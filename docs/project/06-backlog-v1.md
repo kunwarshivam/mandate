@@ -2558,7 +2558,7 @@ v0.2 fixes ([DEC-434](decisions/DEC-434.md) items 21 to 24).
   executor implementation (#174); and §14 and DEC-434 item 12 say once whether E21 is in the epic
   overview.
 
-Rows E21-28 to E21-44 come from the [managed-cells plan](tasks/managed-cells.md)
+Rows E21-28 to E21-48 come from the [managed-cells plan](tasks/managed-cells.md)
 ([DEC-967](decisions/DEC-967.md), Proposed until the founder confirms the relayed answers). Each
 names its lane. None buys hosting, and none edits `crates/mandate-paper/src/lib.rs` or
 `crates/mandate-shell/src/control.rs`, `adapters.rs` or `paper/` before R0 closes (DEC-967 item 2).
@@ -2750,6 +2750,55 @@ Every environment they build is paper or a venue demo; no image enables `live` (
   conflation never drops status, LULD or correction messages (DP-4); and with the channel cut,
   every held instrument goes stale and openings are denied while exits follow the exit price
   ladder (trading spec §5.6).
+- **E21-45 (Proposed, M8; SC; lane A3; after E21-31)** As a user, I want to call my workspace's API
+  from my own code with my own token, the same API the web app uses, so that the web app is one
+  client and not the product's only door (DEC-967 item 13; workspace API spec §1.2, §3). *Accepted
+  when:* a user can issue and revoke their own sender-constrained (DPoP) token through the API,
+  with step-up to issue and none to revoke, scoped by their role (§3.7); the OpenAPI 3.1 document
+  generated from the Rust types is published from `main` per API version, and an SDK generated
+  from it passes the API's contract tests; a test fails any route the web app calls that is not in
+  the published document, and `web/` reaches the cell only at the API's public endpoint; rate
+  limits follow §3.10 per token; a request made with a user's token passes the same builder, gate
+  and autonomy rules as the same request from the web app, shown by one test run both ways
+  (`AGENTS.md` rule 11); and every call is journaled as API-3 requires. Any new caller type the
+  spec does not yet list is a workspace API spec change first.
+- **E21-46 (Proposed, M8; SC; lane B1; after E21-30)** As an owner, I want my Robinhood account and
+  my Alpaca paper account served by the same executor process in the cell, so that each broker is
+  data, not special code (DEC-967 items 12 and 14; DEC-531; connections spec §6). *Accepted when:*
+  `mandate-daemon`'s executor runs either connector from the connection record alone, and no crate
+  outside the connector crates names Robinhood or Alpaca; in the local and CI cell each Robinhood
+  account reaches `mandate-rh-sim` as a sidecar on loopback, which is all the `rh-sim` build accepts
+  (DEC-922), and no image holds a Robinhood host; every E21-37 drill runs once per broker with the
+  same assertions, including the list-and-match fallback for an order the broker cannot be queried
+  for by client id (connections spec §6.2) and an alert on a protective order that is still placed
+  (rule 13); data about any account but the connected one is dropped (CN-8); and the R0 files are
+  not edited.
+- **E21-47 (Proposed, M8; SC; lane B2; connections spec first)** As an owner, I want to connect my
+  Robinhood agentic account through the hosted API, so that my agent trades from the cell without a
+  login on my own machine (connections spec §5.2, §6; CN-1). *Accepted when:* a connections spec
+  change, with its test vectors, defines the hosted Robinhood login (the OAuth callback through the
+  API server, the token's custody in the vault, its lease to that one executor, and what expiry
+  does) before any code; the authorization code passes through the API process only in transit and
+  the token reaches only the vault and that executor's memory; a canary-token scan of responses,
+  logs, the journal, artifacts and restored backups finds nothing (CN-1, OPS-1); expiry mid-run
+  leaves the deployment `closing_only` with resting protection untouched (as E7-24 does for the
+  runner); the terms hash is journaled through `DisclosureAccepted` (connections spec §4); and
+  every test runs against `mandate-rh-sim`, never a Robinhood host (rule 8).
+- **E21-48 (Proposed, M8; SC; lane B3; after E21-40, E21-41, E21-46, E21-47, E21-35)** As the
+  founder, I want my agent to place real orders through my Robinhood agentic account from cell #1,
+  on the same path every broker uses, so that the first hosted version trades for real (DEC-967
+  item 15). *Accepted when:* the cell's Robinhood executor image is the only image built with
+  `live`, signed with the founder's hardware key, and refuses to start unsigned (OPS-15), and CI
+  only compiles it (DEC-529 item 3 as item 15 narrows it); that executor alone has egress to
+  Robinhood's host and every other process none to any live host; the journal runs with its
+  synchronous standby on the second node, and start-up refuses live trading without it (OPS-2);
+  E21-40's write-once check passes and the cold store has its second-region copy (journal §6.2);
+  backups hold no secret outside the vault (DEC-822 item 4's condition); the token arrives only
+  through E21-47's hosted login into the vault; the mandate carries DEC-529's caps and `ask` for
+  openings; a stream's environment is fixed at open and a live stream refuses a paper credential
+  and the reverse (ES-23); no code differs from the drilled path; and the first real order is
+  placed by the founder's confirmation, never by a test, a CI job or an agent (rule 8). Live for
+  any other user stays blocked on the Phase 2 gate, counsel and the penetration test.
 
 ## Won't (v1)
 

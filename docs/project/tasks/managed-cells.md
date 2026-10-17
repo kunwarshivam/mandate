@@ -80,14 +80,16 @@ connection manager), the control plane beyond lane G's first slice (licensing, m
 cell runs without them: the runtime's research path stays off, and data comes as fixtures or the
 founder's own paper feed.
 
-**Never in this plan:** live. Every image is built without the `live` feature (ES-23, DEC-529
-item 3's compile-only rule stands), every environment is `paper` or a venue demo, every process's
-egress is default-deny with no live trading host (OPS-5, E21-1), and the only live-host URL
-compiled in is DEC-821's token endpoint in the token-exchange client. Live waits for the Phase 2
-gate, counsel and the M13 penetration test (infrastructure §1.1). No test places a real order or
-reads a credential (`AGENTS.md` rules 7 and 8): the local cell's broker is a fixture
-(a broker fixture built on `mandate-sim`'s fill model, or `mandate-rh-sim` on loopback
-where its build applies), and Alpaca paper keys are never in CI.
+**Live, and only one kind of it.** Cell #1 places real orders through Robinhood for the
+founder's own agentic account (DEC-967 item 15, the founder's decision in this session). That is
+the only live trading in this plan. Every other connection is `paper` or a venue demo; only the
+Robinhood executor's image is a signed live build, and only it has egress to Robinhood's host;
+every other process's egress is default-deny with no live trading host (OPS-5, E21-1). Live for
+any other user still waits for the Phase 2 gate, counsel and the M13 penetration test
+(infrastructure §1.1). **Tests never trade.** No test, CI job or agent places a real order or reads
+a credential (`AGENTS.md` rules 7 and 8): in tests the broker is a fixture (one built on
+`mandate-sim`'s fill model, or `mandate-rh-sim` on loopback), Alpaca paper keys are never in CI, and
+only the founder logs in to Robinhood and confirms a live order.
 
 ## The three API surfaces
 
@@ -106,6 +108,56 @@ control stream; each stream's owner copies what it needs into its own stream (jo
 (DEC-17: journal tailing with `LISTEN`/`NOTIFY` as a hint). The only other channels are the
 host-local market-data channel and the probes. That is what lets every process scale, restart and
 hand over on its own, and it is what E21-42 makes checked rather than assumed.
+
+## Users call the API; the web app is one client
+
+The founder, in this session: "Lets not couple web with this, web will call the API but users will
+also be able to" (DEC-967 item 13). So the workspace API is the product's public interface, and
+`web/` is one client of it, hosted apart from the cell:
+
+- **No private routes.** Every operation the web app uses is a documented operation of the
+  versioned API (`/v1`, workspace API spec §3.2), reachable with a user's own token. A web-only
+  route, a shared database, or a server-side shortcut from `web/` into the cell is refused in
+  review and caught by a contract test (E21-45).
+- **Users get their own tokens.** Sender-constrained (DPoP) user tokens, as the spec already gives
+  the CLI (§3.3 item 2), issued and revoked through the API, scoped by role (§3.7). Owner-connected
+  agents keep their narrower client scope (§3.8, DEC-141).
+- **One published contract.** The OpenAPI 3.1 document generated from the Rust types (§3.1) is
+  published from `main` per version, with an SDK generated from it and rate limits per §3.10.
+- **Same rules for every caller.** A request from a user's script is owner input like a click in
+  the web app: the same builder, risk gate and autonomy rules, and it never changes the envelope
+  (`AGENTS.md` rule 11).
+- **Deployment.** `web/` on Workers reaches the cell only at the API's public endpoint (through
+  the tunnel), the same address a user's code uses.
+
+## Brokers: Alpaca and Robinhood through one path
+
+The founder, in this session: "I want Robinhood integrated too", then "complete integration and no
+special work", then "real trade through robinhood", not the simulator (DEC-967 items 12, 14 and
+15; spelling corrected in the quotes). What the plan does:
+
+- **One connector path.** Robinhood runs in the cell exactly as Alpaca does: its executor process
+  (E21-30), its connection record and hosted login through the API (E21-47), its credential in the
+  vault leased only to that executor (E21-32, E21-9), its rules as a capability profile
+  ([DEC-531](../decisions/DEC-531.md), ADR-0004), its egress limited to its own host. No
+  Robinhood-only code, binary or runner beyond the connector crate itself.
+- **Real trades, from cell #1.** The founder's Robinhood connection in cell #1 is a `live`
+  connection: real orders on the founder's own agentic account, under the founder's mandate, with
+  DEC-529's caps and `ask` for openings until the founder raises them through a confirmed mandate
+  version. It replaces the R0 runner as the way the founder trades on Robinhood once E21-48's
+  conditions hold; until then the R0 runner stays the path (DEC-529).
+- **The simulator is only for tests.** Robinhood has no paper or demo environment, and no test or
+  agent may reach Robinhood (rule 8), so CI and the local cell drill the same code against
+  `mandate-rh-sim` as a sidecar on loopback (DEC-124, DEC-922). The product never runs against it.
+- **What must hold before the first real order from the cell** (E21-48), each from an existing
+  rule, not new work: a signed live executor image (OPS-15, the founder's hardware key); egress to
+  Robinhood's host for that executor only; the journal's synchronous standby on a second node, so
+  cell #1 needs both VMs (OPS-2: live needs a standby in a second failure domain); write-once
+  storage proven by E21-40 and a second-region copy of the cold store (journal §6.2: both before
+  live capital); backups with no secret outside the vault (DEC-822 item 4's condition); the
+  hosted login (E21-47) and the vault (E21-32) in place, so the token never sits on a disk outside
+  the vault; and DEC-529 item 3 narrowed so this one executor image may build `live`, with CI still
+  only compiling it (DEC-967 item 15 does this).
 
 ## The rule that makes the lanes parallel
 
@@ -129,7 +181,7 @@ first dependency is a founder decision (listed under [Dependencies](#dependencie
 
 ## Lanes
 
-Eleven lanes. A lane is a sequence of stories one builder holds; lanes run in parallel and merge one
+Twelve lanes. A lane is a sequence of stories one builder holds; lanes run in parallel and merge one
 PR at a time. **SC** marks a safety-critical story: tests PR first, reviewed by an agent on a
 different model, zero missed mutants, green CI (`AGENTS.md` Safety-critical paths, DEC-79).
 
@@ -152,6 +204,7 @@ protection), then the runtime.
 |---|---|---|---|---|
 | A1 | **E21-31** (SC) | The API server process: HTTP transport over `mandate-api`'s contract, the session and authorization stack, tenant-scoped reads, probes, drain, a loopback or pod-local bind behind the cell's one ingress (§9), and no secret in its environment (DEC-822 item 4). It serves each E10-10 route as that route's story lands; it adds no route of its own | `mandate-api`, `mandate-authn`, `mandate-identity`, `mandate-identity-seal`, `mandate-identity-system`, `mandate-passkey`, `mandate-tenant`, `mandate-audit`, `mandate-approval`, `mandate-connections`, `mandate-journal-pg`, `mandate-process` | `mandate-api-server` (SC) |
 | A2 | E10-10 to E10-14 (exist) | The routes themselves, in their lanes (L1, L2) | as their rows say | — |
+| A3 | **E21-45** | The API as the public interface: user tokens, the published OpenAPI per version, a generated SDK, rate limits, and a contract test that the web app uses only documented operations | A1, `mandate-identity`, `mandate-authn` | — |
 
 A1 needs an HTTP server dependency, which no crate has today: the founder's row D-1.
 
@@ -236,6 +289,19 @@ item 10, DEC-434 item 16).
 | M3 | **E21-44** (SC) | The host-local channel in the cell | M2, K1 | — |
 | M4 | E2-5 (SC, exists), E2-13 | Alpaca streaming on recorded fixtures, then the fault-injection suite | `mandate-alpaca`, M2 | — |
 
+### Lane B: brokers in the cell (Alpaca paper and Robinhood, one path)
+
+| Order | Story | What | Existing crates it needs | New crate |
+|---|---|---|---|---|
+| B1 | **E21-46** (SC) | Both connectors in the cell's executor process: Alpaca against paper and recorded fixtures, Robinhood against `mandate-rh-sim` as a pod sidecar; capability profiles only | `mandate-alpaca`, `mandate-robinhood`, `mandate-mcp` (`rh-sim` feature), `mandate-rh-sim`, `mandate-executor`, `mandate-daemon` (P3) | — |
+| B2 | **E21-47** (SC; connections spec first) | Hosted Robinhood login: the OAuth callback through the API server, the token into the vault, leased to that one executor, tested against the simulator | `mandate-connections`, `mandate-vault` (V2), `mandate-api-server` (A1), `mandate-robinhood` | — |
+| B3 | **E21-48** (SC) | Real Robinhood trades from cell #1: the signed live executor image, its egress, the standby on the second node, the storage conditions, the founder's first live order from the cell | B1, B2, R2, K1, S1, S2 | — |
+
+B1 and B2 must not edit the R0 files; where the R0 runner's own Robinhood wiring sits in
+`crates/mandate-paper` or `crates/mandate-shell/src/paper/`, B1 reuses the connector crates
+underneath it and leaves the runner alone. P5 (after R0) then retires the runner's separate path in
+favour of the cell's, so there is one path, not two.
+
 ### Lane W: `web/` on Cloudflare Workers (the one approved spend)
 
 | Order | Story | What | Existing crates it needs | New crate |
@@ -269,6 +335,7 @@ flowchart LR
         S2["S2 E21-41 CloudNativePG"]
         M2["M2 E2-6 data service"]
         G1["G1 E21-43 directory, routing, fleet"]
+        B1["B1 E21-46 both brokers in the cell"]
     end
     subgraph W2["Wave 2"]
         P4["P4 E21-7 drain, hand-over"]
@@ -276,6 +343,8 @@ flowchart LR
         O3["O3 E21-39 alert path"]
         O4["O4 E21-34 kill-switch surface"]
         C1b["C1 drills"]
+        B2["B2 E21-47 hosted Robinhood login"]
+        A3["A3 E21-45 public API"]
     end
     G{{"Local-cell gate"}}
     H["Founder: H1 VMs, H3 R2"]
@@ -291,6 +360,9 @@ flowchart LR
     S2 --> C1b
     M2 --> M3["M3 E21-44 local channel"] --> C1b
     G0 --> G1
+    P3 --> B1 --> C1b
+    B1 & A1 & V2 --> B2
+    A1 --> A3
     K1 --> G1
     P3 --> P4
     D1 --> P4
@@ -302,7 +374,9 @@ flowchart LR
 - **Wave 0** (start now, in parallel): P1, V1, O1, R1, K1 and C1's first slice, W1, S1's interface
   and its CI half, M1's check over what exists, G0's journal spec change. None needs another lane.
 - **Wave 1**: P2 and P3 after P1; A1 once the HTTP dependency (D-1) is approved and E10-10's first
-  routes are on `main`; V2 after V1; D1 after P1 and K1; O2 after O1; R2 after R1; S2 after S1 and K1; M2 now (it needs no other lane); G1 after G0 and K1.
+  routes are on `main`; V2 after V1; D1 after P1 and K1; O2 after O1; R2 after R1; S2 after S1 and K1; M2 now (it needs no other lane); G1 after G0 and K1; B1 after P3.
+- **Wave 2** also: B2 after B1, A1 and V2; A3 after A1.
+- **Wave 3:** B3 once B1, B2, R2, S1 and S2 are green and H1 (both VMs) and H3 are approved.
 - **Wave 2**: P4 after P3 and D1; V3 after V2 and P3; O3 after O2 and K1; O4 after P3; C1's drills
   as each process image lands.
 - **After R0 closes**: P5, and any queued change to the four R0 files.
@@ -334,6 +408,8 @@ cost model (§10) is the formula; these are its first inputs.
 | H6 | Paging and on-call tool (DEC-434 item 20) | O3, before design partners | A free tier, or about $10 to $30 per user |
 | H7 | Larger CI runners, if the cell job cannot stay under ten minutes on standard runners by sharding (DEC-464) | C1 | About $0.01 to $0.05 per runner-minute: a few dollars to tens of dollars a month at today's PR rate |
 | H8 | A hardware signing key for ES-17, if the founder holds none | R2 reaches a hosted cell | One-off, about $50 to $90 |
+| L-1 | Live for anyone but the founder's own Robinhood account (other users; Alpaca live) | The Phase 2 gate, counsel and the penetration test | No hosting cost of its own. The founder's own account is decided (DEC-967 item 15) |
+| L-2 | The second-region copy of the cold store that journal §6.2 requires before live capital | Before B3 | At cell #1's scale about $0 to $1: a second R2 bucket in another location hint, or B2 |
 | H10 | Where the control plane's first slice runs (DEC-440 item 16) | G1 reaches a hosted cell | On cell #1's VMs as a separate release, namespace, database and keys: no extra cost, but not the separate accounts item 16 recommends. On its own small VM: about $8 to $20 |
 | H9 | The production cells, a second region, a standby in a second failure domain, the global control plane | The Phase 2 gate, counsel and the penetration test | Not estimated here; roughly double H1 to H3 per region, plus the control plane (DEC-440 item 16) |
 
@@ -343,7 +419,8 @@ from about $5 a month.
 **Cell #1 in total, if H1 and H3 are approved as recommended:** two CPX31-class VMs with volumes
 and addresses, about $35 to $45 a month, plus R2 at about $0 to $2, plus Workers at about $5:
 **roughly $40 to $50 a month**. Starting on one VM halves the compute, at the cost of a standby
-that shares the primary's node (E21-41).
+that shares the primary's node (E21-41), but real Robinhood trades (E21-48) need the second VM,
+because live needs the standby in a second failure domain (OPS-2).
 
 ## Dependencies the founder approves
 
