@@ -1667,6 +1667,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-cp-agent"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-time",
+ "proptest",
+ "ring",
+]
+
+[[package]]
 name = "mandate-dispatcher"
 version = "0.0.0"
 dependencies = [
@@ -1960,6 +1970,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-research-run"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-num",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-rh-sim"
 version = "0.0.0"
 dependencies = [
@@ -2011,9 +2033,14 @@ version = "0.0.0"
 dependencies = [
  "mandate-accounting",
  "mandate-approval",
+ "mandate-builder",
  "mandate-canon",
+ "mandate-domain",
  "mandate-journal",
  "mandate-num",
+ "mandate-research",
+ "mandate-research-run",
+ "mandate-spec",
  "mandate-time",
  "proptest",
  "thiserror",

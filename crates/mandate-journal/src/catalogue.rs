@@ -123,7 +123,17 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "ClientConnected"
         | "ClientRevoked"
         | "OwnerCommandIssued"
-        | "MemberActivated" => entry(CONTROL, NONE),
+        | "MemberActivated"
+        | "ControlPlaneEnrolled"
+        | "LicenseApplied"
+        | "LicenseStateChanged"
+        | "ReleaseOffered"
+        | "ReleaseInstalled"
+        | "ReleaseWithdrawnNoticed"
+        | "CatalogEntryRegistered"
+        | "DataBundleImported"
+        | "UsageReportSealed"
+        | "ControlPlaneMessageRefused" => entry(CONTROL, NONE),
 
         "ConnectionEstablished" | "ConnectionCredentialRotated" => entry(&[Control, Account], NONE),
         "ConnectionRefused" | "ConnectionRequested" => entry(CONTROL, NONE),
