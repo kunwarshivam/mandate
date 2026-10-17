@@ -26,6 +26,7 @@ use crate::routes;
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
 use crate::subject::{self, LinkRefusal};
 use crate::token::{Checked, TokenCheck};
+use crate::writes;
 
 /// The methods a preflight from the app origin allows (§3.3 item 5).
 pub const ALLOW_METHODS: &str = "GET, POST, PUT, DELETE, PATCH";
@@ -107,6 +108,14 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             "/v1/workspaces/{workspace}/approvals/{approval}",
             get(routes::one_approval).fallback(otherwise.clone()),
         )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/pause",
+            post(writes::pause).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/kill-switch",
+            post(writes::kill_switch).fallback(otherwise.clone()),
+        )
         .fallback(otherwise)
         .with_state(Arc::new(app))
         .layer(middleware::from_fn_with_state(Arc::new(settings), cors));
@@ -123,7 +132,7 @@ pub(crate) fn unauthenticated() -> Response {
 
 /// §3.3 item 1's check, which the browser-only session routes make first and refuse with 403: one
 /// `Origin`, exactly the app origin, and one `X-Mandate-Request: 1`.
-fn browser(headers: &HeaderMap, app_origin: &str) -> bool {
+pub(crate) fn browser(headers: &HeaderMap, app_origin: &str) -> bool {
     let mut marks = headers.get_all(CSRF_HEADER).iter();
     let marked = matches!((marks.next(), marks.next()), (Some(mark), None) if mark == "1");
     marked && is_app_origin(headers, app_origin)

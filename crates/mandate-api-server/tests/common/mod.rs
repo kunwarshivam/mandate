@@ -269,24 +269,107 @@ pub fn hosted() -> mandate_api_server::members::Hosted {
     }
 }
 
-/// An in-memory journal: rows by stream, and streams that fail to read.
+/// What the next append of a [`MemJournal`] does instead of appending, in order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scripted {
+    /// Nothing written: `Unavailable`.
+    Unavailable,
+    /// Nothing written: `Fenced`.
+    Fenced,
+    /// Nothing written: `HeadMismatch`.
+    HeadMismatch,
+    /// Nothing written: `Ambiguous`.
+    Ambiguous,
+    /// The draft is stored, and the answer is lost: `Ambiguous`.
+    CommittedThenAmbiguous,
+    /// Nothing written: `IdempotencyConflict`.
+    Conflict,
+    /// A concurrent copy of the same call, a second later, lands first: `IdempotencyConflict`.
+    RaceSame,
+    /// Another command lands under the same id first: `IdempotencyConflict`.
+    RaceOther,
+    /// The draft is refused: `Invalid`.
+    Invalid,
+    /// Nothing written: the call fails (`JournalUnavailable`).
+    Failed,
+}
+
+/// An in-memory journal: rows by stream, streams that fail to read, and appends that follow the
+/// append protocol's epochs, heads, and idempotency (journal spec §5.1), or what is scripted.
 #[derive(Default)]
 pub struct MemJournal {
     pub streams:
         std::sync::Mutex<std::collections::BTreeMap<String, Vec<mandate_journal::StoredEvent>>>,
     pub failing: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    pub epochs: std::sync::Mutex<std::collections::BTreeMap<String, u64>>,
+    pub script: std::sync::Mutex<std::collections::VecDeque<Scripted>>,
+    /// Every append call: the stream, the expected head, and the epoch.
+    pub appends: std::sync::Mutex<Vec<(String, u64, u64)>>,
+}
+
+impl MemJournal {
+    /// Queues what the next appends do.
+    pub fn script(&self, steps: &[Scripted]) {
+        self.script
+            .lock()
+            .expect("unpoisoned")
+            .extend(steps.iter().copied());
+    }
+
+    /// `stream`'s rows now.
+    pub fn rows_of(&self, stream: &str) -> Vec<mandate_journal::StoredEvent> {
+        self.streams
+            .lock()
+            .expect("unpoisoned")
+            .get(stream)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Stores `draft` on `stream` as its next row.
+    fn store(
+        &self,
+        stream: &str,
+        recorded_at: mandate_time::UtcNanos,
+        draft: &[u8],
+    ) -> mandate_journal::StoredEvent {
+        let value = mandate_canon::parse(draft).expect("a JSON draft");
+        let text = |key: &str| {
+            value
+                .get(key)
+                .and_then(mandate_canon::Value::as_str)
+                .expect(key)
+                .to_owned()
+        };
+        let mut streams = self.streams.lock().expect("unpoisoned");
+        let rows = streams.entry(stream.to_owned()).or_default();
+        let prev_hash = rows
+            .last()
+            .map_or(mandate_canon::Digest::ZERO, |row| row.hash);
+        let row = mandate_journal::StoredEvent {
+            stream_id: stream.to_owned(),
+            seq: u64::try_from(rows.len()).expect("a count") + 1,
+            event_id: text("event_id"),
+            event_type: text("event_type"),
+            schema_version: value
+                .get("schema_version")
+                .and_then(mandate_canon::Value::as_int)
+                .expect("a version"),
+            environment: text("environment"),
+            recorded_at: recorded_at.to_string(),
+            prev_hash,
+            hash: mandate_canon::Digest::of(draft),
+            body: draft.to_vec(),
+        };
+        rows.push(row.clone());
+        row
+    }
 }
 
 impl mandate_api_server::journal::Journal for MemJournal {
     fn rows<'a>(&'a self, stream: &'a str) -> mandate_api_server::journal::Rows<'a> {
         let failing = self.failing.lock().expect("unpoisoned").contains(stream);
-        let rows = self
-            .streams
-            .lock()
-            .expect("unpoisoned")
-            .get(stream)
-            .cloned()
-            .unwrap_or_default();
+        let rows = self.rows_of(stream);
         Box::pin(async move {
             if failing {
                 Err(mandate_api_server::journal::JournalUnavailable)
@@ -294,5 +377,151 @@ impl mandate_api_server::journal::Journal for MemJournal {
                 Ok(rows)
             }
         })
+    }
+
+    fn take_ownership<'a>(
+        &'a self,
+        stream: &'a str,
+    ) -> mandate_api_server::journal::Answer<'a, u64> {
+        let mut epochs = self.epochs.lock().expect("unpoisoned");
+        let epoch = epochs.entry(stream.to_owned()).or_default();
+        *epoch += 1;
+        let taken = *epoch;
+        Box::pin(async move { Ok(taken) })
+    }
+
+    fn head<'a>(&'a self, stream: &'a str) -> mandate_api_server::journal::Answer<'a, u64> {
+        let seq = self.rows_of(stream).last().map_or(0, |row| row.seq);
+        Box::pin(async move { Ok(seq) })
+    }
+
+    fn append<'a>(
+        &'a self,
+        stream: &'a str,
+        expected_head: u64,
+        writer_epoch: u64,
+        recorded_at: mandate_time::UtcNanos,
+        draft: &'a [u8],
+    ) -> mandate_api_server::journal::Answer<'a, mandate_journal::AppendOutcome> {
+        use mandate_journal::AppendOutcome;
+        self.appends.lock().expect("unpoisoned").push((
+            stream.to_owned(),
+            expected_head,
+            writer_epoch,
+        ));
+        let scripted = self.script.lock().expect("unpoisoned").pop_front();
+        let outcome = match scripted {
+            Some(Scripted::Failed) => Err(mandate_api_server::journal::JournalUnavailable),
+            Some(Scripted::Unavailable) => Ok(AppendOutcome::Unavailable),
+            Some(Scripted::Fenced) => Ok(AppendOutcome::Fenced {
+                current_epoch: writer_epoch + 1,
+            }),
+            Some(Scripted::HeadMismatch) => Ok(AppendOutcome::HeadMismatch {
+                actual_seq: expected_head + 1,
+                actual_hash: mandate_canon::Digest::ZERO,
+            }),
+            Some(Scripted::Ambiguous) => Ok(AppendOutcome::Ambiguous),
+            Some(Scripted::Conflict) => Ok(AppendOutcome::IdempotencyConflict { stored_seq: 1 }),
+            Some(Scripted::RaceSame) => {
+                let copy = edited(draft, "submitted_at", |v| {
+                    mandate_canon::Value::Int(
+                        mandate_canon::Int::new(v.as_int().expect("a second") + 1).expect("an int"),
+                    )
+                });
+                let row = self.store(stream, recorded_at, &copy);
+                Ok(AppendOutcome::IdempotencyConflict {
+                    stored_seq: row.seq,
+                })
+            }
+            Some(Scripted::RaceOther) => {
+                let other = edited(draft, "subject", |_| {
+                    mandate_canon::Value::Str("other".into())
+                });
+                let row = self.store(stream, recorded_at, &other);
+                Ok(AppendOutcome::IdempotencyConflict {
+                    stored_seq: row.seq,
+                })
+            }
+            Some(Scripted::Invalid) => Ok(AppendOutcome::Invalid {
+                draft: 0,
+                error: mandate_journal::Invalid {
+                    reason: mandate_journal::InvalidReason::Schema,
+                    path: "payload".to_owned(),
+                },
+            }),
+            Some(Scripted::CommittedThenAmbiguous) => {
+                self.store(stream, recorded_at, draft);
+                Ok(AppendOutcome::Ambiguous)
+            }
+            None => Ok(self.protocol(stream, expected_head, writer_epoch, recorded_at, draft)),
+        };
+        Box::pin(async move { outcome })
+    }
+}
+
+/// `draft` with its payload member `name` replaced by `change` of its value.
+fn edited(
+    draft: &[u8],
+    name: &str,
+    change: impl FnOnce(&mandate_canon::Value) -> mandate_canon::Value,
+) -> Vec<u8> {
+    let mut value = mandate_canon::parse(draft).expect("a JSON draft");
+    let mandate_canon::Value::Object(fields) = &mut value else {
+        panic!("an object");
+    };
+    let Some(mandate_canon::Value::Object(payload)) = fields.get_mut("payload") else {
+        panic!("a payload");
+    };
+    let old = payload.get(name).cloned().expect(name);
+    payload.insert(mandate_canon::Key::new(name).expect("a key"), change(&old));
+    mandate_canon::to_canonical(&value)
+}
+
+impl MemJournal {
+    /// Journal spec §5.1's order: idempotency by event id, then the epoch, then the head.
+    fn protocol(
+        &self,
+        stream: &str,
+        expected_head: u64,
+        writer_epoch: u64,
+        recorded_at: mandate_time::UtcNanos,
+        draft: &[u8],
+    ) -> mandate_journal::AppendOutcome {
+        use mandate_journal::AppendOutcome;
+        let value = mandate_canon::parse(draft).expect("a JSON draft");
+        let id = value
+            .get("event_id")
+            .and_then(mandate_canon::Value::as_str)
+            .expect("an id");
+        let rows = self.rows_of(stream);
+        if let Some(stored) = rows.iter().find(|row| row.event_id == id) {
+            return if stored.body == draft {
+                AppendOutcome::AlreadyCommitted(vec![stored.clone()])
+            } else {
+                AppendOutcome::IdempotencyConflict {
+                    stored_seq: stored.seq,
+                }
+            };
+        }
+        let current = self
+            .epochs
+            .lock()
+            .expect("unpoisoned")
+            .get(stream)
+            .copied()
+            .unwrap_or(0);
+        if writer_epoch != current {
+            return AppendOutcome::Fenced {
+                current_epoch: current,
+            };
+        }
+        let head = rows.last().map_or(0, |row| row.seq);
+        if expected_head != head {
+            return AppendOutcome::HeadMismatch {
+                actual_seq: head,
+                actual_hash: mandate_canon::Digest::ZERO,
+            };
+        }
+        AppendOutcome::Committed(vec![self.store(stream, recorded_at, draft)])
     }
 }

@@ -31,6 +31,7 @@ use crate::members::ControlLookup;
 use crate::reads::{
     AgentView, ApprovalView, Deployment, Filter, agent, approvals, deployed, inbox,
 };
+use crate::session::Authenticated;
 
 /// The build digest each response names (§3.2): the release build's own, given at compile time
 /// as `MANDATE_BUILD_DIGEST`, or 64 zeros for a build that names none.
@@ -40,15 +41,15 @@ pub const BUILD: &str = match option_env!("MANDATE_BUILD_DIGEST") {
 };
 
 /// The workspace a request may read, once authorized, and the control stream's rows.
-struct Reader {
-    workspace: String,
-    control: Vec<StoredEvent>,
-    now: UtcNanos,
+pub(crate) struct Reader {
+    pub(crate) workspace: String,
+    pub(crate) control: Vec<StoredEvent>,
+    pub(crate) now: UtcNanos,
 }
 
-/// Why a read refused, each answered by one problem document.
+/// Why a request refused, each answered by one problem document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Refused {
+pub(crate) enum Refused {
     Unauthenticated,
     ReductionOnly,
     Forbidden,
@@ -59,7 +60,7 @@ enum Refused {
 }
 
 impl Refused {
-    fn response(self) -> Response {
+    pub(crate) fn response(self) -> Response {
         let (code, status) = match self {
             Self::Unauthenticated => return unauthenticated(),
             Self::ReductionOnly => (ProblemCode::ReductionOnly, StatusCode::FORBIDDEN),
@@ -81,26 +82,68 @@ impl Refused {
 
 /// Authenticates, then authorizes the read of `workspace`, then reads its control stream.
 async fn reader(app: &App, headers: &HeaderMap, workspace: &str) -> Result<Reader, Refused> {
+    let (admitted, now) = session(app, headers, Request::Other)?;
+    authorized(
+        app,
+        &admitted,
+        now,
+        workspace,
+        Permission::ViewAgents,
+        Unreadable::Read,
+    )
+    .await
+}
+
+/// The session `headers` carry, admitted for `request` at the clock's instant: the one 401, or
+/// `reduction_only` for a live session that reaches only pause and the kill switch.
+pub(crate) fn session(
+    app: &App,
+    headers: &HeaderMap,
+    request: Request,
+) -> Result<(Authenticated, UtcNanos), Refused> {
     let cookie = session_cookie(headers).ok_or(Refused::Unauthenticated)?;
     let now = app.clock.now().ok_or(Refused::Unauthenticated)?;
-    let admitted = match app.sessions.authenticate(&cookie, Request::Other, now) {
-        Ok(admitted) => admitted,
-        Err(_) if app.sessions.reduction_only(&cookie, now) => {
-            return Err(Refused::ReductionOnly);
-        }
-        Err(_) => return Err(Refused::Unauthenticated),
-    };
+    match app.sessions.authenticate(&cookie, request, now) {
+        Ok(admitted) => Ok((admitted, now)),
+        Err(_) if app.sessions.reduction_only(&cookie, now) => Err(Refused::ReductionOnly),
+        Err(_) => Err(Refused::Unauthenticated),
+    }
+}
+
+/// What an unreadable control stream means to the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unreadable {
+    /// A read: its memberships cannot be read (`membership_unavailable`).
+    Read,
+    /// A command: nothing can be appended either (`journal_unavailable`), and a failed membership
+    /// read refuses it too, until sessions keep a roles snapshot (DEC-1007 item 8).
+    Command,
+}
+
+/// Authorizes `admitted` for `permission` on `workspace` and reads its control stream.
+pub(crate) async fn authorized(
+    app: &App,
+    admitted: &Authenticated,
+    now: UtcNanos,
+    workspace: &str,
+    permission: Permission,
+    unreadable: Unreadable,
+) -> Result<Reader, Refused> {
     let workspace = WorkspaceId::from_ulid_text(workspace).map_err(|_| Refused::NotFound)?;
     let hosted = app.hosted;
     let (records, control) = if workspace == hosted.workspace {
         let stream = format!("ctl:{}", workspace_text(workspace)?);
-        match app.journal.rows(&stream).await {
-            Ok(rows) => ((app.members)(&rows), rows),
-            Err(_) => (Err(mandate_identity::LookupFailed), Vec::new()),
+        match (app.journal.rows(&stream).await, unreadable) {
+            (Ok(rows), _) => ((app.members)(&rows), rows),
+            (Err(_), Unreadable::Read) => (Err(mandate_identity::LookupFailed), Vec::new()),
+            (Err(_), Unreadable::Command) => return Err(Refused::JournalUnavailable),
         }
     } else {
         (Ok(Vec::new()), Vec::new())
     };
+    if unreadable == Unreadable::Command && records.is_err() {
+        return Err(Refused::MembershipUnavailable);
+    }
     let lookup = ControlLookup::new(hosted, records, now);
     let session = Session::new(
         Seal::grant(),
@@ -118,7 +161,7 @@ async fn reader(app: &App, headers: &HeaderMap, workspace: &str) -> Result<Reade
             org: hosted.org,
             workspace,
         },
-        Permission::ViewAgents,
+        permission,
         now,
     );
     match authorized {
@@ -134,7 +177,7 @@ async fn reader(app: &App, headers: &HeaderMap, workspace: &str) -> Result<Reade
     }
 }
 
-fn workspace_text(workspace: WorkspaceId) -> Result<String, Refused> {
+pub(crate) fn workspace_text(workspace: WorkspaceId) -> Result<String, Refused> {
     workspace.to_ulid_text().map_err(|_| Refused::NotFound)
 }
 
@@ -167,7 +210,7 @@ fn object(members: Vec<(&str, Value)>) -> Value {
     Value::Object(object)
 }
 
-fn string(text: &str) -> Value {
+pub(crate) fn string(text: &str) -> Value {
     Value::Str(text.to_owned())
 }
 
@@ -176,7 +219,7 @@ fn int(n: u64) -> Value {
 }
 
 /// The watermark of a stream's last row (§6.1), or none for a stream with no row.
-fn watermark(rows: &[StoredEvent]) -> Option<Value> {
+pub(crate) fn watermark(rows: &[StoredEvent]) -> Option<Value> {
     rows.last().map(|row| {
         object(vec![
             ("stream_id", string(&row.stream_id)),
@@ -197,14 +240,23 @@ fn served(
         .chain(streams.iter().copied())
         .filter_map(watermark)
         .collect();
+    members.push(("as_of", Value::Array(as_of)));
+    enveloped(StatusCode::OK, reader.now, members)
+}
+
+/// `members` with the envelope's (§3.2), as `status`; `members` carries `as_of`.
+pub(crate) fn enveloped(
+    status: StatusCode,
+    now: UtcNanos,
+    mut members: Vec<(&str, Value)>,
+) -> Response {
     members.extend([
         ("api_version", string("v1")),
         ("build", string(BUILD)),
-        ("served_at", string(&reader.now.to_string())),
-        ("as_of", Value::Array(as_of)),
+        ("served_at", string(&now.to_string())),
     ]);
     with_type(
-        StatusCode::OK,
+        status,
         "application/json",
         to_canonical(&object(members)).into(),
     )
@@ -246,7 +298,7 @@ pub async fn list_agents(
     path: Result<Path<String>, PathRejection>,
 ) -> Response {
     let Ok(Path(workspace)) = path else {
-        return path_refused(&app, &headers).await;
+        return path_refused(&app, &headers, Request::Other).await;
     };
     let reader = match reader(&app, &headers, &workspace).await {
         Ok(reader) => reader,
@@ -272,7 +324,7 @@ pub async fn one_agent(
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Response {
     let Ok(Path((workspace, id))) = path else {
-        return path_refused(&app, &headers).await;
+        return path_refused(&app, &headers, Request::Other).await;
     };
     let reader = match reader(&app, &headers, &workspace).await {
         Ok(reader) => reader,
@@ -320,7 +372,7 @@ pub async fn list_approvals(
     RawQuery(query): RawQuery,
 ) -> Response {
     let Ok(Path(workspace)) = path else {
-        return path_refused(&app, &headers).await;
+        return path_refused(&app, &headers, Request::Other).await;
     };
     let reader = match reader(&app, &headers, &workspace).await {
         Ok(reader) => reader,
@@ -351,7 +403,7 @@ pub async fn one_approval(
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Response {
     let Ok(Path((workspace, id))) = path else {
-        return path_refused(&app, &headers).await;
+        return path_refused(&app, &headers, Request::Other).await;
     };
     let reader = match reader(&app, &headers, &workspace).await {
         Ok(reader) => reader,
@@ -374,15 +426,11 @@ pub async fn one_approval(
 
 /// A path that does not decode: the one 401 without a session, `reduction_only` for a session that
 /// reaches only pause and the kill switch, else the 404 an absent id gets.
-async fn path_refused(app: &App, headers: &HeaderMap) -> Response {
+pub(crate) async fn path_refused(app: &App, headers: &HeaderMap, request: Request) -> Response {
     let Some((cookie, now)) = session_cookie(headers).zip(app.clock.now()) else {
         return unauthenticated();
     };
-    if app
-        .sessions
-        .authenticate(&cookie, Request::Other, now)
-        .is_ok()
-    {
+    if app.sessions.authenticate(&cookie, request, now).is_ok() {
         Refused::NotFound.response()
     } else if app.sessions.reduction_only(&cookie, now) {
         Refused::ReductionOnly.response()

@@ -19,11 +19,14 @@
 //!   (E21-28) behind [`lifecycle::Lifecycle`] until that crate lands.
 //! - [`http`]: the router. `/livez` and `/readyz` read no data; every other path answers the one
 //!   401 of API-1 until its route lands; CORS allows the one configured app origin (§3.3 item 5).
+//! - [`writes`] and [`commands`]: pause and the kill switch, recorded as the CLI records
+//!   them on the workspace's control stream before the `202`, and replayed by key (DEC-1007).
 //!
 //! It never places, cancels, or sizes an order, and never calls a broker or a runtime (§1.4):
 //! `xtask/layers.toml` keeps it from every crate that could.
 
 pub mod clock;
+pub mod commands;
 pub mod config;
 pub mod http;
 pub mod journal;
@@ -35,3 +38,4 @@ pub mod routes;
 pub mod session;
 pub mod subject;
 pub mod token;
+pub mod writes;
