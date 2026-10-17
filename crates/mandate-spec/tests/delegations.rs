@@ -101,6 +101,7 @@ fn context(
         eligibility_failures: BTreeSet::new(),
         previous_version,
         current_mandate_version: None,
+        stop_limit_asset_classes: mandate_spec::context::stop_limit_asset_classes("alpaca"),
     }
 }
 

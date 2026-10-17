@@ -13,7 +13,9 @@ use mandate_canon::{Digest, Value};
 use mandate_domain::Environment;
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, get_artifact};
 use mandate_num::Usd;
-use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, Membership};
+use mandate_spec::context::{
+    AgentId, ContextArgs, JournaledFact, Membership, unrecorded_stop_limit_asset_classes,
+};
 use mandate_spec::document::ModelId;
 use mandate_spec::policy::{self, PolicyOverlay, PolicyViolation};
 use mandate_spec::validate::{RegisteredModel, Violation, validate};
@@ -370,6 +372,7 @@ fn folded(
         .map_err(|_| DeploymentRefusal::Fold)?;
     if !named {
         context.connection_environment = Some(Environment::Paper);
+        context.stop_limit_asset_classes = unrecorded_stop_limit_asset_classes(&mandate);
     }
     let mut violations = validate(&mandate, &context)
         .map_err(|_| DeploymentRefusal::Fold)?

@@ -22,11 +22,13 @@
 //! - **Read-only ports** ([`BarReader`], [`NewsReader`], [`FilingReader`], [`InstrumentReader`]):
 //!   each takes `&self` and returns owned data, and none can place, cancel, approve, append, or
 //!   change anything (HI-4). Lane I3 implements the news and filings readers.
-//! - **The gateway port** ([`ModelGateway`]): one call per run, built from typed inputs only
-//!   ([`ResearchCall`]), answered by exactly one of a reply or a typed failure (inference spec §3).
-//!   Lane I1 implements it; until then tests use a recorded fake. [`settle`] re-checks the reply's
-//!   call id, reported identity, and completion time against the request, so a late or
-//!   substituted answer is a failure here too (INF-2, INF-3, caller side).
+//! - **The gateway call** ([`call()`]): one call per run through `mandate-gateway`'s [`mandate_gateway::Gateway`],
+//!   built from typed inputs only ([`ResearchCall`], [`ResearchCall::request`]) and answered by
+//!   exactly one [`mandate_gateway::CallRecord`], or by a [`mandate_gateway::RequestError`] for a
+//!   request the gateway cannot make at all (inference spec §3). The research entry's pinned
+//!   template and output schema are [`ResearchEntry`]'s. [`research_gateway`] builds the gateway
+//!   over the recorded fake, the default in every test and CI job, unless the vault holds the
+//!   OpenRouter key and the cell supplies a hosted transport (DEC-997 item 4, DEC-1120).
 //! - **The strict parse** ([`parse_output`]): the model's bytes become [`CandidateOutput`] or an
 //!   [`OutputRejection`], never anything in between. A candidate is still only an opinion: the
 //!   runtime core checks it, fills its platform facts, and runs `mandate_research::admit`.
@@ -42,9 +44,12 @@
 //! may not see cannot be passed.
 //!
 //! Everything is pure: no clock, no randomness, no I/O of its own, `BTreeMap` and `BTreeSet` only,
-//! and exact `mandate-num` arithmetic (ADR-0001 ES-21). Instants are arguments.
+//! and exact `mandate-num` arithmetic (ADR-0001 ES-21). Instants are arguments, or the gateway's
+//! own [`mandate_gateway::provider::Clock`].
 
+mod backend;
 mod call;
+mod entry;
 mod error;
 mod item;
 mod output;
@@ -52,21 +57,26 @@ mod plan;
 mod ports;
 mod retrieve;
 
-pub use call::{
-    CallContext, CallFailure, CallInputs, CallOutcome, CallPlan, ErrorKind, GatewayReply,
-    MemoryThesis, ModelPin, ResearchCall, Treatment, UntrustedItem, settle,
+pub use backend::{
+    Backend, GatewayParts, NoHostedTransport, RECORDED_KEY, Reason, RecordedKey, ResearchTransport,
+    Selection, recorded_reply, research_gateway, select,
 };
+pub use call::{
+    Answer, CallContext, CallInputs, CallPlan, MemoryThesis, ResearchCall, Treatment,
+    UntrustedItem, call, render_inputs, treatment,
+};
+pub use entry::{RESEARCH_INPUTS, ResearchEntry, output_schema};
 pub use error::ResearchRunError;
 pub use item::{
     Allowlist, Bar, Filing, InstrumentFact, ItemId, ItemKind, NewsItem, SourceId, Symbol,
 };
+pub use mandate_gateway::registry::ModelRef as ModelPin;
 pub use output::{
     CandidateInvalidation, CandidateOutput, CandidateThesis, OutputBounds, OutputRejection,
     parse_output,
 };
 pub use plan::{RetrievalPlan, Scope};
 pub use ports::{
-    BarReader, FilingReader, InstrumentReader, ModelGateway, NewsReader, ReadError, Readers,
-    TextQuery,
+    BarReader, FilingReader, InstrumentReader, NewsReader, ReadError, Readers, TextQuery,
 };
 pub use retrieve::{Drop, DropReason, Retrieval, RetrievedItem, retrieve};

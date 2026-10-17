@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 mandate-journal.workspace = true
 mandate-process.workspace = true
+mandate-release.workspace = true
 mandate-shell.workspace = true
 mandate-telemetry.workspace = true
 mandate-time.workspace = true

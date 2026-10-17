@@ -1958,6 +1958,12 @@ const WEB_URL: &str = "http://127.0.0.1:4317";
 /// that, once listed, it is a service.
 const API_PROCESS: &str = "api";
 
+/// Which model gateway the demo's research loop calls through (DEC-1120 item 5): the recorded fake,
+/// since no cell holds a vaulted OpenRouter key (E21-32) or a hosted transport yet. The selection
+/// in `mandate-research-run` picks OpenRouter only when both exist and says so in its own line.
+const RESEARCH_GATEWAY: &str = "research's model gateway: the recorded fake, with no network to \
+     any model provider (OpenRouter only with a vaulted key and a hosted transport, DEC-1120)";
+
 /// One piece of the full local cell (E21-37's demo): ready, or skipped because the lane that
 /// builds it is not on `main` yet. A skipped piece is named, never faked.
 #[derive(Debug, PartialEq, Eq)]
@@ -2003,6 +2009,14 @@ pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
             skipped: lane(
                 built("runtime") && built("executor"),
                 "the runtime and executor images are not on main yet (lane P1, #1451)",
+            ),
+        },
+        DemoPart {
+            name: RESEARCH_GATEWAY,
+            skipped: lane(
+                built("runtime") && built("executor"),
+                "the research loop runs in the runtime once the post-R0 hook wires its ports; until \
+                 then the cell's runtime runs the deny-all wiring (DEC-1013)",
             ),
         },
         DemoPart {
@@ -2172,8 +2186,12 @@ mod tests {
             .collect();
         assert_eq!(
             skipped.len(),
-            5,
-            "API, runtime, agent, membership and web/ wait on their lanes: {skipped:?}"
+            6,
+            "API, runtime, agent, research, membership and web/ wait on their lanes: {skipped:?}"
+        );
+        assert!(
+            skipped.contains(&RESEARCH_GATEWAY),
+            "the research gateway's line waits on the runtime image"
         );
         assert!(
             parts.iter().take(2).all(|p| p.skipped.is_none()),
@@ -2271,6 +2289,14 @@ mod tests {
         };
         assert_eq!(skipped("the agent runtime"), Some(false));
         assert_eq!(skipped("a paper agent"), Some(true));
+        assert_eq!(
+            parts
+                .iter()
+                .find(|p| p.name == RESEARCH_GATEWAY)
+                .map(|p| p.skipped.is_some()),
+            Some(true),
+            "a deny-all runtime runs no research"
+        );
         let unbuilt = demo_parts(&[process("runtime", false)], "");
         assert!(
             unbuilt

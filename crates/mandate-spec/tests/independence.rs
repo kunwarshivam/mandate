@@ -79,6 +79,7 @@ fn context(workspace_users: u32, independent_approval_required: bool) -> Validat
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
         current_mandate_version: None,
+        stop_limit_asset_classes: mandate_spec::context::stop_limit_asset_classes("alpaca"),
     }
 }
 
@@ -130,6 +131,7 @@ fn journal(mandate: &Mandate) -> Vec<JournaledFact> {
         JournaledFact::ConnectionEstablished {
             connection_id: conn(OURS),
             environment: Environment::Paper,
+            broker: Some("alpaca".to_owned()),
         },
         JournaledFact::ModelRegistered {
             id: ModelId::parse("quant.momentum").expect("a model id"),

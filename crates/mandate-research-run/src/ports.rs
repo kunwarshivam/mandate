@@ -1,12 +1,12 @@
 //! The worker's ports. Every reader takes `&self` and returns owned data: there is no method that
 //! writes, sends, approves, or appends, so a reader can only read (HI-4). The shell implements them
-//! over the data plane (lane I3 for news and filings) and the gateway (lane I1).
+//! over the data plane (lane I3 for news and filings). The model gateway is `mandate-gateway`'s
+//! [`mandate_gateway::Gateway`] itself, reached through [`crate::call`].
 
 use std::collections::BTreeSet;
 
 use mandate_time::UtcNanos;
 
-use crate::call::{CallOutcome, ResearchCall};
 use crate::item::{Bar, Filing, InstrumentFact, NewsItem, Symbol};
 
 /// Why a read returned nothing. A failed read is an empty read: the run goes on with what it has,
@@ -71,12 +71,4 @@ pub struct Readers<'a> {
     pub news: &'a dyn NewsReader,
     pub filings: &'a dyn FilingReader,
     pub instruments: &'a dyn InstrumentReader,
-}
-
-/// The model gateway (inference spec §3, lane I1). One call per run; the gateway renders the
-/// prompt from the pinned template, reserves the cost, guards the prompt, calls, and validates the
-/// output, and answers with exactly one of a reply or a typed failure. It holds the provider key;
-/// the worker never sees one (HI-12).
-pub trait ModelGateway {
-    fn call(&self, request: &ResearchCall) -> CallOutcome;
 }

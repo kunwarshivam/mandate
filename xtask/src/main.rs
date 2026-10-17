@@ -14,6 +14,8 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 mod cell;
+mod image;
+mod release;
 
 const USAGE: &str = "\
 usage: cargo xtask <command>
@@ -43,6 +45,22 @@ commands:
   live-feature          check that only the runner may build `live`, and CI only compiles it or
                         tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
+  release tools         install the release build's pinned tools under $CARGO_HOME
+  release build <out>   build the release binaries reproducibly into <out>, with SHA256SUMS and an
+                        SBOM each, and print digest=<sha256 of SHA256SUMS> (E21-8)
+  release compare <a> <b>
+                        check that two release builds' SHA256SUMS are identical
+  release images <dist> <out> [--test-sign]
+                        write one OCI image a release binary into <out>/images, signed by an
+                        ephemeral test key with --test-sign (E21-35)
+  release drill <dist> <out>
+                        run the signed, unsigned and wrongly signed images' start-up check
+  release publish <dist> <out>
+                        push this arch's images to GHCR, sign them keyless and attest their SBOMs
+                        (main only, from CI)
+  release publish-index <out>
+                        push and sign the multi-arch index over every arch's published images
+                        (main only, from CI, after each arch's publish)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
   cell drill [--seeded] [boot|journal|egress]...
@@ -227,6 +245,22 @@ fn run() -> Result<()> {
         ["live-feature"] => live_feature_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
+        ["release", "tools"] => {
+            release::tools(&release::Paths::from_env(&root)?.cargo_home).map(drop)
+        }
+        ["release", "build", out] => release::build(&root, Path::new(out)),
+        ["release", "compare", a, b] => release::compare(Path::new(a), Path::new(b)),
+        ["release", "images", dist, out] => {
+            release::images(&root, Path::new(dist), Path::new(out), false)
+        }
+        ["release", "images", dist, out, "--test-sign"] => {
+            release::images(&root, Path::new(dist), Path::new(out), true)
+        }
+        ["release", "drill", dist, out] => release::drill(&root, Path::new(dist), Path::new(out)),
+        ["release", "publish", dist, out] => {
+            release::publish(&root, Path::new(dist), Path::new(out))
+        }
+        ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
         ["cell", "up"] => cell::up(),
         ["cell", "down"] => cell::down(),
         ["cell", "demo"] => cell::demo(true),
@@ -651,7 +685,7 @@ const EVERY_JOB_PATHS: [&str; 11] = [
 /// `fast-python`), by `web.yml`, or by the crates whose sources name it ([`source_references`]).
 /// Markdown anywhere is known too. A changed path outside every crate and outside this list
 /// selects everything, so a new top-level directory is never assumed unread.
-const KNOWN_OUTSIDE_CRATES: [&str; 18] = [
+const KNOWN_OUTSIDE_CRATES: [&str; 17] = [
     "docs/",
     "web/",
     "python/",
@@ -665,7 +699,6 @@ const KNOWN_OUTSIDE_CRATES: [&str; 18] = [
     "assets/",
     ".cursor/",
     ".claude/",
-    "vercel.json",
     "_typos.toml",
     ".gitleaks.toml",
     "CODEOWNERS",
@@ -1356,7 +1389,9 @@ struct Finding {
 /// file alone, the same row in a stray file is reported, and a real key pasted into that file is
 /// reported too. The fingerprint rows prove the "Pinned GPG key fingerprints" exception: allowed in
 /// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone. The signer rows prove the
-/// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone.
+/// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone. The
+/// ULID rows prove the API server's process-test exception: a workspace or organization ULID is
+/// allowed in that test file alone, and any other value under the same setting there is reported.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -1380,6 +1415,10 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let signer = "crates/mandate-objectstore/tests/sigv4.rs";
     let example = format!("        \"AK{}\".to_owned(),", "IAIOSFODNN7EXAMPLE");
     let near_example = format!("        \"AK{}\".to_owned(),", "ZZIOSFODNN7EXAMPLE");
+    let process = "crates/mandate-api-server/tests/process.rs";
+    let ulid = concat!("01JB3K6F0C9R2V7N", "4M8Q1T5W3Y");
+    let setting = format!("        .env(\"MANDATE_API_WORKSPACE\", \"{ulid}\")");
+    let not_ulid = format!("        .env(\"MANDATE_API_ORG\", \"{page}\")");
     vec![
         (signer.to_owned(), example.clone(), None),
         (signer.to_owned(), near_example, Some("alpaca-key-id")),
@@ -1412,6 +1451,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (bootstrap.to_owned(), fingerprint.clone(), None),
         ("stray-fingerprint.sh".to_owned(), fingerprint, cloudflare),
         (bootstrap.to_owned(), not_fingerprint, cloudflare),
+        (process.to_owned(), setting.clone(), None),
+        ("stray-process.rs".to_owned(), setting, generic),
+        (process.to_owned(), not_ulid, generic),
     ]
 }
 
@@ -3609,6 +3651,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_TEST_PARTITION",
     "MERGE_APPROVERS",
     "MUTANTS_RESULT",
+    "NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_TELEMETRY_DISABLED",
