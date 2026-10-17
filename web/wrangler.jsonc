@@ -1,0 +1,17 @@
+// The Cloudflare Worker that serves web/ through OpenNext (DEC-823, DEC-731 item 3). The founder
+// connects the repository and sets the public variables in the Cloudflare dashboard; this file
+// names no account and holds no variable or credential. scripts/workers.mjs checks it.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "owlhead-web",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "minify": true,
+  // Only the custom domain serves the app: no workers.dev address and no preview URLs (DEC-823 item 2).
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  // OpenNext calls the Worker itself through this binding for revalidation and caching.
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "owlhead-web" }]
+}
