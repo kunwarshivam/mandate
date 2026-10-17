@@ -69,6 +69,7 @@
 /crates/mandate-shell-rh-sim/ @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
 /crates/mandate-sim/        @kunwarshivam
+/crates/mandate-sources/    @kunwarshivam
 /crates/mandate-spec/       @kunwarshivam
 /crates/mandate-tenant/     @kunwarshivam
 /crates/mandate-time/       @kunwarshivam
