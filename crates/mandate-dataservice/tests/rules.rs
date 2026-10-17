@@ -291,6 +291,18 @@ fn only_quotes_received_after_the_subscription_mark() {
 }
 
 #[test]
+fn a_feed_change_keeps_a_later_loss_instant() {
+    let mut cache = cache();
+    cache.connection_lost(at(50));
+    cache.subscribe(asset(1), Feed::Sip, at(40)).unwrap();
+    let mut sip = quote(10_000, 10_010, at(45), at(45));
+    sip.feed = Feed::Sip;
+    assert_eq!(cache.intake(sip.clone()), Ok(Intake::BeforeResync));
+    sip.received_at = at(51);
+    assert_eq!(cache.intake(sip), Ok(Intake::Marked));
+}
+
+#[test]
 fn only_subscribed_instruments_on_their_feed_are_taken() {
     let mut cache = cache();
     let mut other = quote(10_000, 10_010, at(0), at(0));

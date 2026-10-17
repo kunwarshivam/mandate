@@ -25,6 +25,8 @@ pub enum Intake {
     FutureStamped,
     /// Received at or before the instrument's subscription or the last connection loss, so not a
     /// live quote since resync (DP-7, DEC-994 item 5): the mark and the watermark are unchanged.
+    /// A quote that is also stamped too far in the future is [`Intake::FutureStamped`] instead,
+    /// and withdraws the mark.
     BeforeResync,
     /// Stamped at or before the last in-order quote (DEC-433 item 8): the mark is unchanged.
     OutOfOrder,
@@ -118,7 +120,7 @@ impl HotCache {
     /// Adds `instrument` on `feed` to the subscription set at `at`, the host clock's time of the
     /// subscription: only a quote received after `at` can mark it (spec §3.2, `resyncing`).
     /// Subscribing it again on the same feed changes nothing; on another feed it starts over with
-    /// no quote. [`CacheFull`] when a new instrument would exceed the capacity.
+    /// no quote, still taking nothing received at or before an earlier connection loss. [`CacheFull`] when a new instrument would exceed the capacity.
     pub fn subscribe(
         &mut self,
         instrument: AssetId,
@@ -127,7 +129,7 @@ impl HotCache {
     ) -> Result<(), CacheFull> {
         if let Some(entry) = self.entries.get_mut(&instrument) {
             if entry.feed != feed {
-                *entry = Entry::empty(feed, at);
+                *entry = Entry::empty(feed, entry.resync_from.max(at));
             }
             return Ok(());
         }
@@ -146,8 +148,7 @@ impl HotCache {
     /// Takes one received quote. Checked in this order: subscribed on its feed, else
     /// [`Refused`]; stamped too far in the future ([`Intake::FutureStamped`]); received at or
     /// before the subscription or the last connection loss ([`Intake::BeforeResync`]); the same
-    /// message as
-    /// the watermark ([`Intake::Duplicate`]); stamped at or before the watermark
+    /// message as the watermark ([`Intake::Duplicate`]); stamped at or before the watermark
     /// ([`Intake::OutOfOrder`]); then it becomes the watermark, and marks if sane.
     pub fn intake(&mut self, quote: Quote) -> Result<Intake, Refused> {
         let entry = self
