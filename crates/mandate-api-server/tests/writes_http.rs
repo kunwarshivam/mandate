@@ -1018,3 +1018,52 @@ fn an_unreadable_agent_stream_records_nothing_and_a_drain_still_records() {
     assert_eq!(drained.status, 202);
     assert_eq!(answers(&f).len(), 1);
 }
+
+#[test]
+fn an_unreadable_stream_does_not_hide_an_approval_on_another() {
+    let f = fixture();
+    approvable(&f);
+    let a = format!("agent:{WORKSPACE}:agt_a");
+    let b = format!("agent:{WORKSPACE}:agt_b");
+    {
+        let mut streams = f.journal.streams.lock().expect("unpoisoned");
+        let moved = streams.remove(&a).expect("agt_a's stream");
+        let rows: Vec<StoredEvent> = moved
+            .into_iter()
+            .map(|mut row| {
+                row.stream_id = b.clone();
+                row
+            })
+            .collect();
+        streams.insert(b.clone(), rows);
+        let control = streams.get_mut(&ctl()).expect("the control stream");
+        control.push(row(
+            4,
+            "AgentDeployed",
+            r#"{"agent_id":"agt_b","mandate_version":"sha256:01"}"#,
+        ));
+    }
+    f.journal.failing.lock().expect("unpoisoned").insert(a);
+    let cookie = signed_in(&f, alice());
+    let reply = post(&f, &responses(APPROVAL), &cookie, Some(KEY), &skipped());
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let recorded = answers(&f);
+    assert_eq!(text(&recorded[0], &["payload", "agent"]), "agt_b");
+    let absent = post(
+        &f,
+        &responses("01JBH3BTZ8K2M4N6P8R0S2T7AB"),
+        &cookie,
+        Some("absent-key-0000001"),
+        &skipped(),
+    );
+    assert_eq!(
+        code(&absent),
+        (503, ProblemCode::JournalUnavailable, Effect::None),
+        "an absent approval cannot be told from one on the unreadable stream"
+    );
+}

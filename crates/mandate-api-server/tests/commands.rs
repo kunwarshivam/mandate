@@ -472,6 +472,14 @@ fn the_skip_draft_is_the_clis_approval_response() {
         Some(&Value::Str("ApprovalResponseSubmitted".into()))
     );
     assert_eq!(
+        value.get("artifact_refs"),
+        Some(&Value::Array(vec![Value::Str(format!(
+            "sha256:{}",
+            "ab".repeat(32)
+        ))])),
+        "the content hash is the payload's one digest reference"
+    );
+    assert_eq!(
         value.get("actor").and_then(|a| a.get("id")),
         Some(&Value::Str(PRINCIPAL.into()))
     );

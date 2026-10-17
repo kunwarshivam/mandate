@@ -347,24 +347,29 @@ pub async fn respond(
             return problem(StatusCode::UNAUTHORIZED, problem_body(code));
         }
     };
+    let Some(content_hash) = ref_text(&skip.content_hash) else {
+        return Refused::JournalUnavailable.response();
+    };
     let command = Command::Skip {
         agent,
         approval,
-        content_hash: ref_text(&skip.content_hash).unwrap_or_default(),
+        content_hash,
     };
     committed(&app, &gate, &reader, &command, &kept.dropped, None).await
 }
 
 /// The deployed agent whose stream requested `approval`, found by equality with an
-/// `ApprovalRequested` event id; `None` when no deployed agent's stream holds one.
+/// `ApprovalRequested` event id. A stream that cannot be read does not hide the approval on another
+/// that can; only when none that was read holds it and one could not be read is the answer
+/// `journal_unavailable` rather than `not_found`.
 async fn requester(app: &App, reader: &Reader, approval: &str) -> Result<Option<String>, Refused> {
+    let mut unreadable = false;
     for deployment in deployed(&reader.control) {
         let stream = format!("agent:{}:{}", reader.workspace, deployment.0);
-        let rows = app
-            .journal
-            .rows(&stream)
-            .await
-            .map_err(|_| Refused::JournalUnavailable)?;
+        let Ok(rows) = app.journal.rows(&stream).await else {
+            unreadable = true;
+            continue;
+        };
         let requested = rows
             .iter()
             .any(|row| row.event_type == "ApprovalRequested" && row.event_id == approval);
@@ -372,7 +377,10 @@ async fn requester(app: &App, reader: &Reader, approval: &str) -> Result<Option<
             return Ok(Some(deployment.0));
         }
     }
-    Ok(None)
+    match unreadable {
+        true => Err(Refused::JournalUnavailable),
+        false => Ok(None),
+    }
 }
 
 /// The text of a content reference, as it serializes.
