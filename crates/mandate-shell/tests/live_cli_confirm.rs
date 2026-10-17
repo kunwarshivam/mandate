@@ -145,6 +145,22 @@ fn the_latest_record_of_the_mandates_connection_governs() {
         "a revocation outranks an establishment at the same seq"
     );
     assert_eq!(scoped(&[]), None, "no record");
+    let unrelated = record(
+        2,
+        "MandateConfirmed",
+        &format!(r#"{{"connection_id":"{CONNECTION}","environment":"paper"}}"#),
+    );
+    assert_eq!(
+        scoped(&[live_robinhood(1), unrelated]),
+        Some(expected(LiveBroker::Robinhood)),
+        "a later record of another type naming the connection is not its record"
+    );
+    let elsewhere = established(2, "conn_other", "robinhood", "paper", FOUNDER);
+    assert_eq!(
+        scoped(&[live_robinhood(1), elsewhere]),
+        Some(expected(LiveBroker::Robinhood)),
+        "a later record of another connection is not its record"
+    );
     let other = established(1, "conn_other", "robinhood", "live", FOUNDER);
     assert_eq!(scoped(&[other]), None, "another connection's record");
 }

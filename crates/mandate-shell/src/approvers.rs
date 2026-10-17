@@ -56,28 +56,27 @@ pub fn members(records: &[ControlRecord], connection: &str) -> Members {
     {
         return Members::Unread;
     }
-    let text = |record: &ControlRecord, name: &str| {
-        record
-            .payload
-            .get(name)
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-    };
-    let latest = records
+    match latest_record(records, connection) {
+        Some(record) if record.event_type == "ConnectionEstablished" => text_of(record, "user")
+            .filter(|user| !user.is_empty())
+            .map_or(Members::Unread, |user| Members::Owner(user.to_owned())),
+        Some(_) | None => Members::Unread,
+    }
+}
+
+/// The latest `ConnectionEstablished` or `ConnectionRevoked` of `connection` by `seq`, a
+/// revocation outranking an establishment at the same `seq`: the one record both [`members`] and
+/// [`live_cli_confirm`] read, so the two never disagree on which record governs.
+fn latest_record<'r>(records: &'r [ControlRecord], connection: &str) -> Option<&'r ControlRecord> {
+    records
         .iter()
         .filter(|record| {
             matches!(
                 record.event_type.as_str(),
                 "ConnectionEstablished" | "ConnectionRevoked"
-            ) && text(record, "connection_id").as_deref() == Some(connection)
+            ) && text_of(record, "connection_id") == Some(connection)
         })
-        .max_by_key(|record| (record.seq, record.event_type == "ConnectionRevoked"));
-    match latest {
-        Some(record) if record.event_type == "ConnectionEstablished" => text(record, "user")
-            .filter(|user| !user.is_empty())
-            .map_or(Members::Unread, Members::Owner),
-        Some(_) | None => Members::Unread,
-    }
+        .max_by_key(|record| (record.seq, record.event_type == "ConnectionRevoked"))
 }
 
 /// The user ids `references` resolve to among `members`: the set admission check 3 compares a
@@ -122,16 +121,7 @@ pub fn live_cli_confirm(
     let Members::Owner(owner) = members(records, connection) else {
         return None;
     };
-
-    let latest = records
-        .iter()
-        .filter(|record| {
-            matches!(
-                record.event_type.as_str(),
-                "ConnectionEstablished" | "ConnectionRevoked"
-            ) && text_of(record, "connection_id") == Some(connection)
-        })
-        .max_by_key(|record| (record.seq, record.event_type == "ConnectionRevoked"))?;
+    let latest = latest_record(records, connection)?;
     if text_of(latest, "environment") != Some("live") {
         return None;
     }
