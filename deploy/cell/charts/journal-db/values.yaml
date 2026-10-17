@@ -1,0 +1,21 @@
+# The workspace journal's Postgres (infrastructure §4.1). Settings only: every password is made
+# in the cluster by this chart and kept across upgrades, never a value (DEC-822 item 4).
+
+# Instances of the CloudNativePG cluster. One on a developer machine and in CI; lane S2 (E21-41)
+# makes it two with one synchronous standby.
+instances: 1
+
+# CloudNativePG's PostgreSQL 18 image, pinned by digest (D-5).
+image: ghcr.io/cloudnative-pg/postgresql:18.6-202609281634-minimal-trixie@sha256:4467d4cf7e502fbc29800b75d755ede477a765b25a506a58a0842a57a4bf42c9
+
+storage:
+  size: 1Gi
+  # Empty takes the cluster's default class; a value per cluster, never in a template.
+  storageClass: ""
+
+resources:
+  cpu: 500m
+  memory: 512Mi
+
+# The namespace the CloudNativePG operator runs in, which reaches the instances' status port.
+operatorNamespace: cnpg-system
