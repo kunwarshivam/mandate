@@ -70,6 +70,10 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   PR over ES-13's 400 lines instead of DEC-77's two; and item 6's hook in an R0 file (a
   production-cycle constructor that takes its journal stage) before the process can host a real
   cycle.
+- **CI's nightly mutation sweep** ([DEC-1006](decisions/DEC-1006.md) item 5, claim #1481): a
+  seventh of the whole-crate sweep each night (about 12 runner-hours), every mutant once in seven
+  runs, or the full sweep every night as worded (about 45 to 50 runner-hours on the shared pool;
+  `SWEEP_ROTATION = 1`). Meanwhile the seven-run rotation runs.
 - **DEC-773** (causal trace authorship): (a) should an owner-selected signal model's output read
   `owner_selected`? (b) What does the label say? Meanwhile every quoted item is `platform_authored`.
 - **Decided, record still to land:** DEC-360 (option (c)), DEC-410 item 3, DEC-422 (#514 open).
