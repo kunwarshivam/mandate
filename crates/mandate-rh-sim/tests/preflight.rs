@@ -203,7 +203,9 @@ fn row(symbol: &str, quantity: &str, average_buy_price: &str) -> Position {
 }
 
 /// DEC-875 items 1 and 2 and DEC-902 items 1 to 8, end to end: one opening filled once, another
-/// cancelled, and the preflight reading the whole account behind a fresh check each time.
+/// cancelled, and the preflight reading the whole account behind a fresh check each time. The
+/// fill spent 498 of the cash and the buying power, and the working order echoes the `ref_id`
+/// this connector placed it under, so it names our key (DEC-1151 items 6 and 7).
 #[test]
 fn the_preflight_reads_the_whole_account_through_the_wire() {
     let mut core = read_sim().unwrap();
@@ -222,8 +224,8 @@ fn the_preflight_reads_the_whole_account_through_the_wire() {
     run(&mut connector, &cancel).unwrap();
     let facts = ready(connector.preflight_facts(&id("SPY"))).unwrap();
     let expected = AccountSnapshot {
-        cash: Usd::parse("750.25").unwrap(),
-        buying_power: Usd::parse("10000").unwrap(),
+        cash: Usd::parse("252.25").unwrap(),
+        buying_power: Usd::parse("9502").unwrap(),
         positions: vec![BrokerPosition {
             instrument: id(SPY_ASSET),
             qty: SignedQty::parse("1").unwrap(),
@@ -231,7 +233,7 @@ fn the_preflight_reads_the_whole_account_through_the_wire() {
         }],
         open_orders: vec![BrokerOrder {
             broker_order_id: first.broker_order_id.clone(),
-            client_order_id: None,
+            client_order_id: Some(key("01JOPEN").as_str().to_owned()),
             instrument: id(SPY_ASSET),
             side: Side::Buy,
             qty: qty("2"),
@@ -384,7 +386,8 @@ fn the_served_reads_refuse_what_the_core_does_not_hold() {
 }
 
 /// The core's own figures behind `get_portfolio` and `get_equity_positions` (DEC-902 items 2 and
-/// 3): the scripted cash and buying power, each account's positions only, and the average price
+/// 3): the scripted cash and buying power less what the buys cost, which a sell does not add back
+/// (DEC-1151 item 7), each account's positions only, and the average price
 /// the fills themselves set — weighted on a second buy, kept by a sell, kept on a row sold to
 /// zero, which is still listed.
 #[test]
@@ -394,10 +397,8 @@ fn fills_set_the_average_price_a_position_was_bought_at() {
     core.fill(&first.id, qty("2"), price("500")).unwrap();
     let second = core.place(&common::limit("buy", "1", "494", 2)).unwrap();
     core.fill(&second.id, qty("1"), price("494")).unwrap();
-    assert_eq!(
-        core.portfolio(AGENTIC).unwrap(),
-        (Usd::parse("750.25").unwrap(), Usd::parse("10000").unwrap())
-    );
+    let spent = (Usd::parse("-743.75").unwrap(), Usd::parse("8506").unwrap());
+    assert_eq!(core.portfolio(AGENTIC).unwrap(), spent, "1000 + 494 spent");
     assert_eq!(core.position(AGENTIC, "SPY").unwrap(), qty("3"));
     assert_eq!(
         core.equity_positions(AGENTIC).unwrap(),
@@ -411,6 +412,11 @@ fn fills_set_the_average_price_a_position_was_bought_at() {
         core.equity_positions(AGENTIC).unwrap(),
         vec![row("SPY", "0", "498")],
         "the sold-out row is kept, with the average it had"
+    );
+    assert_eq!(
+        core.portfolio(AGENTIC).unwrap(),
+        spent,
+        "a sell's proceeds are not settled cash, and add no buying power"
     );
 }
 
@@ -491,7 +497,7 @@ fn an_unregistered_ticker_in_the_snapshot_stays_as_the_broker_spelled_it() {
             ..common::limit("buy", "3", "400", 7)
         })
         .unwrap();
-    core.fill(&theirs.id, qty("1"), price("400")).unwrap();
+    core.fill(&theirs.id, qty("1"), price("200")).unwrap();
     let ours = core.place(&common::limit("buy", "1", "500", 8)).unwrap();
     core.fill(&ours.id, qty("1"), price("500")).unwrap();
     let server = SimServer::start(core, Variant::Honest).unwrap();

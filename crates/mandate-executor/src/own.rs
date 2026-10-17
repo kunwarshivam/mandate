@@ -13,7 +13,9 @@ use crate::ids::ClientOrderId;
 use crate::orders::fill;
 use crate::ports::Ports;
 use crate::state::ExecutorState;
-use crate::types::{BrokerFill, BrokerOrder, Effect, FillId, Order, RiskClock, WriterEpoch};
+use crate::types::{
+    BrokerFill, BrokerOrder, BrokerPosition, Effect, FillId, Order, RiskClock, WriterEpoch,
+};
 
 /// The orders this stream owns whose fills it may not have booked: every order it journaled
 /// `OrderSubmitted` for whose booked quantity is below its own, in client order id order. Only
@@ -169,4 +171,11 @@ fn mismatch(id: &ClientOrderId, reason: &'static str) -> ExecutorError {
         client_order_id: id.as_str().to_owned(),
         reason,
     }
+}
+
+/// The fills a broker that reports none implies from its order records (R0 R19, DEC-1151). Not
+/// built yet: it derives nothing.
+pub fn recorded_fills(state: &ExecutorState, positions: &[BrokerPosition]) -> Vec<BrokerFill> {
+    let _ = (state, positions);
+    Vec::new()
 }
