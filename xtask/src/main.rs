@@ -15214,10 +15214,11 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            12,
+            13,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, and `cell`"
+             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, and \
+             `hosted-k3d` (E21-51)"
         );
         for checkout in checkouts {
             assert!(
