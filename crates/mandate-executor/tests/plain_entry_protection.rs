@@ -531,6 +531,76 @@ fn a_second_entry_never_ends_the_first_entrys_interval() {
     );
 }
 
+/// The review's round-2 case (DEC-966 item 7): two entries fill and both stops are sent before
+/// the broker accepts either; once both are accepted the whole position rests on its own stops,
+/// so the bound alerts nothing and exits nothing.
+#[test]
+fn two_entries_whose_stops_are_both_accepted_are_never_flattened() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 0)), &ports);
+    let first = entry(&mut shell, &ports, "5", None)
+        .client_order_id
+        .as_str()
+        .to_owned();
+    let filled = fill(&mut shell, &ports, "f-1", &first, "5");
+    let [first_stop] = stops(&filled).try_into().expect("the first entry's stop");
+    let second = shell
+        .run(
+            handoff(
+                "01JABCDEFGHJKMNPQRSTVWXYZ1",
+                common::AGENT,
+                protected_opening(AAPL, "5", "150", "140", None),
+            ),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|order| order.client_order_id.as_str().to_owned())
+        .expect("the second entry is sent");
+    let filled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-2",
+            Some(&second),
+            "5",
+            "150",
+        ))),
+        &ports,
+    );
+    let [second_stop] = stops(&filled).try_into().expect("the second entry's stop");
+    for (broker_id, stop) in [("s-1", &first_stop), ("s-2", &second_stop)] {
+        report(
+            &mut shell,
+            &ports,
+            broker_order(
+                broker_id,
+                Some(stop.client_order_id.as_str()),
+                AAPL,
+                Side::Sell,
+                "5",
+                "0",
+                "accepted",
+            ),
+        );
+    }
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
+    for at in [61, 121, 181] {
+        let ran = shell.run(Input::Tick(clock(at)), &ports);
+        assert!(
+            ran.notifications.is_empty(),
+            "at {at}s: {:?}",
+            ran.notifications
+        );
+        assert!(ran.requests.is_empty(), "at {at}s: {:?}", ran.requests);
+    }
+}
+
 /// LT-14: on Alpaca's profile a part-filled bracket's interval reaching the bound is alerted as
 /// before and never flattened; the bound cancels nothing of its own.
 #[test]
@@ -572,16 +642,18 @@ fn a_bracket_at_the_bound_is_alerted_and_never_flattened() {
 /// One thing the broker or the clock does next, as the property draws it.
 #[derive(Debug, Clone)]
 enum Step {
-    /// A fill of the entry, of this share of what is still unfilled, out of 4.
+    /// A fill of the working entry, of this share of what is still unfilled, out of 4.
     EntryFill(u8),
-    /// The entry ends: the broker reports it cancelled with what has filled.
+    /// The working entry ends: the broker reports it cancelled with what has filled.
     EntryEnds,
-    /// The broker confirms a cancel the executor asked for.
+    /// The broker confirms a cancel of the working entry the executor asked for.
     CancelConfirmed,
     /// The broker accepts every protective order it has not answered.
     StopsAccepted,
     /// The broker rejects every protective order it has not answered.
     StopsRejected,
+    /// Another protected opening of 4, once the working entry has ended (at most three in all).
+    Add,
     /// The clock moves on this many seconds.
     Wait(u8),
 }
@@ -593,18 +665,34 @@ fn step() -> impl Strategy<Value = Step> {
         Just(Step::CancelConfirmed),
         Just(Step::StopsAccepted),
         Just(Step::StopsRejected),
+        Just(Step::Add),
         (1u8..=40).prop_map(Step::Wait),
     ]
+}
+
+/// The intents the property's openings carry, in order.
+const INTENTS: [&str; 3] = [
+    INTENT,
+    "01JABCDEFGHJKMNPQRSTVWXYZ1",
+    "01JABCDEFGHJKMNPQRSTVWXYZ2",
+];
+
+/// One opening as the property records it: its order, its quantity, what has filled, whether it
+/// has ended, and when it first filled.
+struct Opening {
+    id: String,
+    quantity: u64,
+    filled: u64,
+    done: bool,
+    first_fill_at: Option<i64>,
 }
 
 /// The property's own record of the run: the position is the sum of the fills it reported, and
 /// the sells are read off the requests the executor sent and the broker answers it gave.
 #[derive(Default)]
 struct Book {
+    openings: Vec<Opening>,
     held: u64,
-    filled_entry: u64,
-    entry_done: bool,
-    first_fill_at: Option<i64>,
     now: i64,
     cancels: Vec<String>,
     unanswered: Vec<(String, u64)>,
@@ -650,16 +738,51 @@ impl Book {
         self.resting.iter().map(|(_, shares)| *shares).sum()
     }
 
+    /// What the stops the broker accepted for `opening` itself cover: each is named for the entry
+    /// it protects (§2.3).
+    fn covered_for(&self, opening: &Opening) -> u64 {
+        let named = format!("{}-p", opening.id);
+        self.resting
+            .iter()
+            .filter(|(stop, _)| stop.starts_with(&named))
+            .map(|(_, shares)| *shares)
+            .sum()
+    }
+
     fn open_sells(&self) -> u64 {
         self.covered()
             .saturating_add(self.unanswered.iter().map(|(_, shares)| *shares).sum())
             .saturating_add(self.exits)
     }
 
-    /// Whether the entry is still working and the executor has asked the broker to cancel it,
-    /// the step before anything it filled can be exited whole (§5.3 rule 5, §5.4).
-    fn cancelling_entry(&self, entry: &str) -> bool {
-        !self.entry_done && self.cancels.iter().any(|asked| asked == entry)
+    /// Whether every opening that filled anything is covered by its own accepted stops, with
+    /// nothing unanswered: a position no bound can be due on.
+    fn wholly_covered(&self) -> bool {
+        self.unanswered.is_empty()
+            && self
+                .openings
+                .iter()
+                .all(|opening| self.covered_for(opening) >= opening.filled)
+    }
+
+    /// Whether the executor has asked the broker to cancel an order the broker has not answered:
+    /// an opening still working, or a stop never acknowledged. An exit waits on that cancel
+    /// (§5.3 rule 5, §5.4's marketable sequence), which is the broker's hold `AGENTS.md` rule 13
+    /// allows.
+    fn waiting_on_broker(&self) -> bool {
+        let working = self
+            .openings
+            .iter()
+            .filter(|opening| !opening.done)
+            .map(|opening| opening.id.as_str());
+        let unanswered = self.unanswered.iter().map(|(stop, _)| stop.as_str());
+        working
+            .chain(unanswered)
+            .any(|id| self.cancels.iter().any(|asked| asked == id))
+    }
+
+    fn working(&mut self) -> Option<&mut Opening> {
+        self.openings.last_mut().filter(|opening| !opening.done)
     }
 }
 
@@ -681,115 +804,237 @@ proptest! {
         ..ProptestConfig::default()
     })]
 
-    /// Over any sequence of entry fills, part fills, cancels, stop acceptances and rejects, and
-    /// waits: the protective and exit sells the executor sent never exceed the position the test
-    /// itself summed (rule 12, §5.3 rule 4); and once the position has been held past
-    /// `max_unprotected_s` + one wait, it is either covered by stops the broker accepted, or the
-    /// owner has been alerted and the executor has handed itself a `risk_exit` of everything held,
-    /// or, while the entry still works, asked for its cancel first (§5.4's bound, rule 13). What
-    /// the exit's own sequence does next is §5.4's, which the executor's other suites pin.
+    /// Over any sequence of up to three openings, their fills, part fills, ends and cancels, stop
+    /// acceptances and rejects, and waits:
+    /// - the protective and exit sells the executor sent never exceed the position the test
+    ///   itself summed (rule 12, §5.3 rule 4);
+    /// - once an opening's shares have been held past `max_unprotected_s` + one wait, they are
+    ///   covered by the stops the broker accepted for that opening, or the owner has been alerted
+    ///   and the executor has handed itself a `risk_exit` of at least those shares, or is waiting
+    ///   on a cancel the broker has not answered (§5.4's bound, rule 13's broker hold);
+    /// - a position every opening of which is covered by its own accepted stops is never
+    ///   flattened (DEC-966 item 7).
+    ///
+    /// What an exit's own sequence does next is §5.4's, which the executor's other suites pin.
     #[test]
     fn the_position_is_never_oversold_nor_unprotected_past_the_bound(
-        steps in proptest::collection::vec(step(), 1..24),
+        steps in proptest::collection::vec(step(), 1..32),
     ) {
-        let (ids, mandates, instruments, config) =
-            (TestIds, FixedMandate::covering(&[AAPL]), FixedInstruments, config());
-        let ports = ports(&ids, &mandates, &instruments, &config);
-        let mut shell = ready(&ports);
-        shell.run(Input::Market(quote(AAPL, "151", "151.1", 0)), &ports);
-        let id = entry(&mut shell, &ports, "8", Some("170")).client_order_id.as_str().to_owned();
-        let mut book = Book::default();
-        let quantity = 8u64;
-        for step in steps {
-            let ran = match step {
-                Step::EntryFill(share) if !book.entry_done && book.filled_entry < quantity => {
-                    let left = quantity - book.filled_entry;
-                    let shares = (left * u64::from(share)).div_ceil(4).max(1);
-                    book.fills += 1;
-                    book.filled_entry += shares;
-                    book.held += shares;
-                    book.first_fill_at.get_or_insert(book.now);
-                    let fill_id = format!("f-{}", book.fills);
-                    let mut ran = fill(&mut shell, &ports, &fill_id, &id, &shares.to_string());
-                    let status = if book.filled_entry == quantity {
-                        book.entry_done = true;
-                        "filled"
-                    } else {
-                        "partially_filled"
-                    };
-                    book.sent(&ran);
-                    ran = report(
-                        &mut shell,
-                        &ports,
-                        entry_state(&id, "8", &book.filled_entry.to_string(), status),
+        holds(steps)?;
+    }
+}
+
+/// The property's run over `steps` (see the property's doc).
+fn holds(steps: Vec<Step>) -> Result<(), TestCaseError> {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 0)), &ports);
+    let mut book = Book::default();
+    let first = entry(&mut shell, &ports, "4", Some("170"))
+        .client_order_id
+        .as_str()
+        .to_owned();
+    report(
+        &mut shell,
+        &ports,
+        entry_state(&first, "4", "0", "accepted"),
+    );
+    book.openings.push(Opening {
+        id: first,
+        quantity: 4,
+        filled: 0,
+        done: false,
+        first_fill_at: None,
+    });
+    for step in steps {
+        let covered_before = book.wholly_covered();
+        let flattened_before = book.flattened;
+        let now = book.now;
+        let ran = match step {
+            Step::EntryFill(share) => {
+                let Some(opening) = book
+                    .working()
+                    .filter(|opening| opening.filled < opening.quantity)
+                else {
+                    continue;
+                };
+                let left = opening.quantity - opening.filled;
+                let shares = (left * u64::from(share)).div_ceil(4).max(1);
+                opening.filled += shares;
+                opening.first_fill_at.get_or_insert(now);
+                if opening.filled == opening.quantity {
+                    opening.done = true;
+                }
+                let (id, filled, done) = (opening.id.clone(), opening.filled, opening.done);
+                book.held += shares;
+                book.fills += 1;
+                let fill_id = format!("f-{}", book.fills);
+                let filling = fill(&mut shell, &ports, &fill_id, &id, &shares.to_string());
+                book.sent(&filling);
+                let status = if done { "filled" } else { "partially_filled" };
+                report(
+                    &mut shell,
+                    &ports,
+                    entry_state(&id, "4", &filled.to_string(), status),
+                )
+            }
+            Step::EntryEnds => {
+                let Some(opening) = book.working() else {
+                    continue;
+                };
+                opening.done = true;
+                let (id, filled) = (opening.id.clone(), opening.filled);
+                report(
+                    &mut shell,
+                    &ports,
+                    entry_state(&id, "4", &filled.to_string(), "canceled"),
+                )
+            }
+            Step::CancelConfirmed => {
+                let cancels = book.cancels.clone();
+                let Some(opening) = book
+                    .working()
+                    .filter(|opening| cancels.contains(&opening.id))
+                else {
+                    continue;
+                };
+                opening.done = true;
+                let id = opening.id.clone();
+                shell.run(
+                    Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                        client_order_id: id,
+                    })),
+                    &ports,
+                )
+            }
+            Step::StopsAccepted | Step::StopsRejected if !book.unanswered.is_empty() => {
+                let accepted = matches!(step, Step::StopsAccepted);
+                for (stop, shares) in std::mem::take(&mut book.unanswered) {
+                    let status = if accepted { "accepted" } else { "rejected" };
+                    let order = broker_order(
+                        "s-1",
+                        Some(&stop),
+                        AAPL,
+                        Side::Sell,
+                        &shares.to_string(),
+                        "0",
+                        status,
                     );
-                    ran
-                }
-                Step::EntryEnds if !book.entry_done => {
-                    book.entry_done = true;
-                    report(
-                        &mut shell,
-                        &ports,
-                        entry_state(&id, "8", &book.filled_entry.to_string(), "canceled"),
-                    )
-                }
-                Step::CancelConfirmed if book.cancels.contains(&id) && !book.entry_done => {
-                    book.entry_done = true;
-                    shell.run(
-                        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
-                            client_order_id: id.clone(),
-                        })),
-                        &ports,
-                    )
-                }
-                Step::StopsAccepted if !book.unanswered.is_empty() => {
-                    for (stop, shares) in std::mem::take(&mut book.unanswered) {
-                        let order = broker_order(
-                            "s-1", Some(&stop), AAPL, Side::Sell, &shares.to_string(), "0", "accepted",
-                        );
-                        let answered = report(&mut shell, &ports, order);
-                        book.sent(&answered);
+                    let answered = report(&mut shell, &ports, order);
+                    book.sent(&answered);
+                    if accepted {
                         book.resting.push((stop, shares));
                     }
-                    Ran::default()
                 }
-                Step::StopsRejected if !book.unanswered.is_empty() => {
-                    for (stop, shares) in std::mem::take(&mut book.unanswered) {
-                        let order = broker_order(
-                            "s-1", Some(&stop), AAPL, Side::Sell, &shares.to_string(), "0", "rejected",
-                        );
-                        let answered = report(&mut shell, &ports, order);
-                        book.sent(&answered);
-                    }
-                    Ran::default()
-                }
-                Step::Wait(seconds) => {
-                    book.now += i64::from(seconds);
-                    shell.run(Input::Tick(clock(book.now)), &ports)
-                }
-                _ => continue,
-            };
-            book.sent(&ran);
-            prop_assert!(
-                book.open_sells() <= book.held,
-                "the stops sent ({}) exceed the {} held", book.open_sells(), book.held
-            );
-            if let (Some(first), Step::Wait(seconds)) = (book.first_fill_at, &step) {
-                let bound = first + config.max_unprotected_s;
-                if book.now - i64::from(*seconds) > bound && book.held > 0 {
-                    let protected = book.covered() >= book.held;
-                    let flattening = book.alerted
-                        && (book.flattened >= book.held || book.cancelling_entry(&id));
-                    prop_assert!(
-                        protected || flattening,
-                        "held {} at {}s, first fill at {}s: covered {}, alerted {}, flattened {}",
-                        book.held, book.now, first, book.covered(), book.alerted, book.flattened
-                    );
+                Ran::default()
+            }
+            Step::Add => {
+                let next = book.openings.len();
+                let (Some(intent), true) = (INTENTS.get(next), book.working().is_none()) else {
+                    continue;
+                };
+                let ran = shell.run(
+                    handoff(
+                        intent,
+                        common::AGENT,
+                        protected_opening(AAPL, "4", "150", "140", Some("170")),
+                    ),
+                    &ports,
+                );
+                let sent = ran
+                    .submissions()
+                    .into_iter()
+                    .find(|order| order.side == Side::Buy)
+                    .map(|order| order.client_order_id.as_str().to_owned());
+                if let Some(id) = sent {
+                    book.sent(&ran);
+                    let acknowledged =
+                        report(&mut shell, &ports, entry_state(&id, "4", "0", "accepted"));
+                    book.openings.push(Opening {
+                        id,
+                        quantity: 4,
+                        filled: 0,
+                        done: false,
+                        first_fill_at: None,
+                    });
+                    acknowledged
+                } else {
+                    ran
                 }
             }
+            Step::Wait(seconds) => {
+                book.now += i64::from(seconds);
+                shell.run(Input::Tick(clock(book.now)), &ports)
+            }
+            _ => continue,
+        };
+        book.sent(&ran);
+        prop_assert!(
+            book.open_sells() <= book.held,
+            "the sells sent ({}) exceed the {} held",
+            book.open_sells(),
+            book.held
+        );
+        prop_assert!(
+            !(covered_before && book.flattened > flattened_before),
+            "a position wholly covered by its own accepted stops is flattened at {}s",
+            book.now
+        );
+        let Step::Wait(seconds) = step else {
+            continue;
+        };
+        let checked = book.now - i64::from(seconds);
+        for opening in &book.openings {
+            let Some(first) = opening.first_fill_at else {
+                continue;
+            };
+            if checked <= first + config.max_unprotected_s || opening.filled == 0 {
+                continue;
+            }
+            let protected = book.covered_for(opening) >= opening.filled;
+            let cancelling = book.waiting_on_broker();
+            let flattening = book.alerted && (book.flattened >= opening.filled || cancelling);
+            prop_assert!(
+                protected || flattening,
+                "{} held {} at {}s, first fill at {}s: covered {}, alerted {}, flattened {}",
+                opening.id,
+                opening.filled,
+                book.now,
+                first,
+                book.covered_for(opening),
+                book.alerted,
+                book.flattened
+            );
         }
-        let orders = shell.state.orders();
-        let unknown = orders.values().any(|order| order.state == OrderState::Unknown);
-        prop_assert!(!unknown, "nothing here leaves an order in doubt");
     }
+    let orders = shell.state.orders();
+    let unknown = orders
+        .values()
+        .any(|order| order.state == OrderState::Unknown);
+    prop_assert!(!unknown, "nothing here leaves an order in doubt");
+    Ok(())
+}
+
+/// A sequence the property found: the first opening's flatten waits on a stop the broker never
+/// answers, while a second opening fills and reaches its own bound.
+#[test]
+fn a_second_opening_beside_a_waiting_flatten_reaches_its_bound() -> Result<(), TestCaseError> {
+    holds(vec![
+        Step::EntryFill(1),
+        Step::Wait(12),
+        Step::Wait(13),
+        Step::EntryEnds,
+        Step::Wait(35),
+        Step::Add,
+        Step::EntryFill(4),
+        Step::Wait(26),
+        Step::Wait(35),
+        Step::Wait(1),
+    ])
 }

@@ -1156,6 +1156,15 @@ fn cash_compared(state: &mut ExecutorState, payload: &Value) {
     }
 }
 
+/// Whether `entry` was sent plain, with no bracket, so its stop follows its fill (DEC-966 item 2).
+fn is_plain_entry(state: &ExecutorState, entry: &ClientOrderId) -> bool {
+    state
+        .details
+        .get(entry)
+        .and_then(|detail| detail.request.as_ref())
+        .is_some_and(|request| request.bracket.is_none())
+}
+
 /// §5.4's protective orders and unprotected intervals, as `ProtectionChanged` journals them
 /// (journal spec §9: instrument, action, orders, the interval's start or end). `placed` adds the
 /// resting protective orders it names and the quantity they cover, as a tranche beside any already
@@ -1164,7 +1173,9 @@ fn cash_compared(state: &mut ExecutorState, payload: &Value) {
 /// instrument's open one, so an interval can only end by being journaled as ended. A start that
 /// names a plain entry, one sent with no bracket whose stop follows its fill (DEC-966 item 2),
 /// ends no other interval: each such entry's interval ends only with its own stop's
-/// acknowledgement, or is bounded (DEC-966 item 7). Any other
+/// acknowledgement, or is bounded (DEC-966 item 7): its placement's awaited orders join the
+/// instrument's rather than replacing them, and an acknowledgement ends every plain entry's
+/// interval among the orders it awaited. Any other
 /// action is refused rather than skipped.
 fn protection_changed(
     state: &mut ExecutorState,
@@ -1286,13 +1297,9 @@ fn protection_changed(
                     },
                 );
             }
-            let plain_entry = bracket.as_ref().is_some_and(|entry| {
-                state
-                    .details
-                    .get(entry)
-                    .and_then(|detail| detail.request.as_ref())
-                    .is_some_and(|request| request.bracket.is_none())
-            });
+            let plain_entry = bracket
+                .as_ref()
+                .is_some_and(|entry| is_plain_entry(state, entry));
             if !passive && !plain_entry {
                 let awaited: Option<BTreeSet<ClientOrderId>> =
                     state.awaiting.remove(&instrument).map(|ids| {
@@ -1361,15 +1368,35 @@ fn protection_changed(
             }) {
                 open.ended_at = Some(at);
             }
+            let plain: BTreeSet<ClientOrderId> = entries
+                .into_iter()
+                .filter(|entry| is_plain_entry(state, entry))
+                .collect();
+            for open in state.unprotected.iter_mut().filter(|interval| {
+                interval.instrument == instrument
+                    && interval.ended_at.is_none()
+                    && interval
+                        .bracket
+                        .as_ref()
+                        .is_some_and(|entry| plain.contains(entry))
+            }) {
+                open.ended_at = Some(at);
+            }
         }
         "interval_limit" | "unprotected_end" => {
             let awaiting = protective_orders_named(payload, "awaiting")?;
             let uncovered = flag(payload, "uncovered");
             let ends = action == "unprotected_end" && awaiting.is_empty() && !uncovered;
+            let joins = optional_text(payload, "bracket")
+                .map(ClientOrderId::parse)
+                .transpose()?
+                .is_some_and(|entry| is_plain_entry(state, &entry));
             if !awaiting.is_empty() {
-                state
-                    .awaiting
-                    .insert(instrument.clone(), awaiting.into_iter().collect());
+                let awaited = state.awaiting.entry(instrument.clone()).or_default();
+                if !joins {
+                    awaited.clear();
+                }
+                awaited.extend(awaiting);
             }
             let finished = action == "unprotected_end";
             if let Some(entry) = optional_text(payload, "bracket").filter(|_| finished) {
