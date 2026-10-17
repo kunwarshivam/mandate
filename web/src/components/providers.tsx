@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, forwardRef } from "react";
+import { type ReactNode, forwardRef, useMemo } from "react";
 import NextLink from "next/link";
 import { MotionConfig } from "motion/react";
 import { Toasty } from "@cloudflare/kumo/components/toast";
@@ -10,6 +10,7 @@ import { JournalToasts } from "@/components/shell/journal-toasts";
 import type { Workspace } from "@/fixtures/types";
 import { emptyWorkspace } from "@/api/reads";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
+import { browserSessionKeeper } from "@/lib/api-session";
 import type { ApiSource } from "@/lib/data-source";
 import { HandoffProvider } from "@/lib/handoff";
 import { RuntimeProvider } from "@/lib/mock-runtime";
@@ -38,6 +39,8 @@ function Frame({ children }: { children: ReactNode }) {
  * workspace with nothing in it, which takes no command, so nothing on screen passes for a record.
  */
 export function ApiProviders({ source, children }: { source: Pick<ApiSource, "origin" | "workspaceId"> | null; children: ReactNode }) {
+  const origin = source?.origin ?? null;
+  const session = useMemo(() => (origin ? browserSessionKeeper(origin) : null), [origin]);
   const body = (
     <HandoffProvider>
       {children}
@@ -47,7 +50,9 @@ export function ApiProviders({ source, children }: { source: Pick<ApiSource, "or
   return (
     <Frame>
       {source ? (
-        <ApiRuntimeProvider source={source}>{body}</ApiRuntimeProvider>
+        <ApiRuntimeProvider source={source} session={session ?? undefined}>
+          {body}
+        </ApiRuntimeProvider>
       ) : (
         <RuntimeProvider initial={emptyWorkspace("unreachable", new Date().toISOString())} tick={false}>
           {body}

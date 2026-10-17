@@ -317,6 +317,7 @@ describe("no order ticket (DEC-528)", () => {
     "mock-server": ["createMockServer"],
     operations: ["WEB_OPERATIONS", "operationFor"],
     reads: ["emptyWorkspace", "loadWorkspace"],
+    session: ["REFRESH_EVERY_MS", "SESSION_LOCK", "createSessionKeeper"],
     types: ["COMMAND_PHASES", "EFFECTS", "STEP_UP_STATUSES"],
   };
   const MODULES = Object.fromEntries(

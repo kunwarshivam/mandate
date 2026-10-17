@@ -3,8 +3,9 @@
 - **Spec:** `docs/specs/journal.md` §5.1, §6.1, §11; ADR-0001 ES-08; DEC-109;
   `docs/project/tasks/E5-3-postgres-journal.md`.
 - **Code:** `mandate-journal-pg`: `crates/mandate-journal-pg/src/lib.rs` (`PgJournal`: the append
-  protocol in one transaction holding the head row, reads that re-verify stored bytes, `migrator`);
-  the schema, roles, and triggers in `migrations/`.
+  protocol in one transaction holding the head row, reads that re-verify stored bytes); its
+  migration runner, `crates/mandate-journal-pg/src/migrate.rs`, is E21-50's (its own feature
+  file); the schema, roles, and triggers in `migrations/`.
 - **Tests:** `crates/mandate-journal/tests/conformance/mod.rs` (the append suite every journal
   backend runs: stream rules, fencing, `risk_clock`, retries, rejections, the chain and append
   vectors, and a differential property against `MemoryJournal`), run by
