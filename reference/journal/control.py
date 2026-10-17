@@ -914,7 +914,7 @@ SCHEMAS[("ctl", "EvaluationRunRecorded")] = rec(
     ("theses", REF),
     ("theses_from", list_of(STR)),
     ("theses_to", list_of(STR)),
-    ("theses_head", list_of(REF)),
+    ("theses_head", list_of(DIGEST_HEX)),
     ("closes", REF),
     ("cost_model", REF),
     ("code_build", REF),

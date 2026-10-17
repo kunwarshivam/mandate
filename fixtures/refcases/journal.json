@@ -78341,7 +78341,7 @@
   }
  },
  "backtest_records": {
-  "spec": "docs/specs/journal.md v0.45 §9.18 (DEC-1001, DEC-1002; writer DEC-1141)",
+  "spec": "docs/specs/journal.md v0.48 §9.18 (DEC-1001, DEC-1002; writer DEC-1141; theses_head DEC-1142)",
   "artifacts": [
    {
     "name": "mandate_version",
@@ -78423,24 +78423,6 @@
      "note": "reference fixture: stands for the ThesisProposed and ThesisRevised records read"
     },
     "canonical": "{\"kind\":\"theses\",\"note\":\"reference fixture: stands for the ThesisProposed and ThesisRevised records read\"}"
-   },
-   {
-    "name": "head_agent_a",
-    "ref": "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d",
-    "object": {
-     "kind": "record",
-     "note": "reference fixture: stands for the last thesis record read on agent_a"
-    },
-    "canonical": "{\"kind\":\"record\",\"note\":\"reference fixture: stands for the last thesis record read on agent_a\"}"
-   },
-   {
-    "name": "head_agent_b",
-    "ref": "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
-    "object": {
-     "kind": "record",
-     "note": "reference fixture: stands for the last thesis record read on agent_b"
-    },
-    "canonical": "{\"kind\":\"record\",\"note\":\"reference fixture: stands for the last thesis record read on agent_b\"}"
    },
    {
     "name": "closes",
@@ -78560,8 +78542,8 @@
       "agent:ws_01J8Z2:agent_b:5"
      ],
      "theses_head": [
-      "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d",
-      "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f"
+      "dde07663c250a17b3b82e071e9fb16029360d3296905825953b47c56ad506254",
+      "845e15faf55beb233f27c0f4109b8fa3436ece05663b7381d34939e3e535ec3a"
      ],
      "closes": "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
      "cost_model": "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
@@ -78574,10 +78556,8 @@
      "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
      "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
      "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-     "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
      "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-     "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-     "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+     "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
     ],
     "pii_refs": []
    }
@@ -79539,10 +79519,8 @@
       "value": [
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
        "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -79566,10 +79544,8 @@
       "value": [
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
        "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -79593,10 +79569,8 @@
       "value": [
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
        "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -79754,16 +79728,6 @@
      {
       "path": "payload.theses_head",
       "value": "x"
-     },
-     {
-      "path": "artifact_refs",
-      "value": [
-       "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
-       "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
-       "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
-      ]
      }
     ],
     "expect": {
@@ -79780,8 +79744,8 @@
      {
       "path": "payload.theses_head",
       "value": [
-       "sha256:short",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f"
+       "sha256:dde07663c250a17b3b82e071e9fb16029360d3296905825953b47c56ad506254",
+       "845e15faf55beb233f27c0f4109b8fa3436ece05663b7381d34939e3e535ec3a"
       ]
      },
      {
@@ -79790,9 +79754,9 @@
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
        "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
+       "sha256:dde07663c250a17b3b82e071e9fb16029360d3296905825953b47c56ad506254"
       ]
      }
     ],
@@ -79810,19 +79774,8 @@
      {
       "path": "payload.theses_head",
       "value": [
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d",
+       "dde07663c250a17b3b82e071e9fb16029360d3296905825953b47c56ad506254",
        7
-      ]
-     },
-     {
-      "path": "artifact_refs",
-      "value": [
-       "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
-       "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
-       "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
       ]
      }
     ],
@@ -79840,16 +79793,6 @@
      {
       "path": "payload.theses_head",
       "value": null
-     },
-     {
-      "path": "artifact_refs",
-      "value": [
-       "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
-       "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
-       "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
-      ]
      }
     ],
     "expect": {
@@ -79873,9 +79816,7 @@
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -79900,9 +79841,7 @@
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -79927,9 +79866,7 @@
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -79954,9 +79891,7 @@
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
-       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e"
       ]
      }
     ],
@@ -79981,9 +79916,7 @@
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
-       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e"
       ]
      }
     ],
@@ -80008,9 +79941,7 @@
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
-       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e"
       ]
      }
     ],
@@ -80034,10 +79965,8 @@
       "value": [
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
        "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -80061,10 +79990,8 @@
       "value": [
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
        "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -80088,10 +80015,8 @@
       "value": [
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
        "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -80115,10 +80040,8 @@
       "value": [
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
        "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -80142,10 +80065,8 @@
       "value": [
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
        "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -80169,10 +80090,8 @@
       "value": [
        "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
        "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -80862,16 +80781,6 @@
      {
       "path": "payload.theses_head",
       "value": []
-     },
-     {
-      "path": "artifact_refs",
-      "value": [
-       "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
-       "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
-       "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
-      ]
      }
     ],
     "expect": {
@@ -80922,22 +80831,9 @@
      {
       "path": "payload.theses_head",
       "value": [
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
-       "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-      ]
-     },
-     {
-      "path": "artifact_refs",
-      "value": [
-       "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
-       "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
-       "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:807c6a0eaa29b90d2ed08fbd6f9bcbbf1516880c3130c252a475a47aedaccc0f",
-       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d",
-       "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+       "dde07663c250a17b3b82e071e9fb16029360d3296905825953b47c56ad506254",
+       "845e15faf55beb233f27c0f4109b8fa3436ece05663b7381d34939e3e535ec3a",
+       "c2f24a4bd79f33e175a00cb87830875ef5aa76d09deaeef930dc9fdd588e19b8"
       ]
      }
     ],
@@ -80963,6 +80859,66 @@
      "outcome": "Invalid",
      "reason": "schema",
      "path": "payload.theses_from"
+    }
+   },
+   {
+    "name": "EvaluationRunRecorded.head_as_ref",
+    "clause": "§9.18 (DEC-1142): a head is a bare record hash (digest), never a sha256: ref",
+    "base_draft": "evaluation_run_recorded",
+    "changes": [
+     {
+      "path": "payload.theses_head",
+      "value": [
+       "sha256:dde07663c250a17b3b82e071e9fb16029360d3296905825953b47c56ad506254",
+       "sha256:845e15faf55beb233f27c0f4109b8fa3436ece05663b7381d34939e3e535ec3a"
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
+       "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
+       "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
+       "sha256:845e15faf55beb233f27c0f4109b8fa3436ece05663b7381d34939e3e535ec3a",
+       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
+       "sha256:dde07663c250a17b3b82e071e9fb16029360d3296905825953b47c56ad506254"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.theses_head[0]",
+     "also": [
+      {
+       "reason": "non_canonical",
+       "path": "payload.theses_head[1]"
+      }
+     ]
+    }
+   },
+   {
+    "name": "EvaluationRunRecorded.head_listed_as_artifact",
+    "clause": "§9 digest (DEC-1142): a record hash names no stored artifact, so it is not in artifact_refs",
+    "base_draft": "evaluation_run_recorded",
+    "changes": [
+     {
+      "path": "artifact_refs",
+      "value": [
+       "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
+       "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
+       "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
+       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
+       "sha256:dde07663c250a17b3b82e071e9fb16029360d3296905825953b47c56ad506254"
+      ]
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "artifact_refs",
+     "path": "artifact_refs"
     }
    },
    {
@@ -81163,9 +81119,19 @@
      {
       "path": "payload.theses_head",
       "value": [
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "dde07663c250a17b3b82e071e9fb16029360d3296905825953b47c56ad506254"
       ]
-     },
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "EvaluationRunRecorded.heads_not_artifacts",
+    "clause": "§9 digest (DEC-1142): artifact_refs lists the refs only, never a thesis head",
+    "base_draft": "evaluation_run_recorded",
+    "changes": [
      {
       "path": "artifact_refs",
       "value": [
@@ -81173,8 +81139,7 @@
        "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
        "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
        "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23"
       ]
      }
     ],
@@ -81207,19 +81172,8 @@
      {
       "path": "payload.theses_head",
       "value": [
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
-      ]
-     },
-     {
-      "path": "artifact_refs",
-      "value": [
-       "sha256:2674c2de26bf1ae317ab85df7900b99aa04590922ad55b291027a6e3067ff120",
-       "sha256:3c3bfe48d181b857e4f9ad38480fbe951480d077b87f5484b283bc861396a435",
-       "sha256:67bdc864ecb24640fa8fba78df9fa8bab6272912ff7228b0f313c763cc7b61a3",
-       "sha256:aa58bb249274cca24d4c9a17af1f49bead072c6690848e34ff6120de3af6003e",
-       "sha256:b9cc151a284a8ca23edbb6e14bc5be886e159c1073fba981d197f398d3731f23",
-       "sha256:e6b76b645d78c7dc291e093922dbac87bdb7444ba4e2a29520dc602adccdfa7d"
+       "dde07663c250a17b3b82e071e9fb16029360d3296905825953b47c56ad506254",
+       "dde07663c250a17b3b82e071e9fb16029360d3296905825953b47c56ad506254"
       ]
      }
     ],

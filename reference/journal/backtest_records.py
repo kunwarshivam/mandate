@@ -1,7 +1,9 @@
-"""Journal spec v0.45 §9.18's reference vectors for the backtest and evaluation records (DEC-1001,
+"""Journal spec v0.48 §9.18's reference vectors for the backtest and evaluation records (DEC-1001,
 DEC-1002): `BacktestRunRecorded`, one backtest of a mandate version, and `EvaluationRunRecorded`,
 one forward-paper evaluation, both on the workspace control stream at schema version 1, each naming
-its report by artifact and the digests that reproduce it.
+its report by artifact and the digests that reproduce it. `theses_head` holds bare record hashes
+(`[digest]`, DEC-1142): a journal record's hash names no stored artifact, so the heads stay out of
+`artifact_refs` and §11 check 6 never reads them.
 
 The schemas, the required `config_refs` (§9's catalogue: `rule` and `man` for a backtest, `rule`
 for an evaluation), rules 143 to 145, and DEC-1141's writer live in `control.py`, beside the other
@@ -45,7 +47,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.45 §9.18 (DEC-1001, DEC-1002; writer DEC-1141)"
+SPEC = "docs/specs/journal.md v0.48 §9.18 (DEC-1001, DEC-1002; writer DEC-1141; theses_head DEC-1142)"
 AT = "2026-10-17T15:30:00.000000000Z"
 CUT_OFF = "2026-10-16T20:00:00.000000000Z"
 CAUSE = "01J8Z5B0A000000000000000Q1"
@@ -64,6 +66,11 @@ def ref(fill: str) -> str:
     return "sha256:" + fill * 64
 
 
+def record_hash(label: str) -> str:
+    """A bare record hash (§3), as `theses_head` holds it: hex with no `sha256:` prefix."""
+    return hashlib.sha256(label.encode("utf-8")).hexdigest()
+
+
 def stand_in(kind: str, stands_for: str) -> dict:
     return {"kind": kind, "note": f"reference fixture: stands for {stands_for}"}
 
@@ -80,8 +87,6 @@ STORED = {
     "runner_build": stand_in("code_build", "the backtest runner's build"),
     "backtest_report": stand_in("backtest_report", "a report_version 2 backtest report (DEC-1001 item 2)"),
     "evaluation_theses": stand_in("theses", "the ThesisProposed and ThesisRevised records read"),
-    "head_agent_a": stand_in("record", "the last thesis record read on agent_a"),
-    "head_agent_b": stand_in("record", "the last thesis record read on agent_b"),
     "closes": stand_in("closes", "the close series"),
     "cost_model": stand_in("cost_model", "the round-trip cost model"),
     "evaluator_build": stand_in("code_build", "the evaluator's build"),
@@ -91,6 +96,7 @@ STORED_REF = {name: artifact_ref(obj) for name, obj in STORED.items()}
 VERSION = STORED_REF["mandate_version"]
 OTHER_VERSION = ref("9")
 RULES = STORED_REF["rule_set"]
+HEADS = [record_hash("agent_a seq 41"), record_hash("agent_b seq 5")]
 PAYLOADS: dict[str, dict] = {
     BACKTEST: {
         "backtest_id": "bt_01JBT0001",
@@ -113,7 +119,7 @@ PAYLOADS: dict[str, dict] = {
         "theses": STORED_REF["evaluation_theses"],
         "theses_from": [f"{AGENT_STREAM}:2", f"{SECOND_AGENT}:5"],
         "theses_to": [f"{AGENT_STREAM}:41", f"{SECOND_AGENT}:5"],
-        "theses_head": [STORED_REF["head_agent_a"], STORED_REF["head_agent_b"]],
+        "theses_head": list(HEADS),
         "closes": STORED_REF["closes"],
         "cost_model": STORED_REF["cost_model"],
         "code_build": STORED_REF["evaluator_build"],
@@ -127,7 +133,7 @@ CONFIG_REFS = {BACKTEST: {"mandate_version": VERSION, "rule_set": RULES}, EVALUA
 EVENT_IDS = {BACKTEST: "01J8Z5BT00000000000000BT01", EVALUATION: "01J8Z5EV00000000000000EV01"}
 REPORT_VERSIONS = {BACKTEST: 2, EVALUATION: 1}
 POSITION = re.compile(r"^(agent:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+):([1-9][0-9]*)\Z")
-DIGEST_FORM = re.compile(r"^sha256:[0-9a-f]{64}\Z")
+HEAD_FORM = re.compile(r"^[0-9a-f]{64}\Z")
 
 
 def snake(record: str) -> str:
@@ -193,6 +199,7 @@ def wrong_form(ty) -> object | None:
     return {
         "id": "not an id",
         "ref": "sha256:short",
+        "digest": "sha256:" + HEADS[0],
         "str": "",
         "ts": "2026-10-16",
         "one_of": "not_listed",
@@ -414,7 +421,7 @@ def rule_drafts() -> list[dict]:
             "head_longer",
             "rule 145: one entry per stream in each list",
             EVALUATION,
-            [change("payload.theses_head", [*PAYLOADS[EVALUATION]["theses_head"], ref("e")])],
+            [change("payload.theses_head", [*HEADS, record_hash("agent_c seq 1")])],
             "schema",
             "payload.theses_from",
         ),
@@ -425,6 +432,23 @@ def rule_drafts() -> list[dict]:
             [change("payload.theses_from", [f"{AGENT_STREAM}:2"])],
             "schema",
             "payload.theses_from",
+        ),
+        invalid(
+            "head_as_ref",
+            "§9.18 (DEC-1142): a head is a bare record hash (digest), never a sha256: ref",
+            EVALUATION,
+            [change("payload.theses_head", ["sha256:" + head for head in HEADS])],
+            "non_canonical",
+            "payload.theses_head[0]",
+            also=[("non_canonical", "payload.theses_head[1]")],
+        ),
+        control_invalid(
+            f"{EVALUATION}.head_listed_as_artifact",
+            "§9 digest (DEC-1142): a record hash names no stored artifact, so it is not in artifact_refs",
+            snake(EVALUATION),
+            [change("artifact_refs", sorted([*digest_strings(PAYLOADS[EVALUATION]), "sha256:" + HEADS[0]]))],
+            "artifact_refs",
+            "artifact_refs",
         ),
         invalid(
             "from_empty",
@@ -487,8 +511,14 @@ def valid_drafts() -> list[dict]:
             [
                 change("payload.theses_from", [f"{AGENT_STREAM}:2"]),
                 change("payload.theses_to", [f"{AGENT_STREAM}:41"]),
-                change("payload.theses_head", [STORED_REF["head_agent_a"]]),
+                change("payload.theses_head", [HEADS[0]]),
             ],
+        ),
+        valid(
+            "heads_not_artifacts",
+            "§9 digest (DEC-1142): artifact_refs lists the refs only, never a thesis head",
+            EVALUATION,
+            [change("artifact_refs", sorted(digest_strings(PAYLOADS[EVALUATION])))],
         ),
         valid(
             "one_record_per_stream",
@@ -500,7 +530,7 @@ def valid_drafts() -> list[dict]:
             "same_head",
             "rule 145 counts entries; it does not require distinct hashes",
             EVALUATION,
-            [change("payload.theses_head", [STORED_REF["head_agent_a"]] * 2)],
+            [change("payload.theses_head", [HEADS[0]] * 2)],
         ),
         valid("not_passed", "§9.18: an evaluation that did not pass is recorded", EVALUATION, [change("payload.passed", False)]),
         valid(
@@ -561,8 +591,8 @@ def ranges_problem(p: dict) -> str | None:
             return f"{start} to {end} is not a range on one agent stream"
         if int(first.group(2)) > int(last.group(2)):
             return f"{start} is after {end}"
-        if not DIGEST_FORM.match(str(head)):
-            return f"{head} is not a record hash"
+        if not HEAD_FORM.match(str(head)):
+            return f"{head} is not a bare record hash"
         streams.append(first.group(1))
     if len(set(streams)) != len(streams):
         return "an agent stream is read twice"
@@ -601,6 +631,10 @@ def check_section(section: dict) -> list[str]:
             problems.append(found("drafts.marker", f"base draft {name} is not its report version and marker"))
         if draft.get("artifact_refs") != sorted(set(digests_in(p))):
             problems.append(found("drafts.artifacts", f"base draft {name} does not list every digest it names"))
+        heads = p.get("theses_head") if isinstance(p.get("theses_head"), list) else []
+        listed = {str(r).removeprefix("sha256:") for r in draft.get("artifact_refs", [])}
+        if listed & {str(h).removeprefix("sha256:") for h in heads}:
+            problems.append(found("drafts.artifacts", f"base draft {name} lists a thesis head as an artifact"))
         if record == BACKTEST:
             bound = (draft.get("config_refs") or {}).get("mandate_version")
             completed = p.get("result") == "completed" and p.get("report") is not None and p.get("refusal") is None
@@ -628,6 +662,7 @@ VALIDATOR_MUTANTS = (
     "record.missing",
     "types.str_nonempty",
     "types.timestamp",
+    "types.digest",
     "config_refs.required",
     "rule.143.report",
     "rule.143.refusal",
@@ -688,6 +723,19 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             "the evaluation's base draft reads a range backwards",
             "drafts.ranges",
             mutated(lambda s: s["drafts"][ev]["payload"].update(theses_to=[f"{AGENT_STREAM}:1", f"{SECOND_AGENT}:5"])),
+        ),
+        (
+            "the evaluation's base draft lists a thesis head as an artifact",
+            "drafts.artifacts",
+            mutated(lambda s: s["drafts"][ev]["artifact_refs"].append("sha256:" + HEADS[0])),
+        ),
+        (
+            "the evaluation's base draft names its heads as refs",
+            "drafts.ranges",
+            mutated(
+                lambda s: s["drafts"][ev]["payload"].update(theses_head=["sha256:" + head for head in HEADS])
+                or s["drafts"][ev].update(artifact_refs=sorted(digest_strings(s["drafts"][ev]["payload"])))
+            ),
         ),
         (
             "an invalid draft's expectation differs",
