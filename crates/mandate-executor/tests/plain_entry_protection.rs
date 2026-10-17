@@ -193,10 +193,13 @@ fn a_complete_fill_places_one_gtc_stop_limit_journaled_before_it_is_sent() {
         stops(&partly).is_empty(),
         "nothing is placed on a working entry"
     );
-    fill(&mut shell, &ports, "f-2", &id, "6");
-    let ran = report(&mut shell, &ports, entry_state(&id, "10", "10", "filled"));
-    let mut placed: Vec<SubmitOrder> = stops(&ran);
-    placed.extend(stops(&shell.run(Input::Tick(clock(1)), &ports)));
+    let completing = fill(&mut shell, &ports, "f-2", &id, "6");
+    let reported = report(&mut shell, &ports, entry_state(&id, "10", "10", "filled"));
+    let ticked = shell.run(Input::Tick(clock(1)), &ports);
+    let mut placed: Vec<SubmitOrder> = Vec::new();
+    for ran in [&completing, &reported, &ticked] {
+        placed.extend(stops(ran));
+    }
     let [stop] = placed.as_slice() else {
         panic!("one protective order for the filled entry: {placed:?}");
     };
@@ -220,8 +223,12 @@ fn a_complete_fill_places_one_gtc_stop_limit_journaled_before_it_is_sent() {
         (Some(price("140")), Some(price("139.3")), false, false),
         "at the intent's stop, limit stop × (1 − offset), and no take-profit leg"
     );
+    let ran = [&completing, &reported, &ticked]
+        .into_iter()
+        .find(|ran| !stops(ran).is_empty())
+        .expect("one step sent the stop");
     assert!(
-        journaled_before_sent(&ran, stop.client_order_id.as_str()),
+        journaled_before_sent(ran, stop.client_order_id.as_str()),
         "the stop's OrderSubmitted precedes its request (rule 5)"
     );
     let placement = ran
@@ -242,16 +249,16 @@ fn a_complete_fill_places_one_gtc_stop_limit_journaled_before_it_is_sent() {
     );
 }
 
-/// §5.4 and DEC-620 item 3: an entry still part filled at the timeout has its remainder
-/// cancelled; once the cancel is confirmed the stop covers the 4 that filled, and no more.
+/// §5.4 and DEC-620 item 3: an entry still part filled at a 30-second
+/// `bracket_partial_fill_timeout_s` has its remainder cancelled; once the cancel is confirmed,
+/// inside the 60-second bound, the stop covers the 4 that filled, and no more.
 #[test]
 fn a_part_filled_entry_is_cancelled_at_the_timeout_and_its_fill_gets_the_stop() {
-    let (ids, mandates, instruments, config) = (
-        TestIds,
-        FixedMandate::covering(&[AAPL]),
-        FixedInstruments,
-        config(),
-    );
+    let config = mandate_executor::ExecutorConfig {
+        bracket_partial_fill_timeout_s: 30,
+        ..config()
+    };
+    let (ids, mandates, instruments) = (TestIds, FixedMandate::covering(&[AAPL]), FixedInstruments);
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = ready(&ports);
     let id = entry(&mut shell, &ports, "10", Some("170"))
@@ -264,14 +271,14 @@ fn a_part_filled_entry_is_cancelled_at_the_timeout_and_its_fill_gets_the_stop() 
         &ports,
         entry_state(&id, "10", "4", "partially_filled"),
     );
-    let early = shell.run(Input::Tick(clock(30)), &ports);
+    let early = shell.run(Input::Tick(clock(20)), &ports);
     assert!(
         !early
             .requests
             .iter()
             .any(|r| matches!(r, BrokerRequest::Cancel { .. }))
     );
-    let due = shell.run(Input::Tick(clock(61)), &ports);
+    let due = shell.run(Input::Tick(clock(31)), &ports);
     assert!(
         due.requests
             .iter()
@@ -317,11 +324,12 @@ fn a_stop_that_never_rests_is_flattened_at_the_bound() {
         .client_order_id
         .as_str()
         .to_owned();
-    fill(&mut shell, &ports, "f-1", &id, "10");
-    let ran = report(&mut shell, &ports, entry_state(&id, "10", "10", "filled"));
-    let placed = stops(&ran);
+    let filled = fill(&mut shell, &ports, "f-1", &id, "10");
+    let reported = report(&mut shell, &ports, entry_state(&id, "10", "10", "filled"));
+    let mut placed = stops(&filled);
+    placed.extend(stops(&reported));
     let [stop] = placed.as_slice() else {
-        panic!("the stop is sent: {:?}", ran.requests);
+        panic!("the stop is sent: {placed:?}");
     };
     report(
         &mut shell,
@@ -403,6 +411,7 @@ struct Book {
     unanswered: Vec<(String, u64)>,
     resting: Vec<(String, u64)>,
     exits: u64,
+    flattened: u64,
     alerted: bool,
     fills: u32,
 }
@@ -428,6 +437,14 @@ impl Book {
         if ran.notifications.contains(&"unprotected_interval_limit") {
             self.alerted = true;
         }
+        for draft in &ran.drafts {
+            let flatten = draft.event_type == "IntentReceived"
+                && matches!(draft.payload.get("intent_id"), Some(Value::Str(intent)) if intent.starts_with("w-"))
+                && matches!(draft.payload.get("purpose"), Some(Value::Str(purpose)) if purpose == "risk_exit");
+            if let (true, Some(Value::Str(shares))) = (flatten, draft.payload.get("qty")) {
+                self.flattened = self.flattened.saturating_add(whole(qty(shares)));
+            }
+        }
     }
 
     fn covered(&self) -> u64 {
@@ -440,14 +457,10 @@ impl Book {
             .saturating_add(self.exits)
     }
 
-    /// Whether the exit sequence has asked the broker to cancel every stop it has not answered,
-    /// its step before the exit is sent (§5.4's marketable exit sequence).
-    fn cancelling_unanswered(&self) -> bool {
-        !self.unanswered.is_empty()
-            && self
-                .unanswered
-                .iter()
-                .all(|(stop, _)| self.cancels.contains(stop))
+    /// Whether the entry is still working and the executor has asked the broker to cancel it,
+    /// the step before anything it filled can be exited whole (§5.3 rule 5, §5.4).
+    fn cancelling_entry(&self, entry: &str) -> bool {
+        !self.entry_done && self.cancels.iter().any(|asked| asked == entry)
     }
 }
 
@@ -473,8 +486,9 @@ proptest! {
     /// waits: the protective and exit sells the executor sent never exceed the position the test
     /// itself summed (rule 12, §5.3 rule 4); and once the position has been held past
     /// `max_unprotected_s` + one wait, it is either covered by stops the broker accepted, or the
-    /// owner has been alerted and an exit of what is held has been sent, or, where a stop is still
-    /// unanswered, its cancel asked as the exit's first step (§5.4's bound, rule 13).
+    /// owner has been alerted and the executor has handed itself a `risk_exit` of everything held,
+    /// or, while the entry still works, asked for its cancel first (§5.4's bound, rule 13). What
+    /// the exit's own sequence does next is §5.4's, which the executor's other suites pin.
     #[test]
     fn the_position_is_never_oversold_nor_unprotected_past_the_bound(
         steps in proptest::collection::vec(step(), 1..24),
@@ -530,27 +544,25 @@ proptest! {
                     )
                 }
                 Step::StopsAccepted if !book.unanswered.is_empty() => {
-                    let mut last = Ran::default();
                     for (stop, shares) in std::mem::take(&mut book.unanswered) {
                         let order = broker_order(
                             "s-1", Some(&stop), AAPL, Side::Sell, &shares.to_string(), "0", "accepted",
                         );
-                        last = report(&mut shell, &ports, order);
-                        book.sent(&last);
+                        let answered = report(&mut shell, &ports, order);
+                        book.sent(&answered);
                         book.resting.push((stop, shares));
                     }
-                    last
+                    Ran::default()
                 }
                 Step::StopsRejected if !book.unanswered.is_empty() => {
-                    let mut last = Ran::default();
                     for (stop, shares) in std::mem::take(&mut book.unanswered) {
                         let order = broker_order(
                             "s-1", Some(&stop), AAPL, Side::Sell, &shares.to_string(), "0", "rejected",
                         );
-                        last = report(&mut shell, &ports, order);
-                        book.sent(&last);
+                        let answered = report(&mut shell, &ports, order);
+                        book.sent(&answered);
                     }
-                    last
+                    Ran::default()
                 }
                 Step::Wait(seconds) => {
                     book.now += i64::from(seconds);
@@ -564,15 +576,15 @@ proptest! {
                 "the stops sent ({}) exceed the {} held", book.open_sells(), book.held
             );
             if let (Some(first), Step::Wait(seconds)) = (book.first_fill_at, &step) {
-                let bound = first + i64::try_from(config.max_unprotected_s).unwrap_or(i64::MAX);
+                let bound = first + config.max_unprotected_s;
                 if book.now - i64::from(*seconds) > bound && book.held > 0 {
                     let protected = book.covered() >= book.held;
                     let flattening = book.alerted
-                        && (book.exits >= book.held || book.cancelling_unanswered());
+                        && (book.flattened >= book.held || book.cancelling_entry(&id));
                     prop_assert!(
                         protected || flattening,
-                        "held {} at {}s, first fill at {}s: covered {}, alerted {}, exits {}",
-                        book.held, book.now, first, book.covered(), book.alerted, book.exits
+                        "held {} at {}s, first fill at {}s: covered {}, alerted {}, flattened {}",
+                        book.held, book.now, first, book.covered(), book.alerted, book.flattened
                     );
                 }
             }

@@ -520,6 +520,7 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         quote: GateQuote::of(&snapshot.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: None,
     };
     let executor_agent = ExecutorAgentId(AGENT.to_owned());
     let reviewed = symbol(OTHER_ASSET)?;
@@ -1289,6 +1290,7 @@ fn trusted_context_exposes_only_the_reviewed_agent_and_instrument() -> Result<()
         quote: GateQuote::of(&facts()?.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let other_agent = ExecutorAgentId("other".to_owned());
@@ -1359,6 +1361,7 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
         ),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::clone(&current))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let instrument = symbol(INSTRUMENT_ID)?;
@@ -1393,6 +1396,7 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
                 .quote,
         ),
         clock: Rc::new(TestClock(close_clock)),
+        stop_limit_offset: None,
         ..trusted
     };
     assert!(
@@ -1424,6 +1428,7 @@ fn the_binding_gate_judges_the_quote_the_run_last_handed_it() -> Result<(), Stri
         quote: quote.clone(),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::clone(&current))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let instrument = symbol(INSTRUMENT_ID)?;
@@ -1592,6 +1597,7 @@ fn each_binding_request_reserves_its_own_orders_fees() -> Result<(), String> {
         quote: GateQuote::of(&facts()?.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let instrument = symbol(INSTRUMENT_ID)?;

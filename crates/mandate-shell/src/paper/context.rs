@@ -141,6 +141,7 @@ pub fn load_contexts_with_clock(
         quote: quote.clone(),
         quote_max_age: artifacts.quote_max_age,
         clock,
+        stop_limit_offset: stop_limit_offset(&artifacts.mandate.protection)?,
     });
     let executor = ExecutorContext::new(
         Rc::new(Ids {
@@ -291,6 +292,19 @@ pub(super) fn protection_prices(
     }))
 }
 
+/// The mandate's stop-limit offset when its protection is on and sets one; an offset that does
+/// not read as a fraction refuses the run rather than leaving a stop-limit without its limit.
+pub(super) fn stop_limit_offset(protection: &Protection) -> Result<Option<Fraction>, Cause> {
+    let Some(offset) = protection
+        .crypto_stop_limit_offset
+        .as_ref()
+        .filter(|_| protection.enabled)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(Fraction::parse(offset.as_str())?))
+}
+
 fn run_context(
     artifacts: &Artifacts,
     broker: &BrokerFacts,
@@ -398,6 +412,9 @@ pub(super) struct TrustedPaperContext {
     pub(super) quote: GateQuote,
     pub(super) quote_max_age: Duration,
     pub(super) clock: Rc<dyn PaperClock>,
+    /// The mandate's `stop_limit_offset`, the stop-limit's limit below its stop that protection
+    /// places on a profile with no OCO (§5.4, DEC-539, DEC-966 item 5); none when it sets none.
+    pub(super) stop_limit_offset: Option<Fraction>,
 }
 
 impl TrustedPaperContext {
@@ -414,8 +431,8 @@ impl ExecutorMandateView for TrustedPaperContext {
             .map(MandateVersion)
     }
 
-    fn crypto_stop_limit_offset(&self, _agent: &mandate_executor::AgentId) -> Option<Fraction> {
-        None
+    fn crypto_stop_limit_offset(&self, agent: &mandate_executor::AgentId) -> Option<Fraction> {
+        self.stop_limit_offset.filter(|_| agent.0 == self.agent)
     }
 
     fn covers(&self, agent: &mandate_executor::AgentId, instrument: &InstrumentId) -> bool {

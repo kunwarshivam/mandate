@@ -1167,6 +1167,7 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     replacements(batch)?;
     re_cover(batch)?;
     brackets(batch)?;
+    plain_entries(batch)?;
     acknowledged(batch)
 }
 
@@ -1303,6 +1304,172 @@ fn bracket(
             client_order_id: entry.clone(),
         });
     }
+    Ok(())
+}
+
+/// The prices a plain entry's protection follows its fill at: a risk-adding equity entry sent
+/// with no bracket, whose intent carried protective prices, which only a profile that offers no
+/// bracket sends (`crate::intent::bracket_of`; §5.4, DEC-966 item 2). None for anything else: a
+/// bracket entry, an entry with no prices, crypto (slice 5's), or one already protected.
+fn plain_protection(
+    view: &ExecutorState,
+    ports: &Ports<'_>,
+    order: &Order,
+) -> Option<ProtectionPrices> {
+    let detail = view.details.get(&order.client_order_id)?;
+    let request = detail.request.as_ref()?;
+    let plain = order.purpose.adds_risk() && request.bracket.is_none() && !detail.bracket_placed;
+    let crypto = ports.instruments.asset_class(&order.instrument) == Some(AssetClass::Crypto);
+    let IntentBody::Order {
+        protection: Some(prices),
+        ..
+    } = view.bodies.get(order.intent_id.as_ref()?)?
+    else {
+        return None;
+    };
+    (plain && !crypto).then_some(*prices)
+}
+
+/// §5.4's equities on a profile with no OCO or bracket, after every step: each plain entry whose
+/// protection follows its fill ([`plain_protection`]) and that has filled anything ([`stop_after`]).
+fn plain_entries(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let entries: Vec<(ClientOrderId, ProtectionPrices)> = batch
+        .view
+        .orders
+        .values()
+        .filter_map(|order| {
+            plain_protection(&batch.view, batch.ports, order)
+                .map(|prices| (order.client_order_id.clone(), prices))
+        })
+        .collect();
+    for (entry, prices) in entries {
+        stop_after(batch, &entry, prices)?;
+    }
+    Ok(())
+}
+
+/// Whether the open interval `entry` started has already reached `max_unprotected_s` ([`bound`]).
+fn past_bound(view: &ExecutorState, instrument: &InstrumentId, entry: &ClientOrderId) -> bool {
+    view.unprotected.iter().any(|interval| {
+        &interval.instrument == instrument
+            && interval.ended_at.is_none()
+            && interval.alerted
+            && interval.bracket.as_ref() == Some(entry)
+    })
+}
+
+/// One plain entry on a profile with no OCO or bracket (§5.4, DEC-529 item 7, DEC-966). The
+/// unprotected interval starts, journaled once and naming the entry, at its first fill. Once the
+/// entry is terminal — filled completely, or ended partly filled, its remainder cancelled at
+/// `bracket_partial_fill_timeout_s` (or `max_unprotected_s`, if shorter) or once its venue is no
+/// longer the regular session, exactly as [`bracket`] cancels one — one protective order is
+/// journaled and then sent for its filled quantity, capped at what the position leaves after every
+/// live protective order and every exit still selling (rule 12): the strongest form the profile
+/// offers for it ([`protective_shape`]), on this profile one GTC stop-limit at the intent's stop
+/// and stop × (1 − `stop_limit_offset`). Its take-profit is never a resting order: beside a stop
+/// for the same shares it would sell them twice (DEC-966 item 3). The interval ends once the broker
+/// acknowledges the stop ([`acknowledged`]); with no form to place, the shortfall is journaled and
+/// alerted ([`unprotectable`]) and the interval stays open, so [`bound`] exits the position. An
+/// entry that ends only after its interval reached the bound places no stop: what it filled is
+/// exited whole ([`flatten_unprotected`]), since the bound has already passed for all of it, and
+/// its interval ends `uncovered`, so the step after does not see it again.
+fn stop_after(
+    batch: &mut Batch<'_, '_>,
+    entry: &ClientOrderId,
+    prices: ProtectionPrices,
+) -> Result<(), ExecutorError> {
+    let Some(order) = batch.view.orders.get(entry).cloned() else {
+        return Ok(());
+    };
+    let detail = batch.view.details.get(entry).cloned().unwrap_or_default();
+    let filled = order
+        .filled_qty
+        .max(detail.reported_filled.unwrap_or(Qty::ZERO));
+    if filled == Qty::ZERO {
+        return Ok(());
+    }
+    let named = vec![("bracket", text(entry.as_str()))];
+    let instrument = order.instrument.clone();
+    if detail.bracket_since.is_none() {
+        changed(batch, &instrument, "unprotected_start", named.clone())?;
+    }
+    if !order.state.is_terminal() {
+        let since = detail.bracket_since.unwrap_or(batch.at());
+        let config = batch.ports.config;
+        let bound = config
+            .bracket_partial_fill_timeout_s
+            .min(config.max_unprotected_s);
+        let due = batch.at().secs().saturating_sub(since.secs()) >= bound
+            || venue(batch.ports, &instrument, batch.at()) != Venue::Regular;
+        let working = matches!(
+            order.state,
+            OrderState::Accepted | OrderState::PartiallyFilled
+        );
+        if due && working && ask_cancel(batch, entry)? {
+            batch.broker(BrokerRequest::Cancel {
+                client_order_id: entry.clone(),
+            });
+        }
+        return Ok(());
+    }
+    if past_bound(&batch.view, &instrument, entry) {
+        let mut ended = named;
+        ended.push(("uncovered", Value::Bool(true)));
+        let record = changed(batch, &instrument, "unprotected_end", ended)?;
+        return flatten_unprotected(batch, &instrument, entry, &record);
+    }
+    let unapplied = filled.checked_sub(order.filled_qty)?;
+    let committed =
+        covered(&batch.view, &instrument)?.checked_add(still_selling(&batch.view, &instrument)?)?;
+    let room = long(&batch.view, &instrument)?
+        .checked_add(unapplied)?
+        .checked_sub(committed)
+        .unwrap_or(Qty::ZERO);
+    let qty = filled.min(room);
+    if qty == Qty::ZERO {
+        changed(batch, &instrument, "unprotected_end", named)?;
+        return Ok(());
+    }
+    let agent = order
+        .agent
+        .clone()
+        .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+    let stop = ProtectionPrices {
+        stop: prices.stop,
+        take_profit: None,
+    };
+    let offset = batch.ports.mandates.crypto_stop_limit_offset(&agent);
+    let class = protected_class(batch, &instrument);
+    let shape = match batch.view.profile.as_ref() {
+        Some(profile) => protective_shape(profile, class, UNREAD_CLOCK, qty, stop, offset)?,
+        None => None,
+    };
+    let Some(shape) = shape else {
+        unprotectable(batch, &instrument)?;
+        let mut ended = named;
+        ended.push(("uncovered", Value::Bool(true)));
+        changed(batch, &instrument, "unprotected_end", ended)?;
+        return Ok(());
+    };
+    let request = SubmitOrder {
+        client_order_id: ClientOrderId::for_protection(entry, &batch.id_after(2))?,
+        instrument: instrument.clone(),
+        side: Side::Sell,
+        qty,
+        order_type: shape.order_type,
+        tif: shape.tif,
+        limit_price: shape.limit_price,
+        stop_price: shape.stop_price,
+        bracket: None,
+        oco: shape.oco,
+        extended_hours: false,
+        purpose: Purpose::Protective,
+    };
+    place(batch, &request, None, &agent, stop)?;
+    let mut ended = named;
+    ended.push(awaiting(&[&request.client_order_id]));
+    changed(batch, &instrument, "unprotected_end", ended)?;
+    batch.broker(BrokerRequest::Submit(request));
     Ok(())
 }
 
@@ -2173,11 +2340,15 @@ fn oco(id: ClientOrderId, instrument: &InstrumentId, legs: OcoLegs) -> SubmitOrd
 }
 
 /// §5.4's bound: at `max_unprotected_s` the sequence's exits are ended ([`end_exits`]) — their
-/// confirmations re-place protection through [`settle`] — and the owner alerted once.
+/// confirmations re-place protection through [`settle`] — and the owner alerted once. On a profile
+/// with no OCO or bracket, an interval that names a plain entry whose stop is still not resting by
+/// then also exits the held quantity ([`flatten_unprotected`]) once the entry is terminal, so the
+/// exit covers everything it filled; an entry still working is cancelled first, and [`stop_after`]
+/// exits what it filled once it ends.
 pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let limit = batch.ports.config.max_unprotected_s;
-    let due: Vec<InstrumentId> = batch
+    let due: Vec<(InstrumentId, Option<ClientOrderId>)> = batch
         .view
         .unprotected
         .iter()
@@ -2186,16 +2357,98 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                 && !interval.alerted
                 && now.saturating_sub(interval.started_at.secs()) >= limit
         })
-        .map(|interval| interval.instrument.clone())
+        .map(|interval| (interval.instrument.clone(), interval.bracket.clone()))
         .collect();
-    for instrument in due {
-        if batch.view.exiting.contains_key(&instrument) {
+    for (instrument, entry) in due {
+        let exiting = batch.view.exiting.contains_key(&instrument);
+        if exiting {
             end_exits(batch, &instrument)?;
         }
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
-        batch.notify(alerted, "unprotected_interval_limit");
+        batch.notify(alerted.clone(), "unprotected_interval_limit");
+        let Some(entry) = entry.filter(|_| !exiting) else {
+            continue;
+        };
+        let state = batch.view.orders.get(&entry).map(|order| order.state);
+        let working = matches!(
+            state,
+            Some(OrderState::Accepted | OrderState::PartiallyFilled)
+        );
+        if working && ask_cancel(batch, &entry)? {
+            batch.broker(BrokerRequest::Cancel {
+                client_order_id: entry.clone(),
+            });
+        }
+        if state.is_some_and(OrderState::is_terminal) {
+            flatten_unprotected(batch, &instrument, &entry, &alerted)?;
+        }
     }
     Ok(())
+}
+
+/// §5.4's bound on a profile with no OCO or bracket: "if it is not resting by then, the executor
+/// exits the held quantity as a `risk_exit` through §5.6 and alerts the owner" (DEC-966 item 4).
+/// For an interval naming a plain entry (one sent with no bracket, whose intent carried a stop), the
+/// executor hands itself an intent like the watchdog's, `w-<record>` from the `interval_limit`
+/// record, or the `unprotected_end` that ends a late entry's interval (§2.3), for the long position less what exits already sell: a `risk_exit`, so it takes
+/// the marketable sequence, which cancels any stop still awaited before it sells (§5.4), and is
+/// never refused (rule 13). Its limit, the fallback when nothing prices it, is the lowest sane
+/// mark or bid ([`lowest_sane`]), or else the entry's stop. Its agent is the entry's.
+fn flatten_unprotected(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    entry: &ClientOrderId,
+    record: &EventId,
+) -> Result<(), ExecutorError> {
+    let Some(order) = batch.view.orders.get(entry).cloned() else {
+        return Ok(());
+    };
+    let plain = batch
+        .view
+        .details
+        .get(entry)
+        .and_then(|detail| detail.request.as_ref())
+        .is_some_and(|request| request.bracket.is_none());
+    let crypto = batch.ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto);
+    let stop = order
+        .intent_id
+        .as_ref()
+        .and_then(|intent| batch.view.bodies.get(intent))
+        .and_then(|body| match body {
+            IntentBody::Order { protection, .. } => protection.map(|prices| prices.stop),
+            IntentBody::Flatten(_) => None,
+        });
+    let (true, false, Some(stop)) = (plain && order.purpose.adds_risk(), crypto, stop) else {
+        return Ok(());
+    };
+    let held = long(&batch.view, instrument)?
+        .checked_sub(still_selling(&batch.view, instrument)?)
+        .unwrap_or(Qty::ZERO);
+    if held == Qty::ZERO {
+        return Ok(());
+    }
+    let limit = lowest_sane(&batch.view, instrument).unwrap_or(stop);
+    let agent = order
+        .agent
+        .clone()
+        .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+    let tif = order_tif(batch, instrument);
+    received(
+        batch,
+        IntentHandoff {
+            intent_id: IntentId(EventId(format!("{WATCHDOG}{}", record.0))),
+            agent,
+            tif: Some(tif),
+            body: IntentBody::Order {
+                instrument: instrument.clone(),
+                side: Side::Sell,
+                qty: held,
+                limit,
+                purpose: Purpose::RiskExit,
+                protection: None,
+            },
+        },
+    )
 }
 
 /// The bound's end of every exit in `instrument`, since [`settle`] re-places protection only once

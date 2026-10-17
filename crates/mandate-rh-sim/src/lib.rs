@@ -33,7 +33,10 @@
 //! - a sell is refused when it is larger than the position less every working sell, because the
 //!   agentic account cannot sell short and two working sells must not oversell it;
 //! - `place` refuses on any alert `review` would raise;
-//! - a fill comes only to a `confirmed` or `partially_filled` order;
+//! - a fill comes only to a `confirmed` or `partially_filled` order, and to a `stop_market` or
+//!   `stop_limit` order only once it is triggered: a quote at or through its stop (at or below it
+//!   for a sell, at or above it for a buy) has arrived since it was placed, or stood when it was
+//!   placed, and a triggered order stays triggered (DEC-966 item 6);
 //! - the end of the trading day cancels every working `gfd` order, `queued` ones included;
 //! - every other state change follows one lifecycle table: `new` to `queued`, `confirmed`,
 //!   `unconfirmed`, `cancelled`, `rejected` or `failed`; `queued` to the same but `queued`;
@@ -311,6 +314,8 @@ pub struct Sim {
     refuse_changed_resend: bool,
     now: Option<UtcNanos>,
     page_size: Option<usize>,
+    /// The stop orders a quote has reached, by order id.
+    triggered: BTreeSet<String>,
 }
 
 /// What a page cursor the simulator issues starts with: the offset of the page's first order in
@@ -339,6 +344,7 @@ impl Sim {
             refuse_changed_resend: false,
             now: None,
             page_size: None,
+            triggered: BTreeSet::new(),
         })
     }
 
@@ -354,6 +360,12 @@ impl Sim {
                 }
             }
             Event::Quote(symbol, price) => {
+                for order in &self.orders {
+                    if order.symbol == symbol && !is_terminal(order.state) && reached(order, price)
+                    {
+                        self.triggered.insert(order.id.clone());
+                    }
+                }
                 self.quotes.insert(symbol, price);
             }
             Event::Halt(symbol) => {
@@ -424,6 +436,13 @@ impl Sim {
             state,
             ..draft
         };
+        if self
+            .quotes
+            .get(&order.symbol)
+            .is_some_and(|quote| reached(&order, *quote))
+        {
+            self.triggered.insert(order.id.clone());
+        }
         self.orders.push(order.clone());
         self.requests.push(request.clone());
         match fault {
@@ -464,6 +483,9 @@ impl Sim {
         }
         if !admits(order.market_hours, session) {
             return Err(SimError::OutsideSession);
+        }
+        if order.stop_price.is_some() && !self.triggered.contains(&order.id) {
+            return Err(SimError::NotTriggered);
         }
         let filled = order
             .filled_quantity
@@ -844,6 +866,16 @@ fn admits(hours: MarketHours, session: Session) -> bool {
         MarketHours::Regular => session == Session::Regular,
         MarketHours::Extended => matches!(session, Session::Regular | Session::Extended),
         MarketHours::AllDay => session != Session::Closed,
+    }
+}
+
+/// Whether `quote` is at or through the stop of a stop order: at or below it for a sell, at or
+/// above it for a buy. An order with no stop has none to reach.
+fn reached(order: &Order, quote: Price) -> bool {
+    match (order.side, order.stop_price) {
+        (Side::Sell, Some(stop)) => quote <= stop,
+        (Side::Buy, Some(stop)) => quote >= stop,
+        (_, None) => false,
     }
 }
 
