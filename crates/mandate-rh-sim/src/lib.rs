@@ -26,7 +26,9 @@
 //!   says, unless [`Event::RefuseChangedResend`] makes a changed re-send an error;
 //! - an order record does not echo its `ref_id` unless [`Event::EchoRefId`] turns that on, so a
 //!   recovery that matches on it cannot pass here and fail against the real broker;
-//! - buying power and cash are scripted figures that orders and fills do not move;
+//! - buying power and cash are scripted figures that orders do not move; a buy's fill spends
+//!   its cost from both, and a sell's fill adds to neither, since its proceeds are not settled
+//!   cash (DEC-902 item 2) and adding them would lift buying power (DEC-1151 item 7);
 //! - a position carries the average price its buys were filled at, rounded to a price's 9
 //!   places, and a sell does not move it; `get_equity_positions` serves every row, a zero
 //!   quantity included;
@@ -163,7 +165,8 @@ pub struct Account {
     pub number: String,
     pub agentic_allowed: bool,
     /// The account's settled cash, which `get_portfolio` serves (DEC-902 item 2). A scripted
-    /// figure like `buying_power`: orders and fills do not move it.
+    /// figure like `buying_power`: orders do not move it, and a buy's fill spends its cost from
+    /// both (DEC-1151 item 7).
     pub cash: Usd,
     pub buying_power: Usd,
     pub pattern_day_trader: bool,
@@ -503,6 +506,24 @@ impl Sim {
             return Err(SimError::ThroughLimit);
         }
         let key = (order.account_number.clone(), order.symbol.clone());
+        if order.side == Side::Buy {
+            let cost = quantity
+                .notional(price)
+                .map_err(|_| SimError::Unreadable("fill price"))?;
+            let account = self
+                .accounts
+                .iter_mut()
+                .find(|account| account.number == key.0)
+                .ok_or(SimError::UnknownAccount)?;
+            let spent = |figure: Usd| {
+                figure
+                    .checked_sub(cost)
+                    .map_err(|_| SimError::Unreadable("fill price"))
+            };
+            let (cash, buying_power) = (spent(account.cash)?, spent(account.buying_power)?);
+            account.cash = cash;
+            account.buying_power = buying_power;
+        }
         let held = self.positions.get(&key).copied();
         let held_quantity = held.map_or(Qty::ZERO, |position| position.quantity);
         let position = match order.side {
@@ -624,7 +645,7 @@ impl Sim {
     }
 
     /// `get_portfolio` (DEC-902 item 2): the account's cash and its buying power, both scripted
-    /// figures that orders and fills do not move.
+    /// figures that orders do not move and a buy's fill spends from (DEC-1151 item 7).
     pub fn portfolio(&self, account_number: &str) -> Result<(Usd, Usd), SimError> {
         let account = self.account(account_number)?;
         Ok((account.cash, account.buying_power))
