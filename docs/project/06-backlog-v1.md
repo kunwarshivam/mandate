@@ -2350,7 +2350,7 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
     run holds only that run's records more than before, under a compromised model (EX-1);
   - cross-tenant and cross-agent reads: a property test over two workspaces and several agents with
     canaries finds no foreign canary in any tool result, prompt, answer, or record, and identical
-    `not_found` results for foreign and absent refs (EX-2, EX-3), its oracle shown to catch a seeded
+    refusals (`unknown_item` to the model, `not_found` at the API) for foreign and absent refs (EX-2, EX-3), its oracle shown to catch a seeded
     scope bug; and an API-2 matrix test of the desk, cited-record, transcript, and approval routes;
   - no answer with an uncited segment, an unread citation, or a fixture advice phrase is shown
     (EX-4, EX-5); no prompt holds a record's numeric field or a number from the question (EX-6);

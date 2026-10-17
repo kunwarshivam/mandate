@@ -425,7 +425,7 @@ How the API's operations map onto those rows:
 
 | API operation | Matrix row |
 |---|---|
-| Read models (§4.7), the approvals inbox and content (§4.3) | View agents, positions, decisions |
+| Read models (§4.7), the approvals inbox and content (§4.3) | View agents, positions, decisions; an `owner` run's transcript and records only to the member who asked, under the chat row (§4.6.1) |
 | Journal, trace, timeline, gate decisions, exports, verification (§4.8) | Read records, verification; export |
 | Drafts, compile, validate, create a version (§4.1) | Draft a mandate version |
 | Confirm (§5.1) | Confirm a version, by the server's own classification |
