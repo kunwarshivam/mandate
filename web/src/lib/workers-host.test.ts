@@ -137,6 +137,10 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(planted((c) => (c.account_id = "0123456789abcdef0123456789abcdef"))).toEqual(only("account_id"));
     expect(planted((c) => (c.upload_key = `sb_secret_${"x".repeat(32)}`))).toEqual(only("secret"));
     expect(planted((c) => (c.vars = { CLOUDFLARE_API_TOKEN: "y".repeat(40) }))).toEqual(only("vars"));
+    expect(planted((c) => (c.preview_urls = true))).toEqual(only("preview_urls"));
+    expect(planted((c) => delete c.preview_urls)).toEqual(only("preview_urls"));
+    expect(planted((c) => (c.build = { command: "npm run cf:build" }))).toEqual(only("build must not be set"));
+    expect(planted((c) => (c.routes = [{ pattern: "app.owlhead.ai", custom_domain: true }]))).toEqual(only("routes"));
     expect(hostingProblems(tree({ "wrangler.jsonc": `${text}\n// account_id: 0123456789abcdef0123456789abcdef\n` }))).toEqual(only("account_id"));
     expect(config).not.toHaveProperty("account_id");
     expect(config).not.toHaveProperty("vars");
@@ -197,6 +201,32 @@ describe("only the deploy job deploys, from main, through the production environ
     expect(deployWith((y) => y.replace('      WRANGLER_SEND_METRICS: "false"\n', '      WRANGLER_SEND_METRICS: "false"\n      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n'))).toEqual(only("never the whole job"));
     expect(deployWith((y) => y.replace("      - run: npm ci\n", "      - run: npm ci\n      - run: npx wrangler deploy --minify\n"))).toEqual(only("runs wrangler deploy"));
     expect(deployWith((y) => `${y}      - run: npx wrangler login\n`)).toEqual([expect.stringContaining("must end with"), expect.stringContaining("wrangler login")]);
+  });
+
+  it("pending E21-38: flags a secret or a variable read outside a step, a top-level env or defaults, and any other Cloudflare upload", () => {
+    expect(deployWith((y) => y.replace("permissions: {}\n", "permissions: {}\n\nenv:\n  NEXT_PUBLIC_X: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n"))).toEqual([expect.stringContaining("holds env at the top"), expect.stringContaining("never the whole job")]);
+    expect(deployWith((y) => y.replace("permissions: {}\n", "permissions: {}\n\ndefaults:\n  run:\n    shell: bash\n"))).toEqual(only("holds defaults at the top"));
+    expect(deployWith((y) => y.replace("  group: web-deploy\n", "  group: web-deploy-${{ vars.CLOUDFLARE_ACCOUNT_ID }}\n"))).toEqual(only("never the whole job"));
+    const workflow = "../.github/workflows/web.yml";
+    const yml = real(workflow);
+    for (const step of [
+      "npx wrangler -c wrangler.jsonc deploy",
+      "npx wrangler pages deploy x",
+      "npx wrangler deploy # --dry-run",
+      "npx wrangler deploy --var X:--dry-run",
+      "npx wrangler versions upload",
+      "npx wrangler@4 --config wrangler.jsonc versions deploy",
+      "npx wrangler deploy --dry-run && npx wrangler deploy",
+      "npx opennextjs-cloudflare deploy",
+      "npx wrangler \\\n          deploy",
+    ]) {
+      expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: ${step}\n` })), step).toEqual(only("wrangler deploy without --dry-run"));
+    }
+    for (const step of ["uses: cloudflare/wrangler-action@v3", 'uses: "cloudflare/pages-action@v1"', "uses: someone/wrangler-action@v1"]) {
+      expect(hostingProblems(tree({ [workflow]: `${yml}\n      - ${step}\n` })), step).toEqual(only("only the deploy job"));
+    }
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler -c wrangler.jsonc login\n` }))).toEqual(only("wrangler login"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run --outdir dist # a dry run\n` }))).toEqual([]);
   });
 
   it("pending E21-38: flags any other workflow that names the production environment or a Cloudflare value", () => {

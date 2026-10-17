@@ -86,7 +86,9 @@ To run without sign-in, set neither variable (or leave `.env.local` out). To run
 | `NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN` | `1` shows the email link on `/login`; leave it unset until the project has SMTP |
 
 Next reads `.env.local` for `npm run dev`, `npm run build` and `npm start`; the variables are
-inlined into the build, so rebuild after changing them. Open the app at `http://localhost:4317`
+inlined into the build, so rebuild after changing them. For the deployed Worker they are variables of
+the GitHub `production` environment, which `.github/workflows/web-deploy.yml` builds with (DEC-986
+item 6). Open the app at `http://localhost:4317`
 rather than `127.0.0.1`: a passkey only works on a host that matches its relying-party ID.
 
 While sign-in is on, a signed-out visitor at `/` sees the welcome page (the address stays `/`), and

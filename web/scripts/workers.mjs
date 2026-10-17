@@ -122,6 +122,9 @@ function wranglerProblems(tree) {
     [config.assets?.binding === "ASSETS", 'assets.binding must be "ASSETS"'],
     [config.assets?.directory === ".open-next/assets", 'assets.directory must be ".open-next/assets"'],
     [config.workers_dev === false, "workers_dev must be false, so only the custom domain serves the app (DEC-823 item 2)"],
+    [config.preview_urls === false, "preview_urls must be false, so no version gets its own address (DEC-823 item 2)"],
+    [config.build === undefined, "build must not be set; the deploy step runs no repository command while it holds the token (DEC-986 item 2)"],
+    [config.routes === undefined && config.route === undefined, "routes must not be committed; the founder adds the custom domain in the dashboard (DEC-986 item 5)"],
     [services.some((s) => s?.binding === "WORKER_SELF_REFERENCE" && s?.service === WORKER), `services must bind WORKER_SELF_REFERENCE to "${WORKER}"`],
     [!/account_id/.test(text), "account_id must not be committed; the founder's dashboard holds the account (DEC-823 item 4)"],
     [vars === undefined, "vars must not be committed; the founder sets the public variables in the dashboard (DEC-823 items 4 and 5)"],
@@ -147,21 +150,51 @@ function buildProblems(tree) {
 const WEB_WORKFLOW = "../.github/workflows/web.yml";
 const DEPLOY_WORKFLOW = "../.github/workflows/web-deploy.yml";
 const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".github", "workflows");
-const DEPLOY = /\b(wrangler(?:@[\w.^~-]+)?\s+(?:deploy|publish|versions\s+(?:upload|deploy))|opennextjs-cloudflare(?:@[\w.^~-]+)?\s+(?:deploy|upload))\b([^\n;&|]*)/g;
+/** A Wrangler or OpenNext command and its arguments, up to the end of its shell command. */
+const CLI = /\b(wrangler|opennextjs-cloudflare)(?:@[\w.^~-]+)?((?:\s+[^\s;&|]+)*)/g;
+/** The subcommands that upload or publish a Worker, a Pages project or a version. */
+const UPLOADS = { wrangler: ["deploy", "publish", "pages", "versions", "triggers"], "opennextjs-cloudflare": ["deploy", "upload"] };
 
 /** The deploy workflow's triggers, exactly: a push to `main` touching the app, or a dispatch (DEC-986 item 1). */
 const DEPLOY_TRIGGERS = ["on:", "  push:", "    branches: [main]", "    paths:", '      - "web/**"', '      - ".github/workflows/web-deploy.yml"', "  workflow_dispatch:"].join("\n");
 /** The one step that deploys, and the only secret and variables it may read (DEC-986 items 2 and 3). */
 const DEPLOY_STEP = { run: "npx wrangler deploy", secrets: ["CLOUDFLARE_API_TOKEN"], vars: ["CLOUDFLARE_ACCOUNT_ID"] };
+/** The deploy workflow's top-level keys: nothing that sets an environment or defaults for every job. */
+const TOP_LEVEL = ["name", "on", "permissions", "concurrency", "jobs"];
 /** The variables the build may read: public values only, which Next inlines into the bundle (DEC-823 item 5). */
 const PUBLIC_VARS = /^NEXT_PUBLIC_[A-Z0-9_]+$/;
 
-/** One line naming the first deploy or login in `text` that is not a dry run, or none. */
+/** `text`'s shell lines, with continuations joined and trailing comments left out. */
+const shellLines = (text) =>
+  text
+    .replace(/\\\n\s*/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/(^|\s)#.*$/, ""));
+
+/**
+ * The first command in `text` that uploads to Cloudflare, or null. Only `wrangler deploy` with an
+ * argument that is exactly `--dry-run` writes nothing, and only it passes.
+ */
+function firstUpload(text) {
+  for (const line of shellLines(text)) {
+    if (/^\s*(?:-\s+)?uses:\s*["']?(?:cloudflare\/|[^\s]*wrangler-action)/i.test(line)) return line.trim();
+    for (const match of line.matchAll(CLI)) {
+      const args = match[2].trim().split(/\s+/).filter(Boolean);
+      const uploads = args.filter((arg) => UPLOADS[match[1]].includes(arg));
+      if (uploads.length === 0) continue;
+      const dryRun = match[1] === "wrangler" && uploads.every((arg) => arg === "deploy") && args.includes("--dry-run");
+      if (!dryRun) return match[0].trim();
+    }
+  }
+  return null;
+}
+
+/** One line naming the first upload or login in `text` that is not a dry run, or none. */
 function deployProblems(path, text) {
   const problems = [];
-  const deploys = [...text.matchAll(DEPLOY)].filter((match) => !match[0].startsWith("wrangler deploy") || !/--dry-run\b/.test(match[2]));
-  if (deploys.length > 0) problems.push(`${path}: runs ${deploys[0][1]} (wrangler deploy without --dry-run); only the deploy job of ${DEPLOY_WORKFLOW} deploys (DEC-986 item 1)`);
-  if (/\bwrangler(?:@[\w.^~-]+)?\s+login\b/.test(text)) problems.push(`${path}: runs wrangler login; the deploy job's environment token is the only Cloudflare credential (DEC-986 item 2)`);
+  const upload = firstUpload(text);
+  if (upload !== null) problems.push(`${path}: runs ${upload} (wrangler deploy without --dry-run); only the deploy job of ${DEPLOY_WORKFLOW} deploys (DEC-986 item 1)`);
+  if (shellLines(text).some((line) => /\bwrangler(?:@[\w.^~-]+)?(?:\s+\S+)*\s+login\b/.test(line))) problems.push(`${path}: runs wrangler login; the deploy job's environment token is the only Cloudflare credential (DEC-986 item 2)`);
   return problems;
 }
 
@@ -209,6 +242,8 @@ function deployWorkflowProblems(tree) {
   const fail = (message) => problems.push(`${DEPLOY_WORKFLOW}: ${message}`);
   if ((blocks.get("on") ?? []).join("\n") !== DEPLOY_TRIGGERS) fail("must run only on a push to main touching web/ or itself, or on workflow_dispatch (DEC-986 item 1)");
   if ((blocks.get("permissions") ?? []).join("\n") !== "permissions: {}") fail("must set permissions: {} at the top (DEC-986 item 3)");
+  const extra = [...blocks.keys()].filter((key) => !TOP_LEVEL.includes(key));
+  if (extra.length > 0) fail(`holds ${extra.join(", ")} at the top; only ${TOP_LEVEL.join(", ")} may be there, so no secret reaches the whole workflow (DEC-986 item 2)`);
   const [header, ...jobs] = splitAt((blocks.get("jobs") ?? []).slice(1), (line) => /^ {2}\S/.test(line));
   if (header.length > 0 || jobs.length !== 1 || jobs[0][0] !== "  deploy:") return [...problems, `${DEPLOY_WORKFLOW}: must hold one job, deploy (DEC-986 item 1)`];
   const job = jobs[0];
@@ -218,7 +253,6 @@ function deployWorkflowProblems(tree) {
   if (!has(settings, "    environment: production")) fail("the deploy job must use the production environment, which holds the token (DEC-986 item 2)");
   if (!settings.join("\n").includes("    permissions:\n      contents: read")) fail("the deploy job may only read contents (DEC-986 item 3)");
   if (!has(job, "          persist-credentials: false")) fail("the checkout must not persist credentials (DEC-986 item 3)");
-  if (references(settings.join("\n"), "secrets").length > 0 || references(settings.join("\n"), "vars").length > 0) fail("only a step may read a secret or a variable, never the whole job (DEC-986 item 2)");
   const runOf = (step) => step.find((line) => /^ {6}- run: |^ {8}run: /.test(line))?.replace(/^ {6}- run: |^ {8}run: /, "");
   const deploying = steps.filter((step) => runOf(step) === DEPLOY_STEP.run);
   if (deploying.length !== 1 || steps.at(-1) !== deploying[0]) fail(`must end with the one step that runs ${DEPLOY_STEP.run} (DEC-986 item 1)`);
@@ -232,6 +266,8 @@ function deployWorkflowProblems(tree) {
     if (secrets.some((name) => !isDeploy || !DEPLOY_STEP.secrets.includes(name))) fail(`only the deploy step may read a secret, and only ${DEPLOY_STEP.secrets.join(", ")} (DEC-986 item 2)`);
     if (vars.some((name) => (isDeploy ? !DEPLOY_STEP.vars.includes(name) : !PUBLIC_VARS.test(name)))) fail(`the build may read only NEXT_PUBLIC_ variables, and the deploy step only ${DEPLOY_STEP.vars.join(", ")} (DEC-986 item 2)`);
   }
+  const outsideSteps = [...[...blocks.entries()].filter(([key]) => key !== "jobs").flatMap(([, block]) => block), ...header, ...settings].join("\n");
+  if (references(outsideSteps, "secrets").length > 0 || references(outsideSteps, "vars").length > 0) fail("only a step may read a secret or a variable, never the whole job (DEC-986 item 2)");
   const sanctioned = deploying.length === 1 ? lines.filter((line) => !deploying[0].includes(line)).join("\n") : lines.join("\n");
   problems.push(...deployProblems(DEPLOY_WORKFLOW, sanctioned));
   return [...new Set(problems)];
