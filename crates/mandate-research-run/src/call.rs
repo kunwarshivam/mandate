@@ -1,25 +1,19 @@
 //! The one gateway call a run makes (§6.2 step 3, §10.1; inference spec §3), and how the harness
 //! treats each way it can fail (§7.3).
 
-use mandate_canon::{Digest, Value, parse};
+use std::collections::BTreeMap;
+
+use mandate_canon::{Value, parse};
 use mandate_domain::AssetClass;
-use mandate_num::Usd;
+use mandate_gateway::meter::MeterStore;
+use mandate_gateway::provider::{Clock, Transport};
+use mandate_gateway::registry::ModelRef as ModelPin;
+use mandate_gateway::{CallRecord, CallRequest, Gateway, Outcome, RequestError};
 use mandate_time::UtcNanos;
 
 use crate::error::ResearchRunError;
 use crate::item::{ItemId, ItemKind, SourceId, Symbol};
 use crate::retrieve::Retrieval;
-
-/// The pinned identity of the research agent: id, version, and content hash (mandate spec §8.1,
-/// V-007). The content hash covers the template, the retrieval plan, the output bounds, the
-/// deadline, and the model (DEC-431 item 5), so a different value in any of them is a different
-/// pin.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ModelPin {
-    pub model_id: String,
-    pub model_version: String,
-    pub content_hash: Digest,
-}
 
 /// What the runtime core hands the worker once the run's observations are journaled: the ids and
 /// limits of the call, and the `ObservationRecorded` event id of each retrieved item, in the
@@ -161,40 +155,29 @@ impl ResearchCall {
     }
 }
 
-/// A gateway reply with outcome `ok` (inference spec §3.2): the model's bytes, the identity the
-/// provider reported, and the artifacts the shell stored.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GatewayReply {
-    pub call_id: String,
-    pub reported: ModelPin,
-    pub output: Vec<u8>,
-    pub request_digest: Digest,
-    pub prompt_ref: Digest,
-    pub response_ref: Digest,
-    pub cost_usd: Usd,
-    pub completed_at: UtcNanos,
+impl ResearchCall {
+    /// The gateway's request for this call (inference spec §3.1): the typed inputs rendered as one
+    /// canonical JSON text per template slot ([`crate::RESEARCH_INPUTS`]), never prompt text, and
+    /// the journaled observations as the retrieved context. The prompt itself is the gateway's to
+    /// render from the pinned template, inside data sections (§6.4).
+    ///
+    /// # Errors
+    /// [`ResearchRunError::InvalidId`] when an input cannot be written as canonical text.
+    pub fn request(&self) -> Result<CallRequest, ResearchRunError> {
+        Err(ResearchRunError::Unimplemented { story: "E19-3" })
+    }
 }
 
-/// Inference spec §3.3's error kinds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ErrorKind {
-    PolicyDenied,
-    BudgetExhausted,
-    RateLimitedLocal,
-    MeterUnavailable,
-    InputRejected,
-    ModelWithdrawn,
-    DeadlineExceeded,
-    ProviderUnavailable,
-    RateLimitedProvider,
-    CredentialInvalid,
-    ContentRefused,
-    SchemaInvalid,
-    IdentityMismatch,
+/// The typed inputs as the template's slots: `context`, `items`, and `memory`, each canonical JSON.
+///
+/// # Errors
+/// [`ResearchRunError::InvalidId`] when an input cannot be written as canonical text.
+pub fn render_inputs(_inputs: &CallInputs) -> Result<BTreeMap<String, String>, ResearchRunError> {
+    Err(ResearchRunError::Unimplemented { story: "E19-3" })
 }
 
-/// What the harness does about one failed call besides treating the output as missing, which it
-/// always does (HI-6, §7.3).
+/// What the harness does about one call besides treating a failed call's output as missing, which
+/// it always does (HI-6, §7.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Treatment {
     /// Alert the operator with opaque text (rule 6).
@@ -205,72 +188,43 @@ pub struct Treatment {
     pub deadline_streak: bool,
 }
 
-impl ErrorKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::PolicyDenied => "policy_denied",
-            Self::BudgetExhausted => "budget_exhausted",
-            Self::RateLimitedLocal => "rate_limited_local",
-            Self::MeterUnavailable => "meter_unavailable",
-            Self::InputRejected => "input_rejected",
-            Self::ModelWithdrawn => "model_withdrawn",
-            Self::DeadlineExceeded => "deadline_exceeded",
-            Self::ProviderUnavailable => "provider_unavailable",
-            Self::RateLimitedProvider => "rate_limited_provider",
-            Self::CredentialInvalid => "credential_invalid",
-            Self::ContentRefused => "content_refused",
-            Self::SchemaInvalid => "schema_invalid",
-            Self::IdentityMismatch => "identity_mismatch",
-        }
-    }
-
-    /// §7.3's table. No kind is ever retried within the run: the gateway has already retried what
-    /// it may, and sampling again until something parses would select outputs (DEC-432 item 3).
-    pub fn treatment(self) -> Treatment {
-        Treatment {
-            alert_operator: matches!(
-                self,
-                Self::PolicyDenied
-                    | Self::CredentialInvalid
-                    | Self::MeterUnavailable
-                    | Self::InputRejected
-            ),
-            disable_research: self == Self::ModelWithdrawn,
-            deadline_streak: self == Self::DeadlineExceeded,
-        }
+/// §7.3's table over the gateway's outcomes. `ok` has no treatment. No outcome is ever retried
+/// within the run: the gateway has already retried what it may, and sampling again until something
+/// parses would select outputs (DEC-432 item 3).
+pub fn treatment(_outcome: Outcome) -> Treatment {
+    Treatment {
+        alert_operator: false,
+        disable_research: false,
+        deadline_streak: false,
     }
 }
 
-/// A failed call: its id, the kind, and when the answer arrived.
+/// The gateway's answer to one research call: its record, which the core journals whatever the
+/// outcome, or a request the gateway could not make at all, which has no record (inference spec
+/// §3.1).
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one answer per run, handed straight to the core; boxing the record buys nothing"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CallFailure {
-    pub call_id: String,
-    pub kind: ErrorKind,
-    pub completed_at: UtcNanos,
+pub enum Answer {
+    Recorded(CallRecord),
+    Refused(RequestError),
 }
 
-/// Exactly one of a reply or a typed failure (inference spec §3.2).
-pub type CallOutcome = Result<GatewayReply, CallFailure>;
-
-/// The gateway's answer re-checked against the request: a reply for another call, from another
-/// identity, or completed after the deadline is a failure here whatever the gateway said
-/// (INF-2, INF-3, caller side). A failure is passed through with the request's call id.
-pub fn settle(request: &ResearchCall, outcome: CallOutcome) -> CallOutcome {
-    let failure = |kind, completed_at| CallFailure {
-        call_id: request.call_id.clone(),
-        kind,
-        completed_at,
-    };
-    match outcome {
-        Ok(reply) if reply.call_id != request.call_id || reply.reported != request.model => {
-            Err(failure(ErrorKind::IdentityMismatch, reply.completed_at))
-        }
-        Ok(reply) if reply.completed_at > request.deadline => {
-            Err(failure(ErrorKind::DeadlineExceeded, reply.completed_at))
-        }
-        Ok(reply) => Ok(reply),
-        Err(failed) => Err(failure(failed.kind, failed.completed_at)),
-    }
+/// The worker's call (§6.2 step 3): builds the call for `plan` over `retrieval` at the gateway's
+/// own clock, so the deadline is the dispatch instant plus `deadline_ms` (DEC-431 item 24), and
+/// sends it through the gateway, which renders, guards, reserves, calls, and validates.
+///
+/// # Errors
+/// [`ResearchRunError`] when the call cannot be built; nothing is then sent.
+pub fn call<T: Transport, S: MeterStore, C: Clock>(
+    _gateway: &mut Gateway<T, S, C>,
+    _plan: &CallPlan,
+    _retrieval: &Retrieval,
+    _context: CallContext,
+) -> Result<(ResearchCall, Answer), ResearchRunError> {
+    Err(ResearchRunError::Unimplemented { story: "E19-3" })
 }
 
 /// `at` plus `ms` milliseconds, exactly.
