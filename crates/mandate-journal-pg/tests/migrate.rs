@@ -680,3 +680,214 @@ fn a_role_without_a_needed_privilege_is_refused_as_such() {
     );
     assert!(!db.schema_exists(), "nothing was created");
 }
+
+static DATABASES: AtomicU64 = AtomicU64::new(0);
+
+/// A database of the test's own, for the `journal` schema and `deploy.migrations`, which are one
+/// per database; dropped when the value is. The cluster's journal roles are made first, tolerating
+/// a concurrent test making the same one.
+struct FreshDb {
+    rt: Runtime,
+    server: PgPool,
+    pool: PgPool,
+    name: String,
+}
+
+impl FreshDb {
+    fn new() -> Option<Self> {
+        let Ok(url) = std::env::var(URL_VAR) else {
+            assert!(
+                std::env::var_os(REQUIRED_VAR).is_none(),
+                "{REQUIRED_VAR} is set but {URL_VAR} is not"
+            );
+            eprintln!("skipping: {URL_VAR} is unset");
+            return None;
+        };
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let name = format!(
+            "k0pg_{}_{}",
+            std::process::id(),
+            DATABASES.fetch_add(1, Ordering::Relaxed)
+        );
+        let base = PgConnectOptions::from_str(&url).unwrap();
+        let admin = {
+            let _entered = rt.enter();
+            PgPoolOptions::new()
+                .max_connections(1)
+                .connect_lazy_with(base.clone())
+        };
+        let roles = [OWNER_ROLE, APP_ROLE].map(|role| {
+            format!(
+                "DO $$ BEGIN CREATE ROLE {role} NOLOGIN; \
+                 EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$"
+            )
+        });
+        let databases = [
+            format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"),
+            format!("CREATE DATABASE {name} TEMPLATE template0"),
+        ];
+        for sql in roles.into_iter().chain(databases) {
+            rt.block_on(raw_sql(AssertSqlSafe(sql)).execute(&admin))
+                .unwrap();
+        }
+        let pool = {
+            let _entered = rt.enter();
+            PgPoolOptions::new()
+                .max_connections(2)
+                .connect_lazy_with(base.database(&name))
+        };
+        Some(Self {
+            rt,
+            server: admin,
+            pool,
+            name,
+        })
+    }
+
+    fn sql(&self, sql: &str) {
+        self.rt
+            .block_on(raw_sql(AssertSqlSafe(sql.to_owned())).execute(&self.pool))
+            .unwrap_or_else(|e| panic!("{sql}: {e}"));
+    }
+
+    fn run(
+        &self,
+        schema: &str,
+        known: &[Migration],
+    ) -> Result<mandate_journal_pg::MigrationReport, MigrateError> {
+        self.rt.block_on(migrate_known(&self.pool, schema, known))
+    }
+
+    fn sources(&self, schema: &str) -> Vec<String> {
+        self.rt
+            .block_on(
+                sqlx::query_scalar(AssertSqlSafe(format!(
+                    "SELECT version || ' ' || source FROM {schema}.schema_migrations \
+                     ORDER BY version"
+                )))
+                .fetch_all(&self.pool),
+            )
+            .unwrap()
+    }
+
+    /// `deploy/bootstrap.sh`'s ledger and the `journal` schema it migrates, with `applied` run as
+    /// the owner and recorded under `rows` (file, SHA-256).
+    fn bootstrapped(&self, applied: &[Migration], rows: &[(&str, String)]) {
+        self.sql(&format!(
+            "CREATE SCHEMA journal AUTHORIZATION {OWNER_ROLE}; CREATE SCHEMA deploy; \
+             CREATE TABLE deploy.migrations (file text PRIMARY KEY, sha256 text NOT NULL, \
+             applied_at timestamptz NOT NULL DEFAULT now())"
+        ));
+        for m in applied {
+            self.sql(&format!(
+                "BEGIN; SET ROLE {OWNER_ROLE}; SET search_path = journal; {} RESET ROLE; COMMIT",
+                m.sql
+            ));
+        }
+        for (file, sha) in rows {
+            self.sql(&format!(
+                "INSERT INTO deploy.migrations (file, sha256) VALUES ('{file}', '{sha}')"
+            ));
+        }
+    }
+}
+
+impl Drop for FreshDb {
+    fn drop(&mut self) {
+        let (pool, server) = (self.pool.clone(), self.server.clone());
+        let drop_it = format!("DROP DATABASE IF EXISTS {} WITH (FORCE)", self.name);
+        self.rt.block_on(async move {
+            pool.close().await;
+            raw_sql(AssertSqlSafe(drop_it)).execute(&server).await.ok();
+        });
+    }
+}
+
+fn deploy_rows(migrations: &[Migration]) -> Vec<(&'static str, String)> {
+    migrations.iter().map(|m| (m.file, m.sha256())).collect()
+}
+
+/// The first run against `journal` takes `deploy.migrations` over, by the number each file name
+/// starts with, and applies only what it did not hold; later runs read the ledger alone.
+#[test]
+fn the_journal_schema_takes_over_deploy_migrations_once() {
+    let Some(db) = FreshDb::new() else { return };
+    db.bootstrapped(&[ONE, TWO], &deploy_rows(&[TWO, ONE]));
+    let first = db.run("journal", &[ONE, TWO, THREE]).unwrap();
+    assert_eq!(
+        (
+            first.took_over,
+            first.already.clone(),
+            first.applied.clone()
+        ),
+        (2, vec![ONE.file, TWO.file], vec![THREE.file])
+    );
+    assert_eq!(
+        db.sources("journal"),
+        vec![
+            "1 deploy.migrations",
+            "2 deploy.migrations",
+            "3 mandate db migrate"
+        ]
+    );
+    db.sql("INSERT INTO deploy.migrations (file, sha256) VALUES ('0004_late.sql', 'x')");
+    let again = db.run("journal", &[ONE, TWO, THREE]).unwrap();
+    assert_eq!(
+        (again.took_over, again.applied.len()),
+        (0, 0),
+        "deploy.migrations is read only before the ledger exists"
+    );
+}
+
+/// `deploy.migrations` describes the `journal` schema only; another schema in the same database
+/// starts fresh beside it, and a database without it starts fresh too.
+#[test]
+fn deploy_migrations_describes_only_the_journal_schema() {
+    let Some(db) = FreshDb::new() else { return };
+    db.bootstrapped(&[ONE], &deploy_rows(&[ONE]));
+    let other = db.run("other", &[ONE]).unwrap();
+    assert_eq!(
+        (other.took_over, other.applied.clone()),
+        (0, vec![ONE.file])
+    );
+    let Some(bare) = FreshDb::new() else { return };
+    let fresh = bare.run("journal", &[ONE]).unwrap();
+    assert_eq!(
+        (fresh.took_over, fresh.applied.clone()),
+        (0, vec![ONE.file])
+    );
+}
+
+/// Rows the runner cannot vouch for are refused before anything is created, by the same rules
+/// as its own ledger.
+#[test]
+fn deploy_rows_it_cannot_vouch_for_are_refused() {
+    let cases: [(Vec<(&str, String)>, &str); 4] = [
+        (vec![(ONE.file, TWO.sha256())], "migration_changed"),
+        (
+            vec![(ONE.file, ONE.sha256()), ("0009_newer.sql", ONE.sha256())],
+            "schema_newer",
+        ),
+        (vec![("one.sql", ONE.sha256())], "migration_out_of_order"),
+        (vec![], "schema_unrecorded"),
+    ];
+    for (rows, code) in cases {
+        let Some(db) = FreshDb::new() else { return };
+        db.bootstrapped(&[ONE], &rows);
+        let refused = db.run("journal", &[ONE, TWO]).err().map(|e| e.code());
+        assert_eq!(refused, Some(code), "{rows:?}");
+        let ledgers: i64 = db
+            .rt
+            .block_on(
+                sqlx::query_scalar(
+                    "SELECT count(*) FROM pg_tables WHERE tablename = 'schema_migrations'",
+                )
+                .fetch_one(&db.pool),
+            )
+            .unwrap();
+        assert_eq!(ledgers, 0, "{code}: nothing was created");
+    }
+}
