@@ -66,7 +66,8 @@ fn mode(path: &Path) -> u32 {
     fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
 
-/// The command takes the issuer, the member, and the file, and no subject argument.
+/// The command takes the issuer, the member, and the file, which defaults to the one path the API
+/// server accepts, and no subject argument.
 #[test]
 fn link_takes_no_subject_argument() {
     let line = format!("mandate identity link --issuer {ISSUER} --member {FOUNDER} --links f");
@@ -79,11 +80,21 @@ fn link_takes_no_subject_argument() {
         (parsed.issuer.as_str(), parsed.member.as_str()),
         (ISSUER, FOUNDER)
     );
-    for (skip, missing) in [(3, "--issuer"), (5, "--member"), (7, "--links")] {
+    assert_eq!(parsed.links, Path::new("f"));
+    for (skip, missing) in [(3, "--issuer"), (5, "--member")] {
         let given: Vec<&str> = [&full[..skip], &full[skip + 2..]].concat();
         let kind = Cli::try_parse_from(given).err().map(|e| e.kind());
         assert_eq!(kind, Some(ErrorKind::MissingRequiredArgument), "{missing}");
     }
+    let parsed = Cli::try_parse_from(&full[..7]).map(|cli| cli.command);
+    let Ok(Command::Identity(IdentityCommand::Link(parsed))) = parsed else {
+        panic!("{parsed:?}")
+    };
+    assert_eq!(
+        parsed.links,
+        Path::new("/etc/mandate/subject-links"),
+        "the server's one path"
+    );
     let given: Vec<&str> = full.iter().copied().chain(["--subject", SUBJECT]).collect();
     let kind = Cli::try_parse_from(given).err().map(|e| e.kind());
     assert_eq!(kind, Some(ErrorKind::UnknownArgument));

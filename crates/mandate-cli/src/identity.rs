@@ -39,10 +39,14 @@ pub struct LinkArgs {
     /// The user principal the subject signs in as: an opaque ULID (identity spec §3.1).
     #[arg(long, value_name = "ULID")]
     pub member: String,
-    /// The subject-link file the API server reads (`MANDATE_API_SUBJECT_LINKS`).
-    #[arg(long, value_name = "PATH")]
+    /// The subject-link file the API server reads. The server accepts it only at
+    /// [`DEFAULT_LINKS`], so that is the default.
+    #[arg(long, value_name = "PATH", default_value = DEFAULT_LINKS)]
     pub links: PathBuf,
 }
+
+/// The one path the API server accepts the subject-link file at.
+pub const DEFAULT_LINKS: &str = "/etc/mandate/subject-links";
 
 /// What a link did.
 #[derive(Debug, Clone, PartialEq, Eq)]
