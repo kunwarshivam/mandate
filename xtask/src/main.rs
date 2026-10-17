@@ -6,7 +6,7 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
@@ -345,9 +345,10 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
     }
 }
 
-/// The `rh-sim` rehearsal build's tests (DEC-922): `mandate-mcp` with the feature, which no
-/// workspace crate turns on, so the workspace's own run never builds it; its login tests run the
-/// simulator binary built here.
+/// The `rh-sim` rehearsal build's tests (DEC-922): `mandate-mcp` and the runner, `mandate-paper`,
+/// each with the feature, which no workspace crate turns on, so the workspace's own run never
+/// builds it; `mandate-mcp`'s login tests run the simulator binary built here. Each package runs
+/// in its own build, so neither's feature is unified into the other's (DEC-963).
 fn rh_sim_tests() -> Result<()> {
     sh(
         "cargo",
@@ -370,31 +371,46 @@ fn rh_sim_tests() -> Result<()> {
         .as_str()
         .context("cargo metadata names no target directory")?;
     let binary = Path::new(target).join("debug").join("mandate-rh-sim");
-    let args = [
-        "nextest",
-        "run",
-        "--locked",
-        "--no-tests=fail",
-        "--package",
-        "mandate-mcp",
-        "--features",
-        "rh-sim",
-    ];
-    eprintln!(
-        "    $ {RH_SIM_BIN_ENV}={} cargo {}",
-        binary.display(),
-        args.join(" ")
-    );
-    let status = Command::new("cargo")
-        .args(args)
-        .env(RH_SIM_BIN_ENV, &binary)
-        .status()
-        .context("starting `cargo nextest`")?;
-    if !status.success() {
-        bail!("the rh-sim rehearsal build's tests failed with {status}");
+    rehearsal_runs(|args| {
+        eprintln!(
+            "    $ {RH_SIM_BIN_ENV}={} cargo {}",
+            binary.display(),
+            args.join(" ")
+        );
+        Command::new("cargo")
+            .args(args)
+            .env(RH_SIM_BIN_ENV, &binary)
+            .status()
+            .context("starting `cargo nextest`")
+    })
+}
+
+/// [`REHEARSAL_TESTED`]'s `rh-sim` test runs, one `cargo nextest run` a package, in order, each
+/// through `run`, which takes the `cargo` arguments and says how the run exited; the first that
+/// fails stops the rest and is named in the error.
+fn rehearsal_runs(mut run: impl FnMut(&[&str]) -> Result<ExitStatus>) -> Result<()> {
+    for package in REHEARSAL_TESTED {
+        let args = [
+            "nextest",
+            "run",
+            "--locked",
+            "--no-tests=fail",
+            "--package",
+            package,
+            "--features",
+            REHEARSAL,
+        ];
+        let status = run(&args)?;
+        if !status.success() {
+            bail!("the rh-sim rehearsal build's tests of {package} failed with {status}");
+        }
     }
     Ok(())
 }
+
+/// The packages `cargo xtask ci test-rh-sim` tests with the `rh-sim` feature, each in its own
+/// build: every workspace crate that declares it (DEC-922, DEC-963).
+const REHEARSAL_TESTED: [&str; 2] = ["mandate-mcp", "mandate-paper"];
 
 /// The arguments of the workspace's nextest run, every test or, with `partition` (`K/N`, `1 <= K
 /// <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every test
@@ -7806,8 +7822,9 @@ mod tests {
     use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
-    use std::process::Command;
+    use std::process::{Command, ExitStatus};
     use std::time::Duration;
 
     use anyhow::{Context, Result, bail};
@@ -7818,8 +7835,8 @@ mod tests {
         Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_PROFILE,
         MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT,
         Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS, Package, PendingTest,
-        PendingTestRun, REFCASES, SCHEMA_CHECKERS, SCHEMA_DIR, SCHEMA_SHARD_ENV,
-        TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome, UnmutatedSource,
+        PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_TESTED, SCHEMA_CHECKERS, SCHEMA_DIR,
+        SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome, UnmutatedSource,
         actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows, check_schedule,
         ci, ci_files, classify, contains_dec_id, contains_word, external_oracles, failure_cause,
         feature_files, feature_map_problems, files_by_extension, first_panic_line,
@@ -7828,8 +7845,8 @@ mod tests {
         live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
         mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
-        plain_comment_lines, preflight_args, proptest_seeds_in, repo_root, schema_mutants,
-        shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        plain_comment_lines, preflight_args, proptest_seeds_in, rehearsal_runs, repo_root,
+        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
         spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
         test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, verdicts,
         workspace_closure, workspace_packages,
@@ -11732,6 +11749,57 @@ mod tests {
         ("fast-python", &["test-python"]),
         ("fast-portable", &["portable"]),
     ];
+
+    /// DEC-963: `cargo xtask ci test-rh-sim` tests every workspace crate that declares the
+    /// `rh-sim` feature, and only those, so no crate's rehearsal build goes untested until it
+    /// rots, as `mandate-paper`'s did.
+    #[test]
+    fn the_rh_sim_run_tests_every_crate_declaring_the_feature() -> Result<()> {
+        let meta = metadata_in(&repo_root()?)?;
+        let declaring: BTreeSet<&str> = workspace_packages(&meta)
+            .iter()
+            .filter(|package| package.features.contains_key(REHEARSAL))
+            .map(|package| package.name.as_str())
+            .collect();
+        assert_eq!(
+            declaring,
+            REHEARSAL_TESTED.into_iter().collect::<BTreeSet<_>>(),
+            "the crates declaring `{REHEARSAL}` are the ones `test-rh-sim` tests with it"
+        );
+        Ok(())
+    }
+
+    /// DEC-963: `test-rh-sim` runs each crate's `rh-sim` build in a `cargo nextest run` of its
+    /// own, in order, passes only when every run passed, and stops at the first that fails,
+    /// naming its package.
+    #[test]
+    fn the_rh_sim_runs_test_each_crate_alone_and_stop_at_the_first_failure() {
+        let exited = |code: i32| ExitStatus::from_raw(code << 8);
+        let mut ran = Vec::new();
+        let passed = rehearsal_runs(|args| {
+            ran.push(args.join(" "));
+            Ok(exited(0))
+        });
+        assert!(passed.is_ok(), "{passed:?}");
+        assert_eq!(
+            ran,
+            [
+                "nextest run --locked --no-tests=fail --package mandate-mcp --features rh-sim",
+                "nextest run --locked --no-tests=fail --package mandate-paper --features rh-sim",
+            ]
+        );
+        let mut ran = 0;
+        let failed = rehearsal_runs(|_| {
+            ran += 1;
+            Ok(exited(1))
+        });
+        let error = failed.map_err(|error| error.to_string());
+        assert!(
+            matches!(&error, Err(message) if message.contains("tests of mandate-mcp failed")),
+            "{error:?}"
+        );
+        assert_eq!(ran, 1, "a failed run stops the rest");
+    }
 
     /// The `cargo xtask ci <part>` parts a job's steps run, in order.
     fn xtask_parts(lines: &[&str]) -> Vec<String> {

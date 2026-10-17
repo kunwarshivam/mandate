@@ -266,15 +266,10 @@ fn broker_serving(text: &str, environment: Environment) -> Result<Broker, String
 /// The Robinhood a record chooses (DEC-910 item 1's runtime seam): one code path, compiled in
 /// every build, chooses — and only the `live` feature lets a build serve the choice, so the
 /// default build's seam refuses [`ConnectionRefusal::NotBuilt`] and no run of it can reach a
-/// Robinhood host at all (LT-1). No CI or release build enables the feature, so the suite
-/// runs in the default build the ungated pins below name, and [`ROBINHOOD_LINKED`] is the only
-/// part the feature gates. **Caveat for the next contributor:** under a locally built
-/// `--features live` the tests that pin `connector_not_built` fail by design — that is the
-/// settled #1297 reading ("CI's only build of this suite is the default one"): this PR's
-/// `a_live_record_refuses_the_connector_this_build_does_not_hold`, and, per #1297's own
-/// fixtures, `a_re_establishment_after_a_revocation_restores_the_connection` and
-/// `a_revocation_of_another_connection_does_not_refuse_this_one`, whose live halves assert
-/// `Err(ConnectionRefusal::NotBuilt)`; no CI job runs any of them.
+/// Robinhood host at all (LT-1). [`ROBINHOOD_LINKED`] is the only part the feature gates. The
+/// tests that pin this seam expect what the build they run in serves, `connector_not_built`
+/// without `live` and the connection with it, so they hold in every build (DEC-963, replacing
+/// #1297's reading that they fail under `live` by design).
 fn robinhood(environment: Environment, account_ref: &str) -> Result<Connection, ConnectionRefusal> {
     if !ROBINHOOD_LINKED {
         return Err(ConnectionRefusal::NotBuilt);

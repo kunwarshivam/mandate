@@ -162,8 +162,8 @@ jobs:
           MANDATE_TEST_PARTITION: ${{ matrix.shard }}
 
   # DEC-871. The pending tests (DEC-110, DEC-137), the doctests, and the `rh-sim` rehearsal
-  # build's tests (DEC-922): all need the test profile the `fast-test` shards build, and run in
-  # seconds once it is built.
+  # build's tests of `mandate-mcp` and `mandate-paper` (DEC-922, DEC-963): all need the test
+  # profile the `fast-test` shards build, and run in seconds once it is built.
   fast-pending:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
