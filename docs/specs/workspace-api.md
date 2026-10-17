@@ -1381,7 +1381,9 @@ Application is the executor's `MandateVersionApplied`, which may still reject (f
 | `delegation` | `null` or `{preview_id, mandate_version}` | The shape chosen on the card (§5.3); always `null` for `skipped` (a Skip naming one has it dropped, below) |
 
 The API refuses only: an unauthenticated or non-user principal, a user who is not listed in
-`autonomy.approval.approvers` and holding an approving role (§3.7), an unknown approval, and, for
+`autonomy.approval.approvers` and holding an approving role (§3.7; until the server can read the
+mandate, a Skip is recorded for the approving role alone and the runtime refuses a non-approver's,
+[DEC-1007](../project/decisions/DEC-1007.md) item 10, Proposed), an unknown approval, and, for
 `approved` only, missing or unbound step-up: bound to the content hash, or with a delegation to the
 preview's `step_up_digest` (§5.3), else 401 with the step-up code §3.5 names. It does not judge the deadline, the quorum,
 independence, or re-validation: the runtime does (checks 1 to 12). A `skipped` is never refused for
