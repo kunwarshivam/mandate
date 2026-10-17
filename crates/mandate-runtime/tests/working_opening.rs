@@ -1,5 +1,5 @@
 //! One working opening per instrument (trading-domain spec §5.3 rule 6, `working_order_limit`;
-//! R0's second ask, DEC-971 items 3 to 5).
+//! R0's second ask, DEC-1006 items 3 to 5).
 //!
 //! While an opening the runtime proposed is still working on the account stream, a new opening or
 //! increase in that instrument is denied `working_order_limit` in the runtime's dry run, so it is

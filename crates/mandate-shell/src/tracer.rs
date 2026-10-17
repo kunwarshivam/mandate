@@ -1454,7 +1454,7 @@ impl<'s> Session<'s> {
     }
 }
 
-/// The watch's read of its entry (DEC-971 item 6): by its client order id where the connector's
+/// The watch's read of its entry (DEC-1006 item 6): by its client order id where the connector's
 /// profile can query by it, and otherwise by the profile's own listing of the agent's orders in the
 /// instrument created since `since` less DEC-862 item 2's margin, so the watch never sends a query
 /// the connector refuses unsent.
@@ -1547,7 +1547,7 @@ mod tests {
         InstrumentId::new("5f0c3c1e-7d1a-4c8e-9b0a-2e6f1d3a9c41").map_err(|e| e.to_string())
     }
 
-    /// DEC-971 item 6: a profile that queries by client order id is asked by it; one that cannot
+    /// DEC-1006 item 6: a profile that queries by client order id is asked by it; one that cannot
     /// is asked by its listing of the agent's orders in the instrument from five minutes before
     /// the run, the margin DEC-862 item 2 sets.
     #[test]
