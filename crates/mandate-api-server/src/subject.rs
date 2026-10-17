@@ -60,17 +60,45 @@ pub fn digest(issuer: &str, subject: &str) -> String {
 /// The one file the server reads subject links from (DEC-1023): fixed, never a setting.
 pub const SUBJECT_LINKS: &str = "/etc/mandate/subject-links";
 
-/// The principal `issuer`'s `subject` signs in as, read from the file at `path` now.
+/// Where the server learns which principal a subject signs in as.
+pub trait SubjectLinks: Send + Sync {
+    /// The principal `issuer`'s `subject` signs in as, read now.
+    ///
+    /// # Errors
+    /// [`LinkRefusal`], in the order its variants are listed.
+    fn principal(&self, issuer: &str, subject: &str) -> Result<PrincipalId, LinkRefusal>;
+}
+
+/// The deployment's subject links: the file at [`SUBJECT_LINKS`] and no other, so no setting,
+/// argument, or request can point the server at another file (DEC-1023).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Fixed;
+
+impl SubjectLinks for Fixed {
+    fn principal(&self, issuer: &str, subject: &str) -> Result<PrincipalId, LinkRefusal> {
+        principal(issuer, subject)
+    }
+}
+
+/// The principal `issuer`'s `subject` signs in as, read from the file at [`SUBJECT_LINKS`] now.
+///
+/// # Errors
+/// [`LinkRefusal`], in the order its variants are listed.
+pub fn principal(issuer: &str, subject: &str) -> Result<PrincipalId, LinkRefusal> {
+    principal_at(Path::new(SUBJECT_LINKS), issuer, subject)
+}
+
+/// [`principal`] read from the file at `path`, for the reader's own tests.
 /// A path that does not itself name the file opened, a symlink included, is refused as exposed
 /// (DEC-1023), so only the file at the path is ever read.
 ///
 /// # Errors
 /// [`LinkRefusal`], in the order its variants are listed.
-pub fn principal(path: &Path, issuer: &str, subject: &str) -> Result<PrincipalId, LinkRefusal> {
+pub fn principal_at(path: &Path, issuer: &str, subject: &str) -> Result<PrincipalId, LinkRefusal> {
     principal_owned(path, issuer, subject, [geteuid().as_raw(), ROOT])
 }
 
-/// [`principal`] with the file's allowed owners given: the process's user and root.
+/// [`principal_at`] with the file's allowed owners given: the process's user and root.
 ///
 /// # Errors
 /// [`LinkRefusal`], in the order its variants are listed.

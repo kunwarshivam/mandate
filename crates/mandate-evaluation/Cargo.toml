@@ -1,0 +1,23 @@
+[package]
+name = "mandate-evaluation"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The forward-paper evaluation harness (E17-8, E15-3, DEC-1002): journaled thesis records in, one scorecard per signal model and the evaluation report out"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-accounting.workspace = true
+mandate-canon.workspace = true
+mandate-num.workspace = true
+mandate-research.workspace = true
+mandate-spec.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true

@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | v0.51 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md; v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.51 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.51 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md; v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 adds the agent stream's invalidation verdict, `ThesisInvalidated`, [DEC-2202](../project/decisions/DEC-2202.md); v0.51 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `model_gateway` section of §9.19, and `deployment_manager` section of §9.21; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `model_gateway` section of §9.19, `deployment_manager` section of §9.21, and `thesis_invalidation` section of §9.22; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
@@ -21,10 +21,32 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   appended to it before the workspace's own stream, so a failure between them leaves an orphan
   that only over-counts; inference spec §3.3 and §3.6 say so in the same change. Agent-accepted
   under DEC-176: it only refuses more.
-  - **Versions.** v0.49 and v0.50 are held by open changes (v0.49 by lane AH's DEC-2203, v0.50 by
-    lane EX's #1545); this change takes v0.51 and adds no rule number, and is renumbered at merge
-    if that changes.
+  - **Versions.** v0.49 is on main (DEC-2202) and v0.50 is held by lane EX's #1545; this change
+    takes v0.51 and adds no rule number, and is renumbered at merge if that changes.
 
+- **v0.49 ([DEC-2202](../project/decisions/DEC-2202.md); E19-5):** §9.22 adds the agent stream's
+  invalidation verdict, `ThesisInvalidated`, at schema version 1, with rules 184 to 187. Mandate
+  spec §8.6 removes an instrument at once when its thesis is invalidated, and the executor's
+  `UniverseChanged` (`thesis_invalidated`) needs a journaled cause to name; no record carried one,
+  so no research run could start (agent harness spec §6.2). It admits a record that was impossible
+  and loosens nothing: every other record, rule, and reading is unchanged (DEC-176).
+  - **Two causes.** `model`: the research call's judged invalidation verdict (§9.19 rule 151),
+    which the record names by its call record and its index; and `source_revoked`: a source the
+    allowlist dropped (DEC-433 item 19, Proposed for the founder), which the record names by the
+    source. No writer emits `source_revoked` until the founder decides item 19.
+  - **One verdict, one record, one thesis once.** Rule 186 ties a model's invalidation to a judged
+    invalidation verdict of a call earlier in its batch, and every such verdict to exactly one
+    record, so no judged invalidation is dropped in silence (HI-22). Rule 187, a stream rule, names
+    a thesis the stream admitted and that still holds its instrument, invalidated once.
+  - **The executor's copy.** §9.3's `UniverseChanged` (`thesis_invalidated`) names the record as its
+    `causation_id`. The copy is on another stream, so the verifier checks it, not `append`.
+  - **Vectors.** A new generated `thesis_invalidation` section holds base drafts, an invalid draft for
+    every member type and rule, valid drafts for the cases a rule might be misread to refuse,
+    batches for rule 186, and agent streams for rule 187, each a list of `append` batches. The
+    vectors stay version 3.
+  - **Order of the changes (ES-22).** Spec and vectors first. `mandate-journal`'s registration and
+    the runtime's invalidation path follow in their own code change; until the record is
+    registered, no research run starts.
 - **v0.48 ([DEC-1170](../project/decisions/DEC-1170.md); E21-33):** §9.21 registers the deployment
   manager's three records on the workspace control stream, closed at schema version 1:
   `ProcessStartIssued`, `ProcessStopIssued`, and `ProcessCrashLooped`, with rules 165 to 168. Until
@@ -1186,6 +1208,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `ObservationRecorded` | — | source, instrument, data (artifact) |
 | `ModelInvocationRecorded` | mod | A gateway call's record (fast model, LLM signal model, research; the compiler's is on the control stream, §9.9): model, endpoint, request digest, sampling, prompt and response (artifacts), reported identity, provider request ID, outcome, attempts, tokens, cost, price table, cache hit, deadline, completion, the meter reservation, the retrieved context, and the candidates' verdicts; closed in §9.19 |
 | `ModelOutputRecorded` | v1: man; v2: man, reg | signal model id, version, content hash, instrument, as_of, expires_at, direction, conviction, confidence, horizon, thesis (artifact) and, for the research agent, its thesis and lineage ids; `ignored` reason if not used |
+| `ThesisInvalidated` | man | The invalidation verdict that removes a thesis's instrument ([mandate spec §8.6](mandate.md#86-thesis-lifetime-and-revision-lineages-dec-118-dec-111)): the thesis, its lineage and instrument, the cause (the model's judged verdict, or a revoked source), and the items or source it rests on; closed in §9.22 |
 | `ThesisProposed`, `ThesisRevised` | man, mod | The research agent's output and its admission decision ([mandate spec §8.4, §8.5](mandate.md#84-the-research-agent-dec-97-adr-0002)): research agent id, version, and content hash; thesis id, lineage id, revision, and for `ThesisRevised` the `predecessor_thesis_id` and what the revision changed; instrument, asset class, direction, horizon, evidence and cited sources, corroboration kind, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); `admitted` and the refusal reason from the ordered §8.5 checks; closed in §9.4 |
 | `DecisionMade` | v1: man; v2: man, pol, reg | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification and its source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling), `delegation_id` when a delegation lifted it ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003)), and `requested_by` (`agent`, `owner`, or `client`) with the client's id when a connected client asked (mandate §6.2 step 5a, DEC-185); `ask_suppressed` (`budget`, `skipped_today`, `recent_timeout`) when an `ask` was classified but not asked ([mandate spec §6.4](mandate.md#64-approvals)) |
 | `IntentProposed` | man | intent fields (its `event_id` is the intent ID); after a grant, `causation_id` is the `ApprovalRevalidated` |
@@ -1285,7 +1308,7 @@ section holds at least one chain event per schema, an invalid draft for every ru
 drafts for the cases a rule might be misread to refuse. The other agent-stream events are not
 closed yet: the approval events that v0.5 added (§9, mandate spec §6.4) close in their own change,
 and `ModelInvocationRecorded` in §9.19. `ThesisProposed` and `ThesisRevised` are closed in
-§9.4.
+§9.4, and `ThesisInvalidated` in §9.22.
 `OwnerCommandRefused` is closed in §9.2, on both streams that write it.
 
 Journal spec v0.16 adds `schema_version` 2 for `ModelOutputRecorded` and `DecisionMade`. Each has
@@ -1816,6 +1839,13 @@ an instrument was admitted to, or removed from, an agent's working universe.
 | `universe_size_after` | `integer` | The working universe's size after the change |
 | `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
 
+The executor writes `UniverseChanged` with its `causation_id` naming the agent-stream record it
+copies: the `ThesisProposed` or `ThesisRevised` for `thesis_admitted`, and the `ThesisInvalidated`
+(§9.22) for `thesis_invalidated`, which it copies after that record is stored, with the same
+`instrument` (the record's `instrument_id`), `thesis_id`, and `lineage_id`, and the stream's agent as
+`agent_id`. The two records are on two streams, so no rule checks the copy at append; the verifier
+owns it (§9.22).
+
 **Consistency rules** (reason `schema`; the path is the member named):
 
 29. `MandateVersionApplied`: `step_up` is non-null when `classification` is `risk_increasing`
@@ -1935,7 +1965,8 @@ one thesis the research agent proposed, and the admission's verdict on it.
 
 **No mapping to `JournaledFact`.** No fold reads these records yet: the risk-state fold reads the
 account stream's `UniverseChanged` (§9.3), which the executor writes with its `causation_id` naming
-the agent stream's `ThesisProposed` or `ThesisRevised`. The lineage fold's reading of these records
+the agent stream's `ThesisProposed` or `ThesisRevised`, or, for a removal by invalidation, the
+`ThesisInvalidated` (§9.22). The lineage fold's reading of these records
 (mandate spec §8.6) follows with its own story.
 
 ### 9.5 Account-stream executor records ([DEC-446](../project/decisions/DEC-446.md), [DEC-447](../project/decisions/DEC-447.md))
@@ -3932,7 +3963,7 @@ names the model called (§9's `mod`).
 | `completed_at` | `timestamp` | When the gateway finished with it |
 | `reservation` | `ulid?` | The `event_id` of the call's `MeterReserved`, or `null` when it reserved nothing: rule 149. The link crosses streams, so `append` does not resolve it |
 | `observations` | `[ulid]` | The retrieved context: the `event_id`s of the `ObservationRecorded` records whose items the prompt holds, strictly ascending: rule 150. Empty for a call with no retrieval plan |
-| `verdicts` | `[{candidate: integer, kind: thesis \| invalidation, result: judged \| unknown_instrument \| unknown_evidence \| duplicate_instrument \| forbidden_language \| revisions_not_enabled \| unknown_thesis}]` | One per candidate in the response, the theses first and then the invalidations, each in response order: rule 151. `judged` hands the candidate to admission (`ThesisProposed`, §9.4) or to its invalidation record (E19-5, not yet catalogued); every other result is a harness check's refusal ([agent harness spec §6.5](agent-harness.md), HI-22) |
+| `verdicts` | `[{candidate: integer, kind: thesis \| invalidation, result: judged \| unknown_instrument \| unknown_evidence \| duplicate_instrument \| forbidden_language \| revisions_not_enabled \| unknown_thesis}]` | One per candidate in the response, the theses first and then the invalidations, each in response order: rule 151. `judged` hands the candidate to admission (`ThesisProposed`, §9.4) or to its invalidation record (`ThesisInvalidated`, §9.22, rule 186); every other result is a harness check's refusal ([agent harness spec §6.5](agent-harness.md), HI-22) |
 
 Rules 72, 73 and 75 apply to this record as to the control stream's, and rule 74 does except where
 rule 152 says. Rules 71 and 76 are the control stream's alone.
@@ -4310,6 +4341,90 @@ after the members' types:
 version. The test vectors' `deployment_manager` section holds a base draft of each record, an
 invalid draft for every member type and rule, and valid drafts for the cases a rule might be
 misread to refuse.
+### 9.22 Thesis invalidation records ([DEC-2202](../project/decisions/DEC-2202.md))
+
+[Mandate spec §8.6](mandate.md#86-thesis-lifetime-and-revision-lineages-dec-118-dec-111) removes
+an instrument at once when its thesis's invalidation condition holds. The condition is the model's
+own text, so the agent harness takes the verdict from the research call's response ([agent harness
+spec §6.7](agent-harness.md)), and the executor removes the instrument (§9.3's `UniverseChanged`,
+reason `thesis_invalidated`). This subsection closes the record the removal names as its cause.
+§9.2's conventions apply unchanged: every member is present on every record (§4.2), `null` only
+where the type is nullable, any other member refused, and opaque text non-empty. The schema is
+`schema_version` 1, and §9 requires `config_refs.mandate_version`, the agent's mandate version in
+force, which the executor's copy names too.
+
+**`ThesisInvalidated`** on the agent stream: one thesis the agent's runtime invalidated, appended
+before the executor removes its instrument. An invalidation never admits, never adds risk, and
+needs no approval (`AGENTS.md` rule 2): it is taken on the model's word, with no corroboration
+(agent harness spec §6.7). In `exits_only` a research run is review-only, and its invalidations are
+the only candidates it hands on.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `thesis_id`, `lineage_id` | `id` | The invalidated thesis and its lineage, as the thesis record that admitted it states them: rule 187 |
+| `instrument_id` | `asset_id` | The thesis's instrument (mandate spec §3, §9.3's type), as that record states it: rule 187 |
+| `cause` | `model` \| `source_revoked` | `model`: the research call's judged invalidation verdict (§9.19 rule 151). `source_revoked`: a source the allowlist dropped, which invalidates every live thesis that cites it (DEC-433 item 19, Proposed for the founder; no writer emits it until the founder decides) |
+| `candidate` | `integer?` | For `model`, the verdict's index in the call record's `verdicts`; `null` exactly for `source_revoked`: rules 184 and 186 |
+| `evidence` | `[text]` | For `model`, the item ids the output cited as showing the condition holds, in the order given, duplicates kept; empty for `source_revoked`: rule 184 |
+| `source` | `text?` | For `source_revoked`, the revoked source's id; `null` exactly for `model`: rule 184 |
+
+In the call's judging batch, the `ThesisInvalidated` records follow the call record and precede its
+thesis records (`ThesisProposed` or `ThesisRevised`, with their `ModelOutputRecorded`), because the
+harness judges a response's invalidations before its theses ([agent harness spec §6.7](agent-harness.md)).
+So rule 187 judges each invalidation against the theses the response found, and a thesis the same
+response proposes on that instrument is a new admission, not a renewal. The `verdicts` array keeps
+rule 151's index order, theses first; that is the record's order, not the judging order.
+
+The envelope's `causation_id` names the cause: for `model`, the `event_id` of the call's
+`ModelInvocationRecorded` earlier in the same `append` batch (rule 186); for `source_revoked`, the
+`event_id` of the control stream's `ConfigSnapshotRegistered` of the first source allowlist version
+that no longer lists `source` ([DEC-101](../project/04-decision-log.md#decisions)). The run id of a
+model's invalidation rides in `correlation_id`, as its call record's does.
+
+**Consistency rules** (reason `schema`; the path is the member named):
+
+184. `ThesisInvalidated`: for `model`, `candidate` is not `null` (`payload.candidate`) and `source` is
+     `null` (`payload.source`); for `source_revoked`, `candidate` is `null` (`payload.candidate`),
+     `evidence` is empty (`payload.evidence`), and `source` is not `null` (`payload.source`); and
+     for either, `causation_id` is not `null` (`causation_id`). The first that fails, in the order
+     `candidate`, `evidence`, `source`, `causation_id`.
+185. `ThesisInvalidated`: the actor is an `agent` (`actor.kind`), the runtime that owns the stream.
+186. Agent stream, one record per judged invalidation verdict, over one `append` batch whose drafts
+     each passed `Draft::parse`, judged draft by draft in batch order, the first that fails
+     reported:
+     - a `ThesisInvalidated` whose `cause` is `model` names as `causation_id` a
+       `ModelInvocationRecorded` earlier in the batch (`causation_id`); that record's `verdicts`
+       has an item at index `candidate` whose `kind` is `invalidation` and whose `result` is
+       `judged` (`payload.candidate`); and no earlier `ThesisInvalidated` of the batch names the
+       same `causation_id` and `candidate` (`payload.candidate`);
+     - a `ModelInvocationRecorded` each of whose `verdicts` items *i* with `kind` `invalidation`
+       and `result` `judged` is named, as `causation_id` and `candidate` *i*, by a later
+       `ThesisInvalidated` of the batch (`payload.verdicts[i].result`, the first such *i*).
+
+     So every judged invalidation is journaled with its call, exactly once, and no record can name
+     a verdict the harness refused, another call's verdict, or no verdict at all. A
+     `source_revoked` record names no call, and this rule does not read it.
+187. Agent stream, one invalidation per admitted, current thesis: a `ThesisInvalidated` names a
+     `thesis_id` that no earlier `ThesisInvalidated` of the stream names (`payload.thesis_id`);
+     that an earlier `ThesisProposed` or `ThesisRevised` of the stream with `admitted` `true` names
+     (`payload.thesis_id`), with the same `lineage_id` (`payload.lineage_id`) and `instrument_id`
+     (`payload.instrument_id`); and that is the `thesis_id` of the latest such record for that
+     `instrument_id` (`payload.thesis_id`), so a thesis a revision or a renewal superseded is never
+     invalidated in its place. The first that fails, in that order. It is a stream rule: `append`
+     reads the stream's earlier records, and a range judges it from the stream's start.
+
+**Checked by no rule at append**, so the verifier owns them (a §11 check is a follow-up, DEC-2202):
+that the executor's `UniverseChanged` (`thesis_invalidated`) follows its `ThesisInvalidated` and
+copies its instrument, thesis, and lineage (§9.3), the two being on two streams; that a
+`source_revoked` record's `causation_id` names an allowlist registration that no longer lists its
+`source`, and that the thesis cited that source; and that the thesis was still current when it was
+invalidated (not expired, retired, or removed), which the agent stream alone cannot show. A removal
+of an instrument already removed changes nothing, so none of these can add risk.
+
+**No mapping to `JournaledFact`.** No risk state, limit, or order folds from this record: the
+risk-state fold reads the account stream's `UniverseChanged` (§9.3), which the executor writes from
+it. The runtime folds it with the thesis records to know which theses are active (agent harness
+spec §6.7).
 
 ## 10. Anchoring
 
