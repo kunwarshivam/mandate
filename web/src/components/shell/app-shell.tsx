@@ -109,7 +109,7 @@ function Frame({ children }: { children: ReactNode }) {
               strip ? "lg:hidden" : "lg:pb-[calc(var(--dock-clearance)+2rem)]",
             )}
           >
-            {record ? null : <FixtureTag />}
+            {record ? null : <FixtureTag scope="workspace" />}
           </div>
         )}
       </div>

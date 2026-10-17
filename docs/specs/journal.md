@@ -2,16 +2,43 @@
 
 | | |
 |---|---|
-| **Status** | v0.43 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.45 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, and `segment_rows` section of §11's `segment_rows_mismatch`; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, and `control_plane` section of §9.17; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.45 ([DEC-1001](../project/decisions/DEC-1001.md), [DEC-1002](../project/decisions/DEC-1002.md);
+  E4-5, E17-8):** §9.18 closes the workspace control stream's `BacktestRunRecorded` at schema
+  version 1 and adds `EvaluationRunRecorded`, the forward-paper evaluation's record. Both name a
+  report artifact (§6.3) and the digests that reproduce it; neither carries a figure inline. The
+  backtest record was catalogued with no registered payload, so no writer could append one; this
+  admits a record that was impossible and loosens nothing (DEC-176).
+  - **The marker.** `BacktestRunRecorded`'s `marker` is always `backtest`, so no reader can take a
+    backtest for a paper or live result.
+  - **No vectors yet.** Registration in `mandate-journal`, with vectors, is E4-5's and E17-8's; until
+    then `append` refuses both, as it refuses every catalogued type with no registered payload.
+- **v0.44 ([DEC-981](../project/decisions/DEC-981.md); E20-3):** §9.17 registers the ten records of
+  [control-plane design §3.8](../design/control-plane.md#38-the-closed-message-set), closed at schema
+  version 1, before any message flows: `ControlPlaneEnrolled`, `LicenseApplied`,
+  `LicenseStateChanged`, `ReleaseOffered`, `ReleaseInstalled`, `ReleaseWithdrawnNoticed`,
+  `CatalogEntryRegistered`, `DataBundleImported`, `UsageReportSealed`, and
+  `ControlPlaneMessageRefused`, with rules 137 to 142. Until this version `append` refused each as
+  `unknown_event_type`; it admits records that were impossible and changes no other record, rule,
+  or reading (DEC-176).
+  - **Writer and stream.** Workspace control services write every one on the workspace control
+    stream as a `system` actor (rule 137); `cp-agent` never appends. A deployment-wide instruction
+    is journaled on each covered workspace's stream before it takes effect there (DEC-981 items 1
+    and 2).
+  - **No content.** No member is `text`: IDs, closed enumerations, integers, timestamps, and
+    digests only (design CP-1). Signed documents are named by `digest`, not stored.
+  - **Anti-rollback stays with the writer.** Each instruction's `sequence` is recorded; workspace
+    services refuse a replay against the stream's highest and journal the refusal. `append` and
+    §11 compare no sequences at this version (DEC-981 item 4).
 - **v0.43 ([DEC-950](../project/decisions/DEC-950.md); E7-26, DEC-944 item 5):** §9.7 closes the
   agent stream's `ApprovalCanceled` at schema version 1. It was catalogued with no registered
   payload, so `append` refused every draft of it: a tightening that canceled a pending ask (a
@@ -730,7 +757,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 |---|---|---|---|
 | Account | `acct:{workspace_id}:{account_ref}` | The account's executor (trading spec §7.1); the risk gate is a pure library it calls | Intents received, gate decisions, orders, fills, fees, cash, settlement, corporate actions, reconciliation, account state, restrictions, protection changes, copies of gating facts from other streams |
 | Agent | `agent:{workspace_id}:{agent_id}` | The agent's runtime | Observations, model invocations, signal-model outputs, decisions, intents proposed, approvals, agent mode changes |
-| Workspace control | `ctl:{workspace_id}` | Workspace control services (in Phase 1, the founder's CLI) | Mandates, deployments, connections, disclosures, policy and configuration registration, owner acknowledgments, approval responses, owner commands, and alerts, surveillance reports, anchors, verification, records lifecycle, access and export |
+| Workspace control | `ctl:{workspace_id}` | Workspace control services (in Phase 1, the founder's CLI) | Mandates, deployments, connections, disclosures, policy and configuration registration, owner acknowledgments, approval responses, owner commands, and alerts, surveillance reports, anchors, verification, records lifecycle, access and export, and the control-plane link's records (§9.17) |
 | Scheduler | `clock:{workspace_id}` | The workspace scheduler | `ClockAdvanced`, `TradingDayStarted`, clock measurements |
 | Notice | `ntf:{workspace_id}` | The workspace's notification dispatcher ([notifications spec §5.1](notifications.md#51-the-dispatcher)) | Notices issued and every delivery attempt. Never a risk input; no other stream's owner copies from it |
 
@@ -1110,7 +1137,9 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `OwnerRequestSubmitted` | — | An owner's request for an order (workspace API §4.6): agent, instrument, side, optional size, who asked; closed in §9.9 |
 | `OwnerCommandIssued` | — | The owner's command ([mandate spec §6.1](mandate.md#61-purposes)): agent or kill-switch scope, command (`pause`, `resume`, `stop`, `kill_switch`, `owner_exit`, and `hold_openings` and `lift_hold`, closed in §9.11), the release choice and warning shown for a Stop with release, the bid, bid size, and floor confirmed for an owner exit, `submitted_at`, step-up evidence or null, user (opaque) |
 | `ConfigSnapshotRegistered` | — | configuration kind (fee, calendar, instrument snapshot, rule set, mandate, model, policy set, model registry, broker profile), content hash |
-| `SurveillanceReportGenerated`, `BacktestRunRecorded` | rule | period, report (artifact), breaches; data snapshot, code build, configuration, results, paper/live/backtest marker |
+| `SurveillanceReportGenerated` | rule | period, report (artifact), breaches |
+| `BacktestRunRecorded` | rule, man | A backtest of a mandate version: data snapshot, model outputs and theses (digests), configuration, code build, the report (artifact), and the `backtest` marker; closed in §9.18 |
+| `EvaluationRunRecorded` | rule | The forward-paper evaluation of the research agent's theses (E17-8), in an internal paper workspace only: the registered decision, cut-off, the thesis records read, closes, cost model, code build, the report (artifact), and whether it passed; closed in §9.18 |
 | `PlatformOperatorAction` | — | action (stop, global kill switch, acceptable-use action, `model_withdrawn` with model and reason, `research_thesis_halt` with the instrument and optionally the research agent's pinned content hash, [DEC-100](../project/04-decision-log.md#decisions)), operator (opaque), approval |
 | `AnchorComputed`, `VerificationRun`, `IntegrityIncidentRecorded` | — | leaves, root, timestamp token (artifact), closed in §9.14; scope and result, closed in §9.13; last good hash and anchor |
 | `SegmentExported`, `SegmentEvicted`, `RetentionExtended`, `LegalHoldChanged` | — | manifest hash, range, retain-until, hold. `SegmentExported` is closed in §9.14 |
@@ -1122,6 +1151,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `ServiceAccountIssued`, `ServiceAccountRevoked` | — | account, scopes, workspaces, expiry, issuing user |
 | `HostCliRegistered`, `HostCliRevoked` | — | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence ([identity spec §6.4](identity.md#64-the-risk-reduction-path)) |
 | `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` | — | operator (opaque), reason code, window, approvers ([identity spec §10.3](identity.md#103-break-glass-for-platform-staff-managed-mode)) |
+| `ControlPlaneEnrolled`, `LicenseApplied`, `LicenseStateChanged`, `ReleaseOffered`, `ReleaseInstalled`, `ReleaseWithdrawnNoticed`, `CatalogEntryRegistered`, `DataBundleImported`, `UsageReportSealed`, `ControlPlaneMessageRefused` | — | The deployment's records of its link to the global control plane ([control-plane design §3.8](../design/control-plane.md#38-the-closed-message-set)): enrollment, license, release, catalog, data-bundle, and usage-report facts by opaque ID, sequence, and digest, and each refused inbound message with its reason; written by workspace control services, never by `cp-agent`; closed in §9.17 |
 
 The identity records ([identity spec §12.1](identity.md#121-events-journal-9-control-stream),
 DEC-437 item 9) are control-stream records. The membership records close in §9.12. The client
@@ -3531,6 +3561,235 @@ rule 6); it is in the journal, as `ExternalActivityIngested`'s `broker_order_id`
 
 **No mapping to `JournaledFact`**, and no vectors: `reference/journal` does not model
 `OrderStateChanged` at either version, and the test vectors stay version 3.
+
+### 9.17 Control-plane records ([DEC-981](../project/decisions/DEC-981.md))
+
+The workspace deployment's records of what passed over its link to the global control plane
+([control-plane design §3.8](../design/control-plane.md#38-the-closed-message-set)), closed at
+schema version 1 as §9.7's records are: every listed member is present, `null` only where the type
+is nullable, and any extra member is refused. §9.1's types apply, with §9.13's `digest`. The rules
+number on from §9.16's (rule 136 is §9.6's). No record names a configuration.
+
+**Who writes them.** Workspace control services, the control stream's single writer (§2, under the
+fencing of §5.1), as a `system` actor: rule 137. The control-plane agent (`cp-agent`) verifies each
+inbound instruction and hands it over; it never appends, holds no writer epoch, and no record here
+is written in its name (design §3, CP-5). An instruction is journaled before it takes effect, and
+one that is refused is journaled as `ControlPlaneMessageRefused` instead.
+
+**Where they go.** Every record is on the workspace control stream, `ctl:{workspace_id}`. An
+instruction that covers a deployment (an enrollment, a license, a release, a catalog entry, a data
+bundle) is journaled on the control stream of each workspace it covers, before it takes effect in
+that workspace, so each workspace's stream holds every control-plane fact that bounds it and no
+workspace reads another's (§7). A workspace opened later on the same deployment has the
+deployment's enrollment and the instruction of each kind in effect journaled on its own stream
+before its first `AgentDeployed` (DEC-981 item 2). The site's own acts follow the same rule:
+`ReleaseInstalled`, `ReleaseWithdrawnNoticed`, and `ControlPlaneMessageRefused` go on the control
+stream of every workspace the deployment hosts, and `UsageReportSealed`, one report per deployment
+and organization, on that of every workspace of its `org_id` on the deployment, so no workspace
+holds another organization's counts. A `LicenseApplied` names every deployment of its organization
+the license covers; those IDs are the organization's own metadata, visible only to its workspaces.
+
+**No content.** No member is `text`. Every member is an `id`, a closed enumeration, an `integer`,
+a `timestamp`, or a `digest`, so nothing here can hold an instrument, a quantity, a price, a
+mandate field, or personal data (design CP-1, `AGENTS.md` rule 6). The enrollment token, the
+private key, and the signed documents' bytes are never journaled; a document is named by the
+SHA-256 of its bytes as received, a `digest`, not a `ref`, so it is not listed in `artifact_refs`
+and §11 check 6 does not look for it.
+
+**Sequence and anti-rollback (CP-9).** `LicenseApplied`, `ReleaseOffered`, `CatalogEntryRegistered`
+(per `kind`), and `DataBundleImported` (per `dataset`) carry the signed document's `sequence`.
+Workspace services judge an instruction against the highest `sequence` of its kind journaled on the
+stream: a lower one, or an equal one with another digest, is refused and journaled
+`ControlPlaneMessageRefused` with reason `replayed`; one whose digest equals the one in effect is
+already applied and is not journaled again. A `ReleaseWithdrawnNoticed` carries no sequence and
+is never refused as `replayed`: a repeated withdrawal only restricts again. A message whose digest
+was already refused is not journaled again, so a flood of one bad message cannot fill the stream.
+`append` and §11 do not compare sequences across records at this version (DEC-981 item 4).
+
+**Ending a lapse.** A new valid license ends `lapsed` (design §3.3): its `LicenseApplied` is
+journaled first, then the `LicenseStateChanged` out of `lapsed` that names it.
+
+**No effect on an agent here.** A `LicenseStateChanged` into `lapsed` restricts no agent until
+mandate spec §5.9 lists `license_lapsed` (E20-4; design §3.3, DEC-440 item 13 Proposed). None of
+these records is read by `ValidationContext`, the gate, or any fold, and none maps to a
+`JournaledFact`.
+
+**`ControlPlaneEnrolled`**: the deployment enrolled (design §3.1).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `deployment_id`, `org_id` | `id` | The deployment the directory bound the certificate to, and its organization |
+| `mode` | `managed_cell` \| `hybrid` | The deployment's mode (design §3.2) |
+| `certificate_fingerprint` | `digest` | SHA-256 of the client certificate's DER bytes |
+
+**`LicenseApplied`**: a verified license took effect (design §3.3).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `license_id` | `id` | |
+| `sequence` | `integer` | Increases per organization: rule 139 |
+| `org_id` | `id` | |
+| `deployment_ids` | `[id]` | The deployments it covers, strictly ascending by bytes: rule 138 |
+| `max_workspaces`, `max_agents_deployed` | `integer` | Entitlements |
+| `features` | `[hybrid \| connected_clients]` | Feature flags, strictly ascending by bytes: rule 138 |
+| `not_before`, `not_after` | `timestamp` | Validity: rule 138 |
+| `grace_days` | `integer` | |
+| `key_id` | `id` | The pinned license key that verified it |
+| `document_digest` | `digest` | SHA-256 of the signed license as received |
+
+**`LicenseStateChanged`**: the license's state moved (design §3.3).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `license_id` | `id` | |
+| `from` | `valid` \| `renewal_due` \| `grace` \| `lapsed`, or `null` | `null` for the first state of a license: rule 140 |
+| `to` | `valid` \| `renewal_due` \| `grace` \| `lapsed` | |
+| `judged_at` | `timestamp` | The highest UTC time the stream had journaled, against which validity was judged (design §6) |
+
+**`ReleaseOffered`**: a verified release manifest offered to the operator or the update window
+(design §3.4).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `release_id` | `id` | |
+| `sequence` | `integer` | Rule 139 |
+| `manifest_digest` | `digest` | SHA-256 of the signed manifest as received |
+| `key_id` | `id` | The pinned release key that verified it |
+
+**`ReleaseInstalled`**: the site installed a release.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `release_id` | `id` | |
+| `sequence` | `integer` | The manifest's: rule 139 |
+| `manifest_digest` | `digest` | |
+| `trigger` | `promotion` \| `operator` \| `update_window` \| `rollback` | Our managed promotion, the site operator's action, the site's update window, or an operator rollback under infrastructure §7.4, the one install CP-9 allows below the highest offered |
+
+**`ReleaseWithdrawnNoticed`**: a verified withdrawal; new installs of the release are refused.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `release_id` | `id` | |
+| `reason` | `defect` \| `security` \| `superseded` | |
+| `key_id` | `id` | |
+| `document_digest` | `digest` | |
+
+**`CatalogEntryRegistered`**: a verified catalog entry, selectable after the local evaluation gate
+and the owner's pin (design §3.8). A registry entry a mandate pins is still registered as
+`ConfigSnapshotRegistered`.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `kind` | `connector_package` \| `model_registry_entry` | |
+| `entry_id` | `id` | |
+| `content_hash` | `digest` | SHA-256 of the entry's content |
+| `sequence` | `integer` | Per `kind`: rule 139 |
+| `key_id` | `id` | |
+
+**`DataBundleImported`**: a verified shared-data bundle, journaled before any byte of it is used
+([data plane spec §6.1](data-plane.md#61-managed)).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `dataset` | `id` | The dataset the bundle updates |
+| `bundle_digest` | `digest` | The bundle's digest, which an observation names |
+| `sequence` | `integer` | Per `dataset`: rule 139 |
+| `key_id` | `id` | |
+
+**`UsageReportSealed`**: one usage period's report, signed and queued (design §3.5).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `report_id`, `deployment_id`, `org_id` | `id` | One report per deployment, organization, and period (design §3.5) |
+| `period_start`, `period_end` | `timestamp` | Rule 141 |
+| `prev_report_hash` | `digest` | The previous report's digest, 64 zeros for the deployment's first |
+| `report_digest` | `digest` | SHA-256 of the signed report |
+
+**`ControlPlaneMessageRefused`**: an inbound message refused (design CP-5).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `message` | `license` \| `release_manifest` \| `release_withdrawn` \| `catalog_entry` \| `data_bundle` \| `unknown` | The kind it claimed; `unknown` for a type outside §3.8's list |
+| `reason` | `unsigned` \| `bad_signature` \| `unknown_key` \| `replayed` \| `out_of_list` \| `malformed` \| `not_addressed` | No signature; a signature that does not verify; a key the installed release does not pin; a sequence not above the highest journaled (above); a type or effect outside §3.8's list; a member outside its schema; a document naming another organization or deployment |
+| `sequence` | `integer?` | The sequence it claimed, `null` when none could be read: rule 142 |
+| `document_digest` | `digest` | SHA-256 of the bytes received |
+
+**Consistency rules** (reason `schema` unless named; the path is the member named), checked in
+number order after the members' types:
+
+137. Every §9.17 record: `actor.kind` is `system` (`actor.kind`).
+138. `LicenseApplied`: `deployment_ids` is non-empty (`payload.deployment_ids`) and strictly
+     ascending by bytes (`non_canonical` at `payload.deployment_ids`); `features` is strictly
+     ascending by bytes (`non_canonical` at `payload.features`); and `not_before` is earlier than
+     `not_after` (`payload.not_after`).
+139. `LicenseApplied`, `ReleaseOffered`, `ReleaseInstalled`, `CatalogEntryRegistered`, and
+     `DataBundleImported`: `sequence` is at least 1 (`payload.sequence`); so is a non-null
+     `sequence` on `ControlPlaneMessageRefused`.
+140. `LicenseStateChanged`: `from` differs from `to` (`payload.to`).
+141. `UsageReportSealed`: `period_start` is earlier than `period_end` (`payload.period_end`).
+142. `ControlPlaneMessageRefused`: when `message` is `unknown`, `reason` is `out_of_list` or
+     `malformed` (`payload.reason`), since nothing else can be judged of a message outside the list,
+     and `sequence` is `null` (`payload.sequence`), since it has no schema to read one from; and
+     when `reason` is `replayed`, `sequence` is non-null (`payload.sequence`), since a replay is
+     judged by its sequence.
+
+The test vectors' `control_plane` section holds a base draft of each record, an invalid draft for
+every member type and rule, and valid drafts for the cases a rule might be misread to refuse.
+
+### 9.18 Backtest and evaluation records ([DEC-1001](../project/decisions/DEC-1001.md), [DEC-1002](../project/decisions/DEC-1002.md))
+
+Both records are on the workspace control stream, at `schema_version` 1, and both name a report
+by artifact (§6.3): the canonical JSON object of the report, stored under `sha256:` of its bytes,
+before the record is appended (§5.2). The figures live in the report; the record holds what
+reproduces it. §9.2's conventions and types apply: every member present on every record (§4.2),
+`null` only where the type is nullable, any other member refused.
+
+**`BacktestRunRecorded`**: one backtest of a mandate version through its own decision path
+([DEC-1000](../project/decisions/DEC-1000.md)).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `backtest_id` | `id` | The backtest, as `POST /backtests` named it (workspace API §4.2) |
+| `mandate_version` | `ref` | The version backtested; equals `config_refs.mandate_version` |
+| `data_snapshot` | `ref` | The digest of the bars the run read, with its coverage start and first-bar medians; the data plane's manifest digest once DP-14 lands |
+| `model_outputs`, `theses` | `ref` | The digests of the recorded model outputs and thesis records the run replayed |
+| `configuration` | `ref` | The digest of the run's configuration: the fill model, fees, the gate's settings, account type, starting cash, and metric settings |
+| `code_build` | `ref` | The runner's build digest |
+| `report` | `ref?` | The report artifact (`report_version` 2), `null` exactly when `result` is `refused` |
+| `report_version` | `integer` | The report's version: 2 |
+| `marker` | `backtest` | Always `backtest`: never a paper or live result |
+| `result` | `completed` \| `refused` | Whether the run produced a report |
+| `refusal` | `text?` | The run's stable reason code (ADR-0001 ES-09), `null` exactly when `result` is `completed` |
+
+**`EvaluationRunRecorded`**: one forward-paper evaluation (E17-8), written only on the control
+stream of one of the team's internal paper workspaces (DEC-103).
+
+| Member | Type | Meaning |
+|---|---|---|
+| `evaluation_id` | `id` | The evaluation |
+| `decision` | `text` | The recorded decision that registered the window, metric, and threshold (DEC-122) |
+| `cut_off` | `timestamp` | The instant the evaluation reads up to: no thesis whose horizon ends after it is scored |
+| `theses` | `ref` | The digest of the `ThesisProposed` and `ThesisRevised` records read |
+| `theses_from`, `theses_to` | `[text]` | Per agent stream read, in stream order, `stream_id:seq` of the first and of the last record read; equal lengths |
+| `theses_head` | `[ref]` | Per agent stream read, the hash of the last record read, in the same order |
+| `closes`, `cost_model` | `ref` | The digests of the close series and the round-trip cost model |
+| `code_build` | `ref` | The evaluator's build digest |
+| `report` | `ref` | The evaluation report artifact (`report_version` 1) |
+| `report_version` | `integer` | 1 |
+| `passed` | `boolean` | True only when at least one signal model's group was scored and every scored group passed |
+
+**Consistency rules** (reason `schema` unless stated):
+
+143. `BacktestRunRecorded`: `report` is `null` and `refusal` non-null exactly when `result` is
+     `refused` (`payload.report`, then `payload.refusal`).
+144. `BacktestRunRecorded`: `mandate_version` equals `config_refs.mandate_version`
+     (`payload.mandate_version`).
+145. `EvaluationRunRecorded`: `theses_from`, `theses_to`, and `theses_head` have one entry per
+     agent stream read, the same length, and are not empty (`payload.theses_from`).
+
+**No mapping to `JournaledFact`.** No fold reads either record: they are what the backtest and
+evaluation produced, and the go-live record names a backtest by its id (`AgentDeployed`). The rule
+numbers follow §9.17's rule 142.
 
 ## 10. Anchoring
 

@@ -1,0 +1,45 @@
+import { type Page, type Request, expect, test } from "@playwright/test";
+import { operationFor } from "../src/api/operations";
+
+/**
+ * The app with the workspace API as its data source (DEC-975): every screen reads through documented
+ * operations only (E21-45), nothing is labelled as fixtures, and an answer is recorded through the
+ * API's idempotent write route. The scenario cookie picks what the e2e build's mock API serves.
+ */
+const WS = process.env.OWLHEAD_API_E2E_WORKSPACE ?? "ws_01J9ZQ4M0000000000000000AB";
+
+function apiCalls(page: Page): Request[] {
+  const calls: Request[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/v1/")) calls.push(request);
+  });
+  return calls;
+}
+
+test("Home reads the workspace through documented operations and labels nothing as fixture data", async ({ page }) => {
+  const calls = apiCalls(page);
+  await page.goto("/?scenario=approvals");
+  await expect(page.getByRole("heading", { name: /^Needs you/ })).toBeVisible();
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+  expect(calls.length).toBeGreaterThan(3);
+  for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
+});
+
+test("Skip on a request goes to the approval's responses route once, and shows only what the API recorded", async ({ page }) => {
+  const calls = apiCalls(page);
+  await page.goto("/?scenario=approvals");
+  await page.getByRole("region", { name: /^Needs you/ }).getByRole("link").first().click();
+  await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "You chose Skip" })).toBeVisible();
+  await expect.poll(() => calls.filter((c) => c.method() === "POST").map((c) => new URL(c.url()).pathname)).toEqual([expect.stringMatching(new RegExp(`^/v1/workspaces/${WS}/approvals/[^/]+/responses$`))]);
+  const [post] = calls.filter((c) => c.method() === "POST");
+  expect(post.headers()["idempotency-key"]).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
+  expect(post.headers()["x-mandate-request"]).toBe("1");
+  expect(post.postDataJSON()).toMatchObject({ verdict: "skipped", step_up: null, delegation: null });
+});
+
+test("a deployment that does not answer shows unreachable, not the fixtures", async ({ page }) => {
+  await page.goto("/?scenario=unreachable");
+  await expect(page.getByRole("heading", { name: "Cannot reach your deployment" })).toBeVisible();
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+});

@@ -22,6 +22,12 @@ use crate::types::{
 /// journal regenerated in the same change.
 pub const FOLD_VERSION: u32 = 1;
 
+/// How long a passing `ConnectionChecked` covers an opening, in risk-clock seconds: one day, the
+/// period of the executor's daily check (connections spec §8.1, §9.2 "Healthy"). A check this old
+/// or older no longer shows the connection is usable, so an opening waits for the next one
+/// (DEC-969 item 3).
+pub(crate) const CONNECTION_CHECK_COVERS_S: i64 = 86_400;
+
 /// What the runtime knows, derived from journaled events and nothing else.
 ///
 /// Every field is private and every collection is ordered (ES-21). The folded position of each
@@ -67,6 +73,16 @@ pub struct RuntimeState {
     /// The owner's exits of one instrument, by the `OwnerExitRequested` that records each, so that a
     /// restart can hand one the executor has not taken again (`AGENTS.md` rule 13, DEC-257 item 7).
     owner_exits: BTreeMap<EventId, OwnerExit>,
+    /// The latest `ConnectionChecked` of this deployment's own connection, or `None` while the
+    /// account stream holds none (journal spec §9.8, DEC-969).
+    connection_check: Option<ConnectionCheck>,
+}
+
+/// One folded `ConnectionChecked`: whether every check it lists passed, and its risk clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ConnectionCheck {
+    passed: bool,
+    at: RiskClock,
 }
 
 /// An owner's exit of one instrument as the fold holds it: what the planner is asked for again.
@@ -153,6 +169,7 @@ impl RuntimeState {
             copied: BTreeSet::new(),
             assertions: BTreeMap::new(),
             owner_exits: BTreeMap::new(),
+            connection_check: None,
         }
     }
 
@@ -370,6 +387,18 @@ impl RuntimeState {
         self.pending_approvals
             .values()
             .any(|pending| pending.adds_risk)
+    }
+
+    /// Whether the connection's checks let an opening be judged at `now`: no check is folded, or
+    /// the latest check of this deployment's connection passed under
+    /// [`CONNECTION_CHECK_COVERS_S`] before `now`. A failed check is connections spec §8.1's
+    /// "failure later", which halts openings; a check a day old is overdue. Read for openings and
+    /// increases alone, so neither ever holds an exit, a protective order, or a kill switch
+    /// (`AGENTS.md` rule 13, DEC-969 items 2 to 4).
+    pub(crate) fn connection_admits_openings(&self, now: RiskClock) -> bool {
+        self.connection_check.is_none_or(|check| {
+            check.passed && now.secs() < check.at.secs().saturating_add(CONNECTION_CHECK_COVERS_S)
+        })
     }
 
     /// The kill switch the fold holds, if one has been journaled.
@@ -628,6 +657,15 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
             }
         }
         "OrderSubmitted" => state.submission_unreconciled = true,
+        "ConnectionChecked" => {
+            let check = payload::connection_check_of(&event.payload)?;
+            if check.connection_id == state.deployment.connection.0 {
+                state.connection_check = Some(ConnectionCheck {
+                    passed: check.passed,
+                    at: check.at,
+                });
+            }
+        }
         "OwnerAcknowledged" => {
             state.acknowledged.insert(event.event_id.clone(), event.seq);
         }
@@ -648,6 +686,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "OrderAbandoned"
         | "ObservationRecorded"
         | "ModelInvocationRecorded"
+        | "CandidateVerdictsRecorded"
         | "DecisionMade"
         | "ThesisProposed"
         | "ThesisRevised"

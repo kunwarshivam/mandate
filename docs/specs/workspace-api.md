@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -494,7 +494,10 @@ per workspace deployment (item 6).
    listener; the probes are never on it.
 2. **Environment.** Settings come from named variables: `MANDATE_API_DATABASE_URL`,
    `MANDATE_API_ISSUER`, `MANDATE_API_AUDIENCE`, `MANDATE_API_JWKS_URL`, `MANDATE_API_APP_ORIGIN`,
-   and `MANDATE_API_SUBJECT_LINKS`. As a guard against a secret placed in the environment (DEC-822
+   `MANDATE_API_SUBJECT_LINKS`, and `MANDATE_API_WORKSPACE` and `MANDATE_API_ORG`: the one
+   workspace this deployment hosts and its organization, as ULIDs. Every other workspace in a path
+   is absent (API-9's 404), and the organization is what `authorize` checks the pair against;
+   journal spec §9.12's records name neither. As a guard against a secret placed in the environment (DEC-822
    item 4), a variable whose name contains `SECRET`, `PASSWORD`, `TOKEN`, or `KEY` (ASCII
    case-insensitive) refuses the start, and so does a database URL that carries a password: the
    API reaches Postgres over its local socket by peer authentication, or with a credential file.
@@ -532,12 +535,14 @@ per workspace deployment (item 6).
    the cookie, `Origin`, and `X-Mandate-Request`, takes `{access_token}` or `{access_token: null}`:
    - a token that verifies, for the session's subject: a granted refresh; the secret rotates and a
      new cookie is set;
-   - `null`, sent when the web app's sign-in client could not reach the provider, or the server
-     failing to fetch the issuer's keys: an outage (identity spec §6.4 route 1). The session keeps
+   - `null`, sent when the web app's sign-in client could not reach the provider; the server
+     holding no fetched key set, or none with the token's `kid` (a key rotation the next fetch
+     brings); or the subject-link file unreadable or exposed (an operator fault): an outage
+     (identity spec §6.4 route 1). The session keeps
      only pause and the kill switch until its absolute lifetime ends or a later refresh is granted.
      The caller can only narrow its own session this way;
-   - a token that does not verify, or names another subject: a failed refresh, which ends the
-     session (`refresh_failed`);
+   - a token that does not verify, names another subject, or whose subject the link file no longer
+     maps to the session's principal: a failed refresh, which ends the session (`refresh_failed`);
    - a rotated secret presented again ends the session (`refresh_reuse`).
 
    - A pause or a kill switch on a full session whose access has lapsed with no refresh is not
@@ -545,7 +550,8 @@ per workspace deployment (item 6).
      risk reduction never waits on the web app (API-7). Any other call on it gets the one 401.
 
    So a session's full reach never outlasts the last access token it was given by more than five
-   minutes. `DELETE /v1/sessions/current` ends it (`sign_out`) and clears the cookie. Records live
+   minutes. `DELETE /v1/sessions/current` ends it (`sign_out`) and clears the cookie; a cookie naming no live
+   session gets the one 401 with the cookie cleared too. Records live
    in the process until a Postgres store exists: a restart, a deploy included, ends every session.
    The user signs in again; with the identity provider down, pause and the kill switch remain
    through the host CLI (identity spec §6.4 route 3) until route 2's reduction-only sessions are
@@ -563,6 +569,28 @@ per workspace deployment (item 6).
    the new-device notice (ID-14). The journal does not register `SessionOpened` or `SessionRevoked`
    yet; until it does, these routes journal nothing and no new-device notice is sent (DEC-978
    item 10, Proposed).
+10. **Pause and the kill switch** ([DEC-1007](../project/decisions/DEC-1007.md)). The server
+    commits §4.2's `OwnerCommandIssued` with journal spec §9.11's members, as the CLI writes them,
+    under the operation names `pause` and `kill_switch`.
+    - It forwards no step-up until it verifies one. `step_up` is `null`, and `step_up_status` is
+      `missing` or `unbound`, so a kill switch through the API runs without the owner-exit
+      privilege.
+    - `record`, `environment_shown`, and `owner_exit` are kept but not journaled, and idempotency
+      compares what is journaled.
+    - A scope id must be an agent an `AgentDeployed` names, or a connection a control-stream
+      event names, or the request is 404.
+    - An append that does not settle in 5 attempts answers `outcome_unknown` after an ambiguous
+      commit, else `journal_unavailable`.
+    - Readiness and drain never gate these routes.
+    - Until sessions keep a roles snapshot, a failed membership read answers
+      `membership_unavailable` for them too (DEC-1007 item 8, Proposed); the host CLI's kill
+      switch is unaffected.
+    - Holding new openings is not served yet: the runtime does not fold `hold_openings`, and a
+      hold it could not read would stop it at that event, the kill switch behind it included.
+    - An approval's Skip (§5.2) is recorded as the CLI records it, as `ApprovalResponseSubmitted`
+      with `step_up: null`; the runtime judges the deadline, the state, the content hash, and the
+      approvers. An `approved` is refused `step_up_required` or `step_up_missing` until step-up
+      is bound (DEC-1007 item 10).
 
 ---
 
@@ -606,6 +634,20 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Kill switch | `POST /kill-switch` | `OwnerCommandIssued` (`kill_switch`) | §5.4. Agent, connection, or workspace scope |
 | Re-enable a halted scope | **None in v0.1** | — | The halted state is Proposed (DEC-437 item 21; interim: no halted state), so a kill switch leaves no scope halted and there is nothing to re-enable. If the founder accepts item 21, this spec adds a route, a step-up kind, and the events `ScopeHalted` and `ScopeReenabled` (identity spec §12.1) in its own change |
 | Command status | `GET /commands/{event_id}` | — | §5.5 |
+
+`GET /backtests/{id}` returns `read-models/backtest` ([DEC-1001](../project/decisions/DEC-1001.md)):
+the backtest's id, its mandate version, `state` (`running` until `BacktestRunRecorded` commits,
+then `completed` or `refused`), the run's stable `refusal` code when refused, and for a completed
+run `report_ref` (the report artifact, journal spec §6.3) and `report`, the artifact's object. The
+report is a run of the version's own decision path (the risk state, the order builder, the gate's
+dry run, autonomy, and the executor's protection, over historical bars, on recorded model outputs
+and theses only; [DEC-1000](../project/decisions/DEC-1000.md)). It holds FR-4.2's figures for the
+version and for buy-and-hold of the same instrument, one row per decision with its outcome and
+reason, the limits that latched, the equity per period, and two closed lists: `limitations`, the
+codes for what the run cannot know or does not model, and `disclosures`, placeholder names only
+([DEC-1003](../project/decisions/DEC-1003.md)). It holds no thesis-quality figure for any version
+(DEC-99). A backtest is the owner's own strategy's simulated history: the read answers only in the
+workspace that ran it, and no route aggregates backtests across workspaces.
 
 ### 4.3 Approvals (approval service)
 
@@ -689,6 +731,7 @@ revoke on compromise (§5.6) reads no fold and is refused by none of them.
 | Plan view | `GET /agents/{id}/plan` | D12: what it watches, what it would do next and under which rule, whether that would run, ask, or be denied, and what would stop it. Writes nothing |
 | Daily brief | `GET /agents/{id}/briefs/{date}` | D13: counts and sources only; no profit or outcome claims |
 | Scorecards | `GET /agents/{id}/scorecards` | FR-8.4: the user's own results only. Never embedded in an approval, the model picker, or another workspace's view |
+| Forward-paper evaluation | `GET /evaluations/{id}` | E17-8, E15-3: the founder's evaluation of the research agent's theses, one scorecard per signal model beside the baselines. Only in the team's internal paper workspaces (DEC-103); elsewhere `not_found`. Never an owner's scorecard ([DEC-1002](../project/decisions/DEC-1002.md) item 6) |
 | Alerts | `GET /alerts` | G5, from `OwnerAlertSent` and the events it names |
 | Health | `GET /health` | The status strip (G1): market data, broker, deployment, relay, each with its last observation time |
 
@@ -699,6 +742,17 @@ with its environment, deployed mandate version, `deployed_at`, `mode` (the last 
 and `pending_approvals`. An owner's hold shows as the mode it sets, `exits_only`. The rest of D2
 (restrictions, limits and headroom, the ladder, the floor, the universe) is planned as optional
 members.
+
+`GET /evaluations/{id}` returns `read-models/evaluation` ([DEC-1002](../project/decisions/DEC-1002.md)):
+the evaluation's id, `report_ref`, and `report`, the artifact `EvaluationRunRecorded` names. The
+report echoes the registered decision (DEC-122's window, minimum, and `z`), the cut-off, the input
+digests, and the baselines, then one group per signal model, keyed by model id, version, and
+content hash: how many of its theses were closed, still open, and outside the window, and either
+its scorecard (`mandate_research::score::Scorecard`, member for member) or the scorer's refusal
+code, never both. `passed` is true only when at least one group was scored and every scored group
+passed. Its one disclosure is the placeholder `NOTE-FORWARD-PAPER-INTERNAL` (DEC-1003). Until
+counsel answers compliance question 35, nothing here reaches an owner, an approval, or the model
+picker.
 
 ### 4.8 Journal and audit (audit explorer backend)
 
@@ -1353,7 +1407,9 @@ Application is the executor's `MandateVersionApplied`, which may still reject (f
 | `delegation` | `null` or `{preview_id, mandate_version}` | The shape chosen on the card (§5.3); always `null` for `skipped` (a Skip naming one has it dropped, below) |
 
 The API refuses only: an unauthenticated or non-user principal, a user who is not listed in
-`autonomy.approval.approvers` and holding an approving role (§3.7), an unknown approval, and, for
+`autonomy.approval.approvers` and holding an approving role (§3.7; until the server can read the
+mandate, a Skip is recorded for the approving role alone and the runtime refuses a non-approver's,
+[DEC-1007](../project/decisions/DEC-1007.md) item 10, Proposed), an unknown approval, and, for
 `approved` only, missing or unbound step-up: bound to the content hash, or with a delegation to the
 preview's `step_up_digest` (§5.3), else 401 with the step-up code §3.5 names. It does not judge the deadline, the quorum,
 independence, or re-validation: the runtime does (checks 1 to 12). A `skipped` is never refused for
@@ -1710,7 +1766,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Approval content, hash, and admission (`mandate-approval`) | **Exists** (pure core) |
 | Mandate validation and classification (`mandate-spec`) | **Exists**; §4.1 calls it |
 | The web app's screens on recorded fixtures (`web/`) | **Exists**; §4.9 maps fixtures to resources |
-| The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, and the first reads of §4.3 and §4.7 by E21-31 (§3.11) |
+| The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, the first reads of §4.3 and §4.7, pause and the kill switch, and an approval's Skip by E21-31 (§3.11) |
 | Drafts, compile, versions, confirm endpoints | **Planned** (E10-11) |
 | Deployment manager endpoints and the reserved kill-switch path | **Planned** (E10-12) |
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
@@ -1718,6 +1774,8 @@ risk-reducing call never consults one (API-7, API-8).
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
 | Read-model projections | **Planned** (E11-9) |
 | Journal queries, trace, exports over the API | **Planned** (E12-6); contracts in §4.8.1, served by the pure crate `mandate-audit` |
+| The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
+| The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |
 | Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.21 §9.9, DEC-670); `mandate-journal` registration planned (E10-15) |
 | The `client` actor, `ConnectionRevoked`'s reason, and the client events | **Specified** (journal spec v0.22 §3 and §9.10, DEC-671); `mandate-journal` registration planned (E10-15) |
 | `hold_openings` and `lift_hold` | **Specified** (journal spec v0.23 §9.11, DEC-672); `mandate-journal` registration planned (E10-15) |

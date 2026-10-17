@@ -32,7 +32,10 @@ export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 export interface ClientOptions {
   workspaceId: string;
   fetch: Fetch;
-  /** Origin of the API; empty for the app's own origin. */
+  /**
+   * Origin of the API; empty for the app's own origin. Another origin is called with
+   * `credentials: "include"`, so the browser sends the API's own session cookie (spec §3.3 item 5).
+   */
   baseUrl?: string;
   /** A fresh `Idempotency-Key` per gesture; tests pass a deterministic one. */
   newKey?: () => string;
@@ -217,6 +220,7 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     }
   }
   if (!WORKSPACE_ID.test(workspaceId)) throw new Error("not a workspace id");
+  const credentials: RequestCredentials = baseUrl === "" ? "same-origin" : "include";
 
   const path = (route: `/${string}`) => `/v1/workspaces/${workspaceId}${route}`;
 
@@ -227,7 +231,7 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
   async function read<T>(route: `/${string}`, decoder: Decoder<T>): Promise<ReadOutcome<T>> {
     let response: Response;
     try {
-      response = await fetch(baseUrl + path(route), { method: "GET", credentials: "same-origin", headers: { Accept: "application/json" } });
+      response = await fetch(baseUrl + path(route), { method: "GET", credentials, headers: { Accept: "application/json" } });
     } catch {
       return { ok: false, error: networkError("none") };
     }
@@ -271,7 +275,7 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     try {
       response = await fetch(baseUrl + command.path, {
         method: command.method,
-        credentials: "same-origin",
+        credentials,
         headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": command.idempotency_key, [CSRF_HEADER]: "1" },
         body: command.body,
       });

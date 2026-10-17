@@ -13,6 +13,8 @@ use std::time::SystemTime;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+mod cell;
+
 const USAGE: &str = "\
 usage: cargo xtask <command>
 
@@ -20,7 +22,7 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | mutants | schema-mutants; or one part of test: test-nextest |
+                        postgres | mutants | schema-mutants | cell; or one part of test: test-nextest |
                         test-doc | test-rh-sim | test-python
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
@@ -35,6 +37,17 @@ commands:
   live-feature          check that only the runner may build `live`, and CI only compiles it or
                         tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
+  cell up               build this change's images, bring up the local k3d cell, install the
+                        workspace chart (deploy/cell/README.md)
+  cell drill [--seeded] [boot|journal|egress]...
+                        run the cell's drills; --seeded plants each drill's bug and fails if a
+                        drill still holds
+  cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
+                        ready and what waits on its lane, then web/ at 127.0.0.1:4317
+  cell down             delete the local cell
+  cell generate [--write]
+                        the Compose file and the journal's roles file from processes.json
+                        (drift check unless --write)
 ";
 
 /// The two required-check command groups (DEC-76). `pending` follows `test` in `fast` because it
@@ -57,7 +70,7 @@ const FULL_JOB: [&str; 5] = [
     "supply-chain",
     "postgres",
 ];
-const PR_JOBS: [&str; 12] = [
+const PR_JOBS: [&str; 13] = [
     "lint",
     "test",
     "pending",
@@ -70,6 +83,7 @@ const PR_JOBS: [&str; 12] = [
     "postgres",
     "mutants",
     "schema-mutants",
+    "cell",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -186,6 +200,27 @@ fn run() -> Result<()> {
         ["live-feature"] => live_feature_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
+        ["cell", "up"] => cell::up(),
+        ["cell", "down"] => cell::down(),
+        ["cell", "demo"] => cell::demo(true),
+        ["cell", "demo", "--no-web"] => cell::demo(false),
+        ["cell", "generate"] => cell::generate(false),
+        ["cell", "generate", "--write"] => cell::generate(true),
+        ["cell", "drill", rest @ ..] => {
+            let (seeded, names) = match rest {
+                ["--seeded", names @ ..] => (true, names),
+                names => (false, names),
+            };
+            let drills = if names.is_empty() {
+                cell::DRILLS.to_vec()
+            } else {
+                names
+                    .iter()
+                    .map(|n| cell::Drill::parse(n))
+                    .collect::<Result<Vec<_>>>()?
+            };
+            cell::drill(&drills, seeded)
+        }
         _ => {
             eprint!("{USAGE}");
             bail!("unknown command: {}", args.join(" "))
@@ -211,6 +246,7 @@ fn ci(job: &str) -> Result<()> {
         "test-doc" | "test-rh-sim" | "test-python" => test_part(job, None),
         "pending" => pending(),
         "portable" => portable(),
+        "cell" => cell::ci(),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -546,6 +582,7 @@ fn workspace_lint() -> Result<()> {
     markers()?;
     proptest_seeds()?;
     feature_map()?;
+    cell::generate(false)?;
     sh("typos", &[])?;
     uv_tools(&["ruff", "check", "."])?;
     uv_tools(&["ruff", "format", "--check", "."])
@@ -989,7 +1026,24 @@ struct Layers {
     /// (DEC-525).
     #[serde(default)]
     planned: Vec<String>,
+    /// The two process groups of a workspace deployment, which meet only in the journal (E21-42,
+    /// DEC-986).
+    #[serde(default)]
+    process_groups: ProcessGroups,
     crates: BTreeMap<String, CratePolicy>,
+}
+
+/// The crates of each side of a workspace deployment: the workspace services (the API, the
+/// control services, the dispatcher, `cp-agent`) and the agent processes (the runtime's host, the
+/// executor and its connectors). No crate of one side may reach a crate of the other through any
+/// chain of path dependencies, so the two can meet only in the journal (E21-42, DEC-986). A crate
+/// in neither list is a shared library or a tool.
+#[derive(Deserialize, Default)]
+struct ProcessGroups {
+    #[serde(default)]
+    workspace_services: Vec<String>,
+    #[serde(default)]
+    agent_process: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -1077,6 +1131,7 @@ fn layer_problems(policy: &Layers, meta: &Metadata) -> Result<Vec<String>> {
             )
         }));
     }
+    problems.extend(process_group_problems(policy, &names, &closure));
     for pkg in &packages {
         let Some(own) = policy.crates.get(&pkg.name) else {
             problems.push(format!("`{}` has no entry in xtask/layers.toml", pkg.name));
@@ -1185,6 +1240,68 @@ fn forbidden_reached(name: &str, forbidden: &[String], reached: &BTreeSet<String
             )
         })
         .collect()
+}
+
+/// A problem for each workspace-services crate that reaches an agent-process crate, and each
+/// agent-process crate that reaches a workspace-services crate, through path dependencies of any
+/// kind (`closure`); for each group name that is neither a member of `names` nor planned; and for
+/// each crate named in both groups (E21-42, DEC-986).
+fn process_group_problems(
+    policy: &Layers,
+    names: &BTreeSet<&str>,
+    closure: &BTreeMap<String, BTreeSet<String>>,
+) -> Vec<String> {
+    let groups = &policy.process_groups;
+    let services = ("workspace services", &groups.workspace_services);
+    let agents = ("agent process", &groups.agent_process);
+    let mut problems = Vec::new();
+    for (key, own) in [
+        ("workspace_services", services.1),
+        ("agent_process", agents.1),
+    ] {
+        problems.extend(
+            own.iter()
+                .filter(|name| !names.contains(name.as_str()) && !policy.planned.contains(name))
+                .map(|name| {
+                    format!(
+                        "`{name}` is in process group `{key}` but is neither a workspace member \
+                         nor in `planned` (DEC-986)"
+                    )
+                }),
+        );
+    }
+    problems.extend(
+        groups
+            .workspace_services
+            .iter()
+            .filter(|name| groups.agent_process.contains(name))
+            .map(|name| {
+                format!(
+                    "`{name}` is in both process groups, so it would sit on both sides of the \
+                     boundary (DEC-986)"
+                )
+            }),
+    );
+    for ((own_label, own), (other_label, other)) in [(services, agents), (agents, services)] {
+        for name in own {
+            let Some(reached) = closure.get(name) else {
+                continue;
+            };
+            problems.extend(
+                other
+                    .iter()
+                    .filter(|crossed| *crossed != name && reached.contains(*crossed))
+                    .map(|crossed| {
+                        format!(
+                            "`{name}` ({own_label}) reaches `{crossed}` ({other_label}); \
+                             workspace services and agent processes meet only in the journal \
+                             (E21-42, DEC-986)"
+                        )
+                    }),
+            );
+        }
+    }
+    problems
 }
 
 /// Rows of `docs/dependencies.md` shaped `| `name` | ecosystem | ...`.
@@ -2581,7 +2698,8 @@ const PROGRAM_IN_AN_ARGUMENT: &str = "a shell or interpreter given its program i
 /// world's program list ([`closed_world`]) refuses them (DEC-873 item 4). A line not listed is
 /// refused until a person adds it in a change a reviewer sees, as [`PARSER_LIMITED_LINES`] works:
 /// `web-e2e.yml`'s `node -p` probe prints the Playwright version from a `package.json`, and its
-/// `xargs -r sudo rm -f` removes the Microsoft apt source files `grep` lists.
+/// `xargs -r sudo rm -f` removes the Microsoft apt source files `grep` lists; `web.yml` and
+/// `web-deploy.yml` measure the Worker's dry run with `web/scripts/workers.mjs` (DEC-731 item 6).
 const READ_LINES: &[(&str, &str)] = &[
     (
         ".github/workflows/web-e2e.yml",
@@ -2590,6 +2708,14 @@ const READ_LINES: &[(&str, &str)] = &[
     (
         ".github/workflows/web-e2e.yml",
         r##"grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
+    ),
+    (
+        ".github/workflows/web.yml",
+        "node scripts/workers.mjs size .wrangler/dry-run",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "node scripts/workers.mjs size .wrangler/dry-run",
     ),
 ];
 
@@ -2626,10 +2752,13 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// so `BASH_ENV`, `ENV`, `PATH`, `LD_PRELOAD`, `RUSTUP_TOOLCHAIN` and `NODE_OPTIONS`, in any
 /// case, cannot be read. `ci.yml` and `nightly.yml` set the tool versions and checksums and the
 /// `MANDATE_*` and `*_RESULT` names, `merge.yml` the merge inputs, `web.yml` and `web-e2e.yml`
-/// the telemetry switches, and `nightly.yml`'s service `POSTGRES_PASSWORD`.
+/// the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and `web-deploy.yml` the
+/// build's public Supabase values and the deploy step's Cloudflare token and account (DEC-1005).
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_TOKEN",
     "DOCS_ONLY",
     "DO_NOT_TRACK",
     "EVENT",
@@ -2637,10 +2766,18 @@ const READ_ENV_NAMES: &[&str] = &[
     "GH_TOKEN",
     "GITLEAKS_SHA256",
     "GITLEAKS_VERSION",
+    "HELM_SHA256",
+    "HELM_VERSION",
     "IMPECCABLE_NO_TELEMETRY",
+    "K3D_SHA256",
+    "K3D_VERSION",
+    "KUBECONFORM_SHA256",
+    "KUBECONFORM_VERSION",
     "LABELED_PR",
     "LINT_RESULT",
     "MANDATE_MUTANTS_PLANNED",
+    "MANDATE_CELL_HELM_REQUIRED",
+    "MANDATE_CELL_REQUIRED",
     "MANDATE_MUTANT_SHARD",
     "MANDATE_PG_REQUIRED",
     "MANDATE_PG_URL",
@@ -2650,6 +2787,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_TEST_PARTITION",
     "MERGE_APPROVERS",
     "MUTANTS_RESULT",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_TELEMETRY_DISABLED",
     "PENDING_RESULT",
     "PLANNED_MUTANTS",
@@ -2661,6 +2800,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "RUN_PRS",
     "SCHEMA_MUTANTS_RESULT",
     "TEST_RESULT",
+    "WRANGLER_SEND_METRICS",
 ];
 
 /// Whether `name` may be an `env:` key or a command-prefix assignment: exactly one of
@@ -2730,7 +2870,8 @@ const READ_IMAGES: &[&str] =
     &["postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f"];
 
 /// The `npx` commands a `web` job may run, by their exact arguments (B7): `web-e2e.yml`'s two
-/// Playwright installs and `web.yml`'s pinned Impeccable detector. `npx` runs any package, so no
+/// Playwright installs, `web.yml`'s pinned Impeccable detector, and the Worker's dry run and
+/// `web-deploy.yml`'s deploy, both through the `wrangler` the lockfile pins (DEC-731, DEC-1005). `npx` runs any package, so no
 /// other form is read.
 const READ_NPX: &[&[&str]] = &[
     &[
@@ -2742,6 +2883,14 @@ const READ_NPX: &[&[&str]] = &[
     ],
     &["playwright", "install-deps", "chromium"],
     &["--yes", "impeccable@4.1.0", "detect", "src/"],
+    &[
+        "wrangler",
+        "deploy",
+        "--dry-run",
+        "--outdir",
+        ".wrangler/dry-run",
+    ],
+    &["wrangler", "deploy"],
 ];
 
 /// The lines of the [`READ_SCRIPTS`] that run an interpreter a person has read and found to run
@@ -8038,6 +8187,7 @@ mod tests {
         workspace_closure, workspace_packages,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
+    use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
     use super::{unoptimised_config, unoptimised_packages};
 
@@ -8206,6 +8356,7 @@ mod tests {
         Layers {
             impure_crates: Vec::new(),
             planned: owned(planned),
+            process_groups: ProcessGroups::default(),
             crates,
         }
     }
@@ -8357,6 +8508,210 @@ mod tests {
             typo.iter()
                 .any(|p| p.starts_with("`seal` allows `stor` as a dependent")),
             "{typo:?}"
+        );
+        Ok(())
+    }
+
+    /// A policy over `shared`, `api`, `audit`, `exec` and `shell`, with `api`, `audit` and the
+    /// planned `cp-agent` the workspace services and `exec` and `shell` the agent processes
+    /// (DEC-986).
+    fn grouped() -> Layers {
+        let layers = [
+            ("shared", 2),
+            ("api", 4),
+            ("audit", 4),
+            ("exec", 6),
+            ("shell", 8),
+        ];
+        let mut p = policy(&layers, &[], &["cp-agent"]);
+        p.process_groups = ProcessGroups {
+            workspace_services: ["api", "audit", "cp-agent"].map(str::to_owned).to_vec(),
+            agent_process: ["exec", "shell"].map(str::to_owned).to_vec(),
+        };
+        p
+    }
+
+    fn crossings(problems: &[String]) -> Vec<&String> {
+        problems
+            .iter()
+            .filter(|p| p.contains("meet only in the journal"))
+            .collect()
+    }
+
+    /// Both sides may build on a shared crate, by any kind of dependency, and a workspace that
+    /// does nothing else has no problem (E21-42, DEC-986).
+    #[test]
+    fn both_process_groups_may_share_a_library() -> Result<()> {
+        let meta = workspace(vec![
+            member("shared", &[]),
+            member("api", &[("shared", None)]),
+            member("audit", &[("shared", Some("dev"))]),
+            member("exec", &[("shared", None)]),
+            member("shell", &[("exec", None), ("shared", Some("build"))]),
+        ]);
+        assert_eq!(layer_problems(&grouped(), &meta)?, Vec::<String>::new());
+        Ok(())
+    }
+
+    /// A workspace-services crate that reaches an agent-process crate, directly or through a
+    /// shared crate, by a normal, dev or build dependency, is a problem naming both, and so is the
+    /// reverse (E21-42, DEC-986).
+    #[test]
+    fn a_crate_of_one_process_group_that_reaches_the_other_is_a_problem() -> Result<()> {
+        for kind in [None, Some("dev"), Some("build")] {
+            let direct = workspace(vec![
+                member("shared", &[]),
+                member("api", &[("exec", kind)]),
+                member("audit", &[]),
+                member("exec", &[]),
+                member("shell", &[]),
+            ]);
+            let problems = layer_problems(&grouped(), &direct)?;
+            assert_eq!(
+                crossings(&problems),
+                [
+                    "`api` (workspace services) reaches `exec` (agent process); workspace services \
+                     and agent processes meet only in the journal (E21-42, DEC-986)"
+                ],
+                "{kind:?}: {problems:?}"
+            );
+            let chained = workspace(vec![
+                member("shared", &[("shell", kind)]),
+                member("api", &[]),
+                member("audit", &[("shared", None)]),
+                member("exec", &[]),
+                member("shell", &[]),
+            ]);
+            let problems = layer_problems(&grouped(), &chained)?;
+            assert_eq!(
+                crossings(&problems),
+                [
+                    "`audit` (workspace services) reaches `shell` (agent process); workspace \
+                     services and agent processes meet only in the journal (E21-42, DEC-986)"
+                ],
+                "{kind:?}: a crossing through a shared crate is a crossing: {problems:?}"
+            );
+            let reverse = workspace(vec![
+                member("shared", &[("api", kind)]),
+                member("api", &[]),
+                member("audit", &[]),
+                member("exec", &[]),
+                member("shell", &[("shared", None)]),
+            ]);
+            let problems = layer_problems(&grouped(), &reverse)?;
+            assert_eq!(
+                crossings(&problems),
+                [
+                    "`shell` (agent process) reaches `api` (workspace services); workspace services \
+                     and agent processes meet only in the journal (E21-42, DEC-986)"
+                ],
+                "{kind:?}: {problems:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A group name that is neither a member nor planned is a problem, so a typo cannot leave a
+    /// crate unguarded, and a crate in both groups is a problem, since it would sit on both sides
+    /// of the boundary (DEC-986).
+    #[test]
+    fn a_process_group_names_only_members_or_planned_crates_and_each_once() -> Result<()> {
+        let meta = || {
+            workspace(vec![
+                member("shared", &[]),
+                member("api", &[]),
+                member("audit", &[]),
+                member("exec", &[]),
+                member("shell", &[]),
+            ])
+        };
+        let mut typo = grouped();
+        typo.process_groups.agent_process.push("exce".to_owned());
+        assert_eq!(
+            layer_problems(&typo, &meta())?,
+            [
+                "`exce` is in process group `agent_process` but is neither a workspace member nor \
+                 in `planned` (DEC-986)"
+            ]
+        );
+        let mut typo = grouped();
+        typo.process_groups
+            .workspace_services
+            .push("apy".to_owned());
+        assert_eq!(
+            layer_problems(&typo, &meta())?,
+            [
+                "`apy` is in process group `workspace_services` but is neither a workspace member \
+                 nor in `planned` (DEC-986)"
+            ]
+        );
+        let mut both = grouped();
+        both.process_groups.agent_process.push("api".to_owned());
+        let problems = layer_problems(&both, &meta())?;
+        assert!(
+            problems.contains(
+                &"`api` is in both process groups, so it would sit on both sides of the boundary \
+                  (DEC-986)"
+                    .to_owned()
+            ),
+            "{problems:?}"
+        );
+        Ok(())
+    }
+
+    /// The policy as written puts the API contract, the audit reads, the dispatcher, the
+    /// founder's CLI (Phase 1's control services) and the planned `cp-agent` on the workspace
+    /// side, and the agent process, the shell, the paper runner, the executor and its connectors
+    /// on the agent side; the workspace as built respects it, and a crossing added to it is found
+    /// (E21-42, DEC-986).
+    #[test]
+    fn workspace_services_reach_no_agent_process_crate() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
+        assert_eq!(
+            policy.process_groups.workspace_services,
+            [
+                "mandate-api",
+                "mandate-audit",
+                "mandate-cli",
+                "mandate-cp-agent",
+                "mandate-cp-site",
+                "mandate-dispatcher"
+            ]
+        );
+        assert_eq!(
+            policy.process_groups.agent_process,
+            [
+                "mandate-agentd",
+                "mandate-alpaca",
+                "mandate-executor",
+                "mandate-mcp",
+                "mandate-paper",
+                "mandate-robinhood",
+                "mandate-shell"
+            ]
+        );
+        let meta = metadata_in(&root)?;
+        let names: BTreeSet<&str> = workspace_packages(&meta)
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        let closure = workspace_closure(&meta);
+        assert_eq!(
+            process_group_problems(&policy, &names, &closure),
+            Vec::<String>::new()
+        );
+        let mut crossed = closure;
+        crossed
+            .get_mut("mandate-api")
+            .context("mandate-api is a member")?
+            .insert("mandate-executor".to_owned());
+        assert_eq!(
+            process_group_problems(&policy, &names, &crossed),
+            [
+                "`mandate-api` (workspace services) reaches `mandate-executor` (agent process); \
+                 workspace services and agent processes meet only in the journal (E21-42, DEC-986)"
+            ]
         );
         Ok(())
     }
@@ -11746,7 +12101,7 @@ mod tests {
     /// is CI's own `schema-mutants` job, guarded like the others against drafts, capped at ten
     /// minutes (DEC-464), and needed by the required `full` verdict, which fails on any result of
     /// it but success while every other job passed: the matrix's result, a success only when every
-    /// one of its three shards succeeded. Each shard runs the sweep only after all three checkers
+    /// one of its six shards succeeded. Each shard runs the sweep only after all three checkers
     /// pass on the unmutated tree: a checker failing there fails the job and runs no mutant.
     #[test]
     fn the_workspace_api_schema_jobs_gate_full() -> Result<()> {
@@ -11813,7 +12168,7 @@ mod tests {
             "if: ${{ !github.event.pull_request.draft }}",
             "timeout-minutes: 10",
             "fail-fast: false",
-            "shard: [\"0/3\", \"1/3\", \"2/3\"]",
+            "shard: [\"0/6\", \"1/6\", \"2/6\", \"3/6\", \"4/6\", \"5/6\"]",
             shard_env.as_str(),
             "run: cargo xtask ci schema-mutants",
         ] {
@@ -12347,10 +12702,10 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            10,
+            11,
             "one checkout in each source-reading job: `fast-lint`, `fast-test`, `fast-pending`, \
              `fast-python`, `fast-portable`, `fast-rh-sim-live`, `full-checks`, the mutation \
-             plan, the mutants matrix, and `schema-mutants`"
+             plan, the mutants matrix, `schema-mutants`, and `cell`"
         );
         for checkout in checkouts {
             assert!(

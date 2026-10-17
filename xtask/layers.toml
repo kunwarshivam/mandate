@@ -41,7 +41,9 @@
 #   3  mandate-spec, and mandate-push-relay, the web-push relay's pure core (E8-14 S8b, DEC-724):
 #      above mandate-webpush, whose endpoint parser it shares, and mandate-notify, whose canary scan
 #      its tests use, and kept off the journal and every trading crate (NT-3, NT-9; raised from
-#      layer 2 by DEC-713)
+#      layer 2 by DEC-713); and mandate-process, the lifecycle every long-running process shares
+#      (E21-28, DEC-994): above mandate-journal, whose `Fenced` outcome it reads, and below every
+#      process crate that imports it
 #   4  mandate-dispatcher, the notification process (E8-10, E8-14, DEC-701 item 2): above
 #      mandate-journal, whose notice stream it alone appends to, and above mandate-push-relay, whose
 #      request it builds (raised from layer 3 by DEC-713); its forbidden_internal list names every
@@ -52,7 +54,7 @@
 #      (read-only audit reads over the journal, scoped to one workspace; E12-6), raised from layer
 #      3 by DEC-785 so that E12-3's verification run can use mandate-journal-cold's (layer 3)
 #      verify_tsa and SegmentManifest rather than reimplement them
-#   5  mandate-builder
+#   5  mandate-builder; mandate-research-run, the research worker (E19-2, DEC-431 item 20, DEC-996)
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
 #      mandate-runtime, mandate-mcp
 #   7  mandate-alpaca, mandate-robinhood, mandate-backtest. `mandate-alpaca` is an adapter over the core (ES-02's
@@ -67,6 +69,9 @@
 #      quant model host (E15-13, DEC-503 item 2), beside the shell so that neither can depend on
 #      the other: the shell cannot run a model, and the host cannot reach sizing, the gate, the
 #      journal, the executor or the connector
+#   8  mandate-telemetry, metrics through the OpenTelemetry API and a Prometheus pull exporter
+#      (E21-3, DEC-980): no workspace dependency, and its allowed_dependents list names only process
+#      binaries, so no core crate can record a metric or read one (OPS-11)
 #   9  mandate-agentd, the long-running agent process (E21-2, DEC-968), beside mandate-paper and
 #      kept from reaching it; mandate-paper, the paper adapter (E7-19 slice 5, DEC-503 item 2): the only crate that sees
 #      both the host and the shell, and mandate-cli (DEC-525): above the model host, so `model register` takes the content object and
@@ -82,12 +87,45 @@
 #      which its tests drive
 #   tool  mandate-refcases, xtask
 
-impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
+impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom", "opentelemetry", "opentelemetry_sdk", "opentelemetry-prometheus", "prometheus"]
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
 planned = [
+    "mandate-cp-agent",
+    "mandate-cp-site",
     "mandate-identity-seal",
     "mandate-identity-testkit",
+]
+
+# The two sides of a workspace deployment, which meet only in the journal (E21-42, DEC-986;
+# journal spec §2; DEC-17). No crate in one list may reach a crate in the other, directly or
+# through any chain of path dependencies of any kind (normal, dev, build), so no workspace service
+# can call into a runtime's host, an executor or a connector, and no agent process can call a
+# workspace service: every fact crosses as a journaled event. Each name is a workspace member or in
+# `planned`, and no crate is in both. A crate in neither list is a shared library (the journal, the
+# pure cores, the runtime's and the model host's pure decision code, connections, storage) or a
+# tool. A new crate that is a workspace service or an agent process joins its list in the change
+# that creates it.
+#
+# `mandate-cli` is Phase 1's workspace control services (infrastructure design §3.1).
+# `mandate-mcp` is the broker connectors' MCP client, used only inside the executor's connectors.
+[process_groups]
+workspace_services = [
+    "mandate-api",
+    "mandate-audit",
+    "mandate-cli",
+    "mandate-cp-agent",
+    "mandate-cp-site",
+    "mandate-dispatcher",
+]
+agent_process = [
+    "mandate-agentd",
+    "mandate-alpaca",
+    "mandate-executor",
+    "mandate-mcp",
+    "mandate-paper",
+    "mandate-robinhood",
+    "mandate-shell",
 ]
 
 [crates.xtask]
@@ -161,6 +199,15 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 forbidden_internal = ["mandate-journal", "mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-mcp", "mandate-cli", "mandate-paper", "mandate-risk", "mandate-approval"]
+
+# The process lifecycle core (E21-28, DEC-994): a pure fold over injected inputs and time, and the
+# probe answers. Its one I/O is the probe socket, std only, reading no clock. Layer 3 keeps it below
+# every process crate and every trading crate.
+[crates.mandate-process]
+layer = 3
+safety_critical = true
+pure = true
+allowed_external = []
 
 # The notification dispatcher (E8-10, E8-14, DEC-701): a process crate, above mandate-journal. It
 # may never reach a crate that writes an agent, account, or control stream: the runtime, the
@@ -295,6 +342,17 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The agent harness's research worker (agent harness spec §4, E19-2, E19-3; DEC-431 item 20,
+# DEC-996): the retrieval plan, read-only reader ports, the gateway port, and the strict output
+# parse. Layer 5, below mandate-runtime, so it can never name `IntentSink` (HI-1); and kept off
+# every journal crate, so the runtime core stays the agent stream's one writer (HI-16).
+[crates.mandate-research-run]
+layer = 5
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+forbidden_internal = ["mandate-journal", "mandate-journal-pg", "mandate-journal-cold", "mandate-artifacts-fs"]
+
 [crates.mandate-sim]
 layer = 6
 safety_critical = true
@@ -394,6 +452,16 @@ allowed_external = ["thiserror"]
 # the journal's fencing lease, beside the paper adapter and above the shell whose stages it hosts.
 # It may never reach the paper adapter, the one crate that may declare `live`, so no live build of
 # it exists, nor the founder's CLI.
+# Metrics through the OpenTelemetry API with a Prometheus pull exporter (E21-3, infrastructure
+# design §8.1, DEC-980). Telemetry is never an input to a decision (OPS-11): only the process
+# binaries that host a cycle may depend on it, each recording after a call returns. The OpenTelemetry
+# and Prometheus crates are impure, so no pure crate can take them directly either.
+[crates.mandate-telemetry]
+layer = 8
+safety_critical = false
+pure = false
+allowed_dependents = ["mandate-agentd"]
+
 [crates.mandate-agentd]
 layer = 9
 safety_critical = true

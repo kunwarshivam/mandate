@@ -1,0 +1,84 @@
+{{- /*
+The cell's one ingress (DEC-967 item 6): a cloudflared pod that dials out to Cloudflare's tunnel
+edge, so the cluster exposes no port: no Service, no NodePort, no LoadBalancer. Off unless
+`ingress.cloudflared.enabled`; the local cell has no tunnel. The tunnel token is a mounted file
+from a Secret the operator makes, never a value (DEC-822 item 4). It reaches the edge's CIDRs on
+port 7844 and DNS; the workspace API server's route joins when lane A1 lands.
+*/ -}}
+{{- define "mandate.cloudflaredProcess" -}}
+{{- dict "name" "cloudflared" "colocate" false "egress" (list) "db_role" "" "guaranteed" false "resources" (dict "limits" (dict "cpu" "200m" "memory" "128Mi") "requests" (dict "cpu" "100m" "memory" "64Mi")) | toJson -}}
+{{- end -}}
+{{- define "mandate.cloudflared" -}}
+{{- $c := .root.Values.ingress.cloudflared -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "mandate.selector" . | nindent 6 }}
+  template:
+    {{- $mounts := "- {name: tunnel, mountPath: /run/secrets/tunnel, readOnly: true}" }}
+    {{- $container := printf `- name: cloudflared
+  image: %q
+  imagePullPolicy: IfNotPresent
+  args: ["tunnel", "--metrics", "127.0.0.1:20241", "run", "--token-file", "/run/secrets/tunnel/token"]
+  env:
+    - {name: HOME, value: /tmp}
+  securityContext:
+%s
+  resources:
+%s
+  volumeMounts:
+    - {name: tmp, mountPath: /tmp}
+%s` $c.image (include "mandate.containerSecurity" . | indent 4) (include "mandate.resources" . | indent 4) ($mounts | indent 4) }}
+    {{- $volumes := printf "- {name: tunnel, secret: {secretName: %q, defaultMode: 288, items: [{key: token, path: token}]}}" $c.tokenFrom }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container "volumes" $volumes) | nindent 4 }}
+{{- end -}}
+{{- define "mandate.cloudflaredPolicy" -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-cloudflared
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mandate.selector" . | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .root.Values.egress.dns.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .root.Values.egress.dns.podSelector | nindent 14 }}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    {{- with .root.Values.ingress.cloudflared.edge }}
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: 7844}
+        - {protocol: UDP, port: 7844}
+    {{- end }}
+{{- end -}}
+{{- if .Values.ingress.cloudflared.enabled }}
+{{- $ctx := dict "root" . "p" (include "mandate.cloudflaredProcess" . | fromJson) }}
+---
+{{ include "mandate.emit" (include "mandate.cloudflared" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.cloudflaredPolicy" $ctx) }}
+{{- end }}
