@@ -43,9 +43,10 @@ use mandate_time::UtcNanos;
 use mandate_webpush::{
     PushAllowlist, PushRequest, SecureRandom, VapidSigner, VapidSubject, WebPushError,
 };
+use ring::digest::{SHA256, digest};
 use ring::rand::SystemRandom;
-use ring::signature::EcdsaKeyPair;
-use secrecy::{SecretSlice, SecretString};
+use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair};
+use secrecy::{ExposeSecret, SecretSlice, SecretString};
 
 use crate::DispatchError;
 
@@ -162,15 +163,22 @@ pub struct Ports {
 
 /// One VAPID key, held in this process's memory as `ring`'s key pair and signing with
 /// `ECDSA_P256_SHA256_FIXED_SIGNING` (DEC-2503 items 3 and 4). No `Debug`: it holds a key.
-#[allow(
-    dead_code,
-    reason = "the tests PR's stubs build and read no signer; the implementation does (DEC-77, E8-10 D10b)"
-)]
 pub struct RingVapidSigner {
     key_id: KeyId,
+    public: [u8; UNCOMPRESSED_POINT_LEN],
     pair: EcdsaKeyPair,
     random: SystemRandom,
 }
+
+/// The length of an uncompressed P-256 point: `0x04`, then `x` and `y`, 32 bytes each.
+const UNCOMPRESSED_POINT_LEN: usize = 65;
+
+/// The length of a fixed ES256 signature, `r || s`, 32 bytes each.
+const FIXED_SIGNATURE_LEN: usize = 64;
+
+/// How many leading bytes of the public point's SHA-256 a key id writes: 16 hex digits
+/// (DEC-2503 item 1).
+const KEY_ID_DIGEST_BYTES: usize = 8;
 
 impl RingVapidSigner {
     /// The signer of the PKCS #8 document the vault holds, whose bytes are dropped once parsed; its
@@ -180,8 +188,24 @@ impl RingVapidSigner {
     /// [`DispatchError::WebPush`] with [`WebPushError::Signer`] for a document that is not a P-256
     /// key; it holds nothing of the document.
     pub fn from_pkcs8(pkcs8: SecretSlice<u8>) -> Result<Self, DispatchError> {
-        let _ = pkcs8;
-        Err(DispatchError::Unimplemented { story: "E8-10" })
+        let random = SystemRandom::new();
+        let pair = EcdsaKeyPair::from_pkcs8(
+            &ECDSA_P256_SHA256_FIXED_SIGNING,
+            pkcs8.expose_secret(),
+            &random,
+        )
+        .map_err(|_| DispatchError::WebPush(WebPushError::Signer))?;
+        let public: [u8; UNCOMPRESSED_POINT_LEN] = pair
+            .public_key()
+            .as_ref()
+            .try_into()
+            .map_err(|_| DispatchError::WebPush(WebPushError::Signer))?;
+        Ok(Self {
+            key_id: key_id_of(&public),
+            public,
+            pair,
+            random,
+        })
     }
 
     /// The key's id (DEC-2503 item 1).
@@ -189,24 +213,39 @@ impl RingVapidSigner {
     /// # Errors
     /// Never, once built.
     pub fn key_id(&self) -> Result<&KeyId, DispatchError> {
-        Err(DispatchError::Unimplemented { story: "E8-10" })
+        Ok(&self.key_id)
     }
+}
+
+/// The first 16 lowercase hex digits of the SHA-256 of `public` (DEC-2503 item 1).
+fn key_id_of(public: &[u8]) -> KeyId {
+    let hash = digest(&SHA256, public);
+    let id: String = hash
+        .as_ref()
+        .iter()
+        .take(KEY_ID_DIGEST_BYTES)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    KeyId(id)
 }
 
 impl VapidSigner for RingVapidSigner {
     /// The key's uncompressed public point.
-    #[allow(
-        clippy::todo,
-        reason = "an infallible stub's one allowed body, DEC-137's `todo!()`, until the implementation (DEC-77, E8-10 D10b)"
-    )]
     fn public_key(&self) -> [u8; 65] {
-        todo!()
+        self.public
     }
 
     /// An ES256 `r || s` over `message`, from `ring` with the process's secure random source.
     fn sign_es256(&self, message: &[u8]) -> Result<[u8; 64], WebPushError> {
-        let _ = message;
-        Err(WebPushError::Unimplemented { story: "E8-10" })
+        let signature = self
+            .pair
+            .sign(&self.random, message)
+            .map_err(|_| WebPushError::Signer)?;
+        let fixed: [u8; FIXED_SIGNATURE_LEN] = signature
+            .as_ref()
+            .try_into()
+            .map_err(|_| WebPushError::Signer)?;
+        Ok(fixed)
     }
 }
 

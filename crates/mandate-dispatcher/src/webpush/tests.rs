@@ -1076,7 +1076,6 @@ fn any_status_and_vault_answer_maps_by_the_decisions_and_prints_no_secret() -> C
 /// SHA-256 of its public point, and signs ES256 `r || s` that verifies on the RustCrypto side; a
 /// document that is not such a key is refused with the closed `Signer` code, holding none of it.
 #[test]
-#[ignore = "pending E8-10"]
 fn the_ring_signer_signs_es256_and_names_its_key_by_its_public_point() -> Checked {
     let document =
         EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &SystemRandom::new())
