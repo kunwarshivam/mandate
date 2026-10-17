@@ -1,7 +1,8 @@
 # The backtest runner and the record command (E4-5)
 
 - **Spec:** DEC-1144 (the runner stores artifacts only, the CLI re-checks them and journals
-  `BacktestRunRecorded` as the `backtest_runner` system; the input format), DEC-1141 (the
+  `BacktestRunRecorded` as the `backtest_runner` system; the input format; the store root from `--store` or `MANDATE_ARTIFACTS`, the cell's
+  shared store of #1578, or `artifacts_unset`), DEC-1141 (the
   record's writers), DEC-1000 (a workspace service runs the backtest through the journal, never by
   linking it), DEC-986 (the process groups); `docs/specs/journal.md` §9.18 rules 143 and 144,
   §6.3; backlog E4-4, E4-5.
