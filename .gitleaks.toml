@@ -91,3 +91,16 @@ condition = "AND"
 paths = ['''^deploy/tests/test_invariants\.py$''']
 regexTarget = "match"
 regexes = ['''^[a-z-]+\.service", "[A-Za-z]+=(?:[A-Za-z0-9]*"|\\n)$''']
+
+# The API server's process test names its workspace and organization settings beside their
+# ULIDs (`MANDATE_API_WORKSPACE` contains "api"), which the generic key heuristic reads as a key
+# assignment (E21-31, DEC-978 item 8). A ULID is an opaque public identifier. Allowed only in that
+# test file and only in the `MANDATE_API_(WORKSPACE|ORG)", "<ULID>"` shape, so any other value
+# there, and the same text anywhere else, is still reported.
+[[allowlists]]
+description = "Workspace and organization ULID settings in the API server's process test"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^crates/mandate-api-server/tests/process\.rs$''']
+regexTarget = "match"
+regexes = ['''^MANDATE_API_(?:WORKSPACE|ORG)", "[0-7][0-9A-HJKMNP-TV-Z]{25}"$''']
