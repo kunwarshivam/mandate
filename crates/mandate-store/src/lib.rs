@@ -1,4 +1,20 @@
-//! The journal port the scheduler writes through, over the in-memory journal and Postgres.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::float_arithmetic,
+    clippy::float_cmp,
+    clippy::as_conversions
+)]
+//! The journal port a long-running process writes through (journal spec §5.1): it takes a newer
+//! writer epoch on its own stream, reads every stream it follows, and appends under its epoch,
+//! over the in-memory journal (tests and fixtures, shared by every process of one run) and
+//! Postgres. The scheduler (E21-29) and the runtime and executor processes (E21-30) share it
+//! (DEC-1012).
+
+pub mod envelope;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -8,10 +24,10 @@ use mandate_journal_pg::PgJournal;
 use mandate_time::UtcNanos;
 use tokio::runtime::Runtime;
 
-/// The three calls the scheduler makes on its stream (journal spec §5.1).
-pub trait ClockStore {
+/// The three calls a writer makes (journal spec §5.1).
+pub trait Store {
     /// Takes a newer writer epoch, fencing every earlier writer. `None` when the store cannot
-    /// answer, which the scheduler reads as not holding the stream (`AGENTS.md` rule 3).
+    /// answer, which a writer reads as not holding the stream (`AGENTS.md` rule 3).
     fn take_ownership(&mut self, stream: &StreamId) -> Option<u64>;
 
     /// The stream's records, verified from its first. `None` when the store cannot answer.
@@ -28,12 +44,12 @@ pub trait ClockStore {
     ) -> AppendOutcome;
 }
 
-/// One in-memory journal shared by every scheduler of a test or fixture run, so two can contend
+/// One in-memory journal shared by every process of a test or fixture run, so two can contend
 /// for one stream.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryStore(pub Rc<RefCell<MemoryJournal>>);
 
-impl ClockStore for MemoryStore {
+impl Store for MemoryStore {
     fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
         Some(self.0.borrow_mut().take_ownership(stream))
     }
@@ -57,7 +73,7 @@ impl ClockStore for MemoryStore {
     }
 }
 
-/// The Postgres journal, driven from the scheduler's one thread on a current-thread runtime.
+/// The Postgres journal, driven from the writer's one thread on a current-thread runtime.
 pub struct PgStore {
     journal: PgJournal,
     runtime: Runtime,
@@ -82,7 +98,7 @@ impl PgStore {
     }
 }
 
-impl ClockStore for PgStore {
+impl Store for PgStore {
     fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
         self.runtime
             .block_on(self.journal.take_ownership(stream))

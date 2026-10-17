@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { BacktestReportScreen } from "@/components/backtest/backtest-report";
 import { MessagesScreen } from "@/components/messages/messages-screen";
 import { NewAgentFlow } from "@/components/new-agent/new-agent-flow";
 import { AlertsScreen, RegistryScreen, SectionIndexScreen } from "@/components/screens/account-screens";
@@ -11,7 +12,7 @@ import { WorkspaceGate } from "@/components/screens/common";
 import { DashboardScreen } from "@/components/screens/dashboard";
 import { PositionsScreen } from "@/components/screens/positions-screen";
 import { StopRecordScreen } from "@/components/stop/record-screen";
-import { AGENT_ID, APPROVAL_ID, ASSET_ID, CONNECTION_ID, EVENT_ID, ORDER_ID } from "@/lib/ids";
+import { AGENT_ID, APPROVAL_ID, ASSET_ID, BACKTEST_ID, CONNECTION_ID, EVENT_ID, ORDER_ID } from "@/lib/ids";
 import { type AgentRecord, SECTION_INDEX, findAgentRecord, findAgentSection, findScreen } from "@/lib/screens";
 
 const RECORD_ID: Record<AgentRecord["kind"], RegExp> = {
@@ -64,6 +65,8 @@ export function demoScreen(href: string): ReactNode | null {
     case "approvals":
       if (second === undefined) return <ApprovalsInboxScreen />;
       return rest.length === 0 && APPROVAL_ID.test(second) ? <ApprovalRequestScreen approvalId={second} /> : null;
+    case "backtests":
+      return second !== undefined && rest.length === 0 && BACKTEST_ID.test(second) ? <BacktestReportScreen backtestId={second} /> : null;
     case "positions":
       return second === undefined ? <PositionsScreen /> : null;
     case "alerts":

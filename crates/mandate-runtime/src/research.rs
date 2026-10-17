@@ -91,13 +91,22 @@ pub trait RecordCatalog {
     fn registers(&self, record: ResearchRecord) -> bool;
 }
 
-/// `mandate-journal`'s catalogue as of this change: it registers neither record, so no research
-/// run starts in any deployment until E19-5 and E15-8 register them and change this answer.
+/// `mandate-journal`'s own catalogue. The candidates' verdicts are registered once the agent
+/// stream's `ModelInvocationRecorded` is closed with its `verdicts` (journal spec §9.19, E15-8); no
+/// invalidation verdict is registered until E19-5 adds the record, so no research run starts in any
+/// deployment until then.
 pub struct JournalCatalog;
 
 impl RecordCatalog for JournalCatalog {
-    fn registers(&self, _record: ResearchRecord) -> bool {
-        false
+    fn registers(&self, record: ResearchRecord) -> bool {
+        match record {
+            ResearchRecord::CandidateVerdicts => mandate_journal::closes(
+                "ModelInvocationRecorded",
+                1,
+                mandate_journal::StreamType::Agent,
+            ),
+            ResearchRecord::InvalidationVerdict => false,
+        }
     }
 }
 
