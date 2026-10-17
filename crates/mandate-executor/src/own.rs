@@ -183,14 +183,16 @@ fn mismatch(id: &ClientOrderId, reason: &'static str) -> ExecutorError {
 /// average buy price. On a ledger flat in the instrument, that average is exactly the price of
 /// what the one order filled, so the fill is read from the two, and from nothing else:
 ///
-/// - the order is one of ours, a buy that adds risk, sent `day` (so it filled on the New York
-///   date of its `OrderSubmitted`, which is the fill's trade date), whose broker record reported
-///   a filled quantity above zero and no more than its own quantity, and none of which is booked;
+/// - the order is one of ours, a buy that adds risk, sent `day` in the regular session (so it
+///   filled on the New York date of its `OrderSubmitted`, which is the fill's trade date), whose
+///   broker record reported a filled quantity above zero and no more than its own quantity, and
+///   none of which is booked;
 /// - the ledger holds the instrument flat, with no unattributed fill in it, and every other order
 ///   in the instrument has booked all its broker record reported, so no other fill can be in the
 ///   average;
-/// - the broker lists exactly one position in the instrument, and it is long exactly the reported
-///   quantity.
+/// - the broker lists exactly one position in the instrument, long exactly the reported
+///   quantity, at an average no higher than the order's limit, which no fill of it can exceed: an
+///   average above it describes something else.
 ///
 /// Anything else derives nothing: no record of a fill means no fill, the position stays
 /// unexplained, and the reconciliation pauses the agent as before (`AGENTS.md` rule 3). The fill
@@ -219,6 +221,7 @@ fn recorded_fill(
     let entry = order.side == Side::Buy
         && order.purpose.adds_risk()
         && request.tif == TimeInForce::Day
+        && !request.extended_hours
         && order.filled_qty.is_zero()
         && reported <= order.qty;
     let flat = state
@@ -247,7 +250,10 @@ fn recorded_fill(
     let (Some(position), None) = (held.next(), held.next()) else {
         return None;
     };
-    if position.qty != SignedQty::from(reported) {
+    let within_limit = request
+        .limit_price
+        .is_some_and(|limit| position.avg_entry_price <= limit);
+    if position.qty != SignedQty::from(reported) || !within_limit {
         return None;
     }
     let submitted = UtcNanos::from_parts(detail.submitted_at?.secs(), 0).ok()?;
