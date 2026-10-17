@@ -91,8 +91,9 @@ pub enum MigrateError {
     /// The database could not be reached, or a statement other than a migration's failed.
     #[error("the journal database is unavailable")]
     Unavailable(#[source] sqlx::Error),
-    /// The connecting role lacks a privilege the run needs before any migration: to create a
-    /// missing role, or the schema (SQLSTATE 42501).
+    /// The connecting role lacks a privilege the run needs outside a migration's own SQL: to create
+    /// a missing role or the schema, to read `deploy.migrations`, or to keep the ledger (SQLSTATE
+    /// 42501). A migration's own denial is [`MigrateError::Failed`].
     #[error("the connecting role lacks a privilege the run needs (SQLSTATE 42501)")]
     PrivilegeMissing,
     /// The connecting role cannot act as [`OWNER_ROLE`].
@@ -232,8 +233,8 @@ pub async fn migrate_dsn(dsn: &str, schema: &str) -> Result<MigrationReport, Mig
 ///
 /// # Errors
 /// [`MigrateError::SchemaInvalid`] before connecting; then, each having changed nothing,
-/// [`MigrateError::PrivilegeMissing`], [`MigrateError::OwnerRoleNotHeld`], [`MigrateError::SchemaNotOwned`],
-/// [`MigrateError::SchemaUnrecorded`], a ledger refusal of [`applied_prefix`],
+/// [`MigrateError::PrivilegeMissing`], [`MigrateError::OwnerRoleNotHeld`],
+/// [`MigrateError::SchemaNotOwned`], [`MigrateError::SchemaUnrecorded`], a ledger refusal of [`applied_prefix`],
 /// [`MigrateError::Failed`] for a migration whose SQL fails, or [`MigrateError::Unavailable`].
 pub async fn migrate_known(
     pool: &PgPool,
