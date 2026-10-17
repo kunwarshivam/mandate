@@ -15,7 +15,7 @@
   credential guard is `.github/scripts/no-credentials.sh`, DEC-964),
   `xtask/layers.toml` (crate layers and safety-critical policy, and its `[process_groups]` table,
   which `process_group_problems` checks: no workspace-services crate reaches an agent-process
-  crate or the reverse, E21-42, DEC-980), `.cargo/mutants.toml` (approved
+  crate or the reverse, E21-42, DEC-986), `.cargo/mutants.toml` (approved
   equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.
 - **Run:** `cargo xtask check`.

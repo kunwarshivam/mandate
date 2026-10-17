@@ -90,7 +90,7 @@ planned = [
     "mandate-identity-testkit",
 ]
 
-# The two sides of a workspace deployment, which meet only in the journal (E21-42, DEC-980;
+# The two sides of a workspace deployment, which meet only in the journal (E21-42, DEC-986;
 # journal spec §2; DEC-17). No crate in one list may reach a crate in the other, directly or
 # through any chain of path dependencies of any kind (normal, dev, build), so no workspace service
 # can call into a runtime's host, an executor or a connector, and no agent process can call a

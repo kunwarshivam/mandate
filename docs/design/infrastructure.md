@@ -167,7 +167,7 @@ each other's events through journal tailing with Postgres `LISTEN`/`NOTIFY` as a
 (DEC-17); a lost notification costs latency, not correctness.
 
 **Workspace services and agent processes meet only in the journal** (E21-42,
-[DEC-980](../project/decisions/DEC-980.md)). Workspace services (the control services, the API,
+[DEC-986](../project/decisions/DEC-986.md)). Workspace services (the control services, the API,
 the dispatcher, `cp-agent`) never call a runtime, an executor, a connector or the scheduler, and
 agent processes never call a workspace service. Exactly three channels connect processes in a
 workspace deployment: the journal (appends under each stream's single writer, read by tailing),
