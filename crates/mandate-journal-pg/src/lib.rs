@@ -15,7 +15,7 @@
 //! serialize and can neither fork the chain nor reuse a `seq`.
 //!
 //! The database enforces the rest itself, through the forward-only migrations in `migrations/`
-//! applied by [`migrator`] under [`OWNER_ROLE`]: the body is `bytea` with
+//! applied by [`migrate()`] under [`OWNER_ROLE`]: the body is `bytea` with
 //! `CHECK (hash = sha256(body))`, every event links to its predecessor, heads only advance, and the
 //! event tables reject UPDATE, DELETE, and TRUNCATE by both privilege ([`APP_ROLE`] has INSERT and
 //! SELECT) and trigger. Every read re-checks the stored bytes (§11 checks 1 to 5) before returning
@@ -30,46 +30,24 @@ use mandate_journal::{
     verify_events,
 };
 use mandate_time::UtcNanos;
-use sqlx::migrate::{Migration, MigrationType, Migrator};
 use sqlx::postgres::{PgDatabaseError, PgPoolOptions, PgRow, PgSeverity};
-use sqlx::{PgPool, Postgres, Row, SqlSafeStr, Transaction};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 
-/// The migration-only role that owns the journal tables (journal spec §6.1). Deployments create it
-/// before the first migration; no application connects as it.
+pub mod migrate;
+
+pub use migrate::{
+    MigrateError, Migration, MigrationReport, Recorded, applied_prefix, migrate, migrate_known,
+    migrations,
+};
+
+/// The migration-only role that owns the journal tables (journal spec §6.1). [`migrate()`] creates
+/// it `NOLOGIN` when it is missing; no application connects as it.
 pub const OWNER_ROLE: &str = "mandate_journal_owner";
 
 /// The application role: INSERT and SELECT on `events` and `event_ids`, and on `stream_heads` the
-/// UPDATE that advances a head or takes ownership. Deployments create it before the first
-/// migration, which grants it exactly these privileges.
+/// UPDATE that advances a head or takes ownership. [`migrate()`] creates it `NOLOGIN` when it is
+/// missing, and the first migration grants it exactly these privileges.
 pub const APP_ROLE: &str = "mandate_journal_app";
-
-/// `migrations/`, in order. A new migration is a new file and a new entry, never an edit.
-const MIGRATIONS: [(i64, &str, &str); 1] = [(
-    1,
-    "journal",
-    include_str!("../../../migrations/0001_journal.sql"),
-)];
-
-/// The journal schema's migrations, embedded at build time: versioned, forward-only (no down
-/// migrations), and applied only by the migration command under [`OWNER_ROLE`], never at startup
-/// (ADR-0001 ES-08). Running it again is a no-op; a changed or unknown applied migration is an
-/// error.
-pub fn migrator() -> Migrator {
-    Migrator::with_migrations(
-        MIGRATIONS
-            .iter()
-            .map(|&(version, description, sql)| {
-                Migration::new(
-                    version,
-                    description.into(),
-                    MigrationType::Simple,
-                    sql.into_sql_str(),
-                    false,
-                )
-            })
-            .collect(),
-    )
-}
 
 /// Stored bytes failed re-verification on read: something changed the database outside the append
 /// path. Nothing is repaired in place (journal spec §11); the caller treats it as an integrity
