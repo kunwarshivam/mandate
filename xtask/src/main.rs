@@ -33,7 +33,9 @@ commands:
   markers               check for debt markers and #[ignore] without a pending story
   feature-map [--index] check the verification skill's feature map against the workspace, or
                         list its feature files and titles
-  deps                  check every direct dependency against docs/dependencies.md
+  deps [--used-by]      check every direct dependency against docs/dependencies.md, or list
+                        each cargo dependency with the crates that use it
+  decisions             check that no two decision files take one DEC number
   live-feature          check that only the runner may build `live`, and CI only compiles it or
                         tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
@@ -56,19 +58,19 @@ commands:
 /// CI runs `fast`'s parts in parallel jobs, `test` split into [`TEST_PARTS`] and its nextest run
 /// partitioned, and its required `fast` verdict is an aggregate over them (DEC-871); `cargo xtask
 /// ci fast` still runs this whole group unsharded. `portable` runs on macOS in CI (DEC-954).
-const FAST_JOB: [&str; 5] = ["lint", "test", "pending", "spec-guard", "portable"];
+const FAST_JOB: &[&str] = &["lint", "test", "pending", "spec-guard", "portable"];
 /// The parts of `test`, in the order `cargo xtask ci test` runs them: the workspace's nextest run,
 /// its doctests, the `rh-sim` rehearsal build's tests (DEC-922), and the Python tests. CI runs
 /// them in separate jobs (DEC-871).
-const TEST_PARTS: [&str; 4] = ["test-nextest", "test-doc", "test-rh-sim", "test-python"];
-const FULL_JOB: [&str; 5] = [
+const TEST_PARTS: &[&str] = &["test-nextest", "test-doc", "test-rh-sim", "test-python"];
+const FULL_JOB: &[&str] = &[
     "refcases",
     "reference",
     "schemas",
     "supply-chain",
     "postgres",
 ];
-const PR_JOBS: [&str; 13] = [
+const PR_JOBS: &[&str] = &[
     "lint",
     "test",
     "pending",
@@ -195,6 +197,8 @@ fn run() -> Result<()> {
         ["feature-map"] => feature_map(),
         ["feature-map", "--index"] => feature_map_index(),
         ["deps"] => deps(),
+        ["deps", "--used-by"] => deps_used_by(),
+        ["decisions"] => decision_numbers(Path::new(".")),
         ["live-feature"] => live_feature_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
@@ -575,6 +579,7 @@ fn workspace_lint() -> Result<()> {
         ],
     )?;
     layers()?;
+    decision_numbers(Path::new("."))?;
     markers()?;
     proptest_seeds()?;
     feature_map()?;
@@ -1097,15 +1102,42 @@ fn layers() -> Result<()> {
     eprintln!("    layers: checking xtask/layers.toml against cargo metadata");
     let policy: Layers = toml::from_str(&fs::read_to_string("xtask/layers.toml")?)
         .context("parsing xtask/layers.toml")?;
-    report(layer_problems(&policy, &metadata()?)?, "layers")
+    let mut problems = layer_problems(&policy, &metadata()?)?;
+    problems.extend(codeowners_problems(
+        &fs::read_to_string("CODEOWNERS").context("reading CODEOWNERS")?,
+        &policy,
+    ));
+    report(problems, "layers")
 }
 
 /// Every way the CODEOWNERS text `text` breaks `policy` (ADR-0001 ES-13, DEC-2600 item 5): a
 /// safety-critical crate with no `/crates/<name>/` line, and crate lines out of sorted order, which
 /// would send two PRs adding two crates to the same place in the file.
 fn codeowners_problems(text: &str, policy: &Layers) -> Vec<String> {
-    let _ = (text, policy);
-    Vec::new()
+    let lines: Vec<&str> = text
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|path| path.starts_with("/crates/"))
+        .collect();
+    let mut problems = Vec::new();
+    for (name, own) in &policy.crates {
+        let path = format!("/crates/{name}/");
+        if own.safety_critical && !lines.contains(&path.as_str()) {
+            problems.push(format!(
+                "safety-critical crate `{name}` has no `{path}` line in CODEOWNERS"
+            ));
+        }
+    }
+    for pair in lines.windows(2) {
+        if let [before, after] = pair
+            && after < before
+        {
+            problems.push(format!(
+                "CODEOWNERS: `{after}` must come before `{before}`; keep the crate lines sorted"
+            ));
+        }
+    }
+    problems
 }
 
 /// Every way the workspace in `meta` breaks `policy`.
@@ -1321,20 +1353,12 @@ fn process_group_problems(
     problems
 }
 
-/// Rows of `docs/dependencies.md` shaped `| `name` | ecosystem | ...`.
-fn registry() -> Result<BTreeSet<(String, String)>> {
-    let text =
-        fs::read_to_string("docs/dependencies.md").context("reading docs/dependencies.md")?;
-    let mut entries = BTreeSet::new();
-    for line in text.lines() {
-        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
-        if let [_, name, ecosystem, ..] = cells.as_slice()
-            && let Some(name) = name.strip_prefix('`').and_then(|n| n.strip_suffix('`'))
-        {
-            entries.insert((ecosystem.to_string(), name.to_string()));
-        }
-    }
-    Ok(entries)
+/// The `(ecosystem, name)` of every row of the registry text `text`.
+fn registry(text: &str) -> BTreeSet<(String, String)> {
+    registry_rows(text)
+        .into_iter()
+        .map(|row| (row.ecosystem, row.name))
+        .collect()
 }
 
 /// What a cargo row's "Used by" cell says (DEC-2600 item 4): the crates are derived from `cargo
@@ -1350,23 +1374,95 @@ struct RegistryRow {
 
 /// The rows of the registry text `text` shaped `| `name` | ecosystem | used by | ...`.
 fn registry_rows(text: &str) -> Vec<RegistryRow> {
-    let _ = text;
-    Vec::new()
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+        if let [_, name, ecosystem, used_by, ..] = cells.as_slice()
+            && let Some(name) = name.strip_prefix('`').and_then(|n| n.strip_suffix('`'))
+        {
+            rows.push(RegistryRow {
+                name: name.to_owned(),
+                ecosystem: (*ecosystem).to_owned(),
+                used_by: (*used_by).to_owned(),
+            });
+        }
+    }
+    rows
 }
 
 /// Every way the registry text `text` breaks its shape (DEC-2600 item 4): a name registered twice
 /// in one ecosystem, which a union merge of two edits to one row would leave, and a cargo row whose
 /// "Used by" cell is not [`USED_BY_DERIVED`].
 fn registry_problems(text: &str) -> Vec<String> {
-    let _ = registry_rows(text);
-    Vec::new()
+    let mut counts: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    let rows = registry_rows(text);
+    let mut problems = Vec::new();
+    for row in &rows {
+        *counts.entry((&row.ecosystem, &row.name)).or_default() += 1;
+        if row.ecosystem == "cargo" && row.used_by != USED_BY_DERIVED {
+            problems.push(format!(
+                "cargo dependency `{}`'s Used by cell must be {USED_BY_DERIVED}, which derives it \
+                 from cargo metadata, not a hand-kept list",
+                row.name
+            ));
+        }
+    }
+    for ((ecosystem, name), count) in counts {
+        if count > 1 {
+            problems.push(format!(
+                "{ecosystem} dependency `{name}` has {count} rows; keep one"
+            ));
+        }
+    }
+    problems
 }
 
 /// Each external cargo dependency of the workspace in `meta` with the workspace crates that use
 /// it, a crate that uses it only as a dev- or build-dependency marked `(dev)` or `(build)`.
 fn used_by(meta: &Metadata) -> BTreeMap<String, BTreeSet<String>> {
-    let _ = meta;
-    BTreeMap::new()
+    let packages = workspace_packages(meta);
+    let internal: BTreeSet<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+    let mut kinds: BTreeMap<&str, BTreeMap<&str, Option<&str>>> = BTreeMap::new();
+    for pkg in &packages {
+        for dep in pkg
+            .dependencies
+            .iter()
+            .filter(|d| !internal.contains(d.name.as_str()))
+        {
+            let kind = kinds
+                .entry(dep.name.as_str())
+                .or_default()
+                .entry(pkg.name.as_str())
+                .or_insert(dep.kind.as_deref());
+            if dep.kind.is_none() {
+                *kind = None;
+            }
+        }
+    }
+    kinds
+        .into_iter()
+        .map(|(dep, users)| {
+            let users = users
+                .into_iter()
+                .map(|(user, kind)| match kind {
+                    Some(kind) => format!("{user} ({kind})"),
+                    None => user.to_owned(),
+                })
+                .collect();
+            (dep.to_owned(), users)
+        })
+        .collect()
+}
+
+/// `cargo xtask deps --used-by`: the registry's "Used by" column for every cargo row, derived.
+fn deps_used_by() -> Result<()> {
+    for (dep, users) in used_by(&metadata()?) {
+        println!(
+            "{dep}: {}",
+            users.into_iter().collect::<Vec<_>>().join(", ")
+        );
+    }
+    Ok(())
 }
 
 /// The uv workspace root and every member listed in its `[tool.uv.workspace].members`.
@@ -1438,11 +1534,13 @@ fn python_direct_dependencies() -> Result<BTreeSet<String>> {
 
 fn deps() -> Result<()> {
     eprintln!("    deps: checking direct dependencies against docs/dependencies.md");
-    let registered = registry()?;
+    let text =
+        fs::read_to_string("docs/dependencies.md").context("reading docs/dependencies.md")?;
+    let registered = registry(&text);
     let meta = metadata()?;
     let packages = workspace_packages(&meta);
     let internal: BTreeSet<&str> = packages.iter().map(|p| p.name.as_str()).collect();
-    let mut problems = Vec::new();
+    let mut problems = registry_problems(&text);
     for pkg in &packages {
         for dep in pkg
             .dependencies
@@ -18641,7 +18739,8 @@ jq -r "$filter" "$src"
         let passed = decision_numbers(&clean).map_err(|err| format!("{err:#}"));
         fs::remove_dir_all(&clean).ok();
         assert_eq!(passed, Ok(()), "distinct numbers pass");
-        let cases: [(&str, &[(&str, &str)], &[&str]); 3] = [
+        type Case<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a [&'a str]);
+        let cases: [Case; 3] = [
             (
                 "decisions-elsewhere",
                 &[
