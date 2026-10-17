@@ -165,7 +165,8 @@ pub fn ci() -> Result<()> {
     chart_checks()?;
     up()?;
     drill(&DRILLS, false)?;
-    drill(&DRILLS, true)
+    drill(&DRILLS, true)?;
+    demo(false)
 }
 
 /// helm lint and a strict schema check of every rendering of both charts, then the chart's
@@ -1631,6 +1632,11 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
     }
 }
 
+/// The workspace `cargo xtask cell demo` opens, whose control stream it verifies.
+const DEMO_WORKSPACE: &str = "demo";
+/// Where `web/` serves on the developer's machine (its `npm run dev`).
+const WEB_URL: &str = "http://127.0.0.1:4317";
+
 /// One piece of the full local cell (E21-37's demo): ready, or skipped because the lane that
 /// builds it is not on `main` yet. A skipped piece is named, never faked.
 #[derive(Debug, PartialEq, Eq)]
@@ -1639,9 +1645,149 @@ pub struct DemoPart {
     pub skipped: Option<String>,
 }
 
-/// Which demo parts this checkout can bring up. Stub until the demo lands (DEC-921).
-pub fn demo_parts(_processes: &[Value], _cli_help: &str) -> Vec<DemoPart> {
-    Vec::new()
+/// Which demo parts this checkout can bring up: a process is there once the process list marks
+/// it built (its lane's image exists), and the founding membership once the CLI has its gesture.
+pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
+    let built = |name: &str| {
+        processes
+            .iter()
+            .any(|p| p["name"] == name && p["built"] == true)
+    };
+    let lane = |ready: bool, why: &str| (!ready).then(|| why.to_string());
+    vec![
+        DemoPart {
+            name: "the cell: k3d, CloudNativePG, the migration Job",
+            skipped: None,
+        },
+        DemoPart {
+            name: "a demo workspace whose control stream verifies (journal spec §11)",
+            skipped: None,
+        },
+        DemoPart {
+            name: "the workspace API server, through a port-forward",
+            skipped: lane(
+                built("api"),
+                "the API server is not on main yet (lane A1, E21-31)",
+            ),
+        },
+        DemoPart {
+            name: "a paper agent on rh-sim and recorded Alpaca fixtures, no credential",
+            skipped: lane(
+                built("runtime") && built("executor"),
+                "the runtime and executor images are not on main yet (lane P1, #1451)",
+            ),
+        },
+        DemoPart {
+            name: "the founding membership",
+            skipped: lane(
+                cli_help
+                    .lines()
+                    .any(|l| l.trim_start().starts_with("membership")),
+                "the founding membership gesture is not on main yet (lane ID1)",
+            ),
+        },
+        DemoPart {
+            name: "web/ against the cell's API",
+            skipped: lane(
+                built("api"),
+                "web/ runs on its own fixtures until the API server lands (lane A1)",
+            ),
+        },
+    ]
+}
+
+/// `cargo xtask cell demo [--no-web]`: the full local cell on a developer machine, with paper and
+/// demo data only. It brings up the cell, opens the demo workspace and verifies its journal,
+/// prints what is ready and what is skipped and why, then runs `web/` in the foreground at
+/// [`WEB_URL`] unless `--no-web`.
+pub fn demo(web: bool) -> Result<()> {
+    if let Some(reason) = tools_missing() {
+        bail!("the demo needs docker, k3d and helm: {reason} (deploy/cell/README.md)");
+    }
+    up()?;
+    demo_workspace()?;
+    let help = output(
+        &format!("{STATIC_TARGET}/{STATIC_TRIPLE}/debug/mandate"),
+        &["--help"],
+    )
+    .unwrap_or_default();
+    let parts = demo_parts(&processes()?, &help);
+    eprintln!("==> the local cell (paper and demo data only; local-cell results, never staging's)");
+    for part in &parts {
+        match &part.skipped {
+            None => eprintln!("    ready    {}", part.name),
+            Some(why) => eprintln!("    skipped  {}: {why}", part.name),
+        }
+    }
+    eprintln!(
+        "    kubectl: docker exec {NODE} kubectl --namespace {NAMESPACE} get pods; \
+         stop: cargo xtask cell down"
+    );
+    if !web {
+        return Ok(());
+    }
+    if output("npm", &["--version"]).is_err() {
+        eprintln!("    web/: npm is not installed (web/.nvmrc names the Node.js release); skipped");
+        return Ok(());
+    }
+    if !Path::new("web/node_modules").exists() {
+        sh_in("web", "npm", &["ci"])?;
+    }
+    eprintln!("==> web/ at {WEB_URL} (Ctrl-C stops it; the cell keeps running)");
+    sh_in("web", "npm", &["run", "dev"])
+}
+
+/// Opens the demo workspace's control stream once (a second run finds it open and goes on), then
+/// exports and verifies it in the cell.
+fn demo_workspace() -> Result<()> {
+    let id = run_id()?;
+    let args = json!([
+        "workspace",
+        "open",
+        "--workspace",
+        DEMO_WORKSPACE,
+        "--journal",
+        "$(MANDATE_JOURNAL_DSN)",
+        "--store",
+        "/work/store"
+    ]);
+    let open = render(
+        &[format!("run.id=\"{id}\""), format!("run.args={args}")],
+        Some("templates/run.yaml"),
+    )?;
+    let (opened, logs) = run_job(open)?;
+    if !opened && !logs.contains("workspace_already_open") {
+        bail!("`mandate workspace open --workspace {DEMO_WORKSPACE}` failed in the cell:\n{logs}");
+    }
+    let streams = json!([format!("ctl:{DEMO_WORKSPACE}")]);
+    let verify = render(
+        &[
+            format!("verify.id=\"{id}\""),
+            format!("verify.streams={streams}"),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    let (verified, logs) = run_job(verify)?;
+    if !verified {
+        bail!("the demo workspace's control stream did not verify:\n{logs}");
+    }
+    Ok(())
+}
+
+fn sh_in(dir: &str, program: &str, args: &[&str]) -> Result<()> {
+    eprintln!("    $ (cd {dir} && {program} {})", args.join(" "));
+    let status = Command::new(program)
+        .current_dir(dir)
+        .args(args)
+        .status()
+        .with_context(|| format!("starting `{program}`"))?;
+    if !status.success() {
+        bail!(
+            "`{program} {}` in {dir} failed with {status}",
+            args.join(" ")
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
