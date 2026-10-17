@@ -227,6 +227,7 @@ fn a_due_agentic_run_journals_run_started_with_its_kind_and_menu_before_its_seed
     let world = world();
     let mut lp = Loop::new(1);
     boot(&mut lp, &ports);
+    let booted = lp.types().len();
     let step = go(&mut lp, ResearchInput::Poll(clock(CUT_OFF)), &ports, &world);
     let run_id = step
         .requests
@@ -237,8 +238,8 @@ fn a_due_agentic_run_journals_run_started_with_its_kind_and_menu_before_its_seed
         })
         .unwrap_or_else(|| panic!("the run starts: {step:?}"));
     assert_eq!(
-        lp.types(),
-        vec!["RunStarted"],
+        lp.types()[booted..],
+        ["RunStarted"],
         "nothing else before the seed"
     );
     let started = lp.events("RunStarted")[0];
