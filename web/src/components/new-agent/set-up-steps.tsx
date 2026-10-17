@@ -308,7 +308,13 @@ export function SetUpSteps({
   const mayDeploy = useCan("agents.deploy");
   const headingId = useId();
   const root = useRef<HTMLElement>(null);
-  const [asking, setAsking] = useState<"confirm" | "deploy" | null>(null);
+  /** The step the passkey check is for; it outlives the dialog's close, so focus and words stay with that step. */
+  const [asked, setAsked] = useState<"confirm" | "deploy">("confirm");
+  const [asking, setAsking] = useState(false);
+  const ask = (which: "confirm" | "deploy") => {
+    setAsked(which);
+    setAsking(true);
+  };
   const [notice, setNotice] = useState<string | null>(null);
   /** The step just sent, whose heading takes focus once it is on the page. */
   const focusNext = useRef<StepKey | null>(null);
@@ -369,8 +375,8 @@ export function SetUpSteps({
       which === "version"
         ? (["Create the version", "Records this agent as version 1. Nothing runs until you confirm it and deploy it.", create] as const)
         : which === "confirm"
-          ? (["Confirm version 1", "Uses your passkey.", () => setAsking("confirm")] as const)
-          : (["Deploy to paper", "Uses your passkey.", () => setAsking("deploy")] as const);
+          ? (["Confirm version 1", "Uses your passkey.", () => ask("confirm")] as const)
+          : (["Deploy to paper", "Uses your passkey.", () => ask("deploy")] as const);
     return (
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Button type="button" variant="secondary" size="lg" className={cn(KEY, "w-full sm:w-auto")} onClick={onClick}>
@@ -383,7 +389,7 @@ export function SetUpSteps({
 
   const created = setUp?.created.phase === "recorded";
   const confirmed = created && setUp?.confirmed?.phase === "recorded";
-  const verb = asking === "deploy" ? "deployed" : "confirmed";
+  const verb = asked === "deploy" ? "deployed" : "confirmed";
 
   return (
     <div className="grid gap-4">
@@ -423,21 +429,21 @@ export function SetUpSteps({
       ) : null}
 
       <StepUpDialog
-        open={asking !== null}
-        action={asking === "deploy" ? deployAction(draft) : confirmAction(draft)}
-        finalFocus={() => root.current?.querySelector<HTMLElement>(`[data-step=${asking ?? "confirm"}] h4`) ?? true}
+        open={asking}
+        action={asked === "deploy" ? deployAction(draft) : confirmAction(draft)}
+        finalFocus={() => root.current?.querySelector<HTMLElement>(`[data-step=${asked}] h4`) ?? true}
         onVerified={() => {
-          const which = asking;
-          setAsking(null);
+          const which = asked;
+          setAsking(false);
           if (which === "deploy") deploy();
           else confirm();
         }}
         onCancel={() => {
-          setAsking(null);
+          setAsking(false);
           setNotice(`Passkey check canceled. Nothing was ${verb} or sent.`);
         }}
         onFailed={() => {
-          setAsking(null);
+          setAsking(false);
           setNotice(`Passkey check failed. Nothing was ${verb} or sent.`);
         }}
       />
