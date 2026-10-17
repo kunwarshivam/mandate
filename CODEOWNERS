@@ -44,6 +44,7 @@
 /crates/mandate-sim/        @kunwarshivam
 /crates/mandate-risk/       @kunwarshivam
 /crates/mandate-backtest/   @kunwarshivam
+/crates/mandate-evaluation/ @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam
 /crates/mandate-rh-sim/     @kunwarshivam
 /crates/mandate-journal-pg/ @kunwarshivam
