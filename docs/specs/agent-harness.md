@@ -823,8 +823,8 @@ paper). E19 holds only what none of them covered.
 ## 15. Owner and explain runs: the desk
 
 *Added for E12-5 and E19-15 ([DEC-2240](../project/decisions/DEC-2240.md), agent readings;
-[DEC-2241](../project/decisions/DEC-2241.md), [DEC-2242](../project/decisions/DEC-2242.md), and
-[DEC-2243](../project/decisions/DEC-2243.md), Proposed for the founder). It builds on E19-13's
+[DEC-2241](../project/decisions/DEC-2241.md) and [DEC-2243](../project/decisions/DEC-2243.md),
+Proposed for the founder; [DEC-2242](../project/decisions/DEC-2242.md), who pays, the founder's). It builds on E19-13's
 agentic loop (lane AH's harness design input, ADR-0005 when it merges: its §4 run kinds, §5
 tools, §9 run records) and adds no loop, no gateway path, and no run record of its own.
 §1 to §14 are lane AH's and are not changed here.*
@@ -857,8 +857,8 @@ recorded". §15.5 says which part of that the checks enforce and which part is d
 - **Preconditions.** No owner or explain run calls a model until all of these hold: E19-13's change
   to INF-5 admits the pinned tool set, and its run records are registered in `mandate-journal`;
   `OwnerQuestionSubmitted` is registered (§15.6); DEC-997 is accepted; and, for the workspace,
-  either DEC-2241 (wording), DEC-2242 (who pays), and DEC-2243 (what may reach a hosted provider)
-  are all accepted, or the workspace is one of the platform's own demo and development workspaces,
+  either DEC-2241 (wording) and DEC-2243 (what may reach a hosted provider) are accepted, with
+  DEC-2242's way of paying (a plan allowance or the owner's own key) set for the workspace, or the workspace is one of the platform's own demo and development workspaces,
   on the platform's key, with the deployment flag `desk.model_answers` on (off by default). Until
   then the desk answers with the fallback: the records, no model text. CI and the demo use
   recorded-fake gateway fixtures only, with no network.
@@ -1073,7 +1073,7 @@ HI-24 to HI-28 cited here are #1540's.
 **Spend is settings, never constants** (DEC-2240 item 9). Every turn is reserved through the
 gateway against the agent's daily model budget, the workspace's configured budget, and the
 deployment cap (ADR-0005 §8), as E19-13 meters every run. On the platform's demo and development
-deployment the cap is DEC-997's $50.00 a month. Who pays for a customer's runs is DEC-2242, Proposed.
+deployment the cap is DEC-997's $50.00 a month. Who pays for a customer's runs is DEC-2242 (the founder's): a plan allowance or the owner's own key.
 The non-money bounds are engineering values in the entry; a bound reached ends the run with the
 fallback, and changes nothing the agent may do (EX-9).
 
