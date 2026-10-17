@@ -91,11 +91,15 @@ export function ApiRuntimeProvider({
   const opening = useRef<Promise<boolean> | null>(null);
   const openSession = useCallback((): Promise<boolean> => {
     if (!session) return Promise.resolve(true);
-    opening.current ??= session.open().then((state) => {
-      signedIn.current = state;
-      opening.current = null;
-      return state === "open";
-    });
+    opening.current ??= session
+      .open()
+      .then((state) => {
+        signedIn.current = state;
+        return state === "open";
+      })
+      .finally(() => {
+        opening.current = null;
+      });
     return opening.current;
   }, [session]);
 

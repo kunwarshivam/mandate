@@ -43,7 +43,7 @@ export interface SessionKeeper {
 }
 
 /** How long a session call may take before it counts as unanswered, so a hung call never holds the lock. */
-export const SESSION_CALL_TIMEOUT_MS = 10_000;
+const SESSION_CALL_TIMEOUT_MS = 10_000;
 
 /** Refresh one minute before the five-minute access lifetime ends. */
 export const REFRESH_EVERY_MS = 4 * 60_000;
