@@ -3841,8 +3841,9 @@ members, and writes it at no other time.
 
 **What reads the measurements.** Infrastructure design §3.4 makes the clock offset a start-up check
 whose failure refuses to start trading. Read the stricter way, which adds no risk (DEC-176): while
-the workspace's last `ClockOffsetRecorded` has `within_tolerance` `false`, or none has been
-written, the workspace's long-running executor process (design §3.1) takes no new opening. The
+the workspace's last `ClockOffsetRecorded` has `within_tolerance` `false`, none has been
+written, or the last is older than 15 minutes by the risk clock (§5.4's 10-minute cadence with
+slack, so a scheduler that stopped measuring is not read as a good clock), the workspace's long-running executor process (design §3.1) takes no new opening. The
 one-shot runs that read no scheduler stream are not changed by it. Risk exits, protective orders, the kill switch, and the
 ticks themselves are never held by a measurement (`AGENTS.md` rules 3 and 13), and broker
 `event_time` stays authoritative for executions (§5.4). The executor's reading is its own story's
