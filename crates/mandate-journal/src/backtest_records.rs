@@ -1,9 +1,11 @@
-//! The backtest and evaluation records journal spec v0.45 §9.18 closes at schema version 1
+//! The backtest and evaluation records journal spec v0.48 §9.18 closes at schema version 1
 //! (DEC-1001, DEC-1002; E4-5, E17-8): `BacktestRunRecorded`, one backtest of a mandate version
 //! through its own decision path, and `EvaluationRunRecorded`, one forward-paper evaluation, both
 //! on the workspace control stream, with consistency rules 143 to 145, each refusing `schema` at
 //! its member. Each names its report by artifact and the digests that reproduce it; no figure is
-//! inline, and a backtest's `marker` is always `backtest`.
+//! inline, and a backtest's `marker` is always `backtest`. An evaluation's `theses_head` holds bare
+//! record hashes, `digest` and not `ref` (DEC-1142): they name no stored artifact, so they are not
+//! listed in `artifact_refs` and §11 check 6 never reads them.
 //!
 //! **The writer** (DEC-1141). §9.18 names no actor. Workspace services, the control stream's
 //! single writer, append both, and the envelope's `actor` is the `user` who asked or the `system`
@@ -129,7 +131,7 @@ static EVALUATION_RUN_RECORDED: Ty = Ty::Record(&[
     ("theses", Ty::DigestRef),
     ("theses_from", Ty::List(&Ty::Str)),
     ("theses_to", Ty::List(&Ty::Str)),
-    ("theses_head", Ty::List(&Ty::DigestRef)),
+    ("theses_head", Ty::List(&Ty::Digest)),
     ("closes", Ty::DigestRef),
     ("cost_model", Ty::DigestRef),
     ("code_build", Ty::DigestRef),
