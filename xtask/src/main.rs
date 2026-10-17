@@ -7944,18 +7944,42 @@ const UNIMPLEMENTED_VARIANT: &str = "Unimplemented";
 const TODO_PANIC: &str = "not yet implemented";
 
 /// The tokens inside the braces of the function whose `fn` is at or after `from`, or `None` for a
-/// signature without a body.
+/// signature without a body or a body that does not end the tokens. A `{` or `;` inside the
+/// signature's `[...]` or `<...>` is part of a type (`[u8; 65]`, `Result<[u8; 64], E>`,
+/// `Foo<{ N }>`), not the body or the end of a declaration (#1563); the `>` of an `->` closes no
+/// `<`, and a `<` or `>` inside a const-generic `{ ... }` (`Foo<{ A < B }>`) is a comparison.
+/// Requiring the body's `}` to be the last token keeps any misreading failing closed: a block
+/// inside the real body is never taken for it.
 fn function_body(toks: &[(Token, usize)], from: usize) -> Option<&[(Token, usize)]> {
-    let open = toks
-        .iter()
-        .enumerate()
-        .skip(from)
-        .find_map(|(i, (t, _))| match t {
-            Token::Punct('{') => Some(Some(i)),
-            Token::Punct(';') => Some(None),
-            _ => None,
-        })??;
+    let (mut brackets, mut angles, mut braces) = (0usize, 0usize, 0usize);
+    let mut previous = None;
+    let mut open = None;
+    for (i, (t, _)) in toks.iter().enumerate().skip(from) {
+        let in_type = brackets > 0 || angles > 0;
+        match t {
+            Token::Punct('{') if in_type => braces = braces.saturating_add(1),
+            Token::Punct('}') if in_type => braces = braces.saturating_sub(1),
+            _ if braces > 0 => {}
+            Token::Punct('[') => brackets = brackets.saturating_add(1),
+            Token::Punct(']') => brackets = brackets.saturating_sub(1),
+            Token::Punct('<') => angles = angles.saturating_add(1),
+            Token::Punct('>') if previous != Some(&Token::Punct('-')) => {
+                angles = angles.saturating_sub(1);
+            }
+            Token::Punct('{') => {
+                open = Some(i);
+                break;
+            }
+            Token::Punct(';') if !in_type => return None,
+            _ => {}
+        }
+        previous = Some(t);
+    }
+    let open = open?;
     let close = delimited_end(toks, open, '{', '}')?;
+    if close != toks.len() {
+        return None;
+    }
     toks.get(open.saturating_add(1)..close.saturating_sub(1))
 }
 
