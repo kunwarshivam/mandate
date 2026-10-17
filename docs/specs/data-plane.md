@@ -1,8 +1,8 @@
-# Data Plane Spec (v0.2, draft)
+# Data Plane Spec (v0.3, draft)
 
 | | |
 |---|---|
-| **Status** | Draft v0.2: v0.1 plus the blockers and majors of the post-merge review on [#553](https://github.com/kunwarshivam/mandate/pull/553) |
+| **Status** | Draft v0.3: v0.2 with §4.6's research query extended for the agentic research loop's tools ([DEC-2201](../project/decisions/DEC-2201.md)). v0.2: v0.1 plus the blockers and majors of the post-merge review on [#553](https://github.com/kunwarshivam/mandate/pull/553) |
 | **Owner** | Engineering |
 | **Decisions** | [DEC-433](../project/decisions/DEC-433.md) (items 1 to 14 accepted by the agent; items 15 to 20 decided by the founder on 2026-10-03; items 21 and 22 Proposed for the founder) |
 | **Backlog** | E2-5 to E2-19 ([backlog](../project/06-backlog-v1.md#e2-market-data)) |
@@ -338,6 +338,12 @@ interface in the workspace data service. The agent harness spec defines the tool
 | `as_of` | Required; the agent's decision time. Only records with knowledge time at or before it are returned (DP-1) |
 | `allowlist_version` | The version in effect; items from other sources are never returned (DP-9) |
 | `instruments`, `kinds`, `window`, `limit` | Filters; instruments by `asset_id` |
+| `terms` | Optional, at most five words of 1 to 32 bytes (letters, digits, spaces, hyphens, periods). Matched case-folded as whole words against the stored headline and summary of a news item, or the form and excerpt of a filing, inside the data service. A term only narrows, and is never sent to a source or any other host ([agent harness spec §6.10](agent-harness.md#610-tools), HI-26) |
+| `items` | Optional: item ids the caller already received. With `range`, returns that byte range of one stored filing's text, cut on UTF-8 boundaries; where the store holds only an excerpt, the read fails |
+
+**A query reads the store and never fetches.** It answers from what ingestion (§4.2) has already
+stored, as of `as_of`. No query, whatever its filters, makes the data service fetch from a source,
+so a filter the research agent chose never leaves the workspace deployment (DP-9, DEC-2201 item 4).
 
 Every item returned is journaled as `ObservationRecorded` (source, instrument, `as_of`, `data_ref`)
 **before** the model reads it.

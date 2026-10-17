@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.3, draft ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
+| **Status** | v0.4, draft ([DEC-2201](../project/decisions/DEC-2201.md)): v0.3 with turns and pinned read-only tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
@@ -13,6 +13,19 @@ is not built (§11).
 
 ## Change history
 
+- **v0.4 ([DEC-2201](../project/decisions/DEC-2201.md); E19-13):** the research run becomes a
+  bounded agent loop ([agent harness spec](agent-harness.md) v0.2 §6.9 to §6.11), by the founder's
+  decision of 2026-10-17. The gateway still runs nothing a model asks for.
+  - INF-5: the gateway offers a model only the read-only tool declarations pinned in its registry
+    entry, returns each tool call as validated data, and executes none. Provider plugins, web
+    search, code execution, and prompt transforms stay off.
+  - §3.1, §3.2: a request carries `turns`, the `tools` offered in that turn, and
+    `spend_ceiling_usd`; a reply is the final output or one to `max_tool_calls_per_turn` validated
+    tool calls. Anything else is `schema_invalid`, so the error kinds do not change (§3.3).
+  - §4.1: `mode`, `tools`, and `loop_bounds` are pinned content, inside the content hash.
+  - §6: OpenRouter receives the offered declarations as `tools`, or none.
+  - §7.3: the request's run ceiling is one more cap the reservation must fit under; the founder's
+    caps (DEC-997 item 3, DEC-431 item 15) are unchanged.
 - **v0.3 ([DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)):**
   - §3.6: the agent stream's `ModelInvocationRecorded` and the meter stream are closed in
     [journal spec §9.19](journal.md#919-model-gateway-records-dec-998) (E15-8). A refusal and a cache
@@ -108,7 +121,7 @@ inside it.
 | INF-2 | **No substitution** (DEC-67). An attempt goes only to an endpoint the registry lists as serving that exact identity. If the response reports a different identity, the call fails with `identity_mismatch`. The gateway never routes to another model, a smaller variant, or a different quantization |
 | INF-3 | **Deadline.** Every call has a finite deadline, no later than the registry entry's deadline. A response that completes after the deadline is discarded, is never cached, and never becomes an output, in this evaluation or any later one |
 | INF-4 | **Missing is safe.** Every error kind yields no output. Under §8.3 a missing output counts as fully bearish for buys, so it never enlarges a buy (MI-10), and as 0 for exits, never as a negative view. Any exit that follows is a risk reduction. No error path produces a default output, a cached output for different input, or an output from another model |
-| INF-5 | **Opinions only** (rule 4). The gateway returns only an output validated against the model's output schema. It offers the model no tool, function, or network capability. Nothing a model returns is an order, a mandate field, or a policy value |
+| INF-5 | **Opinions only** (rule 4). The gateway returns only an output validated against the model's output schema, or, for an entry whose `mode` is `agentic`, tool calls each validated against a read-only tool declaration pinned in that entry and offered in that turn. It executes no tool call: it returns each to the caller as data (DEC-2201). It offers the model no other tool or function, and no network, browsing, code-execution, or plugin capability. Nothing a model returns is an order, a mandate field, or a policy value |
 | INF-6 | **Metered.** Every call produces exactly one metering record, its `ModelInvocationRecorded`, and every attempt that reached a provider is counted in it, including failures and cache hits. The record names the workspace, the agent (when there is one), and the purpose. Every call that could cost money, and only those, also has a reservation and at most one settlement on the meter stream; refusals and cache hits have none (DEC-998 item 4). Cost is fixed-point USD, never floating point |
 | INF-7 | **Caps refuse, never add risk.** A call starts only if its reserved maximum cost fits under every cap that applies (§7.3) and every rate cap allows it. A cap only refuses calls. Reaching a cap never changes an envelope field, a limit, an order, or the agent's mode |
 | INF-8 | **Prompt contents.** A prompt holds only the inputs the model's contract lists (mandate spec §7, §8.1, §8.4). It never holds a credential, an account identifier, personal data, or another workspace's data. A deterministic guard checks this before any byte leaves (§8.3) |
@@ -128,7 +141,7 @@ inside it.
 | INF-1, INF-2 | Fuzz registry entries and responses. The oracle compares the response's reported identity with the pin by plain string equality on each part; seeded bugs: alias accepted, version ignored, quantization ignored |
 | INF-3 | Fuzz response arrival times against a simulated clock. The oracle derives "late" from the journaled deadline and completion time, never from the gateway's own flag. It also asserts that no cache entry exists for any call whose completion time is past its deadline, and that a later identical request is a miss; seeded bug: a late response stored in the cache |
 | INF-4 | For every error kind, assert the gateway returns no output, then feed the state to the reference order builder (`reference/mandate`) and assert the buy value is at most the value with the model's fresh output present (MI-10), and that the exit conviction equals §8.3's sum with the missing model's term set to 0 |
-| INF-5 | Assert the request body the adapter builds has no tool or function members, for every provider adapter; feed outputs with extra members and assert refusal |
+| INF-5 | For every provider adapter: assert the request body has no tool or function members for a `single_call` entry and for a turn offered no tool, and for any other turn exactly the entry's pinned declarations, with no plugin, transform, or provider-side tool. Feed outputs with extra members, tool calls naming an undeclared or unoffered tool, arguments outside their schema, and more tool calls than the turn's bound, and assert each is refused `schema_invalid` with no tool call returned. A static check that the gateway crate names no data-plane, journal, or source port, so it cannot run a tool |
 | INF-6, INF-7 | Fuzz sequences of calls, failures, cache hits, restarts, and risk-day changes. A separate accumulator over the meter stream's records recomputes spend and asserts it equals the meter's fold and never exceeds a cap; it counts reservations, and the callers' records are counted apart (one per call) |
 | INF-8 | Plant credential patterns, account identifiers, and a second workspace's values in each input source; assert the guard refuses and nothing reaches the transport stub |
 | INF-9, INF-11 | Two workspaces send identical requests; assert no cross-workspace hit and no shared bucket |
@@ -156,17 +169,21 @@ Each oracle must catch a seeded bug before it is trusted (`AGENTS.md`, "Independ
 | `as_of` | The data cut-off of the inputs (§8.2). Part of the canonical request |
 | `deadline` | Absolute UTC instant, nanosecond precision. No later than `now + entry.deadline_ms` |
 | `max_output_tokens` | From the registry entry. Bounds the call's maximum cost (§7.2) |
+| `turns` | Empty except for an agentic research run: the transcript of its earlier turns, each the model's reply (by its response artifact) and the caller's result for each of that reply's tool calls ([agent harness spec §6.9](agent-harness.md#69-the-agentic-loop)). Part of the rendered prompt |
+| `tools` | The names of the entry's pinned tool declarations offered in this turn, or none. Only an `agentic` entry has any; a name the entry does not declare is a `RequestError`, never sent |
+| `spend_ceiling_usd` | Optional, fixed-point USD: a cap on this call's reservation, set by the caller from its run's own records (§7.3). Not part of the canonical request: it decides only whether the call is made |
 
 The **canonical request** is the canonical JSON (journal spec §4) of the model identity, the rendered
-prompt, sampling parameters (temperature, seed where supported), the output schema, and
-`max_output_tokens`. Its SHA-256 is the `request_digest`.
+prompt (the transcript included), the tool declarations offered, sampling parameters (temperature,
+seed where supported), the output schema, and `max_output_tokens`. Its SHA-256 is the
+`request_digest`.
 
 ### 3.2 Response
 
 | Field | Rule |
 |---|---|
 | `call_id`, `outcome` | `ok` or one error kind (§3.3) |
-| `output` | Present only when `outcome` is `ok`: the parsed output, valid against the entry's output schema |
+| `output` | Present only when `outcome` is `ok`: either the parsed final output, valid against the entry's output schema, or, for a turn offered tools, `tool_calls`: one to the entry's `max_tool_calls_per_turn`, each an offered tool's name and arguments valid against its pinned schema, in reply order. A reply with any tool call is a tool-call reply, and any text beside it is kept in the response artifact and is not an output |
 | `reported_identity` | What the provider says served the call. Must equal the pin (INF-2) |
 | `usage` | Input, output, and cached tokens; `attempts`; `cache_hit` |
 | `cost_usd` | Fixed-point USD from the price table version in effect (§7.2) |
@@ -187,7 +204,7 @@ prompt, sampling parameters (temperature, seed where supported), the output sche
 | `rate_limited_provider` | Provider 429 | Yes, after the provider's wait, within the deadline, unless its reply reported usage (§3.4) | No |
 | `credential_invalid` | Provider 401 or 403, or the vault holds no key for the provider (then nothing is sent: journal spec §9.19 rule 152) | No | No |
 | `content_refused` | The provider declined to answer | No | Maybe |
-| `schema_invalid` | Response does not parse, or fails the output schema | No | Yes |
+| `schema_invalid` | Response does not parse, or fails the output schema; or it has a tool call in a turn offered none, names a tool not offered, has arguments its tool's schema refuses, or has more tool calls than `max_tool_calls_per_turn` (INF-5) | No | Yes |
 | `identity_mismatch` | Reported identity differs from the pin, or is missing from a `200` | No | Yes |
 
 The first six are refusals: nothing leaves the deployment.
@@ -260,7 +277,8 @@ existing ones. So:
   `prompt_ref` be `null` for `input_rejected`, as the agent stream's does (journal spec §9.19 rule
   148), since a guard-refused prompt would otherwise be stored (DEC-998 item 2).
 - A call with `outcome: ok` is followed by its output event (`ModelOutputRecorded` or
-  `ThesisProposed`), which carries the content hash the call used.
+  `ThesisProposed`), which carries the content hash the call used, or, for a tool-call reply, by
+  one `ToolCallRecorded` per tool call ([journal spec §9.21](journal.md#921-tool-call-records-dec-2201)).
 - A call with any other outcome writes `ModelInvocationRecorded` and no output event. The model
   simply has no fresh output.
 - **The agent-stream record is closed** in [journal spec §9.19](journal.md#919-model-gateway-records-dec-998)
@@ -303,10 +321,11 @@ entries ([HLD §4](../HLD.md#global-control-plane-thin)). An entry has two parts
 | Field | Rule |
 |---|---|
 | `model_id`, `version` | The signal model's id and semantic version (mandate spec §8.1) |
-| `content_hash` | SHA-256 over the canonical JSON of the pinned content: `identity`, `template`, `retrieval_plan`, `output_schema`, `validation_bounds`, `params_schema`, `deadline_ms`, `max_output_tokens`, the sampling parameters, `methodology`, and `authorship`. **`endpoints` and `status` are not in it.** The mandate pins it (V-007); [mandate spec §8.1](mandate.md#81-signal-model-contract-dec-52-dec-97) gives the same definition (DEC-432 item 18) |
+| `content_hash` | SHA-256 over the canonical JSON of the pinned content: `identity`, `template`, `mode`, `retrieval_plan`, `tools`, `loop_bounds`, `output_schema`, `validation_bounds`, `params_schema`, `deadline_ms`, `max_output_tokens`, the sampling parameters, `methodology`, and `authorship`. **`endpoints` and `status` are not in it.** The mandate pins it (V-007); [mandate spec §8.1](mandate.md#81-signal-model-contract-dec-52-dec-97) gives the same definition (DEC-432 item 18) |
 | `identity` | `provider`, `model_name`, and `snapshot` (an immutable, dated version) or `weights_digest`, plus `quantization` for self-served or third-party-served open weights |
 | `template` | The prompt template and the input contract it renders |
 | `retrieval_plan`, `validation_bounds` | For a model whose inputs are retrieved: which reads fill the input contract and their caps, and the bounds its output is checked against (agent harness spec §6.3, §6.5). Inside the hash, so the pin covers what the model is shown (rule 11, DEC-432 item 22) |
+| `mode`, `tools`, `loop_bounds` | For the research agent: `single_call` or `agentic`; for `agentic`, the read-only tool declarations (each a name from the harness's closed set, a description, an argument schema, and result caps) and the loop's bounds (agent harness spec §6.10, §6.11). Inside the hash, so the pin covers what the model may ask to read and how far the loop may go (rule 11, DEC-2201). Every other entry is `single_call` with no tools |
 | `output_schema` | JSON Schema of the output (mandate spec §8.2, or §8.4's thesis) |
 | `params_schema` | The user-set parameters; no defaults (DEC-52) |
 | `deadline_ms`, `max_output_tokens`, sampling parameters | Pinned with the model |
@@ -419,8 +438,11 @@ DEC-432 item 14's guard stands and no live call runs). The routing lock is set p
   `require_parameters: true`; for open weights, `provider.quantizations` lists the pinned
   quantization alone;
 - zero data retention: `data_collection: deny` and `zdr: true`;
-- no capability: no `tools`, `functions`, or `plugins`, and `transforms` sent empty, so no prompt
-  compression applies.
+- no capability beyond the pinned declarations: `tools` holds exactly the declarations offered in
+  that turn, with `tool_choice` `auto`, or is absent when none is offered (always, for a
+  `single_call` entry); no `functions` or `plugins` (web search among them), and `transforms` sent
+  empty, so no prompt compression applies. `require_parameters: true` routes only to an upstream
+  that honours `tools` (DEC-2201).
 
 The response's reported model and provider must both equal the pin, or the call is
 `identity_mismatch` (DEC-997 item 2). Each endpoint records the routing slug it requests and the
@@ -485,7 +507,8 @@ a settlement only for the calls that could cost money, and spend for caps folds 
 | Workspace model spend | HLD §8 quota ("model spend"), set by the operator or plan | All calls of the workspace per risk day |
 | Workspace monthly cap | [DEC-997](../project/decisions/DEC-997.md) item 3 (Proposed; until accepted, no live call runs at all): **$50 a month** for paper and demo, deployment configuration; per-agent monthly caps are deployment configuration too | All calls of the workspace per calendar month of risk days; per-agent monthly caps under it, each at most the workspace cap |
 | Workspace cycle allotment | The license's `model_spend_usd_per_cycle`, from the plan ([billing design](../design/billing.md) §3.4, DEC-442 item 4) | All calls of the workspace per billing cycle; enforced alongside the per-risk-day caps, never instead of them |
-| Rate caps | Per agent: research calls only in proposal rounds no more often than `behavior.research.interval_s`; per workspace: a token bucket set by the plan | Calls per second |
+| Run ceiling | The request's `spend_ceiling_usd`: an agentic run's `max_run_cost_usd`, pinned in the research entry, less the cost of the run's earlier turns as the caller folds them from its own records ([agent harness spec §6.11](agent-harness.md#611-loop-bounds), DEC-2201 item 9) | One call: its reservation must fit under the ceiling. It only refuses, and never lifts another cap |
+| Rate caps | Per agent: research runs only in proposal rounds no more often than `behavior.research.interval_s`, an agentic run's turns inside its one round; per workspace: a token bucket set by the plan | Calls per second |
 
 - **Reservation.** Before the first attempt, the workspace's meter writer appends a reservation of
   the maximum cost to the meter stream (§3.6). A call starts only if `spent + reserved + this reservation ≤ cap` for every cap that applies.
@@ -560,8 +583,11 @@ layer; mandate spec §8.4 and §8.5 list the others.
   is the same deterministic check with the same verdict.
 - **Inputs are data.** Retrieved text is placed in delimited data sections of the pinned template.
   The template tells the model to treat them as untrusted, but no rule relies on the model obeying.
-- **No capabilities.** No tools, no function calls, no browsing (INF-5). Retrieval happens before the
-  call, in deterministic code, from allowlisted sources only (DEC-101).
+- **No capabilities but pinned reads.** No browsing, plugins, or code execution (INF-5). Retrieval
+  happens in deterministic code, from allowlisted sources only (DEC-101): before the call, and for an
+  agentic entry also between turns, when the harness runs a tool call the gateway returned as data.
+  The harness sets every such read's scope; the model's arguments only narrow it, and no argument
+  leaves the deployment (agent harness spec §6.10, HI-26).
 - **After the response:** schema validation, the output limits of §8.1, and the §8.5 checks. Then the
   order builder, autonomy, and the risk gate, none of which read model text.
 
@@ -592,6 +618,7 @@ risk-day boundary and a restart.
 | Model withdrawn | `PlatformOperatorAction` `model_withdrawn` | Calls refused; outputs count as missing; cache emptied | Never for that version; a new version is a new pin | Operator; owner re-pins | Journaled, so replay sees it |
 | Key revoked | Provider 401 or 403, or `KeyRevoked` | `credential_invalid` on every call to that provider; operator alerted | A valid key is in the vault | Operator (managed) or customer admin (hybrid) | Vault state; survives restart |
 | Spend cap hit mid-day | A reservation would exceed a cap | `budget_exhausted`; research theses also refused by check 7; outputs missing | The next risk day | Nobody (the clock) | Resets at the risk-day boundary, never by restart or redeploy, since spend is folded from the journal by risk day |
+| Run ceiling hit | An agentic turn's reservation would exceed its `spend_ceiling_usd` | `budget_exhausted` for that turn; the harness ends the run with no output | The run's end; the next run has a fresh ceiling | Nobody | The ceiling is per run, never per day, so a day boundary inside a run does not lift it; a restart ends the run |
 | Workspace quota hit | As above for the workspace | Every agent's calls refused | Next risk day, or the operator raises the quota | Clock or operator (a journaled change) | As above |
 | Meter unavailable | The meter writer is unreachable, or a replica's append is fenced | `meter_unavailable`; nothing sent; outputs missing; operator alerted | The holder is reachable, or a new holder has folded the stream | Supervisor (hand-over) | Unsettled reservations stay counted across the hand-over |
 | Prompt guard hit | Forbidden content in the prompt | `input_rejected`; nothing sent; journaled with the rule, not the content | The input source stops supplying it | Nobody; repeats alert the operator | Nothing carries over |
@@ -612,7 +639,9 @@ No case ends in the gateway choosing another model, holding an exit, or adding e
 | Bad model | Returns imperatives, price targets, or out-of-range values | Output schema and §8.1 limits; ignored and journaled |
 | Bad model | Claims to be another model, or the provider serves another | `identity_mismatch` (INF-2) |
 | Bad model | Returns huge output to run up cost | `max_output_tokens` bounds each call; reservation bounds the day |
-| Injected filing or news item | Tells the model to name an instrument or leak data | No tools or egress (INF-5); allowlist, corroboration, eligibility floor, `max_instruments`, autonomy (§8.5); the model has no secrets to leak (INF-8) |
+| Bad model | Calls tools turn after turn to run up cost | The run ceiling (`spend_ceiling_usd`) bounds each run and the daily and monthly caps bound the rest; the harness's `max_turns` and the last turn's empty `tools` end the loop |
+| Bad model | Names a tool it was not offered, or arguments outside the schema | `schema_invalid`; no tool call is returned (INF-5) |
+| Injected filing or news item | Tells the model to name an instrument, read more, or leak data | No egress, and only pinned read-only tools the harness scopes and caps (INF-5; agent harness spec §6.10, §6.11, HI-26); allowlist, corroboration, eligibility floor, `max_instruments`, autonomy (§8.5); the model has no secrets to leak (INF-8) |
 | Malicious insider | Points a registry id at a different model | An entry's pinned content is immutable and signed; the content hash includes identity; the mandate pins the hash (V-007) |
 | Malicious insider | Edits a cached response | Cache entries are artifacts addressed by hash; a mismatch is a miss and an alert |
 | Malicious insider | Changes the price table to exhaust a cap or inflate a bill | Price tables are versioned configuration, journaled; each call names the version it used |
@@ -643,6 +672,7 @@ the date only; it does not suggest a replacement.
 | Prompt guard, egress allowlist, local-only policy key | None | E15-10 |
 | Billing feed | None | §7.4 (E15-11), shown in E14-3's usage view |
 | Laya, Jev | Names only (§5) | Decided by the founder (DEC-432 item 13) |
+| Turns and tool calls | None: `mandate-gateway` takes typed inputs and returns one output | v0.4's request and reply shape, the pinned declarations, and the run ceiling (E19-13) |
 
 ---
 
@@ -663,6 +693,10 @@ the date only; it does not suggest a replacement.
   the meter stream (journal spec §9.19), what the meter counts, and the one crash fold.
 - **[DEC-997](../project/decisions/DEC-997.md), Proposed for the founder:** OpenRouter, its routing
   lock, and the $50 a month workspace cap.
+- **[DEC-2201](../project/decisions/DEC-2201.md):** item 1, the founder's (2026-10-17): the research
+  run is an agentic loop. Items 2 to 13, agent readings: pinned read-only tools returned as data,
+  the turn shape, the run ceiling, and no fallback to a single call. It supersedes item 7 for the
+  research purpose.
 - **Items 13 to 16, decided by the founder on 2026-10-03** (DEC-432, "Founder decisions"): a hosted
   fast model (§5), an aggregator for every call with routing locked per pinned model (§6), provider
   data terms as recommended, and bring-your-own provider keys allowed for hybrid and on-prem, with

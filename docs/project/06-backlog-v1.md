@@ -30,7 +30,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E15 Signal models: LLM and fast models, scorecards | M5 (LLM research, scorecards); Phase 3 (fast models) | 6.3, 6.5 | Must (E15-1, E15-3, E15-6 to E15-10); Should |
 | E16 Kraken Derivatives US connector | Phase 3 | 6.2 (FR-2.5) | Should |
 | E17 Research agent and dynamic universe | M5 | 6.3 (FR-3.9), 6.5 | Must |
-| E19 Agent harness | M5 (construction, the research loop, the bench); before live trading (E19-8) | 6.3 (FR-3.9), 6.5 (FR-5.1) | Must (E19-1 to E19-6, E19-8, E19-10); Should |
+| E19 Agent harness | M5 (construction, the research loop, the bench); before live trading (E19-8) | 6.3 (FR-3.9), 6.5 (FR-5.1) | Must (E19-1 to E19-6, E19-8, E19-10, E19-13); Should |
 
 ## Stories
 
@@ -2284,6 +2284,24 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   - a burst of events never starts more runs than the caps allow, tested over random event
     sequences;
   - a run still produces opinions only (rule 4) and never sizes or places an order.
+- **E19-13 (Must, M5, before the 2026-10-26 demo runs the loop; SC; spec first)** As the founder, I
+  want the research run to be a bounded agent loop over read-only, allowlisted tools, so that the
+  product is an agent harness for trading ([DEC-2201](decisions/DEC-2201.md), the founder's decision
+  of 2026-10-17; agent harness spec v0.2 §6.9 to §6.11, inference spec v0.4, journal spec v0.48
+  §9.21; claim [#1534](https://github.com/kunwarshivam/mandate/issues/1534)). *Accepted when:*
+  - `mandate-gateway` takes `turns`, the offered `tools`, and `spend_ceiling_usd`, sends only the
+    pinned declarations, and returns a final output or validated tool calls, refusing anything else
+    `schema_invalid` (INF-5's new test);
+  - `mandate-research-run` holds the loop's state as a pure fold of the run's records, the five
+    tools over read-only ports with §6.10's scope and caps, and §6.11's bounds, each ending the run
+    with no output except result size;
+  - `mandate-journal` registers `ToolCallRecorded` with a draft for every rule 165 to 170;
+  - HI-2, HI-3, HI-4, HI-8, HI-24, HI-25, HI-26, and HI-27 hold as property tests with independent
+    oracles, each shown to catch a seeded bug, against a compromised model and random crashes;
+  - recorded multi-turn fixtures run the loop in CI and the demo with no network (HI-25);
+  - the `single_call` mode is unchanged, and no agent pins an agentic entry before E19-6's bench and
+    a §8.3 regression evaluation pass on it (DEC-2201 item 13).
+  The runtime core's turn and dispatch inputs and effects are E19-3's, coordinated with its lane.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 

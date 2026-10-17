@@ -1453,8 +1453,9 @@ until the owner confirms them, §7), because they only reduce risk.
   semantic version, and a **content hash** of its code, prompt, parameter schema, and underlying
   model identity (provider, model name, and version, or weights hash); the mandate pins all three
   (V-007). For a model called through the model gateway, the hash also covers the rest of the
-  registry entry's pinned content: the retrieval plan, the output schema and validation bounds, the
-  call deadline, the output-token limit, the sampling parameters, the quantization of open weights,
+  registry entry's pinned content: the research mode, the retrieval plan, the tool declarations
+  and loop bounds of an agentic research entry ([DEC-2201](../project/decisions/DEC-2201.md)), the
+  output schema and validation bounds, the call deadline, the output-token limit, the sampling parameters, the quantization of open weights,
   the methodology text, and the authorship label
   ([inference spec §4.1](inference.md#41-registry-entry), DEC-432 items 17 and 18). The entry's
   endpoints and status are **not** in the hash: a routing or status change never changes a pin.

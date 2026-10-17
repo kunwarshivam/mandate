@@ -71,7 +71,10 @@ month (30.4); risk days are calendar days, since the risk day turns at midnight 
 Every call goes through one aggregator (DEC-432 item 14) and is metered with its token counts and
 cost (INF-6, [inference spec §7.1](../specs/inference.md#71-metering-record)).
 
-**Research (slow tier).** One call per run (agent harness §6.2, DEC-431 item 6).
+**Research (slow tier).** One call per `single_call` run (agent harness §6.2). An agentic run
+(agent harness §6.9, DEC-2201) makes up to `max_turns` calls, each priced as below with its own
+`T_in`, and its sum is capped by the run's ceiling, so `c_run = min(Σ c_turn, max_run_cost_usd)`
+takes the place of `c_call` in `I_research`.
 
 ```
 c_call      = (T_in · (1 − s_pre) · p_in + T_in · s_pre · p_cached + T_out · p_out) · (1 + f_agg)
@@ -83,7 +86,7 @@ I_research  = min( R_day · c_call · (1 − h_cache),  cap_agent_day ) · D_m
 | Variable | Meaning | Where it comes from |
 |---|---|---|
 | `T_in`, `T_out` | Input and output tokens of a typical research call | Measure from the spike (`llm_call`) |
-| `T_in_max` | Largest prompt the retrieval plan allows | Harness bounds (DEC-431 item 7): 50 news items × 2,000 bytes, 20 filing excerpts × 4,000 bytes, 20 bars × up to 50 instruments, 50 theses of memory, the template |
+| `T_in_max` | Largest prompt the retrieval plan allows | Harness bounds (DEC-431 item 7): 50 news items × 2,000 bytes, 20 filing excerpts × 4,000 bytes, 20 bars × up to 50 instruments, 50 theses of memory, the template; in an agentic turn also up to 96,000 bytes of tool results and the earlier replies (agent harness §6.11) |
 | `T_out_max` | The entry's `max_output_tokens` | Pinned with the model (DEC-432 item 1) |
 | `p_in`, `p_out`, `p_cached` | Price per token, from the versioned price table | Inference spec §7.2 |
 | `s_pre` | Share of input tokens served from the provider's prompt-prefix cache (template and instructions only; INF-9 keeps workspace data out of shared prefixes) | Measure |
