@@ -8,6 +8,7 @@ import * as agents from "@/app/(app)/agents/page";
 import * as alerts from "@/app/(app)/alerts/page";
 import * as approval from "@/app/(app)/approvals/[approvalId]/page";
 import * as approvals from "@/app/(app)/approvals/page";
+import * as backtest from "@/app/(app)/backtests/[backtestId]/page";
 import * as auditScreen from "@/app/(app)/audit/[screen]/page";
 import * as audit from "@/app/(app)/audit/page";
 import * as closeAll from "@/app/(app)/connections/[connectionId]/close-all/page";
@@ -23,6 +24,7 @@ import * as settingsScreen from "@/app/(app)/settings/[screen]/page";
 import * as settings from "@/app/(app)/settings/page";
 import { recordHref } from "@/components/stop/commands";
 import type { Scenario } from "@/fixtures/types";
+import { BACKTESTS_BY_AGENT } from "@/fixtures/backtests";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { allOrders } from "@/lib/orders";
 import { AGENT_SECTIONS, SCREENS, SECTION_INDEX, agentHref, decisionHref, orderHref, positionHref } from "@/lib/screens";
@@ -45,6 +47,9 @@ export async function pageFor(path: string): Promise<ReactNode> {
     case "approvals":
       if (!second) return <approvals.default />;
       return approval.default(params({ approvalId: second }));
+    case "backtests":
+      if (!second || rest.length > 0) throw new Error(`no page for ${path}`);
+      return backtest.default(params({ backtestId: second }));
     case "messages":
       if (!second) return <messages.default />;
       if (rest.length === 0) return thread.default(params({ agentId: second }));
@@ -76,7 +81,8 @@ export async function pageFor(path: string): Promise<ReactNode> {
 
 /**
  * Every route a scenario can reach: each screen, and for every agent each section, record screen,
- * position (and its close page), order and gate decision, its thread and desk, and every approval request.
+ * position (and its close page), order and gate decision, its thread and desk, its backtests, and every
+ * approval request.
  */
 export function pathsFor(scenario: Scenario): string[] {
   const ws = buildWorkspace(scenario);
@@ -89,6 +95,7 @@ export function pathsFor(scenario: Scenario): string[] {
     ...ws.decisions.filter((d) => d.agent_id === a.agent_id).map((d) => decisionHref(a.agent_id, d.event_id)),
     `/messages/${a.agent_id}`,
     `/messages/${a.agent_id}/desk`,
+    ...(BACKTESTS_BY_AGENT[a.agent_id] ?? []).map((id) => `/backtests/${id}`),
   ]);
   const connection = ws.connection.connection_id;
   return [
