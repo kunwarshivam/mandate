@@ -1,0 +1,8 @@
+file = "crates/mandate-dispatcher/src/step/tests/approval.rs"
+test = "approvals_and_alerts_interleave_into_one_notice_per_cause_across_steps_and_restarts"
+reason = """
+E8-10 slice D7a (DEC-2501): `step` is already implemented (slices D2 to D4) and reads only
+`OwnerAlertSent` as a cause, so this test fails on that answer, no notice for an
+`ApprovalRequested`, rather than at a stub. The code PR that makes an agent stream's
+`ApprovalRequested` a cause deletes this file with the test's `#[ignore]` line.
+"""
