@@ -70,6 +70,9 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   PR over ES-13's 400 lines instead of DEC-77's two; and item 6's hook in an R0 file (a
   production-cycle constructor that takes its journal stage) before the process can host a real
   cycle.
+- **E17-7's allowlist** ([DEC-996](decisions/DEC-996.md), claim #1460): item 2, confirming
+  Alpaca news (counsel's answer under DEC-433 item 20) in a new allowlist version; until then the
+  research agent reads SEC EDGAR filings only.
 - **DEC-773** (causal trace authorship): (a) should an owner-selected signal model's output read
   `owner_selected`? (b) What does the label say? Meanwhile every quoted item is `platform_authored`.
 - **Decided, record still to land:** DEC-360 (option (c)), DEC-410 item 3, DEC-422 (#514 open).
