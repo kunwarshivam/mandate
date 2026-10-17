@@ -10,7 +10,6 @@ use std::fs;
 use std::rc::Rc;
 
 use mandate_accounting::{InstrumentId, Side};
-use mandate_alpaca::AlpacaPaperHttp;
 use mandate_alpaca::Pause;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, to_canonical};
@@ -35,9 +34,9 @@ use serde_json::json;
 
 use crate::{
     ACCOUNT_NUMBER_VAR, Args, Broker, BrokerAsk, Build, Built, Connected, Connection, Dial,
-    LapseRefusal, LapseSnapshot, Linked, PaperError, Ports, REHEARSAL_ENDPOINT_VAR, REHEARSAL_HOST,
-    RobinhoodEndpoint, Session, SystemClock, live_admission, live_start, live_started,
-    robinhood_reads,
+    LapseRefusal, LapseSnapshot, Linked, Market, PaperError, Ports, REHEARSAL_ENDPOINT_VAR,
+    REHEARSAL_HOST, RobinhoodEndpoint, Session, SystemClock, live_admission, live_start,
+    live_started, robinhood_reads,
 };
 
 const MANDATE: &str = include_str!("../../mandate-shell/tests/fixtures/tracer/mandate.json");
@@ -134,6 +133,7 @@ fn the_dial() -> Dial {
     Dial {
         endpoint: endpoint(),
         account_number: NUMBER.to_owned(),
+        market: None,
     }
 }
 
@@ -497,7 +497,7 @@ impl Tools for Scripted {
     }
 }
 
-fn linked(answers: BTreeMap<&'static str, serde_json::Value>) -> (Linked<Scripted>, Calls) {
+fn linked(answers: BTreeMap<&'static str, serde_json::Value>) -> (Linked<Scripted, Market>, Calls) {
     let calls = Calls::default();
     let tools = Scripted {
         answers,
@@ -510,7 +510,7 @@ fn linked(answers: BTreeMap<&'static str, serde_json::Value>) -> (Linked<Scripte
         runtime,
         RobinhoodConnector::new(tools, NUMBER.to_owned(), Tickers::default()),
     );
-    (Linked::new(bridge, None::<AlpacaPaperHttp>), calls)
+    (Linked::new(bridge, None::<Market>), calls)
 }
 
 /// R4 (DEC-947 item 4): the Robinhood session reads the agentic account's snapshot through its
@@ -569,6 +569,19 @@ fn rehearsal_vars() -> Vec<(String, String)> {
         ),
         (ACCOUNT_NUMBER_VAR.to_owned(), NUMBER.to_owned()),
     ]
+}
+
+/// DEC-961 item 1: the dial names the market fixture's directory only in the `rh-sim` build;
+/// every other build, the `live` one included, reads no fixture whatever the environment holds.
+#[test]
+fn only_the_rehearsal_build_dials_a_market_fixture() {
+    let mut vars = rehearsal_vars();
+    vars.push(("MANDATE_RH_SIM_MARKET".to_owned(), "/fixture".to_owned()));
+    let dialed = crate::dial(Build::Rehearsal, &vars).expect("the rehearsal dials");
+    let expected = cfg!(feature = "rh-sim").then(|| std::path::PathBuf::from("/fixture"));
+    assert_eq!(dialed.market, expected);
+    let unset = crate::dial(Build::Rehearsal, &rehearsal_vars()).expect("the rehearsal dials");
+    assert_eq!(unset.market, None);
 }
 
 /// The rehearsal build: the simulator's endpoint and pin, compiled with `live`.

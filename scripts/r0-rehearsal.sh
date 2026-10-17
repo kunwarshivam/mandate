@@ -40,8 +40,8 @@ export RUST_BACKTRACE=0
 BIN=$CARGO_TARGET_DIR/debug
 RECORD=$WORK/steps.md
 STORE=$WORK/store
-BARS=$WORK/bars
-mkdir -p "$STORE" "$BARS"
+MARKET=$WORK/market
+mkdir -p "$STORE" "$MARKET"
 
 WORKSPACE=ws_r0
 OWNER=founder
@@ -113,8 +113,10 @@ if [ "$BUILD" = 1 ]; then
   step 1a 'Finished' cargo build --manifest-path "$ROOT/Cargo.toml" --bins -p mandate-cli -p mandate-rh-sim || true
   step 1b 'Finished' cargo build --manifest-path "$ROOT/Cargo.toml" --bins -p mandate-paper \
     --features live,rh-sim,mandate-mcp/rh-sim || true
+  # The stored daily bars' writer (DEC-961 item 3): an example, built from dev-dependencies only.
+  step 1c 'Finished' cargo build --manifest-path "$ROOT/Cargo.toml" -p mandate-paper --example rehearsal_bars || true
 fi
-for binary in mandate mandate-rh-sim mandate-paper; do
+for binary in mandate mandate-rh-sim mandate-paper examples/rehearsal_bars; do
   [ -x "$BIN/$binary" ] || { echo "missing $BIN/$binary: build first" >&2; exit 1; }
 done
 cli() { "$BIN/mandate" "$@"; }
@@ -171,6 +173,15 @@ JSON
 SIM_PID=$!
 for _ in $(seq 50); do grep -q 'serving' "$WORK/sim.out" 2>/dev/null && break; sleep 0.1; done
 ENDPOINT=$(sed -n 's/^mandate-rh-sim: serving //p' "$WORK/sim.out")
+# The live run's market reads (DEC-933 item 2) come from a fixture in the rh-sim build (DEC-961):
+# the IEX quote within a cent of the simulator's ask of 85, inside DEC-529's collar, stamped as it
+# is read; the minute bars; and the stored daily bars `--bars` names, rising to 85, through the
+# last completed session. No market-data key is read and no data host dialed.
+printf '{"ask":"85.01","ask_size":"100","asset_id":"%s","bid":"84.99","bid_size":"100","exchange":"ARCA","minute_volume":"20000","symbol":"%s"}\n' \
+  "$ASSET_ID" "$SYMBOL" >"$MARKET/market.json"
+step 2a0 'bars-1Day' "$BIN/examples/rehearsal_bars" "$MARKET/daily" "$SYMBOL" 85 || true
+BARS=$(tail -n 1 "$WORK/out/2a0.out")
+BARS=${BARS:-$MARKET/daily}
 step 2a 'resource' curl -sf "${ENDPOINT%/mcp}/.well-known/oauth-protected-resource/mcp" || true
 
 step 2b 'opened ctl:' cli workspace open --workspace "$WORKSPACE" --environment live "${JOURNAL[@]}" || true
@@ -259,7 +270,7 @@ step 2j '^code ' cli agent deploy "$AGENT" "$VERSION" "${LIVE_OWNER[@]}" "${JOUR
 CODE=$(sed -n 's/^code //p' "$WORK/out/2j.out" | head -n 1)
 step 2k '^deployed' cli agent deploy "$AGENT" "$VERSION" --code "${CODE:-none}" "${LIVE_OWNER[@]}" "${JOURNAL[@]}" || true
 
-RUN=(env "MANDATE_RH_SIM_ENDPOINT=$ENDPOINT" "MANDATE_RH_ACCOUNT_NUMBER=$RH_ACCOUNT" "$BIN/mandate-paper" --workspace "$WORKSPACE" --agent "$AGENT"
+RUN=(env "MANDATE_RH_SIM_ENDPOINT=$ENDPOINT" "MANDATE_RH_ACCOUNT_NUMBER=$RH_ACCOUNT" "MANDATE_RH_SIM_MARKET=$MARKET" "$BIN/mandate-paper" --workspace "$WORKSPACE" --agent "$AGENT"
   --account-ref "$ACCOUNT_REF" --journal "$DSN" --store "$STORE" --bars "$BARS" --confirm-live)
 
 # run ID EXIT EXPECT ARGS...: the runner in the background, logged in through the simulator's
@@ -283,7 +294,7 @@ run() {
     esac
   fi
   [ "$result" = PASS ] || FAILED=1
-  report "$id" "$result" "$status" "mandate-paper ${RUN[*]:3} $*"
+  report "$id" "$result" "$status" "mandate-paper ${RUN[*]:5} $*"
 }
 
 # grant PID: the founder's inbox while the placing run waits (`mandate approvals`, cli_confirm).
