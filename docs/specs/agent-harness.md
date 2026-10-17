@@ -1024,12 +1024,12 @@ deadline) is E19-13's. For the desk:
 ### 15.6 Records
 
 E19-13's records carry the runs ([#1540](https://github.com/kunwarshivam/mandate/pull/1540) at head
-676e141c, journal spec §9.22 there), on the agent stream, written by the runtime core:
+36cf67d9, journal spec §9.22 there), on the agent stream, written by the runtime core:
 `RunStarted` with `kind` `owner` or `explain`, `trigger` `owner_question` or `approval` and its
 `cause`, and the run's `menu`; one `ModelInvocationRecorded` per turn; `ToolCallRecorded` and
 `ToolResultRecorded` for every tool call, the `answer` check's result as the result's `code`;
 `RunSummaryRecorded`; and `RunEnded`, whose reason `answered` marks a shown answer. #1540's rule 173
-allows one `explain` run per approval and, in its next push, one `owner` run per question. Whatever
+allows one `explain` run per approval and one `owner` run per question. Whatever
 names #1540 merges with, §15 means those records. One record is new, on the control stream
 ([journal spec §9.23](journal.md#923-desk-question-records-dec-2240)):
 
