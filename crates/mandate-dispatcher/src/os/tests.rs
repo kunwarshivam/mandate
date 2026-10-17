@@ -15,7 +15,6 @@ impl Entropy for Dry {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn the_system_source_fills_every_buffer_and_never_repeats_a_draw() {
     let mut random = OsRandom::new();
     let (mut first, mut second) = ([0u8; 16], [0u8; 16]);
@@ -34,7 +33,6 @@ fn the_system_source_fills_every_buffer_and_never_repeats_a_draw() {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_source_that_cannot_answer_is_entropy_unavailable_on_both_traits() {
     let mut random = OsRandom::over(Dry);
     let mut id = [0u8; 16];
