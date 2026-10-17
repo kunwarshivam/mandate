@@ -280,6 +280,12 @@ async fn a_wrong_secret_id_or_role_is_refused() {
         Err(SourceError::Denied),
         "a login whose role is not the claimed identity's"
     );
+    let session = bao.source(Identity::Runtime, now).await;
+    let printed = format!("{session:?}");
+    assert!(
+        printed.starts_with("OpenBaoSource { identity: Runtime, address: \"https://127.0.0.1:"),
+        "{printed}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

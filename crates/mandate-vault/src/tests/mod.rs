@@ -1,5 +1,6 @@
 //! Unit tests of the policy table and the lease rule.
 
+mod debug;
 mod errors;
 mod lease;
 mod openbao;
