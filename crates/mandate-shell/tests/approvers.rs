@@ -266,7 +266,14 @@ fn admitted_approvers(stream: &Stream) -> BTreeSet<String> {
         .unwrap();
     let agent = deployed.deployment().agent.clone();
     let facts = spy_facts(SPY, "SPY", Exchange::Arca, now);
-    let contexts = load_contexts(&artifacts, &facts, now, &agent).unwrap();
+    let contexts = load_contexts(
+        &artifacts,
+        &facts,
+        now,
+        &agent,
+        mandate_domain::Environment::Paper,
+    )
+    .unwrap();
     let file = MANDATE_FILE.get_or_init(|| {
         let path = std::env::temp_dir().join(format!(
             "mandate-shell-approvers-{}.json",

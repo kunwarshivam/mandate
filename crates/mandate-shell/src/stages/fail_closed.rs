@@ -23,6 +23,7 @@ use mandate_runtime::{
     AgentId, Autonomy, Command, Effect, EventId, Initiator, Input, IntentBody, IntentHandoff,
     KillScope, Observation, Purpose, RiskClock,
 };
+use proptest::prelude::*;
 
 use super::doubles::{
     FixedClassifier, FixedGate, FixedReconciler, FixtureMandate, LedgerJournal, OneShare,
@@ -311,15 +312,18 @@ fn shadow_book_matches(
 /// The environment scanner (TI-7): every committed draft says `paper`, read from the bytes. Not
 /// `verify_events`, whose column check passes a consistently `live` journal (finding 5).
 fn every_draft_is_paper(ledger: &super::doubles::Ledger) -> Result<(), String> {
+    every_draft_says(ledger, Environment::Paper)
+}
+
+/// The environment scanner over any connection: every committed draft says `expected`, read from
+/// the bytes (TI-7 as DEC-965 reads it).
+fn every_draft_says(ledger: &super::doubles::Ledger, expected: Environment) -> Result<(), String> {
     let bodies = ledger.bodies();
     assert!(!bodies.is_empty());
     for body in bodies {
         let parsed = mandate_canon::parse(&body).map_err(|e| format!("{e:?}"))?;
         let environment = parsed.get("environment").and_then(Value::as_str);
-        assert_eq!(
-            environment.and_then(Environment::parse),
-            Some(Environment::Paper)
-        );
+        assert_eq!(environment.and_then(Environment::parse), Some(expected));
     }
     Ok(())
 }
@@ -1061,21 +1065,99 @@ fn proposal_sanity() -> Result<(), String> {
     Ok(())
 }
 
-/// TI-7: a mandate whose environment is not paper refuses before any stream exists.
+/// One cycle of a mandate in `mandate` over a run whose chosen connection is in `connection`.
+fn run_in(
+    mandate: Environment,
+    connection: mandate_domain::Environment,
+) -> Result<(World, Result<Report, ShellError>), String> {
+    let world = World::default();
+    let mut stages = world.stages();
+    stages.mandate = Box::new(FixtureMandate {
+        world: world.clone(),
+        environment: mandate,
+    });
+    let mut setup = setup()?;
+    setup.connection_environment = connection;
+    let outcome = run_with_setup(stages, &setup)?;
+    Ok((world, outcome))
+}
+
+/// The journal's text for a connection environment, spelled here rather than through the shell's
+/// own mapping, so the oracle does not share the code it checks.
+fn named(connection: mandate_domain::Environment) -> Environment {
+    match connection {
+        mandate_domain::Environment::Paper => Environment::Paper,
+        mandate_domain::Environment::Live => Environment::Live,
+    }
+}
+
+/// TI-7 as DEC-965 reads it: a mandate whose environment is not the chosen connection's refuses
+/// before any stream exists, and one that is runs with every draft in that environment.
 #[test]
-fn a_non_paper_mandate_is_refused() -> Result<(), String> {
-    for environment in [Environment::Live, Environment::Backtest] {
-        let world = World::default();
-        let mut stages = world.stages();
-        stages.mandate = Box::new(FixtureMandate {
-            world: world.clone(),
-            environment,
-        });
-        let error = refusal(run_with(stages)?)?;
-        assert_eq!(error.code(), "non_paper_environment");
+fn a_mandate_outside_the_chosen_connections_environment_is_refused() -> Result<(), String> {
+    for (mandate, connection) in [
+        (Environment::Live, mandate_domain::Environment::Paper),
+        (Environment::Backtest, mandate_domain::Environment::Paper),
+        (Environment::Paper, mandate_domain::Environment::Live),
+        (Environment::Backtest, mandate_domain::Environment::Live),
+    ] {
+        let (world, outcome) = run_in(mandate, connection)?;
+        let error = refusal(outcome)?;
+        assert_eq!(error.code(), "environment_mismatch");
         assert!(world.ledger.borrow().bodies().is_empty());
+        assert_eq!(world.tally.borrow().hands, 0);
     }
     Ok(())
+}
+
+/// R13 behind V-001: a live mandate on the live connection the door chose is admitted, and every
+/// draft the run journals says `live`, never the constant `paper`.
+#[test]
+fn a_live_mandate_on_the_chosen_live_connection_journals_live() -> Result<(), String> {
+    let (world, outcome) = run_in(Environment::Live, mandate_domain::Environment::Live)?;
+    let report = outcome.map_err(|error| error.to_string())?;
+    assert_eq!(report.submitted.len(), 1);
+    every_draft_says(&world.ledger.borrow(), Environment::Live)
+}
+
+fn mandate_environment() -> impl Strategy<Value = Environment> {
+    prop_oneof![
+        Just(Environment::Paper),
+        Just(Environment::Live),
+        Just(Environment::Backtest)
+    ]
+}
+
+fn connection_environment() -> impl Strategy<Value = mandate_domain::Environment> {
+    prop_oneof![
+        Just(mandate_domain::Environment::Paper),
+        Just(mandate_domain::Environment::Live)
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    /// Over every mandate and connection environment pair: the cycle refuses
+    /// `environment_mismatch` with nothing journaled and nothing handed exactly when the two
+    /// differ, and otherwise journals every draft in the connection's environment.
+    #[test]
+    fn the_cycle_admits_exactly_the_chosen_connections_environment(
+        mandate in mandate_environment(),
+        connection in connection_environment(),
+    ) {
+        let (world, outcome) = run_in(mandate, connection).map_err(TestCaseError::fail)?;
+        if mandate == named(connection) {
+            prop_assert!(outcome.is_ok(), "{:?} on {:?}: {:?}", mandate, connection, outcome);
+            every_draft_says(&world.ledger.borrow(), named(connection))
+                .map_err(TestCaseError::fail)?;
+        } else {
+            let error = refusal(outcome).map_err(TestCaseError::fail)?;
+            prop_assert_eq!(error.code(), "environment_mismatch");
+            prop_assert!(world.ledger.borrow().bodies().is_empty());
+            prop_assert_eq!(world.tally.borrow().hands, 0);
+        }
+    }
 }
 
 /// Without `place_one_order` the run stops before the submission and reports what it would

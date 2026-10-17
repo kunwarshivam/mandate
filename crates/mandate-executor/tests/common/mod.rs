@@ -970,6 +970,9 @@ pub struct Shell {
     pub stopped: bool,
     /// Where the shell stopped running the effect list, for the fault-injection suite.
     pub crashed_at: Option<CrashPoint>,
+    /// The connector's capability profile, which a start sets after the fold as the production
+    /// shell does (DEC-838 item 5); none keeps the executor's transitional default.
+    pub profile: Option<mandate_domain::CapabilityProfile>,
 }
 
 impl Shell {
@@ -984,6 +987,7 @@ impl Shell {
             connector: FakeConnector::default(),
             stopped: false,
             crashed_at: None,
+            profile: None,
         }
     }
 
@@ -1289,6 +1293,10 @@ impl Shell {
     fn restart_with(&self, broker: FakeConnector, ports: &Ports<'_>) -> (Self, Ran) {
         let mut next = Self::new(self.epoch.0.saturating_add(1));
         next.connector = broker;
+        next.profile = self.profile.clone();
+        if let Some(profile) = &self.profile {
+            next.state = next.state.clone().with_profile(profile.clone());
+        }
         next.followed = self.followed.clone();
         next.account_journal = self.account_journal.clone();
         for event in self.account_journal.iter().chain(self.followed.iter()) {

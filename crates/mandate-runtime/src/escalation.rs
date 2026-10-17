@@ -27,10 +27,11 @@ use std::num::NonZeroU8;
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_approval::{
     Admission, AdmissionContext, ApprovalRef, AskablePurpose, BoundAction, Classification,
-    CommandAuthority, ContentHash, Current, DryRun, EvidenceAuthor, EvidenceRef, GenericText,
-    KillSwitchAuthority, ModeNow, Notification, OpaqueUser, OwnerCommandKind, PolicyOverlay,
-    Refusal, Request, RequestContent, Response, Revalidation, SkipReason, StepUp, StepUpRefusal,
-    Verdict, admit, content_hash, content_object, quorum, revalidate,
+    CommandAuthority, ContentHash, Current, DryRun, EvidenceAuthor, EvidenceRef, ExecutionTerms,
+    GenericText, KillSwitchAuthority, ModeNow, Notification, OpaqueUser, OwnerCommandKind,
+    PolicyOverlay, ProtectionTerms, Refusal, Request, RequestContent, Response, Revalidation,
+    SkipReason, StepUp, StepUpRefusal, Verdict, admit, content_hash, content_object, quorum,
+    revalidate,
 };
 use mandate_canon::{Digest, Value};
 use mandate_num::{Price, Qty, Signed};
@@ -42,8 +43,9 @@ use crate::state::RuntimeState;
 use crate::step::{Batch, Switching, cancel_approvals, lifecycle_change, proposed, switched};
 use crate::types::{
     AgentId, Autonomy, ConnectionId, DryRunVerdict, EventId, FlattenRequest, FoldedEvent,
-    Initiator, IntentBody, IntentHandoff, KillScope, Mode, OwnerConfirmation, Proposal, Purpose,
-    RiskClock, TimerId, TimerRequest, WorkspaceId,
+    Initiator, IntentBody, IntentHandoff, KillScope, Mode, OrderExecution, OwnerConfirmation,
+    Proposal, ProtectionPrices, Purpose, RiskClock, TimeInForce, TimerId, TimerRequest,
+    WorkspaceId,
 };
 
 /// The control stream's two event types the runtime acts on (journal spec §9, DEC-155 item 2).
@@ -118,6 +120,93 @@ fn purpose_of(purpose: AskablePurpose) -> Purpose {
     }
 }
 
+/// The plan a request binds (DEC-942 item 1): the builder's own, or `None` when it produced none.
+/// A plan naming another asset class than the order is ambiguous, so the order is not asked
+/// (`Err(())`), which never adds risk (`AGENTS.md` rule 3).
+fn bound_plan(proposal: &Proposal) -> Result<Option<ExecutionTerms>, ()> {
+    match proposal.execution {
+        None => Ok(None),
+        Some(plan) if plan.asset_class == proposal.asset_class => Ok(Some(ExecutionTerms {
+            asset_class: approval_class(plan.asset_class),
+            tif: match plan.tif {
+                TimeInForce::Day => mandate_approval::TimeInForce::Day,
+                TimeInForce::Gtc => mandate_approval::TimeInForce::Gtc,
+                TimeInForce::Ioc => mandate_approval::TimeInForce::Ioc,
+            },
+            protection_required: plan.protection_required,
+            protection: plan.protection.map(|p| ProtectionTerms {
+                stop: p.stop,
+                take_profit: p.take_profit,
+            }),
+        })),
+        Some(_) => Err(()),
+    }
+}
+
+/// The plan a request bound, as the executor's sink reads it: the same members, unchanged.
+fn granted_plan(terms: &ExecutionTerms) -> OrderExecution {
+    OrderExecution {
+        asset_class: runtime_class(terms.asset_class),
+        tif: match terms.tif {
+            mandate_approval::TimeInForce::Day => TimeInForce::Day,
+            mandate_approval::TimeInForce::Gtc => TimeInForce::Gtc,
+            mandate_approval::TimeInForce::Ioc => TimeInForce::Ioc,
+        },
+        protection_required: terms.protection_required,
+        protection: terms.protection.map(|p| ProtectionPrices {
+            stop: p.stop,
+            take_profit: p.take_profit,
+        }),
+    }
+}
+
+/// The plan a journaled request's content states, recovered only when it re-derives byte for
+/// byte: its members parse, its asset class is the order's, and the canonical object written back
+/// from them equals the journaled one. Anything else refuses (DEC-942 item 3, `AGENTS.md` rule 3).
+pub(crate) fn recovered_plan(
+    stated: &Value,
+    order_class: mandate_approval::AssetClass,
+) -> Result<ExecutionTerms, RuntimeError> {
+    let refused = || payload::non_canonical("content.execution");
+    let text = |field: &str| payload::str_of(stated, field).ok_or_else(refused);
+    let asset_class = match text("asset_class")? {
+        "us_equity" => mandate_approval::AssetClass::UsEquity,
+        "crypto" => mandate_approval::AssetClass::Crypto,
+        _ => return Err(refused()),
+    };
+    let tif = match text("tif")? {
+        "day" => mandate_approval::TimeInForce::Day,
+        "gtc" => mandate_approval::TimeInForce::Gtc,
+        "ioc" => mandate_approval::TimeInForce::Ioc,
+        _ => return Err(refused()),
+    };
+    let Some(Value::Bool(protection_required)) = stated.get("protection_required") else {
+        return Err(refused());
+    };
+    let protection = match stated.get("protection") {
+        Some(Value::Null) => None,
+        Some(protection) => Some(ProtectionTerms {
+            stop: payload::price_of(payload::str_of(protection, "stop").ok_or_else(refused)?)?,
+            take_profit: match protection.get("take_profit") {
+                Some(Value::Null) => None,
+                Some(Value::Str(price)) => Some(payload::price_of(price)?),
+                Some(_) | None => return Err(refused()),
+            },
+        }),
+        None => return Err(refused()),
+    };
+    let terms = ExecutionTerms {
+        asset_class,
+        tif,
+        protection_required: *protection_required,
+        protection,
+    };
+    if asset_class != order_class || mandate_approval::execution_object(&terms)? != *stated {
+        return Err(refused());
+    }
+    Ok(terms)
+}
+
 fn clock(at: RiskClock) -> mandate_approval::RiskClock {
     mandate_approval::RiskClock(at.secs())
 }
@@ -170,6 +259,9 @@ pub(crate) fn ask(
     let Some(bound) = bound_action(state, proposal, decided_by, &view.version) else {
         return Ok(());
     };
+    let Ok(execution) = bound_plan(proposal) else {
+        return Ok(());
+    };
     let deadline = RiskClock::from_secs(now.secs().saturating_add(view.approval.timeout_s));
     let evidence = state
         .evidence_for(&proposal.instrument, now)
@@ -185,6 +277,7 @@ pub(crate) fn ask(
         evidence,
         risk_impact: Vec::new(),
         deadline: clock(deadline),
+        execution,
     };
     let (Ok(object), Ok(hash)) = (content_object(&content), content_hash(&content)) else {
         return Ok(());
@@ -508,8 +601,12 @@ fn skip_code(reason: &SkipReason) -> &str {
 }
 
 /// The bound order as the ports read a proposal, so the classifier and the dry run judge exactly
-/// what the owner approved (checks 10 and 11).
-fn bound_proposal(bound: &BoundAction) -> Result<Proposal, RuntimeError> {
+/// what the owner approved (checks 10 and 11), with the plan its request bound under the content
+/// hash and never a new or re-sized one (DEC-942 item 3, `AGENTS.md` rule 4).
+fn bound_proposal(
+    bound: &BoundAction,
+    execution: Option<OrderExecution>,
+) -> Result<Proposal, RuntimeError> {
     Ok(Proposal {
         instrument: payload::instrument_of(&bound.instrument)?,
         asset_class: runtime_class(bound.asset_class),
@@ -524,7 +621,7 @@ fn bound_proposal(bound: &BoundAction) -> Result<Proposal, RuntimeError> {
         outputs_used: Default::default(),
         model_weights: Default::default(),
         clips_applied: Vec::new(),
-        execution: None,
+        execution,
     })
 }
 
@@ -543,7 +640,8 @@ fn revalidated(
     batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
     let bound = &request.content.bound;
-    let proposal = bound_proposal(bound)?;
+    let execution = request.content.execution.as_ref().map(granted_plan);
+    let proposal = bound_proposal(bound, execution)?;
     let classified = ports.plan.classify(ports.view, &proposal);
     let decided_now = classified.decided_by.clone().unwrap_or_default();
     let classification = match classified.autonomy {
@@ -617,7 +715,7 @@ fn revalidated(
         return Ok(());
     };
     let order = granted.order();
-    let act = bound_proposal(order)?;
+    let act = bound_proposal(order, execution)?;
     let intent = batch.journal("IntentProposed", Some(revalidation), proposed(&act)?)?;
     batch.hand(IntentHandoff {
         intent_id: intent,

@@ -93,6 +93,27 @@ pub fn protective_shape(
     Ok(None)
 }
 
+/// Whether `profile` lets an equity entry go as a bracket (§5.4's tranche model): its regular
+/// session's whole-share `limit` cell lists the bracket form and `gtc` (DEC-838 item 2). The whole
+/// cell is read because a bracket's legs are whole shares; an entry the builder sized otherwise is
+/// the builder's to refuse. With no profile, nothing is offered (DEC-841 item 2), so the entry goes
+/// plain and its protection follows the fill ([`protective_shape`], DEC-966 item 2).
+pub(crate) fn offers_bracket(profile: Option<&CapabilityProfile>) -> bool {
+    profile.is_some_and(|profile| {
+        profile
+            .cell(
+                AssetClass::UsEquity,
+                MarketSession::Regular,
+                CellType::Limit,
+                QuantityForm::Whole,
+            )
+            .is_ok_and(|cell| {
+                cell.protection_forms.contains(&ProtectionForm::Bracket)
+                    && cell.times_in_force.contains(&CellTif::Gtc)
+            })
+    })
+}
+
 /// The session a GTC protective order rests and triggers in, whatever the clock reads: a US
 /// equity's regular session and crypto's continuous one (§5.4, DEC-838 item 4).
 fn resting_session(asset_class: AssetClass) -> MarketSession {

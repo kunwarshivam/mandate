@@ -5129,7 +5129,16 @@ From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-84
   `Connector::profile`) in B3, before the first non-Alpaca executor
   path merges. Until then an executor built without a profile is Alpaca-only by contract. Once every
   constructor passes a profile, `ExecutorState`'s profile stops being an `Option` and DEC-841 item
-  2's defensive path goes with it.
+  2's defensive path goes with it. B3's protection slice ([DEC-966](decisions/DEC-966.md)) did not
+  delete it: every production start already sets the connector's profile, and the deletion touches
+  about seventy constructors; it stays here.
+
+From E7-23 B3's protection slice ([DEC-966](decisions/DEC-966.md) items 3 and 4, claim #1423):
+
+- **E7-4: the runtime-managed take-profit** (trading-domain spec §5.4, crypto and a profile with
+  no OCO). The runtime watches the mark and hands a marketable exit when the intent's take-profit
+  is reached. Until then a Robinhood position rests on its stop alone, and the take-profit price
+  the intent carries is unused.
 
 From E2's first paper fill ([DEC-938](decisions/DEC-938.md), #1355), and its follow-ups
 ([DEC-948](decisions/DEC-948.md), #1369's review). DEC-948 closed the paper environment, the

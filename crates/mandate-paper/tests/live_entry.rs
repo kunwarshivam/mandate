@@ -4,9 +4,9 @@
 //! the core dumps it turns off before any credential, and the one Robinhood endpoint each build
 //! may dial. No test here logs in, holds a credential or reaches a host (ES-19, LT-1,
 //! `AGENTS.md` rule 8): the endpoint is judged as text, and the login itself runs only against
-//! the simulator in a rehearsal build. CI builds this suite in the default build alone; the
-//! pins that read the build branch on `cfg!(feature = "live")` so a local `live` build reads
-//! its own answer.
+//! the simulator in a rehearsal build. CI runs this suite in the default, `rh-sim` and
+//! `live,rh-sim` builds (DEC-963, DEC-964); the pins that read the build branch on
+//! `cfg!(feature = "live")` so a local `live` build reads its own answer.
 
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -375,6 +375,45 @@ fn each_build_pins_its_own_host_and_the_rehearsal_pins_loopback() {
     } else {
         assert_eq!(live, None);
     }
+}
+
+/// DEC-964 (DEC-922 items 1 and 2): whenever this build holds `rh-sim`, with `live` beside it or
+/// not, the build that runs is the rehearsal: it pins only the simulator's loopback host, dials
+/// nothing until it is given the simulator's endpoint, and refuses Robinhood's own endpoint and
+/// any other host off loopback. CI runs this suite in the `live,rh-sim` build, so this pin is what
+/// holds that build's tests to loopback. The expected build is read from this test crate's own
+/// `cfg!`, never from `Build::CURRENT`.
+#[test]
+fn a_build_holding_rh_sim_dials_loopback_alone_whatever_else_it_holds() {
+    let expected = if cfg!(feature = "rh-sim") {
+        Build::Rehearsal
+    } else if cfg!(feature = "live") {
+        Build::Live
+    } else {
+        Build::Default
+    };
+    assert_eq!(Build::CURRENT, expected);
+    if !cfg!(feature = "rh-sim") {
+        return;
+    }
+    assert_eq!(pinned_host(Build::CURRENT), Some(REHEARSAL_HOST));
+    assert_eq!(
+        endpoint(Build::CURRENT, None),
+        Err(EndpointRefusal::RehearsalUnset)
+    );
+    for off in [
+        "https://agent.robinhood.com/mcp/trading",
+        "http://agent.robinhood.com/mcp/trading",
+        "http://10.0.0.1:8080/mcp",
+    ] {
+        assert_eq!(
+            endpoint(Build::CURRENT, Some(off)),
+            Err(EndpointRefusal::OffLoopback),
+            "{off}"
+        );
+    }
+    let sim = endpoint(Build::CURRENT, Some("http://127.0.0.1:8080/mcp"));
+    assert_eq!(sim.map(|dialed| dialed.host), Ok(REHEARSAL_HOST.to_owned()));
 }
 
 fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {

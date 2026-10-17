@@ -7,7 +7,7 @@ use mandate_alpaca::{
     LatestQuote, MinuteBar, MinuteBars, alpaca_account_rules,
 };
 use mandate_builder::buy_action;
-use mandate_canon::Digest;
+use mandate_canon::{Digest, Key, Value};
 use mandate_domain::{AssetId, Environment};
 use mandate_executor::{
     AgentId as ExecutorAgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
@@ -29,11 +29,14 @@ use crate::control::{
 };
 use mandate_canon::to_canonical;
 use mandate_spec::context::Membership;
+use mandate_spec::validate::{Violation, validate};
+use proptest::prelude::*;
 use std::collections::BTreeMap;
 
 use super::artifacts::reference;
 use super::context::{
     GateQuote, PaperClock, ReconcilingPaperContext, TrustedPaperContext, protection_prices,
+    stop_limit_offset,
 };
 use super::gate::{gate_mandate, gate_template};
 use super::{
@@ -481,7 +484,8 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
     snapshot.broker.quote.instrument = symbol("MSFT")?;
     snapshot.broker.minute_bars.instrument = symbol("MSFT")?;
 
-    let contexts = load_contexts(&loaded, &snapshot, at(NOW)?, &agent()).map_err(text)?;
+    let contexts =
+        load_contexts(&loaded, &snapshot, at(NOW)?, &agent(), Environment::Paper).map_err(text)?;
     let decision = contexts
         .run
         .decision
@@ -520,6 +524,7 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         quote: GateQuote::of(&snapshot.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: None,
     };
     let executor_agent = ExecutorAgentId(AGENT.to_owned());
     let reviewed = symbol(OTHER_ASSET)?;
@@ -920,7 +925,8 @@ fn production_deployment_takes_opaque_ids_and_binds_the_confirmed_connection() -
 #[test]
 fn the_reviewed_snapshot_assembles_both_contexts_from_its_own_facts() -> Result<(), String> {
     let loaded = artifacts()?;
-    let contexts = load_contexts(&loaded, &facts()?, at(NOW)?, &agent()).map_err(text)?;
+    let contexts =
+        load_contexts(&loaded, &facts()?, at(NOW)?, &agent(), Environment::Paper).map_err(text)?;
     let decision = contexts
         .run
         .decision
@@ -1142,7 +1148,13 @@ fn each_fact_that_does_not_hold_refuses_the_assembly() -> Result<(), String> {
     for (name, expected, breaks) in cases {
         let mut snapshot = facts()?;
         breaks(&mut snapshot)?;
-        let what = refusal(load_contexts(&loaded, &snapshot, at(NOW)?, &agent()))?;
+        let what = refusal(load_contexts(
+            &loaded,
+            &snapshot,
+            at(NOW)?,
+            &agent(),
+            Environment::Paper,
+        ))?;
         assert_eq!(what, expected, "{name}");
     }
     Ok(())
@@ -1156,9 +1168,9 @@ fn a_quote_and_record_exactly_at_the_bound_and_a_locked_quote_pass() -> Result<(
     let mut snapshot = facts_at("2026-09-28T16:59:50Z", "2026-09-28T16:59:50Z")?;
     snapshot.broker.quote.bid = snapshot.broker.quote.ask;
     snapshot.broker.account.cash = usd("1")?;
-    load_contexts(&loaded, &snapshot, at(NOW)?, &agent()).map_err(text)?;
+    load_contexts(&loaded, &snapshot, at(NOW)?, &agent(), Environment::Paper).map_err(text)?;
     let fresh = facts_at(NOW, NOW)?;
-    load_contexts(&loaded, &fresh, at(NOW)?, &agent()).map_err(text)?;
+    load_contexts(&loaded, &fresh, at(NOW)?, &agent(), Environment::Paper).map_err(text)?;
     Ok(())
 }
 
@@ -1206,7 +1218,7 @@ fn the_clock_must_be_inside_the_regular_session_and_before_its_close_window() ->
     ];
     for (name, now, expected) in cases {
         let snapshot = facts_at(now, now)?;
-        let result = load_contexts(&loaded, &snapshot, at(now)?, &agent());
+        let result = load_contexts(&loaded, &snapshot, at(now)?, &agent(), Environment::Paper);
         match expected {
             Some(expected) => assert_eq!(refusal(result)?, expected, "{name}"),
             None => assert!(result.is_ok(), "{name}"),
@@ -1262,6 +1274,59 @@ fn protection_derives_from_the_entry_and_rounds_each_sell_price_up() -> Result<(
     Ok(())
 }
 
+/// DEC-966 item 5: the stop-limit's offset is the mandate's when protection is on, and none when
+/// it is off or unset; the executor's view hands it to the reviewed agent alone.
+#[test]
+fn the_stop_limit_offset_is_the_mandates_and_only_the_reviewed_agents() -> Result<(), String> {
+    let loaded = artifacts()?;
+    let mut protection = loaded.mandate.protection.clone();
+    protection.enabled = true;
+    protection.crypto_stop_limit_offset = Some(
+        mandate_spec::SchemaDec::parse("0.005", mandate_spec::DecGrammar::OpenFraction)
+            .map_err(|e| format!("{e:?}"))?,
+    );
+    let offset = Fraction::parse("0.005").map_err(text)?;
+    assert_eq!(stop_limit_offset(&protection).map_err(text)?, Some(offset));
+    let mut disabled = protection.clone();
+    disabled.enabled = false;
+    assert_eq!(stop_limit_offset(&disabled).map_err(text)?, None);
+    let mut unset = protection;
+    unset.crypto_stop_limit_offset = None;
+    assert_eq!(stop_limit_offset(&unset).map_err(text)?, None);
+
+    let snapshot = facts_at(NOW, NOW)?;
+    let template = gate_template(
+        &loaded,
+        &snapshot,
+        at(NOW)?,
+        loaded
+            .production_configuration()
+            .map_err(text)?
+            .gate
+            .clone(),
+    )
+    .map_err(text)?;
+    let trusted = TrustedPaperContext {
+        template,
+        agent: AGENT.to_owned(),
+        increment: loaded.instrument.increment,
+        fees: loaded.fees.clone(),
+        quote: GateQuote::of(&snapshot.broker.quote),
+        quote_max_age: loaded.quote_max_age,
+        clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: Some(offset),
+    };
+    assert_eq!(
+        trusted.crypto_stop_limit_offset(&ExecutorAgentId(AGENT.to_owned())),
+        Some(offset)
+    );
+    assert_eq!(
+        trusted.crypto_stop_limit_offset(&ExecutorAgentId("another-agent".to_owned())),
+        None
+    );
+    Ok(())
+}
+
 #[test]
 fn the_gate_uses_the_reviewed_config_and_the_mandates_exact_limits() -> Result<(), String> {
     let config = reviewed_gate_config()?;
@@ -1289,6 +1354,7 @@ fn trusted_context_exposes_only_the_reviewed_agent_and_instrument() -> Result<()
         quote: GateQuote::of(&facts()?.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let other_agent = ExecutorAgentId("other".to_owned());
@@ -1359,6 +1425,7 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
         ),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::clone(&current))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let instrument = symbol(INSTRUMENT_ID)?;
@@ -1393,6 +1460,7 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
                 .quote,
         ),
         clock: Rc::new(TestClock(close_clock)),
+        stop_limit_offset: None,
         ..trusted
     };
     assert!(
@@ -1424,6 +1492,7 @@ fn the_binding_gate_judges_the_quote_the_run_last_handed_it() -> Result<(), Stri
         quote: quote.clone(),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::clone(&current))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let instrument = symbol(INSTRUMENT_ID)?;
@@ -1592,6 +1661,7 @@ fn each_binding_request_reserves_its_own_orders_fees() -> Result<(), String> {
         quote: GateQuote::of(&facts()?.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: None,
     };
     let reviewed = ExecutorAgentId(AGENT.to_owned());
     let instrument = symbol(INSTRUMENT_ID)?;
@@ -1756,7 +1826,7 @@ fn the_gate_reads_a_robinhood_account_as_cash_under_legacy_pdt() -> Result<(), S
         broker: robinhood,
         liquidity: facts()?.liquidity,
     };
-    load_contexts(&loaded, &paper, at(NOW)?, &agent()).map_err(text)?;
+    load_contexts(&loaded, &paper, at(NOW)?, &agent(), Environment::Paper).map_err(text)?;
     let template =
         gate_template(&loaded, &paper, at(NOW)?, reviewed_gate_config()?).map_err(text)?;
     assert_eq!(template.account.account_type, AccountType::Cash);
@@ -1779,4 +1849,78 @@ fn a_robinhood_quote_of_another_instrument_refuses_the_facts() -> Result<(), Str
         "{refused:?}"
     );
     Ok(())
+}
+
+/// The validation a cycle runs on the run context `connection` gives, for the reviewed mandate
+/// set to `mandate`'s environment: whether V-001 fires.
+fn v001_fires(
+    loaded: &Artifacts,
+    mandate: Environment,
+    connection: Environment,
+) -> Result<bool, String> {
+    let contexts =
+        load_contexts(loaded, &facts()?, at(NOW)?, &agent(), connection).map_err(text)?;
+    let mut value = loaded.mandate.canonical().map_err(text)?;
+    let Value::Object(members) = &mut value else {
+        return Err("the reviewed mandate is an object".to_owned());
+    };
+    let named = match mandate {
+        Environment::Paper => "paper",
+        Environment::Live => "live",
+    };
+    members.insert(
+        Key::new("environment").map_err(text)?,
+        Value::Str(named.to_owned()),
+    );
+    let document = mandate_spec::Mandate::parse(&value).map_err(text)?;
+    let report = validate(&document, &contexts.run.validation).map_err(text)?;
+    Ok(report.violations.contains(&Violation::V001))
+}
+
+#[test]
+fn the_run_context_names_the_chosen_connections_environment_never_a_constant() -> Result<(), String>
+{
+    let loaded = artifacts()?;
+    for connection in [Environment::Paper, Environment::Live] {
+        let contexts =
+            load_contexts(&loaded, &facts()?, at(NOW)?, &agent(), connection).map_err(text)?;
+        assert_eq!(
+            contexts.run.validation.connection_environment,
+            Some(connection),
+            "V-001 compares the connection the run chose (DEC-965)"
+        );
+    }
+    assert!(
+        !v001_fires(&loaded, Environment::Live, Environment::Live)?,
+        "a live mandate on the live connection the door chose passes V-001 (R13)"
+    );
+    assert!(
+        !v001_fires(&loaded, Environment::Paper, Environment::Paper)?,
+        "a paper mandate on a paper connection passes V-001 as before"
+    );
+    assert!(v001_fires(&loaded, Environment::Paper, Environment::Live)?);
+    assert!(v001_fires(&loaded, Environment::Live, Environment::Paper)?);
+    Ok(())
+}
+
+fn environment() -> impl Strategy<Value = Environment> {
+    prop_oneof![Just(Environment::Paper), Just(Environment::Live)]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(24))]
+
+    /// V-001 on the run context, over any sequence of runs on one set of artifacts, each pairing
+    /// a mandate environment with the connection the run chose: it fires exactly when the two
+    /// differ, computed here from the pair alone, so no run's connection carries into the next.
+    #[test]
+    fn v001_on_the_run_context_fires_exactly_when_mandate_and_connection_differ(
+        runs in proptest::collection::vec((environment(), environment()), 1..6),
+    ) {
+        let loaded = artifacts().map_err(TestCaseError::fail)?;
+        for (mandate, connection) in runs {
+            let fires = v001_fires(&loaded, mandate, connection).map_err(TestCaseError::fail)?;
+            prop_assert_eq!(fires, mandate != connection, "{:?} on {:?}", mandate, connection);
+        }
+    }
 }

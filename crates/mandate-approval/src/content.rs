@@ -89,6 +89,31 @@ pub struct RiskFigure {
     pub cap: Option<DecStr>,
 }
 
+/// The time in force the order builder chose for the asked order (journal spec §9.1's `tif`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TimeInForce {
+    Day,
+    Gtc,
+    Ioc,
+}
+
+/// The protective prices the order builder computed for the asked entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProtectionTerms {
+    pub stop: Price,
+    pub take_profit: Option<Price>,
+}
+
+/// The execution plan the deterministic order builder produced for the asked order, bound under
+/// the content hash so a grant releases exactly this plan and never a new one (DEC-942).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutionTerms {
+    pub asset_class: AssetClass,
+    pub tif: TimeInForce,
+    pub protection_required: bool,
+    pub protection: Option<ProtectionTerms>,
+}
+
 /// Everything `ApprovalRequested` carries for the owner to read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestContent {
@@ -96,6 +121,9 @@ pub struct RequestContent {
     pub evidence: Vec<EvidenceRef>,
     pub risk_impact: Vec<RiskFigure>,
     pub deadline: RiskClock,
+    /// `None` when the builder produced no plan: the content object is then version 1's, with no
+    /// `execution` member, and a grant hands no plan, which the executor's sink refuses.
+    pub execution: Option<ExecutionTerms>,
 }
 
 /// SHA-256 of the canonical content object (journal spec §4). A response must repeat it (EI-14).
@@ -106,7 +134,8 @@ pub struct ContentHash(pub Digest);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfirmationCode(pub String);
 
-/// The canonical content object: exactly the keys DEC-165 item 3 lists, and nothing else.
+/// The canonical content object: exactly the keys DEC-165 item 3 lists, and nothing else, plus
+/// `execution` when the builder produced a plan (DEC-942 item 2).
 ///
 /// # Errors
 /// [`ApprovalError::Unrepresentable`] for a deadline outside `UtcNanos`'s range, an order value
@@ -177,23 +206,69 @@ pub fn content_object(content: &RequestContent) -> Result<Value, ApprovalError> 
     };
     let deadline =
         UtcNanos::from_parts(content.deadline.0, 0).map_err(|_| unrepresentable("deadline"))?;
+    let execution = content
+        .execution
+        .as_ref()
+        .map(|terms| execution_object(terms).map(|plan| ("execution", plan)))
+        .transpose()?;
+    object(
+        [
+            ("action", action),
+            ("trigger", trigger),
+            ("evidence", evidence),
+            ("risk_impact", Value::Array(risk_impact)),
+            ("reference_mark", reference_mark),
+            ("deadline", text(&deadline.to_string())),
+            ("default", text(DEFAULT_SENTENCE)),
+            ("choices", Value::Array(vec![text("approve"), text("skip")])),
+            (
+                "approvers",
+                object([
+                    ("required", int(u64::from(bound.approvers_required.get()))?),
+                    ("independent", Value::Bool(bound.independent_required)),
+                ])?,
+            ),
+        ]
+        .into_iter()
+        .chain(execution),
+    )
+}
+
+/// The content object's `execution` member: the plan exactly as the builder produced it, in the
+/// canonical form a fold re-derives and compares byte for byte (DEC-942).
+///
+/// # Errors
+/// Never in practice: every key is a valid canonical key.
+pub fn execution_object(terms: &ExecutionTerms) -> Result<Value, ApprovalError> {
+    let protection = match terms.protection {
+        None => Value::Null,
+        Some(protection) => object([
+            ("stop", text(&protection.stop.to_string())),
+            (
+                "take_profit",
+                protection
+                    .take_profit
+                    .map_or(Value::Null, |price| text(&price.to_string())),
+            ),
+        ])?,
+    };
     object([
-        ("action", action),
-        ("trigger", trigger),
-        ("evidence", evidence),
-        ("risk_impact", Value::Array(risk_impact)),
-        ("reference_mark", reference_mark),
-        ("deadline", text(&deadline.to_string())),
-        ("default", text(DEFAULT_SENTENCE)),
-        ("choices", Value::Array(vec![text("approve"), text("skip")])),
+        ("asset_class", text(asset_class_name(terms.asset_class))),
+        ("tif", text(tif_name(terms.tif))),
         (
-            "approvers",
-            object([
-                ("required", int(u64::from(bound.approvers_required.get()))?),
-                ("independent", Value::Bool(bound.independent_required)),
-            ])?,
+            "protection_required",
+            Value::Bool(terms.protection_required),
         ),
+        ("protection", protection),
     ])
+}
+
+fn tif_name(tif: TimeInForce) -> &'static str {
+    match tif {
+        TimeInForce::Day => "day",
+        TimeInForce::Gtc => "gtc",
+        TimeInForce::Ioc => "ioc",
+    }
 }
 
 /// Mandate spec §6.4's label for the combined score.
@@ -215,7 +290,9 @@ fn int(n: u64) -> Result<Value, ApprovalError> {
         .ok_or_else(|| unrepresentable("integer"))
 }
 
-pub(crate) fn object<const N: usize>(members: [(&str, Value); N]) -> Result<Value, ApprovalError> {
+pub(crate) fn object<'k>(
+    members: impl IntoIterator<Item = (&'k str, Value)>,
+) -> Result<Value, ApprovalError> {
     members
         .into_iter()
         .map(|(k, v)| Key::new(k).map(|k| (k, v)))

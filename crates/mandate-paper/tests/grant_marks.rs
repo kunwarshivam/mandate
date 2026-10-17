@@ -6,11 +6,9 @@
 //! founder's grant is committed on the control stream by the clock itself, at the first pause
 //! that reaches the grant's delay, exactly as the CLI commits one while the run waits.
 //!
-//! One seam is a test double, over a gap outside this lane that fails closed today: the
-//! runtime's granted intent carries no execution policy until gap 2 lands (DEC-940 item 6;
-//! claim #1374), so the sink hands the executor the protection the mandate names, as the
-//! cycle's own request would have carried it. The mandate stage and the builder's two stages are
-//! the production ones: the view resolves the mandate's `role:approver` to the workspace owner,
+//! The sink is the production one: the granted intent carries the execution plan its request
+//! bound under the content hash (DEC-942), so no double supplies one. The mandate stage and the
+//! builder's two stages are the production ones too: the view resolves the mandate's `role:approver` to the workspace owner,
 //! the user who recorded the mandate connection's `ConnectionEstablished` (DEC-953). Nothing here
 //! reaches a host or a credential (`AGENTS.md` rule 8).
 
@@ -30,15 +28,14 @@ use mandate_alpaca::{
     TradingTransport, TransportError,
 };
 use mandate_canon::{Digest, Value, to_canonical};
-use mandate_executor::equity_bracket_prices;
 use mandate_journal::{AppendOutcome, ArtifactSource, StoredEvent};
 use mandate_modelhost::{DailyCloses, Evaluation, Pin, evaluate};
-use mandate_num::{Fraction, Price};
+use mandate_num::Price;
 use mandate_paper::{GrantRefusal, PaperError, fresh_mark, granted_opening, lt10_end};
-use mandate_runtime::{IntentBody, IntentHandoff, ModelOutput, Observation, OrderExecution};
+use mandate_runtime::{ModelOutput, Observation};
 use mandate_shell::adapters::{Sources, StoreJournal, production};
 use mandate_shell::paper::{PaperClock, load_contexts_with_clock};
-use mandate_shell::stages::{JournalWriter, Sink};
+use mandate_shell::stages::JournalWriter;
 use mandate_shell::symbols::BrokerSymbols;
 use mandate_shell::{Cause, Mark, Report, Setup, ShellError, Watch, run_observed_asked_watched};
 use mandate_spec::validate::RegisteredModel;
@@ -226,38 +223,6 @@ impl Shared {
             matches!(outcome, AppendOutcome::Committed(_)),
             "the grant commits: {outcome:?}"
         );
-    }
-}
-
-/// The sink double for gap 2 (DEC-940 item 6, claim #1374): a granted intent carries no
-/// execution policy yet, so it is handed the policy the cycle's own request carried — a day
-/// order with the bracket the mandate's protection derives from the bound limit (stop 5%, take
-/// profit 10%) — and then the production sink.
-struct PolicySink(Box<dyn Sink>);
-
-impl Sink for PolicySink {
-    fn hand(&mut self, handoff: &IntentHandoff) -> Result<mandate_executor::IntentHandoff, Cause> {
-        let mut handoff = handoff.clone();
-        if handoff.execution.is_none()
-            && let IntentBody::Order { limit, .. } = &handoff.body
-        {
-            let bracket = equity_bracket_prices(
-                *limit,
-                Fraction::parse("0.05").unwrap(),
-                Some(Fraction::parse("0.1").unwrap()),
-            )
-            .unwrap();
-            handoff.execution = Some(OrderExecution {
-                asset_class: mandate_domain::AssetClass::UsEquity,
-                tif: mandate_runtime::TimeInForce::Day,
-                protection_required: true,
-                protection: Some(mandate_runtime::ProtectionPrices {
-                    stop: bracket.stop,
-                    take_profit: bracket.take_profit,
-                }),
-            });
-        }
-        self.0.hand(&handoff)
     }
 }
 
@@ -516,6 +481,7 @@ fn granted_with_owner(owner: Option<&str>, delay_s: i64, after_grant: Quoted) ->
         &facts,
         now,
         &agent,
+        mandate_domain::Environment::Paper,
         Rc::new(GateClock(clock.clone())),
     )
     .unwrap();
@@ -551,14 +517,13 @@ fn granted_with_owner(owner: Option<&str>, delay_s: i64, after_grant: Quoted) ->
         transport: broker.clone(),
     });
     stages.journal = Box::new(journal.clone());
-    let sink = std::mem::replace(&mut stages.sink, Box::new(PolicySink(Box::new(Refusing))));
-    stages.sink = Box::new(PolicySink(sink));
     let setup = Setup {
         deployment: deployed.deployment().clone(),
         account_ref: "acct_spy".to_owned(),
         now,
         place_one_order: true,
         new_cycle: false,
+        connection_environment: mandate_domain::Environment::Paper,
     };
     let watch = Watch {
         pause: clock.clone(),
@@ -581,17 +546,6 @@ fn granted_with_owner(owner: Option<&str>, delay_s: i64, after_grant: Quoted) ->
         broker,
         journal,
         clock,
-    }
-}
-
-/// The placeholder the production sink is swapped out through; it never hands anything.
-struct Refusing;
-
-impl Sink for Refusing {
-    fn hand(&mut self, _: &IntentHandoff) -> Result<mandate_executor::IntentHandoff, Cause> {
-        Err(Cause::Absent {
-            what: "the production sink",
-        })
     }
 }
 

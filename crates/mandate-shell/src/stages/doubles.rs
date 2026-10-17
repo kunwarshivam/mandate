@@ -227,6 +227,7 @@ pub fn setup() -> Result<Setup, String> {
         now: UtcNanos::parse(NOW).map_err(|e| e.to_string())?,
         place_one_order: true,
         new_cycle: false,
+        connection_environment: mandate_domain::Environment::Paper,
     })
 }
 

@@ -62,6 +62,7 @@
 /crates/mandate-shell-rh-sim/ @kunwarshivam
 /crates/mandate-modelhost/  @kunwarshivam
 /crates/mandate-paper/      @kunwarshivam
+/crates/mandate-agentd/     @kunwarshivam
 /crates/mandate-webpush/    @kunwarshivam
 /crates/mandate-push-relay/ @kunwarshivam
 /crates/mandate-dispatcher/ @kunwarshivam

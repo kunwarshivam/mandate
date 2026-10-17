@@ -620,21 +620,18 @@ pub fn run<P: Ports>(
     if args.reconcile_only && args.journal.is_none() {
         return Err(usage("--reconcile-only needs --journal".to_owned()));
     }
-    let (session, paper) = match early {
-        Some(session) => (session, false),
-        None => {
-            let (connection, _) =
-                door.ok_or_else(|| absent(Stage::Validate, "the connection the deployment names"))?;
-            let session = ports.connect(&connection, None)?;
-            (session, connection.environment == Environment::Paper)
-        }
+    let (connection, _) =
+        door.ok_or_else(|| absent(Stage::Validate, "the connection the deployment names"))?;
+    let session = match early {
+        Some(session) => session,
+        None => ports.connect(&connection, None)?,
     };
     let booking = Booking {
         session: &session,
         artifacts: &artifacts,
         deployed: &deployed,
         version: confirmed.version(),
-        paper,
+        connection: connection.environment,
         args,
     };
     let booked = booking.book(clock.now())?;
@@ -703,8 +700,15 @@ pub fn run<P: Ports>(
     };
     let paper = PaperFacts { broker, liquidity };
     let binding_clock = Rc::new(PortClock(clock.clone()));
-    let contexts = load_contexts_with_clock(&artifacts, &paper, now, &agent, binding_clock)
-        .map_err(refused(Stage::Validate))?;
+    let contexts = load_contexts_with_clock(
+        &artifacts,
+        &paper,
+        now,
+        &agent,
+        connection.environment,
+        binding_clock,
+    )
+    .map_err(refused(Stage::Validate))?;
     let contexts_quote = contexts.quote.clone();
     let registered = artifacts
         .production_configuration()
@@ -726,6 +730,7 @@ pub fn run<P: Ports>(
         now,
         place_one_order: args.place_one_order,
         new_cycle: false,
+        connection_environment: connection.environment,
     };
     let sources = Sources {
         mandate: store.object_path(&ArtifactRef::from_digest(input.version())),
@@ -778,8 +783,8 @@ struct Booking<'r, S> {
     artifacts: &'r Artifacts,
     deployed: &'r DeploymentInput,
     version: mandate_canon::Digest,
-    /// Whether the run's connection is a paper one; a live run books nothing.
-    paper: bool,
+    /// The environment of the connection the run chose; a live run books nothing.
+    connection: Environment,
     args: &'r Args,
 }
 
@@ -795,7 +800,7 @@ impl<S: Session> Booking<'_, S> {
             .journal
             .clone()
             .filter(|_| self.args.place_one_order || self.args.reconcile_only)
-            .filter(|_| self.paper);
+            .filter(|_| self.connection == Environment::Paper);
         let Some(journal) = journal else {
             return Ok(Booked::default());
         };
@@ -826,6 +831,7 @@ impl<S: Session> Booking<'_, S> {
             now,
             place_one_order: false,
             new_cycle: false,
+            connection_environment: self.connection,
         };
         let booked = self
             .session

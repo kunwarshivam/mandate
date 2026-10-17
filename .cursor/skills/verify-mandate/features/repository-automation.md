@@ -10,7 +10,9 @@
   pre-flight can be deleted without a test failing; `mutated_crates`, which gates every
   `safety_critical = true` crate whatever its layer, DEC-253; `live_feature_problems`, which
   reads each CI command word by word as the shell does and refuses any word holding the token
-  `live` outside the one compile-only form, DEC-529 item 3),
+  `live` outside the one compile-only form, DEC-529 item 3, and the one guarded run of the
+  runner's tests in the `live,rh-sim` build in `ci.yml`'s `fast-rh-sim-live` job, whose
+  credential guard is `.github/scripts/no-credentials.sh`, DEC-964),
   `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
   equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.

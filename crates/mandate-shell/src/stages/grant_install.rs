@@ -27,7 +27,7 @@ use mandate_runtime::{
 use mandate_time::UtcNanos;
 
 use super::doubles::{
-    AAPL, ConvertingSink, FixedClassifier, FixedGate, FixedReconciler, PaperExecutor, World,
+    AAPL, AGENT, ConvertingSink, FixedClassifier, FixedGate, FixedReconciler, PaperExecutor, World,
     agent_stream, control_stream, instrument, output, passed_checks, seed, setup,
 };
 use super::tail_install::ApprovableMandate;
@@ -93,27 +93,6 @@ fn marked_at(price: &str) -> Result<Mark, ShellError> {
     Ok(Mark { price, at })
 }
 
-/// The sink double over a granted intent: the runtime's granted intent carries no execution
-/// policy today (`mandate_runtime`'s `bound_proposal` sets none), and the production sink
-/// refuses it (DEC-940 item 6; [`a_granted_intent_without_its_policy_stops_at_the_sink`] pins
-/// that). This double stands in for the follow-up that carries the policy: it hands the stock
-/// double the fixture sizing's own equity policy where the handoff holds none, so the probes
-/// can read the hold behind the sink.
-struct PolicySink(ConvertingSink);
-
-impl Sink for PolicySink {
-    fn hand(&mut self, handoff: &IntentHandoff) -> Result<mandate_executor::IntentHandoff, Cause> {
-        let mut handoff = handoff.clone();
-        handoff.execution = handoff.execution.or(Some(OrderExecution {
-            asset_class: AssetClass::UsEquity,
-            tif: RuntimeTimeInForce::Day,
-            protection_required: false,
-            protection: None,
-        }));
-        self.0.hand(&handoff)
-    }
-}
-
 /// The paper double executor, answering the watch's protection question covered: the facts the
 /// LT-10 question reads are the caller's to judge here, never this double's.
 struct Covered(PaperExecutor);
@@ -144,20 +123,10 @@ impl Executor for Covered {
 }
 
 /// The doubles' stages with the classifier answering `autonomy`, the mandate naming the founder
-/// as its approver, the observation's closes stored, the instrument marked, and the sink
-/// handing a granted intent on.
+/// as its approver, the observation's closes stored, the instrument marked, and the doubles' stock
+/// sink, which refuses an intent with no execution policy as the production sink does: a granted
+/// intent carries the plan its request bound (DEC-942).
 fn cycle(world: &World, autonomy: Autonomy, place: bool) -> Result<ProductionCycle, String> {
-    assembled(
-        world,
-        autonomy,
-        place,
-        Box::new(PolicySink(ConvertingSink(world.clone()))),
-    )
-}
-
-/// [`cycle`] with the doubles' stock sink, which refuses an intent with no execution policy as
-/// the production sink does.
-fn stock(world: &World, autonomy: Autonomy, place: bool) -> Result<ProductionCycle, String> {
     assembled(
         world,
         autonomy,
@@ -575,20 +544,45 @@ fn the_wake_reads_the_runs_own_streams() -> Result<(), String> {
     Ok(())
 }
 
-/// DEC-940 item 6: today the runtime's granted intent carries no execution policy, and the sink
-/// refuses it as the production sink does — the wake stops the run and nothing is sent. The
-/// grant cannot open a position until the policy travels with the grant; until then the gap
-/// fails closed.
+/// The production sink behind a recorder of the runtime's handoff, so a probe reads both what the
+/// runtime handed and what the production conversion made of it.
+struct RecordedExecutorSink {
+    sink: crate::adapters::ExecutorSink,
+    handed: Rc<RefCell<Vec<IntentHandoff>>>,
+    converted: Rc<RefCell<Vec<mandate_executor::IntentHandoff>>>,
+}
+
+impl Sink for RecordedExecutorSink {
+    fn hand(&mut self, handoff: &IntentHandoff) -> Result<mandate_executor::IntentHandoff, Cause> {
+        self.handed.borrow_mut().push(handoff.clone());
+        let converted = self.sink.hand(handoff)?;
+        self.converted.borrow_mut().push(converted.clone());
+        Ok(converted)
+    }
+}
+
+/// DEC-940 item 6, gap 2, closed by DEC-942: the request is journaled at `ApprovalRequested`
+/// schema version 2 with the sizing's plan in its content, and the grant's intent reaches the production `ExecutorSink` with exactly the plan the
+/// sizing produced for the asked proposal, so the held opening is sent once on the release.
 #[test]
-fn a_granted_intent_without_its_policy_stops_at_the_sink() -> Result<(), String> {
+fn a_granted_intent_reaches_the_executor_sink_with_its_asked_plan() -> Result<(), String> {
     let world = World::default();
     let clock = clock()?;
     let asks = Rc::new(Cell::new(0));
     let end = ending(&asks);
     let w = world.clone();
     let now = clock.now();
-    let report: Result<Report, ShellError> = stock(&world, Autonomy::Ask, true)?
-        .run_observed_asked_watched(
+    let handed = Rc::new(RefCell::new(Vec::new()));
+    let converted = Rc::new(RefCell::new(Vec::new()));
+    let sink = RecordedExecutorSink {
+        sink: crate::adapters::ExecutorSink {
+            agent: mandate_runtime::AgentId(AGENT.to_owned()),
+        },
+        handed: Rc::clone(&handed),
+        converted: Rc::clone(&converted),
+    };
+    let report: Result<Report, ShellError> =
+        assembled(&world, Autonomy::Ask, true, Box::new(sink))?.run_observed_asked_watched(
             observation()?,
             output().map_err(|cause| cause.to_string())?,
             &watch(&clock)?,
@@ -600,18 +594,56 @@ fn a_granted_intent_without_its_policy_stops_at_the_sink() -> Result<(), String>
             },
             &end,
         );
-    assert!(
-        matches!(
-            report,
-            Err(ShellError::Refused {
-                stage: Stage::Sink,
-                ..
+    report.map_err(|e| format!("the granted opening is sent: {e:?}"))?;
+    let rows: Vec<Vec<u8>> = world
+        .ledger
+        .borrow()
+        .bodies()
+        .into_iter()
+        .filter(|body| {
+            mandate_canon::parse(body).is_ok_and(|v| {
+                v.get("event_type").and_then(Value::as_str) == Some("ApprovalRequested")
             })
-        ),
-        "{report:?}"
+        })
+        .collect();
+    let [request] = &rows[..] else {
+        return Err(format!("{} requests, not one", rows.len()));
+    };
+    let envelope = mandate_canon::parse(request).map_err(|e| format!("{e:?}"))?;
+    assert_eq!(
+        envelope.get("schema_version").and_then(Value::as_int),
+        Some(2),
+        "a request that binds a plan is version 2"
     );
-    assert_eq!(world.ledger.borrow().count("IntentProposed"), 1);
-    assert_eq!(submissions(&world), 0, "nothing is sent");
+    let stated = envelope
+        .get("payload")
+        .and_then(|payload| payload.get("content"))
+        .and_then(|content| content.get("execution"))
+        .map(mandate_canon::to_canonical);
+    assert_eq!(
+        stated.as_deref(),
+        Some(
+            &br#"{"asset_class":"us_equity","protection":null,"protection_required":false,"tif":"day"}"#[..]
+        ),
+        "the sizing's plan, as the content binds it"
+    );
+    let planned = Some(OrderExecution {
+        asset_class: AssetClass::UsEquity,
+        tif: RuntimeTimeInForce::Day,
+        protection_required: false,
+        protection: None,
+    });
+    let handed = handed.borrow();
+    let [granted] = &handed[..] else {
+        return Err(format!("{} handoffs, not one", handed.len()));
+    };
+    assert_eq!(granted.execution, planned, "the sizing's plan, unchanged");
+    let converted = converted.borrow();
+    let [sent] = &converted[..] else {
+        return Err(format!("{} conversions, not one", converted.len()));
+    };
+    assert_eq!(sent.tif, Some(mandate_executor::TimeInForce::Day));
+    assert_eq!(submissions(&world), 1, "the released opening is sent once");
     Ok(())
 }
 
@@ -925,7 +957,7 @@ fn a_mismatch_in_the_watch_stops_the_run() -> Result<(), String> {
         &world,
         Autonomy::Ask,
         true,
-        Box::new(PolicySink(ConvertingSink(world.clone()))),
+        Box::new(ConvertingSink(world.clone())),
     )?;
     stages.executor = Box::new(ReconcilesOnCommand(Covered(PaperExecutor {
         world: world.clone(),

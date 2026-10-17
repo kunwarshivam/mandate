@@ -10,7 +10,9 @@ use mandate_executor::{
 };
 use mandate_journal::{AppendOutcome, StoredEvent};
 
-use crate::envelope::{DraftFields, Envelope, Writer, account_stream, draft_bytes};
+use crate::envelope::{
+    DraftFields, Envelope, Writer, account_stream, draft_bytes, journal_environment,
+};
 use crate::error::{Cause, ShellError, refused};
 use crate::stages::{Connector, Executor, Stage};
 
@@ -86,6 +88,7 @@ impl ProductionCycle {
                         writer: Writer::Executor,
                         actor_id: "executor",
                         event_time: self.setup.now,
+                        environment: journal_environment(self.setup.connection_environment),
                     },
                     &DraftFields {
                         event_id: &draft.event_id.0,

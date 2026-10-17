@@ -15,7 +15,7 @@ use mandate_builder::{
     AccountSnapshot as BuilderAccountSnapshot, Market as BuilderMarket,
     RiskContext as BuilderRiskContext, buy_action,
 };
-use mandate_domain::{AssetClass as DomainAssetClass, MarketSession};
+use mandate_domain::{AssetClass as DomainAssetClass, Environment, MarketSession};
 use mandate_executor::{
     BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, FillConfigRefs,
     InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView, equity_bracket_prices,
@@ -96,7 +96,11 @@ impl PaperClock for FixedPaperClock {
     }
 }
 
-/// Judges `facts` at `now` and assembles the two trusted contexts from them.
+/// Judges `facts` at `now` and assembles the two trusted contexts from them. `connection` is the
+/// environment of the connection the run chose (the live door's choice, `mandate-paper`'s
+/// `chosen`), which the run context hands V-001 as the connection's environment, never a
+/// constant: a mandate whose environment differs from it refuses at the cycle's validation
+/// (DEC-505 item 3, DEC-965).
 ///
 /// Refused, in order: any broker position or open order (DEC-470 item 1); an account that is not
 /// `ACTIVE`, is blocked or suspended, or owes accrued fees; an asset record older than the quote
@@ -113,8 +117,16 @@ pub fn load_contexts(
     facts: &PaperFacts,
     now: UtcNanos,
     agent: &AgentId,
+    connection: Environment,
 ) -> Result<Contexts, Cause> {
-    load_contexts_with_clock(artifacts, facts, now, agent, Rc::new(FixedPaperClock(now)))
+    load_contexts_with_clock(
+        artifacts,
+        facts,
+        now,
+        agent,
+        connection,
+        Rc::new(FixedPaperClock(now)),
+    )
 }
 
 /// [`load_contexts`] with a clock that the binding gate reads again for every order request.
@@ -126,6 +138,7 @@ pub fn load_contexts_with_clock(
     facts: &PaperFacts,
     now: UtcNanos,
     agent: &AgentId,
+    connection: Environment,
     clock: Rc<dyn PaperClock>,
 ) -> Result<Contexts, Cause> {
     let configuration = artifacts.production_configuration()?;
@@ -141,6 +154,7 @@ pub fn load_contexts_with_clock(
         quote: quote.clone(),
         quote_max_age: artifacts.quote_max_age,
         clock,
+        stop_limit_offset: stop_limit_offset(&artifacts.mandate.protection)?,
     });
     let executor = ExecutorContext::new(
         Rc::new(Ids {
@@ -154,7 +168,7 @@ pub fn load_contexts_with_clock(
     );
     Ok(Contexts {
         executor,
-        run: run_context(artifacts, &facts.broker, today, template)?,
+        run: run_context(artifacts, &facts.broker, today, template, connection)?,
         quote,
     })
 }
@@ -291,11 +305,25 @@ pub(super) fn protection_prices(
     }))
 }
 
+/// The mandate's stop-limit offset when its protection is on and sets one; an offset that does
+/// not read as a fraction refuses the run rather than leaving a stop-limit without its limit.
+pub(super) fn stop_limit_offset(protection: &Protection) -> Result<Option<Fraction>, Cause> {
+    let Some(offset) = protection
+        .crypto_stop_limit_offset
+        .as_ref()
+        .filter(|_| protection.enabled)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(Fraction::parse(offset.as_str())?))
+}
+
 fn run_context(
     artifacts: &Artifacts,
     broker: &BrokerFacts,
     today: Date,
     template: BindingGateInput,
+    connection: Environment,
 ) -> Result<RunContext, Cause> {
     let instrument = artifacts.instrument.asset_id.clone();
     let quote = &broker.quote;
@@ -369,7 +397,7 @@ fn run_context(
             disclosures_accepted: BTreeSet::new(),
             instrument_groups: BTreeMap::new(),
             claimed_by_other_agents: BTreeSet::new(),
-            connection_environment: Some(mandate_domain::Environment::Paper),
+            connection_environment: Some(connection),
             connection_loss_carry_usd: Usd::ZERO,
             eligibility_failures: BTreeSet::new(),
             previous_version: None,
@@ -398,6 +426,9 @@ pub(super) struct TrustedPaperContext {
     pub(super) quote: GateQuote,
     pub(super) quote_max_age: Duration,
     pub(super) clock: Rc<dyn PaperClock>,
+    /// The mandate's `stop_limit_offset`, the stop-limit's limit below its stop that protection
+    /// places on a profile with no OCO (§5.4, DEC-539, DEC-966 item 5); none when it sets none.
+    pub(super) stop_limit_offset: Option<Fraction>,
 }
 
 impl TrustedPaperContext {
@@ -414,8 +445,8 @@ impl ExecutorMandateView for TrustedPaperContext {
             .map(MandateVersion)
     }
 
-    fn crypto_stop_limit_offset(&self, _agent: &mandate_executor::AgentId) -> Option<Fraction> {
-        None
+    fn crypto_stop_limit_offset(&self, agent: &mandate_executor::AgentId) -> Option<Fraction> {
+        self.stop_limit_offset.filter(|_| agent.0 == self.agent)
     }
 
     fn covers(&self, agent: &mandate_executor::AgentId, instrument: &InstrumentId) -> bool {

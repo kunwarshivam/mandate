@@ -2,7 +2,8 @@
 # `full`, and both are quick aggregates. `fast` is over `fast-lint` (lint and the spec guard), the
 # three `fast-test` shards of the nextest run, `fast-pending` (pending tests, doctests and the
 # rh-sim build's tests) and `fast-python` (pytest), which together run exactly `cargo xtask ci
-# fast` (DEC-871). `full` is
+# fast` (DEC-871), and `fast-rh-sim-live`, the runner's tests in the `live,rh-sim` build, which no
+# `cargo xtask` group runs (DEC-964). `full` is
 # over the non-mutation full checks, the mutation plan, every deterministic mutation shard the plan
 # sized to the diff (DEC-538), and the workspace API schemas' mutation sweep (DEC-688). Run
 # `cargo xtask check` locally for the same complete set, unsharded. main itself is covered by the
@@ -284,29 +285,69 @@ jobs:
       - run: cargo xtask ci portable
         if: steps.change.outputs.docs_only != 'true'
 
+  # DEC-964 (narrowing DEC-529 item 3). The runner's tests in the `live,rh-sim` build, the build
+  # the R0 rehearsal runs: `rh-sim` wins over `live`, so it holds no Robinhood host and dials only
+  # a loopback simulator (DEC-922), and a test in the suite pins that. The credential guard runs
+  # first in the same shell and fails if any variable could carry a broker or data credential; no
+  # step of this job may name a secret or the workflow's token. `cargo xtask live-feature` allows
+  # exactly this run, in this job, besides its compile-only check. It is a job of its own, not a
+  # step of `fast-pending`, so neither nears ten minutes (DEC-464).
+  fast-rh-sim-live:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          tool: cargo-nextest@0.9.146
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          shared-key: fast-rh-sim-live
+      - run: .github/scripts/no-credentials.sh && cargo nextest run --locked --no-tests=fail --package mandate-paper --features live,rh-sim
+        if: steps.change.outputs.docs_only != 'true'
+
   fast:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
     if: ${{ always() && !github.event.pull_request.draft }}
-    needs: [fast-lint, fast-test, fast-pending, fast-python, fast-portable]
+    needs: [fast-lint, fast-test, fast-pending, fast-python, fast-portable, fast-rh-sim-live]
     # DEC-871. The required `fast` verdict: every part must succeed, and a matrix succeeds only when
     # every shard did. A failed, cancelled or skipped part fails it. xtask's tests run this script
-    # over every combination of the five results.
+    # over every combination of the six results.
     steps:
-      - name: Require lint and the spec guard, every test shard, the pending tests and doctests, pytest, and the macOS runner check
+      - name: Require lint and the spec guard, every test shard, the pending tests and doctests, pytest, the macOS runner check, and the rehearsal build's tests
         env:
           LINT_RESULT: ${{ needs.fast-lint.result }}
           TEST_RESULT: ${{ needs.fast-test.result }}
           PENDING_RESULT: ${{ needs.fast-pending.result }}
           PYTHON_RESULT: ${{ needs.fast-python.result }}
           PORTABLE_RESULT: ${{ needs.fast-portable.result }}
+          RH_SIM_LIVE_RESULT: ${{ needs.fast-rh-sim-live.result }}
         run: |
           test "$LINT_RESULT" = success
           test "$TEST_RESULT" = success
           test "$PENDING_RESULT" = success
           test "$PYTHON_RESULT" = success
           test "$PORTABLE_RESULT" = success
+          test "$RH_SIM_LIVE_RESULT" = success
 
   full-checks:
     if: ${{ !github.event.pull_request.draft }}
