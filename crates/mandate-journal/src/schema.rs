@@ -201,6 +201,8 @@ pub(crate) fn payload_schema(event_type: &str, schema_version: u64) -> Option<&'
         ("FillApplied", 1) => Some(&FILL_APPLIED_V1),
         ("MarkUpdated", 1) => Some(&MARK_UPDATED_V1),
         ("ReconciliationRun", 1) => Some(&RECONCILIATION_RUN_V1),
+        ("LateFillApplied", 1) => Some(&FILL_APPLIED_V1),
+        ("FeesCharged", 1) => Some(&FEES_CHARGED_V1),
         _ => None,
     }
 }
@@ -308,6 +310,24 @@ static FILL_APPLIED_V1: Ty = Ty::Record(&[
             ("status", Ty::Str),
         ])),
     ),
+]);
+
+/// The simulated equity fee the paper executor books on its own fill (trading spec §6.2, §10;
+/// DEC-948 item 3): §9's key fields, the `simulated` flag that keeps it out of the cash comparison,
+/// the client order its fill was of, and its three components, each `null` where the side owes
+/// none. The only family booked is `equities`; a broker-posted or crypto fee registers its own
+/// shape when its writer is built.
+static FEES_CHARGED_V1: Ty = Ty::Record(&[
+    ("family", Ty::OneOf(&["equities"])),
+    ("day", Ty::Date),
+    ("accrued", Ty::Decimal),
+    ("charged", Ty::Decimal),
+    ("simulated", Ty::Bool),
+    ("client_order_id", Ty::Str),
+    ("sec", Ty::Nullable(&Ty::Decimal)),
+    ("taf", Ty::Nullable(&Ty::Decimal)),
+    ("cat", Ty::Nullable(&Ty::Decimal)),
+    ("risk_clock", Ty::RiskClock),
 ]);
 
 static MARK_UPDATED_V1: Ty = Ty::Record(&[

@@ -234,15 +234,38 @@ Same placing command again, same day, with the position still open:
 $P $RUN --place-one-order ; echo "exit=$?"
 ```
 Expected: non-zero exit, one stderr line ending `a paper account with no position and no open order`
-(DEC-470 item 1, `judge.rs`; the "tracer stopped at <stage>:" prefix is UNVERIFIED), nothing on stdout,
+(DEC-470 item 1, `judge.rs`; the full line, seen on 2026-10-16, is `the tracer stopped at Validate: a paper account with no position and no open order`), nothing on stdout,
 and no POST. Prove it: re-export the agent stream to a new filename and confirm its `seq` did not grow. If a
 second `submitted` ever appears, stop and report it.
+
+### 8a. Book a fill the journal missed (`--reconcile-only`, DEC-955)
+
+If a placing run stopped after its order filled (as on 2026-10-16, section 11), the account stream
+can hold the entry `filled` with no `FillApplied` or `LateFillApplied`. Book it without placing:
+```bash
+$P $RUN --reconcile-only ; echo "exit=$?"
+```
+It reads the account stream, and only if the stream owns a submitted order whose fill it has not
+booked does it read the broker, with GETs only: that order by its own client order id, and the
+account's `FILL` activities. It appends the fill records the broker's word calls for (here one
+`LateFillApplied` at the broker's price), checks that nothing more is owed, and prints
+`booked <n> fill record(s); nothing sent`, exit 0. It reads no quote or bars, runs no model and
+places nothing; it needs `--journal` and is refused beside `--place-one-order`. A second
+invocation prints `booked 0 fill records; nothing sent`. A placing run does the same booking
+before its preflight, so after this the second run (section 8) is still refused at Validate while
+the position is open: DEC-470 item 1 is unchanged. Prove it with the section 7b export: the
+account stream gains exactly the fill record(s) and still verifies.
+
+If the broker and the journal disagree (for example the entry reads filled and no matching fill
+activity is listed), the run stops before any append with `the tracer stopped at Reconcile: the
+broker and the journal disagree on <client_order_id>'s fills (<reason>)` and exits non-zero.
+Nothing is journaled or sent; report the line, and do not work around it.
 
 ## 9. Common refusals (stderr, exit non-zero) and what to do
 
 | Message / code | Meaning | Do |
 |---|---|---|
-| `--confirm-paper is required`, `<flag> needs a value`, `an argument is unknown` | usage | only the six value flags, `--confirm-paper`, `--place-one-order` exist |
+| `--confirm-paper is required`, `<flag> needs a value`, `an argument is unknown` | usage | only the six value flags, `--confirm-paper`, `--place-one-order` and `--reconcile-only` exist |
 | `the control stream could not be read` | no or wrong `--journal`, DB down, wrong role or search_path | check DSN, `PGPASSWORD`, section 0 SQL |
 | `<VAR> looks like a URL; ...` | an `*ALPACA*` env var holds a host | unset it |
 | `the paper credentials or client are unavailable` | the two env vars unset or empty | export both |
@@ -253,6 +276,7 @@ second `submitted` ever appears, stop and report it.
 | `... a paper account with no position and no open order` / `an active, unblocked paper account` / `a paper account without accrued fees` | account not flat or blocked | clean the paper account (also the expected second-run refusal) |
 | `... a current, uncrossed IEX quote` or a session refusal | stale quote or outside 09:30-15:50 | retry inside the window |
 | `the gate did not allow the proposal (<reason>)` / `the order builder proposed a quantity of zero` | gate denial / `max_order_usd` below one share | never work around a denial; for zero qty make a new mandate version |
+| `... Reconcile: the broker and the journal disagree on <id>'s fills (<reason>)` | the own-fill booking found the broker's fills and the journal disagreeing (DEC-955 item 4); nothing written or sent | stop and report the line |
 | `the proposal classified ask, and the tracer acts only on auto` | autonomy does not make the opening `auto` | fix autonomy in a new version |
 | `cancel_unconfirmed` (alone) | watch bound hit, cancel not confirmed | check the paper dashboard now, cancel by hand, report it |
 | CLI codes: `owner_user_invalid`, `workspace_already_open`, `instrument_snapshot_invalid`, `instrument_unregistered`, `version_invalid`, `code_mismatch`, `version_unconfirmed`, `version_superseded`, `agent_active`, `mandate_not_paper`, `config_file_unreadable` | a step 4 gesture refused, nothing written | fix the input; `code_mismatch` = re-show the code; `version_superseded` = a later confirm exists |
@@ -262,7 +286,6 @@ second `submitted` ever appears, stop and report it.
 - The local Postgres SQL in section 0 (no database here); confirm `e2_app` logs in and `workspace open` works.
 - Whether the Nasdaq Trader lookup needs a particular file; only the `etp_source` literal is enforced.
 - The builder's order sizing and the current SPY price against your `max_order_usd`.
-- The exact stderr stage prefix on the second-run refusal.
 - That Alpaca's SPY asset id is still `b28f4066-...` (the run compares it with the broker's record).
 - Whether the paper run ever waits on an `ask` grant (that wiring is described for the live arm); the
   fixture's autonomy makes openings `auto`, so it should not.
@@ -533,3 +556,61 @@ under the entry. Only the working take-profit appears, at top level, and the hel
 record a refusal and stop, so no second `--place-one-order` was sent. The position and its bracket
 stay at the broker. The second-run refusal is still to be shown, on the next run day, once the
 founder decides.
+
+### §8 run, same laptop, main at `12a693a4` (19:23 to 19:30 UTC): refused, nothing sent
+
+**Build.** Main at `12a693a4` (it includes #1369, DEC-938) does not compile on macOS: the
+hardening in `crates/mandate-paper/src/harden.rs` (#1354, DEC-937 item 4) imports
+`rustix::process::{DumpableBehavior, set_dumpable_behavior}`, which exist on Linux only:
+```
+error[E0432]: unresolved imports `rustix::process::DumpableBehavior`, `rustix::process::set_dumpable_behavior`
+```
+With the founder's approval, the binaries were built with a local patch that was never committed
+and was reverted straight after the build. On a target other than Linux, `disable_core_dumps`
+returns `Err(PaperError::Harden)`, so a live run refuses rather than reading a credential with core
+dumps on. The paper run never calls it (`Ports::harden` runs for a live connection only). The
+proper fix needs its own safety-critical PR.
+
+**Before the run (read-only).** Alpaca paper: the position is 1 SPY at 763.75. Entry
+`68099755-c7e6-40ea-8ba2-5dc644393428` is `filled`, with its nested legs: take-profit
+`58a1eef5-7397-48ea-b0c0-bb1154cb1bda` (sell limit 840.14, `new`) and stop
+`a59d69f1-c452-49a3-95ea-32c96f5d990f` (sell stop 725.58, `held`). The market was open. Clock:
+```
+19:27:15 UTC: -0.003889 (time.apple.com)  -0.003597 (time.google.com)  -0.003653 (time.cloudflare.com)
+```
+The streams before the run: agent seq 1 to 7 (`5412689680…`), account seq 1 to 13
+(`62c61a5a08…`), control seq 1 to 9 (`21b18e71aa…`).
+
+**The one invocation**, `$P $RUN --place-one-order`, 19:27:30.888 to 19:27:32.741 UTC:
+```
+stdout: (empty, 0 bytes)
+stderr: the tracer stopped at Validate: a paper account with no position and no open order
+exit=1
+```
+The stage prefix that §8 marks UNVERIFIED is `Validate`.
+
+**Proof that nothing was sent or journaled.**
+- **Re-exports to new files, each `result: verified`, unchanged:** agent seq 1 to 7, last hash
+  `5412689680d5c3999a0dd70176651f709f0dfe42f53baf164fc9745f88f64e7b`. Account seq 1 to 13, last
+  hash `62c61a5a0829e1d97ddd66d6edd729f7032a30164cd942069941c9b86f44e5a5`. Control seq 1 to 9,
+  last hash `21b18e71aa017e71c8888afa515770ed5e596eb6e87cd6c71bc3eaffed34e12d`.
+- **One `OrderSubmitted`:** no stream grew. The agent stream has no `OrderSubmitted`; the account
+  stream still has exactly one (seq 9, `md-00000100000000000005000001`).
+- **Alpaca after the run:** `status=open&nested=true` lists only the take-profit leg `58a1eef5-…`
+  (sell limit 1, `new`, top level). `status=all&nested=true` since 2026-10-16 lists only the
+  filled entry `68099755-…`, with its two nested legs. So no second order exists. The position is
+  still 1 SPY.
+
+**The first fill is still not journaled.** The account stream has no `FillApplied` or
+`LateFillApplied`. The refusal comes from the preflight judge (`Validate`), before the production
+cycle and its startup reconciliation run, so #1369's fill path never ran. This is a gap, not a
+failure of §8. While the position is open, every paper run is refused at the same check, so no
+paper run can ever book this fill, and the fill price (763.75) lives only at the broker. Booking it
+needs a path that reconciles without placing. That is a new story for the founder to schedule, and
+it must not loosen the flat-account check.
+
+**Booking path (DEC-955).** The gap above is closed by `--reconcile-only` (section 8a): run it once
+on this account to book the 763.75 fill as a `LateFillApplied`, then re-export the account stream.
+A placing run now books the same way before its preflight and is still refused at Validate while
+the position is open.
+

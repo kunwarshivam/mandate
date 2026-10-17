@@ -6,7 +6,9 @@
 //! `Cancel` goes by the broker's `order_id`, and what the profile does not offer is not sent. The
 //! tests correction for #1097 pins the review, cancel and refusal paths no test above reaches,
 //! with a rewrite of one tool's answer after the server has answered. C3 part 3 (DEC-870): a
-//! cancel after a restart, by the id the journal holds. These tests live here, not in
+//! cancel after a restart, by the id the journal holds. C3's listing (DEC-529 item 4, DEC-941):
+//! an `Unknown` order is listed by `get_equity_orders` with the three filters and never placed
+//! again, and a listing that cannot be read whole leaves it `Unknown`. These tests live here, not in
 //! `mandate-robinhood`, so no product crate depends on the simulator (first live trade brief).
 //! Oracles: the simulator's own records and call log, `sha2`, and the spec's tables typed here.
 
@@ -18,18 +20,18 @@ use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
 use common::wire::Wire;
-use common::{AGENTIC, price, qty, sim};
+use common::{AGENTIC, SPY_ASSET, price, qty, sim, tickers};
 use mandate_accounting::{InstrumentId, Side as Way};
 use mandate_canon::parse;
 use mandate_executor::{
     ActivityCursor, BracketLegs, BrokerConnector, BrokerOutcome, BrokerRequest, ClientOrderId,
-    ConnectorError, EventId, FoldedEvent, IntentId, OcoLegs, OrderListing, OrderOrigin,
-    OrderType as Kind, Purpose, RiskClock, Seq, SubmitOrder, TimeInForce as Tif,
+    ConnectorError, EventId, FoldedEvent, IntentId, ListedOrder, OcoLegs, OrderListing,
+    OrderOrigin, OrderType as Kind, Purpose, RiskClock, Seq, SubmitOrder, TimeInForce as Tif,
 };
 use mandate_mcp::{ALLOWLIST, CallClass, McpError};
 use mandate_rh_sim::{Event, Fault, Garble, MarketHours, OrderType, Session, Side, SimServer};
 use mandate_rh_sim::{State, TimeInForce, Variant};
-use mandate_robinhood::{RobinhoodConnector, Tools};
+use mandate_robinhood::{RobinhoodConnector, RobinhoodError, Tickers, Tools};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -46,7 +48,11 @@ type Bend = fn(Value) -> Result<String, McpError>;
 struct Probe {
     garble_place: Cell<Option<Garble>>,
     bend: Cell<Option<(&'static str, Bend)>>,
+    /// How many answers of the bent tool pass unbent before the bend applies.
+    bend_after: Cell<usize>,
     classes: RefCell<Vec<(CallClass, &'static str)>>,
+    /// Each call's tool and arguments, as the seam was handed them.
+    sent: RefCell<Vec<(&'static str, Value)>>,
 }
 
 /// The seam over the wire client.
@@ -64,6 +70,7 @@ impl Tools for Loopback<'_> {
         args: &Value,
     ) -> Result<String, McpError> {
         self.probe.classes.borrow_mut().push((class, tool));
+        self.probe.sent.borrow_mut().push((tool, args.clone()));
         if tool == PLACE
             && let Some(garble) = self.probe.garble_place.take()
         {
@@ -74,6 +81,11 @@ impl Tools for Loopback<'_> {
             .map_err(|_| McpError::Malformed)?;
         let result = message.get("result").cloned().ok_or(McpError::Malformed)?;
         match self.probe.bend.take() {
+            Some((bent, bend)) if bent == tool && self.probe.bend_after.get() > 0 => {
+                self.probe.bend_after.set(self.probe.bend_after.get() - 1);
+                self.probe.bend.set(Some((bent, bend)));
+                Ok(result.to_string())
+            }
             Some((bent, bend)) if bent == tool => bend(result),
             other => {
                 self.probe.bend.set(other);
@@ -93,7 +105,10 @@ fn probed(server: &SimServer) -> (Connector<'_>, Rc<Probe>) {
         wire,
         probe: Rc::clone(&probe),
     };
-    (RobinhoodConnector::new(tools, AGENTIC.to_owned()), probe)
+    (
+        RobinhoodConnector::new(tools, AGENTIC.to_owned(), tickers()),
+        probe,
+    )
 }
 
 fn connector(server: &SimServer) -> Connector<'_> {
@@ -126,7 +141,7 @@ fn key(intent: &str) -> ClientOrderId {
 fn buy(intent: &str) -> SubmitOrder {
     SubmitOrder {
         client_order_id: key(intent),
-        instrument: InstrumentId::new("SPY").unwrap(),
+        instrument: InstrumentId::new(SPY_ASSET).unwrap(),
         side: Way::Buy,
         qty: qty("2"),
         order_type: Kind::Limit,
@@ -727,8 +742,8 @@ fn an_is_error_that_is_not_a_boolean_is_never_success() {
 }
 
 /// Connections spec §6.2: `GetOrderByClientId` "Not offered (U-R2)", `ListActivities` "No feed in
-/// the contract (U-R8)", `AcknowledgeReplace` "Not applicable"; the list and the reads are C2's
-/// and C3's, so C1 does not implement them (`ConnectorError::NotSent`: "the connector does not
+/// the contract (U-R8)", `AcknowledgeReplace` "Not applicable"; the reads are the reconciler's
+/// (C4), so the connector does not implement them (`ConnectorError::NotSent`: "the connector does not
 /// implement it yet"). `CancelAll` and `ClosePosition` take an `AccountWideScope` no test can
 /// build. Each is `NotSent` with nothing called, even with an order on record.
 #[test]
@@ -736,18 +751,11 @@ fn every_other_request_is_not_sent_and_nothing_is_called() {
     let server = server();
     let (mut c, probe) = probed(&server);
     run(&mut c, &submit(buy("01JOPEN"))).unwrap();
-    let listing = OrderListing {
-        client_order_id: key("01JOPEN"),
-        instrument: InstrumentId::new("SPY").unwrap(),
-        origin: OrderOrigin::Agentic,
-        created_since: RiskClock::from_secs(0),
-    };
     let others = [
         BrokerRequest::AcknowledgeReplace {
             replaced: key("01JOPEN"),
         },
         BrokerRequest::GetOrderByClientId(key("01JOPEN")),
-        BrokerRequest::ListOrders(listing),
         BrokerRequest::ListOpenOrders,
         BrokerRequest::ListPositions,
         BrokerRequest::GetAccount,
@@ -870,7 +878,7 @@ fn journaled(orders: &[(&ClientOrderId, Option<&str>)]) -> Vec<FoldedEvent> {
         let key = key.as_str();
         payloads.push((
             "OrderSubmitted",
-            json!({"client_order_id": key, "instrument_id": "SPY",
+            json!({"client_order_id": key, "instrument_id": SPY_ASSET,
             "side": "buy", "qty": "2", "type": "limit", "tif": "day", "limit_price": "499"}),
         ));
         payloads.push((
@@ -918,7 +926,8 @@ fn a_cancel_after_a_restart_finds_its_order_id_from_the_journal() {
         wire,
         probe,
     };
-    let mut restarted = RobinhoodConnector::restore(tools, AGENTIC.to_owned(), &records).unwrap();
+    let mut restarted =
+        RobinhoodConnector::restore(tools, AGENTIC.to_owned(), tickers(), &records).unwrap();
     let cancel = |key: &ClientOrderId| BrokerRequest::Cancel {
         client_order_id: key.clone(),
     };
@@ -942,4 +951,564 @@ fn a_cancel_after_a_restart_finds_its_order_id_from_the_journal() {
         "the order with no id stays live, never guessed"
     );
     assert_eq!(calls(&server), [REVIEW, PLACE, REVIEW, PLACE, CANCEL]);
+}
+
+/// 2026-09-29T17:00:00Z, the broker's clock when the order in doubt is placed.
+const PLACED_AT: i64 = 1_790_701_200;
+
+/// The listing the executor asks for the order of `intent`: SPY, placed by an agent, created at
+/// or after the order's `OrderSubmitted` less DEC-862 item 2's five minutes.
+fn listing(intent: &str) -> BrokerRequest {
+    BrokerRequest::ListOrders(OrderListing {
+        client_order_id: key(intent),
+        instrument: InstrumentId::new(SPY_ASSET).unwrap(),
+        origin: OrderOrigin::Agentic,
+        created_since: RiskClock::from_secs(PLACED_AT - 300),
+    })
+}
+
+/// A server whose clock reads [`PLACED_AT`], with `ref_id` echoed in its records or not, and
+/// the answer to the next place lost. It lists one agentic account beside one that is not, since
+/// DEC-875 item 1 refuses every read of a session that lists two agentic accounts.
+fn clocked(echo: bool) -> SimServer {
+    let accounts = vec![
+        common::account(AGENTIC, true, false),
+        common::account(common::NOT_AGENTIC, false, false),
+    ];
+    let mut sim = mandate_rh_sim::Sim::new(accounts).unwrap();
+    sim.apply(Event::Quote("SPY".to_owned(), price("500")))
+        .unwrap();
+    sim.apply(Event::Session(Session::Regular)).unwrap();
+    sim.apply(Event::EchoRefId(echo)).unwrap();
+    let at = mandate_time::UtcNanos::from_parts(PLACED_AT, 0).unwrap();
+    sim.apply(Event::Clock(at)).unwrap();
+    sim.apply(Event::Script(Fault::LoseAnswer)).unwrap();
+    SimServer::start(sim, Variant::Honest).unwrap()
+}
+
+fn listed(outcome: Result<BrokerOutcome, ConnectorError>) -> (String, Vec<ListedOrder>) {
+    match outcome {
+        Ok(BrokerOutcome::Listed {
+            client_order_id,
+            orders,
+        }) => (client_order_id, orders),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// DEC-529 item 4 and connections spec §6.2: after a lost place answer the order's listing is
+/// one `get_equity_orders` on the recorded account with `symbol` the order's, `placed_agent`
+/// `agentic` and `created_at_gte` the listing's start as RFC 3339, after the account check; the
+/// broker's record comes back as the order the simulator holds, its type and time in force typed,
+/// naming no key of ours since the record carries no `ref_id`; and nothing is placed again.
+#[test]
+fn an_unknown_order_is_listed_by_symbol_agent_and_time_and_never_placed_again() {
+    let server = clocked(false);
+    let (mut c, probe) = probed(&server);
+    let lost = run(&mut c, &submit(buy("01JLOST")));
+    assert!(matches!(lost, Err(ConnectorError::Unknown(_))), "{lost:?}");
+    let (named, records) = listed(run(&mut c, &listing("01JLOST")));
+    assert_eq!(named, key("01JLOST").as_str());
+    let held = server.drive(|sim| sim.orders(AGENTIC)).unwrap().unwrap();
+    let [order] = held.as_slice() else {
+        panic!("{held:?}")
+    };
+    let [record] = records.as_slice() else {
+        panic!("{records:?}")
+    };
+    assert_eq!(record.order.broker_order_id, order.id);
+    assert_eq!(record.order.client_order_id, None);
+    assert_eq!(record.order.instrument.as_str(), SPY_ASSET);
+    assert_eq!((record.order.side, record.order.qty), (Way::Buy, qty("2")));
+    assert_eq!(record.order.limit_price, Some(price("499")));
+    assert_eq!((record.order_type, record.tif), (Kind::Limit, Tif::Day));
+    assert_eq!(record.order.status, "accepted");
+    assert_eq!(
+        calls(&server),
+        [REVIEW, PLACE, "get_accounts", "get_equity_orders"]
+    );
+    let sent = probe.sent.borrow();
+    let (_, args) = sent.last().unwrap();
+    let expected = json!({"account_number": AGENTIC, "symbol": "SPY",
+        "placed_agent": "agentic", "created_at_gte": "2026-09-29T16:55:00.000000000Z"});
+    assert_eq!(args, &expected);
+    assert_eq!(
+        classes(&probe).last(),
+        Some(&(CallClass::Read, "get_equity_orders"))
+    );
+}
+
+/// DEC-941 item 4: a record that echoes our `ref_id` names our key; one carrying another
+/// `ref_id` names that text, never a key of ours.
+#[test]
+fn a_record_names_our_key_only_by_our_ref_id() {
+    let server = clocked(true);
+    let mut c = connector(&server);
+    let lost = run(&mut c, &submit(buy("01JLOST")));
+    assert!(matches!(lost, Err(ConnectorError::Unknown(_))), "{lost:?}");
+    run(&mut c, &submit(buy("01JOTHER"))).unwrap();
+    let (_, records) = listed(run(&mut c, &listing("01JLOST")));
+    let named: Vec<Option<String>> = records
+        .iter()
+        .map(|record| record.order.client_order_id.clone())
+        .collect();
+    let theirs = format!("ref_id {}", uuid_v8(key("01JOTHER").as_str()));
+    assert_eq!(
+        named,
+        [Some(theirs), Some(key("01JLOST").as_str().to_owned())],
+        "newest first"
+    );
+}
+
+/// An answer whose next-page cursor is not text.
+fn numbered_cursor(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["next_cursor"] = json!(2);
+    Ok(result.to_string())
+}
+
+/// An answer whose next-page cursor is empty text, which names no page.
+fn empty_cursor(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["next_cursor"] = json!("");
+    Ok(result.to_string())
+}
+
+/// An answer holding a member beside `orders` and `next_cursor`, such as another spelling of a
+/// cursor, which could name a page the connector would never read.
+fn unknown_member(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["next"] = json!("page-2");
+    Ok(result.to_string())
+}
+
+/// A record naming another instrument than the one listed for (DEC-956 item 1).
+fn listed_as_qqq(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["orders"][0]["symbol"] = json!("QQQ");
+    Ok(result.to_string())
+}
+
+/// A record of a type the executor never sends, `stop_market`.
+fn stop_market(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["orders"][0]["type"] = json!("stop_market");
+    result["structuredContent"]["orders"][0]["stop_price"] = json!("480");
+    Ok(result.to_string())
+}
+
+/// A record whose `time_in_force` is none of the two the executor models.
+fn unmodelled_tif(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["orders"][0]["time_in_force"] = json!("ioc");
+    Ok(result.to_string())
+}
+
+/// A record missing a field its shape lists.
+fn without_side(mut result: Value) -> Result<String, McpError> {
+    let record = result["structuredContent"]["orders"][0]
+        .as_object_mut()
+        .unwrap();
+    record.remove("side");
+    Ok(result.to_string())
+}
+
+/// DEC-941 items 1 and 3, DEC-956 item 3: a listing whose cursor cannot be read, which holds a
+/// member that might name another page, holds a record the executor cannot type or of another
+/// ticker, or is lost or refused is `Unknown`, never `Listed`, so the order stays `Unknown` and
+/// nothing is adopted from part of an answer; nothing is placed again.
+#[test]
+fn a_listing_that_cannot_be_read_whole_leaves_the_order_unknown() {
+    let bends: [(&str, Bend); 9] = [
+        ("cursor not text", numbered_cursor),
+        ("empty cursor", empty_cursor),
+        ("unknown member", unknown_member),
+        ("another symbol", listed_as_qqq),
+        ("stop_market", stop_market),
+        ("tif", unmodelled_tif),
+        ("missing field", without_side),
+        ("lost", lose),
+        ("refused", refuse),
+    ];
+    for (name, bend) in bends {
+        let server = clocked(false);
+        let (mut c, probe) = probed(&server);
+        let lost = run(&mut c, &submit(buy("01JLOST")));
+        assert!(
+            matches!(lost, Err(ConnectorError::Unknown(_))),
+            "{name}: {lost:?}"
+        );
+        probe.bend.set(Some(("get_equity_orders", bend)));
+        let outcome = run(&mut c, &listing("01JLOST"));
+        assert!(
+            matches!(outcome, Err(ConnectorError::Unknown(_))),
+            "{name}: {outcome:?}"
+        );
+        assert_eq!(
+            calls(&server),
+            [REVIEW, PLACE, "get_accounts", "get_equity_orders"],
+            "{name}"
+        );
+    }
+}
+
+/// CN-8 and DEC-875: a listing on an account the broker does not list as agentic reads no orders.
+#[test]
+fn a_listing_on_an_account_that_is_not_agentic_reads_no_orders() {
+    let server = clocked(false);
+    let wire = RefCell::new(Wire::connect(&server.url().unwrap()));
+    let tools = Loopback {
+        server: &server,
+        wire,
+        probe: Rc::default(),
+    };
+    let mut c = RobinhoodConnector::new(tools, common::NOT_AGENTIC.to_owned(), tickers());
+    let outcome = run(&mut c, &listing("01JLOST"));
+    assert!(
+        matches!(outcome, Err(ConnectorError::Unknown(_))),
+        "{outcome:?}"
+    );
+    assert_eq!(calls(&server), ["get_accounts"]);
+}
+
+/// The listed record retyped as a `market` order, which carries no limit price.
+fn as_market(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["orders"][0]["type"] = json!("market");
+    result["structuredContent"]["orders"][0]["limit_price"] = Value::Null;
+    Ok(result.to_string())
+}
+
+/// The listed record retyped as a `stop_limit` order, stop 480, its time in force `gtc`.
+fn as_stop_limit(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["orders"][0]["type"] = json!("stop_limit");
+    result["structuredContent"]["orders"][0]["stop_price"] = json!("480");
+    result["structuredContent"]["orders"][0]["time_in_force"] = json!("gtc");
+    Ok(result.to_string())
+}
+
+/// Connections spec §6.2's three order types the executor sends read as their own types, and
+/// `gtc` as `Gtc`, so the executor matches each record on the type the broker gave.
+#[test]
+fn each_listed_type_and_time_in_force_reads_as_the_executors_own() {
+    let rows: [(&str, Bend, Kind, Tif); 2] = [
+        ("market", as_market, Kind::Market, Tif::Day),
+        ("stop_limit", as_stop_limit, Kind::StopLimit, Tif::Gtc),
+    ];
+    for (name, bend, kind, tif) in rows {
+        let server = clocked(false);
+        let (mut c, probe) = probed(&server);
+        let lost = run(&mut c, &submit(buy("01JLOST")));
+        assert!(
+            matches!(lost, Err(ConnectorError::Unknown(_))),
+            "{name}: {lost:?}"
+        );
+        probe.bend.set(Some(("get_equity_orders", bend)));
+        let (_, records) = listed(run(&mut c, &listing("01JLOST")));
+        let [record] = records.as_slice() else {
+            panic!("{name}: {records:?}")
+        };
+        assert_eq!((record.order_type, record.tif), (kind, tif), "{name}");
+    }
+}
+
+/// The server's own answer to a place or a cancel, its order record naming QQQ, in the
+/// structured content and the text block that carries it.
+fn answered_as_qqq(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["symbol"] = json!("QQQ");
+    let text = result["structuredContent"].to_string();
+    result["content"][0]["text"] = json!(text);
+    Ok(result.to_string())
+}
+
+/// DEC-956 item 1: the executor names SPY by its asset id, and Robinhood is sent its ticker on the
+/// review, the place and the listing, so the broker holds an order in `SPY`; every answer names
+/// the order by the asset id again, the place's, the cancel's and the listing's records alike.
+#[test]
+fn robinhood_is_sent_the_registered_ticker_and_answers_read_as_the_asset_id() {
+    let server = clocked(false);
+    let (mut c, probe) = probed(&server);
+    let lost = run(&mut c, &submit(buy("01JLOST")));
+    assert!(matches!(lost, Err(ConnectorError::Unknown(_))), "{lost:?}");
+    let (_, records) = listed(run(&mut c, &listing("01JLOST")));
+    let [record] = records.as_slice() else {
+        panic!("{records:?}")
+    };
+    assert_eq!(record.order.instrument.as_str(), SPY_ASSET);
+    let BrokerOutcome::Submitted(open) = run(&mut c, &submit(buy("01JOPEN"))).unwrap() else {
+        panic!()
+    };
+    assert_eq!(open.instrument.as_str(), SPY_ASSET);
+    probe
+        .bend
+        .set(Some((CANCEL, |r| showing(r, "confirmed", "0"))));
+    let cancel = BrokerRequest::Cancel {
+        client_order_id: key("01JOPEN"),
+    };
+    let BrokerOutcome::Order(working) = run(&mut c, &cancel).unwrap() else {
+        panic!()
+    };
+    assert_eq!(working.instrument.as_str(), SPY_ASSET);
+    let symbols: Vec<(&str, Value)> = probe
+        .sent
+        .borrow()
+        .iter()
+        .filter_map(|(tool, args)| args.get("symbol").map(|symbol| (*tool, symbol.clone())))
+        .collect();
+    let spy = json!("SPY");
+    assert_eq!(
+        symbols,
+        [
+            (REVIEW, spy.clone()),
+            (PLACE, spy.clone()),
+            ("get_equity_orders", spy.clone()),
+            (REVIEW, spy.clone()),
+            (PLACE, spy),
+        ]
+    );
+    let held = server.drive(|sim| sim.orders(AGENTIC)).unwrap().unwrap();
+    assert!(held.iter().all(|o| o.symbol == "SPY"), "{held:?}");
+}
+
+/// DEC-956 item 1: an instrument whose snapshot gave no ticker is never sent, whatever is asked:
+/// a submit is `NotSent` (`no_symbol`) and a listing leaves the order `Unknown`, with nothing
+/// called. A snapshot with an empty symbol, or two that share a ticker or an asset, registers
+/// nothing.
+#[test]
+fn an_instrument_with_no_registered_ticker_is_never_sent() {
+    let server = server();
+    let wire = RefCell::new(Wire::connect(&server.url().unwrap()));
+    let tools = Loopback {
+        server: &server,
+        wire,
+        probe: Rc::default(),
+    };
+    let mut c = RobinhoodConnector::new(tools, AGENTIC.to_owned(), Tickers::default());
+    assert_eq!(
+        run(&mut c, &submit(buy("01JOPEN"))),
+        Err(ConnectorError::NotSent { code: "no_symbol" })
+    );
+    assert_eq!(
+        run(&mut c, &submit(stop("01JSTOP"))),
+        Err(ConnectorError::NotSent { code: "no_symbol" }),
+        "a protective order with no ticker cannot be sent either; nothing guesses one"
+    );
+    let outcome = run(&mut c, &listing("01JOPEN"));
+    assert!(
+        matches!(outcome, Err(ConnectorError::Unknown(_))),
+        "{outcome:?}"
+    );
+    assert!(server.calls().unwrap().is_empty());
+    let asset = |id: &str| InstrumentId::new(id).unwrap();
+    let refusals = [
+        (
+            vec![(asset(SPY_ASSET), String::new())],
+            RobinhoodError::NoSymbol,
+        ),
+        (
+            vec![
+                (asset(SPY_ASSET), "SPY".to_owned()),
+                (asset("other-asset"), "SPY".to_owned()),
+            ],
+            RobinhoodError::AmbiguousSymbol,
+        ),
+        (
+            vec![
+                (asset(SPY_ASSET), "SPY".to_owned()),
+                (asset(SPY_ASSET), "VOO".to_owned()),
+            ],
+            RobinhoodError::AmbiguousSymbol,
+        ),
+    ];
+    for (pairs, refusal) in refusals {
+        assert_eq!(
+            Tickers::registered(pairs.clone()),
+            Err(refusal),
+            "{pairs:?}"
+        );
+    }
+    let same_twice = [
+        (asset(SPY_ASSET), "SPY".to_owned()),
+        (asset(SPY_ASSET), "SPY".to_owned()),
+    ];
+    assert_eq!(Tickers::registered(same_twice), Ok(tickers()));
+}
+
+/// DEC-956 item 1 and LT-6: a place answered with an order record for another ticker is not this
+/// order's answer, so the order is `Unknown`, never `Submitted`, and never placed again.
+#[test]
+fn a_place_answered_for_another_ticker_is_unknown_and_never_placed_again() {
+    let server = server();
+    let (mut c, probe) = probed(&server);
+    probe.bend.set(Some((PLACE, answered_as_qqq)));
+    for attempt in 0..2 {
+        let outcome = run(&mut c, &submit(buy("01JOPEN")));
+        assert!(
+            matches!(outcome, Err(ConnectorError::Unknown(_))),
+            "{attempt}: {outcome:?}"
+        );
+    }
+    assert_eq!(calls(&server), [REVIEW, PLACE]);
+}
+
+/// DEC-956 item 1: a cancel answered with an order record for another ticker is unreadable, never
+/// the cancel's confirmation or this order's state.
+#[test]
+fn a_cancel_answered_for_another_ticker_is_unreadable() {
+    let (outcome, _) = cancel_answered(answered_as_qqq);
+    assert_eq!(outcome, Err(ConnectorError::Unreadable { code: "cancel" }));
+}
+
+/// [`clocked`]'s server holding, after the order in doubt, `more` agentic SPY orders placed
+/// through the connector, its `get_equity_orders` answering `page` orders a page.
+fn paged_server(page: usize, more: usize) -> (SimServer, Vec<String>) {
+    let server = clocked(true);
+    server
+        .drive(|sim| sim.apply(Event::PageSize(page)))
+        .unwrap()
+        .unwrap();
+    let mut c = connector(&server);
+    let lost = run(&mut c, &submit(buy("01JLOST")));
+    assert!(matches!(lost, Err(ConnectorError::Unknown(_))), "{lost:?}");
+    for n in 0..more {
+        run(&mut c, &submit(buy(&format!("01JMORE{n:02}")))).unwrap();
+    }
+    let held = server.drive(|sim| sim.orders(AGENTIC)).unwrap().unwrap();
+    (server, held.into_iter().map(|order| order.id).collect())
+}
+
+/// The `get_equity_orders` calls the connector sent, each one's `cursor` or `None`.
+fn cursors(probe: &Probe) -> Vec<Option<Value>> {
+    probe
+        .sent
+        .borrow()
+        .iter()
+        .filter(|(tool, _)| *tool == "get_equity_orders")
+        .map(|(_, args)| args.get("cursor").cloned())
+        .collect()
+}
+
+/// DEC-956 item 3: a listing the broker answers in pages is read page by page, each page behind
+/// a fresh account check, by the `next_cursor` the page before named, until a page names none;
+/// the executor is handed every record of every page, newest first, and nothing is placed.
+#[test]
+fn a_paged_listing_is_followed_to_its_last_page() {
+    let (server, held) = paged_server(1, 2);
+    let (mut c, probe) = probed(&server);
+    let (named, records) = listed(run(&mut c, &listing("01JLOST")));
+    assert_eq!(named, key("01JLOST").as_str());
+    let ids: Vec<&str> = records
+        .iter()
+        .map(|record| record.order.broker_order_id.as_str())
+        .collect();
+    assert_eq!(ids, held.iter().map(String::as_str).collect::<Vec<_>>());
+    let pages = cursors(&probe);
+    assert_eq!(pages.len(), 3, "{pages:?}");
+    assert_eq!(pages[0], None, "the first page is asked for with no cursor");
+    assert!(
+        pages[1..]
+            .iter()
+            .all(|cursor| cursor.as_ref().is_some_and(Value::is_string)),
+        "{pages:?}"
+    );
+    assert_ne!(pages[1], pages[2]);
+    let tools: Vec<String> = calls(&server).split_off(6);
+    assert_eq!(
+        tools,
+        [
+            "get_accounts",
+            "get_equity_orders",
+            "get_accounts",
+            "get_equity_orders",
+            "get_accounts",
+            "get_equity_orders"
+        ]
+    );
+    for (_, args) in probe
+        .sent
+        .borrow()
+        .iter()
+        .filter(|(tool, _)| *tool == "get_equity_orders")
+    {
+        assert_eq!(args["symbol"], "SPY");
+        assert_eq!(args["placed_agent"], "agentic");
+        assert_eq!(args["created_at_gte"], "2026-09-29T16:55:00.000000000Z");
+    }
+}
+
+/// DEC-956 item 3: a listing whose pages run past the connector's fixed bound of ten is never
+/// read as whole: the order stays `Unknown` after exactly ten pages, and nothing is placed.
+#[test]
+fn a_listing_past_its_page_bound_leaves_the_order_unknown() {
+    let (server, held) = paged_server(1, 10);
+    assert_eq!(held.len(), 11);
+    let (mut c, probe) = probed(&server);
+    let outcome = run(&mut c, &listing("01JLOST"));
+    assert!(
+        matches!(outcome, Err(ConnectorError::Unknown(_))),
+        "{outcome:?}"
+    );
+    assert_eq!(cursors(&probe).len(), 10);
+    let (fits, _) = paged_server(2, 10);
+    let (mut c, probe) = probed(&fits);
+    let (_, records) = listed(run(&mut c, &listing("01JLOST")));
+    assert_eq!(records.len(), 11, "six pages of two fit the bound");
+    assert_eq!(cursors(&probe).len(), 6);
+    let placed = |server: &SimServer| calls(server).iter().filter(|t| *t == PLACE).count();
+    assert_eq!((placed(&server), placed(&fits)), (11, 11));
+}
+
+/// A page's answer with a forged next-page cursor the broker never issued.
+fn forged_cursor(mut result: Value) -> Result<String, McpError> {
+    result["structuredContent"]["next_cursor"] = json!("page-2");
+    Ok(result.to_string())
+}
+
+/// DEC-956 item 3: one later page that cannot be read leaves the whole listing unread: a page
+/// lost, refused, holding a record of another ticker or missing a field, holding a member that
+/// is not the cursor, or naming a cursor the broker refuses. The order stays `Unknown`, and the
+/// pages read before it are never handed over.
+#[test]
+fn a_garbled_later_page_leaves_the_order_unknown() {
+    let bends: [(&str, Bend); 6] = [
+        ("lost", lose),
+        ("refused", refuse),
+        ("another symbol", listed_as_qqq),
+        ("missing field", without_side),
+        ("unknown member", unknown_member),
+        ("forged cursor", forged_cursor),
+    ];
+    for (name, bend) in bends {
+        let (server, _) = paged_server(1, 2);
+        let (mut c, probe) = probed(&server);
+        probe.bend_after.set(1);
+        probe.bend.set(Some(("get_equity_orders", bend)));
+        let outcome = run(&mut c, &listing("01JLOST"));
+        assert!(
+            matches!(outcome, Err(ConnectorError::Unknown(_))),
+            "{name}: {outcome:?}"
+        );
+        assert!(
+            cursors(&probe).len() >= 2,
+            "{name}: the second page was read"
+        );
+    }
+}
+
+/// DEC-956 item 1: a connector opened with no ticker registers the run's afterwards, and every
+/// order from then on goes out under it.
+#[test]
+fn a_ticker_registered_after_the_connector_opened_is_the_one_sent() {
+    let server = server();
+    let wire = RefCell::new(Wire::connect(&server.url().unwrap()));
+    let tools = Loopback {
+        server: &server,
+        wire,
+        probe: Rc::default(),
+    };
+    let mut c = RobinhoodConnector::new(tools, AGENTIC.to_owned(), Tickers::default());
+    c.register(tickers());
+    let outcome = run(&mut c, &submit(buy("01JOPEN")));
+    assert!(
+        matches!(outcome, Ok(BrokerOutcome::Submitted(_))),
+        "{outcome:?}"
+    );
+    let held = server.drive(|sim| sim.orders(AGENTIC)).unwrap().unwrap();
+    assert!(
+        held.iter().all(|o| o.symbol == "SPY") && held.len() == 1,
+        "{held:?}"
+    );
 }

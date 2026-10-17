@@ -475,8 +475,8 @@ fn ticked(
     decide(state, ports, now, batch)
 }
 
-/// `on_timeout` is always `skip`: a deadline reached journals `ApprovalTimedOut`, disarms its timer,
-/// and acts on nothing (mandate spec §6.4).
+/// `on_timeout` is always `skip`: a deadline reached journals `ApprovalTimedOut`, caused by the ask
+/// it ends (journal spec §9.7 rule 135), disarms its timer, and acts on nothing (mandate spec §6.4).
 fn expire(state: &RuntimeState, now: RiskClock, batch: &mut Batch<'_>) -> Result<(), RuntimeError> {
     for (approval, pending) in state.pending_approvals() {
         if batch.resolved.contains(approval) {
@@ -487,7 +487,7 @@ fn expire(state: &RuntimeState, now: RiskClock, batch: &mut Batch<'_>) -> Result
                 ("approval", payload::text(&approval.0)),
                 ("on_timeout", payload::text("skip")),
             ])?;
-            batch.journal("ApprovalTimedOut", None, body)?;
+            batch.journal("ApprovalTimedOut", Some(approval.clone()), body)?;
             batch.timer(TimerRequest::Cancel {
                 id: TimerId::ApprovalDeadline(approval.clone()),
             });

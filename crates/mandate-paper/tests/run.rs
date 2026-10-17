@@ -28,16 +28,17 @@ use mandate_alpaca::{Response, TradingTransport, TransportError};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{DecStr, Value, to_canonical};
 use mandate_domain::Environment;
-use mandate_journal::{ArtifactRef, ArtifactStore, StreamId, get_artifact};
+use mandate_journal::{ArtifactRef, ArtifactStore, StoredEvent, StreamId, get_artifact};
+use mandate_journal::{TrustedStart, verify_events};
 use mandate_journal_pg::APP_ROLE;
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::model::{AssetClass, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_modelhost::Signal;
 use mandate_paper::{
-    Args, Broker as Chosen, Connection, ConnectionRefusal, Evidence, Outcome, PaperError, Ports,
-    run,
+    Args, Broker as Chosen, Connection, ConnectionRefusal, Dial, Evidence, Outcome, PaperError,
+    Ports, Reconciled, lines, run, stderr_line,
 };
-use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal};
+use mandate_shell::control::{ConfigRefusal, ControlRecord, DeploymentRefusal, Origin};
 use mandate_shell::paper::daily_closes;
 use mandate_shell::{Cause, ShellError};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos};
@@ -87,6 +88,20 @@ struct Broker {
     quote_offset_ns: Option<i128>,
     holds: bool,
     rests: bool,
+    /// The entry's fill, at the entry's own limit price, in the account activities once the entry
+    /// was sent, and the share it bought in the positions, named by the broker's ticker as the
+    /// paper broker reported #1355's (E2, 2026-10-16). A read on from a cursor (`page_token`)
+    /// finds nothing after that one fill, as Alpaca's does.
+    fills: bool,
+    /// The fill activity as Alpaca really sends it: the broker's `order_id` and no
+    /// `client_order_id` (E2, 2026-10-16; DEC-955 item 3).
+    alpaca_activity: bool,
+    /// The open-orders read lists the filled bracket's take-profit at top level under a
+    /// broker-named id, as the E2 account did after its fill (runbook §11).
+    open_take_profit: bool,
+    /// The ticker the `FILL` names, when it is not the deployed equity's own: a fill in an
+    /// instrument the run never registered.
+    fill_symbol: Option<&'static str>,
     minutes: &'static str,
     posts: Rc<RefCell<Vec<Value>>>,
     clock: Clock,
@@ -132,7 +147,62 @@ impl Broker {
         };
         lookup.then(|| self.order(&entry, status, filled))
     }
+
+    /// The account once the entry has filled: its cash less the one share the fill bought at the
+    /// entry's limit, 255.2, as the paper broker settles cash (trading spec §11's cash row), so the
+    /// watch's reconciliation after the fill compares a cash the fill really moved.
+    fn filled_account(&self) -> Vec<u8> {
+        let entry = self.posts.borrow().first().cloned().unwrap();
+        let field = |name: &str| entry.get(name).and_then(Value::as_str).unwrap().to_owned();
+        assert_eq!(
+            (field("qty"), field("limit_price")),
+            ("1".to_owned(), "255.2".to_owned()),
+            "the cash below is the fixture entry's"
+        );
+        let account = String::from_utf8(self.file("account.json")).unwrap();
+        account
+            .replace(r#""cash":"1000000""#, r#""cash":"999744.8""#)
+            .into_bytes()
+    }
+
+    /// The account activities once the entry has filled: one `FILL` of its whole quantity at its
+    /// limit price, or none before the entry was sent.
+    fn fill(&self) -> Vec<u8> {
+        let Some(entry) = self.posts.borrow().first().cloned() else {
+            return b"[]".to_vec();
+        };
+        let field = |name: &str| entry.get(name).and_then(Value::as_str).unwrap().to_owned();
+        let (id, qty, price) = (field("client_order_id"), field("qty"), field("limit_price"));
+        let symbol = self.fill_symbol.unwrap_or(self.equity.1);
+        let at = format!("{}9:59.000000000Z", self.minutes);
+        let client = if self.alpaca_activity {
+            String::new()
+        } else {
+            format!(r#""client_order_id":"{id}","#)
+        };
+        format!(
+            r#"[{{"activity_type":"FILL",{client}"cum_qty":"{qty}","id":"20260929170000000::68099755-c7e6-40ea-8ba2-5dc644393428","leaves_qty":"0","order_id":"e02fc2d2-0ff3-444f-a0ab-6253613302fe","price":"{price}","qty":"{qty}","side":"buy","symbol":"{symbol}","transaction_time":"{at}","type":"fill"}}]"#
+        )
+        .into_bytes()
+    }
 }
+
+impl Broker {
+    /// The open-orders read after the E2 fill: the bracket's take-profit alone, a sell limit at
+    /// top level under the broker's own ids, its entry filled and its stop `held` and unlisted.
+    fn take_profit(&self) -> Vec<u8> {
+        let order = String::from_utf8(self.file("order.json")).unwrap();
+        let order = order
+            .replace("md-e144b97773a6f87c1978cc2831", TAKE_PROFIT)
+            .replace("e02fc2d2-0ff3-444f-a0ab-6253613302fe", TAKE_PROFIT)
+            .replace(r#""side":"buy""#, r#""side":"sell""#)
+            .replace(r#""status":"accepted""#, r#""status":"new""#);
+        format!("[{order}]").into_bytes()
+    }
+}
+
+/// The E2 take-profit leg's broker id, which is also the client order id Alpaca named it with.
+const TAKE_PROFIT: &str = "58a1eef5-7397-48ea-b0c0-bb1154cb1bda";
 
 async fn answer(status: u16, body: Vec<u8>) -> Answer {
     Ok(Response { status, body })
@@ -151,8 +221,14 @@ impl TradingTransport for Broker {
         let asset = format!("/v2/assets/{}", self.equity.1);
         let file = |name| self.file(name);
         let (status, body) = match (request.method(), path) {
+            (Method::Get, "/v2/account") if self.fills && !self.posts.borrow().is_empty() => {
+                (200, self.filled_account())
+            }
             (Method::Get, "/v2/account") => (200, file("account.json")),
             (Method::Get, "/v2/positions") if self.holds => (200, file("position-aapl.json")),
+            (Method::Get, "/v2/positions") if self.fills && !self.posts.borrow().is_empty() => {
+                (200, file("position-aapl.json"))
+            }
             (Method::Get, path) if path == asset => (200, file("asset-aapl.json")),
             (Method::Post, "/v2/orders") => {
                 let sent = json(request.body().unwrap());
@@ -165,6 +241,16 @@ impl TradingTransport for Broker {
                 (204, Vec::new())
             }
             (_, lookup) if self.entry(lookup).is_some() => (200, self.entry(lookup).unwrap()),
+            (_, list) if list.starts_with("/v2/account/activities?") && self.fills => {
+                if list.contains("page_token=") {
+                    (200, b"[]".to_vec())
+                } else {
+                    (200, self.fill())
+                }
+            }
+            (_, list) if list.starts_with("/v2/orders?") && self.open_take_profit => {
+                (200, self.take_profit())
+            }
             (_, lookup) if lookup.starts_with("/v2/orders:by_client_order_id") => {
                 (404, file("order-absent.json"))
             }
@@ -284,7 +370,12 @@ impl Ports for Fake {
         Ok(self.records.clone())
     }
 
-    fn connect(&mut self, connection: &Connection) -> Result<Broker, PaperError> {
+    fn connect(
+        &mut self,
+        connection: &Connection,
+        dial: Option<&Dial>,
+    ) -> Result<Broker, PaperError> {
+        assert!(dial.is_none(), "a paper run dials no Robinhood endpoint");
         self.connects += 1;
         self.connections.push(connection.clone());
         Ok(self.broker.clone())
@@ -391,6 +482,7 @@ impl Scene {
             store: root.join("store"),
             bars: bars.dataset_dir(&dataset),
             place_one_order: true,
+            reconcile_only: false,
             acknowledged: Environment::Paper,
         };
         let (holds, minutes, posts) = (false, TUESDAY.1, Rc::default());
@@ -402,6 +494,10 @@ impl Scene {
                 quote_offset_ns: None,
                 holds,
                 rests: false,
+                fills: false,
+                alpaca_activity: false,
+                open_take_profit: false,
+                fill_symbol: None,
                 minutes,
                 posts,
                 clock: clock.clone(),
@@ -607,6 +703,10 @@ fn push(records: &mut Vec<ControlRecord>, event_type: &str, payload: &str) {
         seq,
         event_type,
         payload,
+        origin: Origin {
+            stream_id: "ctl:ws_paper".to_owned(),
+            environment: Environment::Paper,
+        },
     });
 }
 
@@ -997,12 +1097,219 @@ proptest! {
     }
 }
 
+/// #1355's first defect (E2, 2026-10-16), `AGENTS.md` rule 5, journal spec §9 and DEC-938: once
+/// the bracket entry reads `filled`, the reconciliation it asks for reads the broker's `FILL`,
+/// which names the share by its ticker, and journals it as the run's own fill. With a clock that
+/// moves at every read, as the founder's did, every append is accepted and the run ends having
+/// placed its one order, with no external-activity alert: the first real fill was refused there
+/// as `the journal answered Invalid`.
+#[test]
+fn a_filled_entry_journals_its_fill_and_the_run_ends() {
+    let mut scene = Scene::new("filled", 231..256);
+    scene.ports.broker.fills = true;
+    scene.advancing(1_000_000, 0);
+    let outcome = scene.run();
+    assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+    let Ok(Outcome::Cycle(cycle)) = outcome else {
+        unreachable!("placed_one matched a cycle")
+    };
+    assert!(
+        !cycle.report.alerts.contains(&"external_activity"),
+        "the run's own fill is never external activity: {:?}",
+        cycle.report.alerts
+    );
+}
+
+/// #1355's first defect through a real journal (the suite's PG class, DEC-109): the account
+/// stream holds the entry's fill, priced as the broker filled it, for the client order id and
+/// asset the run sent, and both streams the run appended to verify from genesis (journal spec
+/// §11). The entry already read `filled` when its fill arrived, so the fill is the
+/// `LateFillApplied` trading spec §5.7 journals for a fill of an order in a terminal state.
+#[test]
+fn a_filled_entry_journals_its_fill_price_and_both_streams_verify() {
+    let Some(db) = support::TestDb::new() else {
+        return;
+    };
+    let mut scene = Scene::new("pg-filled", 231..256);
+    scene.ports.broker.fills = true;
+    scene.advancing(1_000_000, 0);
+    let url = std::env::var(support::URL_VAR).unwrap();
+    let joiner = if url.contains('?') { '&' } else { '?' };
+    let options = format!("-c%20search_path%3D{}%20-c%20role%3D{APP_ROLE}", db.schema);
+    scene.args.journal = Some(format!("{url}{joiner}options={options}"));
+    let outcome = scene.run();
+    assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+    let sent = &scene.posts()[0];
+    let field = |name: &str| sent.get(name).and_then(Value::as_str).unwrap().to_owned();
+    let journal = db.journal();
+    let account = StreamId::parse("acct:ws_paper:acct_paper").unwrap();
+    let rows = db.block_on(journal.rows(&account)).unwrap();
+    let fills: Vec<&StoredEvent> = rows
+        .iter()
+        .filter(|row| row.event_type.ends_with("FillApplied"))
+        .collect();
+    let types: Vec<&str> = fills.iter().map(|row| row.event_type.as_str()).collect();
+    assert_eq!(
+        types,
+        ["LateFillApplied"],
+        "one fill record for the one fill"
+    );
+    let body = json(std::str::from_utf8(&fills[0].body).unwrap());
+    let payload = body.get("payload").unwrap();
+    let member = |name: &str| payload.get(name).and_then(Value::as_str).map(str::to_owned);
+    assert_eq!(
+        member("price"),
+        Some(field("limit_price")),
+        "the fill price"
+    );
+    assert_eq!(member("client_order_id"), Some(field("client_order_id")));
+    assert_eq!(
+        member("instrument_id"),
+        Some(field("symbol")),
+        "the asset sent"
+    );
+    assert_eq!(member("qty_gross"), Some(field("qty")));
+    let store = FsArtifactStore::open(&scene.args.store).unwrap();
+    for name in ["agent:ws_paper:agent_spy", "acct:ws_paper:acct_paper"] {
+        let stream = StreamId::parse(name).unwrap();
+        let rows = db.block_on(journal.rows(&stream)).unwrap();
+        let verified = verify_events(&rows, TrustedStart::GENESIS, &store);
+        assert!(verified.is_ok(), "{name}: {verified:?}");
+    }
+}
+
+/// #1369 review, DEC-938 item 1: a `FILL` naming a ticker the run never registered is external
+/// activity, whose `ExternalActivityIngested` has no registered schema. The journal refuses the
+/// batch, so the run stops at the journal, and nothing further reaches the broker: no request
+/// follows the activity read that found the fill.
+#[test]
+fn a_fill_in_an_unregistered_ticker_stops_the_run_at_the_journal() {
+    let mut scene = Scene::new("unregistered-fill", 231..256);
+    scene.ports.broker.fills = true;
+    scene.ports.broker.fill_symbol = Some("QQQ");
+    scene.advancing(1_000_000, 0);
+    let outcome = scene.run();
+    assert!(
+        matches!(
+            outcome,
+            Err(PaperError::Shell(ShellError::Refused {
+                stage: mandate_shell::Stage::Journal,
+                ..
+            }))
+        ),
+        "{}",
+        refused_at(&outcome)
+    );
+    assert_eq!(scene.posts().len(), 1, "the entry, and no other order");
+    let log = scene.ports.broker.log.borrow();
+    let found = log
+        .iter()
+        .rposition(|(_, path, _)| path.starts_with("/v2/account/activities?"))
+        .expect("the reconciliation read the activities");
+    assert_eq!(
+        log.get(found + 1..).map(<[_]>::len),
+        Some(0),
+        "nothing is sent after the refused fill: {:?}",
+        &log[found..]
+    );
+}
+
+/// DEC-948 items 2 to 4 through a real journal (the suite's PG class, DEC-109): the executor
+/// learns from its stream's envelope that it runs on paper, so the entry's fill books the
+/// simulated fee the registered fee configuration defines (trading spec §10), naming that
+/// configuration, for the client order id the run sent; and every account-stream record carries
+/// the run clock's risk clock or later, never 1970's zero (mandate spec §5.2).
+#[test]
+fn a_paper_fill_books_its_simulated_fee_at_the_run_clock() {
+    let Some(db) = support::TestDb::new() else {
+        return;
+    };
+    let mut scene = Scene::new("pg-fee", 231..256);
+    scene.ports.broker.fills = true;
+    scene.advancing(1_000_000, 0);
+    let url = std::env::var(support::URL_VAR).unwrap();
+    let joiner = if url.contains('?') { '&' } else { '?' };
+    let options = format!("-c%20search_path%3D{}%20-c%20role%3D{APP_ROLE}", db.schema);
+    scene.args.journal = Some(format!("{url}{joiner}options={options}"));
+    let outcome = scene.run();
+    assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+    let sent = scene.posts()[0].clone();
+    let journal = db.journal();
+    let account = StreamId::parse("acct:ws_paper:acct_paper").unwrap();
+    let rows = db.block_on(journal.rows(&account)).unwrap();
+    let bodies: Vec<(String, Value)> = rows
+        .iter()
+        .map(|row| {
+            let body = json(std::str::from_utf8(&row.body).unwrap());
+            (row.event_type.clone(), body)
+        })
+        .collect();
+    let refs = |event_type: &str, name: &str| {
+        bodies
+            .iter()
+            .find(|(t, _)| t == event_type)
+            .and_then(|(_, body)| body.get("config_refs")?.get(name)?.as_str())
+            .map(str::to_owned)
+    };
+    let fees: Vec<&Value> = bodies
+        .iter()
+        .filter(|(t, _)| t == "FeesCharged")
+        .filter_map(|(_, body)| body.get("payload"))
+        .collect();
+    let [fee] = fees[..] else {
+        panic!("one simulated fee for the one fill, not {}", fees.len());
+    };
+    let member = |name: &str| fee.get(name).cloned();
+    assert_eq!(member("simulated"), Some(Value::Bool(true)));
+    assert_eq!(
+        member("client_order_id"),
+        sent.get("client_order_id").cloned()
+    );
+    assert_eq!(member("family"), Some(Value::Str("equities".to_owned())));
+    assert_eq!(
+        member("charged"),
+        Some(Value::Str("0".to_owned())),
+        "a simulated fee is never charged by the broker"
+    );
+    assert!(
+        refs("FeesCharged", "fee_config").is_some(),
+        "the fee names its configuration"
+    );
+    assert_eq!(
+        refs("FeesCharged", "fee_config"),
+        refs("LateFillApplied", "fee_config"),
+        "the configuration its fill was accounted under"
+    );
+    let start = UtcNanos::parse_rfc3339(TUESDAY.0).unwrap();
+    let clocks: Vec<(&str, &str)> = bodies
+        .iter()
+        .filter_map(|(t, body)| {
+            let clock = body.get("payload")?.get("risk_clock")?.as_str()?;
+            Some((t.as_str(), clock))
+        })
+        .collect();
+    assert!(!clocks.is_empty());
+    for (event_type, clock) in clocks {
+        let at = UtcNanos::parse(clock).unwrap();
+        assert!(
+            at.secs() >= start.secs(),
+            "{event_type}'s risk clock {clock} is before the run clock {}",
+            TUESDAY.0
+        );
+    }
+    let store = FsArtifactStore::open(&scene.args.store).unwrap();
+    let verified = verify_events(&rows, TrustedStart::GENESIS, &store);
+    assert!(verified.is_ok(), "{verified:?}");
+}
+
 /// DEC-940, rule 3: a placing run whose cycle asks waits for the grant at the watch's interval,
 /// and an ask no answer reaches denies at its own deadline with nothing sent: the scratch
-/// journal no founder can answer on holds only the run's own ask.
+/// journal no founder can answer on holds only the run's own ask. Each wake's fresh quote is
+/// stamped half a second before its read, so every one is current (DEC-943 item 2).
 #[test]
 fn an_asked_opening_no_answer_reaches_denies_at_its_deadline() {
     let mut scene = Scene::asking("asked", 231..256);
+    scene.advancing(0, -NANOS_PER_S / 2);
     let outcome = scene.run();
     assert!(
         matches!(
@@ -1016,6 +1323,27 @@ fn an_asked_opening_no_answer_reaches_denies_at_its_deadline() {
         scene.ports.clock.waited.get(),
         600,
         "the wait ran to the ask's own deadline, the mandate's 600 s timeout"
+    );
+}
+
+/// DEC-943 item 2, rule 3: the wait reads a fresh IEX quote at every wake, through the
+/// preflight's own check, and never relaxes its ten-second bound. A broker whose quote stays
+/// stamped at its recorded instant, half a second before the run, answers current wakes until
+/// the clock is more than ten seconds past that stamp; the first wake after it refuses there,
+/// before the runtime is handed anything, with nothing sent.
+#[test]
+fn an_asked_openings_stale_fresh_quote_refuses_at_its_wake() {
+    let mut scene = Scene::asking("asked-stale", 231..256);
+    let outcome = scene.run();
+    assert_eq!(
+        refused_at(&outcome),
+        "MarketData: a current, uncrossed IEX quote at the wake"
+    );
+    assert!(scene.posts().is_empty(), "nothing is sent");
+    assert_eq!(
+        scene.ports.clock.waited.get(),
+        10,
+        "the wakes at 0 and 5 s read a current quote; the one at 10 s reads it 10.5 s old"
     );
 }
 
@@ -1046,17 +1374,255 @@ fn an_alpaca_session_answers_its_own_iex_ask() {
         UtcNanos::parse_rfc3339(TUESDAY.0).unwrap(),
     );
     let ask = Some(facts.broker.quote.ask);
-    assert_eq!(
+    assert!(matches!(
         mandate_paper::Session::broker_ask(&scene.ports.broker, &facts.broker),
-        ask
-    );
+        mandate_paper::BrokerAsk::Quoted(quoted) if Some(quoted) == ask
+    ));
     let credentials =
         mandate_alpaca::Credentials::from_lookup(|_| Some("placeholder".to_owned())).unwrap();
-    let connected = mandate_paper::Connected::Alpaca(
+    let connected: mandate_paper::Connected = mandate_paper::Connected::Alpaca(
         mandate_alpaca::AlpacaPaperHttp::new(credentials).unwrap(),
     );
-    assert_eq!(
+    assert!(matches!(
         mandate_paper::Session::broker_ask(&connected, &facts.broker),
-        ask
+        mandate_paper::BrokerAsk::Quoted(quoted) if Some(quoted) == ask
+    ));
+}
+
+/// The journal DSN of `db`'s own schema, as the founder's runs name theirs.
+fn dsn(db: &support::TestDb) -> String {
+    let url = std::env::var(support::URL_VAR).unwrap();
+    let joiner = if url.contains('?') { '&' } else { '?' };
+    let options = format!("-c%20search_path%3D{}%20-c%20role%3D{APP_ROLE}", db.schema);
+    format!("{url}{joiner}options={options}")
+}
+
+/// The account stream's rows in `db`.
+fn account_rows(db: &support::TestDb) -> Vec<StoredEvent> {
+    let account = StreamId::parse("acct:ws_paper:acct_paper").unwrap();
+    db.block_on(db.journal().rows(&account)).unwrap()
+}
+
+/// The E2 state (runbook §11, DEC-955), made through a real journal (the suite's PG class,
+/// DEC-109): one placing run whose entry the broker filled while reporting no fill activity, so
+/// the account stream holds the entry `filled` and no `FillApplied` or `LateFillApplied`. The
+/// broker then shows what E2's showed: the share held, the take-profit resting at top level, and
+/// the fill in its activities as Alpaca sends it, by its `order_id` and with no client order id.
+fn e2_state(name: &str) -> Option<(support::TestDb, Scene)> {
+    let db = support::TestDb::new()?;
+    let mut scene = Scene::new(name, 231..256);
+    scene.advancing(1_000_000, 0);
+    scene.args.journal = Some(dsn(&db));
+    let outcome = scene.run();
+    assert!(placed_one(&scene, &outcome), "{}", refused_at(&outcome));
+    let rows = account_rows(&db);
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.event_type.ends_with("FillApplied")),
+        "the E2 state: no fill booked"
     );
+    assert!(
+        rows.iter().any(|row| row.event_type == "OrderStateChanged"
+            && String::from_utf8_lossy(&row.body).contains(r#""state":"filled""#)),
+        "the E2 state: the entry journaled filled"
+    );
+    scene.ports.broker.fills = true;
+    scene.ports.broker.alpaca_activity = true;
+    scene.ports.broker.open_take_profit = true;
+    Some((db, scene))
+}
+
+/// The requests the broker was sent from the `from`th logged one on, as `(method, path)`.
+fn sent_since(scene: &Scene, from: usize) -> Vec<(mandate_alpaca::Method, String)> {
+    let log = scene.ports.broker.log.borrow();
+    log.iter()
+        .skip(from)
+        .map(|(method, path, _)| (*method, path.clone()))
+        .collect()
+}
+
+/// The last row's `(seq, hash)` of `rows`.
+fn head_of(rows: &[StoredEvent]) -> Option<(u64, String)> {
+    rows.last().map(|row| (row.seq, format!("{:?}", row.hash)))
+}
+
+/// DEC-955, the E2 fix: a placing run on the E2 state books the entry's fill as the
+/// `LateFillApplied` trading spec §5.7 names, at the broker's price, for the client order id and
+/// asset it sent, before its preflight is judged; then the unchanged flat-account check (DEC-470
+/// item 1) refuses at Validate with nothing sent. Every request the run made was a read, and the
+/// streams verify from genesis. A third run is refused the same way and appends nothing: the
+/// journal it replays already holds the fill, so the replay is identical.
+#[test]
+fn the_e2_state_books_its_fill_then_refuses_at_validate_with_nothing_sent() {
+    let Some((db, mut scene)) = e2_state("e2-placing") else {
+        return;
+    };
+    let logged = scene.ports.broker.log.borrow().len();
+    let outcome = scene.run();
+    assert_eq!(
+        refused_at(&outcome),
+        "Validate: a paper account with no position and no open order"
+    );
+    assert_eq!(scene.posts().len(), 1, "no second order");
+    let sent = sent_since(&scene, logged);
+    assert!(
+        sent.iter()
+            .all(|(method, _)| *method == mandate_alpaca::Method::Get),
+        "reads only: {sent:?}"
+    );
+    let sent_entry = &scene.posts()[0];
+    let field = |name: &str| {
+        sent_entry
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+    let rows = account_rows(&db);
+    let fills: Vec<&StoredEvent> = rows
+        .iter()
+        .filter(|row| row.event_type.ends_with("FillApplied"))
+        .collect();
+    let types: Vec<&str> = fills.iter().map(|row| row.event_type.as_str()).collect();
+    assert_eq!(types, ["LateFillApplied"], "the one fill, booked once");
+    let body = json(std::str::from_utf8(&fills[0].body).unwrap());
+    let payload = body.get("payload").unwrap();
+    let member = |name: &str| payload.get(name).and_then(Value::as_str).map(str::to_owned);
+    assert_eq!(
+        member("price"),
+        Some(field("limit_price")),
+        "the broker's price"
+    );
+    assert_eq!(member("client_order_id"), Some(field("client_order_id")));
+    assert_eq!(
+        member("instrument_id"),
+        Some(field("symbol")),
+        "the asset sent"
+    );
+    assert_eq!(member("qty_gross"), Some(field("qty")));
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.event_type == "ExternalActivityIngested"),
+        "the take-profit at top level is never adopted"
+    );
+    let store = FsArtifactStore::open(&scene.args.store).unwrap();
+    for name in ["agent:ws_paper:agent_spy", "acct:ws_paper:acct_paper"] {
+        let stream = StreamId::parse(name).unwrap();
+        let rows = db.block_on(db.journal().rows(&stream)).unwrap();
+        let verified = verify_events(&rows, TrustedStart::GENESIS, &store);
+        assert!(verified.is_ok(), "{name}: {verified:?}");
+    }
+
+    let before = head_of(&rows);
+    let outcome = scene.run();
+    assert_eq!(
+        refused_at(&outcome),
+        "Validate: a paper account with no position and no open order"
+    );
+    assert_eq!(
+        head_of(&account_rows(&db)),
+        before,
+        "nothing more is appended"
+    );
+    assert_eq!(scene.posts().len(), 1);
+}
+
+/// DEC-955 item 6: `--reconcile-only` books the E2 fill, verifies that nothing more is owed, and
+/// exits without a model, a market judgement or a cycle: it reads only, places nothing, and
+/// prints the count alone. A second invocation books nothing.
+#[test]
+fn reconcile_only_books_the_e2_fill_and_places_nothing() {
+    let Some((db, mut scene)) = e2_state("e2-reconcile") else {
+        return;
+    };
+    scene.args.place_one_order = false;
+    scene.args.reconcile_only = true;
+    let logged = scene.ports.broker.log.borrow().len();
+    let outcome = scene.run();
+    assert!(
+        matches!(&outcome, Ok(Outcome::Reconciled(Reconciled { fills: 1 }))),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        lines(outcome.as_ref().unwrap()).unwrap(),
+        ["booked 1 fill record; nothing sent"]
+    );
+    let sent = sent_since(&scene, logged);
+    assert!(!sent.is_empty(), "the broker was asked");
+    assert!(
+        sent.iter()
+            .all(|(method, path)| *method == mandate_alpaca::Method::Get
+                && (path.starts_with("/v2/orders:by_client_order_id")
+                    || path.starts_with("/v2/account/activities?"))),
+        "only the owned order and the fills are read: {sent:?}"
+    );
+    assert_eq!(scene.posts().len(), 1);
+    let fills = account_rows(&db)
+        .iter()
+        .filter(|row| row.event_type == "LateFillApplied")
+        .count();
+    assert_eq!(fills, 1);
+    let outcome = scene.run();
+    assert!(
+        matches!(&outcome, Ok(Outcome::Reconciled(Reconciled { fills: 0 }))),
+        "{outcome:?}"
+    );
+}
+
+/// DEC-955 item 4, rule 3: a broker whose word disagrees with the journal — here the entry reads
+/// filled and no fill activity is reported for it — stops the run at Reconcile before its
+/// preflight, with nothing journaled or sent, and the stop names the order's opaque id and a
+/// reason code only (rule 6).
+#[test]
+fn a_disagreeing_broker_stops_at_reconcile_with_nothing_journaled_or_sent() {
+    let Some((db, mut scene)) = e2_state("e2-mismatch") else {
+        return;
+    };
+    scene.ports.broker.fills = false;
+    let before = head_of(&account_rows(&db));
+    let outcome = scene.run();
+    let refusal = refused_at(&outcome);
+    assert!(refusal.starts_with("Reconcile: "), "{refusal}");
+    assert!(refusal.contains("fills_short"), "{refusal}");
+    let Err(error) = &outcome else {
+        unreachable!("refused")
+    };
+    let line = stderr_line(error);
+    let sent = &scene.posts()[0];
+    let id = sent.get("client_order_id").and_then(Value::as_str).unwrap();
+    let limit = sent.get("limit_price").and_then(Value::as_str).unwrap();
+    assert!(line.contains(id) && !line.contains(limit), "{line}");
+    assert_eq!(head_of(&account_rows(&db)), before, "nothing journaled");
+    assert_eq!(scene.posts().len(), 1, "nothing sent");
+}
+
+/// A dry run keeps nothing (DEC-157 item 6): on the E2 state it books no fill and is refused at
+/// Validate as before, so only a placing run or `--reconcile-only` appends.
+#[test]
+fn a_dry_run_on_the_e2_state_books_nothing() {
+    let Some((db, mut scene)) = e2_state("e2-dry") else {
+        return;
+    };
+    scene.args.place_one_order = false;
+    let before = head_of(&account_rows(&db));
+    let outcome = scene.run();
+    assert_eq!(
+        refused_at(&outcome),
+        "Validate: a paper account with no position and no open order"
+    );
+    assert_eq!(head_of(&account_rows(&db)), before);
+}
+
+/// `--reconcile-only` books to the journal it names, so without one it refuses before anything
+/// is read or connected.
+#[test]
+fn reconcile_only_without_a_journal_reads_nothing() {
+    let mut scene = Scene::new("reconcile-no-journal", 231..256);
+    scene.args.place_one_order = false;
+    scene.args.reconcile_only = true;
+    let outcome = scene.run();
+    assert!(matches!(&outcome, Err(PaperError::Usage(_))), "{outcome:?}");
+    assert_eq!(scene.ports.connects, 0);
 }

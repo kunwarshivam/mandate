@@ -18,7 +18,7 @@ use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
 use common::wire::Wire;
-use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, account, price, qty, sim};
+use common::{AGENTIC, DAY_TRADER, NOT_AGENTIC, SPY_ASSET, account, price, qty, sim, tickers};
 use mandate_accounting::{InstrumentId, Side};
 use mandate_executor::{
     BrokerConnector, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest, ClientOrderId,
@@ -68,38 +68,41 @@ fn connector(server: &SimServer) -> (RobinhoodConnector<Loopback>, Calls) {
         wire: RefCell::new(Wire::connect(&server.url().unwrap())),
         calls: Rc::clone(&calls),
     };
-    (RobinhoodConnector::new(tools, AGENTIC.to_owned()), calls)
+    (
+        RobinhoodConnector::new(tools, AGENTIC.to_owned(), tickers()),
+        calls,
+    )
 }
 
 /// The preflight's nine calls of the reads, with the arguments the connector must send.
 fn preflight_calls() -> Vec<Call> {
     [
-        (CallClass::Ordinary, "get_accounts", json!({})),
+        (CallClass::Read, "get_accounts", json!({})),
         (
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_portfolio",
             json!({"account_number": AGENTIC}),
         ),
-        (CallClass::Ordinary, "get_accounts", json!({})),
+        (CallClass::Read, "get_accounts", json!({})),
         (
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_equity_positions",
             json!({"account_number": AGENTIC}),
         ),
-        (CallClass::Ordinary, "get_accounts", json!({})),
+        (CallClass::Read, "get_accounts", json!({})),
         (
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_equity_orders",
             json!({"account_number": AGENTIC}),
         ),
-        (CallClass::Ordinary, "get_accounts", json!({})),
+        (CallClass::Read, "get_accounts", json!({})),
         (
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_equity_tradability",
             json!({"account_number": AGENTIC, "symbol": "SPY"}),
         ),
         (
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_equity_quotes",
             json!({"symbols": ["SPY"]}),
         ),
@@ -119,7 +122,7 @@ fn key(intent: &str) -> ClientOrderId {
 fn opening(intent: &str, quantity: &str, limit: &str) -> SubmitOrder {
     SubmitOrder {
         client_order_id: key(intent),
-        instrument: id("SPY"),
+        instrument: id(SPY_ASSET),
         side: Side::Buy,
         qty: qty(quantity),
         order_type: Kind::Limit,
@@ -222,14 +225,14 @@ fn the_preflight_reads_the_whole_account_through_the_wire() {
         cash: Usd::parse("750.25").unwrap(),
         buying_power: Usd::parse("10000").unwrap(),
         positions: vec![BrokerPosition {
-            instrument: id("SPY"),
+            instrument: id(SPY_ASSET),
             qty: SignedQty::parse("1").unwrap(),
             avg_entry_price: price("498"),
         }],
         open_orders: vec![BrokerOrder {
             broker_order_id: first.broker_order_id.clone(),
             client_order_id: None,
-            instrument: id("SPY"),
+            instrument: id(SPY_ASSET),
             side: Side::Buy,
             qty: qty("2"),
             filled_qty: qty("1"),
@@ -449,4 +452,61 @@ fn a_rebought_average_rounds_to_the_grids_nine_places() {
             .collect::<Vec<_>>(),
         [(AGENTIC, true), (NOT_AGENTIC, false), (DAY_TRADER, true)]
     );
+}
+
+/// DEC-956 item 1: the preflight and the quote name the instrument by its ticker, and of a
+/// ticker the run did not register, or of an asset id, they refuse `NoSymbol` before anything
+/// is read or asked for.
+#[test]
+fn a_preflight_of_an_instrument_with_no_ticker_reads_nothing() {
+    let server = SimServer::start(read_sim().unwrap(), Variant::Honest).unwrap();
+    let (connector, calls) = connector(&server);
+    for unregistered in ["QQQ", SPY_ASSET] {
+        assert_eq!(
+            ready(connector.preflight_facts(&id(unregistered))),
+            Err(RobinhoodError::NoSymbol),
+            "{unregistered}"
+        );
+        assert_eq!(
+            ready(connector.equity_quote(&id(unregistered))),
+            Err(RobinhoodError::NoSymbol),
+            "{unregistered}"
+        );
+    }
+    assert!(calls.borrow().is_empty());
+    assert!(server.calls().unwrap().is_empty());
+}
+
+/// DEC-956 item 1: a position or a working order in a ticker the run did not register reads as
+/// the broker spelled it, so it is never taken for the instrument the run trades; the registered
+/// one reads as its asset id.
+#[test]
+fn an_unregistered_ticker_in_the_snapshot_stays_as_the_broker_spelled_it() {
+    let mut core = read_sim().unwrap();
+    core.apply(Event::Quote("QQQ".to_owned(), price("400")))
+        .unwrap();
+    let theirs = core
+        .place(&mandate_rh_sim::OrderRequest {
+            symbol: "QQQ".to_owned(),
+            ..common::limit("buy", "3", "400", 7)
+        })
+        .unwrap();
+    core.fill(&theirs.id, qty("1"), price("400")).unwrap();
+    let ours = core.place(&common::limit("buy", "1", "500", 8)).unwrap();
+    core.fill(&ours.id, qty("1"), price("500")).unwrap();
+    let server = SimServer::start(core, Variant::Honest).unwrap();
+    let (connector, _) = connector(&server);
+    let snapshot = ready(connector.account_snapshot()).unwrap();
+    let held: Vec<&str> = snapshot
+        .positions
+        .iter()
+        .map(|position| position.instrument.as_str())
+        .collect();
+    assert_eq!(held, ["QQQ", SPY_ASSET]);
+    let working: Vec<&str> = snapshot
+        .open_orders
+        .iter()
+        .map(|order| order.instrument.as_str())
+        .collect();
+    assert_eq!(working, ["QQQ"]);
 }

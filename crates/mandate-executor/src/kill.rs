@@ -845,6 +845,7 @@ mod tests {
         Ok(Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
             fill_id: FillId(format!("f-{at}")),
             client_order_id: Some(format!("md-{ENTRY}")),
+            broker_order_id: None,
             instrument: aapl()?,
             side: Side::Buy,
             qty: Qty::parse(qty)?,

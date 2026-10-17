@@ -4858,6 +4858,31 @@ From E7-23 B2a's implementation ([DEC-838](decisions/DEC-838.md) item 5, [DEC-84
   constructor passes a profile, `ExecutorState`'s profile stops being an `Option` and DEC-841 item
   2's defensive path goes with it.
 
+From E2's first paper fill ([DEC-938](decisions/DEC-938.md), #1355), and its follow-ups
+([DEC-948](decisions/DEC-948.md), #1369's review). DEC-948 closed the paper environment, the
+simulated fee's schema and the paper risk clock that DEC-938 left here. Still open:
+
+- **A settlement calendar of its own.** A fill's `set` reference names the registered trading
+  calendar, because the paper run registers no settlement calendar and `mandate-accounting`
+  settles on the trading one (DEC-938 item 2). When a distinct settlement calendar is registered,
+  `InstrumentSnapshot::fill_refs` names it as `settlement_calendar` and the accounting settles on
+  it.
+- **External fills at the journal.** `ExternalActivityIngested` has no registered schema, and an
+  unattributed `FillApplied` has no `client_order_id`, which version 1 requires. A truly external
+  fill (a ticker the run never registered) is still refused at the journal, so the run stops
+  there with nothing further sent; `mandate-paper`'s
+  `a_fill_in_an_unregistered_ticker_stops_the_run_at_the_journal` pins that until a schema lands.
+- **A labelled fail-safe deny.** If a refused classification should be on the record, add a
+  deny-only `decided_by` label to journal spec §9.1 and mandate spec §6.4 in a spec PR. Until
+  then a classifier that cannot answer stops the step at Classify and journals nothing (DEC-938
+  item 4).
+- **A fill between the snapshot's account and activity reads.** The reconciliation reads the
+  account before the activities, so a fill that lands between the two is in the activities but
+  not yet in the broker's cash. The model, measured from the snapshot before (DEC-948 item 5),
+  counts it, so the run stops on a cash mismatch one fill wide: fail-safe, and a false alarm.
+  Reading the activities first, or bounding the activity read at the account's time, would close
+  it.
+
 From the closure of the anchor and segment records ([DEC-783](decisions/DEC-783.md)):
 
 - Close `SegmentEvicted` (journal spec §6.2, §9): which segment left the hot store, by its
@@ -4867,3 +4892,24 @@ From the closure of the anchor and segment records ([DEC-783](decisions/DEC-783.
   an `AnchorComputed` as its `causation_id` and carries a timestamp token for its root. It backfills
   the token of an anchor appended during a timestamping outage, which until then is not a trusted
   start (§9.14), and re-stamps an anchor before its token expires.
+
+From the Robinhood connector correctness follow-ups ([DEC-956](decisions/DEC-956.md), #1394):
+
+- **An adopted order stays adopted (DEC-956 item 2, Proposed for the founder).** A Robinhood
+  record never carries our key (U-R2), so the startup reconciliation after a restart's listing
+  adoption marks the order `Unknown` again and drafts `ExternalActivityIngested`, which the journal
+  refuses: the restart stops, fail closed. The proposed fix matches a record naming no key by the
+  one broker id the order's version-2 `OrderStateChanged` carried, for its instrument and side; it
+  changes journal spec §9.16's "no order state depends on it", so it needs the founder's decision
+  and a spec PR first. The tested implementation is in #1394's history (reverted there).
+- **The binding gate is not handed the account's working orders (DEC-956 item 4).** The shell's
+  `gate_template` (`crates/mandate-shell/src/paper/gate.rs`) gives the gate empty
+  `working_orders`, so trading spec §5.3 rule 6 (`working_order_limit`) and §9.3's open opening
+  orders in gross exposure go unchecked in the run path. A run that reconciled a working order
+  and opened a new cycle would place a second opening; today the preflight's refusal of an
+  account with any open order (DEC-470 item 1) keeps the live run from reaching it. Feed the
+  gate the executor's working orders, with a pending test of a working order beside a new cycle.
+- **Wire `Tickers` from the registered instrument snapshot (DEC-956 item 1).** The connector
+  refuses every order of an instrument with no registered ticker, exits included; the live wiring
+  that builds `RobinhoodConnector` must pass the run's `(asset_id, symbol)` pairs, with a startup
+  check that the pinned instrument has one.

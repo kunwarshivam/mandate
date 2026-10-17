@@ -1094,6 +1094,51 @@ fn a_late_fill_names_an_order_that_is_already_terminal() {
     );
 }
 
+/// Alpaca's `FILL` activity names its order by the broker's own `order_id` and carries no
+/// `client_order_id` (the E2 fill, 2026-10-16), so the fill keeps that id for the own-fill
+/// reconciliation to find its order by (DEC-955 item 3); a fill without one keeps none.
+#[test]
+fn a_fill_keeps_the_brokers_order_id_and_needs_no_client_order_id() {
+    let row = |order_id: Option<&str>| {
+        let mut fill = serde_json::json!({
+            "activity_type": "FILL",
+            "cum_qty": "1",
+            "id": "20261016171402621::0c1f8e43-6a5d-4d3e-9c0e-2b8a3f0e4d11",
+            "leaves_qty": "0",
+            "order_status": "filled",
+            "price": "763.75",
+            "qty": "1",
+            "side": "buy",
+            "symbol": "SPY",
+            "transaction_time": "2026-10-16T17:14:02.621Z",
+            "type": "fill"
+        });
+        if let (Some(id), Some(object)) = (order_id, fill.as_object_mut()) {
+            object.insert("order_id".to_owned(), serde_json::json!(id));
+        }
+        serde_json::to_vec(&serde_json::json!([fill])).expect("serialises")
+    };
+    let fills = wire::activities(&row(Some("68099755-c7e6-40ea-8ba2-5dc644393428")))
+        .expect("a fill without a client order id parses");
+    let [fill] = fills.as_slice() else {
+        panic!("one fill: {fills:?}")
+    };
+    assert_eq!(
+        (
+            fill.client_order_id.as_deref(),
+            fill.broker_order_id.as_deref()
+        ),
+        (None, Some("68099755-c7e6-40ea-8ba2-5dc644393428"))
+    );
+    assert_eq!(fill.price.to_string(), "763.75");
+    let fills = wire::activities(&row(None)).expect("parses");
+    assert_eq!(
+        fills.first().map(|fill| fill.broker_order_id.clone()),
+        Some(None),
+        "no order id is invented"
+    );
+}
+
 #[test]
 fn the_account_wide_endpoints_are_the_two_the_spec_names() {
     let cancel_all = scenario("cancel_all_account_scope");

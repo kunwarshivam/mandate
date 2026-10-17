@@ -11,12 +11,19 @@ workspace = true
 
 [dev-dependencies]
 mandate-accounting.workspace = true
+mandate-alpaca.workspace = true
 mandate-canon.workspace = true
+mandate-domain.workspace = true
 mandate-executor.workspace = true
+mandate-journal.workspace = true
 mandate-mcp.workspace = true
+mandate-modelhost.workspace = true
 mandate-num.workspace = true
 mandate-rh-sim.workspace = true
 mandate-robinhood.workspace = true
+mandate-runtime.workspace = true
 mandate-shell.workspace = true
+mandate-spec.workspace = true
+mandate-time.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt"] }

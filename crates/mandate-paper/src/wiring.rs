@@ -27,11 +27,12 @@ use mandate_domain::AssetClass;
 use mandate_journal::StoredEvent;
 use mandate_num::{Fraction, Price, Usd};
 use mandate_robinhood::Quote;
-use mandate_shell::control::ControlRecord;
-use mandate_shell::{AskedCycle, Cause, ShellError, Stage};
+use mandate_shell::control::{ControlRecord, Origin};
+use mandate_shell::{AskedCycle, Cause, Mark, ShellError, Stage};
 use mandate_time::{ExchangeCalendar, Session, UtcNanos};
 
 use crate::PaperError;
+use crate::ask::BrokerAsk;
 use crate::connection::member;
 use crate::evidence::{Evidence, EvidenceRefusal, evidence};
 use crate::grant::{Asked, GrantRefusal, Journaled, grant};
@@ -317,13 +318,31 @@ where
         })?;
     loop {
         let read = reads()?;
-        match answers(&read.control, &read.agent, &ask, pause.now()) {
+        let now = pause.now();
+        match answers(&read.control, &read.agent, &ask, now) {
             Ok(()) => return Ok(()),
             Err(GrantRefusal::Unanswered) => {}
             Err(refusal) => return Err(PaperError::Grant(refusal)),
         }
-        runtime.block_on(pause.pause(interval));
+        runtime.block_on(pause.pause(interval.min(until(now, ask.deadline))));
     }
+}
+
+/// The time from `now` to `deadline`, the wait's last pause (DEC-949 item 2): the wake after it is
+/// at the deadline itself, so the runtime is ticked there and closes the ask. `now` is before the
+/// deadline whenever the wait pauses — at or after it the fold has already denied — so a
+/// `deadline` already reached reads as no time left.
+fn until(now: UtcNanos, deadline: UtcNanos) -> Duration {
+    let nanos = |at: UtcNanos| {
+        i128::from(at.secs())
+            .checked_mul(1_000_000_000)
+            .and_then(|whole| whole.checked_add(i128::from(at.nanos())))
+    };
+    nanos(deadline)
+        .zip(nanos(now))
+        .and_then(|(deadline, now)| deadline.checked_sub(now))
+        .and_then(|left| u64::try_from(left).ok())
+        .map_or(Duration::ZERO, Duration::from_nanos)
 }
 
 /// The registered gate configuration's own collar members (the very members
@@ -416,6 +435,38 @@ pub fn robinhood_cross_check(
     )
 }
 
+/// The asked opening's cross-check at the check itself
+/// ([DEC-945](../../../docs/project/decisions/DEC-945.md) item 3; DEC-529 item 12; DEC-940 item
+/// 4): the broker's ask is asked of `broker` now, for the instrument `iex` is of, and held to
+/// `max_age` ([`BrokerAsk::ask`]); then it and `iex`'s ask go to [`cross_check_the_opening`]
+/// within the registered collar's own `x` for `asset_class` and the 20-day median dollar volume.
+/// It runs after the grant and before the one held opening is sent, and refuses with nothing
+/// sent.
+///
+/// # Errors
+/// [`PaperError::CrossCheck`]: `quote_absent` or `quote_stale` from the broker's read, and every
+/// refusal of [`cross_check_the_opening`].
+pub fn broker_cross_check<P: Pause + ?Sized>(
+    collar: &CollarMembers,
+    asset_class: AssetClass,
+    median_dollar_volume_20d: Option<Usd>,
+    broker: &BrokerAsk,
+    iex: &LatestQuote,
+    pause: &P,
+    max_age: Duration,
+) -> Result<(), PaperError> {
+    let ask = broker
+        .ask(&iex.instrument, pause, max_age)
+        .map_err(PaperError::CrossCheck)?;
+    cross_check_the_opening(
+        collar,
+        asset_class,
+        median_dollar_volume_20d,
+        Some(ask),
+        Some(iex.ask),
+    )
+}
+
 /// The run-level call frame of the watch's end (E7-26's G1b wiring row; LT-10; DEC-912 item 3;
 /// DEC-914 items 4, 5 and 7): the question the live watch asks at every wake in place of the
 /// bare terminal read the paper watch keeps (`mandate-shell`'s `TERMINAL_STATUSES` check,
@@ -450,45 +501,60 @@ pub fn watch_may_end(
 /// The asked opening's way out of the run (G1b's wiring row; DEC-912 items 1 and 2; DEC-914
 /// items 1 to 3 and 7; DEC-920 item 1; DEC-940 items 1 and 4): the production caller of
 /// [`wait_for_the_grant`]. The ask is bound off the agent stream as the cycle left it; each wake
-/// is the shell's own ([`AskedCycle::wake`]) — the control stream tailed whole and handed to the
-/// runtime, which journals its `ApprovalResponded` and `ApprovalRevalidated`, then both streams
-/// read back at the clock `pause` keeps — and the wait folds each read through [`answers`], so
+/// before the deadline first reads `fresh`, the caller's fresh IEX quote handed to the binding
+/// gate and returned as its risk mark (DEC-943 item 2), and a read that fails stops the wait
+/// with nothing sent; then the wake is the shell's own ([`AskedCycle::wake`]) — the mark
+/// journaled, the control stream tailed whole and handed to the runtime, which journals its
+/// `ApprovalResponded` and `ApprovalRevalidated` against that mark, then both streams read back
+/// at the clock `pause` keeps — and the wait folds each read through [`answers`], so
 /// it releases only on the runtime's admitted, re-validated grant of the first deciding answer.
 /// Then `cross_check` — the caller's [`cross_check_the_opening`] over the collar's own `x` —
 /// runs before anything leaves, and only then the one held opening is sent
 /// ([`AskedCycle::submit`]). A timeout, a deny, a difference, a refused cross-check or a stopped
 /// wake each end the run with nothing sent (`AGENTS.md` rule 3); exits and protective orders are
 /// never held by the shell, so nothing here can hold one (rule 13). A wake at or past the ask's
-/// deadline hands the runtime nothing: the fold denies the timeout there with no read, and the
-/// approval stays pending on the journal for the runtime's own fold (DEC-912 item 1; DEC-940
-/// item 7).
+/// deadline — the wait's last pause ends at it, and an ask bound already past it takes one — reads
+/// no quote and hands the runtime no answer: it ticks the runtime's clock alone
+/// ([`AskedCycle::expire`]), so the runtime journals its own `ApprovalTimedOut` (`on_timeout:
+/// skip`, caused by the ask), and the fold denies the timeout (DEC-949, closing DEC-940 item 7).
 ///
 /// # Errors
 /// Every [`PaperError`] is a stop after which nothing is sent.
-pub fn granted_opening<P, C>(
+pub fn granted_opening<P, F, C>(
     cycle: &mut dyn AskedCycle,
     pause: &P,
     interval: Duration,
+    mut fresh: F,
     cross_check: C,
 ) -> Result<(), PaperError>
 where
     P: Pause + ?Sized,
+    F: FnMut() -> Result<Mark, PaperError>,
     C: FnOnce() -> Result<(), PaperError>,
 {
     let agent_rows = cycle.agent_rows().map_err(PaperError::Shell)?;
-    let deadline = asked(&agent_rows, pause.now())
-        .map_err(PaperError::Grant)?
-        .deadline;
+    let deadline = match asked(&agent_rows, pause.now()) {
+        Ok(ask) => ask.deadline,
+        Err(GrantRefusal::TimedOut) => {
+            cycle.expire(pause.now()).map_err(PaperError::Shell)?;
+            return Err(PaperError::Grant(GrantRefusal::TimedOut));
+        }
+        Err(refusal) => return Err(PaperError::Grant(refusal)),
+    };
     let reads = || {
         let now = pause.now();
         if now >= deadline {
-            return Ok(WakeRead {
-                agent: agent_rows.clone(),
-                control: Vec::new(),
-            });
+            return cycle
+                .expire(now)
+                .map(|wake| WakeRead {
+                    agent: wake.agent,
+                    control: wake.control,
+                })
+                .map_err(PaperError::Shell);
         }
+        let mark = fresh()?;
         cycle
-            .wake(now)
+            .wake(now, &mark)
             .map(|wake| WakeRead {
                 agent: wake.agent,
                 control: wake.control,
@@ -535,10 +601,12 @@ fn record_of(row: &StoredEvent) -> Result<ControlRecord, GrantRefusal> {
     let Some(payload) = body.get("payload") else {
         return Err(GrantRefusal::Mismatched);
     };
+    let origin = Origin::of(&row.stream_id, &row.environment).ok_or(GrantRefusal::Mismatched)?;
     Ok(ControlRecord {
         seq: row.seq,
         event_type: row.event_type.clone(),
         payload: payload.clone(),
+        origin,
     })
 }
 
@@ -553,13 +621,14 @@ fn journaled(rows: &[StoredEvent], folded: &[&str]) -> Result<Vec<Journaled>, Gr
         .map(|row| match journaled_row(row) {
             Ok(journaled) => Ok(journaled),
             Err(refusal) if folded.contains(&row.event_type.as_str()) => Err(refusal),
-            Err(_) => Ok(Journaled {
+            Err(refusal) => Ok(Journaled {
                 event_id: row.event_id.clone(),
                 causation_id: None,
                 record: ControlRecord {
                     seq: row.seq,
                     event_type: row.event_type.clone(),
                     payload: Value::Null,
+                    origin: Origin::of(&row.stream_id, &row.environment).ok_or(refusal)?,
                 },
             }),
         })
@@ -605,4 +674,58 @@ fn deadline_of(record: &ControlRecord) -> Result<UtcNanos, GrantRefusal> {
         .and_then(|seconds| i64::try_from(seconds).ok())
         .ok_or(GrantRefusal::Mismatched)?;
     UtcNanos::from_parts(seconds, 0).map_err(|_| GrantRefusal::Mismatched)
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_canon::Digest;
+    use mandate_domain::Environment;
+    use mandate_journal::StoredEvent;
+    use mandate_shell::control::Origin;
+
+    use super::{GrantRefusal, journaled, record_of};
+
+    fn row(event_type: &str, environment: &str, body: &[u8]) -> StoredEvent {
+        StoredEvent {
+            stream_id: "ctl:ws_live".to_owned(),
+            seq: 2,
+            event_id: format!("{:0>26}", 2),
+            event_type: event_type.to_owned(),
+            schema_version: 1,
+            environment: environment.to_owned(),
+            recorded_at: "2026-10-10T15:05:00Z".to_owned(),
+            prev_hash: Digest::of(&[]),
+            hash: Digest::of(&[]),
+            body: body.to_vec(),
+        }
+    }
+
+    /// DEC-957 item 4: the grant fold's records carry their row's stream and environment, as the
+    /// run's own control read does, and a row naming neither environment refuses as a difference,
+    /// whether the fold reads it or hands it in unread.
+    #[test]
+    fn the_grant_folds_records_carry_their_rows_origin() {
+        let live = Origin {
+            stream_id: "ctl:ws_live".to_owned(),
+            environment: Environment::Live,
+        };
+        let read = record_of(&row(
+            "ApprovalResponseSubmitted",
+            "live",
+            br#"{"payload":{}}"#,
+        ));
+        assert_eq!(read.map(|record| record.origin), Ok(live.clone()));
+        let unread = journaled(&[row("Other", "live", b"not canonical")], &[]);
+        let origins: Result<Vec<Origin>, _> =
+            unread.map(|rows| rows.into_iter().map(|row| row.record.origin).collect());
+        assert_eq!(origins, Ok(vec![live]));
+        let refused = record_of(&row(
+            "ApprovalResponseSubmitted",
+            "demo",
+            br#"{"payload":{}}"#,
+        ));
+        assert_eq!(refused.err(), Some(GrantRefusal::Mismatched));
+        let unread = journaled(&[row("Other", "demo", b"not canonical")], &[]);
+        assert_eq!(unread.err(), Some(GrantRefusal::Mismatched));
+    }
 }

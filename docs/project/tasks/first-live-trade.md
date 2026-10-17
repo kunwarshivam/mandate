@@ -289,15 +289,25 @@ Only the founder runs it, on their own machine, with their own login; no agent r
 sees its output during the run (`AGENTS.md` rule 8).
 
 1. Build `mandate-paper` with `--features live` from a commit on `main`, and `mandate-rh-sim`.
-2. **Rehearsal (DEC-124).** Start `mandate-rh-sim`; record a connection to it, register, confirm
-   and deploy a rehearsal mandate on a separate journal; run the whole flow, including the
-   grant, the fill, the stop, and a restart that sends nothing; then `journal export` and
-   `journal verify`: clean.
+2. **Rehearsal (DEC-124).** Start `mandate-rh-sim`; open a live workspace on a separate journal
+   (`mandate workspace open --environment live`, [DEC-952](../decisions/DEC-952.md)); run the
+   connect check against the simulator (`mandate-paper --connect-check`, DEC-946) and record the
+   connection with the id it prints; register (the fee schedule is the live Robinhood one,
+   DEC-958), confirm and deploy a rehearsal mandate, every
+   command with `--environment live`; run the whole flow, including the grant, the fill, the
+   stop, and a restart that sends nothing; then `journal export` and `journal verify`: clean.
+   `scripts/r0-rehearsal.sh` runs these steps ([r0-rehearsal.md](r0-rehearsal.md)).
 3. **Live preparation.** The agentic account is flat, holds only what the founder will risk, and
-   is a cash account or has margin disabled. Download and `inspect` the instrument's bars;
-   register the configuration with a dated ETP classification; `connection record` the live
-   connection, typing the account number; create, confirm and deploy the mandate with `ask` for
-   openings and `max_order_usd` covering one share.
+   is a cash account or has margin disabled. Open the live workspace, a workspace of its own and
+   never a paper one (`mandate workspace open --environment live`, DEC-952); every later owner
+   command names it with `--environment live`. Download and `inspect` the instrument's bars;
+   register the configuration with a dated ETP classification, and as the fee schedule the live
+   Robinhood one, `mandate config register --kind fee_config
+   config/fees/robinhood-live-2026-10-16.json` ([DEC-958](../decisions/DEC-958.md); a live run
+   refuses the paper-only one); run `mandate-paper
+   --connect-check` with the account number typed into `MANDATE_RH_ACCOUNT_NUMBER`, and
+   `connection record` the live connection with the event id it prints (DEC-946); create,
+   confirm and deploy the mandate with `ask` for openings and `max_order_usd` covering one share.
 4. Between 09:30 and 15:50 New York on a trading day, run without `--place-one-order`: it logs in
    and reports the order it would ask for, or the exact refusal. A `Flat` model or a gate denial
    ends here; neither is worked around.
@@ -310,6 +320,10 @@ sees its output during the run (`AGENTS.md` rule 8).
    evidence (no account number) in R0's docs PR. Robinhood's GTC expiry is not published, so the
    founder checks the stop again periodically while the position is held and re-places it by
    hand if it lapsed (DEC-529 item 7).
+
+Steps 1 and 2 are scripted in `scripts/r0-rehearsal.sh`, which builds the rehearsal runner with
+`--features live,rh-sim,mandate-mcp/rh-sim`; its record on `main`, with each refusal and the line
+responsible, is [r0-rehearsal.md](r0-rehearsal.md).
 
 Step 4 is the first time real Robinhood answers are read: the response shapes are assumed until
 then. A refusal there for an unexpected shape is a finding for the connector, not something to

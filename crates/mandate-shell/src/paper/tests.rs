@@ -8,10 +8,11 @@ use mandate_alpaca::{
 };
 use mandate_builder::buy_action;
 use mandate_canon::Digest;
-use mandate_domain::AssetId;
+use mandate_domain::{AssetId, Environment};
 use mandate_executor::{
     AgentId as ExecutorAgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
-    BrokerAccount, BrokerOrder, BrokerPosition, InstrumentSnapshot, MandateView, Purpose,
+    BrokerAccount, BrokerOrder, BrokerPosition, FillConfigRefs, InstrumentSnapshot, MandateView,
+    Purpose,
 };
 use mandate_num::{Fraction, Price, Qty, SignedQty, Unit, Usd};
 use mandate_risk::{DayTradeRegime, Exchange as GateExchange, GateConfig, SaneQuote};
@@ -23,15 +24,17 @@ use mandate_time::{Date, UtcNanos};
 
 use crate::Cause;
 use crate::control::{
-    Configuration, ConfirmedVersion, ControlRecord, LiveAdmission, Pinned, RunFacts, configuration,
-    confirmed_version,
+    Configuration, ConfirmedVersion, ControlRecord, LiveAdmission, Origin, Pinned, RunFacts,
+    configuration, confirmed_version,
 };
 use mandate_canon::to_canonical;
 use mandate_spec::context::Membership;
 use std::collections::BTreeMap;
 
 use super::artifacts::reference;
-use super::context::{PaperClock, TrustedPaperContext, protection_prices};
+use super::context::{
+    GateQuote, PaperClock, ReconcilingPaperContext, TrustedPaperContext, protection_prices,
+};
 use super::gate::{gate_mandate, gate_template};
 use super::{
     Artifacts, BrokerFacts, LiquidityFacts, MarketFacts, PaperFacts, load_contexts, robinhood_facts,
@@ -131,6 +134,10 @@ impl Deployed {
             seq: seq.saturating_add(1),
             event_type: event_type.to_owned(),
             payload: parsed,
+            origin: Origin {
+                stream_id: "ctl:ws_spy".to_owned(),
+                environment: Environment::Paper,
+            },
         });
         Ok(())
     }
@@ -405,6 +412,11 @@ fn the_registered_artifacts_bind_the_bytes_they_checked() -> Result<(), String> 
         "the registered rule set's quote bound"
     );
     assert_eq!(
+        loaded.quote_max_age(),
+        std::time::Duration::from_secs(10),
+        "the runner's cross-check reads the same bound (DEC-945 item 2)"
+    );
+    assert_eq!(
         loaded.instrument.etp_classified_at,
         at("2026-09-25T00:00:00Z")?
     );
@@ -505,7 +517,7 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         agent: AGENT.to_owned(),
         increment: loaded.instrument.increment,
         fees: loaded.fees.clone(),
-        quote_at: snapshot.broker.quote.at,
+        quote: GateQuote::of(&snapshot.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
     };
@@ -528,6 +540,124 @@ fn production_contexts_use_the_reviewed_instrument_and_model_end_to_end() -> Res
         protection: None,
     };
     assert!(trusted.input(&request).is_some());
+    let refs = loaded.config_refs();
+    let registered = (
+        refs.fee_config.clone(),
+        refs.trading_calendar.clone(),
+        refs.instrument_snapshot.clone(),
+    );
+    let (Some(fee), Some(calendar), Some(snapshot)) = registered else {
+        return Err("the registered references".to_owned());
+    };
+    assert_eq!(
+        trusted.fill_refs(&reviewed),
+        Some(FillConfigRefs {
+            fee_config: fee,
+            settlement_calendar: calendar.clone(),
+            trading_calendar: calendar,
+            instrument_snapshot: snapshot,
+        }),
+        "the reviewed instrument's fill names the registered objects, settling on its trading \
+         calendar (DEC-938 item 2)"
+    );
+    assert_eq!(
+        trusted.fill_refs(&symbol("SPY")?),
+        None,
+        "another instrument's fill names none"
+    );
+    Ok(())
+}
+
+/// DEC-955 item 5: the own-fill reconciliation's context answers the reviewed agent on the
+/// reviewed instrument as the trusted context does, names the registered fill configuration (or
+/// none when a reference is missing, which the journal refuses), and answers no binding request,
+/// so nothing it carries can let an order through.
+#[test]
+fn the_reconciling_context_names_the_fill_configuration_and_answers_no_gate_request()
+-> Result<(), String> {
+    let loaded = msft_deployment()?;
+    let refs = loaded.config_refs().clone();
+    let context = ReconcilingPaperContext {
+        agent: AGENT.to_owned(),
+        asset: OTHER_ASSET.to_owned(),
+        increment: loaded.instrument.increment,
+        config_refs: refs.clone(),
+    };
+    let ours = ExecutorAgentId(AGENT.to_owned());
+    let theirs = ExecutorAgentId("agent_other".to_owned());
+    let reviewed = symbol(OTHER_ASSET)?;
+    let other = symbol("SPY")?;
+    assert!(context.covers(&ours, &reviewed));
+    assert!(!context.covers(&theirs, &reviewed));
+    assert!(!context.covers(&ours, &other));
+    let version = refs
+        .mandate_version
+        .clone()
+        .ok_or("the registered mandate version")?;
+    assert_eq!(
+        context.version(&ours),
+        Some(mandate_executor::MandateVersion(version))
+    );
+    assert_eq!(context.version(&theirs), None);
+    assert_eq!(context.crypto_stop_limit_offset(&ours), None);
+    assert_eq!(context.asset_class(&reviewed), Some(AssetClass::UsEquity));
+    assert_eq!(context.asset_class(&other), None);
+    assert_eq!(
+        context.increment(&reviewed),
+        Some(mandate_num::ShareIncrement::Whole)
+    );
+    assert_eq!(context.increment(&other), None);
+    assert_eq!(context.exit_tier(&reviewed), None);
+    let (Some(fee), Some(calendar), Some(snapshot)) = (
+        refs.fee_config.clone(),
+        refs.trading_calendar.clone(),
+        refs.instrument_snapshot.clone(),
+    ) else {
+        return Err("the registered references".to_owned());
+    };
+    assert_eq!(
+        context.fill_refs(&reviewed),
+        Some(FillConfigRefs {
+            fee_config: fee,
+            settlement_calendar: calendar.clone(),
+            trading_calendar: calendar,
+            instrument_snapshot: snapshot,
+        })
+    );
+    assert_eq!(context.fill_refs(&other), None);
+    let missing: [fn(&mut mandate_executor::BindingGateConfigRefs); 3] = [
+        |refs| refs.fee_config = None,
+        |refs| refs.trading_calendar = None,
+        |refs| refs.instrument_snapshot = None,
+    ];
+    for drop in missing {
+        let mut partial = refs.clone();
+        drop(&mut partial);
+        let short = ReconcilingPaperContext {
+            config_refs: partial,
+            agent: AGENT.to_owned(),
+            asset: OTHER_ASSET.to_owned(),
+            increment: loaded.instrument.increment,
+        };
+        assert_eq!(
+            short.fill_refs(&reviewed),
+            None,
+            "a missing reference names none"
+        );
+    }
+    for side in [Side::Buy, Side::Sell] {
+        let request = BindingGateRequest {
+            agent: &ours,
+            instrument: &reviewed,
+            side,
+            qty: qty("1")?,
+            limit: price("255.2")?,
+            purpose: Purpose::Open,
+            tif: mandate_executor::TimeInForce::Day,
+            protection: None,
+        };
+        assert!(context.input(&request).is_none(), "no request is answered");
+    }
     Ok(())
 }
 
@@ -1156,7 +1286,7 @@ fn trusted_context_exposes_only_the_reviewed_agent_and_instrument() -> Result<()
         agent: AGENT.to_owned(),
         increment: mandate_num::ShareIncrement::Whole,
         fees: loaded.fees.clone(),
-        quote_at: facts()?.broker.quote.at,
+        quote: GateQuote::of(&facts()?.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
     };
@@ -1222,7 +1352,11 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
         agent: AGENT.to_owned(),
         increment: mandate_num::ShareIncrement::Whole,
         fees: loaded.fees.clone(),
-        quote_at: at("2026-09-28T16:59:59.5Z")?,
+        quote: GateQuote::of(
+            &facts_at("2026-09-28T16:59:59Z", "2026-09-28T16:59:59.5Z")?
+                .broker
+                .quote,
+        ),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::clone(&current))),
     };
@@ -1253,7 +1387,11 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
 
     let close_clock = Rc::new(Cell::new(at("2026-09-28T19:50:00Z")?));
     let close_window = TrustedPaperContext {
-        quote_at: at("2026-09-28T19:49:59.5Z")?,
+        quote: GateQuote::of(
+            &facts_at("2026-09-28T19:49:59Z", "2026-09-28T19:49:59.5Z")?
+                .broker
+                .quote,
+        ),
         clock: Rc::new(TestClock(close_clock)),
         ..trusted
     };
@@ -1261,6 +1399,183 @@ fn binding_gate_rechecks_quote_age_and_close_window_at_its_current_clock() -> Re
         close_window.input(&request).is_none(),
         "the first instant of the close window refuses before submission"
     );
+    Ok(())
+}
+
+/// DEC-943 item 2 (DEC-940 item 6, gap 3): the binding gate judges the IEX quote the run last
+/// handed it, at its own clock and under the unchanged ten-second bound. Thirty seconds after
+/// the preflight its quote is stale and refuses; a fresh read handed to the gate reaches it,
+/// bid, ask and stamp, as the market quote the gate judges; a handed read ten seconds and a
+/// nanosecond old refuses again; and a quote stamped after the gate's clock refuses, as the
+/// gate's recheck always did (DEC-936 item 4).
+#[test]
+fn the_binding_gate_judges_the_quote_the_run_last_handed_it() -> Result<(), String> {
+    let loaded = artifacts()?;
+    let preflight = facts()?;
+    let template =
+        gate_template(&loaded, &preflight, at(NOW)?, reviewed_gate_config()?).map_err(text)?;
+    let quote = GateQuote::of(&preflight.broker.quote);
+    let current = Rc::new(Cell::new(at("2026-09-28T17:00:30Z")?));
+    let trusted = TrustedPaperContext {
+        template,
+        agent: AGENT.to_owned(),
+        increment: mandate_num::ShareIncrement::Whole,
+        fees: loaded.fees.clone(),
+        quote: quote.clone(),
+        quote_max_age: loaded.quote_max_age,
+        clock: Rc::new(TestClock(Rc::clone(&current))),
+    };
+    let reviewed = ExecutorAgentId(AGENT.to_owned());
+    let instrument = symbol(INSTRUMENT_ID)?;
+    let request = BindingGateRequest {
+        agent: &reviewed,
+        instrument: &instrument,
+        side: Side::Buy,
+        qty: qty("1")?,
+        limit: price("255.2")?,
+        purpose: Purpose::Open,
+        tif: mandate_executor::TimeInForce::Day,
+        protection: None,
+    };
+    assert!(
+        trusted.input(&request).is_none(),
+        "thirty seconds on, the preflight's quote is past its bound"
+    );
+    let read = |stamp: &str, bid: &str, ask: &str| -> Result<LatestQuote, String> {
+        Ok(LatestQuote {
+            at: at(stamp)?,
+            bid: price(bid)?,
+            ask: price(ask)?,
+            ..preflight.broker.quote.clone()
+        })
+    };
+    quote.hand(&read("2026-09-28T17:00:29.5Z", "254.9", "255.3")?);
+    assert_eq!(
+        trusted.input(&request).and_then(|input| input.market.quote),
+        Some(SaneQuote {
+            bid: price("254.9")?,
+            ask: price("255.3")?,
+            at: at("2026-09-28T17:00:29.5Z")?,
+        }),
+        "the gate judges the read the run handed it"
+    );
+    quote.hand(&read("2026-09-28T17:00:20Z", "254.9", "255.3")?);
+    assert!(
+        trusted.input(&request).is_some(),
+        "a handed read exactly at the bound is current"
+    );
+    quote.hand(&read("2026-09-28T17:00:19.999999999Z", "254.9", "255.3")?);
+    assert!(
+        trusted.input(&request).is_none(),
+        "a handed read a nanosecond past the bound refuses: the bound is never relaxed"
+    );
+    quote.hand(&read("2026-09-28T17:00:30.000000001Z", "254.9", "255.3")?);
+    assert!(
+        trusted.input(&request).is_none(),
+        "a handed read stamped after the gate's clock refuses"
+    );
+    Ok(())
+}
+
+/// A scripted IEX data feed: every quote read answers `body`, and the clock reads `now`.
+#[derive(Clone)]
+struct QuoteFeed {
+    body: String,
+    now: UtcNanos,
+}
+
+impl mandate_alpaca::DataTransport for QuoteFeed {
+    async fn send(
+        &self,
+        _: &mandate_alpaca::QuoteRequest,
+    ) -> Result<mandate_alpaca::Response, mandate_alpaca::TransportError> {
+        Ok(mandate_alpaca::Response {
+            status: 200,
+            body: self.body.clone().into_bytes(),
+        })
+    }
+
+    async fn send_bars(
+        &self,
+        _: &mandate_alpaca::BarsRequest,
+    ) -> Result<mandate_alpaca::Response, mandate_alpaca::TransportError> {
+        Err(mandate_alpaca::TransportError::Timeout)
+    }
+}
+
+impl mandate_alpaca::Pause for QuoteFeed {
+    fn now(&self) -> UtcNanos {
+        self.now
+    }
+
+    async fn pause(&self, _: std::time::Duration) {}
+}
+
+/// DEC-943 item 2: a wake's fresh read is the preflight's own IEX read and the judge's checks
+/// of it. A current quote of the reviewed symbol, a locked one among them, is the quote; a
+/// crossed quote, another symbol's, and one past the ten-second bound or DEC-936's 250 ms skew
+/// tolerance each refuse, naming the wake's quote.
+#[test]
+fn a_fresh_read_is_the_reviewed_symbols_current_uncrossed_iex_quote() -> Result<(), String> {
+    let loaded = artifacts()?;
+    let now = at("2026-09-28T17:00:30Z")?;
+    let feed = |symbol: &str, bid: &str, ask: &str, stamp: &str| QuoteFeed {
+        body: format!(
+            r#"{{"quote":{{"ap":{ask},"as":1,"ax":"V","bp":{bid},"bs":2,"bx":"V","c":["R"],"t":"{stamp}","z":"C"}},"symbol":"{symbol}"}}"#
+        ),
+        now,
+    };
+    let read = |feed: QuoteFeed| super::fresh_quote(&loaded, feed.clone(), feed);
+    let current = read(feed("AAPL", "255.1", "255.2", "2026-09-28T17:00:29.5Z")).map_err(text)?;
+    assert_eq!(
+        (
+            current.instrument.as_str(),
+            current.bid,
+            current.ask,
+            current.at,
+            current.feed
+        ),
+        (
+            "AAPL",
+            price("255.1")?,
+            price("255.2")?,
+            at("2026-09-28T17:00:29.5Z")?,
+            Feed::Iex
+        )
+    );
+    assert!(
+        read(feed("AAPL", "255.2", "255.2", "2026-09-28T17:00:20Z")).is_ok(),
+        "a locked quote exactly at the bound is current"
+    );
+    let refused = Cause::Absent {
+        what: "a current, uncrossed IEX quote at the wake",
+    };
+    for (name, quoted) in [
+        (
+            "crossed",
+            feed("AAPL", "255.3", "255.2", "2026-09-28T17:00:29.5Z"),
+        ),
+        (
+            "another symbol",
+            feed("MSFT", "255.1", "255.2", "2026-09-28T17:00:29.5Z"),
+        ),
+        (
+            "stale",
+            feed("AAPL", "255.1", "255.2", "2026-09-28T17:00:19.999999999Z"),
+        ),
+        (
+            "ahead",
+            feed("AAPL", "255.1", "255.2", "2026-09-28T17:00:30.250000001Z"),
+        ),
+    ] {
+        assert_eq!(
+            read(quoted)
+                .map(|quote| quote.bid)
+                .map_err(|cause| cause.to_string()),
+            Err(refused.to_string()),
+            "{name}"
+        );
+    }
     Ok(())
 }
 
@@ -1274,7 +1589,7 @@ fn each_binding_request_reserves_its_own_orders_fees() -> Result<(), String> {
         agent: AGENT.to_owned(),
         increment: mandate_num::ShareIncrement::Whole,
         fees: loaded.fees.clone(),
-        quote_at: facts()?.broker.quote.at,
+        quote: GateQuote::of(&facts()?.broker.quote),
         quote_max_age: loaded.quote_max_age,
         clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
     };

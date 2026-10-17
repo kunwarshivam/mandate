@@ -9,6 +9,12 @@ description = "The `mandate` command line: `download` fetches Alpaca historical 
 [lints]
 workspace = true
 
+[features]
+# The R0 rehearsal against the simulator (DEC-962 item 2): the owner's clock is the instant
+# `MANDATE_RH_SIM_CLOCK` names, as the rehearsal runner's is. Only the rehearsal's build turns it
+# on; the founder's CLI is built with no feature.
+rh-sim = []
+
 [[bin]]
 name = "mandate"
 path = "src/main.rs"

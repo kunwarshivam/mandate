@@ -6,7 +6,7 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
@@ -19,8 +19,8 @@ usage: cargo xtask <command>
 commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
-                        spec-guard | refcases | reference | schemas | supply-chain | postgres |
-                        mutants | schema-mutants; or one part of test: test-nextest |
+                        spec-guard | portable | refcases | reference | schemas | supply-chain |
+                        postgres | mutants | schema-mutants; or one part of test: test-nextest |
                         test-doc | test-rh-sim | test-python
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
@@ -43,8 +43,8 @@ commands:
 /// which the required `full` verdict also needs, so `full-checks` stays under ten minutes (DEC-688).
 /// CI runs `fast`'s parts in parallel jobs, `test` split into [`TEST_PARTS`] and its nextest run
 /// partitioned, and its required `fast` verdict is an aggregate over them (DEC-871); `cargo xtask
-/// ci fast` still runs this whole group unsharded.
-const FAST_JOB: [&str; 4] = ["lint", "test", "pending", "spec-guard"];
+/// ci fast` still runs this whole group unsharded. `portable` runs on macOS in CI (DEC-954).
+const FAST_JOB: [&str; 5] = ["lint", "test", "pending", "spec-guard", "portable"];
 /// The parts of `test`, in the order `cargo xtask ci test` runs them: the workspace's nextest run,
 /// its doctests, the `rh-sim` rehearsal build's tests (DEC-922), and the Python tests. CI runs
 /// them in separate jobs (DEC-871).
@@ -56,10 +56,11 @@ const FULL_JOB: [&str; 5] = [
     "supply-chain",
     "postgres",
 ];
-const PR_JOBS: [&str; 11] = [
+const PR_JOBS: [&str; 12] = [
     "lint",
     "test",
     "pending",
+    "portable",
     "refcases",
     "reference",
     "schemas",
@@ -208,6 +209,7 @@ fn ci(job: &str) -> Result<()> {
         }
         "test-doc" | "test-rh-sim" | "test-python" => test_part(job, None),
         "pending" => pending(),
+        "portable" => portable(),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -286,6 +288,40 @@ fn ci(job: &str) -> Result<()> {
     }
 }
 
+/// The runner on the host it runs on (DEC-954): clippy `-D warnings` over every target of
+/// `mandate-paper`, then its core-dump hardening tests, which read the kernel's answer back.
+/// CI's `fast-portable` job runs it on macOS, where the founder runs the CLIs, so a Linux-only
+/// call in the runner fails a required check; on Linux it repeats what `lint` and `test` cover.
+fn portable() -> Result<()> {
+    sh(
+        "cargo",
+        &[
+            "clippy",
+            "--locked",
+            "--package",
+            "mandate-paper",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    )?;
+    sh(
+        "cargo",
+        &[
+            "test",
+            "--locked",
+            "--package",
+            "mandate-paper",
+            "--lib",
+            "--test",
+            "live_entry",
+            "--",
+            "harden",
+        ],
+    )
+}
+
 /// One of [`TEST_PARTS`]; `partition`, a `K/N` counted from 1, runs only the nextest run's `K`th
 /// of `N` slices (DEC-871).
 fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
@@ -309,9 +345,10 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
     }
 }
 
-/// The `rh-sim` rehearsal build's tests (DEC-922): `mandate-mcp` with the feature, which no
-/// workspace crate turns on, so the workspace's own run never builds it; its login tests run the
-/// simulator binary built here.
+/// The `rh-sim` rehearsal build's tests (DEC-922): `mandate-mcp` and the runner, `mandate-paper`,
+/// each with the feature, which no workspace crate turns on, so the workspace's own run never
+/// builds it; `mandate-mcp`'s login tests run the simulator binary built here. Each package runs
+/// in its own build, so neither's feature is unified into the other's (DEC-963).
 fn rh_sim_tests() -> Result<()> {
     sh(
         "cargo",
@@ -334,31 +371,46 @@ fn rh_sim_tests() -> Result<()> {
         .as_str()
         .context("cargo metadata names no target directory")?;
     let binary = Path::new(target).join("debug").join("mandate-rh-sim");
-    let args = [
-        "nextest",
-        "run",
-        "--locked",
-        "--no-tests=fail",
-        "--package",
-        "mandate-mcp",
-        "--features",
-        "rh-sim",
-    ];
-    eprintln!(
-        "    $ {RH_SIM_BIN_ENV}={} cargo {}",
-        binary.display(),
-        args.join(" ")
-    );
-    let status = Command::new("cargo")
-        .args(args)
-        .env(RH_SIM_BIN_ENV, &binary)
-        .status()
-        .context("starting `cargo nextest`")?;
-    if !status.success() {
-        bail!("the rh-sim rehearsal build's tests failed with {status}");
+    rehearsal_runs(|args| {
+        eprintln!(
+            "    $ {RH_SIM_BIN_ENV}={} cargo {}",
+            binary.display(),
+            args.join(" ")
+        );
+        Command::new("cargo")
+            .args(args)
+            .env(RH_SIM_BIN_ENV, &binary)
+            .status()
+            .context("starting `cargo nextest`")
+    })
+}
+
+/// [`REHEARSAL_TESTED`]'s `rh-sim` test runs, one `cargo nextest run` a package, in order, each
+/// through `run`, which takes the `cargo` arguments and says how the run exited; the first that
+/// fails stops the rest and is named in the error.
+fn rehearsal_runs(mut run: impl FnMut(&[&str]) -> Result<ExitStatus>) -> Result<()> {
+    for package in REHEARSAL_TESTED {
+        let args = [
+            "nextest",
+            "run",
+            "--locked",
+            "--no-tests=fail",
+            "--package",
+            package,
+            "--features",
+            REHEARSAL,
+        ];
+        let status = run(&args)?;
+        if !status.success() {
+            bail!("the rh-sim rehearsal build's tests of {package} failed with {status}");
+        }
     }
     Ok(())
 }
+
+/// The packages `cargo xtask ci test-rh-sim` tests with the `rh-sim` feature, each in its own
+/// build: every workspace crate that declares it (DEC-922, DEC-963, DEC-962 item 2).
+const REHEARSAL_TESTED: [&str; 3] = ["mandate-mcp", "mandate-paper", "mandate-cli"];
 
 /// The arguments of the workspace's nextest run, every test or, with `partition` (`K/N`, `1 <= K
 /// <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every test
@@ -459,13 +511,15 @@ fn output_in(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
 }
 
 /// The lint job over the repository at `root` (ADR-0001 ES-12): ShellCheck over its
-/// `.github/scripts/` (DEC-329) and `deploy/` (the demo host's runbook, DEC-822), actionlint over its `.github/workflows/` (DEC-330), then
+/// `.github/scripts/` (DEC-329), `deploy/` (the demo host's runbook, DEC-822) and `scripts/` (the
+/// founder's runbooks, R0's rehearsal first), actionlint over its `.github/workflows/` (DEC-330), then
 /// `workspace_checks`, the checks that need the Cargo and uv workspaces, which `ci lint` passes as
 /// [`workspace_lint`]. The job takes the repository it runs in, so a fixture repository drives it
 /// and neither tool's result can be dropped without a test failing (DEC-331, the DEC-139 pattern).
 fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()> {
     shellcheck_scripts(&root.join(".github/scripts"))?;
     shellcheck_scripts(&root.join("deploy"))?;
+    shellcheck_scripts(&root.join("scripts"))?;
     actionlint_workflows(&root.join(".github/workflows"))?;
     live_feature_in(root)?;
     workspace_checks()
@@ -2474,6 +2528,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "PENDING_RESULT",
     "PLANNED_MUTANTS",
     "PLAN_RESULT",
+    "PORTABLE_RESULT",
     "POSTGRES_PASSWORD",
     "PYTHON_RESULT",
     "RUN_PRS",
@@ -7767,8 +7822,9 @@ mod tests {
     use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
-    use std::process::Command;
+    use std::process::{Command, ExitStatus};
     use std::time::Duration;
 
     use anyhow::{Context, Result, bail};
@@ -7779,8 +7835,8 @@ mod tests {
         Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_PROFILE,
         MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT,
         Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS, Package, PendingTest,
-        PendingTestRun, REFCASES, SCHEMA_CHECKERS, SCHEMA_DIR, SCHEMA_SHARD_ENV,
-        TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome, UnmutatedSource,
+        PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_TESTED, SCHEMA_CHECKERS, SCHEMA_DIR,
+        SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome, UnmutatedSource,
         actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows, check_schedule,
         ci, ci_files, classify, contains_dec_id, contains_word, external_oracles, failure_cause,
         feature_files, feature_map_problems, files_by_extension, first_panic_line,
@@ -7789,8 +7845,8 @@ mod tests {
         live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
         mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
-        plain_comment_lines, preflight_args, proptest_seeds_in, repo_root, schema_mutants,
-        shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        plain_comment_lines, preflight_args, proptest_seeds_in, rehearsal_runs, repo_root,
+        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
         spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
         test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, verdicts,
         workspace_closure, workspace_packages,
@@ -11626,6 +11682,10 @@ mod tests {
             ),
             ("fast-python", "if: ${{ !github.event.pull_request.draft }}"),
             (
+                "fast-portable",
+                "if: ${{ !github.event.pull_request.draft }}",
+            ),
+            (
                 "fast",
                 "if: ${{ always() && !github.event.pull_request.draft }}",
             ),
@@ -11682,12 +11742,65 @@ mod tests {
 
     /// CI's fast jobs and the `cargo xtask ci` parts each runs, in order (DEC-871). The required
     /// `fast` verdict needs every one of them.
-    const FAST_CI_JOBS: [(&str, &[&str]); 4] = [
+    const FAST_CI_JOBS: [(&str, &[&str]); 5] = [
         ("fast-lint", &["lint", "spec-guard"]),
         ("fast-test", &["test-nextest"]),
         ("fast-pending", &["pending", "test-doc", "test-rh-sim"]),
         ("fast-python", &["test-python"]),
+        ("fast-portable", &["portable"]),
     ];
+
+    /// DEC-963: `cargo xtask ci test-rh-sim` tests every workspace crate that declares the
+    /// `rh-sim` feature, and only those, so no crate's rehearsal build goes untested until it
+    /// rots, as `mandate-paper`'s did.
+    #[test]
+    fn the_rh_sim_run_tests_every_crate_declaring_the_feature() -> Result<()> {
+        let meta = metadata_in(&repo_root()?)?;
+        let declaring: BTreeSet<&str> = workspace_packages(&meta)
+            .iter()
+            .filter(|package| package.features.contains_key(REHEARSAL))
+            .map(|package| package.name.as_str())
+            .collect();
+        assert_eq!(
+            declaring,
+            REHEARSAL_TESTED.into_iter().collect::<BTreeSet<_>>(),
+            "the crates declaring `{REHEARSAL}` are the ones `test-rh-sim` tests with it"
+        );
+        Ok(())
+    }
+
+    /// DEC-963: `test-rh-sim` runs each crate's `rh-sim` build in a `cargo nextest run` of its
+    /// own, in order, passes only when every run passed, and stops at the first that fails,
+    /// naming its package.
+    #[test]
+    fn the_rh_sim_runs_test_each_crate_alone_and_stop_at_the_first_failure() {
+        let exited = |code: i32| ExitStatus::from_raw(code << 8);
+        let mut ran = Vec::new();
+        let passed = rehearsal_runs(|args| {
+            ran.push(args.join(" "));
+            Ok(exited(0))
+        });
+        assert!(passed.is_ok(), "{passed:?}");
+        assert_eq!(
+            ran,
+            [
+                "nextest run --locked --no-tests=fail --package mandate-mcp --features rh-sim",
+                "nextest run --locked --no-tests=fail --package mandate-paper --features rh-sim",
+                "nextest run --locked --no-tests=fail --package mandate-cli --features rh-sim",
+            ]
+        );
+        let mut ran = 0;
+        let failed = rehearsal_runs(|_| {
+            ran += 1;
+            Ok(exited(1))
+        });
+        let error = failed.map_err(|error| error.to_string());
+        assert!(
+            matches!(&error, Err(message) if message.contains("tests of mandate-mcp failed")),
+            "{error:?}"
+        );
+        assert_eq!(ran, 1, "a failed run stops the rest");
+    }
 
     /// The `cargo xtask ci <part>` parts a job's steps run, in order.
     fn xtask_parts(lines: &[&str]) -> Vec<String> {
@@ -11824,7 +11937,7 @@ mod tests {
     }
 
     /// DEC-871's `fast` verdict, run as GitHub runs it (`bash -e`) over every combination of its
-    /// four parts' results: it passes only when every part succeeded, and a skipped part fails it.
+    /// five parts' results (DEC-954 adds `fast-portable`): it passes only when every part succeeded, and a skipped part fails it.
     #[test]
     fn fast_passes_only_when_every_part_succeeded() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -11835,6 +11948,7 @@ mod tests {
             "TEST_RESULT",
             "PENDING_RESULT",
             "PYTHON_RESULT",
+            "PORTABLE_RESULT",
         ];
         let fast = workflow_job(&workflow, "fast").context("ci.yml has `fast`")?;
         for ((job, _), var) in FAST_CI_JOBS.iter().zip(vars) {
@@ -11845,7 +11959,7 @@ mod tests {
             );
         }
         let mut checked = 0usize;
-        for combination in 0..results.len().pow(4) {
+        for combination in 0..results.len().pow(5) {
             let mut command = Command::new("bash");
             command.args(["-e", "-c", &script]);
             let mut rest = combination;
@@ -11863,7 +11977,7 @@ mod tests {
             );
             checked = checked.saturating_add(1);
         }
-        assert_eq!(checked, 625, "every combination of four results is judged");
+        assert_eq!(checked, 3125, "every combination of five results is judged");
         Ok(())
     }
 
@@ -11935,10 +12049,10 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            8,
+            9,
             "one checkout in each source-reading job: `fast-lint`, `fast-test`, `fast-pending`, \
-             `fast-python`, `full-checks`, the mutation plan, the mutants matrix, and \
-             `schema-mutants`"
+             `fast-python`, `fast-portable`, `full-checks`, the mutation plan, the mutants \
+             matrix, and `schema-mutants`"
         );
         for checkout in checkouts {
             assert!(
@@ -12709,10 +12823,12 @@ jq -r "$filter" "$src"
         let scripts = root.join(".github/scripts");
         let workflows = root.join(".github/workflows");
         let deploy = root.join("deploy");
+        let runbooks = root.join("scripts");
         fs::create_dir_all(&scripts)?;
         fs::create_dir_all(&workflows)?;
         fs::create_dir_all(&deploy)?;
-        for dir in [&scripts, &deploy] {
+        fs::create_dir_all(&runbooks)?;
+        for dir in [&scripts, &deploy, &runbooks] {
             fs::write(
                 dir.join("clean.sh"),
                 "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\"\n",
@@ -12752,6 +12868,12 @@ jq -r "$filter" "$src"
             .err();
         fs::remove_file(deploy.join("planted.sh"))?;
 
+        fs::write(runbooks.join("planted.sh"), "#!/usr/bin/env bash\nrm $1\n")?;
+        let runbook_shellcheck = lint(&root, || Ok(()))
+            .map_err(|err| format!("{err:#}"))
+            .err();
+        fs::remove_file(runbooks.join("planted.sh"))?;
+
         fs::write(
             workflows.join("planted.yml"),
             concat!(
@@ -12778,6 +12900,12 @@ jq -r "$filter" "$src"
                 .as_deref()
                 .is_some_and(|err| err.contains("SC2086")),
             "a planted SC2086 under deploy/ fails the lint job too, got {deploy_shellcheck:?}"
+        );
+        assert!(
+            runbook_shellcheck
+                .as_deref()
+                .is_some_and(|err| err.contains("SC2086")),
+            "a planted SC2086 under scripts/ fails the lint job too, got {runbook_shellcheck:?}"
         );
         assert!(
             actionlint
@@ -17492,6 +17620,7 @@ jq -r "$filter" "$src"
         fs::create_dir_all(&workflows)?;
         fs::create_dir_all(root.join(".github/scripts"))?;
         fs::create_dir_all(root.join("deploy"))?;
+        fs::create_dir_all(root.join("scripts"))?;
         fs::write(
             root.join("deploy/clean.sh"),
             "#!/usr/bin/env bash\nset -euo pipefail\necho \"deployed\"\n",

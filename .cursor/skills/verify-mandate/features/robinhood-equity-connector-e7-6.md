@@ -8,7 +8,12 @@
   implemented: `agentic_account` and `read`, the reads scoped to the agentic account, CN-8,
   DEC-875, and their filter-key allowlist, DEC-879; C4 implemented: `account_snapshot` and
   `preflight_facts`, DEC-470 item 1's facts from the scoped reads, quotes and tradability,
-  DEC-902). The tool seam `Tools` is `mandate-mcp`'s, implemented for `McpClient`
+  DEC-902; the brief's C3 listing implemented: `ListOrders` as one whole `get_equity_orders`
+  read by `symbol`, `placed_agent` and `created_at_gte`,
+  `crates/mandate-robinhood/src/listing.rs`, DEC-529 item 4, DEC-941, followed page by page by
+  its `next_cursor` up to ten pages, DEC-956 item 3; every call names the instrument by its
+  registered ticker and reads answers back as the asset id, `Tickers`,
+  `crates/mandate-robinhood/src/tickers.rs`, DEC-956 item 1). The tool seam `Tools` is `mandate-mcp`'s, implemented for `McpClient`
   (`crates/mandate-mcp/src/tools.rs`, DEC-928 item 1). In the shell,
   `crates/mandate-shell/src/robinhood.rs` (DEC-928 item 2, DEC-933): `RobinhoodBridge`, one
   runtime and one connector, with `preflight_facts`; `RobinhoodShellConnector`, the shell's
@@ -18,7 +23,9 @@
   executor's own reconciliation. `crates/mandate-shell/src/paper/facts.rs`'s `robinhood_facts`
   builds a Robinhood connection's `BrokerFacts` beside Alpaca's `market_facts`, and
   `mandate-paper`'s `robinhood_cross_check` holds Robinhood's ask within the collar of the IEX
-  ask (DEC-933 item 2, DEC-529 item 12). `mandate-shell-rh-sim`, `crates/mandate-shell-rh-sim/`
+  ask (DEC-933 item 2, DEC-529 item 12). The shell ticks the executor at the run's clock before
+  the cycle's output (`crates/mandate-shell/src/tracer.rs`, DEC-941 item 5).
+  `mandate-shell-rh-sim`, `crates/mandate-shell-rh-sim/`
   (layer 11, tests only, DEC-928 item 4), is the shell's simulator harness.
 - **Tests:** `crates/mandate-robinhood/tests/shape.rs` (profile, `ref_id`, states),
   `crates/mandate-robinhood/tests/restore.rs` (C3, DEC-870, DEC-872, DEC-874 and DEC-876: the
@@ -40,8 +47,19 @@
   and the snapshot property against an independent oracle, its generated orders of both sides),
   `crates/mandate-rh-sim/tests/robinhood.rs` (`Submit` against `SimServer` over loopback: review
   then place, a deduplicated re-send, LT-6's lost and garbled answers, LT-5's alerts, `Cancel`
-  by `order_id`, what the profile does not offer, and a cancel after a restart by
-  the id the journal holds), and
+  by `order_id`, what the profile does not offer, a cancel after a restart by
+  the id the journal holds, and DEC-941's listing: the three filters sent, a record naming our
+  key only by our `ref_id`, and an untyped, lost or refused listing, a cursor that cannot be
+  read, or a record of another ticker leaving the order `Unknown`; DEC-956: the ticker sent and
+  read back, no ticker sending nothing, a place or cancel answered for another ticker, a paged
+  listing followed to its last page, one past ten pages and one with a garbled later page
+  leaving the order `Unknown`), `crates/mandate-rh-sim/tests/server.rs`'s
+  `get_equity_orders_keeps_only_what_its_three_filters_name` (DEC-941 item 2) and
+  `get_equity_orders_pages_by_its_own_cursor` (DEC-956 item 3),
+  `crates/mandate-shell-rh-sim/tests/restart.rs` (LT-6 end to end through the shell's run path:
+  place, lose the answer, restart, adoption journaled as `OrderStateChanged` version 2 with the
+  broker's `order_id` before the reconciliation, no second place; with no match the order stays
+  `Unknown` and the restart's opening is denied `unknown_order_in_flight`), and
   `crates/mandate-rh-sim/tests/preflight.rs` (C4, DEC-875 item 6 and DEC-902: the whole preflight
   against `SimServer` over loopback, a halted symbol `NotTradable` before the quote, the served
   reads refusing what the core does not hold, and the core's own portfolio, positions, average

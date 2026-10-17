@@ -162,8 +162,8 @@ jobs:
           MANDATE_TEST_PARTITION: ${{ matrix.shard }}
 
   # DEC-871. The pending tests (DEC-110, DEC-137), the doctests, and the `rh-sim` rehearsal
-  # build's tests (DEC-922): all need the test profile the `fast-test` shards build, and run in
-  # seconds once it is built.
+  # build's tests of `mandate-mcp` and `mandate-paper` (DEC-922, DEC-963): all need the test
+  # profile the `fast-test` shards build, and run in seconds once it is built.
   fast-pending:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
@@ -253,27 +253,60 @@ jobs:
       - run: cargo xtask ci test-python
         if: steps.change.outputs.docs_only != 'true'
 
+  # DEC-954. The runner on macOS, where the founder runs the CLIs: `cargo xtask ci portable`
+  # lints `mandate-paper` and runs its core-dump hardening tests there, so a Linux-only call in it
+  # fails the required `fast` check. A cross-check from Linux cannot build `ring`'s C for Apple
+  # without the macOS SDK, so it runs on a macOS runner.
+  fast-portable:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: macos-14
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          shared-key: fast-portable
+      - run: cargo xtask ci portable
+        if: steps.change.outputs.docs_only != 'true'
+
   fast:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
     if: ${{ always() && !github.event.pull_request.draft }}
-    needs: [fast-lint, fast-test, fast-pending, fast-python]
+    needs: [fast-lint, fast-test, fast-pending, fast-python, fast-portable]
     # DEC-871. The required `fast` verdict: every part must succeed, and a matrix succeeds only when
     # every shard did. A failed, cancelled or skipped part fails it. xtask's tests run this script
-    # over every combination of the four results.
+    # over every combination of the five results.
     steps:
-      - name: Require lint and the spec guard, every test shard, the pending tests and doctests, and pytest
+      - name: Require lint and the spec guard, every test shard, the pending tests and doctests, pytest, and the macOS runner check
         env:
           LINT_RESULT: ${{ needs.fast-lint.result }}
           TEST_RESULT: ${{ needs.fast-test.result }}
           PENDING_RESULT: ${{ needs.fast-pending.result }}
           PYTHON_RESULT: ${{ needs.fast-python.result }}
+          PORTABLE_RESULT: ${{ needs.fast-portable.result }}
         run: |
           test "$LINT_RESULT" = success
           test "$TEST_RESULT" = success
           test "$PENDING_RESULT" = success
           test "$PYTHON_RESULT" = success
+          test "$PORTABLE_RESULT" = success
 
   full-checks:
     if: ${{ !github.event.pull_request.draft }}

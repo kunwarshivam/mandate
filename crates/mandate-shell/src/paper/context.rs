@@ -4,24 +4,27 @@
 //! classification facts are the builder's [`buy_action`] and its protection is the executor's
 //! [`equity_bracket_prices`], so no money or quantity is computed here (DEC-138 item 3).
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId};
+use mandate_alpaca::LatestQuote;
 use mandate_builder::{
     AccountSnapshot as BuilderAccountSnapshot, Market as BuilderMarket,
     RiskContext as BuilderRiskContext, buy_action,
 };
 use mandate_domain::{AssetClass as DomainAssetClass, MarketSession};
 use mandate_executor::{
-    BindingGateInput, BindingGateRequest, BindingGateSource, InstrumentSnapshot, MandateVersion,
-    MandateView as ExecutorMandateView, equity_bracket_prices,
+    BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, FillConfigRefs,
+    InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView, equity_bracket_prices,
 };
 use mandate_num::{
     CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, ShareIncrement, Signed, SizeFraction,
     Unit, Usd,
 };
+use mandate_risk::SaneQuote;
 use mandate_runtime::{AgentId, OrderExecution, ProtectionPrices, TimeInForce};
 use mandate_spec::ValidationContext;
 use mandate_spec::document::{Protection, ProvenanceMap};
@@ -40,6 +43,43 @@ use crate::error::Cause;
 pub struct Contexts {
     pub executor: ExecutorContext,
     pub run: RunContext,
+    /// The IEX quote the executor's binding gate judges, the preflight's until the run hands it
+    /// a fresher read (DEC-943 item 2).
+    pub quote: GateQuote,
+}
+
+/// The IEX quote the binding gate judges at each request, shared between the run that reads
+/// quotes and the gate that judges them (DEC-943 item 2). It starts as the preflight's quote; an
+/// asked opening's runner hands it the fresh quote each wake read, so a grant answered after
+/// the preflight quote's bound is judged on a quote read at its own wake, never on the
+/// preflight's. The gate's recheck is unchanged: the quote's age at the gate's own clock,
+/// `iex_quote_max_age_s` (DEC-935 item 2), and a stamp after that clock refuses.
+#[derive(Debug, Clone)]
+pub struct GateQuote(Rc<Cell<SaneQuote>>);
+
+impl GateQuote {
+    pub(super) fn of(quote: &LatestQuote) -> Self {
+        Self(Rc::new(Cell::new(sane(quote))))
+    }
+
+    /// Hands the binding gate `quote`, a fresh IEX read the run judged at its read: every
+    /// binding request from now on judges it in place of the one held before.
+    pub fn hand(&self, quote: &LatestQuote) {
+        self.0.set(sane(quote));
+    }
+
+    fn current(&self) -> SaneQuote {
+        self.0.get()
+    }
+}
+
+/// The gate's view of an IEX quote: its bid, its ask, and its own stamp.
+fn sane(quote: &LatestQuote) -> SaneQuote {
+    SaneQuote {
+        bid: quote.bid,
+        ask: quote.ask,
+        at: quote.at,
+    }
 }
 
 /// The submission clock, injected so the binding gate rechecks freshness without reading a wall
@@ -92,12 +132,13 @@ pub fn load_contexts_with_clock(
     let config = configuration.gate.clone();
     let today = judge(artifacts, &facts.broker, now, &config)?;
     let template = gate_template(artifacts, facts, now, config)?;
+    let quote = GateQuote::of(&facts.broker.quote);
     let source = Rc::new(TrustedPaperContext {
         template: template.clone(),
         agent: agent.0.clone(),
         increment: artifacts.instrument.increment,
         fees: artifacts.fees.clone(),
-        quote_at: facts.broker.quote.at,
+        quote: quote.clone(),
         quote_max_age: artifacts.quote_max_age,
         clock,
     });
@@ -114,6 +155,109 @@ pub fn load_contexts_with_clock(
     Ok(Contexts {
         executor,
         run: run_context(artifacts, &facts.broker, today, template)?,
+        quote,
+    })
+}
+
+/// The executor context of the own-fill reconciliation a run performs before its preflight is
+/// judged (DEC-955 item 5): the reviewed agent's mandate version, the reviewed instrument's class,
+/// increment and fill configuration, the registered fee configuration, and a binding gate that
+/// answers no request, so nothing this context carries can ever let an order through.
+///
+/// # Errors
+/// [`Cause::Absent`] when the registered configuration cannot be read.
+pub fn reconcile_context(artifacts: &Artifacts, agent: &AgentId) -> Result<ExecutorContext, Cause> {
+    let configuration = artifacts.production_configuration()?;
+    let source = Rc::new(ReconcilingPaperContext {
+        agent: agent.0.clone(),
+        asset: artifacts.instrument.asset_id.as_str().to_owned(),
+        increment: artifacts.instrument.increment,
+        config_refs: artifacts.config_refs.clone(),
+    });
+    Ok(ExecutorContext::new(
+        Rc::new(Ids {
+            space: IdSpace::Account,
+        }),
+        source.clone(),
+        source.clone(),
+        source,
+        configuration.executor,
+        artifacts.fees.clone(),
+    ))
+}
+
+/// [`reconcile_context`]'s view: the reviewed agent on the reviewed instrument, as
+/// [`TrustedPaperContext`] answers them, with no market fact and a binding gate that answers no
+/// request (DEC-955 item 5).
+pub(super) struct ReconcilingPaperContext {
+    pub(super) agent: String,
+    pub(super) asset: String,
+    pub(super) increment: ShareIncrement,
+    pub(super) config_refs: BindingGateConfigRefs,
+}
+
+impl ReconcilingPaperContext {
+    fn reviewed(&self, agent: &mandate_executor::AgentId, instrument: &InstrumentId) -> bool {
+        agent.0 == self.agent && instrument.as_str() == self.asset
+    }
+}
+
+impl ExecutorMandateView for ReconcilingPaperContext {
+    fn version(&self, agent: &mandate_executor::AgentId) -> Option<MandateVersion> {
+        (agent.0 == self.agent)
+            .then(|| self.config_refs.mandate_version.clone())
+            .flatten()
+            .map(MandateVersion)
+    }
+
+    fn crypto_stop_limit_offset(&self, _agent: &mandate_executor::AgentId) -> Option<Fraction> {
+        None
+    }
+
+    fn covers(&self, agent: &mandate_executor::AgentId, instrument: &InstrumentId) -> bool {
+        self.reviewed(agent, instrument)
+    }
+}
+
+impl InstrumentSnapshot for ReconcilingPaperContext {
+    fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
+        (instrument.as_str() == self.asset).then_some(AssetClass::UsEquity)
+    }
+
+    fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
+        (instrument.as_str() == self.asset).then_some(self.increment)
+    }
+
+    fn exit_tier(&self, _instrument: &InstrumentId) -> Option<mandate_executor::ExitTier> {
+        None
+    }
+
+    /// The registered fill configuration, as [`TrustedPaperContext`] names it (DEC-938 item 2).
+    fn fill_refs(&self, instrument: &InstrumentId) -> Option<FillConfigRefs> {
+        (instrument.as_str() == self.asset)
+            .then(|| fill_refs(&self.config_refs))
+            .flatten()
+    }
+}
+
+impl BindingGateSource for ReconcilingPaperContext {
+    /// No request is answered, so the binding gate refuses every order this context could be
+    /// asked about: the own-fill reconciliation never sends one (DEC-955 item 5).
+    fn input(&self, _request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        None
+    }
+}
+
+/// The fill records' configuration from the registered references: the fee configuration, the
+/// trading calendar (which also settles the paper run, DEC-938 item 2) and the instrument
+/// snapshot, or none when any is missing, which the journal refuses.
+fn fill_refs(refs: &BindingGateConfigRefs) -> Option<FillConfigRefs> {
+    let calendar = refs.trading_calendar.clone()?;
+    Some(FillConfigRefs {
+        fee_config: refs.fee_config.clone()?,
+        settlement_calendar: calendar.clone(),
+        trading_calendar: calendar,
+        instrument_snapshot: refs.instrument_snapshot.clone()?,
     })
 }
 
@@ -233,6 +377,7 @@ fn run_context(
         },
         policies: Vec::new(),
         author: "founder".to_owned(),
+        members: artifacts.members.clone(),
         restricted_instruments: BTreeSet::new(),
         decision: Some(DecisionContext {
             builder: Some(builder),
@@ -250,7 +395,7 @@ pub(super) struct TrustedPaperContext {
     pub(super) agent: String,
     pub(super) increment: ShareIncrement,
     pub(super) fees: mandate_accounting::Config,
-    pub(super) quote_at: UtcNanos,
+    pub(super) quote: GateQuote,
     pub(super) quote_max_age: Duration,
     pub(super) clock: Rc<dyn PaperClock>,
 }
@@ -292,25 +437,37 @@ impl InstrumentSnapshot for TrustedPaperContext {
     fn exit_tier(&self, _instrument: &InstrumentId) -> Option<mandate_executor::ExitTier> {
         None
     }
+
+    /// The reviewed instrument's fills are accounted under the registered fee configuration,
+    /// trading calendar and instrument snapshot the binding gate names, and settle on that same
+    /// trading calendar, which is the one `mandate-accounting` computes settlement on here
+    /// (DEC-938 item 2); any other instrument's fill names none, so the journal refuses it.
+    fn fill_refs(&self, instrument: &InstrumentId) -> Option<FillConfigRefs> {
+        if instrument.as_str() != self.template.asset.as_str() {
+            return None;
+        }
+        fill_refs(&self.template.config_refs)
+    }
 }
 
 impl BindingGateSource for TrustedPaperContext {
-    /// The template, with `mandate-accounting`'s fee reservation of the very order the executor
-    /// asks about. An order it cannot price gets no input, so the gate refuses it.
+    /// The template, with the quote the run last handed the gate ([`GateQuote`], DEC-943 item 2)
+    /// and `mandate-accounting`'s fee reservation of the very order the executor asks about. An
+    /// order it cannot price gets no input, so the gate refuses it.
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         if !self.reviewed(request.agent, request.instrument) {
             return None;
         }
         let now = self.clock.now()?;
-        if let Err(error) = judge_submission_time(
-            self.quote_at,
-            self.quote_max_age,
-            now,
-            &self.template.config,
-        ) {
+        let quote = self.quote.current();
+        if let Err(error) =
+            judge_submission_time(quote.at, self.quote_max_age, now, &self.template.config)
+        {
             let _ = error;
             return None;
         }
+        let mut market = self.template.market.clone();
+        market.quote = Some(quote);
         match reservation(
             &self.fees,
             request.instrument,
@@ -322,6 +479,7 @@ impl BindingGateSource for TrustedPaperContext {
             Ok(fee_reservation) => Some(BindingGateInput {
                 now,
                 fee_reservation,
+                market,
                 ..self.template.clone()
             }),
             Err(_) => None,

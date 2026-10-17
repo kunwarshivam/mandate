@@ -1,0 +1,53 @@
+# Robinhood Financial's posted US equity fees for a live account, transcribed for mandate-executor's
+# `robinhood_live_fee_config` (trading-domain spec §6.2; DEC-958, Accepted (agent, under DEC-929);
+# the founder may revert). Every figure is copied from the source named beside it, and each is the
+# highest rate in force or scheduled on the retrieval date, so the platform never prices a live
+# account below what it is charged. When a source changes, a new dated file and schedule are added
+# rather than this one edited. Valid for environment `live` and broker `robinhood` only.
+
+schedule = "robinhood_live_2026_10_16"
+environment = "live"
+broker = "robinhood"
+effective_from = "2026-04-06"           # the first trading day with every figure below in force (SEC from Saturday 2026-04-04)
+retrieved_on = "2026-10-16"
+
+[equities]
+# Commission: "Commission-free trading refers to $0 commissions" for U.S. listed equities
+# (including ETFs), Robinhood Financial Standard Pricing Fee Schedule, revised 2026-09-29,
+# https://cdn.robinhood.com/assets/robinhood/legal/RHF+Fee+Schedule.pdf, p. 1. The accounting
+# configuration has no commission field: commission is zero (§6.2).
+
+# SEC Section 31: "$20.60 per million dollars" for covered sales with "charge dates on or after
+# April 4, 2026", until 60 days after the fiscal 2027 appropriation is enacted,
+# https://www.sec.gov/rules-regulations/fee-rate-advisories/2026-2 (Fee Rate Advisory, 2026-02-27).
+# Robinhood's schedule: "$20.60 per $1,000,000 of total principal amount of sale, rounded up to the
+# nearest penny", effective April 4, 2026. $20.60 / 1,000,000 is exactly 0.0000206.
+sec_rate = "0.0000206"
+sec_effective_from = "2026-04-04"
+
+# FINRA TAF, sells only: "$0.000195 per share for each sale of a covered equity security, with a
+# maximum charge of $9.79 per trade", FINRA By-Laws Schedule A, Section 1, as restored from
+# January 1, 2027 in SR-FINRA-2026-021 (filed 2026-09, effective on filing),
+# https://www.finra.org/sites/default/files/2026-09/SR-FINRA-2026-021.pdf, Exhibit 5. That filing
+# pauses TAF at $0.00 for transactions from October 1 to December 31, 2026; Robinhood's schedule
+# still posts "Effective January 1, 2026 $0.000195 per share (equity sells) ... no greater than
+# $9.79", so the posted rate is kept as the upper bound through the pause.
+taf_per_share = "0.000195"
+taf_cap = "9.79"
+taf_effective_from = "2026-01-01"
+# Robinhood: "The limit on this fee is based on execution of your order, which can occur in parts."
+# Per execution is §6.2's default and charges at least as much as per order.
+taf_cap_basis = "per_execution"
+
+# CAT: "$0.000003 per share of listed equities", buys and sells (no side is named), "rounded to the
+# nearest penny (unless the fee is less than one cent, in which case it is rounded down to 0)",
+# Robinhood's schedule above, p. 1 and note vii. Booked on both sides, the reading that never
+# understates.
+cat_per_share = "0.000003"
+
+[crypto]
+# A live run trades US equities only (the shell's artifacts refuse any other pinned asset class), so
+# these are never charged; they repeat the paper-only overestimate rather than name a Robinhood
+# crypto rate.
+maker_bps = "250"
+taker_bps = "250"

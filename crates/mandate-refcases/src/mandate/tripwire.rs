@@ -8,8 +8,8 @@
 use std::collections::BTreeSet;
 
 use mandate_accounting::{
-    Account, AccountType, AssetClass, Config, CryptoFees, EquityFees, Execution, Input,
-    InstrumentId, Position, Record, Side, TafCapBasis,
+    Account, AccountType, AssetClass, Config, CryptoFees, EquityFees, Execution, FeeRounding,
+    Input, InstrumentId, Position, Record, Side, TafCapBasis,
 };
 use mandate_approval::{AssertionId, Environment, RiskClock, StepUp, StepUpMethod};
 use mandate_builder::{ActionContext, Classification, DecidedBy, classify};
@@ -571,6 +571,7 @@ pub(super) fn accounting_config() -> Result<Config, String> {
             sec_rate: FeeRate::parse("0").map_err(|error| error.to_string())?,
             taf_per_share: FeePerShare::parse("0").map_err(|error| error.to_string())?,
             taf_cap: FeeCap::parse("0").map_err(|error| error.to_string())?,
+            fee_rounding: FeeRounding::DailyTotal,
             taf_cap_basis: TafCapBasis::PerExecution,
             cat_per_share: FeePerShare::parse("0").map_err(|error| error.to_string())?,
         },

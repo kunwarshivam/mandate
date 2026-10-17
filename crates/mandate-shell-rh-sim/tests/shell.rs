@@ -12,6 +12,7 @@
 mod common;
 
 use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use common::wire::Wire;
@@ -27,13 +28,16 @@ use mandate_executor::{
 use mandate_mcp::{ALLOWLIST, CallClass, McpError};
 use mandate_num::{SignedQty, Usd};
 use mandate_rh_sim::{Event, Fault, Garble, Session, Sim, SimServer, State, Variant};
-use mandate_robinhood::{Quote, RobinhoodConnector, Tools, ref_id, robinhood_profile};
+use mandate_robinhood::{Quote, RobinhoodConnector, Tickers, Tools, ref_id, robinhood_profile};
+use mandate_runtime::AgentId as RuntimeAgentId;
 use mandate_shell::Cause;
-use mandate_shell::adapters::CoreExecutor;
+use mandate_shell::adapters::{CoreExecutor, Sources, robinhood_stages};
 use mandate_shell::robinhood::{
-    ACCOUNT_UNREAD, RobinhoodBridge, RobinhoodReconciler, RobinhoodShellConnector,
+    ACCOUNT_UNREAD, QUOTE_UNREAD, RobinhoodBridge, RobinhoodReconciler, RobinhoodShellConnector,
 };
 use mandate_shell::stages::{Connector, Reconciler};
+use mandate_shell::symbols::BrokerSymbols;
+use mandate_time::UtcNanos;
 use serde_json::{Value, json};
 use tokio::runtime::{Builder, Runtime};
 
@@ -94,7 +98,8 @@ fn shell_for<'s>(server: &'s SimServer, account: &str, records: &[FoldedEvent]) 
         garble_place: Rc::clone(&garble_place),
         seen: Rc::clone(&seen),
     };
-    let robinhood = RobinhoodConnector::restore(tools, account.to_owned(), records).unwrap();
+    let robinhood =
+        RobinhoodConnector::restore(tools, account.to_owned(), tickers(), records).unwrap();
     let bridge = RobinhoodBridge::new(runtime(), robinhood);
     let scope = AccountScope {
         account: AccountRef("acct_rh".to_owned()),
@@ -468,8 +473,8 @@ fn the_reconciler_reads_only_the_agentic_account_and_maps_its_snapshot() {
     assert!(
         seen.borrow()
             .iter()
-            .all(|(class, ..)| *class == CallClass::Ordinary),
-        "reads never draw on the exits' budget"
+            .all(|(class, ..)| *class == CallClass::Read),
+        "reads are reads, and never draw on the exits' budget"
     );
     every_call_names_the_agentic_account(seen);
     assert!(
@@ -597,4 +602,176 @@ fn the_bridges_preflight_of_an_account_that_is_not_agentic_refuses() {
         "{refused:?}"
     );
     assert_eq!(calls(&server), ["get_accounts"]);
+}
+
+/// The live door's lapse evidence (DEC-947 item 1, DEC-933 item 3): the bridge reads the agentic
+/// account's snapshot through the same session, the account reads alone, no quote and nothing
+/// placed, and lists what the account holds, a filled position and a working order included.
+#[test]
+fn the_bridges_snapshot_reads_the_agentic_account_alone() {
+    let server = read_server();
+    let shell = shell(&server);
+    let snapshot = shell.bridge.account_snapshot().unwrap();
+    assert_eq!(snapshot.cash, Usd::parse("750.25").unwrap());
+    assert!(snapshot.positions.is_empty() && snapshot.open_orders.is_empty());
+    assert_eq!(calls(&server), ACCOUNT_READS);
+    let held = read_server_echoing(true);
+    let mut shell = shell_for(&held, AGENTIC, &[]);
+    let order = submitted(shell.connector.call(&buy("01JHELD")));
+    held.drive(|core| core.fill(&order.broker_order_id, qty("1"), price("498")))
+        .unwrap()
+        .unwrap();
+    let snapshot = shell.bridge.account_snapshot().unwrap();
+    assert_eq!(
+        (snapshot.positions.len(), snapshot.open_orders.len()),
+        (1, 1)
+    );
+}
+
+/// A snapshot of an account that is not agentic refuses as every unread account does, after the
+/// one listing read.
+#[test]
+fn the_bridges_snapshot_of_an_account_that_is_not_agentic_refuses() {
+    let server = read_server();
+    let shell = shell_for(&server, NOT_AGENTIC, &[]);
+    let refused = shell.bridge.account_snapshot();
+    assert!(
+        matches!(refused, Err(Cause::Absent { what }) if what == ACCOUNT_UNREAD),
+        "{refused:?}"
+    );
+    assert_eq!(calls(&server), ["get_accounts"]);
+}
+
+/// The production stages over one Robinhood session (DEC-947 item 4, DEC-928 item 2): the run's
+/// connector is the Robinhood connector, so its profile is Robinhood's and each request is
+/// placed through the session, and the startup reconciliation reads the agentic account through
+/// that same session, never Alpaca's four requests.
+#[test]
+fn the_robinhood_stages_trade_and_reconcile_through_one_session() {
+    let server: &'static SimServer = Box::leak(Box::new(read_server_echoing(true)));
+    let (garble_place, seen) = (Rc::default(), Seen::default());
+    let tools = Loopback {
+        server,
+        wire: RefCell::new(Wire::connect(&server.url().unwrap())),
+        garble_place,
+        seen,
+    };
+    let robinhood = RobinhoodConnector::new(tools, AGENTIC.to_owned(), tickers());
+    let sources = Sources {
+        mandate: PathBuf::from("unread-mandate.json"),
+        journal: None,
+        recorded_at: UtcNanos::from_parts(0, 0).unwrap(),
+        agent: RuntimeAgentId("agent_rh".to_owned()),
+        workspace: "ws_rh".to_owned(),
+        account_ref: "acct_rh".to_owned(),
+        executor: None,
+        run: None,
+        artifacts: None,
+        symbols: BrokerSymbols::default(),
+        transport: RobinhoodBridge::new(runtime(), robinhood),
+    };
+    let mut stages = robinhood_stages(sources);
+    assert_eq!(stages.connector.profile(), robinhood_profile());
+    let snapshot = stages
+        .reconciler
+        .snapshot(&mut *stages.connector, &snapshot_requests())
+        .unwrap();
+    assert_eq!(snapshot, startup(Vec::new(), Vec::new()));
+    assert_eq!(calls(server), ACCOUNT_READS);
+    let order = submitted(stages.connector.call(&buy("01JSTAGES")));
+    assert_eq!(orders(server).len(), 1);
+    assert_eq!(orders(server)[0].id, order.broker_order_id);
+}
+
+/// DEC-945 item 1: the bridge's quote read is `get_equity_quotes` alone, on the `Ordinary`
+/// budget with exactly `{"symbols": [symbol]}` and no account, answered with the simulator's
+/// locked quote; a second read answers the quote the broker holds then, not the first one.
+#[test]
+fn the_bridges_quote_is_the_brokers_latest_and_names_no_account() {
+    let server = read_server();
+    let shell = shell(&server);
+    let spy = InstrumentId::new("SPY").unwrap();
+    let quote = shell.bridge.equity_quote(&spy).unwrap();
+    assert_eq!(
+        quote,
+        Quote {
+            symbol: spy.clone(),
+            bid: price("500"),
+            ask: price("500"),
+        }
+    );
+    assert_eq!(calls(&server), ["get_equity_quotes"]);
+    assert_eq!(
+        *shell.seen.borrow(),
+        [(
+            CallClass::Read,
+            "get_equity_quotes",
+            json!({"symbols": ["SPY"]})
+        )]
+    );
+    server
+        .drive(|sim| sim.apply(Event::Quote("SPY".to_owned(), price("501.25"))))
+        .unwrap()
+        .unwrap();
+    let moved = shell.bridge.equity_quote(&spy).unwrap();
+    assert_eq!((moved.bid, moved.ask), (price("501.25"), price("501.25")));
+    assert_eq!(calls(&server), ["get_equity_quotes", "get_equity_quotes"]);
+}
+
+/// DEC-945 item 1: a symbol the broker quotes nothing for, and a garbled answer, each refuse the
+/// read as [`QUOTE_UNREAD`]; nothing but the quote read is called.
+#[test]
+fn the_bridges_quote_refuses_a_missing_or_garbled_answer() {
+    let server = read_server();
+    let shell = shell(&server);
+    let missing = shell
+        .bridge
+        .equity_quote(&InstrumentId::new("QQQ").unwrap());
+    assert!(
+        matches!(missing, Err(Cause::Absent { what }) if what == QUOTE_UNREAD),
+        "{missing:?}"
+    );
+    server.garble_next(Garble::NotJson).unwrap();
+    let garbled = shell
+        .bridge
+        .equity_quote(&InstrumentId::new("SPY").unwrap());
+    assert!(
+        matches!(garbled, Err(Cause::Absent { what }) if what == QUOTE_UNREAD),
+        "{garbled:?}"
+    );
+    assert_eq!(calls(&server), ["get_equity_quotes", "get_equity_quotes"]);
+}
+
+/// SPY and QQQ registered as their own asset ids, as these tests name them (DEC-956 item 1).
+fn tickers() -> Tickers {
+    let pairs = ["SPY", "QQQ"].map(|s| (InstrumentId::new(s).unwrap(), s.to_owned()));
+    Tickers::registered(pairs).unwrap()
+}
+
+/// DEC-956 item 1: a session opened before the run read its mandate holds no ticker, so the
+/// bridge quotes nothing until the run registers the pinned instrument's `(asset id, symbol)`;
+/// from then on the quote is read under that ticker.
+#[test]
+fn the_bridge_quotes_only_what_the_run_registered() {
+    let server = read_server();
+    let tools = Loopback {
+        server: &server,
+        wire: RefCell::new(Wire::connect(&server.url().unwrap())),
+        garble_place: Rc::default(),
+        seen: Seen::default(),
+    };
+    let robinhood = RobinhoodConnector::new(tools, AGENTIC.to_owned(), Tickers::default());
+    let bridge = RobinhoodBridge::new(runtime(), robinhood);
+    let spy = InstrumentId::new("SPY").unwrap();
+    assert!(
+        matches!(bridge.equity_quote(&spy), Err(Cause::Absent { what }) if what == QUOTE_UNREAD)
+    );
+    assert!(
+        calls(&server).is_empty(),
+        "nothing is asked before the registration"
+    );
+    bridge.register(tickers()).unwrap();
+    let quote = bridge.equity_quote(&spy).unwrap();
+    assert_eq!((quote.symbol, quote.ask), (spy, price("500")));
+    assert_eq!(calls(&server), ["get_equity_quotes"]);
 }

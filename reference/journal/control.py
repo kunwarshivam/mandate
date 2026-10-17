@@ -163,6 +163,8 @@ SCHEMAS[("agent", "OwnerCommandRefused")] = REFUSAL
 
 REQUIRED_REFS = {
     "ApprovalResponded": ("mandate_version",),
+    "ApprovalTimedOut": ("mandate_version",),
+    "ApprovalCanceled": ("mandate_version",),
     "ApprovalRevalidated": ("mandate_version",),
     "AgentDeployed": ("mandate_version",),
     "AgentStopped": ("mandate_version",),
@@ -333,6 +335,18 @@ SCHEMAS[("agent", "ApprovalRevalidated")] = rec(
     ("m_req", opt(DEC)),
     ("m_now", opt(DEC)),
     ("band_bp", INT),
+)
+# §9.7 v0.41 (DEC-944): the runtime's record that an ask's deadline passed and its safe default,
+# skip, applied. Its `causation_id` is the ask itself (rule 135).
+SCHEMAS[("agent", "ApprovalTimedOut")] = rec(
+    ("approval", ULID),
+    ("on_timeout", one_of("skip")),
+)
+# §9.7 v0.43 (DEC-950): the runtime's record that a tightening canceled a pending ask before any
+# terminal answer. The legacy `rebound` names no reason this version records.
+SCHEMAS[("agent", "ApprovalCanceled")] = rec(
+    ("approval", ULID),
+    ("reason", one_of("version_applied", "mode_tightened", "owner_pause", "owner_stop", "kill_switch")),
 )
 
 # §9.8 (DEC-800): a connection's history. The control stream's three records and the account
@@ -2071,11 +2085,18 @@ def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
 
 
 def copy_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """Rule 27: an `OwnerCommandRefused` names the owner input it refused, and §9.7's rule 50: an
-    `ApprovalResponded` names the answer it copies (reason `schema`)."""
+    """Rule 27: an `OwnerCommandRefused` names the owner input it refused, §9.7's rule 50: an
+    `ApprovalResponded` names the answer it copies, and rule 135: an `ApprovalTimedOut` is caused by
+    the ask it ends (reason `schema`)."""
     kind = draft["stream_id"].split(":")[0]
     if event_type == "ApprovalResponded" and draft["causation_id"] is None and "rule.50" not in skip:
         return [Violation("rule.50", "schema", "causation_id")]
+    if event_type == "ApprovalTimedOut":
+        cause = draft["causation_id"]
+        if cause is None and "rule.135.missing" not in skip:
+            return [Violation("rule.135.missing", "schema", "causation_id")]
+        if cause is not None and cause != draft["payload"]["approval"] and "rule.135.approval" not in skip:
+            return [Violation("rule.135.approval", "schema", "causation_id")]
     checked_first = event_type == "ConnectionCredentialRotated" or (
         event_type == "ConnectionEstablished" and draft["schema_version"] == 2
     )

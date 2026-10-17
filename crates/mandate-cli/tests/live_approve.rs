@@ -15,7 +15,8 @@ use mandate_approval::{
 };
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_cli::approvals::{approve, skip};
-use mandate_cli::control::{ControlError, Submitted};
+use mandate_cli::control::{ControlError, Owner, Submitted};
+use mandate_journal::Environment;
 use mandate_num::{Price, Qty, Signed};
 
 const MANDATE: &str = include_str!("fixtures/spy_mandate.json");
@@ -113,12 +114,20 @@ fn granting(fx: &mut Fixture, asked: &common::Asked) -> Result<Submitted, Contro
         &mut fx.journal,
         &fx.store,
         &mut FixedIds::default(),
-        &common::owner(),
+        &live_owner(),
         AGENT,
         &asked.approval,
         &code_of(&asked.content),
         at(ASKED_AT + 5),
     )
+}
+
+/// The owner, acting in the live workspace its control stream is (DEC-952).
+fn live_owner() -> Owner {
+    Owner {
+        environment: Environment::Live,
+        ..common::owner()
+    }
 }
 
 fn refused_with(fx: &mut Fixture, asked: &common::Asked, reason: &str) {

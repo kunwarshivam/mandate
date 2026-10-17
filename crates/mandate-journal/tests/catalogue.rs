@@ -117,11 +117,45 @@ const REGISTERED: &[&str] = &[
     "GateDecided",
     "OrderSubmitted",
     "FillApplied",
+    "LateFillApplied",
+    "FeesCharged",
     "MarkUpdated",
     "ReconciliationRun",
     "MandateVersionApplied",
     "UniverseChanged",
 ];
+
+/// DEC-948 item 3: `FeesCharged` version 1 is the simulated equity fee the paper executor books
+/// (trading spec §10): a record with exactly its members, refusing a family it does not book and
+/// a component that is not a decimal.
+#[test]
+fn fees_charged_is_closed_to_the_simulated_equity_fee() {
+    let (_, refs, payload) = RISK_INPUT_PAYLOADS
+        .iter()
+        .find(|(t, _, _)| *t == "FeesCharged")
+        .unwrap();
+    let valid = with_payload("FeesCharged", refs, payload);
+    assert!(Draft::parse(&valid).is_ok(), "{:?}", Draft::parse(&valid));
+    for (path, value, reason) in [
+        ("payload.unregistered", Some("1"), InvalidReason::Schema),
+        (
+            "payload.family",
+            Some(r#""crypto""#),
+            InvalidReason::NonCanonical,
+        ),
+        ("payload.cat", Some(r#""x""#), InvalidReason::NonCanonical),
+        (
+            "payload.simulated",
+            Some(r#""true""#),
+            InvalidReason::Schema,
+        ),
+        ("payload.client_order_id", None, InvalidReason::Schema),
+        ("payload.sec", None, InvalidReason::Schema),
+    ] {
+        let refused = Draft::parse(&edit(&valid, path, value)).unwrap_err();
+        assert_eq!((refused.reason, refused.path.as_str()), (reason, path));
+    }
+}
 
 /// Payload schemas journal spec v0.6 §9.1 closes on the agent stream (E7-9). On an agent stream a
 /// `StreamOpened` or `KillSwitchActivated` takes the agent stream's schema, not the account's.
@@ -155,14 +189,17 @@ const CLOSED_BY_SECTION_9_2: &[(&str, &str)] = &[
     ("OwnerCommandRefused", AGENT),
 ];
 
-/// The records journal spec v0.17 §9.7 closes (DEC-533), each on its one stream with the
-/// configuration it names. Until J2's implementation catalogues and closes them, the journal refuses
-/// them as not catalogued or not registered; `the_approval_answers_are_catalogued_and_closed_on_their_streams`
-/// asserts what they become, so the table above leaves their schema reason alone.
+/// The records journal spec v0.17 §9.7 closes (DEC-533), and `ApprovalTimedOut` and
+/// `ApprovalCanceled`, which v0.41 and v0.43 close there (DEC-944, DEC-950), each on its one stream
+/// with the configuration it names.
+/// `the_approval_answers_are_catalogued_and_closed_on_their_streams` asserts what they are, so the
+/// table above leaves their schema reason alone.
 const CLOSED_BY_SECTION_9_7: &[(&str, &str, &[&str])] = &[
     ("ApprovalResponseSubmitted", CTL, &[]),
     ("ApprovalResponded", AGENT, &[MAN]),
     ("ApprovalRevalidated", AGENT, &[MAN]),
+    ("ApprovalTimedOut", AGENT, &[MAN]),
+    ("ApprovalCanceled", AGENT, &[MAN]),
 ];
 
 /// The connection records journal spec v0.20 §9.8 closes (E7-17, DEC-800), with the stream types
@@ -1034,6 +1071,18 @@ const RISK_INPUT_PAYLOADS: &[(&str, &[&str], &str)] = &[
         &[FEE, CAL, SET, INS],
         r#"{"fill_id":"f","client_order_id":"c-1","instrument_id":"i","side":"buy","qty_gross":"1",
         "price":"1","trade_date":"2026-09-21","risk_clock":"2026-09-21T14:00:01.000000000Z","fees":[]}"#,
+    ),
+    (
+        "LateFillApplied",
+        &[FEE, CAL, SET, INS],
+        r#"{"fill_id":"f","client_order_id":"c-1","instrument_id":"i","side":"buy","qty_gross":"1",
+        "price":"1","trade_date":"2026-09-21","risk_clock":"2026-09-21T14:00:01.000000000Z","fees":[]}"#,
+    ),
+    (
+        "FeesCharged",
+        &[FEE],
+        r#"{"family":"equities","day":"2026-09-21","accrued":"0.0001","charged":"0","simulated":true,
+        "client_order_id":"c-1","sec":null,"taf":null,"cat":"0.0001","risk_clock":"2026-09-21T14:00:01.000000000Z"}"#,
     ),
 ];
 

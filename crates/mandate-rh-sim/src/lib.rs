@@ -59,6 +59,7 @@ pub use script::{Script, ScriptError, ScriptedFill};
 pub use server::{CONTRACT, Garble, INJECTION, ServerError, SimServer, Variant};
 
 use mandate_num::{Price, Qty, Rounding, ShareIncrement, Usd};
+use mandate_time::UtcNanos;
 
 /// The ten values of `get_equity_orders`'s `state`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -144,6 +145,12 @@ pub enum Event {
     EndOfDay,
     EchoRefId(bool),
     RefuseChangedResend(bool),
+    /// The broker's clock: every order placed from then on was created at this instant, which
+    /// `get_equity_orders`'s `created_at_gte` filters on (DEC-941 item 2).
+    Clock(UtcNanos),
+    /// From then on `get_equity_orders` answers at most this many orders a page, naming the next
+    /// page by a `next_cursor` it takes back as `cursor` (DEC-956 item 3); zero is refused.
+    PageSize(usize),
 }
 
 /// A customer account. `pattern_day_trader` marks an account a day trade would restrict, so an
@@ -202,6 +209,20 @@ pub struct Order {
     pub state: State,
     pub filled_quantity: Qty,
     pub executions: Vec<Execution>,
+    /// The broker's clock when the order was placed; `None` before any [`Event::Clock`]. The
+    /// contract does not list `orders[]`'s fields, so no answer carries it; only the
+    /// `created_at_gte` filter reads it (DEC-941 item 2).
+    pub created_at: Option<UtcNanos>,
+}
+
+/// The filters of `get_equity_orders` the core models (DEC-941 item 2); `None` filters nothing.
+/// Every order the core holds was placed through the agentic account's tools, so `placed_agent`
+/// `agentic` keeps every one and any other value keeps none.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OrderFilter {
+    pub symbol: Option<String>,
+    pub created_at_gte: Option<UtcNanos>,
+    pub agentic: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -286,7 +307,13 @@ pub struct Sim {
     server_keys: u64,
     echo_ref_id: bool,
     refuse_changed_resend: bool,
+    now: Option<UtcNanos>,
+    page_size: Option<usize>,
 }
+
+/// What a page cursor the simulator issues starts with: the offset of the page's first order in
+/// the filtered list follows it.
+const CURSOR_PREFIX: &str = "rh-sim-cursor-";
 
 impl Sim {
     /// A simulator over these accounts, in the closed session, with no quotes, halts or orders.
@@ -308,6 +335,8 @@ impl Sim {
             server_keys: 0,
             echo_ref_id: false,
             refuse_changed_resend: false,
+            now: None,
+            page_size: None,
         })
     }
 
@@ -343,6 +372,9 @@ impl Sim {
             }
             Event::EchoRefId(on) => self.echo_ref_id = on,
             Event::RefuseChangedResend(on) => self.refuse_changed_resend = on,
+            Event::Clock(now) => self.now = Some(now),
+            Event::PageSize(0) => return Err(SimError::Unreadable("page_size")),
+            Event::PageSize(size) => self.page_size = Some(size),
         }
         Ok(())
     }
@@ -495,15 +527,70 @@ impl Sim {
 
     /// `get_equity_orders` for one account, newest first.
     pub fn orders(&self, account_number: &str) -> Result<Vec<Order>, SimError> {
+        self.listed(account_number, &OrderFilter::default())
+    }
+
+    /// `get_equity_orders` for one account under `filter`, newest first. An order created before
+    /// any [`Event::Clock`] has no creation time, so a `created_at_gte` filter never keeps it.
+    pub fn listed(
+        &self,
+        account_number: &str,
+        filter: &OrderFilter,
+    ) -> Result<Vec<Order>, SimError> {
         self.account(account_number)?;
         let mine = self
             .orders
             .iter()
-            .filter(|o| o.account_number == account_number);
+            .filter(|o| o.account_number == account_number)
+            .filter(|o| {
+                filter
+                    .symbol
+                    .as_ref()
+                    .is_none_or(|symbol| &o.symbol == symbol)
+            })
+            .filter(|o| {
+                filter
+                    .created_at_gte
+                    .is_none_or(|since| o.created_at.is_some_and(|at| at >= since))
+            })
+            .filter(|_| filter.agentic.is_none_or(|agentic| agentic));
         Ok(mine
             .rev()
             .map(|o| shown(o.clone(), self.echo_ref_id))
             .collect())
+    }
+
+    /// One page of [`Self::listed`] (DEC-956 item 3): with no [`Event::PageSize`] the whole list
+    /// and no next cursor; with one, at most that many orders from the page `cursor` names, the
+    /// first page when it names none, and the cursor of the next page while orders remain. A
+    /// cursor the simulator did not issue for this list, or any cursor without a page size, is
+    /// refused.
+    pub fn page(
+        &self,
+        account_number: &str,
+        filter: &OrderFilter,
+        cursor: Option<&str>,
+    ) -> Result<(Vec<Order>, Option<String>), SimError> {
+        let listed = self.listed(account_number, filter)?;
+        let refused = SimError::Unreadable("cursor");
+        let Some(size) = self.page_size else {
+            return match cursor {
+                None => Ok((listed, None)),
+                Some(_) => Err(refused),
+            };
+        };
+        let start = match cursor {
+            None => 0,
+            Some(text) => text
+                .strip_prefix(CURSOR_PREFIX)
+                .and_then(|offset| offset.parse::<usize>().ok())
+                .filter(|offset| *offset > 0 && *offset < listed.len())
+                .ok_or(refused)?,
+        };
+        let end = start.saturating_add(size).min(listed.len());
+        let next = (end < listed.len()).then(|| format!("{CURSOR_PREFIX}{end}"));
+        let page = listed.get(start..end).unwrap_or_default().to_vec();
+        Ok((page, next))
     }
 
     /// `get_accounts`'s records: every account of the customer as it was configured, agentic
@@ -701,6 +788,7 @@ impl Sim {
             state: State::New,
             filled_quantity: Qty::ZERO,
             executions: Vec::new(),
+            created_at: self.now,
         };
         Ok((order, alerts))
     }

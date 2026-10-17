@@ -224,7 +224,6 @@ impl PendingLogin {
 pub const LOGIN_LIFETIME: Duration = Duration::from_secs(600);
 
 /// The token, a [`SecretString`] only: never printed, displayed or written (LT-9, DEC-861).
-#[cfg_attr(not(test), allow(dead_code, reason = "the MCP session (O2) reads it"))]
 #[derive(Debug)]
 pub struct AccessToken {
     pub(crate) secret: SecretString,

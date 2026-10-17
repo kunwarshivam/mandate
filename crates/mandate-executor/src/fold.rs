@@ -18,7 +18,7 @@ use crate::payload::{
 use crate::protection::climbs;
 use crate::state::{
     Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
-    ObservedAccount, OrderDetail, PendingRequest, Replacement, Switch,
+    ObservedAccount, OrderDetail, PendingRequest, PriorBase, Replacement, Switch,
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
@@ -161,9 +161,9 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             Ok(())
         }
         "ProtectionChanged" => protection_changed(state, payload, at),
-        "AccountStateObserved" => account_observed(state, payload),
+        "AccountStateObserved" => account_observed(state, payload, event.seq),
         "AccountSnapshotRecorded" => {
-            account_observed(state, payload)?;
+            account_observed(state, payload, event.seq)?;
             cash_compared(state, payload);
             Ok(())
         }
@@ -1100,8 +1100,14 @@ fn replacement(
 /// start from (§11). Its state reads §7.3's first row: any blocking flag, or a status other than
 /// `ACTIVE`, is `blocked`. `crypto_status` is journaled and not folded until the crypto row of §7.3
 /// is (the backlog carries it). An account missing `non_marginable_buying_power` or
-/// `accrued_fees` is incomplete, and buying power is `None` for it rather than guessed.
-fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+/// `accrued_fees` is incomplete, and buying power is `None` for it rather than guessed. The base's
+/// `seq` is kept, so a reconciliation knows whether its snapshot's own report is the base, and so
+/// is the report it replaced, which that reconciliation compares against instead.
+fn account_observed(
+    state: &mut ExecutorState,
+    payload: &Value,
+    seq: Seq,
+) -> Result<(), ExecutorError> {
     let buying_power = usd(payload, "buying_power")?;
     let non_marginable = optional_usd(payload, "non_marginable_buying_power")?;
     let accrued = optional_usd(payload, "accrued_fees")?;
@@ -1109,6 +1115,11 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
         || flag(payload, "trading_blocked")
         || flag(payload, "account_blocked")
         || flag(payload, "trade_suspended_by_user");
+    state.prior_base = state.observed.as_ref().map(|replaced| PriorBase {
+        cash: replaced.cash,
+        cash_flow: state.cash_flow,
+        fill_notional: state.fill_notional,
+    });
     state.observed = Some(ObservedAccount {
         state: if blocked {
             AccountState::Blocked
@@ -1125,6 +1136,7 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
         accrued_fees: accrued.unwrap_or(Usd::ZERO),
         complete: non_marginable.is_some() && accrued.is_some(),
     });
+    state.observed_at = Some(seq);
     state.cash_flow = Usd::ZERO;
     state.fill_notional = Usd::ZERO;
     Ok(())
@@ -2056,7 +2068,7 @@ mod tests {
 #[cfg(test)]
 mod buying_power_tests {
     use mandate_accounting::{
-        Account, AccountType, AssetClass, Config, CryptoFees, EquityFees, Execution,
+        Account, AccountType, AssetClass, Config, CryptoFees, EquityFees, Execution, FeeRounding,
         Input as AccountingInput, InstrumentId, Record, Reservations, Side, TafCapBasis,
     };
     use mandate_canon::Value;
@@ -2450,6 +2462,7 @@ mod buying_power_tests {
                 sec_rate: FeeRate::parse("0.00003")?,
                 taf_per_share: FeePerShare::parse("0.0002")?,
                 taf_cap: FeeCap::parse("9.79")?,
+                fee_rounding: FeeRounding::DailyTotal,
                 taf_cap_basis: TafCapBasis::PerExecution,
                 cat_per_share: FeePerShare::parse("0.00001")?,
             },

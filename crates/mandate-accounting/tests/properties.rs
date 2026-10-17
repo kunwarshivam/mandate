@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use common::{d, equity, fee_cap, id, no_fees, round_trip, usd};
 use mandate_accounting::{
     Account, AccountType, AccountingError, AssetClass, Config, CryptoFees, EquityFees, Execution,
-    FeeFamily, FeeKind, Input, Liquidity, Position, Record, Side, TafCapBasis,
+    FeeFamily, FeeKind, FeeRounding, Input, Liquidity, Position, Record, Side, TafCapBasis,
 };
 use mandate_num::{Bps, CostBasis, FeePerShare, FeeRate, Price, Qty, SignedQty};
 use mandate_time::{Date, UtcNanos};
@@ -44,6 +44,7 @@ fn config(taf_cap_cents: i128, per_order: bool) -> Config {
             sec_rate: FeeRate::parse("0.0000278").unwrap(),
             taf_per_share: FeePerShare::parse("0.000166").unwrap(),
             taf_cap: fee_cap(&cents_text(taf_cap_cents)),
+            fee_rounding: FeeRounding::DailyTotal,
             taf_cap_basis: if per_order {
                 TafCapBasis::PerOrder
             } else {

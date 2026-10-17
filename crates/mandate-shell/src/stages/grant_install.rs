@@ -18,6 +18,7 @@ use mandate_accounting::AssetClass;
 use mandate_alpaca::Pause;
 use mandate_canon::{Digest, Value};
 use mandate_executor::Purpose;
+use mandate_num::Price;
 use mandate_risk::Verdict;
 use mandate_runtime::{
     Autonomy, IntentHandoff, Observation, OrderExecution, RiskClock,
@@ -26,14 +27,14 @@ use mandate_runtime::{
 use mandate_time::UtcNanos;
 
 use super::doubles::{
-    AAPL, AGENT, ConvertingSink, FixedClassifier, FixedGate, PaperExecutor, World, account_stream,
+    AAPL, AGENT, ConvertingSink, FixedClassifier, FixedGate, FixedReconciler, PaperExecutor, World,
     agent_stream, control_stream, instrument, output, passed_checks, seed, setup,
 };
 use super::tail_install::ApprovableMandate;
 use crate::error::{Cause, ShellError};
 use crate::lt10::watch_may_end;
-use crate::stages::{Executor, Sink, Stage};
-use crate::tracer::{AskedCycle, Door, ProductionCycle, Report, Wake, door};
+use crate::stages::{Connector, Executor, Reconciler, Sink, Stage, Stages};
+use crate::tracer::{AskedCycle, Door, Mark, ProductionCycle, Report, Wake, door};
 use crate::watch::Watch;
 
 /// The closes the fixture observation carries, stored under their own digest.
@@ -41,10 +42,6 @@ const CLOSES: &[u8] = br#"{"closes":[["2026-09-25","255.2"]]}"#;
 
 /// The founder's answer's event id on the control stream.
 const ANSWER: &str = "00000100000000000000000002";
-
-/// The account stream's opening and its mark.
-const MARK_OPENED: &str = "00000900000000000000000001";
-const MARK: &str = "00000900000000000000000002";
 
 /// The watch's clock: an injected cell moved on by each pause.
 #[derive(Clone)]
@@ -82,31 +79,18 @@ fn clock() -> Result<Clock, String> {
     })
 }
 
-/// The account stream as a mark left it: opened, and the pinned instrument's `MarkUpdated` at
-/// the run clock, the reference the ask records and re-validation compares with (DEC-156
-/// item 3): with no mark, drift cannot be computed and every grant skips.
-fn marked(world: &World) -> Result<(), String> {
-    let opened = r#"{"stream_type":"account","workspace_id":"tracer","broker":"alpaca","account_ref":"tracer-paper"}"#;
-    seed(
-        world,
-        &account_stream(),
-        1,
-        MARK_OPENED,
-        "StreamOpened",
-        "executor",
-        opened,
-    )?;
-    let at = setup()?.now.secs();
-    let mark = format!(r#"{{"instrument":"{AAPL}","price":"255.2","risk_clock":{at}}}"#);
-    seed(
-        world,
-        &account_stream(),
-        2,
-        MARK,
-        "MarkUpdated",
-        "executor",
-        &mark,
-    )
+/// The preflight quote's risk mark the run hands the cycle: the fixture's 255.2 at the run
+/// clock, which the cycle journals before its request, so the request records it as its
+/// reference (DEC-943 item 1).
+fn mark() -> Result<Mark, ShellError> {
+    marked_at("255.2")
+}
+
+/// A risk mark at `price`, read at the run clock.
+fn marked_at(price: &str) -> Result<Mark, ShellError> {
+    let at = setup().map_err(|_| ShellError::ProposalInvalid)?.now;
+    let price = Price::parse(price).map_err(|_| ShellError::ProposalInvalid)?;
+    Ok(Mark { price, at })
 }
 
 /// The paper double executor, answering the watch's protection question covered: the facts the
@@ -157,7 +141,17 @@ fn assembled(
     place: bool,
     sink: Box<dyn Sink>,
 ) -> Result<ProductionCycle, String> {
-    marked(world)?;
+    let (stages, setup) = parts(world, autonomy, place, sink)?;
+    Ok(ProductionCycle::new(stages, setup))
+}
+
+/// [`assembled`]'s stages and setup, for a probe that puts its own double in one stage's place.
+fn parts(
+    world: &World,
+    autonomy: Autonomy,
+    place: bool,
+    sink: Box<dyn Sink>,
+) -> Result<(Stages, crate::tracer::Setup), String> {
     let mut stages = world.stages();
     stages.sink = sink;
     stages.executor = Box::new(Covered(PaperExecutor {
@@ -178,7 +172,7 @@ fn assembled(
     stages.artifacts = Some(artifacts);
     let mut setup = setup()?;
     setup.place_one_order = place;
-    Ok(ProductionCycle::new(stages, setup))
+    Ok((stages, setup))
 }
 
 fn observation() -> Result<Observation, String> {
@@ -275,13 +269,14 @@ fn a_wake_hands_the_answer_to_the_runtime_and_holds_the_opening() -> Result<(), 
             observation()?,
             output().map_err(|cause| cause.to_string())?,
             &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
             |asked: &mut dyn AskedCycle| {
                 let agent = asked.agent_rows()?;
                 log.borrow_mut().push(types(&agent));
-                let quiet = asked.wake(now)?;
+                let quiet = asked.wake(now, &mark()?)?;
                 log.borrow_mut().push(types(&quiet.agent));
                 answer(&w).map_err(|_| ShellError::ProposalInvalid)?;
-                let Wake { agent, control } = asked.wake(now)?;
+                let Wake { agent, control } = asked.wake(now, &mark()?)?;
                 log.borrow_mut().push(types(&agent));
                 log.borrow_mut().push(types(&control));
                 log.borrow_mut()
@@ -351,6 +346,7 @@ fn a_cycle_that_never_asks_never_waits() -> Result<(), String> {
             observation()?,
             output().map_err(|cause| cause.to_string())?,
             &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
             |_: &mut dyn AskedCycle| {
                 flag.set(true);
                 Ok(())
@@ -387,9 +383,10 @@ fn a_refused_wait_sends_nothing() -> Result<(), String> {
             observation()?,
             output().map_err(|cause| cause.to_string())?,
             &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
             |asked: &mut dyn AskedCycle| {
                 answer(&w).map_err(|_| ShellError::ProposalInvalid)?;
-                asked.wake(now)?;
+                asked.wake(now, &mark()?)?;
                 Err(ShellError::ProposalInvalid)
             },
             &end,
@@ -424,9 +421,10 @@ fn a_wait_that_never_submits_sends_nothing() -> Result<(), String> {
             observation()?,
             output().map_err(|cause| cause.to_string())?,
             &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
             |asked: &mut dyn AskedCycle| {
                 answer(&w).map_err(|_| ShellError::ProposalInvalid)?;
-                asked.wake(now).map(|_| ())
+                asked.wake(now, &mark()?).map(|_| ())
             },
             &end,
         );
@@ -456,6 +454,7 @@ fn a_submit_with_nothing_held_refuses() -> Result<(), String> {
             observation()?,
             output().map_err(|cause| cause.to_string())?,
             &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
             |asked: &mut dyn AskedCycle| asked.submit(),
             &end,
         );
@@ -486,6 +485,7 @@ fn a_dry_run_that_asks_never_waits() -> Result<(), String> {
             observation()?,
             output().map_err(|cause| cause.to_string())?,
             &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
             |_: &mut dyn AskedCycle| {
                 flag.set(true);
                 Ok(())
@@ -519,9 +519,10 @@ fn the_wake_reads_the_runs_own_streams() -> Result<(), String> {
             observation()?,
             output().map_err(|cause| cause.to_string())?,
             &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
             |asked: &mut dyn AskedCycle| {
                 answer(&w).map_err(|_| ShellError::ProposalInvalid)?;
-                let read = asked.wake(now)?;
+                let read = asked.wake(now, &mark()?)?;
                 let ledger = w.ledger.borrow();
                 *seen.borrow_mut() = (
                     read.agent.len(),
@@ -585,9 +586,10 @@ fn a_granted_intent_reaches_the_executor_sink_with_its_asked_plan() -> Result<()
             observation()?,
             output().map_err(|cause| cause.to_string())?,
             &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
             |asked: &mut dyn AskedCycle| {
                 answer(&w).map_err(|_| ShellError::ProposalInvalid)?;
-                asked.wake(now)?;
+                asked.wake(now, &mark()?)?;
                 asked.submit()
             },
             &end,
@@ -645,44 +647,138 @@ fn a_granted_intent_reaches_the_executor_sink_with_its_asked_plan() -> Result<()
     Ok(())
 }
 
-/// DEC-156 item 3, DEC-940 item 6: with no mark folded, the ask records none, drift cannot be
-/// computed, and re-validation skips the grant — so the opening is never released, and the
-/// wait reads the skip.
-#[test]
-fn a_grant_with_no_mark_is_skipped_and_never_released() -> Result<(), String> {
+/// One asked cycle whose wake hands the runtime `wake_mark`, the founder's grant committed
+/// before it: the re-validation's result and reason, the account stream's `MarkUpdated` bodies,
+/// the request's and the re-validation's bodies, and the submissions sent.
+struct Revalidated {
+    result: Option<String>,
+    reason: Option<String>,
+    marks: Vec<Value>,
+    requested: Option<Value>,
+    revalidated: Option<Value>,
+    sent: u32,
+}
+
+fn revalidated_at(wake_mark: &str) -> Result<Revalidated, String> {
     let world = World::default();
     let clock = clock()?;
     let asks = Rc::new(Cell::new(0));
     let end = ending(&asks);
     let w = world.clone();
     let now = clock.now();
-    let mut unmarked = cycle(&world, Autonomy::Ask, true)?;
-    world.ledger.borrow_mut().clear(&account_stream());
-    let result = Rc::new(RefCell::new(None));
-    let read = Rc::clone(&result);
-    let report: Result<Report, ShellError> = unmarked.run_observed_asked_watched(
-        observation()?,
-        output().map_err(|cause| cause.to_string())?,
-        &watch(&clock)?,
-        |asked: &mut dyn AskedCycle| {
-            answer(&w).map_err(|_| ShellError::ProposalInvalid)?;
-            asked.wake(now)?;
-            *read.borrow_mut() = w
-                .ledger
-                .borrow()
-                .parsed("ApprovalRevalidated")
-                .first()
-                .and_then(|copy| copy.get("payload"))
-                .and_then(|payload| payload.get("reason"))
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            asked.submit()
-        },
-        &end,
+    let at_wake = marked_at(wake_mark).map_err(|error| error.to_string())?;
+    let _: Result<Report, ShellError> = cycle(&world, Autonomy::Ask, true)?
+        .run_observed_asked_watched(
+            observation()?,
+            output().map_err(|cause| cause.to_string())?,
+            &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
+            |asked: &mut dyn AskedCycle| {
+                answer(&w).map_err(|_| ShellError::ProposalInvalid)?;
+                asked.wake(now, &at_wake)?;
+                asked.submit()
+            },
+            &end,
+        );
+    let ledger = world.ledger.borrow();
+    let payload = |event_type: &str| {
+        ledger
+            .parsed(event_type)
+            .first()
+            .and_then(|row| row.get("payload"))
+            .cloned()
+    };
+    let member = |value: &Option<Value>, name: &str| {
+        value
+            .as_ref()
+            .and_then(|payload| payload.get(name))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    let revalidated = payload("ApprovalRevalidated");
+    Ok(Revalidated {
+        result: member(&revalidated, "result"),
+        reason: member(&revalidated, "reason"),
+        marks: ledger
+            .parsed("MarkUpdated")
+            .iter()
+            .filter_map(|row| row.get("payload").cloned())
+            .collect(),
+        requested: payload("ApprovalRequested"),
+        revalidated,
+        sent: submissions(&world),
+    })
+}
+
+/// DEC-943 item 1 (gap 1 of DEC-940 item 6): the run journals its own marks — the preflight
+/// quote's at the cycle's open, before the request, and each wake's before the answers reach
+/// the runtime — as the registered `MarkUpdated` (`instrument_id`, `price`, `source`, `feed`,
+/// `risk_clock`), so the request records the open's mark as its reference and the
+/// re-validation compares the wake's mark with it, and a grant inside the band acts.
+#[test]
+fn the_open_and_each_wake_journal_the_runs_marks_before_the_runtime_reads_them()
+-> Result<(), String> {
+    let run = revalidated_at("255.3")?;
+    let tick = "2026-09-25T20:00:00.000000000Z";
+    let expected = |price: &str| {
+        let text = format!(
+            r#"{{"feed":"iex","instrument_id":"{AAPL}","price":"{price}","risk_clock":"{tick}","source":"quote"}}"#
+        );
+        mandate_canon::parse(text.as_bytes()).map_err(|error| error.to_string())
+    };
+    assert_eq!(
+        run.marks,
+        vec![expected("255.2")?, expected("255.3")?],
+        "the open's mark, then the wake's, as the registered record"
     );
-    assert_eq!(result.borrow().as_deref(), Some("drift"));
-    assert!(report.is_err(), "{report:?}");
-    assert_eq!(submissions(&world), 0, "nothing is sent");
+    let reference = run
+        .requested
+        .as_ref()
+        .and_then(|payload| payload.get("reference_mark"))
+        .and_then(|mark| mark.get("price"))
+        .and_then(Value::as_str);
+    assert_eq!(
+        reference,
+        Some("255.2"),
+        "the request records the open's mark"
+    );
+    let compared = |name: &str| {
+        run.revalidated
+            .as_ref()
+            .and_then(|payload| payload.get(name))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    assert_eq!(
+        (compared("m_req"), compared("m_now")),
+        (Some("255.2".to_owned()), Some("255.3".to_owned())),
+        "the re-validation compares the wake's mark with the request's"
+    );
+    assert_eq!(run.result.as_deref(), Some("act"), "{:?}", run.reason);
+    assert_eq!(run.sent, 1, "the granted opening is sent once");
+    Ok(())
+}
+
+/// Mandate spec §6.4 check 12 (MI-22), with the run's own marks: a wake's mark at the band's
+/// edge either side of the request's — 1% of 255.2 is 2.552 — acts, and one a thousandth of a
+/// dollar beyond it skips the grant as `drift`, with nothing sent.
+#[test]
+fn a_wake_mark_beyond_the_band_skips_the_grant_as_drift() -> Result<(), String> {
+    for (price, acts) in [
+        ("257.752", true),
+        ("252.648", true),
+        ("257.753", false),
+        ("252.647", false),
+    ] {
+        let run = revalidated_at(price)?;
+        let (result, reason, sent) = match acts {
+            true => ("act", None, 1),
+            false => ("skip", Some("drift"), 0),
+        };
+        assert_eq!(run.result.as_deref(), Some(result), "{price}");
+        assert_eq!(run.reason.as_deref(), reason, "{price}");
+        assert_eq!(run.sent, sent, "{price}");
+    }
     Ok(())
 }
 
@@ -746,6 +842,7 @@ fn a_cycle_refused_otherwise_never_waits() -> Result<(), String> {
             observation()?,
             output().map_err(|cause| cause.to_string())?,
             &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
             |_: &mut dyn AskedCycle| {
                 flag.set(true);
                 Ok(())
@@ -759,5 +856,166 @@ fn a_cycle_refused_otherwise_never_waits() -> Result<(), String> {
     );
     assert!(!waited.get(), "a refusal other than the ask never waits");
     assert_eq!(submissions(&world), 0);
+    Ok(())
+}
+
+/// The four reads one reconciliation gathers (trading spec §11).
+fn reconciliation_reads() -> [mandate_executor::Effect; 4] {
+    [
+        mandate_executor::BrokerRequest::ListOpenOrders,
+        mandate_executor::BrokerRequest::ListPositions,
+        mandate_executor::BrokerRequest::GetAccount,
+        mandate_executor::BrokerRequest::ListActivities {
+            since: mandate_executor::ActivityCursor(String::new()),
+        },
+    ]
+    .map(mandate_executor::Effect::Broker)
+}
+
+/// The covered paper double, asking for a reconciliation on every command the watch hands it,
+/// as the real executor does when a read finds the entry in a state it cannot account for.
+struct ReconcilesOnCommand(Covered);
+
+impl Executor for ReconcilesOnCommand {
+    fn reset(&mut self) -> Result<(), Cause> {
+        self.0.reset()
+    }
+
+    fn use_profile(&mut self, profile: mandate_domain::CapabilityProfile) -> Result<(), Cause> {
+        self.0.use_profile(profile)
+    }
+
+    fn step(
+        &mut self,
+        input: mandate_executor::Input,
+    ) -> Result<Vec<mandate_executor::Effect>, Cause> {
+        let commanded = matches!(input, mandate_executor::Input::Command(_));
+        let mut effects = self.0.step(input)?;
+        if commanded {
+            effects.extend(reconciliation_reads());
+        }
+        Ok(effects)
+    }
+
+    fn protected(&mut self, instrument: &mandate_accounting::InstrumentId) -> Result<bool, Cause> {
+        self.0.protected(instrument)
+    }
+
+    fn committed(&mut self, event: &mandate_executor::FoldedEvent) -> Result<(), Cause> {
+        self.0.committed(event)
+    }
+}
+
+/// A reconciler whose rounds before `mismatch_from` are clean and whose later rounds mismatch,
+/// each mismatched round asking for another as one that ingested a late fill does.
+struct MismatchesLater {
+    inner: FixedReconciler,
+    mismatch_from: usize,
+    rounds: Rc<Cell<usize>>,
+}
+
+impl Reconciler for MismatchesLater {
+    fn snapshot(
+        &mut self,
+        connector: &mut dyn Connector,
+        requests: &[mandate_executor::BrokerRequest],
+    ) -> Result<mandate_executor::BrokerSnapshot, Cause> {
+        self.inner.snapshot(connector, requests)
+    }
+
+    fn reconcile(
+        &mut self,
+        snapshot: &mandate_executor::BrokerSnapshot,
+    ) -> Result<mandate_executor::Reconciliation, Cause> {
+        let round = self.rounds.get();
+        self.rounds.set(round.saturating_add(1));
+        self.inner.clean = round < self.mismatch_from;
+        let mut reconciled = self.inner.reconcile(snapshot)?;
+        if !self.inner.clean {
+            reconciled.effects.extend(reconciliation_reads());
+        }
+        Ok(reconciled)
+    }
+}
+
+/// #1369 review: a reconciliation the watch asks for that finds a mismatch stops the run, as the
+/// startup's does (trading spec §11, `AGENTS.md` rule 3): the run answers
+/// `reconciliation_mismatch`, the watch reads nothing more and the end question is never asked
+/// again, nothing further is sent, and the round the mismatch asked for is never run.
+#[test]
+fn a_mismatch_in_the_watch_stops_the_run() -> Result<(), String> {
+    let world = World::default();
+    let clock = clock()?;
+    let asks = Rc::new(Cell::new(0_u32));
+    let counted = Rc::clone(&asks);
+    let end = move |_: Option<&str>, _: bool, _: &[&'static str], _: UtcNanos, _: UtcNanos| {
+        counted.set(counted.get().saturating_add(1));
+        Ok(counted.get() > 4)
+    };
+    let rounds = Rc::new(Cell::new(0));
+    let (mut stages, setup) = parts(
+        &world,
+        Autonomy::Ask,
+        true,
+        Box::new(ConvertingSink(world.clone())),
+    )?;
+    stages.executor = Box::new(ReconcilesOnCommand(Covered(PaperExecutor {
+        world: world.clone(),
+        seen: Default::default(),
+        inverted: false,
+        last_client_order_id: None,
+    })));
+    stages.reconciler = Box::new(MismatchesLater {
+        inner: FixedReconciler {
+            world: world.clone(),
+            clean: true,
+        },
+        mismatch_from: 1,
+        rounds: Rc::clone(&rounds),
+    });
+    let w = world.clone();
+    let now = clock.now();
+    let report: Result<Report, ShellError> = ProductionCycle::new(stages, setup)
+        .run_observed_asked_watched(
+            observation()?,
+            output().map_err(|cause| cause.to_string())?,
+            &watch(&clock)?,
+            &mark().map_err(|error| error.to_string())?,
+            |asked: &mut dyn AskedCycle| {
+                answer(&w).map_err(|_| ShellError::ProposalInvalid)?;
+                asked.wake(now, &mark()?)?;
+                asked.submit()
+            },
+            &end,
+        );
+    assert_eq!(
+        report.as_ref().err().map(ShellError::code),
+        Some("reconciliation_mismatch"),
+        "the watch's mismatch stops the run: {report:?}"
+    );
+    assert_eq!(
+        rounds.get(),
+        2,
+        "the startup's round and the watch's mismatched one; the round it asked for never runs"
+    );
+    assert_eq!(asks.get(), 1, "the watch asks nothing after the mismatch");
+    assert_eq!(submissions(&world), 1, "nothing further is sent");
+    let results: Vec<String> = world
+        .ledger
+        .borrow()
+        .parsed("ReconciliationRun")
+        .iter()
+        .filter_map(|run| {
+            run.get("payload")
+                .and_then(|payload| payload.get("result"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(
+        results,
+        ["clean", "mismatch"],
+        "the mismatch is on the record"
+    );
     Ok(())
 }

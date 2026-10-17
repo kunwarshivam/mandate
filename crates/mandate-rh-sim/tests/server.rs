@@ -804,11 +804,10 @@ fn get_equity_orders_refuses_every_filter_it_does_not_model() -> Outcome {
     assert!(!refused(&placed), "{placed}");
     let filters = [
         ("order_id", "nothing"),
-        ("symbol", "QQQ"),
         ("state", "filled"),
-        ("created_at_gte", "2099-01-01T00:00:00Z"),
-        ("placed_agent", "user"),
         ("cursor", "next"),
+        ("created_at_gte", "yesterday"),
+        ("placed_agent", "someone"),
     ];
     for (key, value) in filters {
         let mut args = json!({"account_number": AGENTIC});
@@ -1044,6 +1043,127 @@ fn header_names_are_read_without_regard_to_case() -> Outcome {
         tools,
         Some(9),
         "the session and length were honoured: {answer}"
+    );
+    Ok(())
+}
+
+/// One order placed at each of two clock readings, a minute apart.
+fn placed_twice(wire: &mut Wire, server: &SimServer) -> Result<(), ServerError> {
+    let at = |text: &str| mandate_time::UtcNanos::parse_rfc3339(text).unwrap();
+    for (n, now) in [(1, "2026-09-29T17:00:00Z"), (2, "2026-09-29T17:01:00Z")] {
+        server.drive(|s| s.apply(Event::Clock(at(now))).unwrap())?;
+        let placed = wire.call(
+            "place_equity_order",
+            arguments(&limit("buy", "1", "499", n)),
+        );
+        assert!(!refused(&placed), "{placed}");
+    }
+    Ok(())
+}
+
+fn ids(answer: &Value) -> Vec<&str> {
+    let orders = answer["structuredContent"]["orders"].as_array().unwrap();
+    orders.iter().map(|o| o["id"].as_str().unwrap()).collect()
+}
+
+/// DEC-941 item 2: `get_equity_orders` keeps the orders of the named `symbol`, those created at
+/// or after `created_at_gte`, and for `placed_agent` `agentic` every order the core holds, since
+/// each was placed through the agentic tools, and for the contract's other three values none.
+/// An order placed before the clock was set has no creation time, so a time filter drops it.
+#[test]
+fn get_equity_orders_keeps_only_what_its_three_filters_name() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    let early = wire.call(
+        "place_equity_order",
+        arguments(&limit("buy", "1", "499", 9)),
+    );
+    assert!(!refused(&early), "{early}");
+    placed_twice(&mut wire, &server)?;
+    let list = |wire: &mut Wire, extra: Value| {
+        let mut args = json!({"account_number": AGENTIC});
+        for (key, value) in extra.as_object().unwrap() {
+            args[key] = value.clone();
+        }
+        wire.call("get_equity_orders", args)
+    };
+    let all = list(&mut wire, json!({}));
+    assert_eq!(
+        ids(&all),
+        ["rh-sim-000003", "rh-sim-000002", "rh-sim-000001"]
+    );
+    let spy = list(&mut wire, json!({"symbol": "SPY"}));
+    assert_eq!(ids(&spy).len(), 3);
+    assert!(ids(&list(&mut wire, json!({"symbol": "QQQ"}))).is_empty());
+    let since = list(&mut wire, json!({"created_at_gte": "2026-09-29T17:00:30Z"}));
+    assert_eq!(ids(&since), ["rh-sim-000003"]);
+    let at = list(&mut wire, json!({"created_at_gte": "2026-09-29T17:00:00Z"}));
+    assert_eq!(
+        ids(&at),
+        ["rh-sim-000003", "rh-sim-000002"],
+        "the bound is inclusive"
+    );
+    let agentic = list(&mut wire, json!({"placed_agent": "agentic"}));
+    assert_eq!(ids(&agentic).len(), 3);
+    for other in ["user", "recurring", "drip"] {
+        let answer = list(&mut wire, json!({"placed_agent": other}));
+        assert!(ids(&answer).is_empty(), "{other}: {answer}");
+    }
+    let all_three = list(
+        &mut wire,
+        json!({"symbol": "SPY", "placed_agent": "agentic",
+            "created_at_gte": "2026-09-29T17:00:30Z"}),
+    );
+    assert_eq!(ids(&all_three), ["rh-sim-000003"]);
+    Ok(())
+}
+
+/// DEC-956 item 3: with a page size, `get_equity_orders` answers at most that many orders a page,
+/// newest first, and names the next page by a text `next_cursor` it takes back as `cursor`; the
+/// last page names none. A cursor it never issued is refused, never read as the first page: one
+/// naming the first page's own offset, the list's end, or past it included; and
+/// without a page size the answer is whole, with no cursor.
+#[test]
+fn get_equity_orders_pages_by_its_own_cursor() -> Outcome {
+    let (server, mut wire) = served(Variant::Honest)?;
+    for n in 1..=3 {
+        let placed = wire.call(
+            "place_equity_order",
+            arguments(&limit("buy", "1", "499", n)),
+        );
+        assert!(!refused(&placed), "{placed}");
+    }
+    let whole = wire.call("get_equity_orders", json!({"account_number": AGENTIC}));
+    assert_eq!(ids(&whole).len(), 3);
+    assert_eq!(whole["structuredContent"].get("next_cursor"), None);
+    server.drive(|sim| sim.apply(Event::PageSize(2)).unwrap())?;
+    let first = wire.call("get_equity_orders", json!({"account_number": AGENTIC}));
+    assert_eq!(ids(&first), ["rh-sim-000003", "rh-sim-000002"]);
+    let cursor = first["structuredContent"]["next_cursor"].clone();
+    assert!(cursor.is_string(), "{first}");
+    let second = wire.call(
+        "get_equity_orders",
+        json!({"account_number": AGENTIC, "cursor": cursor}),
+    );
+    assert_eq!(ids(&second), ["rh-sim-000001"]);
+    assert_eq!(second["structuredContent"].get("next_cursor"), None);
+    let forged = [
+        json!("next"),
+        json!("page-2"),
+        json!(2),
+        json!("rh-sim-cursor-0"),
+        json!("rh-sim-cursor-3"),
+        json!("rh-sim-cursor-99"),
+    ];
+    for forged in forged {
+        let answer = wire.call(
+            "get_equity_orders",
+            json!({"account_number": AGENTIC, "cursor": forged}),
+        );
+        assert!(refused(&answer), "{forged}: {answer}");
+    }
+    assert_eq!(
+        server.drive(|sim| sim.apply(Event::PageSize(0)))?,
+        Err(SimError::Unreadable("page_size"))
     );
     Ok(())
 }
