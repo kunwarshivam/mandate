@@ -115,6 +115,9 @@ pub enum StreamType {
     Control,
     Scheduler,
     Notice,
+    /// `meter:{ws}`, the model gateway's meter (journal spec v0.46 §9.19, DEC-998 item 3), listed so
+    /// an auditor reads and verifies spend as any other stream.
+    Meter,
 }
 
 /// A stream's head: its last `seq`, that event's hash (bare, §4.8.1 "Hash forms") and its
@@ -257,6 +260,7 @@ fn stream_type(stream: &StreamId) -> StreamType {
         mandate_journal::StreamType::Control => StreamType::Control,
         mandate_journal::StreamType::Scheduler => StreamType::Scheduler,
         mandate_journal::StreamType::Notice => StreamType::Notice,
+        mandate_journal::StreamType::Meter => StreamType::Meter,
     }
 }
 
