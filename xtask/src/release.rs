@@ -11,7 +11,7 @@
 //! enables a feature, so none can build `live` (DEC-529 item 3).
 //!
 //! The tools are pinned by version and SHA-256 and fetched from their GitHub releases only
-//! (`AGENTS.md` Setup); `release tools` installs them under `target/release-tools`.
+//! (`AGENTS.md` Setup); `release tools` installs them under `$CARGO_HOME/mandate-release-tools`.
 
 use std::collections::BTreeMap;
 use std::env;
@@ -43,9 +43,9 @@ const TARGET_DIR: &str = "target/release-build";
 
 /// The only variables the build inherits, beside the ones it sets: the home directory, the
 /// terminal, and the network's proxy and certificate settings, which reach the registry and
-/// nothing the compiler sees. Everything else is cleared, above all what `cargo run` hands xtask
-/// itself (`CARGO_*`, `RUSTUP_TOOLCHAIN`), which changed the workspace crates' metadata hashes
-/// between two checkouts.
+/// nothing the compiler sees. Everything else is cleared, so neither what `cargo run` hands xtask
+/// (`CARGO_*`, `RUSTUP_TOOLCHAIN`) nor a runner's own settings (`RUSTC_WRAPPER`, inherited
+/// rustflags) can reach the build.
 const PASSED_ENV: [&str; 11] = [
     "HOME",
     "TERM",
@@ -60,8 +60,10 @@ const PASSED_ENV: [&str; 11] = [
     "CARGO_HTTP_CAINFO",
 ];
 
-/// Where `release tools` installs the pinned tools.
-const TOOLS_DIR: &str = "target/release-tools";
+/// Where `release tools` installs the pinned tools, under `CARGO_HOME`, never under the checkout:
+/// cargo hashes the path of `cargo-auditable`, its `RUSTC_WORKSPACE_WRAPPER`, into every workspace
+/// crate's metadata, so a tool inside each checkout made two checkouts build different binaries.
+const TOOLS_DIR: &str = "mandate-release-tools";
 
 /// One pinned tool: its release asset, the asset's SHA-256, and the executable's path inside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,7 +103,7 @@ pub(crate) struct Paths {
 }
 
 impl Paths {
-    fn from_env(root: &Path) -> Result<Self> {
+    pub(crate) fn from_env(root: &Path) -> Result<Self> {
         let home = env::var_os("HOME").map(PathBuf::from);
         let or_home = |name: &str, under: &str| -> Result<PathBuf> {
             env::var_os(name)
@@ -210,10 +212,10 @@ pub(crate) fn compare_sums(a: &str, b: &str) -> Result<()> {
     Ok(())
 }
 
-/// `cargo xtask release tools`: installs each [`TOOLS`] entry under [`TOOLS_DIR`], checked
-/// against its SHA-256, and returns the directory that holds them.
-pub(crate) fn tools(root: &Path) -> Result<PathBuf> {
-    let bin = root.join(TOOLS_DIR).join("bin");
+/// `cargo xtask release tools`: installs each [`TOOLS`] entry under [`TOOLS_DIR`] in
+/// `cargo_home`, checked against its SHA-256, and returns the directory that holds them.
+pub(crate) fn tools(cargo_home: &Path) -> Result<PathBuf> {
+    let bin = cargo_home.join(TOOLS_DIR).join("bin");
     fs::create_dir_all(&bin).with_context(|| format!("creating {}", bin.display()))?;
     for tool in TOOLS {
         let stamp = bin.join(format!(".{}-{}", tool.name, tool.version));
@@ -221,7 +223,7 @@ pub(crate) fn tools(root: &Path) -> Result<PathBuf> {
             continue;
         }
         eprintln!("    release: installing {} {}", tool.name, tool.version);
-        let work = root
+        let work = cargo_home
             .join(TOOLS_DIR)
             .join(format!("{}-{}", tool.name, tool.version));
         fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
@@ -261,8 +263,8 @@ pub(crate) fn tools(root: &Path) -> Result<PathBuf> {
 
 /// `cargo xtask release build <out>`.
 pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
-    let tools = tools(root)?;
     let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
     let epoch = git(root, &["log", "-1", "--format=%ct", "HEAD"])?;
     let commit = git(root, &["rev-parse", "HEAD"])?;
     run(Command::new("rustup").args(["target", "add", TARGET]))?;

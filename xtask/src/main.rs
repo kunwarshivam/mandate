@@ -37,7 +37,7 @@ commands:
   live-feature          check that only the runner may build `live`, and CI only compiles it or
                         tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
-  release tools         install the release build's pinned tools under target/release-tools
+  release tools         install the release build's pinned tools under $CARGO_HOME
   release build <out>   build the release binaries reproducibly into <out>, with SHA256SUMS and an
                         SBOM each, and print digest=<sha256 of SHA256SUMS> (E21-8)
   release compare <a> <b>
@@ -193,7 +193,9 @@ fn run() -> Result<()> {
         ["live-feature"] => live_feature_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
-        ["release", "tools"] => release::tools(&root).map(drop),
+        ["release", "tools"] => {
+            release::tools(&release::Paths::from_env(&root)?.cargo_home).map(drop)
+        }
         ["release", "build", out] => release::build(&root, Path::new(out)),
         ["release", "compare", a, b] => release::compare(Path::new(a), Path::new(b)),
         _ => {
