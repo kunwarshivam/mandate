@@ -21,10 +21,10 @@ pub enum Intake {
     /// In order but crossed or too wide: the instrument has no mark until a later sane quote.
     NotSane,
     /// Stamped more than `future_skew` after its receipt: the instrument has no mark until a later
-    /// sane quote, and the order watermark does not move (DEC-994 item 3).
+    /// sane quote, and the order watermark does not move (DEC-1008 item 3).
     FutureStamped,
     /// Received at or before the instrument's subscription or the last connection loss, so not a
-    /// live quote since resync (DP-7, DEC-994 item 5): the mark and the watermark are unchanged.
+    /// live quote since resync (DP-7, DEC-1008 item 5): the mark and the watermark are unchanged.
     /// A quote that is also stamped too far in the future is [`Intake::FutureStamped`] instead,
     /// and withdraws the mark.
     BeforeResync,
@@ -75,7 +75,7 @@ struct Entry {
     /// The subscription's instant, or the last connection loss after it: a quote received at or
     /// before it never marks.
     resync_from: UtcNanos,
-    /// The last in-order quote, sane or not: the order watermark (DEC-994 item 2).
+    /// The last in-order quote, sane or not: the order watermark (DEC-1008 item 2).
     watermark: Option<Quote>,
     /// The quote that marks now, if any.
     mark: Option<Quote>,
@@ -107,7 +107,7 @@ pub struct HotCache {
 impl HotCache {
     /// An empty cache holding at most `capacity` instruments. The host clock starts not known to
     /// be in tolerance, so nothing is fresh for an opening until [`Self::set_clock_in_tolerance`]
-    /// is told otherwise (DEC-994 item 7).
+    /// is told otherwise (DEC-1008 item 7).
     pub fn new(freshness: Freshness, capacity: usize) -> Self {
         Self {
             freshness,
@@ -189,7 +189,7 @@ impl HotCache {
 
     /// The connection carrying every subscribed instrument was lost at `at`, by the host clock:
     /// no instrument has a mark until a quote received after `at` marks it, however late a quote
-    /// received before it is taken (DP-7, DEC-994 item 5). Watermarks stay, so a replay of an
+    /// received before it is taken (DP-7, DEC-1008 item 5). Watermarks stay, so a replay of an
     /// earlier quote never marks either.
     pub fn connection_lost(&mut self, at: UtcNanos) {
         for entry in self.entries.values_mut() {

@@ -62,7 +62,7 @@ pub struct Freshness {
     /// this is not sane (DEC-433 item 5).
     pub future_skew: Duration,
     /// The profile's spread limit, as a fraction of the bid: a quote whose ask is above
-    /// `bid × (1 + max_spread)` is not sane (DEC-994 item 6).
+    /// `bid × (1 + max_spread)` is not sane (DEC-1008 item 6).
     pub max_spread: Fraction,
 }
 
@@ -88,7 +88,7 @@ impl Freshness {
     }
 
     /// Whether `quote` is fresh at `now`: its [`Quote::age_basis`] is at or before `now` and at
-    /// most [`Self::max_age`] earlier, counted in UTC nanoseconds (DEC-994 item 4).
+    /// most [`Self::max_age`] earlier, counted in UTC nanoseconds (DEC-1008 item 4).
     /// The receive time may be after `now` when the host clock stepped back; the clock-tolerance
     /// check, not this one, keeps such a quote from an opening (DEC-433 item 5).
     pub fn fresh_at(&self, quote: &Quote, now: UtcNanos) -> bool {

@@ -284,6 +284,7 @@ fn stages(now: &str, bridge: &Rc<RobinhoodBridge<Loopback>>, store: Vec<u8>) -> 
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: Some(Arc::new(store) as Arc<dyn ArtifactSource + Send + Sync>),
+        content_store: None,
         symbols: BrokerSymbols::default(),
         transport: Box::new(Unbracketed {
             robinhood: RobinhoodShellConnector::new(Rc::clone(bridge)),

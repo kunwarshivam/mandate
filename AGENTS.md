@@ -173,14 +173,16 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
 - **Setup:** `bash .cursor/install.sh` installs everything at the pinned versions and is idempotent;
   Cloud Agents run it automatically through `.cursor/environment.json`. Rust comes from
   `rust-toolchain.toml` (1.98.1) via rustup, which must already be installed; Python 3.14 and uv
-  0.12; cargo-deny, cargo-nextest, cargo-mutants, typos, gitleaks, shellcheck, and actionlint at
-  the versions in `.github/workflows/ci.yml` (keep the two in sync). The binaries it downloads are
+  0.12; cargo-deny, cargo-nextest, cargo-mutants, typos, gitleaks, shellcheck, and actionlint, and
+  for the local cell k3d, helm and kubeconform (DEC-993), at the versions in
+  `.github/workflows/ci.yml` (keep the two in sync). The binaries it downloads are
   x86_64 Linux builds. It downloads only from `github.com` (release assets redirect to
   `release-assets.githubusercontent.com`), `static.rust-lang.org`, `index.crates.io`,
-  `static.crates.io`, `pypi.org`, and `files.pythonhosted.org`, never from `astral.sh`, so it runs
+  `static.crates.io`, `pypi.org`, `files.pythonhosted.org`, and, best effort, `get.helm.sh` (helm
+  publishes its binaries nowhere else; DEC-993 item 3), never from `astral.sh`, so it runs
   behind restrictive egress proxies. The one exception is PostgreSQL 18 for the Postgres journal
   tests: it tries the system package manager and `apt.postgresql.org`, and if that fails those
-  tests skip. It also sets `python-install-mirror` in uv's user config
+  tests skip; without helm the cell's checks skip too. It also sets `python-install-mirror` in uv's user config
   (`~/.config/uv/uv.toml`) so later `uv` calls fetch Python from GitHub too. Work under `web/`
   (DEC-200) also needs `nodejs.org`, for the Node.js release pinned in `web/.nvmrc`,
   `registry.npmjs.org`, for `npm ci`, and `cdn.playwright.dev`, for the Chromium download that
@@ -192,7 +194,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   seeds, the feature map, typos, ruff), test (nextest, doctests, pytest), pending tests, reference-case fixture drift, the reference
   implementation checks, the workspace API schema checks (`schemas`), supply chain (cargo-deny,
   the dependency registry, gitleaks), the spec guard, the Postgres journal tests (skipped unless
-  `MANDATE_PG_URL` is set), mutants on the diff of safety-critical crates, and the workspace API
+  `MANDATE_PG_URL` is set), the local cell (`cell`: the chart checks, `cargo xtask cell up`, and
+  every drill plain and seeded; skipped without docker, k3d and helm; DEC-993), mutants on the diff of safety-critical crates, and the workspace API
   schemas' mutation sweep (`schema-mutants`). CI runs them as two required checks:
   `cargo xtask ci fast` (lint, test, pending tests, spec guard, and `portable`, which CI runs on
   macOS so the runner keeps building where the founder runs it; DEC-954) and `full`, an aggregate over

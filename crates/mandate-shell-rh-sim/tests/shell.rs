@@ -667,6 +667,7 @@ fn the_robinhood_stages_trade_and_reconcile_through_one_session() {
         executor: None,
         run: None,
         artifacts: None,
+        content_store: None,
         symbols: BrokerSymbols::default(),
         transport: RobinhoodBridge::new(runtime(), robinhood),
     };

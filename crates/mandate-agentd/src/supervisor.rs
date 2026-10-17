@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use mandate_journal::Environment;
+use mandate_process::State;
 use mandate_shell::Cause;
 use mandate_shell::stages::JournalWriter;
 
@@ -64,44 +65,9 @@ impl Host for IdleHost {
     }
 }
 
-/// Why a supervisor stopped. Each has a stable code and exit status, and none carries content.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Stop {
-    /// Drained on request; the lease was released.
-    Drained,
-    /// Another process took a stream; nothing further was handed to the host.
-    Fenced,
-    /// It never ran a cycle: an environment other than paper, no lease, or a failed
-    /// reconciliation.
-    Refused,
-    /// A cycle stopped fail-closed while the lease still held.
-    CycleFailed,
-    /// Drained on request, but the host could not settle what was in flight; the lease was
-    /// released, and the next process recovers it as after a crash.
-    DrainIncomplete,
-}
-
-impl Stop {
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Drained => "drained",
-            Self::Fenced => "fenced",
-            Self::Refused => "refused",
-            Self::CycleFailed => "cycle_failed",
-            Self::DrainIncomplete => "drain_incomplete",
-        }
-    }
-
-    pub fn exit_status(self) -> u8 {
-        match self {
-            Self::Drained => 0,
-            Self::Refused => 2,
-            Self::Fenced => 3,
-            Self::CycleFailed => 4,
-            Self::DrainIncomplete => 5,
-        }
-    }
-}
+/// Why a supervisor stopped: the lifecycle's exits, shared with every long-running process
+/// (DEC-994 item 7), so each keeps its stable code and exit status.
+pub use mandate_process::Exit as Stop;
 
 /// Where a supervisor is. Only `Ready` runs cycles and answers ready.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,6 +89,16 @@ impl Phase {
         Self::Stopped(Stop::CycleFailed),
         Self::Stopped(Stop::DrainIncomplete),
     ];
+
+    /// The shared lifecycle's state for this phase, which the probes answer from (DEC-994 item 7).
+    pub fn state(self) -> State {
+        match self {
+            Self::Starting => State::Starting,
+            Self::Ready => State::Ready,
+            Self::Draining => State::Draining,
+            Self::Stopped(stop) => State::Exited(stop),
+        }
+    }
 
     fn index(self) -> u8 {
         match self {

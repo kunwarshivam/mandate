@@ -1,4 +1,4 @@
-//! Each rule of spec §3.3 and §3.4 and DEC-994, one at a time.
+//! Each rule of spec §3.3 and §3.4 and DEC-1008, one at a time.
 
 mod common;
 
