@@ -14,6 +14,10 @@
   runner's tests in the `live,rh-sim` build in `ci.yml`'s `fast-rh-sim-live` job, whose
   credential guard is `.github/scripts/no-credentials.sh`, DEC-964),
   `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
-  equivalent mutants).
-- **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.
-- **Run:** `cargo xtask check`.
+  equivalent mutants); `select`, `source_references` and `dependents_closure`, the affected-set
+  selection every scoped job follows, and `sweep_plan` with `sweep_scheduled`, the nightly's
+  whole-crate mutation sweep through the gate's own `gate_run` (DEC-1006).
+- **CI:** `.github/workflows/ci.yml` (`select`, then `fast`, `full`),
+  `.github/workflows/nightly.yml` (dispatches `ci` on main, Postgres 17, the reference extras,
+  the sweep).
+- **Run:** `cargo xtask check`; `cargo xtask ci select` says what the diff runs.
