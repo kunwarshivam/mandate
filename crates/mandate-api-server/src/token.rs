@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use mandate_authn::{IssuerConfig, Jwks, TokenKind, verify};
+use mandate_authn::{IssuerConfig, Jwks, Refusal, TokenKind, verify};
 use mandate_time::UtcNanos;
 
 /// What a presented token amounts to.
@@ -13,8 +13,9 @@ pub enum Checked {
     Subject { issuer: String, subject: String },
     /// It did not verify.
     Refused,
-    /// The issuer's keys could not be had, so nothing can be said of it (identity spec §6.4
-    /// route 1's outage).
+    /// The issuer's keys could not be had, or the key it names is not in the set last fetched (a
+    /// key rotation the next fetch brings), so nothing can be said of it (identity spec §6.4
+    /// route 1's outage). It only narrows the presenter's own session.
     Unreachable,
 }
 
@@ -61,6 +62,7 @@ impl TokenCheck for Issuer {
                 issuer: verified.issuer().to_owned(),
                 subject: verified.subject().to_owned(),
             },
+            Err(Refusal::KeyNotFound) => Checked::Unreachable,
             Err(_) => Checked::Refused,
         }
     }

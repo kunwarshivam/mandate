@@ -3,6 +3,7 @@
 mod common;
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use common::{at, hex};
 use mandate_api_server::config::{MIN_SESSION_KEY_BYTES, SessionKey, read_session_key};
@@ -202,6 +203,7 @@ fn lapsed_access_keeps_pause_and_the_kill_switch_only() {
                 cookie.value(),
                 Answer::Granted {
                     subject: SUBJECT.to_owned(),
+                    principal: alice(),
                 },
                 at(T0 + ACCESS_S + 5),
             )
@@ -226,6 +228,7 @@ fn a_granted_refresh_rotates_and_the_old_cookie_presented_again_ends_the_session
             cookie.value(),
             Answer::Granted {
                 subject: SUBJECT.to_owned(),
+                principal: alice(),
             },
             at(T0 + 200),
         )
@@ -252,7 +255,8 @@ fn a_granted_refresh_rotates_and_the_old_cookie_presented_again_ends_the_session
         store.refresh(
             cookie.value(),
             Answer::Granted {
-                subject: SUBJECT.to_owned()
+                subject: SUBJECT.to_owned(),
+                principal: alice(),
             },
             at(T0 + 452)
         ),
@@ -295,7 +299,8 @@ fn an_outage_refresh_keeps_the_secret_and_narrows_the_session() {
             .refresh(
                 cookie.value(),
                 Answer::Granted {
-                    subject: SUBJECT.to_owned()
+                    subject: SUBJECT.to_owned(),
+                    principal: alice(),
                 },
                 at(T0 + 14)
             )
@@ -310,6 +315,7 @@ fn a_failed_refresh_or_another_subject_ends_the_session() {
         Answer::Failed,
         Answer::Granted {
             subject: "sha256:bbbb".to_owned(),
+            principal: alice(),
         },
     ] {
         let store = sessions();
@@ -462,6 +468,7 @@ fn the_idle_timeout_and_the_absolute_lifetime_end_a_session() {
                 cookie.value(),
                 Answer::Granted {
                     subject: SUBJECT.to_owned(),
+                    principal: alice(),
                 },
                 at(t),
             )
@@ -528,9 +535,14 @@ fn an_ordinary_request_on_a_lapsed_session_does_not_narrow_it() {
 #[test]
 fn a_session_is_purged_at_its_absolute_lifetime_exactly() {
     let store = sessions();
-    store
+    let first = store
         .open(alice(), SUBJECT.to_owned(), None, at(T0))
         .expect("opened");
+    assert_eq!(
+        store.refresh(first.value(), Answer::Unreachable, at(T0 + 1)),
+        Ok(None),
+        "an outage session has no idle timeout, so only its absolute end purges it"
+    );
     store
         .open(
             bob(),
@@ -551,4 +563,145 @@ fn the_system_clock_reads_the_present() {
     use mandate_api_server::clock::{Clock, SystemClock};
     let now = SystemClock.now().expect("the host's clock");
     assert!(now.secs() > 1_790_000_000, "{}", now.secs());
+}
+
+/// Bytes from a counter until switched off, then nothing.
+struct Toggle(Counter, AtomicBool);
+
+impl Random for Toggle {
+    fn fill(&self, out: &mut [u8]) -> Result<(), Unauthenticated> {
+        if self.1.load(Ordering::SeqCst) {
+            self.0.fill(out)
+        } else {
+            Err(Unauthenticated)
+        }
+    }
+}
+
+#[test]
+fn without_randomness_pause_and_the_kill_switch_are_still_served() {
+    let toggle = std::sync::Arc::new(Toggle(Counter(Mutex::new(0)), AtomicBool::new(true)));
+    struct Shared(std::sync::Arc<Toggle>);
+    impl Random for Shared {
+        fn fill(&self, out: &mut [u8]) -> Result<(), Unauthenticated> {
+            self.0.fill(out)
+        }
+    }
+    let store = Sessions::new(&key(), Box::new(Shared(std::sync::Arc::clone(&toggle))));
+    let live = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let lapsing = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    toggle.1.store(false, Ordering::SeqCst);
+    for request in [Request::Other, Request::Pause, Request::KillSwitch] {
+        assert!(
+            store
+                .authenticate(live.value(), request, at(T0 + 10))
+                .is_ok(),
+            "{request:?} on a live session"
+        );
+    }
+    for request in [Request::Pause, Request::KillSwitch] {
+        assert!(
+            store
+                .authenticate(lapsing.value(), request, at(T0 + ACCESS_S + 10))
+                .is_ok(),
+            "{request:?} on a lapsed session"
+        );
+    }
+    assert_eq!(
+        store.open(alice(), SUBJECT.to_owned(), Some(live.value()), at(T0 + 20)),
+        Err(Unauthenticated)
+    );
+    assert!(
+        store
+            .authenticate(live.value(), Request::Other, at(T0 + 21))
+            .is_ok(),
+        "a refused open ends no session"
+    );
+    assert_eq!(store.len(), 2);
+}
+
+#[test]
+fn an_idle_full_session_is_purged_but_an_outage_session_is_not() {
+    let store = sessions();
+    let idle = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let outage = store
+        .open(bob(), "sha256:bbbb".to_owned(), None, at(T0))
+        .expect("opened");
+    assert_eq!(
+        store.refresh(outage.value(), Answer::Unreachable, at(T0 + 1)),
+        Ok(None)
+    );
+    store
+        .open(
+            PrincipalId(9),
+            "sha256:cccc".to_owned(),
+            None,
+            at(T0 + IDLE_S - 1),
+        )
+        .expect("opened");
+    assert_eq!(
+        store.len(),
+        3,
+        "one second before the idle timeout, all are kept"
+    );
+    store
+        .open(
+            PrincipalId(9),
+            "sha256:cccc".to_owned(),
+            None,
+            at(T0 + IDLE_S),
+        )
+        .expect("opened");
+    assert_eq!(
+        store.len(),
+        3,
+        "the idle full session is purged; the outage one is kept"
+    );
+    assert_eq!(
+        store.authenticate(idle.value(), Request::Pause, at(T0 + IDLE_S)),
+        Err(Unauthenticated)
+    );
+    assert!(
+        store
+            .authenticate(outage.value(), Request::Pause, at(T0 + IDLE_S))
+            .is_ok()
+    );
+}
+
+#[test]
+fn a_rotated_cookie_presented_at_sign_in_ends_its_session() {
+    let store = sessions();
+    let first = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let rotated = store
+        .refresh(
+            first.value(),
+            Answer::Granted {
+                subject: SUBJECT.to_owned(),
+                principal: alice(),
+            },
+            at(T0 + 10),
+        )
+        .expect("granted")
+        .expect("rotated");
+    store
+        .open(
+            alice(),
+            SUBJECT.to_owned(),
+            Some(first.value()),
+            at(T0 + 20),
+        )
+        .expect("opened");
+    assert_eq!(
+        store.authenticate(rotated.value(), Request::Pause, at(T0 + 21)),
+        Err(Unauthenticated)
+    );
+    assert_eq!(store.len(), 1);
 }

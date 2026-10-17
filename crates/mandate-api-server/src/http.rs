@@ -21,7 +21,7 @@ use mandate_canon::Value;
 use crate::clock::Clock;
 use crate::lifecycle::{Drain, Lifecycle};
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
-use crate::subject;
+use crate::subject::{self, LinkRefusal};
 use crate::token::{Checked, TokenCheck};
 
 /// The methods a preflight from the app origin allows (§3.3 item 5).
@@ -196,9 +196,11 @@ async fn refresh_session(State(app): State<Arc<App>>, headers: HeaderMap, body: 
             Some(Checked::Refused) => Answer::Failed,
             Some(Checked::Subject { issuer, subject }) => {
                 match subject::principal(&app.links, &issuer, &subject) {
-                    Ok(_) => Answer::Granted {
+                    Ok(principal) => Answer::Granted {
                         subject: subject::digest(&issuer, &subject),
+                        principal,
                     },
+                    Err(LinkRefusal::Unreadable | LinkRefusal::Exposed) => Answer::Unreachable,
                     Err(_) => Answer::Failed,
                 }
             }
@@ -217,10 +219,19 @@ async fn end_session(State(app): State<Arc<App>>, headers: HeaderMap) -> Respons
     if !browser(&headers, &app.settings.app_origin) {
         return forbidden();
     }
-    let ended = session_cookie(&headers).map(|cookie| app.sessions.end(&cookie));
-    match ended {
+    let presented = session_cookie(&headers);
+    match presented.as_deref().map(|cookie| app.sessions.end(cookie)) {
         Some(Ok(())) => set_cookie("", 0),
-        _ => unauthenticated(),
+        Some(Err(_)) => {
+            let mut refused = unauthenticated();
+            if let Some(cleared) = set_cookie("", 0).headers().get(header::SET_COOKIE) {
+                refused
+                    .headers_mut()
+                    .insert(header::SET_COOKIE, cleared.clone());
+            }
+            refused
+        }
+        None => unauthenticated(),
     }
 }
 

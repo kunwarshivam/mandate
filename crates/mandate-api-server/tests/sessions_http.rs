@@ -492,3 +492,107 @@ fn a_session_cookie_among_others_is_found_and_two_of_them_are_refused() {
     );
     assert_eq!(reply.status, 401);
 }
+
+#[test]
+fn a_remapped_subject_link_fails_the_refresh() {
+    let f = fixture();
+    let cookie = open(&f);
+    std::fs::write(
+        &f.links,
+        format!(
+            "{} 01JB3K6F0C9R2V7N4M8Q1T5W40\n",
+            digest(&f.issuer.issuer, ALICE)
+        ),
+    )
+    .expect("the line now names another principal");
+    let token = f.issuer.token(ALICE, T0 + 3_600);
+    let reply = call(
+        &f,
+        "POST",
+        "/v1/sessions/refresh",
+        &browser_with(Some(&cookie)),
+        &open_body(&token),
+    );
+    assert_eq!(reply.status, 401);
+    assert!(f.sessions.is_empty());
+}
+
+#[test]
+fn an_unknown_key_or_an_unreadable_link_file_is_an_outage_not_a_failure() {
+    let f = fixture();
+    let cookie = open(&f);
+    let rotated_key = TestIssuer::new("es256-2").token(ALICE, T0 + 3_600);
+    let reply = call(
+        &f,
+        "POST",
+        "/v1/sessions/refresh",
+        &browser_with(Some(&cookie)),
+        &open_body(&rotated_key),
+    );
+    assert_eq!(reply.status, 204, "a kid the last fetch did not bring");
+    assert!(reply.header("set-cookie").is_none());
+    std::fs::set_permissions(&f.links, std::fs::Permissions::from_mode(0o666)).expect("mode");
+    let token = f.issuer.token(ALICE, T0 + 3_600);
+    let reply = call(
+        &f,
+        "POST",
+        "/v1/sessions/refresh",
+        &browser_with(Some(&cookie)),
+        &open_body(&token),
+    );
+    assert_eq!(reply.status, 204, "an exposed link file");
+    std::fs::remove_file(&f.links).expect("removed");
+    let reply = call(
+        &f,
+        "POST",
+        "/v1/sessions/refresh",
+        &browser_with(Some(&cookie)),
+        &open_body(&token),
+    );
+    assert_eq!(reply.status, 204, "an unreadable link file");
+    assert_eq!(f.sessions.len(), 1);
+}
+
+#[test]
+fn signing_out_a_dead_cookie_still_clears_it() {
+    let f = fixture();
+    let cookie = open(&f);
+    assert_eq!(
+        call(
+            &f,
+            "DELETE",
+            "/v1/sessions/current",
+            &browser_with(Some(&cookie)),
+            ""
+        )
+        .status,
+        204
+    );
+    let reply = call(
+        &f,
+        "DELETE",
+        "/v1/sessions/current",
+        &browser_with(Some(&cookie)),
+        "",
+    );
+    assert_eq!(reply.status, 401);
+    assert_eq!(reply.body, unauthenticated(&f));
+    let (value, attributes) = set_cookie(&reply);
+    assert_eq!(value, "");
+    assert_eq!(
+        attributes,
+        "Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict"
+    );
+    let reply = call(
+        &f,
+        "DELETE",
+        "/v1/sessions/current",
+        &browser_with(None),
+        "",
+    );
+    assert_eq!(reply.status, 401);
+    assert!(
+        reply.header("set-cookie").is_none(),
+        "no cookie, nothing to clear"
+    );
+}
