@@ -14,7 +14,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 - **v0.52 ([DEC-2505](../project/decisions/DEC-2505.md); E8-14, E8-10, DEC-2502 item 5):** §9.15
   closes the control stream's `NotificationAddressChanged` at schema version 1 and adds
-  `NoticeAttempted` version 3, with rules 192 to 198. Both were owed: workspace API §4.11 and §5.7
+  `NoticeAttempted` version 3, with rules 210 to 216. Both were owed: workspace API §4.11 and §5.7
   write the first ([DEC-795](../project/decisions/DEC-795.md) item 5), and
   [DEC-2502](../project/decisions/DEC-2502.md) item 5 makes one send and one record per web-push
   address, which a record that names no address cannot hold. Until now `append` refused
@@ -24,20 +24,20 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   - **`NotificationAddressChanged`.** Exactly workspace API §5.7's and identity spec §12.1's
     members: `member` (the user principal's ULID), `channel` (`web_push`), `action` (`added`,
     `removed`), `address_ref`, and `step_up`. An `added`'s `address_ref` is its own `event_id`, and
-    `pii_refs` is exactly `[address_ref]` (rules 192 and 193). No member can hold an endpoint, a
+    `pii_refs` is exactly `[address_ref]` (rules 210 and 211). No member can hold an endpoint, a
     key, a push service's host, or a hash of any of them (NT-2, API-11); the VAPID `key_id` of
     [DEC-2503](../project/decisions/DEC-2503.md) item 5 stays in the vault entry with them.
   - **Who writes it, and with what.** An `added`, and a `removed` with step-up, are the member's own,
-    by a `user` actor who is the `member`, with step-up valid as rule 102 reads it (rules 194 and
-    195). A `removed` with `null` step-up rides a deactivation: rule 196, a batch rule, holds it to a
+    by a `user` actor who is the `member`, with step-up valid as rule 102 reads it (rules 212 and
+    213). A `removed` with `null` step-up rides a deactivation: rule 214, a batch rule, holds it to a
     `MemberDeactivated` or `MemberRemoved` of the same member by the same actor in its batch, with no
     alert, and holds every request's record to its `OwnerAlertSent` (`notification_address_changed`)
     in one batch, a replacement's `removed` to the `added` it rides with, and every such alert to a
     request's record.
   - **`NoticeAttempted` version 3.** Version 2's members in their order, then `address_ref`,
     non-null exactly when `channel` is `web_push` and then listed as the event's only `pii_refs`
-    entry (rule 197), and the stop `address_retired`, only `abandoned` and only on web push
-    (rule 198). A terminal attempt, a mark, and `address_missing`'s one report are per address.
+    entry (rule 215), and the stop `address_retired`, only `abandoned` and only on web push
+    (rule 216). A terminal attempt, a mark, and `address_missing`'s one report are per address.
   - **Versions.** From v0.52 `append` refuses `NoticeAttempted` at versions 1 and 2 as
     `unknown_schema` at `payload`, as v0.40 refused version 1: a version-2 record on web push names
     no address, and one shape per fact keeps a writer from choosing the shape that says less. Both
@@ -46,9 +46,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   - **Vectors.** None: `reference/journal` models neither record. `crates/mandate-journal/tests/notices.rs`
     pins §9.15 (DEC-720 item 7), and the tests, the registration, and the dispatcher's and the
     workspace API's writers follow in their own code changes (ES-22). The vectors stay version 3.
-  - **Numbering.** v0.48 and rules 165 to 168 are [DEC-1170](../project/decisions/DEC-1170.md)'s;
-    v0.49 to v0.51 and rules 169 to 191 are held by open changes; this change takes v0.52 and rules
-    192 to 198, adds no section, and is renumbered at merge if that changes.
+  - **Numbering.** Rule numbers are reserved in blocks per lane (AH 171 to 183, I2 184 to 189, EX
+    190 to 199, D1 200 to 209, L3 210 to 219); this change takes rules 210 to 216 from L3's block and
+    adds no section. Versions go to the change that lands first, so v0.52 here is renumbered at merge
+    if another lands before it; v0.48 and rules 165 to 168 are
+    [DEC-1170](../project/decisions/DEC-1170.md)'s.
 - **v0.48 ([DEC-1170](../project/decisions/DEC-1170.md); E21-33):** §9.21 registers the deployment
   manager's three records on the workspace control stream, closed at schema version 1:
   `ProcessStartIssued`, `ProcessStopIssued`, and `ProcessCrashLooped`, with rules 165 to 168. Until
@@ -3536,8 +3538,8 @@ item 5). Its members are exactly workspace API §5.7's and identity spec §12.1'
 | `member` | `ulid` | The user principal whose address it is (identity spec §3.1), as §9.12's `member`. On the notice stream that principal's recipient is `p_` and this ULID in lowercase ([DEC-2502](../project/decisions/DEC-2502.md) item 3) |
 | `channel` | `web_push` | The one push channel whose addresses a member sets in the workspace (notifications spec §4.6) |
 | `action` | `added` \| `removed` | |
-| `address_ref` | `ulid` | The address: the `added` event's own `event_id`, naming the vault entry that holds the endpoint, the keys, and the VAPID `key_id` (DEC-2502 item 1, [DEC-2503](../project/decisions/DEC-2503.md) item 5); never derived from the address: rules 192 and 193 |
-| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}?` | §9.2's step-up evidence, bound to the request's digest (workspace API §5.7, API-17); `null` only for a `removed` that rides a deactivation: rules 194 to 196 |
+| `address_ref` | `ulid` | The address: the `added` event's own `event_id`, naming the vault entry that holds the endpoint, the keys, and the VAPID `key_id` (DEC-2502 item 1, [DEC-2503](../project/decisions/DEC-2503.md) item 5); never derived from the address: rules 210 and 211 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}?` | §9.2's step-up evidence, bound to the request's digest (workspace API §5.7, API-17); `null` only for a `removed` that rides a deactivation: rules 212 to 214 |
 
 **No part of an address.** The endpoint, `p256dh`, `auth`, the push service or its host, and a hash
 of any of them are not members, so the closed schema refuses each as `schema` at that member (NT-2,
@@ -3588,11 +3590,11 @@ one address)
 | `channel` | `email` \| `phone` \| `slack` \| `sms` \| `telegram` \| `web_push` | The mandate schema's push channels (notifications spec §4.1). The pull channels are never attempted: `ApprovalDelivered` and the journal itself are their record |
 | `attempt` | `integer` | 1 for the first attempt on the channel, and at version 3 on web push for the first at the address: rule 126 |
 | `status` | `delivered` \| `failed` \| `suppressed_quiet_hours` \| `deferred_quiet_hours` \| `abandoned` | `delivered` means the provider accepted the message, not that anyone read it |
-| `reason` | `timeout` \| `rate_limited` \| `provider_error` \| `address_rejected` \| `auth_failed` \| `too_large` \| `recipient_not_permitted` \| `address_missing` \| `bounced` \| `complained` \| `unsubscribed` \| `not_pending` \| `retry_window_ended` \| `address_retired` (nullable; `address_retired` from version 3) | Notifications spec §5.2's closed enum, with the receipts `bounced`, `complained`, and `unsubscribed` (§5.6) and the dispatcher's own `address_missing` (§5.1, [DEC-795](../project/decisions/DEC-795.md) item 7), then §5.3's stops, `address_retired` from version 3 only (at versions 1 and 2 it is `non_canonical` at `payload.reason`): rules 127 and 198 |
+| `reason` | `timeout` \| `rate_limited` \| `provider_error` \| `address_rejected` \| `auth_failed` \| `too_large` \| `recipient_not_permitted` \| `address_missing` \| `bounced` \| `complained` \| `unsubscribed` \| `not_pending` \| `retry_window_ended` \| `address_retired` (nullable; `address_retired` from version 3) | Notifications spec §5.2's closed enum, with the receipts `bounced`, `complained`, and `unsubscribed` (§5.6) and the dispatcher's own `address_missing` (§5.1, [DEC-795](../project/decisions/DEC-795.md) item 7), then §5.3's stops, `address_retired` from version 3 only (at versions 1 and 2 it is `non_canonical` at `payload.reason`): rules 127 and 216 |
 | `provider_message_id` | `opaque?` | The provider's id for the accepted message, which a later receipt names: rule 128 |
 | `coalesced_into` | `opaque?` | For a notice combined into one message (notifications spec §5.4), that message's provider id: rule 129 |
 | `verdict` | `retryable` \| `permanent` (nullable) | Version 2. For a `failed` attempt, the provider's verdict of notifications spec §5.2, which decides whether that channel is tried again for the notice ([DEC-725](../project/decisions/DEC-725.md) item 6.3); `null` for every other status: rule 134 |
-| `address_ref` | `ulid?` | Version 3. On web push, the address the attempt went to: the `address_ref` of a `NotificationAddressChanged` (DEC-2502 items 4 and 5); `null` on every other channel, where a recipient has one address per channel: rule 197 |
+| `address_ref` | `ulid?` | Version 3. On web push, the address the attempt went to: the `address_ref` of a `NotificationAddressChanged` (DEC-2502 items 4 and 5); `null` on every other channel, where a recipient has one address per channel: rule 215 |
 
 **Versions.** Version 2 (v0.40, [DEC-706](../project/decisions/DEC-706.md)) is version 1's
 members in their order, and `verdict` last, so a reader of the notice stream alone, the dispatcher
@@ -3664,7 +3666,7 @@ does `address_retired`, which records only that the address left the set.
      `abandoned` attempt's reason is a stop: `not_pending` (an `action` notice whose approval
      stopped being pending) or `retry_window_ended` (a `safety` notice's 24 hours or an `info`
      notice's 6 hours ran out, or the one last send to a removed address whose vault entry is
-     gone; notifications spec §5.1, §5.3), and at version 3 also `address_retired` (rule 198); a
+     gone; notifications spec §5.1, §5.3), and at version 3 also `address_retired` (rule 216); a
      `failed` one's is any other (`payload.reason`).
 128. `NoticeAttempted`: `provider_message_id` is non-null exactly when `status` is `delivered` or
      `reason` is a receipt, `bounced`, `complained`, or `unsubscribed`
@@ -3688,28 +3690,28 @@ does `address_retired`, which records only that the address left the set.
      `unreachable` while its channel is still retried, and never stops a channel on a timeout or a
      rate limit. It holds at version 3 unchanged.
 
-Rules 192 to 198 ([DEC-2505](../project/decisions/DEC-2505.md), v0.52) number on after rule 191,
+Rules 210 to 216 ([DEC-2505](../project/decisions/DEC-2505.md), v0.52) number on after rule 191,
 which open changes hold, and renumber none:
 
-192. `NotificationAddressChanged`: `address_ref` equals the envelope's `event_id` when `action` is
+210. `NotificationAddressChanged`: `address_ref` equals the envelope's `event_id` when `action` is
      `added`, and differs from it when `action` is `removed` (`payload.address_ref`), so an address
      is named by the record that added it and a removal names an earlier one.
-193. `NotificationAddressChanged`: `pii_refs` is exactly `[address_ref]` (`pii_refs`), so redaction
+211. `NotificationAddressChanged`: `pii_refs` is exactly `[address_ref]` (`pii_refs`), so redaction
      and erasure reach the vault entry (workspace API §5.7) and the record lists no other personal
      data.
-194. `NotificationAddressChanged`: `step_up` is non-null when `action` is `added`
+212. `NotificationAddressChanged`: `step_up` is non-null when `action` is `added`
      (`payload.step_up`). Non-null evidence is valid at the envelope's `event_time` as rule 102
      reads it: its method is `passkey` in a `live` envelope and `passkey` or `cli_confirm`
      otherwise (`payload.step_up.method`), and 0 ≤ `event_time` − `authenticated_at` ≤ 300 seconds
      (`payload.step_up.authenticated_at`). That the assertion was never used before is workspace
      services' check across records (API-17); a replacement's `removed` repeats its `added`'s
-     evidence, one request's evidence written twice and not a second use (rule 196).
-195. `NotificationAddressChanged`: the actor. With a non-null `step_up` it is a `user`
+     evidence, one request's evidence written twice and not a second use (rule 214).
+213. `NotificationAddressChanged`: the actor. With a non-null `step_up` it is a `user`
      (`actor.kind`) whose `id` equals `member` (`payload.member`): a member sets and removes only
      their own addresses (workspace API §4.11, API-6). With a `null` `step_up`, a `removed` riding a
      deactivation, it is a `user` or `system` (`actor.kind`), as rule 98 has the deactivation's. A
      `client` actor is refused before the payload is read (rule 83).
-196. **Batch rule** (workspace API §4.11, §5.7; identity spec §5.2 step 3). In one `append` batch:
+214. **Batch rule** (workspace API §4.11, §5.7; identity spec §5.2 step 3). In one `append` batch:
      (a) the `NotificationAddressChanged` records with a non-null `step_up` are one request's: at
      most one `added` and at most one `removed`, with one `member` and equal `step_up`; one of each
      is a replacement (of an `unreachable` address, or of one subscribed under a retired key,
@@ -3725,19 +3727,19 @@ which open changes hold, and renumber none:
      `NotificationAddressChanged` that (b) gives an alert. A break of (a) to (d) is reported at the
      first `NotificationAddressChanged` in the batch that breaks one (`payload.address_ref`), and of
      (e) at the first such alert (`payload.subject`).
-197. `NoticeAttempted` version 3: `address_ref` is non-null exactly when `channel` is `web_push`
+215. `NoticeAttempted` version 3: `address_ref` is non-null exactly when `channel` is `web_push`
      (`payload.address_ref`), and `pii_refs` is `[address_ref]` when it is non-null and empty when
      it is `null` (`pii_refs`).
-198. `NoticeAttempted` version 3: `reason` `address_retired` is on an `abandoned` attempt on
+216. `NoticeAttempted` version 3: `reason` `address_retired` is on an `abandoned` attempt on
      `web_push` only (`payload.reason`). At version 3 rule 127's stops are `not_pending`,
      `retry_window_ended`, and `address_retired`, so rule 127 already refuses `address_retired` on a
      `failed` attempt; this rule refuses it on any other channel, which has no address set to leave.
 
 The first violation is reported in §9.1's order: unlisted members, the listed members in the order
 given, then rules 119, 120, 122 to 124, 126 to 129, at versions 2 and 3 rule 134, at version 3
-rules 197 and 198, and rules 192 to 195 (only on a well-typed payload), then `artifact_refs` and
+rules 215 and 216, and rules 210 to 213 (only on a well-typed payload), then `artifact_refs` and
 `pii_refs`, then the subject rules 121 and 125. Rule 130 spans a batch, so it is
-checked once every draft in the batch passes these, as rule 10's second clause is, and rule 196
+checked once every draft in the batch passes these, as rule 10's second clause is, and rule 214
 after it.
 
 **Lifecycle.** A cause is issued once: a cause that already has a `NoticeIssued` is skipped, and on
