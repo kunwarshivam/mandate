@@ -124,9 +124,9 @@ seeded egress run, with the workspace's policies deleted, the probes open TCP co
 live trading hosts from the runner, to prove the drill can see a leak; they send no byte, so no
 request reaches a broker (AGENTS.md rule 8).
 
-Each stream owner's `KillSwitchActivated` in the kill-switch drill, kills at each step of
-submission, two executors for one account (OPS-3), the upgrade drill (OPS-7) and the restore drill
-(OPS-8) join as their processes land.
+These join as their processes land: each stream owner's `KillSwitchActivated` in the kill-switch
+drill, kills at each step of submission, two executors for one account (OPS-3), the upgrade drill
+(OPS-7) and the restore drill (OPS-8).
 
 ## The Compose file
 

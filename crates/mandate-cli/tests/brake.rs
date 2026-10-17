@@ -124,6 +124,14 @@ fn seeded() -> Fixture {
     stopped(&mut fx, FOURTH_AGENT);
     deployed(&mut fx, FOURTH_AGENT, &on_conn);
     deployed(&mut fx, "agent-unread", &missing_version());
+    let corrupt = br#"{"connection_id":"conn_alpaca_paper_02"}"#.to_vec();
+    let digest = Digest::of(&corrupt);
+    fx.store.insert(digest, corrupt);
+    deployed(
+        &mut fx,
+        "agent-corrupt",
+        &format!("sha256:{}", digest.to_hex()),
+    );
     fx
 }
 
@@ -194,9 +202,15 @@ fn a_connection_pause_reaches_its_active_agents_and_any_whose_mandate_cannot_be_
             ),
         )
     };
-    assert_eq!(of(CONN), set(&[AGENT, FOURTH_AGENT, "agent-unread"]));
-    assert_eq!(of(OTHER_CONN), set(&[OTHER_AGENT, "agent-unread"]));
-    assert_eq!(of("conn_nobody"), set(&["agent-unread"]));
+    assert_eq!(
+        of(CONN),
+        set(&[AGENT, FOURTH_AGENT, "agent-unread", "agent-corrupt"])
+    );
+    assert_eq!(
+        of(OTHER_CONN),
+        set(&[OTHER_AGENT, "agent-unread", "agent-corrupt"])
+    );
+    assert_eq!(of("conn_nobody"), set(&["agent-unread", "agent-corrupt"]));
 }
 
 #[test]
@@ -207,7 +221,13 @@ fn a_workspace_pause_reaches_every_active_agent() {
             "reached",
             reached(&fx.journal, &fx.store, &owner(), &Scope::Workspace)
         ),
-        set(&[AGENT, OTHER_AGENT, FOURTH_AGENT, "agent-unread"])
+        set(&[
+            AGENT,
+            OTHER_AGENT,
+            FOURTH_AGENT,
+            "agent-unread",
+            "agent-corrupt"
+        ])
     );
 }
 
@@ -217,11 +237,17 @@ fn a_pause_commits_one_agent_scoped_pause_per_agent_reached() {
         (Scope::Agent(OTHER_AGENT.to_owned()), set(&[OTHER_AGENT])),
         (
             Scope::Connection(CONN.to_owned()),
-            set(&[AGENT, FOURTH_AGENT, "agent-unread"]),
+            set(&[AGENT, FOURTH_AGENT, "agent-unread", "agent-corrupt"]),
         ),
         (
             Scope::Workspace,
-            set(&[AGENT, OTHER_AGENT, FOURTH_AGENT, "agent-unread"]),
+            set(&[
+                AGENT,
+                OTHER_AGENT,
+                FOURTH_AGENT,
+                "agent-unread",
+                "agent-corrupt",
+            ]),
         ),
     ] {
         let mut fx = seeded();
@@ -259,7 +285,13 @@ fn a_pause_goes_on_past_an_agent_whose_pause_fails() {
     assert_eq!(failed[0].agent, "agent:bad");
     assert_eq!(
         paused_agents(&fx, before),
-        set(&[AGENT, OTHER_AGENT, FOURTH_AGENT, "agent-unread"])
+        set(&[
+            AGENT,
+            OTHER_AGENT,
+            FOURTH_AGENT,
+            "agent-unread",
+            "agent-corrupt"
+        ])
     );
     let lines = paused_lines(&paused);
     assert_eq!(lines.len(), paused.len(), "one line per agent");

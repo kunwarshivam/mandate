@@ -1744,12 +1744,16 @@ fn brake_args(workspace: &str, journal: &str) -> Vec<Vec<String>> {
 }
 
 /// Which brakes of `expected` the exported segment lines in `logs` do not hold, as one report, or
-/// `None` when every one is there. Each line of an export is `{"body":<event>,"hash":…}`; any
-/// other line is ignored.
+/// `None` when every one is there. Each line of an export is `{"body":<event>,"hash":…}`, read from
+/// its first `{`, so the container prefix [`job_logs`] puts on each log line is skipped; any other
+/// line is ignored.
 pub fn brakes_missing(logs: &str, expected: &[(String, String, String)]) -> Option<String> {
     let mut seen = Vec::new();
     for line in logs.lines() {
-        let Ok(line) = serde_json::from_str::<Value>(line.trim()) else {
+        let Some(start) = line.find('{') else {
+            continue;
+        };
+        let Ok(line) = serde_json::from_str::<Value>(line[start..].trim()) else {
             continue;
         };
         let body = &line["body"];
@@ -1789,7 +1793,7 @@ fn kill_switch(seeded: bool) -> Result<Verdict> {
         .filter_map(|l| l.split_once(' '))
         .map(|(n, r)| (n.to_owned(), r.to_owned()))
         .collect();
-    for (name, _) in &downed {
+    let scaled_down = downed.iter().try_for_each(|(name, _)| {
         kubectl(&[
             "scale",
             "deployment",
@@ -1797,20 +1801,34 @@ fn kill_switch(seeded: bool) -> Result<Verdict> {
             "--namespace",
             NAMESPACE,
             "--replicas=0",
-        ])?;
+        ])
+        .map(drop)
+    });
+    let verdict = scaled_down.and_then(|()| brake_in_cell(&selector, seeded));
+    let unrestored: Vec<String> = downed
+        .iter()
+        .filter_map(|(name, replicas)| {
+            let replicas = format!("--replicas={replicas}");
+            kubectl(&[
+                "scale",
+                "deployment",
+                name,
+                "--namespace",
+                NAMESPACE,
+                &replicas,
+            ])
+            .err()
+            .map(|e| format!("{name}: {e:#}"))
+        })
+        .collect();
+    if unrestored.is_empty() {
+        verdict
+    } else {
+        bail!(
+            "the drill's verdict was {verdict:?}, but these processes were not scaled back: {}",
+            unrestored.join("; ")
+        )
     }
-    let verdict = brake_in_cell(&selector, seeded);
-    for (name, replicas) in &downed {
-        kubectl(&[
-            "scale",
-            "deployment",
-            name,
-            "--namespace",
-            NAMESPACE,
-            &format!("--replicas={replicas}"),
-        ])?;
-    }
-    verdict
 }
 
 fn brake_in_cell(selector: &str, seeded: bool) -> Result<Verdict> {
@@ -2350,6 +2368,15 @@ mod tests {
             ])
             .collect();
         assert_eq!(brakes_missing(&all.join("\n"), &expected), None);
+        let prefixed: Vec<String> = all
+            .iter()
+            .map(|l| format!("[pod/verify-1-abc/show-segment] {l}"))
+            .collect();
+        assert_eq!(
+            brakes_missing(&prefixed.join("\n"), &expected),
+            None,
+            "job_logs' container prefix is skipped"
+        );
         let without_connection: Vec<&String> =
             all.iter().filter(|l| !l.contains("connection")).collect();
         let joined = without_connection
