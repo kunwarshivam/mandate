@@ -18,10 +18,12 @@ pub struct Named {
     pub owner: Option<String>,
 }
 
-/// The deployment `flag` (the value after a `run` flag) and `var` (an environment variable) name,
-/// or the refusal's code: `process_not_runtime` for a pod started for another process,
-/// `deployment_missing` for no workspace or agent, and `deployment_conflict` for a flag that
-/// disagrees with the manager's variable.
+/// The deployment `flag` (the value after a `run` flag) and `var` (an environment variable, `Some`
+/// for any value it holds, unreadable ones included) name, or the refusal's code:
+/// `process_not_runtime` for a pod started for another process, `deployment_missing` for no
+/// workspace or agent, and `deployment_conflict` for a flag that disagrees with the manager's
+/// variable, or a manager variable set without `MANDATE_PROCESS`. A value that is empty or has
+/// whitespace around it names nothing.
 ///
 /// # Errors
 /// The refusal codes above.
@@ -29,9 +31,12 @@ pub fn named(
     flag: &dyn Fn(&str) -> Option<String>,
     var: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Named, &'static str> {
-    let given = |value: Option<String>| value.filter(|v| !v.is_empty());
+    let given = |value: Option<String>| value.filter(|v| !v.is_empty() && v.trim() == v);
     let (workspace, agent) = match given(var("MANDATE_PROCESS")) {
         None if var("MANDATE_PROCESS").is_some() => return Err("process_not_runtime"),
+        None if var("MANDATE_WORKSPACE").is_some() || var("MANDATE_SUBJECT").is_some() => {
+            return Err("deployment_conflict");
+        }
         None => (given(flag("--workspace")), given(flag("--agent"))),
         Some(process) if process != "runtime" => return Err("process_not_runtime"),
         Some(_) => (

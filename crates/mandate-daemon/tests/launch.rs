@@ -64,6 +64,8 @@ fn a_launch_naming_no_workspace_or_agent_is_refused() {
     assert_eq!(named(&only_workspace, &none()), Err("deployment_missing"));
     let empty = flags(&[("--workspace", ""), ("--agent", "agent-a")]);
     assert_eq!(named(&empty, &none()), Err("deployment_missing"));
+    let padded = flags(&[("--workspace", "ws1 "), ("--agent", "agent-a")]);
+    assert_eq!(named(&padded, &none()), Err("deployment_missing"));
 }
 
 /// The deployment manager's pod: the workspace and the agent from its variables, the generation
@@ -80,7 +82,7 @@ fn the_deployment_manager_s_variables_name_a_runtime() {
 
 #[test]
 fn a_pod_started_for_another_process_is_refused() {
-    for process in ["executor", "", "Runtime"] {
+    for process in ["executor", "", "Runtime", " runtime"] {
         assert_eq!(
             named(&none(), &manager(process)),
             Err("process_not_runtime"),
@@ -122,4 +124,21 @@ fn a_flag_that_disagrees_with_the_manager_is_refused() {
     );
     let same = flags(&[("--workspace", "ws1"), ("--agent", "agent-a")]);
     assert!(named(&same, &manager("runtime")).is_ok());
+    let emptied = flags(&[("--agent", "")]);
+    assert_eq!(
+        named(&emptied, &manager("runtime")),
+        Err("deployment_conflict")
+    );
+}
+
+/// A manager variable never stands without `MANDATE_PROCESS`: the flags are not quietly preferred
+/// over it, and the variables alone name nothing.
+#[test]
+fn a_manager_variable_without_its_process_is_refused() {
+    let given = flags(&[("--workspace", "ws1"), ("--agent", "agent-a")]);
+    for stray in ["MANDATE_WORKSPACE", "MANDATE_SUBJECT"] {
+        let var = flags(&[(stray, "other")]);
+        assert_eq!(named(&given, &var), Err("deployment_conflict"), "{stray}");
+        assert_eq!(named(&none(), &var), Err("deployment_conflict"), "{stray}");
+    }
 }

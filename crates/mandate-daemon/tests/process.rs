@@ -8,7 +8,9 @@
     reason = "the tests bound their waits on a child process; no core code reads the clock"
 )]
 
+use std::ffi::OsStr;
 use std::io::Read;
+use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
@@ -138,6 +140,22 @@ fn a_manager_launch_refuses_until_its_deployment_is_resolved() {
     assert_eq!(
         launch("executor"),
         (Some(2), "process_not_runtime\n".to_owned())
+    );
+    let unreadable = Command::new(BIN)
+        .args(["run", "--probe"])
+        .arg(&path)
+        .args(DEPLOYMENT)
+        .env_remove("MANDATE_JOURNAL_DSN")
+        .env_remove("MANDATE_WORKSPACE")
+        .env_remove("MANDATE_SUBJECT")
+        .env("MANDATE_PROCESS", OsStr::from_bytes(b"run\xfftime"))
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(unreadable.status.code(), Some(2));
+    assert_eq!(
+        unreadable.stderr, b"process_not_runtime\n",
+        "an unreadable value is not taken as unset"
     );
     assert!(!path.exists(), "a refused process serves no probe");
 }

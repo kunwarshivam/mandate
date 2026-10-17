@@ -63,7 +63,11 @@ fn main() -> ExitCode {
             ExitCode::from(probe::query(&socket, asked).map_or(1, |a| a.exit_status()))
         }
         Some("run") => {
-            let var = |name: &str| std::env::var(name).ok();
+            let var = |name: &str| match std::env::var(name) {
+                Ok(value) => Some(value),
+                Err(std::env::VarError::NotUnicode(_)) => Some(String::new()),
+                Err(std::env::VarError::NotPresent) => None,
+            };
             let named = match launch::named(&flag, &var) {
                 Ok(named) => named,
                 Err(code) => {
