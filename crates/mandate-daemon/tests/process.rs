@@ -209,6 +209,10 @@ fn a_launch_that_cannot_resolve_its_deployment_refuses() {
         launch(&["run", "--connection", "conn-1"], &store),
         refused("deployment_missing")
     );
+    assert!(
+        !store.join("tmp").exists(),
+        "a runtime creates nothing in a store it reads"
+    );
     assert!(!path.exists(), "a refused process serves no probe");
     std::fs::remove_dir_all(&store).ok();
     std::fs::remove_dir_all(&not_a_store).ok();

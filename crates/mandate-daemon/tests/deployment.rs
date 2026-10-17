@@ -208,6 +208,46 @@ fn a_paper_runtime_never_resolves_a_live_deployment_or_document() {
     assert_eq!(live.resolved(), Err("mandate_environment_mismatch"));
 }
 
+/// A deployment record the process cannot read is not skipped for an older one: a stopped agent
+/// must never start on the deployment before its stop (`AGENTS.md` rule 3).
+#[test]
+fn an_unreadable_deployment_record_is_never_skipped() {
+    let mut world = World::default();
+    let version = world.version(("user", "user-author"), |_| {});
+    world.deployed(AGENT, &version, "paper");
+    world.stopped(AGENT);
+    let last = world.control.last_mut().unwrap();
+    last.body = b"not an envelope".to_vec();
+    assert_eq!(world.resolved(), Err("control_unreadable"));
+    world.stopped(AGENT);
+    world.control.last_mut().unwrap().body =
+        br#"{"payload":{"agent_id":7},"actor":{"kind":"user","id":"u"}}"#.to_vec();
+    assert_eq!(world.resolved(), Err("control_unreadable"));
+}
+
+/// Only the process's environment's records decide: a live stop leaves a paper deployment running.
+#[test]
+fn another_environment_s_stop_is_not_this_deployment_s() {
+    let mut world = World::default();
+    let version = world.version(("user", "user-author"), |_| {});
+    world.deployed(AGENT, &version, "paper");
+    world.stopped(AGENT);
+    world.control.last_mut().unwrap().environment = "live".into();
+    assert!(world.resolved().is_ok());
+}
+
+/// The author is the version's first creator: a later creation of the same document by another
+/// user never makes the true author independent of their own mandate.
+#[test]
+fn the_author_is_the_user_who_first_created_the_version() {
+    let mut world = World::default();
+    let first = world.version(("user", "user-author"), |_| {});
+    let again = world.version(("user", "user-other"), |_| {});
+    assert_eq!(first, again);
+    world.deployed(AGENT, &first, "paper");
+    assert_eq!(world.resolved().unwrap().author, "user-author");
+}
+
 #[test]
 fn a_version_with_no_user_who_created_it_is_refused() {
     let mut world = World::default();
