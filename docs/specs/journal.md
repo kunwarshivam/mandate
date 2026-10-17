@@ -4182,7 +4182,8 @@ one gateway call with its own `ModelInvocationRecorded` (§9.19), unchanged: its
 is its order among the run's records, so it needs no turn member. A turn's rule 151 candidates are
 the final output's theses and invalidations, or, for an entry with action tools, the reply's
 `propose_thesis` and `invalidate` calls that were mediated (a thesis's `judged` verdict hands it to
-a provisional admission, and its thesis record is written only when the run ends `done`; not
+a provisional admission; a provisional refusal's thesis record is written in that batch, an
+`admissible` one's only when the run ends `done`; not
 refused `call_budget`,
 `max_theses`, `max_repeat_denials`, or `run_ended`), mapped to the verdict list in reply order
 within each kind; their verdicts sort theses first, each kind in reply order.
@@ -4226,7 +4227,7 @@ the next turn's call is sent (agent harness spec HI-24).
 |---|---|---|
 | `tool_call` | `ulid` | The `event_id` of its `ToolCallRecorded`: rule 178 |
 | `result` | `ok` \| `refused` \| `failed` | `ok`: the read or think ran, or the action was mediated, whatever its verdict. `refused`: the call returned nothing, refused by the harness or by the reader. `failed`: a read did not answer, or found only an excerpt: rule 179 |
-| `code` | `admissible` \| `removed` \| `unknown_instrument` \| `unknown_evidence` \| `duplicate_instrument` \| `forbidden_language` \| `revisions_not_enabled` \| `unknown_thesis` \| `direction_not_allowed` \| `asset_class_not_allowed` \| `not_eligible` \| `source_not_allowed` \| `not_corroborated` \| `universe_full` \| `not_admitted` \| `out_of_universe` \| `unknown_item` \| `unavailable` \| `call_budget` \| `max_theses` \| `max_repeat_denials` \| `run_ended` \| `null` | The model-visible code it was told (agent harness spec §6.13 item 5): an action's verdict, or a refusal's or failure's reason. `null` only for an `ok` read or think: rule 179. Lane EX's change adds its `answer` checks to this list |
+| `code` | `admissible` \| `removed` \| `exit_requested` \| `not_held` \| `unknown_instrument` \| `unknown_evidence` \| `duplicate_instrument` \| `forbidden_language` \| `revisions_not_enabled` \| `unknown_thesis` \| `direction_not_allowed` \| `asset_class_not_allowed` \| `not_eligible` \| `source_not_allowed` \| `not_corroborated` \| `universe_full` \| `not_admitted` \| `out_of_universe` \| `unknown_item` \| `unavailable` \| `call_budget` \| `max_theses` \| `max_repeat_denials` \| `run_ended` \| `null` | The model-visible code it was told (agent harness spec §6.13 item 5): an action's verdict, or a refusal's or failure's reason. `null` only for an `ok` read or think: rule 179. Lane EX's change adds its `answer` checks to this list |
 | `untrusted` | `boolean` | The result holds third-party or model-written text (news, filings, theses, run summaries), so an action written after it records it as provenance (agent harness spec §6.12) |
 | `content_ref` | `ref` | The result as the model was given it, stored as an artifact, with licensed text replaced by its digest once licensed sources are read (agent harness spec §6.6); for a refusal or failure, the `{"error": code}` object |
 | `bytes` | `integer` | The byte length of the result as the model was given it |
@@ -4248,7 +4249,7 @@ record (rule 183).
 | Member | Type | Meaning |
 |---|---|---|
 | `reason` | `done` \| `bound` \| `deadline` \| `cost` \| `mode` \| `error` \| `answered` | The model ended it; a bound the core counts ended it; the risk clock passed its deadline, or a turn ended `deadline_exceeded` on a deadline the run's time left had cut; a turn ended `budget_exhausted` under the run's ceiling or any other cap; a mode change, a version change, a withdrawn model or disabled research, Stop, or the kill switch cancelled it; a turn ended with any other error outcome; or an `answer` was shown (§15) |
-| `bound` | `max_tool_calls` \| `max_repeat_denials` \| `max_theses` \| `null` | The bound, exactly when `reason` is `bound`: rule 182. A run whose last turn completes ends `done` |
+| `bound` | `max_turns` \| `max_tool_calls` \| `max_repeat_denials` \| `max_theses` \| `null` | For `reason` `bound`, the bound that cut the run off (never `max_turns`); for `done`, `max_turns` or `max_tool_calls` when the run's announced shape ran out rather than the model ending it, else `null`: rule 182 |
 | `turns`, `tool_calls`, `result_bytes` | `integer` | The run's `ModelInvocationRecorded` records committed before this record, its `ToolCallRecorded` records, and its read results' bytes |
 | `discarded` | `[ulid]` | The `event_id`s of the `ToolCallRecorded` records of the run's pending `propose_thesis` calls that this end discards, strictly ascending; empty for `done`, which commits them: rule 182 (agent harness spec §6.9) |
 
@@ -4290,8 +4291,9 @@ number order after the members' types:
      when `result` is `ok` and the class is `read` or `think` (`payload.code`); a `failed` result is
      only a read's, and its `code` is `unavailable`; a `refused` result's `code` is one of
      `out_of_universe`, `unknown_item`, `call_budget`, `max_theses`, `max_repeat_denials`, or
-     `run_ended`; and an `ok` action's `code` is a verdict, neither one of those nor `unavailable`
-     (`payload.result`);
+     `run_ended`; and an `ok` action's `code` is a verdict: not `unknown_item`, `call_budget`, `max_theses`,
+     `max_repeat_denials`, `run_ended`, or `unavailable` (`out_of_universe` may be a mediated
+     thesis's, from §8.5 check 8) (`payload.result`);
      `observations` strictly ascending by bytes (`payload.observations`, reason `non_canonical`), and
      empty and `truncated` `false` unless the class is `read` and `result` is `ok`
      (`payload.observations`, `payload.truncated`); the first that fails.
@@ -4301,11 +4303,13 @@ number order after the members' types:
 181. `RunSummaryRecorded`: `instruments_read` strictly ascending by bytes
      (`payload.instruments_read`, reason `non_canonical`); `watch` has at most 10 entries, no
      instrument twice (`payload.watch`).
-182. `RunEnded`: `bound` is not `null` exactly when `reason` is `bound` (`payload.bound`); and
+182. `RunEnded`: `bound` is not `null` when `reason` is `bound`, and is then not `max_turns`; it
+     may be `max_turns` or `max_tool_calls` when `reason` is `done`; and it is `null` for every other
+     reason (`payload.bound`); and
      `discarded` is strictly ascending by bytes (`payload.discarded`, reason `non_canonical`) and
      empty when `reason` is `done` (`payload.discarded`); the first that fails. That each entry
-     names a pending `propose_thesis` call of the run, and that every pending one is named, is the
-     writer's.
+     names a pending `propose_thesis` call of the run (one whose provisional result is `admissible`),
+     and that every pending one is named, is the writer's.
 183. Agent stream, a `ModelInvocationRecorded` with `purpose` `research` whose `correlation_id` is
      that of an earlier `RunStarted` (a `single_call` run has none, so this rule does not reach it;
      that an agentic turn's record follows its `RunStarted` at all is the writer's): no `RunEnded` of

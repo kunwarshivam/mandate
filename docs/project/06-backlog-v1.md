@@ -2313,13 +2313,14 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   - no agent pins an agentic entry before E19-6's bench and a §8.3 regression evaluation pass on it
     (DEC-2203 item 13).
 - **E19-14 (Should; SC; spec first)** As an owner, I want the agentic loop's follow-ups
-  ([DEC-2203](decisions/DEC-2203.md) items 12, 14, 15, 17, 19, 20). *Accepted when:* `propose_exit`
-  is declared once the founder accepts item 14's mandate spec change; `ask_owner` has its journaled
-  question, opaque delivery, and answer record, with wording the founder accepted; event triggers and
-  a monitoring interval exist as envelope fields with their debounce and rate limit (mandate spec
-  change); the longer strategy brief exists, with the validator's warning where it contradicts the
-  envelope; and a journaled turn start lets a restart resume a run within its deadline without losing
-  a reservation from the ceiling's fold.
+  ([DEC-2203](decisions/DEC-2203.md) items 12, 15, 17, 20). *Accepted when:* `ask_owner` has its
+  journaled question and answer records and its delivery (in-app, with an email ping of generic text
+  only), so an entry may declare it; `propose_mandate_change` has its record and its draft path to the
+  owner (always ASK, the diff with its classification, step-up, expiry, rate limit; a `monitor` run
+  only risk-reducing changes); event triggers and a monitoring interval exist as envelope fields with
+  their debounce and rate limit (mandate spec change); the longer strategy brief exists, with the
+  validator's warning where it contradicts the envelope; and a journaled turn start lets a restart
+  resume a run within its deadline without losing a reservation from the ceiling's fold.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 

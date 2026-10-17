@@ -29,8 +29,8 @@ is not built (§11).
     workspace configuration. Budgets are configuration, never product figures: DEC-997 item 3's $50
     a month is the demo and dev deployment's own cap, a deployment setting (the founder's
     clarification of 2026-10-17), and a workspace's monthly budget is its own setting. Who pays for a
-    customer's calls, a plan or the customer's own key, is the founder's pricing decision (DEC-2203
-    item 16, Proposed); `key_owner` (§7.1) serves either.
+    customer's calls is both a plan and the customer's own key, the founder's decision (DEC-2203
+    item 16: both, from day one, the founder's); `key_owner` (§7.1) serves either.
 - **v0.3 ([DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)):**
   - §3.6: the agent stream's `ModelInvocationRecorded` and the meter stream are closed in
     [journal spec §9.19](journal.md#919-model-gateway-records-dec-998) (E15-8). A refusal and a cache
@@ -560,8 +560,13 @@ a settlement only for the calls that could cost money, and spend for caps folds 
 sums metering records (the callers' `ModelInvocationRecorded`, priced by the meter stream's settlements) per organization, period, endpoint class, provider, and `key_owner`, and sends counts and
 cost only, never content, model outputs, or instruments, to the metering pipeline in the global
 control plane. Hybrid deployments send signed usage reports; air-gapped ones send offline reports.
-The margin is applied by billing, never by the gateway. Managed deployments use platform keys only.
-Hybrid and on-prem customers may bring their own key (DEC-432 item 16): either their own account at
+The margin is applied by billing, never by the gateway. Every workspace, managed deployments
+included, may use the plan's monthly model allowance on platform keys, an optional key of its own, or
+both, from day one ([DEC-2203](../project/decisions/DEC-2203.md) item 16, the founder's, 2026-10-17,
+superseding DEC-432 item 16's platform keys only for managed deployments). A customer's key lives in
+the workspace's vault, is read only by the gateway (INF-14), and is never shown to a model or
+logged (rule 7); metering is per workspace either way. A customer may bring their own key
+(DEC-432 item 16): either their own account at
 the aggregator DEC-432 item 14 names, or a provider key that aggregator routes. Every call still goes
 through the gateway, which enforces INF-2's routing lock to named upstreams and DEC-432 item 10's
 reported-identity check exactly as for a platform key. A customer key is accepted only for registry
@@ -718,8 +723,8 @@ the date only; it does not suggest a replacement.
   lock, and the $50 a month cap, which DEC-2203 item 9 records as the demo deployment's own setting.
 - **[DEC-2203](../project/decisions/DEC-2203.md):** item 1, the founder's (2026-10-17): the research
   run is an agentic loop. Agent readings: pinned tools returned as data, the turn shape, the run
-  ceiling, budgets as configuration, pinned reasoning, the stable prompt order, and no fallback to a single call. Items 14 to 16, 19, and 20 are Proposed
-  for the founder. It supersedes item 7 for the research purpose.
+  ceiling, budgets as configuration, pinned reasoning, the stable prompt order, and no fallback to a single call. Items 14 to 16, 19, and 20 were decided
+  by the founder on 2026-10-17. It supersedes item 7 for the research purpose.
 - **Items 13 to 16, decided by the founder on 2026-10-03** (DEC-432, "Founder decisions"): a hosted
   fast model (§5), an aggregator for every call with routing locked per pinned model (§6), provider
   data terms as recommended, and bring-your-own provider keys allowed for hybrid and on-prem, with

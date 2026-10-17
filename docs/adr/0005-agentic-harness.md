@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted ([DEC-2203](../project/decisions/DEC-2203.md)): the founder's direction of 2026-10-17, with the items DEC-2203 marks Proposed left to the founder and the conservative option in force |
+| **Status** | Accepted ([DEC-2203](../project/decisions/DEC-2203.md)): the founder's direction of 2026-10-17, with the items the founder decided the same day (DEC-2203 items 14, 15, 16, 19, 20) |
 | **Date** | 2026-10-17 |
 | **Deciders** | The founder (the direction, and the deployment cap's clarification); an agent (Claude Code, lane AH) for the readings, under DEC-79 and DEC-176, from the coordinator's design input and research memo |
 
@@ -99,13 +99,13 @@ records it.
 | Reserve each run's cost up front | Each turn reserves its own maximum; the run has a ceiling checked on every turn | A whole-run reservation holds budget other agents need and counts the whole run at its maximum after a crash |
 | Monitoring triggered by events (news, a filing, a price move, a fill, a refusal) | Scheduled only, until a mandate spec change adds triggers | Evaluation triggers and cadence are envelope fields (rule 11), as E19-12 found |
 | `ModelInvocationRecorded` gains a turn index | The turn's place is its order among the run's records | The record is closed and being registered; the index is derivable |
-| `mandate.read` shows the agent's limits | It shows the envelope's facts that carry no money and no limit value | HI-11 keeps limits and dollar figures out of every prompt; loosening it is the founder's (DEC-2203 item 19) |
-| `propose_exit` through the builder | Specified, not declared | A new origin of a discretionary exit is a mandate spec change, which the founder approves (item 14) |
-| `propose_mandate_change` from the agent's runs | Owner runs only, specified and not declared | The memo's narrowing; whether the agent may propose envelope changes at all is compliance text (item 15) |
+| `mandate.read` shows the agent's limits | It shows them as percentages of the allocation, never amounts | The founder's choice (DEC-2203 item 19): HI-11 still keeps every dollar figure out |
+| `propose_exit` through the builder | Accepted: a research exit request is a new origin of `discretionary_exit` (mandate spec §6.1), honoured at the next scheduled evaluation | The founder's (item 14); at the next scheduled evaluation because an extra evaluation would change the cadence (rule 11) |
+| `propose_mandate_change` from the agent's runs | Accepted for `ideate`, `monitor` (risk-reducing changes only), and `owner` runs, declared once its record path exists (E19-14) | The founder's (item 15); a `monitor` run gets only risk-reducing actions, so only a risk-reducing change from it |
 | A run in flight resumes after a crash | A crash ends the run; replay is exact | Without a journaled turn start, a resumed run cannot count the lost turn's reservation (E19-14) |
 | Compaction of long runs | Not needed under v0.2's bounds | The bounds keep every prompt small; a journaled compaction is a later change |
 | Action tools' verdicts take effect at once | A thesis's verdict is provisional mid-run and commits only when the run ends normally; an invalidation takes effect at once | A cap that ends a run must never leave an admission behind, so HI-9 holds strictly (the coordinator's tightening, DEC-2203 item 25) |
-| `ask_owner` in slice 1 | Specified, not declared | It needs its own records, an opaque notification (rule 6), and founder-approved wording (item 20) |
+| `ask_owner` in slice 1 | Accepted, declared once its records exist (E19-14): in-app, with an email ping of generic text only | It needs its own records and an opaque notification (rule 6); the channels are the founder's (item 20) |
 
 ## Consequences
 
