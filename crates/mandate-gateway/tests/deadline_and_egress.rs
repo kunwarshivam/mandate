@@ -5,7 +5,7 @@ mod common;
 
 use common::*;
 use mandate_gateway::fake::{Recorded, RecordedTransport};
-use mandate_gateway::meter::{Caps, MemoryMeter, Meter, MeterRecord};
+use mandate_gateway::meter::{MemoryMeter, Meter, MeterRecord};
 use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::provider::{
     Clock, Delivery, HttpRequest, ManualClock, Prompt, ProviderAdapter, Reply, SequentialIds,
@@ -45,7 +45,7 @@ fn an_output_validated_after_the_deadline_is_not_released() {
             Box::new(OpenRouter),
             RecordedTransport::new(),
             Box::new(TestKey),
-            Meter::new(MemoryMeter::new(), Caps::demo()),
+            Meter::new(MemoryMeter::new(), common::caps(), common::deployment()),
             TickingClock {
                 inner: ManualClock::at(at(START)),
                 tick_ms: 1,
@@ -113,7 +113,7 @@ fn a_request_to_a_host_off_the_allowlist_is_refused_before_anything_is_sent() {
         Box::new(Rogue),
         RecordedTransport::new(),
         Box::new(TestKey),
-        Meter::new(MemoryMeter::new(), Caps::demo()),
+        Meter::new(MemoryMeter::new(), common::caps(), common::deployment()),
         ManualClock::at(at(START)),
         Box::new(SequentialIds::starting_at(5)),
     );

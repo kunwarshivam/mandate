@@ -209,16 +209,19 @@ pub fn read_session_key(credentials_dir: &Path) -> Result<SessionKey, StartRefus
 }
 
 /// The content-addressed store at `root`, which the agent reads take mandate documents from
-/// (DEC-1020 item 1), or none when `root` is absent or empty. The server only reads it, so a root
-/// that is not already a store (its `sha256` directory) is refused rather than created.
+/// (DEC-1020 item 1) and the version routes add objects to (DEC-2101 item 8), or none when `root`
+/// is absent or empty. A root that is not already a store (its `sha256` directory) is refused
+/// rather than created.
 ///
 /// # Errors
 /// [`StartRefusal::Setting`] naming `MANDATE_API_ARTIFACTS` when `root` cannot be opened as a
 /// store.
 pub fn artifact_store(
     root: Option<&std::ffi::OsStr>,
-) -> Result<Option<std::sync::Arc<dyn mandate_journal::ArtifactSource + Send + Sync>>, StartRefusal>
-{
+) -> Result<
+    Option<std::sync::Arc<crate::objects::Objects<mandate_artifacts_fs::FsArtifactStore>>>,
+    StartRefusal,
+> {
     let Some(root) = root.filter(|root| !root.is_empty()) else {
         return Ok(None);
     };
@@ -232,5 +235,7 @@ pub fn artifact_store(
         mandate_artifacts_fs::FsArtifactStore::open(root).map_err(|_| StartRefusal::Setting {
             name: "MANDATE_API_ARTIFACTS",
         })?;
-    Ok(Some(std::sync::Arc::new(store)))
+    Ok(Some(std::sync::Arc::new(crate::objects::Objects::new(
+        store,
+    ))))
 }
