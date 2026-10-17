@@ -22,7 +22,7 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | objectstore | mutants | schema-mutants | cell | sweep; or one part
+                        postgres | objectstore | mutants | schema-mutants | cell | cell-journal | sweep; or one part
                         of test: test-nextest | test-doc | test-rh-sim | test-python. Tests,
                         pending tests, doctests, the rehearsal, Postgres and object-store runs and `portable` run over
                         the crates the diff selects (DEC-1190); with no diff base, all of them
@@ -45,7 +45,7 @@ commands:
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
-  cell drill [--seeded] [boot|journal|egress]...
+  cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
                         run the cell's drills; --seeded plants each drill's bug and fails if a
                         drill still holds
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
@@ -92,6 +92,7 @@ const PR_JOBS: &[&str] = &[
     "mutants",
     "schema-mutants",
     "cell",
+    "cell-journal",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -239,7 +240,10 @@ fn run() -> Result<()> {
                 names => (false, names),
             };
             let drills = if names.is_empty() {
-                cell::DRILLS.to_vec()
+                cell::DRILLS
+                    .into_iter()
+                    .chain(cell::JOURNAL_DRILLS)
+                    .collect()
             } else {
                 names
                     .iter()
@@ -275,6 +279,7 @@ fn ci(job: &str) -> Result<()> {
         "portable" => portable(),
         "select" => ci_select(),
         "cell" => cell::ci(),
+        "cell-journal" => cell::ci_journal(),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -15177,10 +15182,11 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            12,
+            13,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, and `cell`"
+             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, and \
+             `cell-journal`"
         );
         for checkout in checkouts {
             assert!(

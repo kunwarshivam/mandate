@@ -1,0 +1,45 @@
+{{- /*
+The plugin's server certificate (for its Service, `barman-cloud`) and the operator's client
+certificate, each self-signed as the plugin's own cert-manager Issuer makes them, with `ca.crt`
+the certificate itself: the operator trusts the server's, and the plugin trusts the client's. Read
+back on upgrade, so an upgrade keeps them, until one is within 30 days of its end (the Secret's
+`mandate.dev/not-after`, in seconds since the epoch) or its Secret is gone; then it is remade, and
+`cargo xtask cell up` restarts the plugin, which reads its files only at start.
+*/ -}}
+{{- define "tls.secret" -}}
+{{- $existing := lookup "v1" "Secret" .root.Release.Namespace .name -}}
+{{- $crt := "" -}}
+{{- $key := "" -}}
+{{- $notAfter := 0 -}}
+{{- $now := now | unixEpoch | int64 -}}
+{{- if and $existing $existing.data $existing.metadata.annotations -}}
+{{- $notAfter = get $existing.metadata.annotations "mandate.dev/not-after" | int64 -}}
+{{- end -}}
+{{- if gt (sub $notAfter $now) (mul 30 86400) -}}
+{{- $crt = b64dec (get $existing.data "tls.crt") -}}
+{{- $key = b64dec (get $existing.data "tls.key") -}}
+{{- else -}}
+{{- $made := genSelfSignedCert .cn nil .dns (int .root.Values.days) -}}
+{{- $crt = $made.Cert -}}
+{{- $key = $made.Key -}}
+{{- $notAfter = add $now (mul (int .root.Values.days) 86400) -}}
+{{- end -}}
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/tls
+metadata:
+  name: {{ .name | quote }}
+  annotations:
+    mandate.dev/not-after: {{ $notAfter | quote }}
+  labels:
+    app.kubernetes.io/name: mandate-backup-plugin-tls
+    app.kubernetes.io/instance: {{ .root.Release.Name | quote }}
+stringData:
+  tls.crt: {{ $crt | quote }}
+  tls.key: {{ $key | quote }}
+  ca.crt: {{ $crt | quote }}
+{{- end -}}
+---
+{{ include "tls.secret" (dict "root" . "name" "barman-cloud-server-tls" "cn" "barman-cloud" "dns" (list "barman-cloud" (printf "barman-cloud.%s.svc" .Release.Namespace))) | fromYaml | toJson }}
+---
+{{ include "tls.secret" (dict "root" . "name" "barman-cloud-client-tls" "cn" "barman-cloud-client" "dns" (list)) | fromYaml | toJson }}
