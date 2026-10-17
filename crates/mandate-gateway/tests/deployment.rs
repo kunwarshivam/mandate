@@ -577,6 +577,7 @@ fn an_orphan_is_counted_for_the_operator() {
         Box::new(SequentialIds::starting_at(1 << 80)),
     );
     gateway.transport_mut().script(vec![ok_reply(10)]);
+    assert_eq!(gateway.orphans(), 0, "no orphan before the call");
     let record = gateway.call(&request(&model, 1)).unwrap();
     assert_eq!(record.outcome, Outcome::MeterUnavailable);
     assert_eq!(record.reservation, None);
