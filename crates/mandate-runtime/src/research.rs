@@ -728,7 +728,10 @@ fn fold_drift(research: &mut ResearchState, items: &[RetrievedObservation]) {
 /// flight, on time, under the pin research still runs, is judged in the same step, and its
 /// verdicts go in the record, which heads the batch (§6.2 steps 4 and 5, journal spec §9.19). A
 /// record of another call, pin, purpose, agent, or retrieved context is refused and never
-/// journaled as this run's (INF-2, caller side).
+/// journaled as this run's (INF-2, caller side). A judgment the core cannot write is no judgment:
+/// the record is still journaled, with no verdicts, so a paid call is never left unrecorded and the
+/// schedule still counts from it (HI-8, DEC-1120 item 7). A record completed after the run's own
+/// wall-clock bound is never judged, whatever deadline it carries (§7.1).
 fn called(
     state: &RuntimeState,
     research: &mut ResearchState,
@@ -782,22 +785,23 @@ fn called(
         Some(config)
             if record.outcome == Outcome::Ok
                 && record.completed_at <= record.deadline
+                && record.completed_at.secs() <= run.bound.secs()
                 && research_allowed(state, research, context).as_ref() == Some(&run.pin) =>
         {
             let called = Called {
                 observations,
                 items,
             };
-            judge::judge(&run, &called, record, config, context, batch)?
+            judge::judge(&run, &called, record, config, context, batch).unwrap_or_default()
         }
         _ => Judged::default(),
     };
-    let id = batch.journal(
-        "ModelInvocationRecorded",
-        None,
-        invocation(record, &judged.verdicts)?,
-    )?;
-    for thesis in judged.theses {
+    let (body, theses) = match invocation(record, &judged.verdicts) {
+        Ok(body) => (body, judged.theses),
+        Err(_) => (invocation(record, &[])?, Vec::new()),
+    };
+    let id = batch.journal("ModelInvocationRecorded", None, body)?;
+    for thesis in theses {
         let thesis_record = batch.journal(thesis.event_type, Some(id.clone()), thesis.body)?;
         if let Some(output) = thesis.output {
             batch.journal("ModelOutputRecorded", Some(thesis_record), output)?;

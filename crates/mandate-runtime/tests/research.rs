@@ -1857,6 +1857,34 @@ fn an_ok_record_past_its_deadline_is_recorded_and_never_judged() {
 }
 
 #[test]
+fn a_record_completed_after_the_run_s_bound_is_never_judged_whatever_its_deadline() {
+    for (completed, judged) in [(CUT_OFF + 60 + 120, true), (CUT_OFF + 60 + 120 + 1, false)] {
+        let f = Fixture::new();
+        let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &ports);
+        let world = World::open();
+        let (_, drafts) = called_unfolded(
+            &mut lp,
+            &ports,
+            &world,
+            &recorded(RESPONSE_AAPL),
+            |record| {
+                record.deadline = common::research::instant(CUT_OFF + 86_400);
+                record.completed_at = common::research::instant(completed);
+            },
+        );
+        let drafts = drafts.unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            drafts.len() > 1,
+            judged,
+            "§7.1: completed at {completed}, the bound is the start plus 60 s plus 120 s"
+        );
+        assert_eq!(drafts[0].event_type, "ModelInvocationRecorded");
+    }
+}
+
+#[test]
 fn the_schedule_counts_from_an_answer_before_its_record_folds_back() {
     let f = Fixture::new();
     let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);

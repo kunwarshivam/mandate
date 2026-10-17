@@ -79,12 +79,53 @@ fn the_selection_says_which_and_why_and_never_names_the_key() {
     assert_ne!(lines[0], lines[1]);
 }
 
+fn request() -> mandate_gateway::CallRequest {
+    mandate_gateway::CallRequest {
+        call_id: mandate_canon::encode_ulid((1 << 100) + 9),
+        workspace_id: common::WORKSPACE.to_owned(),
+        agent_id: Some(common::AGENT.to_owned()),
+        purpose: mandate_gateway::Purpose::Research,
+        model: common::registry().1,
+        inputs: ["context", "items", "memory"]
+            .into_iter()
+            .map(|slot| (slot.to_owned(), "{}".to_owned()))
+            .collect(),
+        as_of: common::at(common::CUT_OFF),
+        deadline: common::at(common::CUT_OFF + 120),
+        observations: Vec::new(),
+        key_owner: mandate_gateway::KeyOwner::Platform,
+    }
+}
+
+fn ok_reply() -> Recorded {
+    Recorded {
+        latency_ms: 10,
+        delivery: Delivery::Response {
+            status: 200,
+            body: reply(r#"{"invalidations":[],"theses":[]}"#),
+            retry_after_ms: None,
+        },
+    }
+}
+
 #[test]
 fn the_default_gateway_calls_through_the_fake_with_the_placeholder_key() {
-    let (mut gateway, selection) = recorded_gateway(vec![reply("{}")]);
+    let (mut gateway, selection) =
+        recorded_gateway(vec![reply(r#"{"invalidations":[],"theses":[]}"#)]);
     assert_eq!(selection.backend, Backend::RecordedFake);
-    assert!(gateway.transport().recorded().is_some());
-    assert!(gateway.transport_mut().recorded_mut().is_some());
+    let record = gateway.call(&request()).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        record.outcome,
+        mandate_gateway::Outcome::Ok,
+        "not credential_invalid"
+    );
+    let sent = gateway
+        .transport()
+        .recorded()
+        .unwrap_or_else(|| panic!("the fake"))
+        .sent();
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].with_key, "the placeholder stands where a key would");
     assert_eq!(
         RecordedKey
             .provider_key(UPSTREAM)
@@ -102,20 +143,10 @@ fn the_default_gateway_calls_through_the_fake_with_the_placeholder_key() {
 #[test]
 fn a_selected_openrouter_gateway_sends_through_the_hosted_transport_with_the_vault_s_key() {
     let mut hosted = HostedDouble::default();
-    hosted.inner.script(vec![Recorded {
-        latency_ms: 10,
-        delivery: Delivery::Response {
-            status: 200,
-            body: reply("{}"),
-            retry_after_ms: None,
-        },
-    }]);
+    hosted.inner.script(vec![ok_reply()]);
     let mut fake = RecordedTransport::new();
-    fake.script(vec![Recorded {
-        latency_ms: 10,
-        delivery: Delivery::ConnectFailed,
-    }]);
-    let (gateway, selection) = research_gateway(
+    fake.script(vec![ok_reply()]);
+    let (mut gateway, selection) = research_gateway(
         parts(Caps::demo()),
         Box::new(common::FixtureVault),
         Some(hosted),
@@ -123,21 +154,41 @@ fn a_selected_openrouter_gateway_sends_through_the_hosted_transport_with_the_vau
         UPSTREAM,
     );
     assert_eq!(selection.backend, Backend::OpenRouter);
+    let record = gateway.call(&request()).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(record.outcome, mandate_gateway::Outcome::Ok);
     assert!(gateway.transport().recorded().is_none());
-    assert!(matches!(gateway.transport(), ResearchTransport::Hosted(_)));
+    let ResearchTransport::Hosted(hosted) = gateway.transport() else {
+        panic!("the hosted transport");
+    };
+    assert_eq!(hosted.inner.sent().len(), 1, "the call went out hosted");
+    assert_eq!(
+        hosted.keys,
+        vec![FIXTURE_KEY.to_owned()],
+        "with the vault's key, never the placeholder"
+    );
 }
 
 #[test]
 fn a_hosted_transport_without_a_vaulted_key_is_never_used() {
-    let (gateway, selection) = research_gateway(
+    let mut hosted = HostedDouble::default();
+    hosted.inner.script(vec![ok_reply()]);
+    let mut fake = RecordedTransport::new();
+    fake.script(vec![ok_reply()]);
+    let (mut gateway, selection) = research_gateway(
         parts(Caps::demo()),
         Box::new(NoKeys),
-        Some(HostedDouble::default()),
-        RecordedTransport::new(),
+        Some(hosted),
+        fake,
         UPSTREAM,
     );
     assert_eq!(selection.backend, Backend::RecordedFake);
-    assert!(gateway.transport().recorded().is_some());
+    let record = gateway.call(&request()).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(record.outcome, mandate_gateway::Outcome::Ok);
+    assert_eq!(
+        gateway.transport().recorded().map(|fake| fake.sent().len()),
+        Some(1),
+        "the call went to the fake"
+    );
     let (_, selection) = research_gateway(
         parts(Caps::demo()),
         Box::new(common::FixtureVault),
@@ -184,21 +235,7 @@ fn a_reply_scripted_through_the_gateway_s_own_fake_is_the_one_it_replays() {
             retry_after_ms: None,
         },
     }]);
-    let request = mandate_gateway::CallRequest {
-        call_id: mandate_canon::encode_ulid((1 << 100) + 9),
-        workspace_id: common::WORKSPACE.to_owned(),
-        agent_id: Some(common::AGENT.to_owned()),
-        purpose: mandate_gateway::Purpose::Research,
-        model: common::registry().1,
-        inputs: ["context", "items", "memory"]
-            .into_iter()
-            .map(|slot| (slot.to_owned(), "{}".to_owned()))
-            .collect(),
-        as_of: common::at(common::CUT_OFF),
-        deadline: common::at(common::CUT_OFF + 120),
-        observations: Vec::new(),
-        key_owner: mandate_gateway::KeyOwner::Platform,
-    };
+    let request = request();
     let record = gateway.call(&request).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
         record.outcome,
