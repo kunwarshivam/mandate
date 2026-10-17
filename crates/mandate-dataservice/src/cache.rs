@@ -41,8 +41,10 @@ pub enum Refused {
 
 impl fmt::Display for Refused {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = f;
-        todo!()
+        f.write_str(match self {
+            Self::NotSubscribed => "quote for an instrument not subscribed",
+            Self::OtherFeed => "quote from a feed the instrument is not subscribed on",
+        })
     }
 }
 
@@ -55,8 +57,7 @@ pub struct CacheFull;
 
 impl fmt::Display for CacheFull {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = f;
-        todo!()
+        f.write_str("the hot cache holds its capacity of instruments")
     }
 }
 
@@ -74,6 +75,17 @@ struct Entry {
     last_marked: Option<Quote>,
 }
 
+impl Entry {
+    fn empty(feed: Feed) -> Self {
+        Self {
+            feed,
+            watermark: None,
+            mark: None,
+            last_marked: None,
+        }
+    }
+}
+
 /// The bounded hot cache of one workspace's quotes.
 #[derive(Debug, Clone)]
 pub struct HotCache {
@@ -88,22 +100,34 @@ impl HotCache {
     /// be in tolerance, so nothing is fresh for an opening until [`Self::set_clock_in_tolerance`]
     /// is told otherwise (DEC-994 item 7).
     pub fn new(freshness: Freshness, capacity: usize) -> Self {
-        let _ = (freshness, capacity);
-        todo!()
+        Self {
+            freshness,
+            capacity,
+            clock_in_tolerance: false,
+            entries: BTreeMap::new(),
+        }
     }
 
     /// Adds `instrument` on `feed` to the subscription set. Subscribing it again on the same feed
     /// changes nothing; on another feed it starts over with no quote. [`CacheFull`] when a new
     /// instrument would exceed the capacity.
     pub fn subscribe(&mut self, instrument: AssetId, feed: Feed) -> Result<(), CacheFull> {
-        let _ = (instrument, feed);
-        todo!()
+        if let Some(entry) = self.entries.get_mut(&instrument) {
+            if entry.feed != feed {
+                *entry = Entry::empty(feed);
+            }
+            return Ok(());
+        }
+        if self.entries.len() >= self.capacity {
+            return Err(CacheFull);
+        }
+        self.entries.insert(instrument, Entry::empty(feed));
+        Ok(())
     }
 
     /// Removes `instrument` and everything held for it.
     pub fn unsubscribe(&mut self, instrument: &AssetId) {
-        let _ = instrument;
-        todo!()
+        self.entries.remove(instrument);
     }
 
     /// Takes one received quote. Checked in this order: subscribed on its feed, else
@@ -111,37 +135,69 @@ impl HotCache {
     /// the watermark ([`Intake::Duplicate`]); stamped at or before the watermark
     /// ([`Intake::OutOfOrder`]); then it becomes the watermark, and marks if sane.
     pub fn intake(&mut self, quote: Quote) -> Result<Intake, Refused> {
-        let _ = quote;
-        todo!()
+        let entry = self
+            .entries
+            .get_mut(&quote.instrument)
+            .ok_or(Refused::NotSubscribed)?;
+        if entry.feed != quote.feed {
+            return Err(Refused::OtherFeed);
+        }
+        if self.freshness.future_stamped(&quote) {
+            entry.mark = None;
+            return Ok(Intake::FutureStamped);
+        }
+        if let Some(watermark) = &entry.watermark {
+            if watermark.same_message(&quote) {
+                return Ok(Intake::Duplicate);
+            }
+            if quote.vendor_time <= watermark.vendor_time {
+                return Ok(Intake::OutOfOrder);
+            }
+        }
+        let sane = self.freshness.sane(&quote);
+        entry.mark = sane.then(|| quote.clone());
+        if sane {
+            entry.last_marked = Some(quote.clone());
+        }
+        entry.watermark = Some(quote);
+        Ok(if sane {
+            Intake::Marked
+        } else {
+            Intake::NotSane
+        })
     }
 
     /// The connection carrying every subscribed instrument was lost: no instrument has a mark
     /// until a quote received after this one is taken (DP-7, DEC-994 item 5). Watermarks stay, so
     /// a replay of an earlier quote never marks.
     pub fn connection_lost(&mut self) {
-        todo!()
+        for entry in self.entries.values_mut() {
+            entry.mark = None;
+        }
     }
 
     /// Whether the host clock is in tolerance: false while the scheduler's
     /// `ClockToleranceExceeded` stands, true after a later in-tolerance `ClockOffsetRecorded`
     /// (journal spec §5.4, DEC-433 item 5).
     pub fn set_clock_in_tolerance(&mut self, in_tolerance: bool) {
-        let _ = in_tolerance;
-        todo!()
+        self.clock_in_tolerance = in_tolerance;
     }
 
     /// The quote an opening or increasing order in `instrument` may use at `now`: the mark, if
     /// the clock is in tolerance and it is fresh at `now`, with `at` its age basis. `None` denies
     /// the opening (`stale_mark`, mandate spec §5.2) and never touches an exit.
     pub fn opening_quote(&self, instrument: &AssetId, now: UtcNanos) -> Option<SaneQuote> {
-        let _ = (instrument, now);
-        todo!()
+        let mark = self.entries.get(instrument)?.mark.as_ref()?;
+        (self.clock_in_tolerance && self.freshness.fresh_at(mark, now)).then(|| SaneQuote {
+            bid: mark.bid,
+            ask: mark.ask,
+            at: mark.age_basis(),
+        })
     }
 
     /// The last quote that marked `instrument`, however old: exits take any mark source (trading
     /// spec §8.2) and price from it as §5.6 says.
     pub fn last_marked(&self, instrument: &AssetId) -> Option<&Quote> {
-        let _ = instrument;
-        todo!()
+        self.entries.get(instrument)?.last_marked.as_ref()
     }
 }
