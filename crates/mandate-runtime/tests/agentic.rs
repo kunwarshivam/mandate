@@ -1029,7 +1029,16 @@ fn results_that_are_not_the_dispatch_s_calls_are_refused() {
             &ports,
             &world,
         );
-        assert!(refused.is_err(), "{broken}: {refused:?}");
+        let refusal = format!("{refused:?}");
+        let ours = if broken == "run" {
+            "not in flight"
+        } else {
+            "not exactly the dispatch's calls"
+        };
+        assert!(
+            refusal.contains(ours),
+            "{broken}: the core refuses before the loop sees them: {refusal}"
+        );
         assert_eq!(run.lp.types().len(), before, "{broken}");
     }
 }
