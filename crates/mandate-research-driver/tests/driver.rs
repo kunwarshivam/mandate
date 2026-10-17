@@ -66,6 +66,11 @@ impl Core for FakeCore {
         }
         Ok(())
     }
+
+    fn abandon(&mut self) -> bool {
+        self.log.borrow_mut().push("abandon".to_owned());
+        true
+    }
 }
 
 /// A journal that answers each append with the next scripted outcome (committed by default).
@@ -73,6 +78,8 @@ struct FakeJournal {
     log: Log,
     seq: u64,
     outcomes: Vec<Option<AppendFailure>>,
+    /// Rows the journal drops from the end of its reply, as a broken writer might.
+    short: usize,
 }
 
 impl JournalWriter for FakeJournal {
@@ -86,7 +93,8 @@ impl JournalWriter for FakeJournal {
         {
             return Err(failure);
         }
-        Ok(drafts
+        let kept = drafts.len().saturating_sub(self.short);
+        Ok(drafts[..kept]
             .iter()
             .map(|d| {
                 self.seq += 1;
@@ -136,6 +144,7 @@ fn parts(
             log: log.clone(),
             seq: 0,
             outcomes,
+            short: 0,
         },
         worker: FakeWorker { log: log.clone() },
         log,
@@ -218,7 +227,10 @@ fn an_unknown_append_holds_every_other_input_until_the_same_one_is_retried() {
     let mut driver = Driver::new();
     assert_eq!(p.step(&mut driver, poll(1)), Ok(Stepped::Held));
     assert_eq!(driver.pending(), Some(&poll(1)));
-    assert!(!driver.halted(), "an unknown append holds, it does not halt");
+    assert!(
+        !driver.halted(),
+        "an unknown append holds, it does not halt"
+    );
     assert!(
         !p.log().iter().any(|line| line.starts_with("hand")),
         "nothing is handed on before its drafts are known committed"
@@ -261,6 +273,11 @@ fn a_refused_append_halts_research_in_the_process() {
         })
     );
     assert!(driver.halted());
+    assert_eq!(driver.pending(), None);
+    assert!(
+        p.log().iter().any(|line| line == "abandon"),
+        "the core forgets the batch, so nothing waits behind it"
+    );
     for input in [poll(1), poll(2)] {
         assert_eq!(
             p.step(&mut driver, input),
@@ -329,9 +346,16 @@ fn a_committed_event_the_core_cannot_fold_back_halts_research() {
     let mut p = parts(vec![Ok(step)], vec![]);
     p.core.fold_refuses = true;
     let mut driver = Driver::new();
-    assert_eq!(
-        p.step(&mut driver, poll(1)),
-        Err(DriverError::Core(RuntimeError::NotStarted))
+    assert!(
+        matches!(
+            p.step(&mut driver, poll(1)),
+            Err(DriverError::Diverged { .. })
+        ),
+        "the shell must rebuild the core from the journal"
+    );
+    assert!(
+        !p.log().iter().any(|line| line == "abandon"),
+        "a committed batch is never forgotten"
     );
     assert!(
         driver.halted(),
@@ -342,5 +366,25 @@ fn a_committed_event_the_core_cannot_fold_back_halts_research() {
         !p.log().iter().any(|line| line == "fold e2"),
         "folding stops at the first refusal"
     );
+    assert_eq!(p.step(&mut driver, poll(2)), Err(DriverError::Halted));
+}
+
+#[test]
+fn a_reply_that_is_not_the_batch_is_a_divergence_and_nothing_is_folded_or_handed() {
+    let step = step_with(
+        vec![Effect::Journal(draft("e1")), Effect::Journal(draft("e2"))],
+        vec![start("run_1")],
+    );
+    let mut p = parts(vec![Ok(step)], vec![]);
+    p.journal.short = 1;
+    let mut driver = Driver::new();
+    assert!(matches!(
+        p.step(&mut driver, poll(1)),
+        Err(DriverError::Diverged { .. })
+    ));
+    assert!(driver.halted());
+    let log = p.log();
+    assert!(!log.iter().any(|line| line.starts_with("fold")), "{log:?}");
+    assert!(!log.iter().any(|line| line.starts_with("hand")), "{log:?}");
     assert_eq!(p.step(&mut driver, poll(2)), Err(DriverError::Halted));
 }

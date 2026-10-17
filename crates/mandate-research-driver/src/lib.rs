@@ -13,10 +13,10 @@
 //! after R0 closes. It reads no clock and does no I/O: the shell hands it time, the journal, and
 //! the worker.
 //!
-//! - **The trigger queue** ([`TriggerQueue`]): which run starts next and with which tool classes.
-//!   One run in flight per agent, owner and explain runs first, event triggers debounced and
-//!   rate-limited, every start gated by mode, and the tools fixed by the run's kind before anything
-//!   untrusted is read ([`tool_classes`]).
+//! - **The trigger queue** ([`TriggerQueue`]): which run's trigger goes to the core next. One run
+//!   in flight per agent, owner and explain runs ahead of a scheduled one, no start while paused or
+//!   stopped, and any mode change cancelling the run in flight (agent harness spec v0.2 §6.9). The
+//!   core decides a run's kind and tool menu; event triggers wait for E19-14.
 //! - **The step machine** ([`Driver`]): each input to the core ([`RuntimeCore`] wraps
 //!   `mandate_runtime::handle_research`), the step's drafts appended as one batch and folded back,
 //!   and only then the worker's requests handed on. An unresolved append holds every other input
@@ -28,7 +28,4 @@ mod trigger;
 pub use driver::{
     AppendFailure, Core, Driver, DriverError, JournalWriter, RuntimeCore, Stepped, Worker,
 };
-pub use trigger::{
-    EventCause, Offered, QueueConfig, RunKind, Started, ToolClass, Trigger, TriggerQueue,
-    tool_classes,
-};
+pub use trigger::{Offered, QueueConfig, Trigger, TriggerQueue};

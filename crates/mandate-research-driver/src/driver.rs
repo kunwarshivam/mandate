@@ -7,16 +7,27 @@
 //! request is ever acted on, and no notice names a record, before the record is committed
 //! (`AGENTS.md` rule 5, HI-2).
 //!
-//! An append whose outcome is unknown (a timeout, a lost connection) holds the driver: every other
-//! input is refused with [`DriverError::Held`] until the shell retries the same one, which the core
-//! answers with the same drafts, so the journal's idempotency settles it (journal spec §5.1). An
-//! append the journal refuses is a writer defect that no retry can mend, so the driver halts:
-//! research stops in this process until a restart, and trading, which never waits on research,
-//! is untouched (HI-7, `AGENTS.md` rule 3).
+//! Three outcomes are not a plain commit:
+//!
+//! - **An append whose outcome is unknown** (a timeout, a lost connection) holds the driver. Every
+//!   other research input is refused with [`DriverError::Held`] until the shell retries the same
+//!   one, which the core answers with the same drafts, so the journal's idempotency settles it
+//!   (journal spec §5.1). The agent stream has one writer, so the core holds every trading input
+//!   behind that batch too, exactly as it does behind a trading batch in doubt: the shell retries
+//!   [`Driver::pending`] before it hands the core any other input.
+//! - **An append the journal refused** stored nothing. The core forgets the batch
+//!   ([`Core::abandon`]), so trading inputs, the kill switch among them, are never held behind a
+//!   batch that can never commit, and research halts in this process until a restart
+//!   (`AGENTS.md` rules 3 and 13).
+//! - **A reply that is not this batch** (other events, fewer, or out of order), or a committed event
+//!   the core cannot fold back: the core no longer matches the journal. The driver halts with
+//!   [`DriverError::Diverged`], and the shell restarts the agent process, which rebuilds the core
+//!   from the journal (§5.4).
 
 use mandate_runtime::{
     Effect, EventDraft, FoldedEvent, Ports, ResearchContext, ResearchInput, ResearchRequest,
-    ResearchState, ResearchStep, RuntimeError, RuntimeState, fold, handle_research,
+    ResearchState, ResearchStep, RuntimeError, RuntimeState, abandon_refused_research, fold,
+    handle_research,
 };
 
 /// The core as the driver sees it. [`RuntimeCore`] is the one production implementation.
@@ -32,6 +43,10 @@ pub trait Core {
     /// # Errors
     /// The core's refusal to fold its own event.
     fn fold(&mut self, event: &FoldedEvent) -> Result<(), RuntimeError>;
+
+    /// The journal refused the step's batch and stored none of it: forget the batch, so no other
+    /// input waits behind it. Returns whether a research batch was in doubt.
+    fn abandon(&mut self) -> bool;
 }
 
 /// The agent stream's writer: one step's drafts as one `append` batch.
@@ -79,8 +94,10 @@ pub enum DriverError {
     Held,
     #[error("the journal refused the research batch ({code}); research is halted in this process")]
     Refused { code: String },
-    #[error("research is halted in this process after a refused append")]
+    #[error("research is halted in this process")]
     Halted,
+    #[error("the core no longer matches the journal ({what}); restart the agent process")]
+    Diverged { what: String },
 }
 
 /// The driver's own state: the input whose append is in doubt, and whether research is halted.
@@ -134,10 +151,26 @@ impl Driver {
         if !drafts.is_empty() {
             match journal.append(&drafts) {
                 Ok(stored) => {
+                    let same = stored.len() == drafts.len()
+                        && stored
+                            .iter()
+                            .zip(&drafts)
+                            .all(|(row, draft)| row.event_id == draft.event_id);
+                    if !same {
+                        self.halted = true;
+                        return Err(DriverError::Diverged {
+                            what: "the journal's rows are not the step's drafts".to_owned(),
+                        });
+                    }
                     for event in &stored {
                         if let Err(error) = core.fold(event) {
                             self.halted = true;
-                            return Err(DriverError::Core(error));
+                            return Err(DriverError::Diverged {
+                                what: format!(
+                                    "a committed {} did not fold: {error}",
+                                    event.event_type
+                                ),
+                            });
                         }
                     }
                 }
@@ -146,6 +179,8 @@ impl Driver {
                     return Ok(Stepped::Held);
                 }
                 Err(AppendFailure::Refused { code }) => {
+                    core.abandon();
+                    self.pending = None;
                     self.halted = true;
                     return Err(DriverError::Refused { code });
                 }
@@ -178,5 +213,9 @@ impl Core for RuntimeCore<'_> {
     fn fold(&mut self, event: &FoldedEvent) -> Result<(), RuntimeError> {
         fold(self.state, event)?;
         self.research.fold(event)
+    }
+
+    fn abandon(&mut self) -> bool {
+        abandon_refused_research(self.state, self.research)
     }
 }

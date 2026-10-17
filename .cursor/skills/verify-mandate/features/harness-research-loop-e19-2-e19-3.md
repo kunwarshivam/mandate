@@ -30,9 +30,9 @@ neither the invalidation verdict (E19-5) nor the agent-stream `ModelInvocationRe
   checks, the platform fill, admission, and the judging batch).
   In `mandate-research-driver`, the shell's research driver ([DEC-2204](../../../../docs/project/decisions/DEC-2204.md), not yet
   wired into the run path, which waits for R0): `crates/mandate-research-driver/src/trigger.rs`
-  (the per-agent trigger queue and each run kind's tool classes) and
-  `crates/mandate-research-driver/src/driver.rs` (the step machine: commit, fold back, then hand on;
-  hold on an unresolved append; halt on a refused one).
+  (the per-agent trigger queue) and `crates/mandate-research-driver/src/driver.rs` (the step
+  machine: commit, check, fold back, then hand on; hold on an unknown append; abandon and halt on a
+  refused one; halt as diverged otherwise), with `mandate_runtime::abandon_refused_research`.
 - **Tests:** `crates/mandate-research-run/tests/retrieve.rs`, `crates/mandate-research-run/tests/output.rs`
   (with a property over arbitrary bytes and an integer-thousandths oracle),
   `crates/mandate-research-run/tests/call.rs`, `crates/mandate-research-run/tests/item.rs`,
