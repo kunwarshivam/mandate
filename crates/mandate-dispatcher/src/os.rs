@@ -44,10 +44,7 @@ impl Default for System {
 }
 
 impl Entropy for System {
-    /// Fills `out` from the kernel's generator through `ring`. This leaf is implemented in the
-    /// tests PR, not stubbed: its only failure is the closed [`EntropyUnavailable`], which carries no
-    /// `Unimplemented` report, so a stub here would leave a mutant `cargo xtask ci mutants` cannot
-    /// exempt (DEC-137). `OsRandom`'s two traits over it stay stubs until the implementation PR.
+    /// Fills `out` from the kernel's generator through `ring`.
     fn fill(&self, out: &mut [u8]) -> Result<(), EntropyUnavailable> {
         ring::rand::SecureRandom::fill(&self.0, out).map_err(|_| EntropyUnavailable)
     }
@@ -56,10 +53,6 @@ impl Entropy for System {
 /// The process's one random source, over `entropy`.
 #[derive(Debug, Default)]
 pub struct OsRandom<E: Entropy = System> {
-    #[allow(
-        dead_code,
-        reason = "the tests PR's stubs read no field; the implementation fills from it (DEC-77, E8-10 D10a)"
-    )]
     entropy: E,
 }
 
@@ -80,16 +73,27 @@ impl<E: Entropy> OsRandom<E> {
 
 impl<E: Entropy> NoticeRandom for OsRandom<E> {
     /// Fills `bytes` from the source; [`EntropyUnavailable`] is
-    /// [`NotifyError::EntropyUnavailable`].
-    fn fill(&mut self, _bytes: &mut [u8; 16]) -> Result<(), NotifyError> {
-        Err(NotifyError::Unimplemented { story: "E8-10" })
+    /// [`NotifyError::EntropyUnavailable`], and `bytes` is then left as it was.
+    fn fill(&mut self, bytes: &mut [u8; 16]) -> Result<(), NotifyError> {
+        let mut drawn = [0u8; 16];
+        self.entropy
+            .fill(&mut drawn)
+            .map_err(|EntropyUnavailable| NotifyError::EntropyUnavailable)?;
+        *bytes = drawn;
+        Ok(())
     }
 }
 
 impl<E: Entropy> PushRandom for OsRandom<E> {
-    /// Fills `out` from the source; [`EntropyUnavailable`] is [`WebPushError::Random`].
-    fn fill(&mut self, _out: &mut [u8]) -> Result<(), WebPushError> {
-        Err(WebPushError::Unimplemented { story: "E8-10" })
+    /// Fills `out` from the source; [`EntropyUnavailable`] is [`WebPushError::Random`], and `out`
+    /// is then left as it was.
+    fn fill(&mut self, out: &mut [u8]) -> Result<(), WebPushError> {
+        let mut drawn = vec![0u8; out.len()];
+        self.entropy
+            .fill(&mut drawn)
+            .map_err(|EntropyUnavailable| WebPushError::Random)?;
+        out.copy_from_slice(&drawn);
+        Ok(())
     }
 }
 

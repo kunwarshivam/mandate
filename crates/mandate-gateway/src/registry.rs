@@ -9,6 +9,7 @@ use mandate_time::Date;
 
 use crate::money::PriceTable;
 use crate::schema;
+use crate::tools::Agentic;
 
 /// Inference spec §3.4: a fast model's deadline is at most 300 ms, a slow model's at most 600 s.
 pub const FAST_DEADLINE_MS: u64 = 300;
@@ -45,6 +46,76 @@ pub struct Template {
     pub inputs: Vec<String>,
 }
 
+/// How an entry is called (inference spec §4.1, DEC-2203): one call, or an agentic research run's
+/// turns over its pinned tools.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mode {
+    SingleCall,
+    Agentic(Agentic),
+}
+
+/// `top_p` in millionths, from 1 to 1,000,000 (inference spec §4.1): a decimal, never a float.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TopP(u32);
+
+impl TopP {
+    pub const SCALE: u32 = 1_000_000;
+
+    /// `millionths` as a `top_p`, or `None` outside 1 to [`TopP::SCALE`].
+    pub fn from_millionths(millionths: u32) -> Option<Self> {
+        (1..=Self::SCALE)
+            .contains(&millionths)
+            .then_some(Self(millionths))
+    }
+
+    pub fn millionths(self) -> u32 {
+        self.0
+    }
+
+    /// The journal's decimal text: `1`, or `0.` and the significant digits, no trailing zero.
+    pub fn text(self) -> String {
+        if self.0 == Self::SCALE {
+            return "1".to_owned();
+        }
+        let digits = format!("{:06}", self.0);
+        format!("0.{}", digits.trim_end_matches('0'))
+    }
+}
+
+/// How much a reasoning model thinks before it answers (inference spec §4.1, DEC-2203 item 22).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Effort {
+    Low,
+    Medium,
+    High,
+}
+
+impl Effort {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
+
+/// The pinned reasoning mode: off, or on at one effort.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Reasoning {
+    Off,
+    On(Effort),
+}
+
+impl Reasoning {
+    pub fn canonical(self) -> Value {
+        match self {
+            Self::Off => object([("enabled", Value::Bool(false))]),
+            Self::On(effort) => object([("effort", Value::Str(effort.code().to_owned()))]),
+        }
+    }
+}
+
 /// An entry's pinned content (inference spec §4.1), every member inside the content hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinnedContent {
@@ -59,13 +130,19 @@ pub struct PinnedContent {
     pub deadline_ms: u64,
     pub max_output_tokens: u32,
     pub seed: Option<u64>,
+    pub top_p: Option<TopP>,
+    pub reasoning: Option<Reasoning>,
+    pub mode: Mode,
     pub methodology: String,
     pub authorship: String,
 }
 
 impl PinnedContent {
     /// The canonical object the content hash covers. Sampling is temperature 0 always (inference
-    /// spec §3.4) and the seed is pinned. `endpoints` and `status` are not in it.
+    /// spec §3.4) and the seed is pinned. `endpoints` and `status` are not in it. A `single_call`
+    /// entry leaves out `mode`, `tools`, `loop_bounds`, and `output_schemas`, and an entry with no
+    /// `top_p` or reasoning leaves those out of its sampling, so every hash from before inference
+    /// spec v0.4 is unchanged.
     pub fn canonical(&self) -> Value {
         let identity = self.identity.canonical();
         let template = object([
@@ -83,7 +160,7 @@ impl PinnedContent {
             ("system", Value::Str(self.template.system.clone())),
             ("user", Value::Str(self.template.user.clone())),
         ]);
-        object([
+        let mut canonical = object([
             ("authorship", Value::Str(self.authorship.clone())),
             ("deadline_ms", int(self.deadline_ms)),
             ("identity", identity),
@@ -94,10 +171,55 @@ impl PinnedContent {
             ("output_schema", self.output_schema.clone()),
             ("params_schema", self.params_schema.clone()),
             ("retrieval_plan", self.retrieval_plan.clone()),
-            ("sampling", sampling(self.seed)),
+            ("sampling", self.sampling()),
             ("template", template),
             ("validation_bounds", self.validation_bounds.clone()),
-        ])
+        ]);
+        if let (Mode::Agentic(agentic), Value::Object(members)) = (&self.mode, &mut canonical) {
+            let schemas = agentic
+                .output_schemas
+                .iter()
+                .filter_map(|(kind, s)| Key::new(kind).ok().map(|k| (k, s.clone())))
+                .collect::<Object>();
+            for (name, value) in [
+                ("loop_bounds", agentic.loop_bounds.canonical()),
+                ("mode", Value::Str("agentic".to_owned())),
+                ("output", Value::Str(agentic.output.code().to_owned())),
+                ("output_schemas", Value::Object(schemas)),
+                (
+                    "tools",
+                    Value::Array(agentic.tools.iter().map(|t| t.canonical()).collect()),
+                ),
+            ] {
+                if let Ok(key) = Key::new(name) {
+                    members.insert(key, value);
+                }
+            }
+        }
+        canonical
+    }
+
+    /// The pinned sampling: temperature 0 and the seed, with `top_p` and the reasoning mode only
+    /// where the entry pins them (inference spec §3.1, §4.1).
+    pub fn sampling(&self) -> Value {
+        let mut sampling = sampling(self.seed);
+        if let Value::Object(members) = &mut sampling {
+            if let (Some(top_p), Ok(key)) = (self.top_p, Key::new("top_p")) {
+                members.insert(key, Value::Str(top_p.text()));
+            }
+            if let (Some(reasoning), Ok(key)) = (self.reasoning, Key::new("reasoning")) {
+                members.insert(key, reasoning.canonical());
+            }
+        }
+        sampling
+    }
+
+    /// The agentic loop, or `None` for a `single_call` entry.
+    pub fn agentic(&self) -> Option<&Agentic> {
+        match &self.mode {
+            Mode::SingleCall => None,
+            Mode::Agentic(agentic) => Some(agentic),
+        }
     }
 
     /// SHA-256 over the canonical JSON of the pinned content (inference spec §4.1).
@@ -277,6 +399,8 @@ pub enum RegistryError {
     OutputSchema,
     #[error("the template's slots and its input contract differ")]
     Template,
+    #[error("the agentic loop's tools, bounds, or output schemas are not ones a registry may pin")]
+    Agentic,
     #[error("this id and version are registered with other content; pinned content is immutable")]
     Immutable,
     #[error("no entry for this id and version")]
@@ -457,6 +581,9 @@ fn check_content(content: &PinnedContent) -> Result<(), RegistryError> {
     }
     if !template_matches(&content.template) {
         return Err(RegistryError::Template);
+    }
+    if content.agentic().is_some_and(|a| !a.well_formed()) {
+        return Err(RegistryError::Agentic);
     }
     Ok(())
 }

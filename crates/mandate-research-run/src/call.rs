@@ -180,6 +180,10 @@ impl ResearchCall {
                 .map(|item| item.observation.clone())
                 .collect(),
             key_owner: KeyOwner::Platform,
+            run_kind: None,
+            turns: Vec::new(),
+            tools: Vec::new(),
+            spend_ceiling: None,
         })
     }
 }
