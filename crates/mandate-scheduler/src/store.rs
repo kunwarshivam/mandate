@@ -35,13 +35,11 @@ pub struct MemoryStore(pub Rc<RefCell<MemoryJournal>>);
 
 impl ClockStore for MemoryStore {
     fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
-        todo!()
+        Some(self.0.borrow_mut().take_ownership(stream))
     }
 
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
-
-        todo!()
-
+        Some(self.0.borrow().rows(stream).to_vec())
     }
 
     fn append(
@@ -52,9 +50,10 @@ impl ClockStore for MemoryStore {
         recorded_at: UtcNanos,
         drafts: &[Vec<u8>],
     ) -> AppendOutcome {
-
-        todo!()
-
+        let drafts: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
+        self.0
+            .borrow_mut()
+            .append(stream, expected_head, epoch, recorded_at, &drafts)
     }
 }
 
@@ -71,19 +70,27 @@ impl PgStore {
     /// The runtime's or the connection's, as a stable code only: a DSN is a credential and never
     /// appears in an error (`AGENTS.md` rule 7).
     pub fn connect(dsn: &str) -> Result<Self, &'static str> {
-        todo!()
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| "runtime_unavailable")?;
+        let journal = {
+            let _entered = runtime.enter();
+            PgJournal::from_dsn(dsn).map_err(|e| e.code())?
+        };
+        Ok(Self { journal, runtime })
     }
 }
 
 impl ClockStore for PgStore {
     fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
-        todo!()
+        self.runtime
+            .block_on(self.journal.take_ownership(stream))
+            .ok()
     }
 
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
-
-        todo!()
-
+        self.runtime.block_on(self.journal.rows(stream)).ok()
     }
 
     fn append(
@@ -94,8 +101,12 @@ impl ClockStore for PgStore {
         recorded_at: UtcNanos,
         drafts: &[Vec<u8>],
     ) -> AppendOutcome {
-
-        todo!()
-
+        let drafts: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
+        self.runtime
+            .block_on(
+                self.journal
+                    .append(stream, expected_head, epoch, recorded_at, &drafts),
+            )
+            .unwrap_or(AppendOutcome::Unavailable)
     }
 }

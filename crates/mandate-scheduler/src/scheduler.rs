@@ -57,82 +57,235 @@ impl<S: ClockStore> Scheduler<S> {
     /// writer epoch (fencing every earlier scheduler), replays the stream, and opens it if it is
     /// empty. A store that cannot answer leaves the scheduler exited `Refused`.
     pub fn start(store: S, config: &Config, calendar: ExchangeCalendar, now: UtcNanos) -> Self {
-        todo!()
+        let writer = Writer {
+            workspace: config.workspace.clone(),
+            environment: config.environment,
+            epoch: 0,
+        };
+        let stream = StreamId::parse(&writer.stream());
+        let mut this = Self {
+            store,
+            writer,
+            stream,
+            calendar,
+            tolerance_ns: config.tolerance_ns,
+            head: 0,
+            last_tick: None,
+            last_day: None,
+            schedule: Schedule::default(),
+            pending: None,
+            lifecycle: Lifecycle::new(Kind::Writer, config.liveness, now),
+        };
+        if config.environment != Environment::Paper {
+            this.lifecycle.observe(now, Input::Failed);
+            return this;
+        }
+        this.lifecycle.observe(now, Input::StartupPassed);
+        let Some(stream) = this.stream.clone() else {
+            this.lifecycle.observe(now, Input::Failed);
+            return this;
+        };
+        let Some(epoch) = this.store.take_ownership(&stream) else {
+            this.lifecycle.observe(now, Input::Failed);
+            return this;
+        };
+        this.writer.epoch = epoch;
+        this.lifecycle.observe(now, Input::EpochTaken);
+        let Some(rows) = this.store.rows(&stream) else {
+            this.lifecycle.observe(now, Input::Failed);
+            return this;
+        };
+        this.replay(&rows);
+        this.lifecycle.observe(
+            now,
+            Input::Replayed {
+                position: this.head,
+                head: this.head,
+            },
+        );
+        if this.head == 0 {
+            this.write(now, vec![Record::Opened]);
+        }
+        this
     }
 
     /// One second of the loop at the host clock's reading `host`: a retried batch first, then the
     /// tick (with its trading day), then a measurement if one is due. Nothing is written once the
     /// scheduler has exited.
     pub fn step(&mut self, host: UtcNanos, servers: &mut dyn TimeServers) {
-        todo!()
+        if self.exited() {
+            return;
+        }
+        self.lifecycle.observe(host, Input::Heartbeat);
+        if !self.flush(host) {
+            return;
+        }
+        let Some(tick) = tick::next(self.last_tick, host) else {
+            return;
+        };
+        let mut records = vec![Record::Advanced(tick)];
+        records
+            .extend(tick::trading_day(&self.calendar, tick, self.last_day).map(Record::DayStarted));
+        if !self.write(host, records) {
+            return;
+        }
+        if let Some(trigger) = measure::due(&self.schedule, &self.calendar, tick) {
+            let measurement = Measurement::judge(trigger, servers.ask(), self.tolerance_ns);
+            let exceeded = (!measurement.within_tolerance).then_some(Record::Exceeded {
+                offset_ns: measurement.offset_ns,
+                tolerance_ns: measurement.tolerance_ns,
+            });
+            let mut records = vec![Record::Measured(measurement)];
+            records.extend(exceeded);
+            if self.write(host, records) {
+                self.schedule.measured_since_start = true;
+            }
+        }
     }
 
     /// Drains at `now`: no new tick or measurement; a batch in flight is tried once more, then
     /// the scheduler exits `Drained`, or `DrainIncomplete` if that batch is still unknown.
     pub fn drain(&mut self, now: UtcNanos) {
-        todo!()
+        if self.exited() {
+            return;
+        }
+        self.lifecycle.observe(now, Input::DrainRequested);
+        let settled = self.flush(now);
+        let last = if settled {
+            Input::Settled
+        } else {
+            Input::Failed
+        };
+        self.lifecycle.observe(now, last);
     }
 
     pub fn lifecycle(&self) -> &Lifecycle {
-
-        todo!()
-
+        &self.lifecycle
     }
 
     pub fn store(&self) -> &S {
-
-        todo!()
-
+        &self.store
     }
 
     /// The last tick written, the risk clock (mandate spec §5.2).
     pub fn last_tick(&self) -> Option<UtcNanos> {
-        todo!()
+        self.last_tick
     }
 
     fn exited(&self) -> bool {
-
-        todo!()
-
+        matches!(self.lifecycle.state(), State::Exited(_))
     }
 
     /// Retries the pending batch; whether nothing is left pending.
     fn flush(&mut self, now: UtcNanos) -> bool {
-        todo!()
+        match self.pending.take() {
+            Some(pending) => self.append(now, pending),
+            None => true,
+        }
     }
 
     /// Writes `records` as one batch at the head; whether it is known to be committed.
     fn write(&mut self, now: UtcNanos, records: Vec<Record>) -> bool {
-        todo!()
+        let Some(drafts) = self.writer.drafts(self.head, now, &records) else {
+            self.lifecycle.observe(now, Input::Failed);
+            return false;
+        };
+        self.append(
+            now,
+            Pending {
+                head: self.head,
+                records,
+                drafts,
+            },
+        )
     }
 
     fn append(&mut self, now: UtcNanos, pending: Pending) -> bool {
-
-        todo!()
-
+        let Some(stream) = self.stream.clone() else {
+            return false;
+        };
+        let outcome = self.store.append(
+            &stream,
+            pending.head,
+            self.writer.epoch,
+            now,
+            &pending.drafts,
+        );
+        match outcome {
+            AppendOutcome::Committed(stored) | AppendOutcome::AlreadyCommitted(stored) => {
+                self.head = stored.last().map_or(self.head, |e| e.seq);
+                for record in &pending.records {
+                    self.apply(record);
+                }
+                true
+            }
+            AppendOutcome::Unavailable | AppendOutcome::Ambiguous => {
+                self.pending = Some(pending);
+                false
+            }
+            AppendOutcome::Fenced { .. } => {
+                self.lifecycle.observe(now, Input::Fenced);
+                false
+            }
+            AppendOutcome::HeadMismatch { .. }
+            | AppendOutcome::IdempotencyConflict { .. }
+            | AppendOutcome::Invalid { .. } => {
+                self.lifecycle.observe(now, Input::Failed);
+                false
+            }
+        }
     }
 
     /// What a committed record changes: the last tick, the last trading day, and the schedule,
     /// which dates a measurement by the tick before it.
     fn apply(&mut self, record: &Record) {
-        todo!()
+        match record {
+            Record::Advanced(clock) => self.last_tick = Some(*clock),
+            Record::DayStarted(date) => self.last_day = Some(*date),
+            Record::Measured(m) => self.measured(m.trigger == Trigger::BeforeSession),
+            Record::Opened | Record::Exceeded { .. } => {}
+        }
     }
 
     fn measured(&mut self, before_session: bool) {
-
-        todo!()
-
+        self.schedule.last_measured = self.last_tick;
+        if before_session {
+            self.schedule.before_session_on = self
+                .last_tick
+                .and_then(|t| new_york_date_and_hour(t).ok())
+                .map(|(date, _)| date);
+        }
     }
 
     /// The state the stream's records leave: its head, last tick, last trading day, and last
     /// measurements. A record this scheduler cannot read changes nothing but the head; the next
     /// tick is still later than every tick written.
     fn replay(&mut self, rows: &[StoredEvent]) {
-        todo!()
+        for row in rows {
+            self.head = row.seq;
+            let body = parse(&row.body).ok();
+            let payload = body.as_ref().and_then(|b| b.get("payload"));
+            let member = |name: &str| payload.and_then(|p| p.get(name)).and_then(Value::as_str);
+            match row.event_type.as_str() {
+                "ClockAdvanced" => {
+                    let clock = member("clock").and_then(|c| UtcNanos::parse(c).ok());
+                    self.last_tick = clock.max(self.last_tick);
+                }
+                "TradingDayStarted" => {
+                    let date = member("date").and_then(|d| Date::parse(d).ok());
+                    self.last_day = date.max(self.last_day);
+                }
+                "ClockOffsetRecorded" => self.measured(member("trigger") == Some("before_session")),
+                _ => {}
+            }
+        }
     }
 }
 
 /// The exit a scheduler stopped with, if it has.
 pub fn exit<S>(scheduler: &Scheduler<S>) -> Option<Exit> {
-    todo!()
+    match scheduler.lifecycle.state() {
+        State::Exited(exit) => Some(exit),
+        _ => None,
+    }
 }

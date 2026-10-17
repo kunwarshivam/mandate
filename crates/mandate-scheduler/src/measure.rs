@@ -24,7 +24,11 @@ pub enum Trigger {
 
 impl Trigger {
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Startup => "startup",
+            Self::BeforeSession => "before_session",
+            Self::Periodic => "periodic",
+        }
     }
 }
 
@@ -54,7 +58,20 @@ impl Measurement {
     /// or above), carries a negative delay, or repeats a server already answered is not a
     /// sample. With no sample there is no offset, which is out of tolerance (`AGENTS.md` rule 3).
     pub fn judge(trigger: Trigger, mut answers: Vec<Sample>, tolerance_ns: u64) -> Self {
-        todo!()
+        answers.retain(|s| (1..=15).contains(&s.stratum) && s.delay_ns >= 0);
+        answers.sort_by(|a, b| a.server.cmp(&b.server));
+        answers.dedup_by(|later, earlier| later.server == earlier.server);
+        let mut offsets: Vec<i64> = answers.iter().map(|s| s.offset_ns).collect();
+        offsets.sort_by_key(|o| (o.unsigned_abs(), *o));
+        let offset_ns = offsets.get(offsets.len() / 2).copied();
+        let within_tolerance = offset_ns.is_some_and(|o| o.unsigned_abs() <= tolerance_ns);
+        Self {
+            trigger,
+            samples: answers,
+            offset_ns,
+            tolerance_ns,
+            within_tolerance,
+        }
     }
 }
 
@@ -70,20 +87,48 @@ pub struct Schedule {
 /// The measurement due at `tick`, if any: at start first; then once in the 15 minutes before a
 /// trading day's regular session; then whenever [`PERIOD_SECS`] have passed since the last.
 pub fn due(schedule: &Schedule, calendar: &ExchangeCalendar, tick: UtcNanos) -> Option<Trigger> {
-    todo!()
+    if !schedule.measured_since_start {
+        return Some(Trigger::Startup);
+    }
+    if let Some(date) = opening_soon(calendar, tick)
+        && schedule.before_session_on != Some(date)
+    {
+        return Some(Trigger::BeforeSession);
+    }
+    let elapsed = schedule
+        .last_measured
+        .and_then(|last| tick.secs().checked_sub(last.secs()));
+    elapsed
+        .is_none_or(|secs| secs >= PERIOD_SECS)
+        .then_some(Trigger::Periodic)
 }
 
 /// The trading date whose regular session opens within [`BEFORE_SESSION_SECS`] after `tick`.
 pub fn opening_soon(calendar: &ExchangeCalendar, tick: UtcNanos) -> Option<Date> {
-    todo!()
+    let (date, _) = mandate_time::new_york_date_and_hour(tick).ok()?;
+    let regular = calendar
+        .sessions(date)
+        .ok()?
+        .into_iter()
+        .find(|span| span.session() == Session::Regular)?;
+    let until = regular.start().secs().checked_sub(tick.secs())?;
+    (until > 0 && until <= BEFORE_SESSION_SECS).then_some(date)
 }
 
 /// `nanos` as §4.6 decimal seconds, from integers alone: no trailing fractional zero, no `-0`.
 pub fn seconds(nanos: i64) -> String {
-    todo!()
+    let sign = if nanos < 0 { "-" } else { "" };
+    let magnitude = nanos.unsigned_abs();
+    let whole = magnitude.checked_div(NANOS_PER_SEC).unwrap_or_default();
+    let part = magnitude.checked_rem(NANOS_PER_SEC).unwrap_or_default();
+    if part == 0 {
+        return format!("{sign}{whole}");
+    }
+    let fraction = format!("{part:09}");
+    format!("{sign}{whole}.{}", fraction.trim_end_matches('0'))
 }
 
 /// `nanos` as §4.6 decimal seconds, for the unsigned tolerance.
 pub fn tolerance_seconds(nanos: u64) -> String {
-    todo!()
+    seconds(i64::try_from(nanos).unwrap_or(i64::MAX))
 }

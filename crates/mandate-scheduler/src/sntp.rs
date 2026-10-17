@@ -27,14 +27,34 @@ pub struct Servers<C> {
 
 impl<C: Fn() -> UtcNanos> TimeServers for Servers<C> {
     fn ask(&mut self) -> Vec<Sample> {
-        todo!()
+        self.names
+            .iter()
+            .filter_map(|name| query(name, &self.now))
+            .collect()
     }
 }
 
 /// One server's answer, or `None` when it did not answer in [`TIMEOUT`], answered something that
 /// is not a server reply to this request, or flagged its clock unsynchronized.
 pub fn query(server: &str, now: &dyn Fn() -> UtcNanos) -> Option<Sample> {
-    todo!()
+    let address = format!("{server}:123").to_socket_addrs().ok()?.next()?;
+    let socket = UdpSocket::bind(if address.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    })
+    .ok()?;
+    socket.set_read_timeout(Some(TIMEOUT)).ok()?;
+    socket.connect(address).ok()?;
+    let sent = now();
+    let request = request(sent);
+    socket.send(&request).ok()?;
+    let mut reply = [0u8; PACKET];
+    let read = socket.recv(&mut reply).ok()?;
+    let received = now();
+    (read == PACKET)
+        .then(|| judge(server, &request, &reply, sent, received))
+        .flatten()
 }
 
 /// The request: the client's transmit time, which the server echoes as its originate time.
@@ -59,18 +79,46 @@ pub fn judge(
     sent: UtcNanos,
     received: UtcNanos,
 ) -> Option<Sample> {
-    todo!()
+    let first = *reply.first()?;
+    let unsynchronized = first >> 6 == 3;
+    if first & 0b111 != 4 || unsynchronized || reply.get(24..32)? != request.get(40..48)? {
+        return None;
+    }
+    let t1 = nanos(sent);
+    let t2 = from_ntp(reply.get(32..40)?)?;
+    let t3 = from_ntp(reply.get(40..48)?)?;
+    let t4 = nanos(received);
+    let offset = t1
+        .checked_sub(t2)?
+        .checked_add(t4.checked_sub(t3)?)?
+        .checked_div(2)?;
+    let delay = t4.checked_sub(t1)?.checked_sub(t3.checked_sub(t2)?)?;
+    Some(Sample {
+        server: server.to_owned(),
+        stratum: *reply.get(1)?,
+        offset_ns: i64::try_from(offset).ok()?,
+        delay_ns: i64::try_from(delay).ok()?,
+    })
 }
 
 fn nanos(at: UtcNanos) -> i128 {
-
-    todo!()
-
+    i128::from(at.secs())
+        .saturating_mul(NANOS_PER_SEC)
+        .saturating_add(i128::from(at.nanos()))
 }
 
 /// An NTP timestamp (seconds since 1900 and a 32-bit fraction) as nanoseconds since 1970.
 fn from_ntp(stamp: &[u8]) -> Option<i128> {
-    todo!()
+    let secs = u32::from_be_bytes(stamp.get(0..4)?.try_into().ok()?);
+    let fraction = u32::from_be_bytes(stamp.get(4..8)?.try_into().ok()?);
+    if secs == 0 && fraction == 0 {
+        return None;
+    }
+    let whole = i128::from(secs)
+        .checked_sub(UNIX_FROM_NTP)?
+        .checked_mul(NANOS_PER_SEC)?;
+    let part = i128::from(fraction).checked_mul(NANOS_PER_SEC)? >> 32;
+    whole.checked_add(part)
 }
 
 fn to_ntp(at: UtcNanos) -> Option<[u8; 8]> {
