@@ -1,4 +1,4 @@
-"""Mutation sweep over the envelope and command schemas (DEC-682 item 31).
+"""Mutation sweep over the envelope, command, and read-model schemas (DEC-682 item 31, DEC-979).
 
 Run from the repository root, in the reference environment:
 
@@ -28,6 +28,7 @@ HERE = ROOT / "schemas/workspace-api"
 FILES = [
     "envelope.schema.json",
     *sorted(f"commands/{p.name}" for p in (HERE / "commands").glob("*.schema.json")),
+    *sorted(f"read-models/{p.name}" for p in (HERE / "read-models").glob("*.schema.json")),
 ]
 
 CHECKERS = ["check_examples.py", "check_planned.py", "check_lenient.py"]
@@ -45,6 +46,9 @@ DELIBERATE: dict[str, str] = {
     "envelope.schema.json/$defs/Problem/allOf/23/then/properties/effect/enum gains a value": "`effect` is also `Effect`, whose own enum refuses any added value",
     "envelope.schema.json/$defs/Problem/allOf/24/then/properties/effect/enum gains a value": "`effect` is also `Effect`, whose own enum refuses any added value",
     "envelope.schema.json/$defs/Problem/allOf/25/then/properties/effect/enum gains a value": "`effect` is also `Effect`, whose own enum refuses any added value",
+    "read-models/backtest.schema.json/$defs/Backtest/allOf/0/if/required drops state": "`state` is required by `Backtest` itself, so an instance without it fails whatever the `if` reads (DEC-1001)",
+    "read-models/backtest.schema.json/$defs/Backtest/allOf/1/if/required drops state": "`state` is required by `Backtest` itself, so an instance without it fails whatever the `if` reads (DEC-1001)",
+    "read-models/backtest.schema.json/$defs/Backtest/allOf/2/if/required drops state": "`state` is required by `Backtest` itself, so an instance without it fails whatever the `if` reads (DEC-1001)",
 }
 
 
