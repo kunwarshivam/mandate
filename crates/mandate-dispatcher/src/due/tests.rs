@@ -174,7 +174,6 @@ fn wait(secs: i64) -> Result<Option<Next>, Box<dyn Error>> {
 /// Spec §5.1 step 3 and §5.3 "at once": a notice with no attempt is due at once, as attempt 1 on
 /// every configured channel of every recipient it lists, each under its own key.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_notice_with_no_attempt_is_due_at_once_as_attempt_1_on_each_channel() -> Checked {
     let stream = safety()?;
     let listed = due(&stream.rows, &AUDIENCE, at(0)?)?;
@@ -202,7 +201,6 @@ fn a_notice_with_no_attempt_is_due_at_once_as_attempt_1_on_each_channel() -> Che
 /// exactly that instant; at it, attempt n + 1 is due under the same key. An attempt made late (attempt
 /// 2 here, 5 s after it was due) moves the schedule with it.
 #[test]
-#[ignore = "pending E8-10"]
 fn after_each_retryable_failure_the_next_attempt_waits_15_s_60_s_5_min_then_15_min() -> Checked {
     let mut stream = safety()?;
     let email = PushChannel::Email;
@@ -235,7 +233,6 @@ fn after_each_retryable_failure_the_next_attempt_waits_15_s_60_s_5_min_then_15_m
 /// `abandoned`, and `failed` with the verdict `permanent` are terminal, so that send is no longer
 /// listed at any later instant; the other channel's `retryable` failure leaves it due.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_terminal_attempt_ends_its_send_and_leaves_the_other_channel_due() -> Checked {
     let ends = [
         ("delivered", ""),
@@ -267,7 +264,6 @@ fn a_terminal_attempt_ends_its_send_and_leaves_the_other_channel_due() -> Checke
 /// `too_large` retry when `retryable` and stop when `permanent`; `timeout` and `rate_limited`
 /// always retry.
 #[test]
-#[ignore = "pending E8-10"]
 fn the_verdict_decides_whether_a_send_is_retried_not_its_reason() -> Checked {
     let cases = [
         ("timeout", true),
@@ -293,7 +289,6 @@ fn the_verdict_decides_whether_a_send_is_retried_not_its_reason() -> Checked {
 /// DEC-706 item 6: a stored version-1 `failed` attempt, even for `timeout`, reads as `permanent`,
 /// so its send is finished; nothing is sent again on a guess.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_stored_version_1_failed_attempt_reads_as_permanent() -> Checked {
     let mut stream = safety()?;
     let payload = format!(
@@ -314,7 +309,6 @@ fn a_stored_version_1_failed_attempt_reads_as_permanent() -> Checked {
 /// 1 waits until the window's end and is abandoned, as the attempt after its last, at the first
 /// instant at or after that end; never before.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_safety_send_is_abandoned_at_the_windows_end_and_never_before() -> Checked {
     let mut stream = safety()?;
     for (n, secs) in [(1, 0), (2, 100), (3, 200), (4, 85_501)] {
@@ -333,7 +327,6 @@ fn a_safety_send_is_abandoned_at_the_windows_end_and_never_before() -> Checked {
 
 /// DEC-725 item 6.2: an attempt due exactly at the window's end is made, under the same key.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_attempt_due_exactly_at_the_windows_end_is_made() -> Checked {
     let mut stream = safety()?;
     for (n, secs) in [(1, 0), (2, 100), (3, 200), (4, 85_500)] {
@@ -349,7 +342,6 @@ fn an_attempt_due_exactly_at_the_windows_end_is_made() -> Checked {
 /// after the window's end (it was down); only then, with no retry left inside the window, is the
 /// send abandoned, at the next instant asked.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_attempt_due_inside_the_window_is_made_late_and_the_send_then_abandoned() -> Checked {
     let mut stream = safety()?;
     for (n, secs) in [(1, 0), (2, 100), (3, 200), (4, 85_000)] {
@@ -366,7 +358,6 @@ fn an_attempt_due_inside_the_window_is_made_late_and_the_send_then_abandoned() -
 /// Spec §5.3: an `info` send's window is 6 hours from attempt 1. Due exactly at its end is made;
 /// due one second after is abandoned at the end, and not before.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_info_sends_window_is_6_hours() -> Checked {
     let email = PushChannel::Email;
     for (last, at_end) in [
@@ -393,7 +384,6 @@ fn an_info_sends_window_is_6_hours() -> Checked {
 /// is never abandoned: it keeps §5.3's schedule however long its retries run, so no approval
 /// notice is dropped early.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_action_send_is_never_abandoned_before_slice_d7() -> Checked {
     let mut stream = Stream::default();
     stream.issued(N1, "approval_requested", "action", &["founder"])?;
@@ -411,7 +401,6 @@ fn an_action_send_is_never_abandoned_before_slice_d7() -> Checked {
 /// DEC-725 item 6.1 and DEC-707: each attempt is timed by its own record's `event_time`, never
 /// by the journal's `recorded_at`; a skew between them moves nothing.
 #[test]
-#[ignore = "pending E8-10"]
 fn each_attempt_is_timed_by_its_records_event_time() -> Checked {
     for skew in [-3_600, 0, 7, 3_600] {
         let mut stream = Stream {
@@ -435,7 +424,6 @@ fn each_attempt_is_timed_by_its_records_event_time() -> Checked {
 /// its own schedule and its own key; a channel the audience does not configure and a recipient the
 /// notice does not list have no send; a second notice to the same address has another key.
 #[test]
-#[ignore = "pending E8-10"]
 fn each_send_keeps_its_own_schedule_and_key() -> Checked {
     let mut stream = Stream::default();
     stream.issued(N1, "risk_limit", "safety", &["u_1", "u_2"])?;
@@ -502,7 +490,6 @@ fn each_send_keeps_its_own_schedule_and_key() -> Checked {
 /// Spec §3.1: an `info` kind other than the brief goes only to the pull channels, so it has no
 /// push send to be due.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_kind_that_pushes_nothing_has_no_send() -> Checked {
     let mut stream = Stream::default();
     stream.issued(N1, "delegation_ended", "info", &["founder"])?;

@@ -61,10 +61,13 @@ pub enum JournaledFact {
         connection_id: ConnectionId,
         equity_usd: Usd,
     },
-    /// `ConnectionEstablished`: the environment the connection actually is (V-001).
+    /// `ConnectionEstablished`: the environment the connection actually is (V-001), and the broker
+    /// it names, whose capability profile says which classes a stop-limit protects (V-008, W-002;
+    /// DEC-539 item 2). A record naming no broker leaves the profile absent.
     ConnectionEstablished {
         connection_id: ConnectionId,
         environment: Environment,
+        broker: Option<String>,
     },
     /// `ConnectionRevoked`: the connection's environment is no longer known, and neither is its equity,
     /// so V-001 and V-002 both refuse until the connection is established and snapshotted again.
@@ -156,6 +159,11 @@ impl JournaledFact {
                     "live" => Environment::Live,
                     _ => return Err(malformed("environment")),
                 },
+                broker: payload
+                    .get("broker")
+                    .and_then(Value::as_str)
+                    .filter(|broker| !broker.is_empty())
+                    .map(str::to_owned),
             },
             "ConnectionRevoked" => Self::ConnectionRevoked {
                 connection_id: record.connection("connection_id")?,
@@ -537,6 +545,7 @@ struct VersionInForce {
 struct Fold {
     equity: BTreeMap<ConnectionId, Usd>,
     environment: BTreeMap<ConnectionId, Environment>,
+    brokers: BTreeMap<ConnectionId, String>,
     disclosures: BTreeSet<Digest>,
     agents: BTreeMap<AgentId, AgentState>,
     retirements: Vec<(ConnectionId, Date, Usd)>,
@@ -557,11 +566,17 @@ impl Fold {
             JournaledFact::ConnectionEstablished {
                 connection_id,
                 environment,
+                broker,
             } => {
                 self.environment.insert(connection_id.clone(), *environment);
+                match broker {
+                    Some(broker) => self.brokers.insert(connection_id.clone(), broker.clone()),
+                    None => self.brokers.remove(connection_id),
+                };
             }
             JournaledFact::ConnectionRevoked { connection_id } => {
                 self.environment.remove(connection_id);
+                self.brokers.remove(connection_id);
                 self.equity.remove(connection_id);
             }
             JournaledFact::DisclosureAccepted { version } => {
@@ -740,7 +755,37 @@ impl Fold {
             eligibility_failures: args.eligibility_failures,
             previous_version,
             current_mandate_version,
+            stop_limit_asset_classes: self
+                .brokers
+                .get(ours)
+                .and_then(|broker| stop_limit_asset_classes(broker)),
         })
+    }
+}
+
+/// The classes a stop-limit protects for a mandate whose connection the control stream records
+/// nothing about: Phase 1's paper connections journal no `ConnectionEstablished` and are Alpaca's,
+/// the only paper broker (DEC-969 item 6, LT-14), so a paper mandate reads Alpaca's row; a live
+/// connection cannot be recorded without its record (journal spec §9.8 rule 68), so a live mandate
+/// reads the profile absent, which fails closed.
+pub fn unrecorded_stop_limit_asset_classes(mandate: &Mandate) -> Option<BTreeSet<AssetClass>> {
+    match mandate.environment {
+        Environment::Paper => stop_limit_asset_classes("alpaca"),
+        Environment::Live => None,
+    }
+}
+
+/// The classes `broker`'s capability profile protects with a stop-limit, DEC-539 item 2's fixed table
+/// until validation is given the profile itself: Alpaca protects crypto with a stop-limit and
+/// equities with OCO or bracket legs (trading spec §5.1, §5.4); Robinhood protects equities with a
+/// stop-limit (DEC-529 item 7), and its crypto, which no Robinhood connection trades, counts as one
+/// too. Any other broker is `None`, the absent profile, under which every class counts (fail closed,
+/// mandate spec §4).
+pub fn stop_limit_asset_classes(broker: &str) -> Option<BTreeSet<AssetClass>> {
+    match broker {
+        "alpaca" => Some(BTreeSet::from([AssetClass::Crypto])),
+        "robinhood" => Some(BTreeSet::from([AssetClass::Crypto, AssetClass::UsEquity])),
+        _ => None,
     }
 }
 
@@ -1217,6 +1262,7 @@ mod record_tests {
                 Some(JournaledFact::ConnectionEstablished {
                     connection_id: ConnectionId::parse("conn_1")?,
                     environment,
+                    broker: Some("alpaca".to_owned()),
                 }),
                 "{label}"
             );

@@ -1,0 +1,36 @@
+# The run against Cloudflare R2 that tests the object store finding of DEC-973 item 5 (E21-40):
+# on demand, from `main` only, in the `production` environment, which holds R2's key and the
+# Cloudflare API token and is restricted to `main`; never from a pull request (ES-12). It creates a
+# scratch bucket, never the cell's, and deletes it at the end (crates/mandate-objectstore/README.md).
+name: r2-lockcheck
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  r2-lockcheck:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Run the R2 finding against a scratch bucket
+        env:
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: cargo run --locked --package mandate-objectstore --example r2_finding

@@ -3856,6 +3856,7 @@ mod tests {
                 eligibility_failures: BTreeSet::new(),
                 previous_version: None,
                 current_mandate_version: None,
+                stop_limit_asset_classes: None,
             },
             policies: Vec::new(),
             author: String::new(),

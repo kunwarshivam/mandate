@@ -53,6 +53,18 @@ paths = ['''^crates/mandate-alpaca/tests/common/mod\.rs$''']
 regexTarget = "match"
 regexes = ['''^PKSENTINELTRADING000$''']
 
+# Amazon's published example access key ID, from the worked SigV4 examples of the S3
+# documentation, which the object store's signer is tested against (E21-40, DEC-973). It matches the
+# Alpaca key-ID shape. Allowed only as that exact value and only in the signer's test file, so a
+# real key there, or the example anywhere else, is still reported.
+[[allowlists]]
+description = "Amazon's documented SigV4 example key ID"
+targetRules = ["alpaca-key-id"]
+condition = "AND"
+paths = ['''^crates/mandate-objectstore/tests/sigv4\.rs$''']
+regexTarget = "match"
+regexes = ['''^AKIAIOSFODNN7EXAMPLE$''']
+
 # The web palette's `lapis` token rows (DEC-204 to DEC-217): `lapis` contains "api", so the
 # generic key heuristic reads the design-source table's quoted ramp refs as credentials —
 # `lapis-soft": "ultramarine-100"` in the old Ink-and-Ultramarine commits of 2026-09-28/29,
@@ -91,3 +103,16 @@ condition = "AND"
 paths = ['''^deploy/tests/test_invariants\.py$''']
 regexTarget = "match"
 regexes = ['''^[a-z-]+\.service", "[A-Za-z]+=(?:[A-Za-z0-9]*"|\\n)$''']
+
+# The API server's process test names its workspace and organization settings beside their
+# ULIDs (`MANDATE_API_WORKSPACE` contains "api"), which the generic key heuristic reads as a key
+# assignment (E21-31, DEC-978 item 8). A ULID is an opaque public identifier. Allowed only in that
+# test file and only in the `MANDATE_API_(WORKSPACE|ORG)", "<ULID>"` shape, so any other value
+# there, and the same text anywhere else, is still reported.
+[[allowlists]]
+description = "Workspace and organization ULID settings in the API server's process test"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^crates/mandate-api-server/tests/process\.rs$''']
+regexTarget = "match"
+regexes = ['''^MANDATE_API_(?:WORKSPACE|ORG)", "[0-7][0-9A-HJKMNP-TV-Z]{25}"$''']
