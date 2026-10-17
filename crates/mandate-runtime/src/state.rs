@@ -78,13 +78,13 @@ pub struct RuntimeState {
     connection_check: Option<ConnectionCheck>,
     /// The account stream's `OrderRequestRecorded` events that name an intent, by event id: what
     /// links an `OrderSubmitted`, whose `causation_id` is its request (journal spec §9.5 rule 45),
-    /// or at version 1 the intent itself, to the intent it sends (DEC-1006 item 4).
+    /// or at version 1 the intent itself, to the intent it sends (DEC-1150 item 4).
     requests: BTreeMap<EventId, EventId>,
     /// Each order the account stream has submitted for an intent, by client order id, a
     /// replacement following the order it replaced.
     orders_of: BTreeMap<String, EventId>,
     /// The intents whose order or decision the account stream has ended: a binding-gate deny, an
-    /// abandonment, or a terminal state of its order. Nothing else ends one (DEC-1006 item 4).
+    /// abandonment, or a terminal state of its order. Nothing else ends one (DEC-1150 item 4).
     ended: BTreeSet<EventId>,
 }
 
@@ -417,7 +417,7 @@ impl RuntimeState {
     /// Whether an opening or increase this runtime proposed in `instrument` is still working: its
     /// intent committed and nothing on the account stream has ended it. Trading spec §5.3 rule 6
     /// allows one working non-protective order per instrument, so another opening there waits for
-    /// it to end (DEC-1006 item 5). Read for openings and increases alone, never for an exit
+    /// it to end (DEC-1150 item 5). Read for openings and increases alone, never for an exit
     /// (`AGENTS.md` rule 13).
     pub(crate) fn opening_works_in(&self, instrument: &InstrumentId) -> bool {
         self.outstanding.values().any(|live| {
@@ -789,7 +789,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
 
 /// An `OrderStateChanged` of an order the runtime follows: a terminal state ends its intent, and a
 /// replacement passes the intent to the order that replaced it. A record that names no order,
-/// no state, or an order this runtime did not submit ends nothing (DEC-1006 item 4).
+/// no state, or an order this runtime did not submit ends nothing (DEC-1150 item 4).
 fn order_state_changed(state: &mut RuntimeState, payload: &Value) {
     let (Some(order), Some(to)) = (
         payload::str_of(payload, "client_order_id"),

@@ -653,7 +653,7 @@ fn a_restart_lists_an_unknown_order_on_a_no_query_profile() {
     one_listing(&ran, &id, "restart");
 }
 
-/// R0's R18 (DEC-1006 items 1 and 2): a working order — accepted at the broker, its cancel asked
+/// R0's R18 (DEC-1150 items 1 and 2): a working order — accepted at the broker, its cancel asked
 /// and refused — on a profile that cannot query by client order id. Its doubt is asked by the
 /// profile's own listing, never by a query the connector refuses unsent, and the listing's answer
 /// is adopted only from the one record that names it by our own id.

@@ -547,7 +547,7 @@ fn decide(
 /// cover is denied `account_restricted` before the gate is asked, as trading spec §7.3 row 5
 /// denies one on a connection that is not usable, and one in an instrument where an opening this
 /// runtime proposed still works is denied `working_order_limit` (trading spec §5.3 rule 6,
-/// DEC-1006 item 5); every other proposal, and every exit whatever either says, is the gate's to
+/// DEC-1150 item 5); every other proposal, and every exit whatever either says, is the gate's to
 /// judge (`AGENTS.md` rule 13, DEC-969 item 4).
 pub(crate) fn dry_run(
     state: &RuntimeState,

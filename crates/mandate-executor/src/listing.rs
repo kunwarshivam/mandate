@@ -82,7 +82,7 @@ fn ledger_current(view: &ExecutorState, entry: &ClientOrderId) -> bool {
 /// asked and the order stays `Unknown`. An order in any other state, which the broker has already
 /// described to us, is listed the same way on any account, and only the record naming it by our
 /// own id is ever adopted for it ([`listed`]), so no query the connector refuses unsent is asked
-/// (DEC-1006 item 1).
+/// (DEC-1150 item 1).
 pub(crate) fn query_unknown(
     batch: &mut Batch<'_, '_>,
     id: ClientOrderId,
@@ -189,7 +189,7 @@ fn matches(
 /// through §5.7's table, and zero or several leave it as it was with nothing sent. For an
 /// `Unknown` order a record carrying no client order id may match (DEC-863); for one in any other
 /// state only a record naming it by our own id does, never a look-alike, so a working order is
-/// never taken as filled or gone on a guess (DEC-1006 item 2).
+/// never taken as filled or gone on a guess (DEC-1150 item 2).
 pub(crate) fn listed(
     batch: &mut Batch<'_, '_>,
     raw: &str,

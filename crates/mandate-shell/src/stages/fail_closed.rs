@@ -935,7 +935,7 @@ fn a_denied_run_leaves_no_cycle_open() -> Result<(), String> {
 
 /// Only `--new-cycle` starts another cycle, and it is a new intent with a new id, never the old
 /// one resubmitted. The first cycle's order fills before the second starts: while it works,
-/// trading spec §5.3 rule 6 holds another opening in its instrument (DEC-1006 item 5).
+/// trading spec §5.3 rule 6 holds another opening in its instrument (DEC-1150 item 5).
 #[test]
 fn a_new_cycle_is_a_new_intent_with_a_new_id() -> Result<(), String> {
     let world = World::default();

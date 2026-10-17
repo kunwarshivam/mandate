@@ -491,7 +491,7 @@ fn an_unknown_order_is_adopted_on_the_restart_and_never_placed_again() {
 /// DEC-529 item 4 and trading spec §5.3 rules 6 and 9: a place that never reached the broker lists
 /// nothing on the restart, so the order stays `Unknown`; the restart reconciles, runs its cycle
 /// on the same rising closes, and places no opening in SPY while the order is `Unknown`: the
-/// runtime's dry run holds it, since the first opening still works (DEC-1006 item 5).
+/// runtime's dry run holds it, since the first opening still works (DEC-1150 item 5).
 #[test]
 fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
     let server = broker(false);
@@ -564,7 +564,7 @@ fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
         decided.last(),
         Some(&("deny".to_owned(), "working_order_limit".to_owned())),
         "the restart's opening is held while the Unknown one works, by the runtime's dry run \
-         (trading spec §5.3 rule 6, DEC-1006 item 5): {decided:?}"
+         (trading spec §5.3 rule 6, DEC-1150 item 5): {decided:?}"
     );
     assert_eq!(
         gates.len(),
