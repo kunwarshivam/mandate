@@ -94,7 +94,7 @@ fn wire(name: &str, arguments: &str) -> WireCall {
 }
 
 #[test]
-fn a_replys_calls_are_validated_against_the_offered_tools_in_reply_order() {
+fn the_calls_of_a_reply_are_validated_against_the_offered_tools_in_reply_order() {
     let bars = tool("market.bars", ToolClass::Read, BARS_ARGS, &["ideate"]);
     let note = tool("note", ToolClass::Think, NOTE_ARGS, &["ideate"]);
     let offered = [&bars, &note];
