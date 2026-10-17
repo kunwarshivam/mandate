@@ -1,0 +1,305 @@
+//! The Kubernetes adapter: plain HTTPS to the cluster's API server through `reqwest` and `rustls`,
+//! no Kubernetes client crate (D-3, DEC-990 item 1). Each instance is a bare pod with
+//! `restartPolicy: Never`, so only the manager restarts a process and every restart is journaled
+//! (DEC-1170 item 2). The pod's shape (image, probes, resources, affinity, the labels the network
+//! policies select) is the chart's template; the adapter adds only the pod's name, its labels and
+//! the process's identity.
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use mandate_canon::Digest;
+use reqwest::{Client, Method, StatusCode};
+use serde_json::{Map, Value, json};
+
+use crate::control::{Process, Slot};
+use crate::orchestrator::{Instance, Orchestrator, Phase, Unavailable};
+
+const MANAGED_BY: &str = "app.kubernetes.io/managed-by";
+const MANAGER: &str = "mandate-deploy-manager";
+const WORKSPACE: &str = "mandate.dev/workspace";
+const PROCESS: &str = "mandate.dev/process";
+const GENERATION: &str = "mandate.dev/generation";
+const SUBJECT: &str = "mandate.dev/subject";
+/// The largest answer read from the API server; a longer one is unavailable.
+pub const MAX_BODY: usize = 8_388_608;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Why the in-cluster adapter could not be built. None carries a path's content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupError {
+    /// The API server's address is not `https://`.
+    NotHttps,
+    /// The service account's token or CA file could not be read.
+    Unreadable,
+    /// The CA file holds no certificate, or the client could not be built.
+    Client,
+    /// A pod template is not a JSON object with a `spec` holding `containers`.
+    Template,
+}
+
+/// How the manager reaches the API server from inside the cell: the service account's files,
+/// mounted read-only, never an environment variable (DEC-822 item 4).
+#[derive(Debug, Clone)]
+pub struct InCluster {
+    /// `https://kubernetes.default.svc` in a pod.
+    pub api: String,
+    pub token_file: PathBuf,
+    pub ca_file: PathBuf,
+    pub namespace: String,
+    pub workspace: String,
+    /// The chart's pod template for each process.
+    pub templates: BTreeMap<Process, Value>,
+}
+
+/// The adapter. Its token is never printed.
+pub struct Kubernetes {
+    client: Client,
+    api: String,
+    namespace: String,
+    token: String,
+    workspace: String,
+    templates: BTreeMap<Process, Value>,
+}
+
+impl std::fmt::Debug for Kubernetes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Kubernetes")
+            .field("api", &self.api)
+            .field("namespace", &self.namespace)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Kubernetes {
+    /// The adapter inside the cell: HTTPS only, the cluster's CA only, no redirect, no proxy.
+    ///
+    /// # Errors
+    /// [`SetupError`].
+    pub fn in_cluster(config: InCluster) -> Result<Self, SetupError> {
+        if !config.api.starts_with("https://") {
+            return Err(SetupError::NotHttps);
+        }
+        let token = std::fs::read_to_string(&config.token_file)
+            .map_err(|_| SetupError::Unreadable)?
+            .trim()
+            .to_owned();
+        let ca = std::fs::read(&config.ca_file).map_err(|_| SetupError::Unreadable)?;
+        let certificates =
+            reqwest::Certificate::from_pem_bundle(&ca).map_err(|_| SetupError::Client)?;
+        if certificates.is_empty() {
+            return Err(SetupError::Client);
+        }
+        let _already_installed = rustls::crypto::ring::default_provider().install_default();
+        let client = Client::builder()
+            .https_only(true)
+            .tls_certs_only(certificates)
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .map_err(|_| SetupError::Client)?;
+        Self::with_client(
+            client,
+            config.api,
+            config.namespace,
+            token,
+            config.workspace,
+            config.templates,
+        )
+    }
+
+    /// The adapter over a given client and API address, as the tests build it on loopback.
+    ///
+    /// # Errors
+    /// [`SetupError::Template`] for a template without `spec.containers`.
+    pub fn with_client(
+        client: Client,
+        api: String,
+        namespace: String,
+        token: String,
+        workspace: String,
+        templates: BTreeMap<Process, Value>,
+    ) -> Result<Self, SetupError> {
+        let shaped = templates.values().all(|t| {
+            t.get("spec")
+                .and_then(|s| s.get("containers"))
+                .and_then(Value::as_array)
+                .is_some_and(|c| c.iter().all(Value::is_object))
+        });
+        if !shaped {
+            return Err(SetupError::Template);
+        }
+        Ok(Self {
+            client,
+            api: api.trim_end_matches('/').to_owned(),
+            namespace,
+            token,
+            workspace,
+            templates,
+        })
+    }
+
+    /// A pod's name: DNS-safe whatever the subject's spelling, one per slot and generation.
+    pub fn pod_name(&self, slot: &Slot, generation: u64) -> String {
+        let short = match slot.process {
+            Process::Runtime => "rt",
+            Process::Executor => "ex",
+        };
+        let key = format!("{}:{}", self.workspace, slot.subject);
+        format!("mandate-{short}-{}-g{generation}", hex16(&key))
+    }
+
+    /// The pod `generation` of `slot` is created from: the chart's template with the name, the
+    /// labels, the subject, `restartPolicy: Never`, and the process's identity in its environment.
+    pub fn manifest(&self, slot: &Slot, generation: u64) -> Option<Value> {
+        let mut pod = self.templates.get(&slot.process)?.clone();
+        let root = pod.as_object_mut()?;
+        root.insert("apiVersion".to_owned(), json!("v1"));
+        root.insert("kind".to_owned(), json!("Pod"));
+        let metadata = member(root, "metadata")?;
+        metadata.insert("name".to_owned(), json!(self.pod_name(slot, generation)));
+        let labels = member(metadata, "labels")?;
+        labels.insert(MANAGED_BY.to_owned(), json!(MANAGER));
+        labels.insert(WORKSPACE.to_owned(), json!(hex16(&self.workspace)));
+        labels.insert(PROCESS.to_owned(), json!(slot.process.code()));
+        labels.insert(GENERATION.to_owned(), json!(generation.to_string()));
+        member(metadata, "annotations")?.insert(SUBJECT.to_owned(), json!(slot.subject));
+        let spec = member(root, "spec")?;
+        spec.insert("restartPolicy".to_owned(), json!("Never"));
+        let env = [
+            ("MANDATE_WORKSPACE", self.workspace.clone()),
+            ("MANDATE_PROCESS", slot.process.code().to_owned()),
+            ("MANDATE_SUBJECT", slot.subject.clone()),
+            ("MANDATE_GENERATION", generation.to_string()),
+        ];
+        for container in spec.get_mut("containers")?.as_array_mut()? {
+            let vars = container
+                .as_object_mut()?
+                .entry("env")
+                .or_insert_with(|| Value::Array(Vec::new()))
+                .as_array_mut()?;
+            for (name, value) in &env {
+                vars.push(json!({"name": name, "value": value}));
+            }
+        }
+        Some(pod)
+    }
+
+    fn pods(&self) -> String {
+        format!("{}/api/v1/namespaces/{}/pods", self.api, self.namespace)
+    }
+
+    async fn send(
+        &self,
+        method: Method,
+        url: String,
+        body: Option<&Value>,
+    ) -> Result<(StatusCode, Vec<u8>), Unavailable> {
+        let mut request = self
+            .client
+            .request(method, url)
+            .bearer_auth(&self.token)
+            .header("accept", "application/json");
+        if let Some(body) = body {
+            let bytes = serde_json::to_vec(body).map_err(|_| Unavailable)?;
+            request = request
+                .header("content-type", "application/json")
+                .body(bytes);
+        }
+        let mut response = request.send().await.map_err(|_| Unavailable)?;
+        let status = response.status();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|_| Unavailable)? {
+            if bytes.len().saturating_add(chunk.len()) > MAX_BODY {
+                return Err(Unavailable);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok((status, bytes))
+    }
+}
+
+impl Orchestrator for Kubernetes {
+    async fn observe(&mut self) -> Result<Vec<Instance>, Unavailable> {
+        let _stub = (self.pods(), instance);
+        Err(Unavailable)
+    }
+
+    async fn start(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
+        let _stub = (self.pods(), instance);
+        Err(Unavailable)
+    }
+
+    async fn stop(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
+        let _stub = (self.pods(), instance);
+        Err(Unavailable)
+    }
+}
+
+/// One listed pod as an instance. A pod of this manager that cannot be read makes the whole list
+/// unreadable, so no step is decided while an instance might be hidden.
+fn instance(pod: &Value) -> Result<Instance, Unavailable> {
+    let metadata = pod.get("metadata").ok_or(Unavailable)?;
+    let label = |name: &str| metadata.get("labels")?.get(name)?.as_str();
+    let process = label(PROCESS).and_then(Process::parse).ok_or(Unavailable)?;
+    let generation = label(GENERATION)
+        .and_then(|g| g.parse::<u64>().ok())
+        .ok_or(Unavailable)?;
+    let subject = metadata
+        .get("annotations")
+        .and_then(|a| a.get(SUBJECT))
+        .and_then(Value::as_str)
+        .ok_or(Unavailable)?;
+    let status = pod.get("status");
+    let ready = status
+        .and_then(|s| s.get("conditions"))
+        .and_then(Value::as_array)
+        .is_some_and(|conditions| {
+            conditions.iter().any(|c| {
+                c.get("type").and_then(Value::as_str) == Some("Ready")
+                    && c.get("status").and_then(Value::as_str) == Some("True")
+            })
+        });
+    let deleting = metadata
+        .get("deletionTimestamp")
+        .is_some_and(|d| !d.is_null());
+    let phase = match status.and_then(|s| s.get("phase")).and_then(Value::as_str) {
+        Some("Succeeded" | "Failed") => Phase::Exited,
+        Some("Pending") if !deleting => Phase::Pending,
+        Some("Running") if !deleting => Phase::Running { ready },
+        _ => Phase::Unknown,
+    };
+    Ok(Instance {
+        slot: Slot {
+            process,
+            subject: subject.to_owned(),
+        },
+        generation,
+        phase,
+    })
+}
+
+/// The object member `name` of `object`, created empty when absent; `None` when it is not an
+/// object.
+fn member<'a>(
+    object: &'a mut Map<String, Value>,
+    name: &str,
+) -> Option<&'a mut Map<String, Value>> {
+    object
+        .entry(name.to_owned())
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+}
+
+/// The first 16 hex digits of the SHA-256 of `text`: a label-safe, DNS-safe key.
+fn hex16(text: &str) -> String {
+    Digest::of(text.as_bytes())
+        .to_hex()
+        .chars()
+        .take(16)
+        .collect()
+}

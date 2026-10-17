@@ -30,6 +30,11 @@
 /crates/mandate-api/        @kunwarshivam
 /crates/mandate-approval/   @kunwarshivam
 /crates/mandate-artifacts-fs/ @kunwarshivam
+/crates/mandate-process/    @kunwarshivam
+/crates/mandate-deploy-manager/ @kunwarshivam
+/crates/mandate-webpush/    @kunwarshivam
+/crates/mandate-push-relay/ @kunwarshivam
+/crates/mandate-dispatcher/ @kunwarshivam
 /crates/mandate-audit/      @kunwarshivam
 /crates/mandate-authn/      @kunwarshivam
 /crates/mandate-backtest/   @kunwarshivam

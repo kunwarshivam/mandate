@@ -254,6 +254,11 @@ to the journal.
 Restart policy: always restart, with exponential back-off. After a crash loop (Proposed: five
 restarts in ten minutes), the deployment manager leaves the agent `Paused` and alerts; it does not
 keep restarting a process that crashes during recovery (HLD lifecycle: `Recovering` → `Paused`).
+The deployment manager starts every process itself (the orchestrator never restarts one), and
+journals each start, stop and crash loop on the control stream before acting (journal spec §9.21,
+[DEC-1170](../project/decisions/DEC-1170.md)): a restart is a `ProcessStartIssued` with `cause`
+`restart`, which the bound counts, and the pause is `ProcessCrashLooped`. A kill switch never
+makes it stop a process, and a process the switch covers that is down is started at once.
 
 **At most one writer is the fence's job.** The orchestrator may briefly run two copies of a
 process (a partition, a slow termination, a manual mistake). Safety does not depend on it: a new
