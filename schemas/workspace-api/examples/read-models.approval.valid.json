@@ -1,0 +1,65 @@
+[
+  {
+    "label": "state acted",
+    "set": {
+      "/approval/state": "acted"
+    }
+  },
+  {
+    "label": "state skipped",
+    "set": {
+      "/approval/state": "skipped"
+    }
+  },
+  {
+    "label": "state timed_out",
+    "set": {
+      "/approval/state": "timed_out"
+    }
+  },
+  {
+    "label": "state canceled",
+    "set": {
+      "/approval/state": "canceled"
+    }
+  },
+  {
+    "label": "a deadline of zero",
+    "set": {
+      "/approval/deadline": 0
+    }
+  },
+  {
+    "label": "an empty content object",
+    "set": {
+      "/approval/content": {}
+    }
+  },
+  {
+    "label": "a version-1 request: no time in force or protection",
+    "set": {
+      "/approval/order/tif": null,
+      "/approval/order/protection": null
+    }
+  },
+  {
+    "label": "protection with a take profit",
+    "set": {
+      "/approval/order/protection/take_profit": "112"
+    }
+  },
+  {
+    "label": "a crypto increase",
+    "set": {
+      "/approval/order/asset_class": "crypto",
+      "/approval/order/purpose": "increase",
+      "/approval/order/tif": "ioc"
+    }
+  },
+  {
+    "label": "a good-till-cancelled order",
+    "set": {
+      "/approval/order/tif": "gtc"
+    }
+  }
+]
