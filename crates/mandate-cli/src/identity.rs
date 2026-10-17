@@ -63,6 +63,12 @@ const FILE_MODE: u32 = 0o644;
 /// The mode bits that make a file group- or world-writable, which the server refuses.
 const OTHERS_WRITE: u32 = 0o022;
 
+/// Whether the server trusts a file with this owner and mode, read by a process running as `own`:
+/// the file is owned by that user or by root, and neither its group nor others may write it.
+fn trusted(owner: u32, own: u32, mode: u32) -> bool {
+    (owner == own || owner == 0) && mode & OTHERS_WRITE == 0
+}
+
 fn refused(reason: &'static str) -> ControlError {
     ControlError::Refused { reason }
 }
@@ -235,10 +241,7 @@ fn staged(
     let own = file.metadata().map_err(|e| io_error("inspect", &e))?.uid();
     let existing = match fs::symlink_metadata(path) {
         Ok(meta) => {
-            let trusted = meta.file_type().is_file()
-                && (meta.uid() == own || meta.uid() == 0)
-                && meta.mode() & OTHERS_WRITE == 0;
-            if !trusted {
+            if !(meta.file_type().is_file() && trusted(meta.uid(), own, meta.mode())) {
                 return Err(refused("links_unsafe"));
             }
             fs::read_to_string(path).map_err(|e| io_error("read", &e))?
@@ -269,3 +272,6 @@ fn staged(
 fn io_error(what: &str, error: &io::Error) -> ControlError {
     ControlError::Journal(format!("the subject-link file: {what}: {}", error.kind()))
 }
+
+#[cfg(test)]
+mod tests;
