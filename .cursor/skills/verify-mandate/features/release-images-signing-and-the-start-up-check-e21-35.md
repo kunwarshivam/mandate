@@ -7,8 +7,9 @@
   `check_running`, `RELEASE_KEYS`); `mandate-agentd`'s `main` runs the check first;
   `xtask/src/image.rs` (the OCI layout of one binary, `push` over the distribution API, `unpack`);
   `xtask/src/release.rs` (`release images [--test-sign]`, `release drill`, `release publish`,
-  cosign pinned); `.github/workflows/release.yml` (`build-a` builds and drills the images,
-  `publish` on a push to `main` only).
+  `release publish-index`, cosign pinned; `Arch`: amd64 and arm64, each built natively, DEC-1060);
+  `.github/workflows/release.yml` (each arch's `build-a` builds and drills its images; on a push to
+  `main` only, `publish-amd64`, `publish-arm64`, then `publish-index` over them).
 - **Tests:** `crates/mandate-release/tests/startup.rs`: a release key starts everywhere; unsigned
   only in dev and CI; a test key only in dev and CI; a wrong, truncated or other-binary signature
   refused in every tier; no release key compiled in yet; a signature cosign itself wrote verifies
@@ -19,7 +20,8 @@
   the image is a pure function of its inputs, the binary layer does not depend on the signature,
   non-root with the binary as the only entrypoint, content-addressed blobs (`sha256sum`), each
   layer exactly its one file (`tar`). `xtask/src/release.rs`: only the `main` publish job can write
-  packages or mint an OIDC token.
+  packages or mint an OIDC token; every arch is built twice on its own runners and compared; the
+  index lists each arch once by digest, sorted, and refuses a repeated arch or a bad digest.
 - **Run:** `cargo nextest run -p mandate-release -p mandate-agentd`; `cargo test -p xtask -- release
   image`; after `cargo xtask release build <dist>`, `cargo xtask release images <dist> <out>
   --test-sign` and `cargo xtask release drill <dist> <out>`.

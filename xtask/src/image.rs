@@ -100,10 +100,11 @@ fn descriptor(media_type: &str, bytes: &[u8]) -> serde_json::Value {
     })
 }
 
-/// The image of the binary `name` with `binary`'s bytes, signed by `signature` if given, built
-/// from commit `revision`.
+/// The image of the binary `name` for the OCI `architecture` (`amd64`, `arm64`), with `binary`'s
+/// bytes, signed by `signature` if given, built from commit `revision`.
 pub(crate) fn layout(
     name: &str,
+    architecture: &str,
     binary: &[u8],
     signature: Option<&[u8]>,
     revision: &str,
@@ -118,7 +119,7 @@ pub(crate) fn layout(
         "org.opencontainers.image.source": SOURCE,
     });
     let config = json!({
-        "architecture": "amd64",
+        "architecture": architecture,
         "os": "linux",
         "config": {
             "Entrypoint": [format!("/{name}")],
@@ -265,6 +266,127 @@ pub(crate) fn push(
         reported == format!("sha256:{}", layout.manifest),
         "{repository}:{tag} is {reported}, not the image's sha256:{}",
         layout.manifest
+    );
+    Ok(reported)
+}
+
+/// One image of a multi-arch index: its OCI architecture, its manifest's SHA-256 hex and size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Platform {
+    pub(crate) architecture: String,
+    pub(crate) manifest: String,
+    pub(crate) size: u64,
+}
+
+/// The OCI image index over one binary's per-arch images, sorted by architecture, and its
+/// SHA-256 hex: the one digest a host of any listed arch pulls (DEC-1060). Each architecture must
+/// appear once.
+pub(crate) fn index(platforms: &[Platform]) -> Result<(Vec<u8>, String)> {
+    ensure!(!platforms.is_empty(), "an index of no image");
+    let mut sorted = platforms.to_vec();
+    sorted.sort_by(|a, b| a.architecture.cmp(&b.architecture));
+    for pair in sorted.windows(2) {
+        if let [a, b] = pair {
+            ensure!(
+                a.architecture != b.architecture,
+                "{} is listed twice",
+                a.architecture
+            );
+        }
+    }
+    for platform in &sorted {
+        ensure!(
+            platform.manifest.len() == 64
+                && platform
+                    .manifest
+                    .bytes()
+                    .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+            "not a manifest digest: {}",
+            platform.manifest
+        );
+    }
+    let manifests: Vec<serde_json::Value> = sorted
+        .iter()
+        .map(|platform| {
+            json!({
+                "mediaType": MANIFEST_TYPE,
+                "digest": format!("sha256:{}", platform.manifest),
+                "size": platform.size,
+                "platform": {"architecture": platform.architecture, "os": "linux"},
+            })
+        })
+        .collect();
+    let bytes = json!({
+        "schemaVersion": 2,
+        "mediaType": INDEX_TYPE,
+        "manifests": manifests,
+    })
+    .to_string()
+    .into_bytes();
+    let digest = hex(&bytes);
+    Ok((bytes, digest))
+}
+
+/// The manifest `repository:tag` names on the registry at `base`: its SHA-256 hex and size, from
+/// the registry's own answer to a `HEAD`.
+pub(crate) fn remote_manifest(
+    base: &str,
+    repository: &str,
+    tag: &str,
+    auth: Option<&Path>,
+) -> Result<(String, u64)> {
+    let headers = curl(
+        auth,
+        &["-I", "-H", &format!("Accept: {MANIFEST_TYPE}")],
+        &format!("{base}/v2/{repository}/manifests/{tag}"),
+    )?;
+    let digest = header(&headers, "docker-content-digest")
+        .and_then(|d| d.strip_prefix("sha256:").map(str::to_owned))
+        .with_context(|| format!("{repository}:{tag} has no digest"))?;
+    let size = header(&headers, "content-length")
+        .and_then(|n| n.parse().ok())
+        .with_context(|| format!("{repository}:{tag} has no size"))?;
+    Ok((digest, size))
+}
+
+/// Pushes the index `bytes`, whose SHA-256 hex is `digest`, as `repository:tag`, and checks the
+/// registry reports that digest.
+pub(crate) fn push_index(
+    bytes: &[u8],
+    digest: &str,
+    dir: &Path,
+    base: &str,
+    repository: &str,
+    tag: &str,
+    auth: Option<&Path>,
+) -> Result<String> {
+    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    let file = dir.join(digest);
+    fs::write(&file, bytes).with_context(|| format!("writing {}", file.display()))?;
+    let api = format!("{base}/v2/{repository}");
+    curl(
+        auth,
+        &[
+            "-X",
+            "PUT",
+            "-o",
+            "/dev/null",
+            "-H",
+            &format!("Content-Type: {INDEX_TYPE}"),
+            "--data-binary",
+            &format!("@{}", file.display()),
+        ],
+        &format!("{api}/manifests/{tag}"),
+    )?;
+    let headers = curl(
+        auth,
+        &["-I", "-H", &format!("Accept: {INDEX_TYPE}")],
+        &format!("{api}/manifests/{tag}"),
+    )?;
+    let reported = header(&headers, "docker-content-digest").context("no digest reported")?;
+    ensure!(
+        reported == format!("sha256:{digest}"),
+        "{repository}:{tag} is {reported}, not the index's sha256:{digest}"
     );
     Ok(reported)
 }
@@ -421,8 +543,8 @@ mod tests {
 
     #[test]
     fn an_image_is_a_pure_function_of_its_inputs() {
-        let a = layout("mandate-agentd", BINARY, Some(b"sig"), REVISION);
-        let b = layout("mandate-agentd", BINARY, Some(b"sig"), REVISION);
+        let a = layout("mandate-agentd", "amd64", BINARY, Some(b"sig"), REVISION);
+        let b = layout("mandate-agentd", "amd64", BINARY, Some(b"sig"), REVISION);
         assert_eq!(a, b);
         assert_eq!(a.manifest.len(), 64);
     }
@@ -430,9 +552,9 @@ mod tests {
     /// The binary's layer is the same signed or not, and whoever signed it; the image is not.
     #[test]
     fn the_binary_layer_does_not_depend_on_the_signature() {
-        let unsigned = layout("mandate-agentd", BINARY, None, REVISION);
-        let one = layout("mandate-agentd", BINARY, Some(b"one"), REVISION);
-        let two = layout("mandate-agentd", BINARY, Some(b"two"), REVISION);
+        let unsigned = layout("mandate-agentd", "amd64", BINARY, None, REVISION);
+        let one = layout("mandate-agentd", "amd64", BINARY, Some(b"one"), REVISION);
+        let two = layout("mandate-agentd", "amd64", BINARY, Some(b"two"), REVISION);
         assert_eq!(unsigned.layers.len(), 1);
         assert_eq!(one.layers.len(), 2);
         assert_eq!(unsigned.layers.first(), one.layers.first());
@@ -445,7 +567,7 @@ mod tests {
     /// `Shell`, no working directory, no volume, no exposed port.
     #[test]
     fn the_image_runs_its_binary_as_a_non_root_user_and_nothing_else() {
-        let image = layout("mandate-agentd", BINARY, Some(b"sig"), REVISION);
+        let image = layout("mandate-agentd", "amd64", BINARY, Some(b"sig"), REVISION);
         let config = config(&image);
         assert_eq!(config["os"], "linux");
         assert_eq!(config["architecture"], "amd64");
@@ -472,7 +594,7 @@ mod tests {
     /// blob's, and the index names the manifest.
     #[test]
     fn the_layout_is_content_addressed() {
-        let image = layout("mandate-agentd", BINARY, Some(b"sig"), REVISION);
+        let image = layout("mandate-agentd", "amd64", BINARY, Some(b"sig"), REVISION);
         let dir = scratch("addressed");
         write(&image, &dir).unwrap_or_else(|e| panic!("{e}"));
         let blobs = dir.join("blobs").join("sha256");
@@ -515,7 +637,13 @@ mod tests {
     /// the signature's holds exactly the signature, read-only. Nothing else, so no shell.
     #[test]
     fn each_layer_holds_exactly_its_one_file() {
-        let image = layout("mandate-agentd", BINARY, Some(b"the signature"), REVISION);
+        let image = layout(
+            "mandate-agentd",
+            "amd64",
+            BINARY,
+            Some(b"the signature"),
+            REVISION,
+        );
         let dir = scratch("layers");
         write(&image, &dir).unwrap_or_else(|e| panic!("{e}"));
         let blobs = dir.join("blobs").join("sha256");
@@ -583,6 +711,78 @@ mod tests {
     #[should_panic(expected = "would overwrite the mode")]
     fn a_name_too_long_for_the_header_is_refused() {
         tar_one(&"n".repeat(NAME_LEN + 1), 0o444, b"");
+    }
+
+    fn platform(architecture: &str, c: char, size: u64) -> Platform {
+        Platform {
+            architecture: architecture.to_owned(),
+            manifest: c.to_string().repeat(64),
+            size,
+        }
+    }
+
+    /// The same binary's image differs by arch only in its config: the layers are the bytes.
+    #[test]
+    fn each_arch_has_its_own_config_over_the_same_layers() {
+        let amd = layout("mandate-agentd", "amd64", BINARY, None, REVISION);
+        let arm = layout("mandate-agentd", "arm64", BINARY, None, REVISION);
+        assert_eq!(amd.layers, arm.layers);
+        assert_ne!(amd.manifest, arm.manifest);
+        assert_eq!(config(&amd)["architecture"], "amd64");
+        assert_eq!(config(&arm)["architecture"], "arm64");
+    }
+
+    /// The index lists each arch's manifest once, by digest and size, sorted by arch, whatever
+    /// order the arches came in, and is named by its own SHA-256.
+    #[test]
+    fn the_index_lists_each_arch_once_by_digest() -> Result<()> {
+        let (bytes, digest) = index(&[platform("arm64", 'b', 20), platform("amd64", 'a', 10)])?;
+        let (again, same) = index(&[platform("amd64", 'a', 10), platform("arm64", 'b', 20)])?;
+        assert_eq!((bytes.clone(), digest.clone()), (again, same));
+        let dir = scratch("index");
+        let file = dir.join("index.json");
+        fs::write(&file, &bytes)?;
+        assert_eq!(sha256sum(&file), digest);
+        let value: Value = serde_json::from_slice(&bytes)?;
+        assert_eq!(value["mediaType"], INDEX_TYPE);
+        assert_eq!(value["schemaVersion"], 2);
+        let entries = value["manifests"].as_array().context("manifests")?;
+        let listed: Vec<(String, String, u64)> = entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry["platform"]["architecture"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                    hex_of(&entry["digest"]),
+                    entry["size"].as_u64().unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("amd64".to_owned(), "a".repeat(64), 10),
+                ("arm64".to_owned(), "b".repeat(64), 20)
+            ]
+        );
+        for entry in entries {
+            assert_eq!(entry["mediaType"], MANIFEST_TYPE);
+            assert_eq!(entry["platform"]["os"], "linux");
+        }
+        fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn an_index_of_nothing_a_repeated_arch_or_a_bad_digest_is_refused() {
+        assert!(index(&[]).is_err());
+        assert!(index(&[platform("amd64", 'a', 1), platform("amd64", 'b', 1)]).is_err());
+        let mut short = platform("amd64", 'a', 1);
+        short.manifest.pop();
+        assert!(index(&[short]).is_err());
+        assert!(index(&[platform("amd64", 'A', 1)]).is_err());
     }
 
     /// A tar is whole 512-byte records and ends in two zero records.

@@ -1,16 +1,18 @@
-# The release build (E21-8, DEC-972; infrastructure design §7.1 step 2, ES-14, ES-17). Two jobs
-# build the same commit with `cargo xtask release build`: on two runners, in two checkout paths,
-# with no cache, so nothing one build left behind can reach the other. `compare` fails unless both
-# printed the same digest of their SHA256SUMS, which lists every binary's SHA-256: one commit,
-# byte-identical binaries. On `main` and on demand, `build-a`'s binaries, SHA256SUMS and SBOMs are
-# kept as the run's artifact, `release-<commit>`. `build-a` also builds one image a binary
-# (E21-35, DEC-971), signed by an ephemeral test key, and drills the start-up signature check on
-# them: an unsigned and a wrongly signed image are refused outside dev and CI. Only a push to
-# `main` runs `publish`, which rebuilds the release, requires the same digest, pushes the images to
-# GHCR by digest, signs each keyless with the run's OIDC identity and attests its SBOM. A pull
-# request that changes the release build runs the builds and the drill and keeps and publishes
-# nothing (ES-12). Nothing here builds a feature, so no release build holds `live` (DEC-529
-# item 3).
+# The release build (E21-8, DEC-972; infrastructure design §7.1 step 2, ES-14, ES-17), for amd64
+# and arm64 (DEC-1060), each natively on runners of its own arch, never cross-built. For each
+# arch, two jobs build the same commit with `cargo xtask release build`: on two runners, in two
+# checkout paths, with no cache, so nothing one build left behind can reach the other. `compare`
+# fails unless each arch's two builds printed the same digest of their SHA256SUMS, which lists
+# every binary's SHA-256: one commit, byte-identical binaries. On `main` and on demand, each
+# arch's `build-a` keeps its binaries, SHA256SUMS and SBOMs as `release-<commit>-<arch>`, and
+# builds one image a binary (E21-35, DEC-971), signed by an ephemeral test key, and drills the
+# start-up signature check on them: an unsigned and a wrongly signed image are refused outside dev
+# and CI. Only a push to `main` publishes: each arch's `publish` job rebuilds, requires its
+# `build-a`'s digest, pushes that arch's images to GHCR by digest, signs each keyless with the
+# run's OIDC identity and attests its SBOM; then `publish-index` pushes and signs the multi-arch
+# index a cell pulls on any arch. A pull request that changes the release build runs the builds and
+# the drills and keeps and publishes nothing (ES-12). Nothing here builds a feature, so no release
+# build holds `live` (DEC-529 item 3).
 name: release
 
 on:
@@ -39,7 +41,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-a:
+  build-a-amd64:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     # Not a required check (DEC-464's ten minutes bind those): one uncached three-binary musl
@@ -68,7 +70,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: github.event_name != 'pull_request'
         with:
-          name: release-${{ github.sha }}
+          name: release-${{ github.sha }}-amd64
           path: |
             dist/
             images/IMAGES
@@ -78,11 +80,71 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  build-b:
+  build-b-amd64:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: elsewhere/src
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: elsewhere/src
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Build the release again, elsewhere
+        id: build
+        run: cargo xtask release build out | tee -a "$GITHUB_OUTPUT"
+
+  build-a-arm64:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04-arm
     # Not a required check (DEC-464's ten minutes bind those): one uncached three-binary musl
     # build took about three minutes on four cores, and a two-core runner may take twice that.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Build the release
+        id: build
+        run: cargo xtask release build dist | tee -a "$GITHUB_OUTPUT"
+      - name: Build the images, signed by an ephemeral test key
+        run: cargo xtask release images dist images --test-sign
+      - name: Drill the start-up check on signed, unsigned and wrongly signed images
+        run: cargo xtask release drill dist images
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name != 'pull_request'
+        with:
+          name: release-${{ github.sha }}-arm64
+          path: |
+            dist/
+            images/IMAGES
+            images/images/
+            images/signatures/
+            images/test-key/cosign.pub
+          if-no-files-found: error
+          retention-days: 90
+
+  build-b-arm64:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       contents: read
@@ -106,29 +168,35 @@ jobs:
   # Runs whatever the builds did, so a failed or cancelled build fails this job rather than
   # skipping it.
   compare:
-    needs: [build-a, build-b]
+    needs: [build-a-amd64, build-b-amd64, build-a-arm64, build-b-arm64]
     if: ${{ always() && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     steps:
       - name: A build did not finish
-        if: needs.build-a.result != 'success' || needs.build-b.result != 'success'
+        if: needs.build-a-amd64.result != 'success' || needs.build-b-amd64.result != 'success' || needs.build-a-arm64.result != 'success' || needs.build-b-arm64.result != 'success'
         run: |
           echo "a release build of this commit did not succeed"
           exit 1
-      - name: The two builds differ
-        if: needs.build-a.outputs.digest == '' || needs.build-a.outputs.digest != needs.build-b.outputs.digest
+      - name: The two amd64 builds differ
+        if: needs.build-a-amd64.outputs.digest == '' || needs.build-a-amd64.outputs.digest != needs.build-b-amd64.outputs.digest
         run: |
-          echo "the two release builds of this commit differ, or one printed no digest; each build's log lists its SHA256SUMS and toolchain"
+          echo "the two amd64 release builds of this commit differ, or one printed no digest; each build's log lists its SHA256SUMS and toolchain"
           exit 1
-      - name: The two builds are identical
-        run: echo "both release builds of this commit printed the same SHA256SUMS digest"
+      - name: The two arm64 builds differ
+        if: needs.build-a-arm64.outputs.digest == '' || needs.build-a-arm64.outputs.digest != needs.build-b-arm64.outputs.digest
+        run: |
+          echo "the two arm64 release builds of this commit differ, or one printed no digest; each build's log lists its SHA256SUMS and toolchain"
+          exit 1
+      - name: Each arch's two builds are identical
+        run: echo "each arch's two release builds of this commit printed the same SHA256SUMS digest"
 
-  # A push to main only: never a pull request, never a branch (ES-12, E21-35). The rebuild must
-  # print build-a's digest, so what is published is what `compare` proved reproducible.
-  publish:
-    needs: [build-a, compare]
+  # A push to main only: never a pull request, never a branch (ES-12, E21-35). Each arch publishes
+  # from a runner of its own arch, and its rebuild must print its build-a's digest, so what is
+  # published is what `compare` proved reproducible.
+  publish-amd64:
+    needs: [build-a-amd64, compare]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -149,19 +217,89 @@ jobs:
         id: build
         run: cargo xtask release build dist | tee -a "$GITHUB_OUTPUT"
       - name: The rebuild differs from build-a
-        if: steps.build.outputs.digest != needs.build-a.outputs.digest
+        if: steps.build.outputs.digest != needs.build-a-amd64.outputs.digest
         run: |
           echo "the publish job's rebuild is not the release build-a built and compare proved"
           exit 1
-      - name: Publish the images to GHCR, sign them keyless and attest their SBOMs
+      - name: Publish this arch's images to GHCR, sign them keyless and attest their SBOMs
         env:
           GH_TOKEN: ${{ github.token }}
         run: cargo xtask release publish dist published
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: published-${{ github.sha }}
+          name: published-${{ github.sha }}-amd64
           path: |
             published/PUBLISHED
             published/IMAGES
+          if-no-files-found: error
+          retention-days: 90
+
+  publish-arm64:
+    needs: [build-a-arm64, compare]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Rebuild the release
+        id: build
+        run: cargo xtask release build dist | tee -a "$GITHUB_OUTPUT"
+      - name: The rebuild differs from build-a
+        if: steps.build.outputs.digest != needs.build-a-arm64.outputs.digest
+        run: |
+          echo "the publish job's rebuild is not the release build-a built and compare proved"
+          exit 1
+      - name: Publish this arch's images to GHCR, sign them keyless and attest their SBOMs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: cargo xtask release publish dist published
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-${{ github.sha }}-arm64
+          path: |
+            published/PUBLISHED
+            published/IMAGES
+          if-no-files-found: error
+          retention-days: 90
+
+  # The one reference per binary a cell pulls on any arch: the index over every arch's image,
+  # read back from the registry by digest only after every arch has published (DEC-1060).
+  publish-index:
+    needs: [publish-amd64, publish-arm64]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Push and sign the multi-arch index
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: cargo xtask release publish-index published
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-${{ github.sha }}
+          path: published/PUBLISHED
           if-no-files-found: error
           retention-days: 90
