@@ -244,21 +244,94 @@ pub fn agent(deployment: &Deployment, agent_rows: &[StoredEvent]) -> AgentView {
 /// The bound order of an `ApprovalRequested` payload (DEC-1021): `content.action`'s members, and
 /// version 2's `content.execution` time in force and protection, `null` without one.
 pub fn order(payload: &Value) -> Option<Value> {
-    let _ = payload;
-    Some(Value::Null)
+    let content = payload.get("content")?;
+    let action = content.get("action")?;
+    let mut members = Vec::with_capacity(9);
+    for name in ACTION_MEMBERS {
+        members.push((name, action.get(name)?.clone()));
+    }
+    let execution = content.get("execution");
+    for name in ["tif", "protection"] {
+        let planned = execution.and_then(|e| e.get(name)).cloned();
+        members.push((name, planned.unwrap_or(Value::Null)));
+    }
+    object(members)
+}
+
+/// `content.action`'s members, every one of which an approval binds.
+const ACTION_MEMBERS: [&str; 7] = [
+    "instrument",
+    "asset_class",
+    "side",
+    "qty",
+    "limit",
+    "order_usd",
+    "purpose",
+];
+
+/// An object of `members`.
+fn object(members: Vec<(&str, Value)>) -> Option<Value> {
+    let mut object = mandate_canon::Object::new();
+    for (name, value) in members {
+        object.insert(mandate_canon::Key::new(name).ok()?, value);
+    }
+    Some(Value::Object(object))
 }
 
 /// The `account_ref` the control stream binds to `connection_id` (DEC-1020 item 3): the latest
 /// `ConnectionEstablished` at schema version 2 naming it, else its latest `ConnectionRequested`.
 pub fn account_ref(control: &[StoredEvent], connection_id: &str) -> Option<String> {
-    let _ = (control, connection_id);
-    None
+    let bound = |event_type: &str, schema_version: u64| {
+        control.iter().rev().find_map(|row| {
+            if row.event_type != event_type || row.schema_version != schema_version {
+                return None;
+            }
+            let event = envelope(row)?;
+            (text(&event, "payload.connection_id") == Some(connection_id))
+                .then(|| text(&event, "payload.account_ref").map(str::to_owned))
+                .flatten()
+        })
+    };
+    bound("ConnectionEstablished", 2).or_else(|| bound("ConnectionRequested", 1))
 }
 
 /// The account's holdings at its last reconciliation (DEC-1020 item 3): the latest
 /// `BrokerPositionObserved` per instrument, in instrument order, leaving out an instrument whose
 /// model and broker quantities are both zero.
 pub fn account_positions(account_rows: &[StoredEvent]) -> Vec<Value> {
-    let _ = account_rows;
-    Vec::new()
+    let mut latest: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
+    for row in account_rows {
+        if row.event_type != "BrokerPositionObserved" {
+            continue;
+        }
+        let Some(event) = envelope(row) else {
+            continue;
+        };
+        let member = |name: &str| event.get("payload").and_then(|p| p.get(name)).cloned();
+        let (Some(Value::Str(instrument)), Some(qty), Some(broker), Some(mismatch)) = (
+            member("instrument"),
+            member("model_qty"),
+            member("broker_qty"),
+            member("mismatch"),
+        ) else {
+            continue;
+        };
+        let held = [&qty, &broker].iter().any(|q| q.as_str() != Some("0"));
+        let position = object(vec![
+            ("instrument", Value::Str(instrument.clone())),
+            ("qty", qty),
+            ("broker_qty", broker),
+            ("mismatch", mismatch),
+            ("observed_at", Value::Str(row.recorded_at.clone())),
+        ]);
+        match (held, position) {
+            (true, Some(position)) => {
+                latest.insert(instrument, position);
+            }
+            _ => {
+                latest.remove(&instrument);
+            }
+        }
+    }
+    latest.into_values().collect()
 }

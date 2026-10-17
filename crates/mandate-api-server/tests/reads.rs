@@ -159,7 +159,7 @@ fn request(stream: &str, seq: u64, deadline: i64, n: u8) -> StoredEvent {
         seq,
         "ApprovalRequested",
         &format!(
-            r#"{{"content":{{"bound":{{"side":"buy","n":{n}}}}},"content_hash":"{}","deadline":{deadline}}}"#,
+            r#"{{"content":{{{ACTION},"bound":{{"side":"buy","n":{n}}}}},"content_hash":"{}","deadline":{deadline}}}"#,
             version(n)
         ),
     )
@@ -247,12 +247,15 @@ fn approval_states_fold_with_the_first_terminal_event_winning() {
     assert_eq!(first.requested_at, at(1));
     assert_eq!(first.deadline, 500);
     assert_eq!(first.content_hash, version(1));
-    let expected_content = parse(br#"{"bound":{"n":1,"side":"buy"}}"#).expect("JSON");
+    let expected_content =
+        parse(format!(r#"{{{ACTION},"bound":{{"n":1,"side":"buy"}}}}"#).as_bytes()).expect("JSON");
     assert_eq!(first.content, expected_content);
+    let expected_order = parse(br#"{"instrument":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","asset_class":"us_equity","side":"buy","qty":"3","limit":"101.5","order_usd":"304.5","purpose":"open","tif":null,"protection":null}"#).expect("JSON");
+    assert_eq!(first.order, expected_order);
 }
 
 #[test]
-fn a_request_without_a_deadline_or_hash_is_not_served_as_an_approval() {
+fn a_request_without_a_deadline_hash_or_action_is_not_served_as_an_approval() {
     let s = format!("agent:{WS}:agt_a");
     let rows = vec![
         row(
@@ -263,6 +266,12 @@ fn a_request_without_a_deadline_or_hash_is_not_served_as_an_approval() {
         ),
         row(&s, 2, "ApprovalRequested", r#"{"content":{},"deadline":5}"#),
         request(&s, 3, 7, 3),
+        row(
+            &s,
+            4,
+            "ApprovalRequested",
+            r#"{"content":{"bound":{}},"content_hash":"sha256:x","deadline":5}"#,
+        ),
     ];
     let folded = approvals("agt_a", &rows);
     assert_eq!(folded.len(), 1);

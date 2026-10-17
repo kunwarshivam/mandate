@@ -300,7 +300,7 @@ fn the_agents_list_states_each_deployed_agent_from_the_journal() {
     assert_eq!(text(&body, "served_at"), "2026-10-03T04:00:00.000000000Z");
     let expected = parse(
         format!(
-            r#"[{{"agent_id":"agt_a","deployed_at":"2026-10-17T10:00:02.000000000Z","environment":"paper","mandate_version":"{}","mode":"paused","pending_approvals":1}},{{"agent_id":"agt_b","deployed_at":"2026-10-17T10:00:03.000000000Z","environment":"paper","mandate_version":"{}","mode":null,"pending_approvals":0}}]"#,
+            r#"[{{"agent_id":"agt_a","deployed_at":"2026-10-17T10:00:02.000000000Z","environment":"paper","label":null,"mandate":null,"mandate_version":"{}","mode":"paused","pending_approvals":1}},{{"agent_id":"agt_b","deployed_at":"2026-10-17T10:00:03.000000000Z","environment":"paper","label":null,"mandate":null,"mandate_version":"{}","mode":null,"pending_approvals":0}}]"#,
             version(1),
             version(2)
         )
