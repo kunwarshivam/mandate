@@ -46,9 +46,16 @@ pub const COMPOSE_FILE: &str = "deploy/cell/compose/compose.json";
 const IMAGE_DOCKERFILE: &str = "deploy/cell/images/mandate.Dockerfile";
 /// The workspace API server's image, built beside `mandate` from the same static build.
 const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
-/// The host's CA bundle, copied into the `api` image: on an empty base the server finds no roots,
-/// cannot build its key-set client, and refuses to start (`MANDATE_API_JWKS_URL`).
-const HOST_CA_BUNDLE: &str = "/etc/ssl/certs/ca-certificates.crt";
+/// Where a Linux host keeps its CA bundle, in the order `cell up` looks after `SSL_CERT_FILE`:
+/// Debian and Ubuntu, Fedora and RHEL, openSUSE, Alpine. The bundle is copied into the `api`
+/// image: on an empty base the server finds no roots, cannot build its key-set client, and refuses
+/// to start (`MANDATE_API_JWKS_URL`).
+const HOST_CA_BUNDLES: [&str; 4] = [
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/ca-bundle.pem",
+    "/etc/ssl/cert.pem",
+];
 /// Where the cell keeps what it derives: the kubeconfig, the downloaded operator chart, and the
 /// image build context. Under `target/`, so nothing derived is ever committed.
 const STATE: &str = "target/cell";
@@ -431,7 +438,7 @@ pub fn up() -> Result<()> {
             api,
             API_DOCKERFILE,
             "mandate-api-server",
-            &[(HOST_CA_BUNDLE, "ca-certificates.crt")],
+            &[(&host_ca_bundle()?, "ca-certificates.crt")],
         )?;
     }
     if !cluster_exists()? {
@@ -612,6 +619,34 @@ fn build_binary() -> Result<()> {
         bail!("the static build of mandate-cli and mandate-api-server failed with {status}");
     }
     Ok(())
+}
+
+/// The host's CA bundle for the `api` image: `SSL_CERT_FILE` when set, else the first of
+/// [`HOST_CA_BUNDLES`] that is a file.
+fn host_ca_bundle() -> Result<String> {
+    let named = env::var("SSL_CERT_FILE").ok();
+    ca_bundle_from(named.as_deref(), |path| Path::new(path).is_file())
+}
+
+/// The CA bundle `named` (`SSL_CERT_FILE`) when set, else the first of [`HOST_CA_BUNDLES`] for
+/// which `exists` holds; refused, naming `SSL_CERT_FILE`, when none is found.
+pub fn ca_bundle_from(named: Option<&str>, exists: impl Fn(&str) -> bool) -> Result<String> {
+    if let Some(named) = named.map(str::trim).filter(|n| !n.is_empty()) {
+        if exists(named) {
+            return Ok(named.to_string());
+        }
+        bail!("SSL_CERT_FILE={named} is not a file; the api image needs the host's CA bundle");
+    }
+    HOST_CA_BUNDLES
+        .iter()
+        .find(|path| exists(path))
+        .map(|path| (*path).to_string())
+        .with_context(|| {
+            format!(
+                "no CA bundle at {}; set SSL_CERT_FILE to this host's, which the api image needs",
+                HOST_CA_BUNDLES.join(", ")
+            )
+        })
 }
 
 /// The image `image` from `dockerfile`, over a context holding only `binary` and each of `files`,
@@ -2585,6 +2620,30 @@ mod tests {
             "the session key is the file the server reads"
         );
         assert!(doc["secrets"][API_SESSION_KEY]["file"].is_string());
+        Ok(())
+    }
+
+    #[test]
+    fn the_api_image_takes_the_named_bundle_else_the_first_on_the_host() -> Result<()> {
+        let fedora = |path: &str| path == "/etc/pki/tls/certs/ca-bundle.crt";
+        assert_eq!(
+            ca_bundle_from(None, fedora)?,
+            "/etc/pki/tls/certs/ca-bundle.crt"
+        );
+        let both = |path: &str| path.starts_with("/etc/");
+        assert_eq!(ca_bundle_from(None, both)?, HOST_CA_BUNDLES[0]);
+        assert_eq!(
+            ca_bundle_from(Some("/opt/ca.pem"), |_| true)?,
+            "/opt/ca.pem"
+        );
+        assert_eq!(
+            ca_bundle_from(Some("  "), fedora)?,
+            "/etc/pki/tls/certs/ca-bundle.crt"
+        );
+        let missing = ca_bundle_from(Some("/opt/ca.pem"), both).map_err(|e| e.to_string());
+        assert!(missing.is_err_and(|e| e.contains("SSL_CERT_FILE=/opt/ca.pem")));
+        let none = ca_bundle_from(None, |_| false).map_err(|e| e.to_string());
+        assert!(none.is_err_and(|e| e.contains("set SSL_CERT_FILE")));
         Ok(())
     }
 
