@@ -53,6 +53,18 @@ paths = ['''^crates/mandate-alpaca/tests/common/mod\.rs$''']
 regexTarget = "match"
 regexes = ['''^PKSENTINELTRADING000$''']
 
+# Amazon's published example access key ID, from the worked SigV4 examples of the S3
+# documentation, which the object store's signer is tested against (E21-40, DEC-973). It matches the
+# Alpaca key-ID shape. Allowed only as that exact value and only in the signer's test file, so a
+# real key there, or the example anywhere else, is still reported.
+[[allowlists]]
+description = "Amazon's documented SigV4 example key ID"
+targetRules = ["alpaca-key-id"]
+condition = "AND"
+paths = ['''^crates/mandate-objectstore/tests/sigv4\.rs$''']
+regexTarget = "match"
+regexes = ['''^AKIAIOSFODNN7EXAMPLE$''']
+
 # The web palette's `lapis` token rows (DEC-204 to DEC-217): `lapis` contains "api", so the
 # generic key heuristic reads the design-source table's quoted ramp refs as credentials —
 # `lapis-soft": "ultramarine-100"` in the old Ink-and-Ultramarine commits of 2026-09-28/29,

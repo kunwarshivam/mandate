@@ -71,6 +71,9 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   PR over ES-13's 400 lines instead of DEC-77's two; and item 6's hook in an R0 file (a
   production-cycle constructor that takes its journal stage) before the process can host a real
   cycle.
+- **E17-7's allowlist** ([DEC-1130](decisions/DEC-1130.md), claim #1460): item 2, confirming
+  Alpaca news (counsel's answer under DEC-433 item 20) in a new allowlist version; until then the
+  research agent reads SEC EDGAR filings only.
 - **E21-28's lifecycle core** ([DEC-994](decisions/DEC-994.md), claim #1433): item 8, one PR
   over ES-13's 400 lines, as DEC-968 item 9.
 - **CI's nightly mutation sweep** ([DEC-1190](decisions/DEC-1190.md) item 5, claim #1481): a
