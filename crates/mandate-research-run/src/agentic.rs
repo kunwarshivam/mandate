@@ -65,6 +65,31 @@ pub enum Tool {
 }
 
 impl Tool {
+    /// Every tool, in declaration order.
+    pub const ALL: [Self; 16] = [
+        Self::MarketBars,
+        Self::MarketQuote,
+        Self::NewsSearch,
+        Self::NewsGet,
+        Self::FilingsSearch,
+        Self::FilingsGet,
+        Self::MemoryPositions,
+        Self::MemoryTheses,
+        Self::MemoryRuns,
+        Self::RecordsQuery,
+        Self::MandateRead,
+        Self::Note,
+        Self::Plan,
+        Self::ProposeThesis,
+        Self::Invalidate,
+        Self::ProposeExit,
+    ];
+
+    /// The tool a declared name names, the inverse of [`Tool::name`]; `None` for any other text.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|tool| tool.name() == name)
+    }
+
     /// The declared name, as the pinned entry and `ToolCallRecorded.tool` carry it.
     pub const fn name(self) -> &'static str {
         match self {
@@ -195,6 +220,71 @@ pub enum Code {
     MaxTheses,
     MaxRepeatDenials,
     RunEnded,
+}
+
+impl Code {
+    /// Every code, in declaration order.
+    pub const ALL: [Self; 24] = [
+        Self::Admissible,
+        Self::Removed,
+        Self::ExitRequested,
+        Self::NotHeld,
+        Self::UnknownInstrument,
+        Self::UnknownEvidence,
+        Self::DuplicateInstrument,
+        Self::ForbiddenLanguage,
+        Self::RevisionsNotEnabled,
+        Self::UnknownThesis,
+        Self::DirectionNotAllowed,
+        Self::AssetClassNotAllowed,
+        Self::NotEligible,
+        Self::SourceNotAllowed,
+        Self::NotCorroborated,
+        Self::UniverseFull,
+        Self::NotAdmitted,
+        Self::OutOfUniverse,
+        Self::UnknownItem,
+        Self::Unavailable,
+        Self::CallBudget,
+        Self::MaxTheses,
+        Self::MaxRepeatDenials,
+        Self::RunEnded,
+    ];
+
+    /// The journal spec §9.22 spelling of the code.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Admissible => "admissible",
+            Self::Removed => "removed",
+            Self::ExitRequested => "exit_requested",
+            Self::NotHeld => "not_held",
+            Self::UnknownInstrument => "unknown_instrument",
+            Self::UnknownEvidence => "unknown_evidence",
+            Self::DuplicateInstrument => "duplicate_instrument",
+            Self::ForbiddenLanguage => "forbidden_language",
+            Self::RevisionsNotEnabled => "revisions_not_enabled",
+            Self::UnknownThesis => "unknown_thesis",
+            Self::DirectionNotAllowed => "direction_not_allowed",
+            Self::AssetClassNotAllowed => "asset_class_not_allowed",
+            Self::NotEligible => "not_eligible",
+            Self::SourceNotAllowed => "source_not_allowed",
+            Self::NotCorroborated => "not_corroborated",
+            Self::UniverseFull => "universe_full",
+            Self::NotAdmitted => "not_admitted",
+            Self::OutOfUniverse => "out_of_universe",
+            Self::UnknownItem => "unknown_item",
+            Self::Unavailable => "unavailable",
+            Self::CallBudget => "call_budget",
+            Self::MaxTheses => "max_theses",
+            Self::MaxRepeatDenials => "max_repeat_denials",
+            Self::RunEnded => "run_ended",
+        }
+    }
+
+    /// The code a §9.22 spelling names, the inverse of [`Code::as_str`]; `None` for any other text.
+    pub fn from_spelling(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|code| code.as_str() == text)
+    }
 }
 
 /// A tool result's outcome (§6.10's pairing table).
@@ -343,6 +433,8 @@ impl RunState {
     }
 
     /// Takes a turn's reply: orders its calls, screens reads, applies the in-batch bounds (§6.9 step 4).
+    /// The refusals it returns in [`Reply::refused`] count toward `max_repeat_denials` here;
+    /// [`RunState::on_results`] counts only the dispatched results.
     ///
     /// # Errors
     /// [`ResearchRunError::Unimplemented`] until slice 3.
