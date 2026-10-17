@@ -19,4 +19,7 @@ mandate-time.workspace = true
 tokio = { workspace = true, features = ["rt", "signal"] }
 
 [dev-dependencies]
+mandate-journal-pg.workspace = true
 proptest.workspace = true
+sqlx.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
