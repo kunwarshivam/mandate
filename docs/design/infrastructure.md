@@ -61,6 +61,11 @@ Rules that hold across the ladder:
   are rejected (ES-23), so a paper journal can never become a live one.
 - Until the founder decides to go live (reserved by DEC-79), no production environment exists and
   the most conservative option holds: paper only.
+- **Narrowing ([DEC-967](../project/decisions/DEC-967.md) item 15, the founder):** managed cell #1
+  carries one live connection, the founder's own Robinhood agentic account, served by one signed
+  executor image built with `live` (E21-48). Every other image in it is built without `live`,
+  every other process has no route to a live host, and every other connection is paper or demo.
+  Live for any other user still needs the Phase 2 gate, counsel and the M13 penetration test.
 
 ### 1.2 What runs where, by deployment mode
 
@@ -826,21 +831,21 @@ Each failure, walked to its exit: what detects it, what agents do, how it ends, 
 
 ## 12. What exists and what is planned
 
-As of 2026-10-03. Most of this document is plan.
+As of 2026-10-03; the Environments, Secrets and Backups rows as of 2026-10-17. Most of this document is plan.
 
 | Area | Exists today | Planned |
 |---|---|---|
-| Environments | Dev and CI. CI runs `fast` and `full` on GitHub Actions with no secrets in PR jobs, and a weekly run (DEC-256). Paper keys come from local configuration (ES-19) | The Phase 1 paper environment as a supervised set of processes; staging from M8; production after the Phase 2 gate |
+| Environments | Dev and CI. CI runs `fast` and `full` on GitHub Actions with no secrets in PR jobs, and a weekly run (DEC-256). Paper keys come from local configuration (ES-19). The demo's API host has a runbook and scripts in `deploy/` (DEC-822); agents have no host | A local and CI cell (k3d or kind) first, then a managed cell for paper and demo environments, plus real orders through Robinhood for the founder's own account only (DEC-967 item 15), as the first hosted version after R0: the same Helm chart on k3s at small scale, growing by nodes and cells (the `deploy/` systemd path stays a dev and demo convenience) ([DEC-967](../project/decisions/DEC-967.md); the [managed-cells plan](../project/tasks/managed-cells.md)); staging once the founder approves its hosting; production after the Phase 2 gate |
 | Paper/live boundary | Only paper hosts compiled in; the tracer refuses any host but Alpaca's paper host (E7-7); `environment` fixed per stream | Egress allow-lists; the live build, signed, after counsel and the penetration test |
 | Processes | `mandate-runtime` (pure state machine and kill switches), `mandate-executor`, `mandate-alpaca` (paper), `mandate-shell` (the process shell) with the `mandate-paper` one-order adapter binary | Long-running runtime, executor, and scheduler processes; health and readiness; the deployment manager; drain and hand-over |
 | Journal | `mandate-journal-pg` with `migrations/0001_journal.sql`: append protocol, fencing, append-only roles and triggers, read-time checks; CI runs Postgres tests | Synchronous standby and failover; WAL archiving; the evictor |
 | Cold store | `mandate-journal-cold`: manifests, per-range checks, export, and the RFC 3161 imprint check (signature verification Proposed, DEC-265) | Shipping to object storage with object lock, the replica, retention jobs, and drills (E5-7); CLI over cold exports (E5-8) |
 | Artifacts | `mandate-artifacts-fs`, the filesystem backend | Object-storage backend |
 | Market data | `mandate-marketdata` writing Parquet; `mandate download` and `inspect` | Live ingest and the shared data plane (`docs/specs/data-plane.md`) |
-| Secrets | Local paper keys (ES-19); `secrecy` and the log-scan rule (ES-09) | The vault, leases, permission checks, rotation, break-glass; the personal-data vault (E5-5) |
+| Secrets | Local paper keys (ES-19); `secrecy` and the log-scan rule (ES-09); `mandate-vault-local`, the demo host's local vault (V1, DEC-692), with its start-up checks only; the demo host's credential files under systemd (`deploy/`, DEC-822 item 4) | V1's reads and writes; `SecretSource` with OpenBao (E21-32), leases, permission checks, rotation, break-glass; the personal-data vault (E5-5) |
 | Observability | `tracing` JSON logs with opaque IDs | Metrics exporter (M6), alerts, SLOs, runbooks |
 | Release | Squash merges by label (DEC-175); cargo-deny, the dependency registry, gitleaks | Release builds, reproducibility, SBOM, signing, promotion, installer (Helm, Compose), signed bundles |
-| Backups | None | WAL archiving, base backups, restore procedure, drills |
+| Backups | The demo host's nightly `pg_dump` and state tarball, and its restore check running journal verification on every stream (`deploy/backup.sh`, `deploy/restore-check.sh`) | WAL archiving, base backups, restore procedure, drills |
 | Kubernetes, cells, global control plane | None | M8 and M11 |
 
 ---
