@@ -5,9 +5,10 @@
 //! whether it is deployed, and the deployment names its mandate version: the hash of the stored
 //! canonical document (journal spec §9.2). The document gives the connection and the approvers
 //! named as users; a `role:` approver is not resolved here, which can only make an approval harder
-//! to grant. The version's `MandateVersionCreated`, journaled by the user who created it, gives the
-//! author. Anything missing, corrupt, or for another environment refuses rather than guessing
-//! (`AGENTS.md` rules 3 and 8).
+//! to grant. The version's first `MandateVersionCreated`, journaled by the user who created it,
+//! gives the author. Anything missing, corrupt, unreadable, or for another environment refuses
+//! rather than guessing, and a deployment record that cannot be read is never skipped for an older
+//! one (`AGENTS.md` rules 3 and 8).
 
 use mandate_canon::{Value, parse};
 use mandate_journal::{ArtifactRef, ArtifactSource, Environment, StoredEvent, get_artifact};
@@ -25,21 +26,26 @@ pub struct Resolved {
 /// documents in `store`.
 ///
 /// # Errors
-/// `agent_not_deployed`, `mandate_document_unavailable`, `mandate_environment_mismatch`, or
-/// `mandate_author_unknown`.
+/// `control_unreadable`, `agent_not_deployed`, `mandate_document_unavailable`,
+/// `mandate_environment_mismatch`, or `mandate_author_unknown`.
 pub fn resolved(
     control: &[StoredEvent],
     agent: &str,
     environment: Environment,
     store: &dyn ArtifactSource,
 ) -> Result<Resolved, &'static str> {
-    let latest = control
-        .iter()
-        .rev()
-        .filter(|row| row.environment == environment.as_str())
-        .filter(|row| matches!(row.event_type.as_str(), "AgentDeployed" | "AgentStopped"))
-        .filter_map(|row| Some((row, body(row)?)))
-        .find(|(_, body)| text(body, &["payload", "agent_id"]) == Some(agent));
+    let mut latest = None;
+    for row in control.iter().rev().filter(|row| {
+        row.environment == environment.as_str()
+            && matches!(row.event_type.as_str(), "AgentDeployed" | "AgentStopped")
+    }) {
+        let body = body(row).ok_or("control_unreadable")?;
+        let named = text(&body, &["payload", "agent_id"]).ok_or("control_unreadable")?;
+        if named == agent {
+            latest = Some((row, body));
+            break;
+        }
+    }
     let version = match latest {
         Some((row, body)) if row.event_type == "AgentDeployed" => {
             text(&body, &["payload", "mandate_version"]).map(str::to_owned)
@@ -71,7 +77,7 @@ pub fn resolved(
         .collect();
     let author = control
         .iter()
-        .rev()
+        .filter(|row| row.environment == environment.as_str())
         .filter(|row| row.event_type == "MandateVersionCreated")
         .filter_map(body)
         .find(|body| text(body, &["payload", "mandate_version"]) == Some(version.as_str()))

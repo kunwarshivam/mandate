@@ -144,10 +144,9 @@ fn run(
         liveness: LIVENESS,
     };
     let artifacts = match &given {
-        Given::Resolve { root } if Path::new(root).join("sha256").is_dir() => {
-            Some(FsArtifactStore::open(root).map_err(|_| "artifact_store_unavailable")?)
+        Given::Resolve { root } => {
+            Some(FsArtifactStore::open_existing(root).map_err(|_| "artifact_store_unavailable")?)
         }
-        Given::Resolve { .. } => return Err("artifact_store_unavailable"),
         Given::Named { .. } => None,
     };
     if fixture {
