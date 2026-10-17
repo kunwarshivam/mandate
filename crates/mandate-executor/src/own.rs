@@ -5,7 +5,9 @@
 
 use std::collections::BTreeSet;
 
-use mandate_num::Qty;
+use mandate_accounting::Side;
+use mandate_num::{Qty, SignedQty, Usd};
+use mandate_time::{UtcNanos, new_york_date_and_hour};
 
 use crate::batch::Batch;
 use crate::error::ExecutorError;
@@ -14,7 +16,8 @@ use crate::orders::fill;
 use crate::ports::Ports;
 use crate::state::ExecutorState;
 use crate::types::{
-    BrokerFill, BrokerOrder, BrokerPosition, Effect, FillId, Order, RiskClock, WriterEpoch,
+    BrokerFill, BrokerOrder, BrokerPosition, Effect, FillId, Order, RiskClock, TimeInForce,
+    WriterEpoch,
 };
 
 /// The orders this stream owns whose fills it may not have booked: every order it journaled
@@ -173,9 +176,94 @@ fn mismatch(id: &ClientOrderId, reason: &'static str) -> ExecutorError {
     }
 }
 
-/// The fills a broker that reports none implies from its order records (R0 R19, DEC-1151). Not
-/// built yet: it derives nothing.
+/// The fill records a broker that reports no fill implies (R0 R19, DEC-1151; connections spec
+/// U-R8: "DEC-529's order on a flat, dedicated account compares the order's state and filled
+/// quantity and the position"). Robinhood publishes no activity feed and no execution price, so
+/// the only broker word on a fill is an order record's `filled_quantity` and the position's
+/// average buy price. On a ledger flat in the instrument, that average is exactly the price of
+/// what the one order filled, so the fill is read from the two, and from nothing else:
+///
+/// - the order is one of ours, a buy that adds risk, sent `day` (so it filled on the New York
+///   date of its `OrderSubmitted`, which is the fill's trade date), whose broker record reported
+///   a filled quantity above zero and no more than its own quantity, and none of which is booked;
+/// - the ledger holds the instrument flat, with no unattributed fill in it, and every other order
+///   in the instrument has booked all its broker record reported, so no other fill can be in the
+///   average;
+/// - the broker lists exactly one position in the instrument, and it is long exactly the reported
+///   quantity.
+///
+/// Anything else derives nothing: no record of a fill means no fill, the position stays
+/// unexplained, and the reconciliation pauses the agent as before (`AGENTS.md` rule 3). The fill
+/// carries no fee, since Robinhood charges no commission (DEC-958 item 1); its regulatory fees are
+/// the fee configuration's, which every fill record names (DEC-958, DEC-960). Its id is
+/// `record:<client order id>:<filled quantity>`, the same on every read of the same record, so
+/// it is booked once whatever reads it again (journal spec §5.2), and the reconciliation's own
+/// fill path books it ([`crate::reconcile`]).
 pub fn recorded_fills(state: &ExecutorState, positions: &[BrokerPosition]) -> Vec<BrokerFill> {
-    let _ = (state, positions);
-    Vec::new()
+    state
+        .orders
+        .values()
+        .filter_map(|order| recorded_fill(state, positions, order))
+        .collect()
+}
+
+/// The one fill [`recorded_fills`] reads for `order`, or `None`.
+fn recorded_fill(
+    state: &ExecutorState,
+    positions: &[BrokerPosition],
+    order: &Order,
+) -> Option<BrokerFill> {
+    let detail = state.details.get(&order.client_order_id)?;
+    let reported = detail.reported_filled.filter(|filled| !filled.is_zero())?;
+    let request = detail.request.as_ref()?;
+    let entry = order.side == Side::Buy
+        && order.purpose.adds_risk()
+        && request.tif == TimeInForce::Day
+        && order.filled_qty.is_zero()
+        && reported <= order.qty;
+    let flat = state
+        .positions
+        .get(&order.instrument)
+        .is_none_or(|held| *held == SignedQty::ZERO)
+        && state
+            .unattributed
+            .get(&order.instrument)
+            .is_none_or(Vec::is_empty);
+    let alone = state.orders.values().all(|other| {
+        other.client_order_id == order.client_order_id
+            || other.instrument != order.instrument
+            || state
+                .details
+                .get(&other.client_order_id)
+                .and_then(|other_detail| other_detail.reported_filled)
+                .is_none_or(|filled| filled <= other.filled_qty)
+    });
+    if !(entry && flat && alone) {
+        return None;
+    }
+    let mut held = positions
+        .iter()
+        .filter(|position| position.instrument == order.instrument);
+    let (Some(position), None) = (held.next(), held.next()) else {
+        return None;
+    };
+    if position.qty != SignedQty::from(reported) {
+        return None;
+    }
+    let submitted = UtcNanos::from_parts(detail.submitted_at?.secs(), 0).ok()?;
+    let (trade_date, _) = new_york_date_and_hour(submitted).ok()?;
+    Some(BrokerFill {
+        fill_id: FillId(format!(
+            "record:{}:{reported}",
+            order.client_order_id.as_str()
+        )),
+        client_order_id: Some(order.client_order_id.as_str().to_owned()),
+        broker_order_id: None,
+        instrument: order.instrument.clone(),
+        side: Side::Buy,
+        qty: reported,
+        price: position.avg_entry_price,
+        fees: Usd::ZERO,
+        trade_date,
+    })
 }
