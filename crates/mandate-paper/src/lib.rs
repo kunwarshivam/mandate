@@ -63,6 +63,7 @@ use mandate_num::{Price, Usd};
 use mandate_robinhood::AccountSnapshot;
 use mandate_runtime::Observation;
 use mandate_shell::adapters::Sources;
+use mandate_shell::approvers::live_cli_confirm;
 use mandate_shell::control::{
     Build as BuiltWith, ConfigRefusal, Confirmation, ConfirmedVersion, ControlRecord,
     DeploymentRefusal, DoorChecks, LiveAdmission, McpHost, Origin, Pinned, RunFacts,
@@ -253,6 +254,7 @@ fn with_transport<T>(sources: Sources<()>, transport: T) -> Sources<T> {
         executor,
         run,
         artifacts,
+        content_store,
         symbols,
         transport: (),
     } = sources;
@@ -266,6 +268,7 @@ fn with_transport<T>(sources: Sources<()>, transport: T) -> Sources<T> {
         executor,
         run,
         artifacts,
+        content_store,
         symbols,
         transport,
     }
@@ -622,6 +625,7 @@ pub fn run<P: Ports>(
     }
     let (connection, _) =
         door.ok_or_else(|| absent(Stage::Validate, "the connection the deployment names"))?;
+    let live_scope = live_cli_confirm(&records, confirmed.mandate(), connection.environment);
     let session = match early {
         Some(session) => session,
         None => ports.connect(&connection, None)?,
@@ -700,7 +704,7 @@ pub fn run<P: Ports>(
     };
     let paper = PaperFacts { broker, liquidity };
     let binding_clock = Rc::new(PortClock(clock.clone()));
-    let contexts = load_contexts_with_clock(
+    let mut contexts = load_contexts_with_clock(
         &artifacts,
         &paper,
         now,
@@ -709,6 +713,7 @@ pub fn run<P: Ports>(
         binding_clock,
     )
     .map_err(refused(Stage::Validate))?;
+    contexts.run.live_cli_confirm = live_scope;
     let contexts_quote = contexts.quote.clone();
     let registered = artifacts
         .production_configuration()
@@ -741,6 +746,7 @@ pub fn run<P: Ports>(
         account_ref: deployed.account_ref().to_owned(),
         executor: Some(contexts.executor),
         run: Some(contexts.run),
+        content_store: Some(Box::new(store.clone())),
         artifacts: Some(Arc::new(store)),
         symbols: BrokerSymbols::registered([(ticker, asset_id)]),
         transport: (),
@@ -822,6 +828,7 @@ impl<S: Session> Booking<'_, S> {
             executor: Some(context),
             run: None,
             artifacts: Some(Arc::new(store)),
+            content_store: None,
             symbols: BrokerSymbols::registered([(ticker, asset_id)]),
             transport: (),
         };

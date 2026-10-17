@@ -1,0 +1,274 @@
+{
+  "configs": {
+    "journal-initdb": {
+      "file": "./initdb.sh"
+    },
+    "journal-roles": {
+      "file": "../charts/journal-db/files/roles.sql"
+    }
+  },
+  "name": "mandate-workspace",
+  "networks": {
+    "egress": {},
+    "journal": {
+      "internal": true
+    }
+  },
+  "secrets": {
+    "journal-role-mandate-control": {
+      "file": "./secrets/journal-role-mandate-control.pgpass"
+    },
+    "journal-role-mandate-executor": {
+      "file": "./secrets/journal-role-mandate-executor.pgpass"
+    },
+    "journal-role-mandate-exporter": {
+      "file": "./secrets/journal-role-mandate-exporter.pgpass"
+    },
+    "journal-role-mandate-gateway": {
+      "file": "./secrets/journal-role-mandate-gateway.pgpass"
+    },
+    "journal-role-mandate-migrator": {
+      "file": "./secrets/journal-role-mandate-migrator.pgpass"
+    },
+    "journal-role-mandate-runtime": {
+      "file": "./secrets/journal-role-mandate-runtime.pgpass"
+    },
+    "journal-role-mandate-scheduler": {
+      "file": "./secrets/journal-role-mandate-scheduler.pgpass"
+    },
+    "journal-role-mandate-verify": {
+      "file": "./secrets/journal-role-mandate-verify.pgpass"
+    },
+    "postgres-superuser": {
+      "file": "./secrets/postgres-superuser"
+    }
+  },
+  "services": {
+    "control": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "depends_on": {
+        "migrate": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "deploy": {
+        "resources": {
+          "limits": {
+            "cpus": "0.2",
+            "memory": "128M"
+          },
+          "reservations": {
+            "cpus": "0.1",
+            "memory": "64M"
+          }
+        }
+      },
+      "environment": {
+        "HOME": "/tmp",
+        "MANDATE_JOURNAL_DSN": "postgres://mandate_control@postgres:5432/mandate?sslmode=disable",
+        "PGPASSFILE": "/run/secrets/journal-role-mandate-control"
+      },
+      "image": "${MANDATE_IMAGE_MANDATE:?set the mandate image, pinned by digest}",
+      "labels": {
+        "mandate.dev/process": "control",
+        "mandate.dev/workspace": "${MANDATE_WORKSPACE:?set the workspace}"
+      },
+      "networks": [
+        "journal",
+        "egress"
+      ],
+      "profiles": [
+        "run"
+      ],
+      "read_only": true,
+      "restart": "no",
+      "secrets": [
+        "journal-role-mandate-control"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "tmpfs": [
+        "/tmp"
+      ],
+      "user": "999:999"
+    },
+    "journal-verify": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "depends_on": {
+        "migrate": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "deploy": {
+        "resources": {
+          "limits": {
+            "cpus": "0.2",
+            "memory": "128M"
+          },
+          "reservations": {
+            "cpus": "0.1",
+            "memory": "64M"
+          }
+        }
+      },
+      "environment": {
+        "HOME": "/tmp",
+        "MANDATE_JOURNAL_DSN": "postgres://mandate_verify@postgres:5432/mandate?sslmode=disable",
+        "PGPASSFILE": "/run/secrets/journal-role-mandate-verify"
+      },
+      "image": "${MANDATE_IMAGE_MANDATE:?set the mandate image, pinned by digest}",
+      "labels": {
+        "mandate.dev/process": "journal-verify",
+        "mandate.dev/workspace": "${MANDATE_WORKSPACE:?set the workspace}"
+      },
+      "networks": [
+        "journal"
+      ],
+      "profiles": [
+        "run"
+      ],
+      "read_only": true,
+      "restart": "no",
+      "secrets": [
+        "journal-role-mandate-verify"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "tmpfs": [
+        "/tmp"
+      ],
+      "user": "999:999"
+    },
+    "migrate": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "command": [
+        "bash",
+        "/opt/mandate/migrate.sh"
+      ],
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        }
+      },
+      "deploy": {
+        "resources": {
+          "limits": {
+            "cpus": "0.2",
+            "memory": "128M"
+          },
+          "reservations": {
+            "cpus": "0.1",
+            "memory": "64M"
+          }
+        }
+      },
+      "environment": {
+        "HOME": "/tmp",
+        "MANDATE_JOURNAL_DSN": "postgres://mandate_migrator@postgres:5432/mandate?sslmode=disable",
+        "PGPASSFILE": "/run/secrets/journal-role-mandate-migrator"
+      },
+      "image": "ghcr.io/cloudnative-pg/postgresql:18.6-202609281634-minimal-trixie@sha256:4467d4cf7e502fbc29800b75d755ede477a765b25a506a58a0842a57a4bf42c9",
+      "labels": {
+        "mandate.dev/process": "migrate",
+        "mandate.dev/workspace": "${MANDATE_WORKSPACE:?set the workspace}"
+      },
+      "networks": [
+        "journal"
+      ],
+      "read_only": true,
+      "restart": "no",
+      "secrets": [
+        "journal-role-mandate-migrator"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "tmpfs": [
+        "/tmp"
+      ],
+      "user": "999:999",
+      "volumes": [
+        "../../../migrations:/migrations:ro",
+        "../charts/workspace/files/migrate.sh:/opt/mandate/migrate.sh:ro"
+      ]
+    },
+    "postgres": {
+      "cap_add": [
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "SETGID",
+        "SETUID"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "configs": [
+        {
+          "source": "journal-initdb",
+          "target": "/docker-entrypoint-initdb.d/10-journal.sh"
+        },
+        {
+          "source": "journal-roles",
+          "target": "/etc/mandate/roles.sql"
+        }
+      ],
+      "environment": {
+        "POSTGRES_DB": "postgres",
+        "POSTGRES_PASSWORD_FILE": "/run/secrets/postgres-superuser",
+        "POSTGRES_USER": "postgres"
+      },
+      "healthcheck": {
+        "interval": "2s",
+        "retries": 30,
+        "test": [
+          "CMD",
+          "pg_isready",
+          "-U",
+          "postgres",
+          "-d",
+          "mandate"
+        ]
+      },
+      "image": "postgres:18.6-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336",
+      "networks": [
+        "journal"
+      ],
+      "read_only": true,
+      "restart": "unless-stopped",
+      "secrets": [
+        "postgres-superuser",
+        "journal-role-mandate-migrator",
+        "journal-role-mandate-control",
+        "journal-role-mandate-verify",
+        "journal-role-mandate-runtime",
+        "journal-role-mandate-executor",
+        "journal-role-mandate-scheduler",
+        "journal-role-mandate-gateway",
+        "journal-role-mandate-exporter"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "tmpfs": [
+        "/tmp",
+        "/var/run/postgresql"
+      ],
+      "volumes": [
+        "journal-data:/var/lib/postgresql"
+      ]
+    }
+  },
+  "volumes": {
+    "journal-data": {}
+  },
+  "x-generated": "Generated by `cargo xtask cell generate --write` from deploy/cell/charts/workspace/processes.json; edit that file, never this one"
+}
