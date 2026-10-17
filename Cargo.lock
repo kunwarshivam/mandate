@@ -1675,6 +1675,7 @@ dependencies = [
  "mandate-push-relay",
  "mandate-time",
  "mandate-webpush",
+ "proptest",
  "thiserror",
 ]
 

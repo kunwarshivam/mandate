@@ -20,3 +20,4 @@ thiserror.workspace = true
 
 [dev-dependencies]
 base64ct.workspace = true
+proptest.workspace = true
