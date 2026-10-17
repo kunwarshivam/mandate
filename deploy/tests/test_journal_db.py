@@ -99,6 +99,17 @@ def standby_synchronous(docs: list[dict]) -> list[str]:
     return problems
 
 
+def former_primary_can_rejoin(docs: list[dict]) -> list[str]:
+    """roles.sql revokes CONNECT on `postgres` from PUBLIC, and pg_rewind connects there as
+    `streaming_replica` when a former primary rejoins after a failover, so the bootstrap grants it."""
+    cluster = one(docs, "Cluster", "journal")
+    if cluster is None:
+        return ["no Cluster"]
+    grants = cluster["spec"].get("bootstrap", {}).get("initdb", {}).get("postInitSQL", [])
+    want = "GRANT CONNECT ON DATABASE postgres TO streaming_replica"
+    return [] if want in grants else [f"postInitSQL {grants} does not grant {want}"]
+
+
 def archive_configured(docs: list[dict]) -> list[str]:
     """The WAL archiver is the Barman Cloud plugin, writing to the chart's ObjectStore with a key no
     database role holds, and a scheduled base backup goes through the same plugin."""
@@ -283,6 +294,19 @@ def plugin_tls(docs: list[dict]) -> list[str]:
 
 def test_standby_synchronous():
     assert standby_synchronous(journal()) == []
+
+
+def test_former_primary_can_rejoin():
+    docs = journal()
+    assert former_primary_can_rejoin(docs) == []
+    assert (
+        "REVOKE CONNECT ON DATABASE postgres FROM PUBLIC"
+        in (JOURNAL_CHART / "files" / "roles.sql").read_text()
+    )
+    stripped = mutate(
+        docs, "Cluster", "journal", lambda c: c["spec"]["bootstrap"]["initdb"].pop("postInitSQL")
+    )
+    assert former_primary_can_rejoin(stripped)
 
 
 def test_archive_configured():

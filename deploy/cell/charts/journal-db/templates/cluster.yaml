@@ -56,6 +56,10 @@ spec:
       owner: mandate_migrator
       secret:
         name: journal-role-mandate-migrator
+      # roles.sql revokes CONNECT on `postgres` from PUBLIC; pg_rewind connects there as
+      # CloudNativePG's replication role when a former primary rejoins after a failover.
+      postInitSQL:
+        - GRANT CONNECT ON DATABASE postgres TO streaming_replica
       postInitApplicationSQLRefs:
         configMapRefs:
           - name: journal-roles
