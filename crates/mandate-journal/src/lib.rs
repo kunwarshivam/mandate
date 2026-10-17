@@ -73,8 +73,10 @@ pub fn reads_stream(batch: &[Draft]) -> bool {
     batch.iter().any(|draft| {
         matches!(
             (draft.event_type(), draft.stream_id().stream_type()),
-            ("ModelInvocationRecorded" | "ThesisInvalidated", StreamType::Agent)
-                | ("MeterReserved" | "MeterSettled", StreamType::Meter)
+            (
+                "ModelInvocationRecorded" | "ThesisInvalidated",
+                StreamType::Agent
+            ) | ("MeterReserved" | "MeterSettled", StreamType::Meter)
         )
     })
 }
