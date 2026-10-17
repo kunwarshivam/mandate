@@ -96,10 +96,10 @@ pub async fn kill_switch(
 }
 
 /// A request past §3.3's checks: its session, the instant, and its key.
-struct Gate {
-    admitted: Authenticated,
-    now: UtcNanos,
-    key: IdempotencyKey,
+pub(crate) struct Gate {
+    pub(crate) admitted: Authenticated,
+    pub(crate) now: UtcNanos,
+    pub(crate) key: IdempotencyKey,
 }
 
 /// The largest body read, in bytes: a command's members and a record's two references fit many
@@ -126,8 +126,26 @@ async fn admitted<T: Api7>(
     Ok((Gate { admitted, now, key }, kept))
 }
 
+/// The session (for any but pause and the kill switch), the CSRF mark, the key, and the body's
+/// bytes, in that order, for a route whose body is decoded strictly (§3.11 item 11).
+pub(crate) async fn strict(
+    app: &App,
+    headers: &HeaderMap,
+    body: Body,
+) -> Result<(Gate, Bytes), Refused> {
+    let (admitted, now) = session(app, headers, Request::Other)?;
+    if !browser(headers, &app.settings.app_origin) {
+        return Err(Refused::Forbidden);
+    }
+    let key = one_key(headers).ok_or(Refused::Invalid)?;
+    let body = to_bytes(body, MAX_BODY)
+        .await
+        .map_err(|_| Refused::Invalid)?;
+    Ok((Gate { admitted, now, key }, body))
+}
+
 /// The one `Idempotency-Key`, when it is sent once and is well formed.
-fn one_key(headers: &HeaderMap) -> Option<IdempotencyKey> {
+pub(crate) fn one_key(headers: &HeaderMap) -> Option<IdempotencyKey> {
     let mut sent = headers.get_all(IDEMPOTENCY_KEY).iter();
     match (sent.next(), sent.next()) {
         (Some(key), None) => IdempotencyKey::parse(key.to_str().ok()?).ok(),
@@ -136,7 +154,7 @@ fn one_key(headers: &HeaderMap) -> Option<IdempotencyKey> {
 }
 
 /// The text of an id, as it serializes.
-fn id_text(id: &Id) -> Option<String> {
+pub(crate) fn id_text(id: &Id) -> Option<String> {
     json_string(&encode(id).ok()?)
 }
 
@@ -146,7 +164,7 @@ fn event_text(id: &EventId) -> Option<String> {
 }
 
 /// `bytes` as a JSON string's text.
-fn json_string(bytes: &[u8]) -> Option<String> {
+pub(crate) fn json_string(bytes: &[u8]) -> Option<String> {
     parse(bytes).ok()?.as_str().map(str::to_owned)
 }
 
@@ -205,21 +223,7 @@ async fn committed(
     let Some(bytes) = draft(&issued) else {
         return Refused::JournalUnavailable.response();
     };
-    let stream = format!("ctl:{}", reader.workspace);
-    let settled = match repeated(&reader.control, &text, &bytes) {
-        Some(settled) => settled,
-        None => match settle(app.journal.as_ref(), &stream, &text, &bytes, gate.now).await {
-            Settled::Conflict => app
-                .journal
-                .rows(&stream)
-                .await
-                .ok()
-                .and_then(|rows| repeated(&rows, &text, &bytes))
-                .unwrap_or(Settled::Unknown),
-            settled => settled,
-        },
-    };
-    match settled {
+    match appended(app, reader, &text, &bytes, gate.now).await {
         Settled::Stored(row) => accepted(command.id_member(), &row, gate.now, dropped, status),
         Settled::Conflict => problem(
             StatusCode::CONFLICT,
@@ -230,9 +234,34 @@ async fn committed(
     }
 }
 
+/// `draft`, whose id is `id`, on the control stream `reader` read: the event already stored under
+/// the id, replayed or a conflict (§3.4 step 1), or the append's outcome (DEC-1007 item 6).
+pub(crate) async fn appended(
+    app: &App,
+    reader: &Reader,
+    id: &str,
+    draft: &[u8],
+    now: UtcNanos,
+) -> Settled {
+    let stream = format!("ctl:{}", reader.workspace);
+    if let Some(settled) = repeated(&reader.control, id, draft) {
+        return settled;
+    }
+    match settle(app.journal.as_ref(), &stream, id, draft, now).await {
+        Settled::Conflict => app
+            .journal
+            .rows(&stream)
+            .await
+            .ok()
+            .and_then(|rows| repeated(&rows, id, draft))
+            .unwrap_or(Settled::Unknown),
+        settled => settled,
+    }
+}
+
 /// What `rows` already hold under `id` (§3.4 step 1): the same command, replayed, or other content,
 /// a conflict; `None` when nothing is stored under it.
-fn repeated(rows: &[StoredEvent], id: &str, draft: &[u8]) -> Option<Settled> {
+pub(crate) fn repeated(rows: &[StoredEvent], id: &str, draft: &[u8]) -> Option<Settled> {
     let row = rows.iter().find(|row| row.event_id == id)?;
     Some(match same(row, draft) {
         true => Settled::Stored(Box::new(row.clone())),
@@ -240,18 +269,27 @@ fn repeated(rows: &[StoredEvent], id: &str, draft: &[u8]) -> Option<Settled> {
     })
 }
 
-fn principal_text(gate: &Gate) -> Option<String> {
+pub(crate) fn principal_text(gate: &Gate) -> Option<String> {
     gate.admitted.principal.to_ulid_text().ok()
 }
 
 /// §3.4's event id for `command` under the gate's key, and its text.
 fn derived(gate: &Gate, workspace: &str, command: &Command) -> Option<(EventId, String)> {
+    derived_for(gate, workspace, command.operation())
+}
+
+/// §3.4's event id for `operation` under the gate's key, and its text.
+pub(crate) fn derived_for(
+    gate: &Gate,
+    workspace: &str,
+    operation: &str,
+) -> Option<(EventId, String)> {
     let workspace = Id::try_from(workspace.to_owned()).ok()?;
     let principal = Id::try_from(principal_text(gate)?).ok()?;
     let id = event_id(&Derivation {
         workspace: &workspace,
         principal: &principal,
-        operation: command.operation(),
+        operation,
         key: &gate.key,
         position: None,
     })
@@ -289,7 +327,7 @@ fn accepted(
 }
 
 /// 503 `outcome_unknown`, naming the event id the client polls (§3.5, §5.5).
-fn unknown(id: EventId) -> Response {
+pub(crate) fn unknown(id: EventId) -> Response {
     let body = Problem::of(ProblemCode::OutcomeUnknown, Effect::Unknown, Some(id), None)
         .ok()
         .and_then(|problem| encode(&problem).ok())
@@ -384,6 +422,6 @@ async fn requester(app: &App, reader: &Reader, approval: &str) -> Result<Option<
 }
 
 /// The text of a content reference, as it serializes.
-fn ref_text(reference: &Ref) -> Option<String> {
+pub(crate) fn ref_text(reference: &Ref) -> Option<String> {
     json_string(&encode(reference).ok()?)
 }

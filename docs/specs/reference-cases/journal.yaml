@@ -47929,7 +47929,7 @@ model_gateway:
     admitted: 2282
     refused: 620
 backtest_records:
-  spec: docs/specs/journal.md v0.50 §9.18 (DEC-1001, DEC-1002; writer DEC-1141; theses_head DEC-1142)
+  spec: docs/specs/journal.md v0.51 §9.18 (DEC-1001, DEC-1002; writer DEC-1141; theses_head DEC-1142)
   artifacts:
   - name: mandate_version
     ref: sha256:f3c73187ca6449fdc3796cd4a60e0f0c8658f58cfb4df1e723b938bcf3008841

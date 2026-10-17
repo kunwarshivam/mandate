@@ -1,0 +1,81 @@
+[
+  {
+    "label": "a phase other than recorded",
+    "set": {
+      "/phase": "applied"
+    }
+  },
+  {
+    "label": "a malformed version",
+    "set": {
+      "/mandate_version": "sha256:xyz"
+    }
+  },
+  {
+    "label": "a warning code that is not a W-code",
+    "set": {
+      "/warnings/0": "V-001"
+    }
+  },
+  {
+    "label": "a warning listed twice",
+    "set": {
+      "/warnings": [
+        "W-001",
+        "W-001"
+      ]
+    }
+  },
+  {
+    "label": "a malformed command id",
+    "set": {
+      "/command_id": "not-a-ulid"
+    }
+  },
+  {
+    "label": "no envelope build",
+    "remove": [
+      "/build"
+    ]
+  },
+  {
+    "label": "a malformed watermark",
+    "set": {
+      "/as_of": [
+        {
+          "stream_id": "ctl:x"
+        }
+      ]
+    }
+  },
+  {
+    "label": "auto: no /command_id",
+    "remove": [
+      "/command_id"
+    ]
+  },
+  {
+    "label": "auto: no /phase",
+    "remove": [
+      "/phase"
+    ]
+  },
+  {
+    "label": "auto: no /mandate_version",
+    "remove": [
+      "/mandate_version"
+    ]
+  },
+  {
+    "label": "auto: no /warnings",
+    "remove": [
+      "/warnings"
+    ]
+  },
+  {
+    "label": "auto: an extra member in the body",
+    "set": {
+      "/mutant_member": 1
+    }
+  }
+]

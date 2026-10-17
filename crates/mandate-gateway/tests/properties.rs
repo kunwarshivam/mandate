@@ -309,7 +309,7 @@ fn new_gateway(store: MemoryMeter, caps: Caps, clock: ManualClock, ids_from: u12
         Box::new(OpenRouter),
         RecordedTransport::new(),
         Box::new(TestKey),
-        Meter::new(store, caps),
+        Meter::new(store, caps, common::deployment()),
         clock,
         Box::new(SequentialIds::starting_at(ids_from)),
     )
@@ -361,6 +361,10 @@ fn run(caps: &CapModel, steps: &[Step]) -> Run {
                     deadline: mandate_gateway::provider::after_ms(start, 60_000).unwrap(),
                     observations: vec![],
                     key_owner: KeyOwner::Platform,
+                    run_kind: None,
+                    turns: vec![],
+                    tools: vec![],
+                    spend_ceiling: None,
                 };
                 gateway.transport_mut().clear_script();
                 gateway
@@ -523,6 +527,7 @@ fn cap_oracle(caps: &CapModel, run: &Run) -> Result<(), String> {
         let who = match scope {
             Scope::Workspace => "workspace".to_owned(),
             Scope::Agent(a) => a.clone(),
+            Scope::Deployment => "deployment".to_owned(),
         };
         let when = match period {
             Period::Day(d) => d.to_string(),
@@ -931,6 +936,7 @@ fn seeded_the_deadline_oracle_catches_late_use_and_late_caching() {
     let attempt = Sent {
         host: HOST.to_owned(),
         body_digest: Digest::ZERO,
+        body: vec![],
         at: at("2026-10-16T14:01:00.000000000Z"),
         deadline: at("2026-10-16T14:01:00.000000000Z"),
         with_key: true,

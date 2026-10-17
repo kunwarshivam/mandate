@@ -11,6 +11,8 @@ import { WorkspaceGate } from "@/components/screens/common";
 import { FixtureTag } from "@/components/domain/placeholders";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
+import { confirmStepUpDigest } from "@/api/confirm";
+import { CONFIRM_RECORD, DEPLOY_RECORD } from "@/test/set-up";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
 const ORIGIN = "https://api.owlhead.ai";
@@ -237,16 +239,38 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     expect(current().view).toBeNull();
   });
 
-  it("refuses set-up and mandate changes it cannot send yet, and sends nothing for them", async () => {
+  it("sends no version creation and no deployment, which have no request schema yet, and says not sent, never recorded", async () => {
     const { posts } = mount();
     await ready();
     const agent = buildWorkspace("approvals").agents[0];
-    let deployment: ReturnType<Runtime["deploy"]> | null = null;
+    let id = "";
     act(() => {
-      deployment = current().deploy({ mandate: agent.mandate, provenance: agent.provenance }, { screen: "A5", environment: "paper", shown: [] });
+      id = current().createVersion({ mandate: agent.mandate, provenance: agent.provenance }).id;
     });
-    expect(deployment).not.toBeNull();
-    await waitFor(() => expect(current().deployments.at(-1)?.phase).toBe("undelivered"));
+    expect(current().setUps.at(-1)).toMatchObject({ id, agentId: "", created: { phase: "sent", validated: false, classification: null } });
+    await waitFor(() => expect(current().setUps.at(-1)?.created).toMatchObject({ phase: "undelivered", reason: "not_sent", validated: false, classification: null }));
+    act(() => current().deployVersion(id, DEPLOY_RECORD));
+    await waitFor(() => expect(current().setUps.at(-1)?.deployed).toMatchObject({ phase: "undelivered", reason: "not_sent" }));
+    expect(current().setUps.at(-1)?.confirmed).toBeNull();
+    expect(posts()).toHaveLength(0);
+    expect(current().backtestFor(agent.mandate_version)).toBeNull();
+  });
+
+  it("sends no confirm until the served confirmation can be read: a version not created is refused first, and no step-up is recorded", async () => {
+    const { posts } = mount();
+    await ready();
+    const agent = buildWorkspace("approvals").agents[0];
+    let id = "";
+    act(() => {
+      id = current().createVersion({ mandate: agent.mandate, provenance: agent.provenance }).id;
+    });
+    const setUp = () => current().setUps.find((s) => s.id === id)!;
+    await waitFor(() => expect(setUp().created.phase).toBe("undelivered"));
+    act(() => current().confirmVersion(id, CONFIRM_RECORD, confirmStepUpDigest(setUp().version, null, null)));
+    expect(setUp().confirmed).toMatchObject({ phase: "sent", record: CONFIRM_RECORD, stepUp: null });
+    await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "undelivered", reason: "not_created", stepUp: null }));
+    act(() => current().confirmVersion("set-unknown", CONFIRM_RECORD, null));
+    expect(current().setUps.some((s) => s.id === "set-unknown")).toBe(false);
     expect(posts()).toHaveLength(0);
   });
 

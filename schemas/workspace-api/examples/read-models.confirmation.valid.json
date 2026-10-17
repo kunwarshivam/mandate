@@ -1,0 +1,25 @@
+[
+  {
+    "label": "neutral, no step-up, no warnings",
+    "set": {
+      "/classification": "neutral",
+      "/step_up_required": false,
+      "/warnings": []
+    }
+  },
+  {
+    "label": "risk-reducing",
+    "set": {
+      "/classification": "risk_reducing",
+      "/step_up_required": false
+    }
+  },
+  {
+    "label": "a path with an escaped slash",
+    "set": {
+      "/required_paths": [
+        "/a~1b"
+      ]
+    }
+  }
+]
