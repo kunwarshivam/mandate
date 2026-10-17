@@ -6,7 +6,8 @@
 //! `authorize` over the hosted workspace's control-stream memberships for the matrix's "View agents,
 //! positions, decisions" row (API-2). The streams are read only after that, under the tenant
 //! context it returns (identity spec ID-8). An absent id, another workspace, and a workspace the
-//! principal holds no membership of answer the same 404 (API-9). Every value comes from journal
+//! principal holds no membership of answer the same 404 (API-9); an id is found only by equality
+//! with one the journal holds, so a malformed id is simply absent. Every value comes from journal
 //! rows, and `as_of` names the last row of each stream read (API-14).
 
 use std::sync::Arc;
@@ -238,19 +239,6 @@ fn approval_value(view: &ApprovalView, with_content: bool) -> Value {
     object(members)
 }
 
-/// Whether `id` is journal spec §2's identifier, at most 64 characters (common `Id`).
-fn is_agent_id(id: &str) -> bool {
-    (1..=64).contains(&id.len())
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-}
-
-/// Whether `id` is an event id: 26 Crockford base-32 digits, the first at most `7`.
-fn is_event_id(id: &str) -> bool {
-    mandate_canon::is_ulid(id)
-}
-
 /// `GET /v1/workspaces/{ws}/agents`.
 pub async fn list_agents(
     State(app): State<Arc<App>>,
@@ -292,7 +280,7 @@ pub async fn one_agent(
     };
     let Some(deployment) = deployed(&reader.control)
         .into_iter()
-        .find(|deployment| is_agent_id(&id) && deployment.0 == id)
+        .find(|deployment| deployment.0 == id)
     else {
         return Refused::NotFound.response();
     };
@@ -369,9 +357,6 @@ pub async fn one_approval(
         Ok(reader) => reader,
         Err(refusal) => return refusal.response(),
     };
-    if !is_event_id(&id) {
-        return Refused::NotFound.response();
-    }
     let (views, rows) = match all_approvals(&app, &reader).await {
         Ok(read) => read,
         Err(refusal) => return refusal.response(),

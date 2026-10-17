@@ -511,3 +511,25 @@ fn a_reduction_only_session_reads_nothing() {
     assert!(String::from_utf8_lossy(&reply.body).contains(r#""code":"reduction_only""#));
     assert_eq!(ORG.len(), 26);
 }
+
+#[test]
+fn a_path_that_does_not_decode_is_the_one_401_or_the_404() {
+    let f = fixture();
+    seed(&f);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    let one = unauthenticated(&f);
+    for path in [
+        "/v1/workspaces/%FF/agents",
+        "/v1/workspaces/%FF/approvals",
+        &format!("/v1/workspaces/{WORKSPACE}/agents/%FF"),
+        &format!("/v1/workspaces/{WORKSPACE}/approvals/%FF"),
+    ] {
+        let without = get(&f, path, None);
+        assert_eq!(without.status, 401, "{path}");
+        assert_eq!(without.body, one, "{path}");
+        let with = get(&f, path, Some(&cookie));
+        assert_eq!(with.status, 404, "{path}");
+        assert!(String::from_utf8_lossy(&with.body).contains(r#""code":"not_found""#));
+    }
+}
