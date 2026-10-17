@@ -276,12 +276,13 @@ forbidden_internal = [
 # process, and the workspace API (DEC-2500 item 2). Nothing may depend on it, so no trading crate
 # can wait on it (NT-9 at rung 1). `pure = false` since slice D10a: the operating system's random
 # source (through `ring`) and the Postgres journal (through `tokio`). Its other externals
-# (DEC-2500 item 2) are listed by the slice that first uses each.
+# (DEC-2500 item 2) are listed by the slice that first uses each: `secrecy` since slice D10b, for a
+# web-push address's vault entry and a VAPID key's document (DEC-2502 item 8, DEC-2503 item 3).
 [crates.mandate-dispatcher]
 layer = 9
 safety_critical = true
 pure = false
-allowed_external = ["ring", "thiserror", "tokio"]
+allowed_external = ["ring", "secrecy", "thiserror", "tokio"]
 forbidden_internal = ["mandate-runtime", "mandate-executor", "mandate-mcp", "mandate-shell", "mandate-cli", "mandate-paper", "mandate-alpaca", "mandate-robinhood", "mandate-agentd", "mandate-api"]
 allowed_dependents = []
 
