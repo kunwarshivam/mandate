@@ -121,6 +121,22 @@ fn the_deadline_counts_from_dispatch_not_from_the_run_start() {
 }
 
 #[test]
+fn the_deadline_carries_nanoseconds_into_seconds() {
+    let retrieved = retrieval();
+    let mut plan = call_plan(retrieved.items.len());
+    plan.deadline_ms = 1_500;
+    let dispatched =
+        mandate_time::UtcNanos::from_parts(CUT_OFF, 700_000_000).unwrap_or_else(|e| panic!("{e}"));
+    let call = ResearchCall::build(&plan, &retrieved, context(), dispatched)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        call.deadline,
+        mandate_time::UtcNanos::from_parts(CUT_OFF + 2, 200_000_000)
+            .unwrap_or_else(|e| panic!("{e}"))
+    );
+}
+
+#[test]
 fn an_item_without_an_observation_never_reaches_the_call() {
     let retrieved = retrieval();
     for observations in [retrieved.items.len() - 1, retrieved.items.len() + 1] {

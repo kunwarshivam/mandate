@@ -385,3 +385,55 @@ fn platform_items_have_derived_ids_and_platform_sources() {
     );
     let _ = EDGAR;
 }
+
+#[test]
+fn a_link_and_a_form_are_cut_to_their_caps() {
+    let mut fixture = Fixture::default();
+    let mut long = news("n-link", NEWSWIRE, "AAPL", CUT_OFF - 60);
+    long.link = "l".repeat(600);
+    fixture.news = vec![long];
+    let mut filed = filing("f-form", "AAPL", CUT_OFF - 60);
+    filed.form = "F".repeat(40);
+    fixture.filings = vec![filed];
+    let retrieval =
+        retrieve(&plan(), &scope(), fixture.readers()).unwrap_or_else(|e| panic!("{e}"));
+    for item in &retrieval.items {
+        match item {
+            RetrievedItem::News(kept) => assert_eq!(kept.link.len(), 512),
+            RetrievedItem::Filing(kept) => assert_eq!(kept.form.len(), 32),
+            _ => {}
+        }
+    }
+    assert_eq!(
+        dropped(&retrieval, DropReason::Trimmed),
+        vec!["f-form", "n-link"]
+    );
+}
+
+#[test]
+fn a_reader_id_in_the_platform_s_namespace_is_dropped() {
+    let mut fixture = Fixture::default();
+    fixture.news = vec![news("bar:AAPL:1", NEWSWIRE, "AAPL", CUT_OFF - 60)];
+    fixture.filings = vec![filing("instrument:x", "AAPL", CUT_OFF - 60)];
+    let retrieval =
+        retrieve(&plan(), &scope(), fixture.readers()).unwrap_or_else(|e| panic!("{e}"));
+    assert!(retrieval.items.is_empty());
+    assert_eq!(
+        dropped(&retrieval, DropReason::ReservedId),
+        vec!["bar:AAPL:1", "instrument:x"]
+    );
+}
+
+#[test]
+fn two_bars_in_one_second_are_one_bar() {
+    let mut fixture = Fixture::default();
+    let first = common::bar("AAPL", CUT_OFF - DAY, "100");
+    let mut second = first.clone();
+    second.knowledge_at =
+        mandate_time::UtcNanos::from_parts(CUT_OFF - DAY, 5).unwrap_or_else(|e| panic!("{e}"));
+    fixture.bars = vec![first, second];
+    let retrieval =
+        retrieve(&plan(), &scope(), fixture.readers()).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(kept(&retrieval.items, ItemKind::Bar).len(), 1);
+    assert_eq!(dropped(&retrieval, DropReason::Duplicate).len(), 1);
+}

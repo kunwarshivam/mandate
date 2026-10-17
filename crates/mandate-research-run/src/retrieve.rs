@@ -40,6 +40,9 @@ pub enum DropReason {
     OverCap,
     /// Kept, but its text was cut to the plan's byte cap.
     Trimmed,
+    /// A reader's id in the namespace the platform derives its own ids in (`bar:`, `instrument:`),
+    /// which would collide with a platform item's.
+    ReservedId,
 }
 
 impl DropReason {
@@ -53,6 +56,7 @@ impl DropReason {
             Self::Duplicate => "duplicate",
             Self::OverCap => "over_cap",
             Self::Trimmed => "trimmed",
+            Self::ReservedId => "reserved_id",
         }
     }
 }
@@ -285,6 +289,19 @@ fn cut(text: &str, budget: usize) -> &str {
     text.get(..end).unwrap_or_default()
 }
 
+/// The longest link a news item carries into the prompt, and the longest filing form name.
+const LINK_BYTES: usize = 512;
+const FORM_BYTES: usize = 32;
+
+/// The id prefixes the platform derives its own items' ids under (`RetrievedItem::item_id`).
+const RESERVED_PREFIXES: [&str; 2] = ["bar:", "instrument:"];
+
+fn reserved(id: &ItemId) -> bool {
+    RESERVED_PREFIXES
+        .iter()
+        .any(|prefix| id.as_str().starts_with(prefix))
+}
+
 /// What every text read shares: a window, an allowlist, a scope, a cap, and a byte bound.
 struct TextRead<'a> {
     scope: &'a Scope,
@@ -403,14 +420,14 @@ pub fn retrieve(
             .bars
             .daily_bars(symbol, scope.cut_off, plan.bars_per_instrument)
             .unwrap_or_default();
-        let mut by_time: BTreeMap<UtcNanos, Bar> = BTreeMap::new();
+        let mut by_time: BTreeMap<i64, Bar> = BTreeMap::new();
         for bar in answered {
             let id = RetrievedItem::Bar(bar.clone()).item_id()?;
             let reason = if bar.knowledge_at > scope.cut_off {
                 Some(DropReason::AfterCutOff)
             } else if bar.symbol != *symbol {
                 Some(DropReason::OutsideScope)
-            } else if by_time.contains_key(&bar.knowledge_at) {
+            } else if by_time.contains_key(&bar.knowledge_at.secs()) {
                 Some(DropReason::Duplicate)
             } else {
                 None
@@ -422,7 +439,7 @@ pub fn retrieve(
                     kind: ItemKind::Bar,
                 }),
                 None => {
-                    by_time.insert(bar.knowledge_at, bar);
+                    by_time.insert(bar.knowledge_at.secs(), bar);
                 }
             }
         }
@@ -464,6 +481,7 @@ pub fn retrieve(
                 item.licensed,
                 &item.symbols,
             )
+            .or_else(|| reserved(&item.item_id).then_some(DropReason::ReservedId))
             .or_else(|| {
                 seen.contains(&item.item_id)
                     .then_some(DropReason::Duplicate)
@@ -483,11 +501,13 @@ pub fn retrieve(
     let budget = usize::try_from(plan.news_item_bytes).unwrap_or(usize::MAX);
     let mut news: Vec<(Symbol, UtcNanos, ItemId, NewsItem)> = Vec::new();
     for (knowledge_at, id, mut item) in news_read.capped(kept, &mut drops) {
-        if item.headline.len().saturating_add(item.summary.len()) > budget {
+        let over_budget = item.headline.len().saturating_add(item.summary.len()) > budget;
+        if over_budget || item.link.len() > LINK_BYTES {
             let headline = cut(&item.headline, budget).to_owned();
             let left = budget.saturating_sub(headline.len());
             item.summary = cut(&item.summary, left).to_owned();
             item.headline = headline;
+            item.link = cut(&item.link, LINK_BYTES).to_owned();
             drops.push(Drop {
                 item: id.clone(),
                 reason: DropReason::Trimmed,
@@ -529,6 +549,7 @@ pub fn retrieve(
                 item.licensed,
                 &BTreeSet::from([item.symbol.clone()]),
             )
+            .or_else(|| reserved(&item.item_id).then_some(DropReason::ReservedId))
             .or_else(|| {
                 seen.contains(&item.item_id)
                     .then_some(DropReason::Duplicate)
@@ -548,8 +569,9 @@ pub fn retrieve(
     let budget = usize::try_from(plan.filing_excerpt_bytes).unwrap_or(usize::MAX);
     let mut filings: Vec<(Symbol, UtcNanos, ItemId, Filing)> = Vec::new();
     for (knowledge_at, id, mut item) in filings_read.capped(kept, &mut drops) {
-        if item.excerpt.len() > budget {
+        if item.excerpt.len() > budget || item.form.len() > FORM_BYTES {
             item.excerpt = cut(&item.excerpt, budget).to_owned();
+            item.form = cut(&item.form, FORM_BYTES).to_owned();
             drops.push(Drop {
                 item: id.clone(),
                 reason: DropReason::Trimmed,

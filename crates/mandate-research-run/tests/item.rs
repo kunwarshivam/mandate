@@ -71,6 +71,7 @@ fn kinds_and_drop_reasons_write_their_journal_names() {
         DropReason::Duplicate,
         DropReason::OverCap,
         DropReason::Trimmed,
+        DropReason::ReservedId,
     ]
     .iter()
     .map(|reason| reason.as_str())
@@ -86,6 +87,7 @@ fn kinds_and_drop_reasons_write_their_journal_names() {
             "duplicate",
             "over_cap",
             "trimmed",
+            "reserved_id",
         ]
     );
 }

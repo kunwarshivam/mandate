@@ -196,6 +196,33 @@ fn text_must_be_present_and_within_its_bound() {
 }
 
 #[test]
+fn blank_or_control_text_is_a_range_rejection_wherever_it_is() {
+    let fields = [
+        r#""invalidation":"Guidance is cut.""#,
+        r#""thesis":"Services revenue keeps compounding.""#,
+        r#""instrument":"AAPL""#,
+        r#""direction":"long""#,
+    ];
+    for field in fields {
+        let (name, _) = field.split_once(':').unwrap_or_default();
+        for bad in [r#""   ""#, r#""\t""#, r#""a\u0000b""#, r#""line\nbreak""#] {
+            let text = ONE_THESIS.replace(field, &format!("{name}:{bad}"));
+            assert!(
+                matches!(rejected(&text), OutputRejection::Range { .. }),
+                "{name} = {bad}"
+            );
+        }
+    }
+    let blank_id = ONE_THESIS.replace(r#""n-1""#, r#"" ""#);
+    assert!(matches!(rejected(&blank_id), OutputRejection::Range { .. }));
+    let blank_thesis = output_with(&[], r#"{"thesis_id":"  ","evidence":[]}"#);
+    assert!(matches!(
+        rejected(&blank_thesis),
+        OutputRejection::Range { .. }
+    ));
+}
+
+#[test]
 fn evidence_is_bounded() {
     let many: Vec<String> = (0..21).map(|n| format!(r#""n-{n}""#)).collect();
     let text = ONE_THESIS.replace(

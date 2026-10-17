@@ -1340,3 +1340,301 @@ fn an_unresolved_append_blocks_research_until_the_same_input_retries() {
     .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(retried, first, "the same drafts and the same call request");
 }
+
+fn rejection(lp: &Loop) -> (Option<String>, Option<String>) {
+    let judged = lp.events("CandidateVerdictsRecorded");
+    assert_eq!(
+        judged.len(),
+        1,
+        "HI-22: one verdict record per committed call"
+    );
+    (
+        payload_text(&judged[0].payload, "outcome").map(str::to_owned),
+        payload_text(&judged[0].payload, "rejection").map(str::to_owned),
+    )
+}
+
+#[test]
+fn a_blank_invalidation_rejects_the_output_with_a_verdict_record() {
+    let world = World::open();
+    let blank = thesis("AAPL", &[SERVICES, SUPPLY], "x").replace("It stops.", "   ");
+    let lp = judged_with(
+        &format!(r#"{{"theses":[{blank}],"invalidations":[]}}"#),
+        &world,
+    );
+    assert_eq!(
+        rejection(&lp),
+        (Some("output_rejected".to_owned()), Some("range".to_owned()))
+    );
+    assert!(lp.events("ThesisProposed").is_empty());
+}
+
+#[test]
+fn a_candidate_the_platform_cannot_fill_rejects_the_output_with_a_verdict_record() {
+    let mut world = World::open();
+    if let Some(config) = world.config.as_mut() {
+        config.pin.model_id = String::new();
+    }
+    let lp = judged_with(RESPONSE_AAPL, &world);
+    assert_eq!(
+        rejection(&lp),
+        (
+            Some("output_rejected".to_owned()),
+            Some("unfillable_candidate".to_owned())
+        )
+    );
+    assert!(lp.events("ThesisProposed").is_empty());
+    assert!(lp.events("ModelOutputRecorded").is_empty());
+}
+
+#[test]
+fn a_snapshot_the_platform_cannot_read_rejects_the_output_with_a_verdict_record() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    let mut plane = RecordedPlane::load();
+    for fact in &mut plane.instruments {
+        fact.group = Some(String::new());
+    }
+    full_run(
+        &mut lp,
+        clock(CUT_OFF),
+        &ports,
+        &world,
+        &plane,
+        &recorded(RESPONSE_AAPL),
+    );
+    assert_eq!(
+        rejection(&lp),
+        (
+            Some("output_rejected".to_owned()),
+            Some("unreadable_snapshot".to_owned())
+        )
+    );
+}
+
+#[test]
+fn an_ineligible_or_grouped_instrument_in_the_snapshot_binds_admission() {
+    for change in 0..2 {
+        let f = Fixture::new();
+        let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &ports);
+        let mut world = World::open();
+        let mut plane = RecordedPlane::load();
+        for fact in &mut plane.instruments {
+            if change == 0 {
+                fact.eligible = false;
+            } else {
+                fact.group = Some("grp.apple".to_owned());
+            }
+        }
+        if change == 1 {
+            world
+                .facts
+                .claimed_by_other_agents
+                .insert(AssetId::new(MSFT).unwrap_or_else(|e| panic!("{e}")));
+            world.facts.instrument_groups.insert(
+                AssetId::new(MSFT).unwrap_or_else(|e| panic!("{e}")),
+                mandate_research::GroupId::new("grp.apple").unwrap_or_else(|e| panic!("{e}")),
+            );
+        }
+        full_run(
+            &mut lp,
+            clock(CUT_OFF),
+            &ports,
+            &world,
+            &plane,
+            &recorded(RESPONSE_AAPL),
+        );
+        let expected = if change == 0 {
+            "eligibility_floor"
+        } else {
+            "instrument_group_claimed"
+        };
+        assert_eq!(verdicts(&lp), vec![expected.to_owned()]);
+    }
+}
+
+#[test]
+fn an_empty_retrieval_holds_the_interval_like_a_call() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
+    lp.run(
+        ResearchInput::Retrieved {
+            run_id: started[0].0.clone(),
+            items: Vec::new(),
+        },
+        &ports,
+        &world,
+    );
+    let again = lp.run(ResearchInput::Poll(clock(CUT_OFF + 1)), &ports, &world);
+    assert!(starts(&again).is_empty(), "HI-8: no re-read on every poll");
+    let due = lp.run(
+        ResearchInput::Poll(clock(CUT_OFF + i64::from(INTERVAL_S))),
+        &ports,
+        &world,
+    );
+    assert_eq!(starts(&due).len(), 1);
+}
+
+/// Drives one run through its call by hand, without folding anything back, and returns the run id.
+fn called_unfolded(
+    lp: &mut Loop,
+    ports: &mandate_runtime::Ports<'_>,
+    world: &World,
+    outcome: impl Fn(&ResearchCall) -> CallOutcome,
+) -> (String, Vec<mandate_runtime::EventDraft>) {
+    let plane = RecordedPlane::load();
+    let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), ports, world));
+    let run_id = started[0].0.clone();
+    let retrieval = mandate_research_run::retrieve(
+        &common::research::config().plan,
+        &world.scope(clock(CUT_OFF)),
+        plane.readers(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let items = retrieval
+        .items
+        .iter()
+        .map(|item| {
+            mandate_runtime::RetrievedObservation::capture(item, clock(CUT_OFF))
+                .unwrap_or_else(|e| panic!("{e}"))
+                .0
+        })
+        .collect();
+    let retrieved = lp.run(
+        ResearchInput::Retrieved {
+            run_id: run_id.clone(),
+            items,
+        },
+        ports,
+        world,
+    );
+    let Some(ResearchRequest::Call(plan)) = retrieved.requests.first().cloned() else {
+        panic!("a call is requested");
+    };
+    let call = ResearchCall::build(
+        &plan,
+        &retrieval,
+        world.call_context(),
+        mandate_time::UtcNanos::EPOCH,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let answer = outcome(&call);
+    let step = mandate_runtime::handle_research(
+        &mut lp.shell.state,
+        &mut lp.research,
+        ResearchInput::Called {
+            run_id: run_id.clone(),
+            at: clock(CUT_OFF + 30),
+            outcome: answer,
+        },
+        ports,
+        &world.context(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let drafts = step
+        .effects
+        .into_iter()
+        .filter_map(|effect| match effect {
+            Effect::Journal(draft) => Some(draft),
+            _ => None,
+        })
+        .collect();
+    (run_id, drafts)
+}
+
+#[test]
+fn the_core_re_checks_the_answer_s_call_and_identity_whatever_the_worker_did() {
+    for change in 0..2 {
+        let f = Fixture::new();
+        let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &ports);
+        let world = World::open();
+        let (_, drafts) = called_unfolded(&mut lp, &ports, &world, |call| {
+            let mut reply = reply_with(call, RESPONSE_AAPL.as_bytes());
+            if change == 0 {
+                reply.reported.model_version = "9.9.9".to_owned();
+            } else {
+                reply.call_id = "01SOMEOTHERCALL".to_owned();
+            }
+            Ok(reply)
+        });
+        assert_eq!(drafts.len(), 1, "the call record alone");
+        assert_eq!(
+            payload_text(&drafts[0].payload, "outcome"),
+            Some("identity_mismatch"),
+            "change {change}"
+        );
+        assert_eq!(
+            lp.research.in_flight(),
+            None,
+            "a substituted answer ends the run unjudged"
+        );
+    }
+}
+
+#[test]
+fn the_schedule_counts_from_an_answer_before_its_record_folds_back() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    called_unfolded(&mut lp, &ports, &world, |call| {
+        Err(CallFailure {
+            call_id: call.call_id.clone(),
+            kind: ErrorKind::ProviderUnavailable,
+            completed_at: call.as_of,
+        })
+    });
+    assert_eq!(lp.research.last_call(), Some(clock(CUT_OFF + 30)));
+}
+
+#[test]
+fn a_call_record_that_never_folds_back_frees_the_loop_after_the_bound() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    let (run_id, drafts) = called_unfolded(&mut lp, &ports, &world, |call| {
+        Ok(reply_with(call, RESPONSE_AAPL.as_bytes()))
+    });
+    for event in drafts {
+        let seq = lp.shell.head().0 + 1;
+        let stored = mandate_runtime::FoldedEvent {
+            stream: common::AGENT_STREAM.to_owned(),
+            seq: mandate_runtime::Seq(seq),
+            event_id: event.event_id.clone(),
+            event_type: event.event_type.clone(),
+            causation_id: event.causation_id.clone(),
+            actor: mandate_runtime::ActorKind::Agent,
+            payload: event.payload.clone(),
+        };
+        lp.shell.agent_journal.push(stored.clone());
+        mandate_runtime::fold(&mut lp.shell.state, &stored).unwrap_or_else(|e| panic!("{e}"));
+    }
+    let bound = CUT_OFF + 60 + 120;
+    lp.run(ResearchInput::Poll(clock(bound)), &ports, &world);
+    assert_eq!(
+        lp.research.in_flight(),
+        Some(run_id.as_str()),
+        "within the bound it waits"
+    );
+    lp.run(ResearchInput::Poll(clock(bound + 1)), &ports, &world);
+    assert_eq!(
+        lp.research.in_flight(),
+        None,
+        "past the bound the unfolded record is given up"
+    );
+    assert!(lp.events("ThesisProposed").is_empty());
+}

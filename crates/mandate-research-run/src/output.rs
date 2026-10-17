@@ -169,13 +169,15 @@ fn list<'a>(
     Ok(items)
 }
 
-/// A non-empty string member of at most `max` bytes.
+/// A string member of at most `max` bytes that is not blank and holds no control character, so
+/// every text the platform later wraps in a typed value (an `Invalidation`, an id) is one it can
+/// hold, and a candidate is never dropped between the parse and its verdict (HI-22).
 fn bounded(object: &Object, name: &'static str, max: usize) -> Result<String, OutputRejection> {
     let text = object
         .get(name)
         .and_then(Value::as_str)
         .ok_or(OutputRejection::Shape { at: name })?;
-    if text.is_empty() || text.len() > max {
+    if text.trim().is_empty() || text.len() > max || text.chars().any(char::is_control) {
         return Err(OutputRejection::Range { at: name });
     }
     Ok(text.to_owned())
@@ -188,7 +190,7 @@ fn evidence(object: &Object, bounds: &OutputBounds) -> Result<Vec<String>, Outpu
             let id = id
                 .as_str()
                 .ok_or(OutputRejection::Shape { at: "evidence" })?;
-            if id.is_empty() || id.len() > MAX_ID_BYTES {
+            if id.trim().is_empty() || id.len() > MAX_ID_BYTES || id.chars().any(char::is_control) {
                 return Err(OutputRejection::Range { at: "evidence" });
             }
             Ok(id.to_owned())

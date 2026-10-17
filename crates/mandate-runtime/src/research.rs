@@ -320,6 +320,10 @@ struct Cancelled {
 pub struct ResearchState {
     run: Option<Run>,
     last_call: Option<RiskClock>,
+    /// The cut-off of the last run that ended with nothing to show the model, which the schedule
+    /// counts from as it does a call, so a data plane that answers nothing is not re-read on
+    /// every poll (HI-8). Process-local: a restart may read once more, never more often.
+    last_attempt: Option<RiskClock>,
     starts: u32,
     deadline_streak: u32,
     withdrawn: BTreeSet<ModelPin>,
@@ -343,6 +347,7 @@ impl ResearchState {
         Self {
             run: None,
             last_call: None,
+            last_attempt: None,
             starts: 0,
             deadline_streak: 0,
             withdrawn: BTreeSet::new(),
@@ -519,10 +524,14 @@ fn due(
     let interval = context
         .overlay
         .effective_research_interval_s(envelope.interval_s);
-    let anchor = match (research.last_call, context.last_reservation) {
-        (Some(call), Some(reservation)) => Some(call.max(reservation)),
-        (call, reservation) => call.or(reservation),
-    };
+    let anchor = [
+        research.last_call,
+        research.last_attempt,
+        context.last_reservation,
+    ]
+    .into_iter()
+    .flatten()
+    .max();
     let anchor = anchor
         .map(|at| UtcNanos::from_parts(at.secs(), 0))
         .transpose()?;
@@ -549,7 +558,11 @@ fn polled(
         match &run.phase {
             Phase::Recorded {
                 committed: false, ..
-            } => research.run = Some(run),
+            } => {
+                if now <= run.bound {
+                    research.run = Some(run);
+                }
+            }
             Phase::Recorded {
                 committed: true, ..
             } => {
@@ -645,6 +658,7 @@ fn retrieved(
         }
     };
     if items.is_empty() {
+        research.last_attempt = Some(run.cut_off);
         return Ok(());
     }
     let mut ids = BTreeSet::new();
@@ -764,6 +778,7 @@ fn called(
             used: false,
         };
         let id = batch.journal("ModelInvocationRecorded", None, invocation(&call, outcome)?)?;
+        research.last_call = Some(research.last_call.map_or(at, |last| last.max(at)));
         treat(research, &cancelled.pin, outcome, id, batch);
         return Ok(());
     };
@@ -783,7 +798,9 @@ fn called(
         observations: &observations,
         used: true,
     };
+    let outcome = &checked(&run, outcome);
     let id = batch.journal("ModelInvocationRecorded", None, invocation(&call, outcome)?)?;
+    research.last_call = Some(research.last_call.map_or(at, |last| last.max(at)));
     treat(research, &run.pin, outcome, id.clone(), batch);
     if let Ok(reply) = outcome {
         research.run = Some(Run {
@@ -798,6 +815,23 @@ fn called(
         });
     }
     Ok(())
+}
+
+/// The worker's settled answer checked again by the core: a reply for another call, or from an
+/// identity other than the run's pin, is `identity_mismatch` here whatever the worker said, so a
+/// shell that skipped `settle` still cannot have a substituted answer judged (INF-2, caller side).
+/// The deadline is the worker's to check, since only it knows the dispatch instant.
+fn checked(run: &Run, outcome: &CallOutcome) -> CallOutcome {
+    match outcome {
+        Ok(reply) if reply.call_id != run.call_id || reply.reported != run.pin => {
+            Err(CallFailure {
+                call_id: run.call_id.clone(),
+                kind: ErrorKind::IdentityMismatch,
+                completed_at: reply.completed_at,
+            })
+        }
+        other => other.clone(),
+    }
 }
 
 /// §7.3's treatment beyond "missing": an opaque operator alert, research disabled for a withdrawn

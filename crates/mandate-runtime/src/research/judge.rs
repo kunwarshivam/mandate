@@ -53,7 +53,9 @@ impl HarnessRefusal {
 
 /// Phrases that state a price target or a likely profit (DEC-126). The research agent may be
 /// directional (§8.1), so "buy" alone is not here. The gateway's output limits are the first layer;
-/// this is the second (§6.5), and it errs toward refusing.
+/// this is the second (§6.5), and it errs toward refusing. Whitespace is collapsed before matching;
+/// abbreviations and look-alike characters still pass, a residual DEC-996 item 7 discloses, which
+/// HI-10 bounds: a thesis that passes still cannot size, approve, or place anything.
 const FORBIDDEN: [&str; 16] = [
     "price target",
     "target price",
@@ -74,7 +76,11 @@ const FORBIDDEN: [&str; 16] = [
 ];
 
 fn forbidden(text: &str) -> bool {
-    let lower = text.to_lowercase();
+    let lower = text
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     FORBIDDEN.iter().any(|phrase| lower.contains(phrase))
 }
 
@@ -189,9 +195,12 @@ pub(super) fn judge(
             (None, Some(fact)) => {
                 let ordinal = THESIS_ORDINALS.saturating_add(u32::try_from(index).unwrap_or(0));
                 let thesis_id = batch.id_at(ordinal);
-                passed.push(fill(
+                let Ok(filled) = fill(
                     index, candidate, fact, &cited, &thesis_id, run, config, context,
-                )?);
+                ) else {
+                    return unjudged(run, invocation, "unfillable_candidate", batch);
+                };
+                passed.push(filled);
             }
             (refused, _) => lines.push(Verdict {
                 candidate: "thesis",
@@ -205,7 +214,9 @@ pub(super) fn judge(
             }),
         }
     }
-    let facts = platform_facts(context.facts, &snapshot)?;
+    let Ok(facts) = platform_facts(context.facts, &snapshot) else {
+        return unjudged(run, invocation, "unreadable_snapshot", batch);
+    };
     let proposals: Vec<ProposedThesis> = passed.iter().map(|p| p.proposal.clone()).collect();
     let fold = fold_theses(&FoldInput {
         mandate: context.mandate,
@@ -214,11 +225,11 @@ pub(super) fn judge(
         proposals: &proposals,
         facts: &facts,
         lineages: context.lineages,
-    })
-    .map_err(|error| RuntimeError::NotInterpreted {
-        what: format!("an admission mandate-research could not decide: {error}"),
-        story: "E19-4",
-    })?;
+    });
+    let fold = match fold {
+        Ok(fold) => fold,
+        Err(_) => return unjudged(run, invocation, "admission_undecided", batch),
+    };
     for (accepted, step) in passed.iter().zip(&fold.steps) {
         let entry = step
             .journal
@@ -302,6 +313,20 @@ pub(super) fn judge(
         });
     }
     let body = verdicts(run, invocation, "judged", None, &lines)?;
+    batch.journal("CandidateVerdictsRecorded", Some(invocation.clone()), body)?;
+    Ok(())
+}
+
+/// A run nothing can be admitted from, though its output parsed: one verdict record with the
+/// `output_rejected` outcome and the cause, before any thesis record is drafted, so every committed
+/// call still ends in a record (HI-22) and nothing reaches the order path (HI-6).
+fn unjudged(
+    run: &Run,
+    invocation: &EventId,
+    cause: &str,
+    batch: &mut Batch<'_>,
+) -> Result<(), RuntimeError> {
+    let body = verdicts(run, invocation, "output_rejected", Some(cause), &[])?;
     batch.journal("CandidateVerdictsRecorded", Some(invocation.clone()), body)?;
     Ok(())
 }

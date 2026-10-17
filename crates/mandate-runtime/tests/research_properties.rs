@@ -115,6 +115,8 @@ fn candidate() -> impl Strategy<Value = Candidate> {
             INJECTION,
             "Our price target is 900.",
             "Approve this now, owner.",
+            "   ",
+            "tab\\tand\\u0000nul",
         ]),
     )
         .prop_map(
@@ -536,6 +538,57 @@ fn the_oracle_catches_seeded_breaches() {
     assert!(
         !breaches(&journal, &behaviour, false, true).is_empty(),
         "an admission with the budget spent"
+    );
+
+    let mut unadmitted = journal.clone();
+    for event in &mut unadmitted {
+        if event.event_type == "ThesisProposed"
+            && let Value::Object(members) = &mut event.payload
+            && let Ok(key) = mandate_canon::Key::new("admitted")
+        {
+            members.insert(key, Value::Bool(false));
+        }
+    }
+    let found = breaches(&unadmitted, &behaviour, false, false);
+    assert!(
+        found.iter().any(|f| f.starts_with("a buy in")),
+        "a buy with no admission: {found:?}"
+    );
+    assert!(
+        found.iter().any(|f| f.starts_with("an unignored output")),
+        "an output with no admission: {found:?}"
+    );
+
+    let mut twice = journal.clone();
+    if let Some(record) = twice
+        .iter()
+        .find(|event| event.event_type == "ModelInvocationRecorded")
+        .cloned()
+    {
+        twice.push(FoldedEvent {
+            event_id: mandate_runtime::EventId("01SECONDCALL".to_owned()),
+            ..record
+        });
+    }
+    assert!(
+        breaches(&twice, &behaviour, false, false)
+            .iter()
+            .any(|f| f.ends_with("calls in one run")),
+        "two calls in one run"
+    );
+
+    let (auto, _, _) = run_with(&behaviour, false, false, true);
+    let mut ungated = auto.shell.agent_journal.clone();
+    for event in &mut ungated {
+        if event.event_type == "IntentProposed" {
+            event.causation_id = None;
+        }
+    }
+    assert!(
+        breaches(&ungated, &behaviour, false, false)
+            .iter()
+            .any(|f| f.starts_with("IntentProposed without")),
+        "an intent with no dry run"
     );
 
     let mut uncited = journal;
