@@ -12,8 +12,8 @@ workspace = true
 [dependencies]
 axum.workspace = true
 mandate-api.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "signal", "time"] }
+tokio = { workspace = true, features = ["rt", "net", "signal", "sync", "time"] }
 
 [dev-dependencies]
 axum.workspace = true
-tokio = { workspace = true, features = ["rt", "net"] }
+tokio = { workspace = true, features = ["rt", "net", "sync", "time"] }

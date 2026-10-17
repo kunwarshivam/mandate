@@ -14,8 +14,8 @@
 //! It makes every start check before it listens, and refuses with exit status 2 and one line on
 //! stderr naming the check. Once both listeners are bound it prints
 //! `listening api=<addr> probes=<addr>` and nothing else. SIGTERM starts the drain: readiness
-//! turns `not_ready`, in-flight requests finish, and the process exits 0 when they have, or at
-//! [`DRAIN_BOUND`].
+//! turns `not_ready` while both listeners still accept, and once no API request is in flight, or
+//! at [`DRAIN_BOUND`], the listeners close and the process exits 0.
 
 use std::env;
 use std::ffi::OsString;
@@ -128,7 +128,11 @@ async fn run(args: Args, settings: Settings) -> io::Result<()> {
     let (stopped, stop) = tokio::sync::watch::channel(false);
     let api_stop = wait_for(stop.clone());
     let probe_stop = wait_for(stop);
-    let api = tokio::spawn(serve(api, http::api(settings), api_stop));
+    let api = tokio::spawn(serve(
+        api,
+        http::api(settings, Arc::clone(&drain)),
+        api_stop,
+    ));
     let probes = tokio::spawn(serve(
         probes,
         http::probes(Arc::new(Local::new(Arc::clone(&drain)))),
@@ -136,15 +140,14 @@ async fn run(args: Args, settings: Settings) -> io::Result<()> {
     ));
     term.recv().await;
     drain.begin();
+    let settled = drain.settled(DRAIN_BOUND).await;
     let _ = stopped.send(true);
-    let finished = tokio::time::timeout(DRAIN_BOUND, async {
-        let _ = api.await;
-        let _ = probes.await;
-    })
-    .await;
-    if finished.is_err() {
+    if !settled {
         eprintln!("drain bound reached; exiting with requests in flight");
+        return Ok(());
     }
+    let _ = api.await;
+    let _ = probes.await;
     Ok(())
 }
 

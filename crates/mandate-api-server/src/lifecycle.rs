@@ -4,7 +4,7 @@
 //! will implement it; until then [`Local`] answers: ready once serving and not draining.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 /// How long a drain may take before the process exits anyway: Proposed, by analogy with
@@ -17,10 +17,24 @@ pub trait Lifecycle: Send + Sync {
     fn ready(&self) -> bool;
 }
 
-/// The drain flag, set once by SIGTERM and never cleared.
+/// How often a drain looks at the in-flight count.
+pub const DRAIN_POLL: Duration = Duration::from_millis(10);
+
+/// The drain flag, set once by SIGTERM and never cleared, and the count of API requests in flight.
 #[derive(Debug, Default)]
 pub struct Drain {
     begun: AtomicBool,
+    in_flight: AtomicUsize,
+}
+
+/// One API request in flight; dropping it ends the request's count.
+#[derive(Debug)]
+pub struct InFlight(Arc<Drain>);
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.0.in_flight.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Drain {
@@ -37,6 +51,33 @@ impl Drain {
     /// Whether the drain has begun.
     pub fn draining(&self) -> bool {
         self.begun.load(Ordering::SeqCst)
+    }
+
+    /// Counts one request in flight until the returned guard is dropped.
+    pub fn enter(self: &Arc<Self>) -> InFlight {
+        self.in_flight.fetch_add(1, Ordering::SeqCst);
+        InFlight(Arc::clone(self))
+    }
+
+    /// How many requests are in flight.
+    pub fn in_flight(&self) -> usize {
+        self.in_flight.load(Ordering::SeqCst)
+    }
+
+    /// Waits until no request is in flight, looking every [`DRAIN_POLL`], for at most `bound`:
+    /// `true` once nothing is in flight, `false` if the bound came first.
+    pub async fn settled(&self, bound: Duration) -> bool {
+        let polls = bound
+            .as_millis()
+            .checked_div(DRAIN_POLL.as_millis())
+            .unwrap_or_default();
+        for _ in 0..=polls {
+            if self.in_flight() == 0 {
+                return true;
+            }
+            tokio::time::sleep(DRAIN_POLL).await;
+        }
+        false
     }
 }
 

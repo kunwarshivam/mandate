@@ -14,9 +14,12 @@ use mandate_api_server::lifecycle::{Drain, Lifecycle, Local};
 const APP: &str = "https://app.owlhead.test";
 
 fn api() -> std::net::SocketAddr {
-    serve(http::api(Settings {
-        app_origin: APP.to_owned(),
-    }))
+    serve(http::api(
+        Settings {
+            app_origin: APP.to_owned(),
+        },
+        Drain::new(),
+    ))
 }
 
 struct Switch(AtomicBool);
@@ -249,4 +252,63 @@ fn a_401_to_another_origin_carries_none() {
     assert_eq!(reply.status, 401);
     assert!(!reply.has_cors(), "{:?}", reply.headers);
     assert_eq!(reply.header("vary"), Some("Origin"));
+}
+
+#[test]
+fn a_request_is_counted_in_flight_until_its_response_is_ready() {
+    let drain = Drain::new();
+    let (entered, wait_entered) = std::sync::mpsc::channel::<()>();
+    let (release, released) = tokio::sync::oneshot::channel::<()>();
+    let released = Arc::new(std::sync::Mutex::new(Some(released)));
+    let slow = axum::Router::new().route(
+        "/slow",
+        axum::routing::get(move || {
+            let entered = entered.clone();
+            let released = released.lock().expect("unpoisoned").take();
+            async move {
+                let _ = entered.send(());
+                if let Some(released) = released {
+                    let _ = released.await;
+                }
+                "done"
+            }
+        }),
+    );
+    let addr = serve(http::counted(slow, Arc::clone(&drain)));
+    assert_eq!(drain.in_flight(), 0);
+    let client = std::thread::spawn(move || get(addr, "/slow"));
+    wait_entered
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the handler ran");
+    assert_eq!(drain.in_flight(), 1, "counted while the handler runs");
+    let _ = release.send(());
+    let reply = client.join().expect("the client");
+    assert_eq!(reply.body, b"done");
+    assert_eq!(drain.in_flight(), 0, "uncounted once answered");
+}
+
+#[test]
+fn a_drain_settles_when_nothing_is_in_flight_and_not_before() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let drain = Drain::new();
+    assert!(runtime.block_on(drain.settled(std::time::Duration::ZERO)));
+    let held = drain.enter();
+    let second = drain.enter();
+    assert_eq!(drain.in_flight(), 2);
+    assert!(!runtime.block_on(drain.settled(std::time::Duration::from_millis(50))));
+    drop(second);
+    assert!(!runtime.block_on(drain.settled(std::time::Duration::from_millis(30))));
+    let releaser = {
+        let held = std::sync::Mutex::new(Some(held));
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            drop(held.lock().expect("unpoisoned").take());
+        })
+    };
+    assert!(runtime.block_on(drain.settled(std::time::Duration::from_secs(10))));
+    releaser.join().expect("the releaser");
+    assert_eq!(drain.in_flight(), 0);
 }

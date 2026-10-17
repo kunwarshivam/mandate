@@ -16,7 +16,7 @@ use axum::routing::{MethodRouter, get};
 use mandate_api::problem::{Effect, Problem, ProblemCode};
 use mandate_api::wire::encode;
 
-use crate::lifecycle::Lifecycle;
+use crate::lifecycle::{Drain, Lifecycle};
 
 /// The methods a preflight from the app origin allows (§3.3 item 5).
 pub const ALLOW_METHODS: &str = "GET, POST, PUT, DELETE, PATCH";
@@ -41,14 +41,27 @@ pub struct Settings {
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
-pub fn api(settings: Settings) -> Router {
+/// Each request is counted in flight on `drain` until its response is ready.
+pub fn api(settings: Settings, drain: Arc<Drain>) -> Router {
     let unauthenticated = problem_body(ProblemCode::Unauthenticated);
-    Router::new()
+    let routes = Router::new()
         .fallback(move || {
             let body = unauthenticated.clone();
             async move { problem(StatusCode::UNAUTHORIZED, body) }
         })
-        .layer(middleware::from_fn_with_state(Arc::new(settings), cors))
+        .layer(middleware::from_fn_with_state(Arc::new(settings), cors));
+    counted(routes, drain)
+}
+
+/// `router`, with each request counted in flight on `drain` until its response is ready, so a
+/// drain waits for it (§3.11 item 4).
+pub fn counted(router: Router, drain: Arc<Drain>) -> Router {
+    router.layer(middleware::from_fn_with_state(drain, count))
+}
+
+async fn count(State(drain): State<Arc<Drain>>, request: Request, next: Next) -> Response {
+    let _in_flight = drain.enter();
+    next.run(request).await
 }
 
 /// The probes' listener's router: `/livez`, `/readyz`, and a bodiless 404 for anything else.
