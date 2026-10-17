@@ -195,7 +195,6 @@ fn a_read_that_fails_ends_the_step_before_any_issue_send_or_append() -> Checked 
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn a_read_that_fails_is_the_closed_journal_unavailable() -> Checked {
     for at in 0..READS {
         let mut dispatcher = Dispatcher::new()?;
@@ -252,7 +251,6 @@ fn check_run(run: &Run) -> Result<(), String> {
 /// The property over random interleavings of failing and answering reads and restarts. A proptest
 /// `TestRunner` in a plain function, as a macro-generated pending test is refused.
 #[test]
-#[ignore = "pending E8-10"]
 fn random_failing_reads_never_send_without_a_committed_issue_and_answer_journal_unavailable() {
     let checked =
         TestRunner::default().run(&runs(), |run| check_run(&run).map_err(TestCaseError::fail));

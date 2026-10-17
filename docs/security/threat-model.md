@@ -296,9 +296,9 @@ The full chain is in §7.1. In short:
 
 | | Threat | Controls | Gap |
 |---|---|---|---|
-| T | Injected instructions in an article or filing | Text is inert to deterministic code (DP-8); the model has no tools (INF-5, HI-4); output is a thesis that passes mandate spec §8.5; admission is `ask` by default (MI-17) | Plausible false content on a vetted source (§8 rank 3) |
+| T | Injected instructions in an article or filing | Text is inert to deterministic code (DP-8); the model has only pinned read and proposal tools, scoped and capped by the harness (INF-5, HI-4, HI-8; agent harness spec §6.10, DEC-2203); output is a thesis that passes mandate spec §8.5; admission is `ask` by default (MI-17) | Plausible false content on a vetted source (§8 rank 3) |
 | T | A vetted source turns malicious | Allowlist versions (DP-9, DEC-101); corroboration; drift detector (E17-5); operator per-thesis halt (E17-6) | Live theses citing a revoked source: DEC-433 item 19 |
-| I | Injection tries to exfiltrate data | No outbound path; inputs hold only public data and the agent's own memory (HI-11, INF-8) | The prompt itself still reaches the aggregator (B5) |
+| I | Injection tries to exfiltrate data | No outbound path, and no tool argument leaves the deployment (HI-28); inputs hold only public data and the agent's own memory (HI-11, INF-8) | The prompt itself still reaches the aggregator (B5) |
 | D | Flooding sources | Bounded queues; the slow tier never blocks the hot tier (data plane §3.6; HI-7) | — |
 
 ### 6.5 B5: Model gateway to the aggregator and providers
@@ -410,7 +410,7 @@ cooperation:**
 |---|---|---|
 | 1. Vetted sources only | Open web and social media never enter | DP-9; DEC-101 |
 | 2. Text is inert | No deterministic code parses instructions from text | DP-8 |
-| 3. No capabilities | The model has no tools, browsing, or network; the retrieval plan is fixed by the harness | INF-5; HI-4 |
+| 3. No capabilities but pinned reads | The model has no browsing, plugins, or network. It may ask for reads, and give opinions, only through the research entry's pinned read and proposal tools; the harness sets each read's scope, mediates each proposal on an existing path, caps the loop, and no argument leaves the deployment | INF-5; HI-4; HI-8; HI-28 |
 | 4. Nothing to leak | Prompts hold no secret, account ID, personal data, or other tenant's data, checked by a deterministic guard | INF-8; HI-11 |
 | 5. Output contract | Schema, output limits, platform-filled facts (identity, timing, asset class, corroboration) | HI-18; inference §8.3 |
 | 6. Admission | Eligibility floor, allowlisted evidence, independent corroboration, asset classes, `max_instruments`, operator halt | Mandate spec §8.5; MI-15, MI-16 |

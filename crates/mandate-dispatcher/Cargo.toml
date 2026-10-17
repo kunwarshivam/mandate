@@ -19,7 +19,7 @@ mandate-time.workspace = true
 mandate-webpush.workspace = true
 ring.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
 [dev-dependencies]
 base64ct.workspace = true
