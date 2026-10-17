@@ -166,6 +166,11 @@ pub fn found_in(
     let Some(opening) = rows.first() else {
         return Err(refused(FoundingRefusal::NotOpen.code()));
     };
+    if opening.event_type != "StreamOpened" {
+        return Err(ControlError::Journal(
+            "the control stream's first event is not its opening".to_owned(),
+        ));
+    }
     owner.environment = Environment::parse(&opening.environment)
         .ok_or_else(|| ControlError::Journal("the stream's environment".to_owned()))?;
     let mut writer = FoundingStream {
@@ -238,7 +243,9 @@ fn checked(founding: Founding<'_>) -> Result<(&'static str, PrincipalId), Contro
 /// reads every row, so the founding decision sees the stream from its opening, and appends the
 /// founding grant's draft at the head the attempt read. A fence, an unavailable journal, or a lost
 /// answer reads as a moved head after a [`backoff`], so the writer re-reads and decides again: a
-/// grant that did commit is then found, never written twice.
+/// grant that did commit is then found, never written twice. So does an idempotency conflict: the
+/// event id is the member's at that head, so a stored event under it is an earlier attempt's grant,
+/// stamped at another instant and made visible only after this attempt's read.
 struct FoundingStream<'a> {
     journal: &'a mut dyn ControlJournal,
     owner: &'a Owner,
@@ -289,14 +296,12 @@ impl ControlStream for FoundingStream<'_> {
             AppendOutcome::HeadMismatch { .. }
             | AppendOutcome::Fenced { .. }
             | AppendOutcome::Ambiguous
-            | AppendOutcome::Unavailable => {
+            | AppendOutcome::Unavailable
+            | AppendOutcome::IdempotencyConflict { .. } => {
                 self.retries = self.retries.saturating_add(1);
                 self.journal.wait(backoff(self.retries, &event_id)?);
                 Ok(Appended::HeadMoved)
             }
-            AppendOutcome::IdempotencyConflict { stored_seq } => Err(ControlError::Journal(
-                format!("another event is stored under this id at seq {stored_seq}"),
-            )),
             AppendOutcome::Invalid { error, .. } => {
                 Err(ControlError::Journal(format!("refused: {error:?}")))
             }

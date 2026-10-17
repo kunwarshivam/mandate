@@ -509,3 +509,92 @@ proptest! {
         }
     }
 }
+
+/// A journal whose commits become visible to reads one read late: the read right after an append
+/// that answered `Unavailable` does not see what it committed.
+struct LateReads {
+    inner: Journal,
+    hidden: bool,
+    committed_once: bool,
+}
+
+impl ControlJournal for LateReads {
+    fn rows(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, ControlError> {
+        let mut rows = self.inner.rows(stream)?;
+        if self.hidden {
+            rows.retain(|r| r.event_type != "MemberActivated");
+        }
+        Ok(rows)
+    }
+
+    fn head(&self, stream: &StreamId) -> Result<mandate_journal::Head, ControlError> {
+        self.inner.head(stream)
+    }
+
+    fn take_ownership(&mut self, stream: &StreamId) -> Result<u64, ControlError> {
+        self.inner.take_ownership(stream)
+    }
+
+    fn append(
+        &mut self,
+        stream: &StreamId,
+        expected_head: u64,
+        writer_epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[&[u8]],
+    ) -> Result<AppendOutcome, ControlError> {
+        let outcome =
+            self.inner
+                .append(stream, expected_head, writer_epoch, recorded_at, drafts)?;
+        if !self.committed_once && matches!(outcome, AppendOutcome::Committed(_)) {
+            self.committed_once = true;
+            self.hidden = true;
+            return Ok(AppendOutcome::Unavailable);
+        }
+        self.hidden = false;
+        Ok(outcome)
+    }
+
+    fn wait(&mut self, delay: std::time::Duration) {
+        self.inner.wait(delay);
+    }
+}
+
+/// A grant committed by an attempt whose answer was lost, and seen only after the next attempt
+/// appended at the same head, is an idempotency conflict under the member's id; it is re-read
+/// and found, never reported as a failure or written twice.
+#[test]
+fn a_late_visible_grant_is_found_not_failed() {
+    let mut inner = Journal::default();
+    open(&mut inner, "paper");
+    let mut journal = LateReads {
+        inner,
+        hidden: false,
+        committed_once: false,
+    };
+    let ulid = member(1);
+    let founding = Founding {
+        workspace: "ws1",
+        member: &ulid,
+        method: "oidc",
+    };
+    let got = found_in(&mut journal, founding, &mut ticking(), &mut Vec::new());
+    assert_eq!(
+        got,
+        Ok(Founded {
+            seq: 2,
+            granted: false
+        })
+    );
+    assert_eq!(grants(&journal.inner).len(), 1);
+}
+
+/// A stream whose first event is not its opening is not founded.
+#[test]
+fn a_stream_not_opened_first_is_refused() {
+    let mut journal = Journal::default();
+    other(&mut journal, 1);
+    let got = run(&mut journal, 1, "oidc").0;
+    assert!(matches!(got, Err(ControlError::Journal(_))), "{got:?}");
+    assert!(grants(&journal).is_empty());
+}
