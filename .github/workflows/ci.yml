@@ -43,6 +43,14 @@ env:
   CARGO_MUTANTS_SHA256: "dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e"
   ACTIONLINT_VERSION: "1.7.12"
   ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+  # The local cell's tools (D-4, DEC-969), pinned with .cursor/install.sh. k3d and kubeconform come
+  # from their GitHub releases; helm publishes its binaries only on get.helm.sh (DEC-993 item 3).
+  K3D_VERSION: "5.9.0"
+  K3D_SHA256: "06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0"
+  HELM_VERSION: "4.3.0"
+  HELM_SHA256: "86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"
+  KUBECONFORM_VERSION: "0.8.0"
+  KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
 
 jobs:
   # DEC-871. `fast`'s parts run in parallel jobs, so each stays under ten minutes (DEC-464):
@@ -251,8 +259,19 @@ jobs:
         if: steps.change.outputs.docs_only != 'true'
         with:
           shared-key: fast-python
+      # The workspace chart's invariants (deploy/tests/test_cell.py) render it with helm, so the
+      # required `fast` check holds them; without helm they would skip (DEC-993 item 10).
+      - name: Install helm (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
       - run: cargo xtask ci test-python
         if: steps.change.outputs.docs_only != 'true'
+        env:
+          MANDATE_CELL_HELM_REQUIRED: "1"
 
   # DEC-954. The runner on macOS, where the founder runs the CLIs: `cargo xtask ci portable`
   # lints `mandate-paper` and runs its core-dump hardening tests there, so a Linux-only call in it
@@ -394,6 +413,59 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: steps.change.outputs.docs_only != 'true'
       - run: cargo xtask ci full
+        if: steps.change.outputs.docs_only != 'true'
+
+  # E21-36, E21-37 (DEC-993): the local cell on the runner. `cargo xtask ci cell` lints and renders
+  # both charts, runs the chart's invariant tests, brings up a k3d cluster, installs the chart from
+  # the image this change built, runs every drill, and runs every drill again with its bug planted,
+  # which each must catch. Not yet in `full` (DEC-993 item 10); the chart's invariants are in
+  # `fast-python`.
+  cell:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_CELL_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - name: Install k3d, helm and kubeconform (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          shared-key: cell
+          cache-on-failure: true
+      - run: cargo xtask ci cell
         if: steps.change.outputs.docs_only != 'true'
 
   # DEC-538. Sizes the mutation matrix to the diff: `cargo xtask ci mutants --plan` lists, without

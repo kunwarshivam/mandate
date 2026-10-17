@@ -1,0 +1,74 @@
+# One workspace deployment (E21-36). Settings only: no secret is ever a value (DEC-822 item 4).
+# Credentials arrive as Secrets the journal-db chart or the operator creates, mounted as files.
+# values.schema.json refuses any key not named here.
+
+# The workspace this release deploys; one release, in its own namespace, per workspace.
+workspace: ws1
+
+# `paper` or `backtest` (DEC-967 item 15). The live Robinhood connection of E21-48 is not in
+# this chart.
+environment: paper
+
+# Whether `mandate.local/` images, built by `cargo xtask cell up` and imported into a local k3d
+# cell, may be named. Only the local cell's values set it; every other cluster takes digests only.
+localImages: false
+
+# Container images. A process renders only when its image is named here (processes.json), so an
+# empty entry leaves that process out. Each is pinned by digest, or is a `mandate.local/` image
+# that `cargo xtask cell up` built from the change itself and imported into the cell.
+images:
+  # The migration Job's psql, and the drills' network probe: CloudNativePG's PostgreSQL 18 image
+  # (D-5).
+  postgres: ghcr.io/cloudnative-pg/postgresql:18.6-202609281634-minimal-trixie@sha256:4467d4cf7e502fbc29800b75d755ede477a765b25a506a58a0842a57a4bf42c9
+  mandate: ""
+  runtime: ""
+  executor: ""
+  token-exchange: ""
+  scheduler: ""
+  model-gateway: ""
+  exporter: ""
+  data: ""
+
+# Where the workspace journal's Postgres is. The journal-db chart's defaults match these.
+journal:
+  host: journal-rw
+  port: 5432
+  database: mandate
+  # The Secret holding the cluster's CA certificate (`ca.crt`): every connection is verify-full.
+  ca: journal-ca
+  # The pods to allow on port 5432, by label (CloudNativePG's cluster label).
+  podSelector:
+    cnpg.io/cluster: journal
+
+# Each process type's credential is the Secret `<rolePrefix><db_role with _ as ->`, with a
+# `pgpass` key, created by the journal-db chart.
+rolePrefix: journal-role-
+
+# Addresses outside the cluster that an external egress target may reach, as CIDRs of /24 or
+# narrower (/32 for the token host). Each is empty until the lane that needs it sets it; an empty
+# target allows nothing. Never a live trading host (DEC-821 item 4): `cargo xtask ci cell` refuses
+# a rendering whose policies contain one, and the egress drill probes them (OPS-5).
+egress:
+  broker: []
+  token-host: []
+  time: []
+  model-providers: []
+  object-storage: []
+  timestamping: []
+  market-data: []
+  artifact-store: []
+  identity-provider: []
+  # The cluster DNS, which every process with an egress target needs to resolve its names.
+  dns:
+    namespace: kube-system
+    podSelector:
+      k8s-app: kube-dns
+
+# One-off runs of the `run` and `verify` processes, rendered only when set. `id` names the Job,
+# so each run is a new Job.
+run:
+  id: ""
+  args: []
+verify:
+  id: ""
+  streams: []

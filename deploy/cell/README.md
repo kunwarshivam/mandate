@@ -1,0 +1,100 @@
+# deploy/cell/: the workspace chart, the Compose file, and the local cell
+
+One workspace deployment, packaged once (E21-36), and a cell on a developer machine or a CI
+runner that proves it (E21-37), with no cloud account, no broker credential and no broker host
+([DEC-967](../../docs/project/decisions/DEC-967.md) item 3). The choices are recorded in
+[DEC-993](../../docs/project/decisions/DEC-993.md); the plan is the
+[managed-cells brief](../../docs/project/tasks/managed-cells.md), lanes K and C.
+
+| Path | What it is |
+|---|---|
+| `charts/workspace/processes.json` | **The process list** (infrastructure §3.1): every process type with its kind, image, database role, egress column, placement and resources. The chart and the Compose file are both rendered from it |
+| `charts/workspace/` | The Helm chart `mandate-workspace`: one Deployment or Job per process type whose image is named, the migration hook, and the network policies |
+| `charts/journal-db/` | The journal's Postgres under the CloudNativePG operator, its roles (`files/roles.sql`), and one credential Secret per process type. Installed before the workspace chart. Lane S2 (E21-41) grows it |
+| `compose/compose.json` | The same processes for one host (infrastructure §3.2, hybrid), generated: `cargo xtask cell generate --write` |
+| `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ |
+| `images/mandate.Dockerfile` | The interim `mandate` image the cell builds from the change; lane R2 (E21-35) replaces it |
+| `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
+
+## What the chart guarantees
+
+Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci cell`:
+
+- one pod per process type, and a process renders only when its image is named;
+- the runtime, the executor and the data service share a node by required pod affinity on the
+  workspace (§3.2), since the market-data channel is host-local;
+- every container has CPU and memory limits, and the executor's and the scheduler's requests
+  equal them (§3.3);
+- a namespace-wide default-deny policy, then exactly each process type's §3.1 egress: DNS, the
+  journal's Postgres, the vault and the model gateway by pod label, and each external target's
+  CIDRs from values, empty by default; DEC-821's token host only for the token-exchange process;
+- every pod starts behind an `egress-gate` init container: nothing of the process runs until the
+  pod's own egress is shown filtered, since k3s's policy controller programs a new pod only seconds
+  after it starts, and the gate fails closed after a minute (DEC-993 item 8);
+- no inbound connection to the data plane; only the model gateway accepts its callers;
+- non-root, a read-only root filesystem, no capability, no privilege escalation, the runtime's
+  seccomp profile, and no service-account token, in every container;
+- secrets only as mounted files: no Secret in the chart, no secret in any values file, no
+  environment variable from a Secret, and no password in a DSN (DEC-822 item 4);
+- migrations as a pre-install and pre-upgrade hook Job under the migration-owner role, never at a
+  process's start (OPS-13);
+- `environment` is `paper` or `backtest` only, and every image is pinned by digest or is the
+  cell's own `mandate.local/` build;
+- no k3s-only, Hetzner-only or cloud-only API: the k3d, k3s and managed renderings are identical.
+
+## The local cell
+
+Needs docker, plus k3d, helm and kubeconform at the versions in `.github/workflows/ci.yml`
+(`bash .cursor/install.sh` installs them on x86_64 Linux).
+
+```bash
+cargo xtask cell up               # build the image, start k3d, install the operator, journal-db, workspace
+cargo xtask cell drill            # boot, journal, egress, compose
+cargo xtask cell drill --seeded   # each drill with its bug planted; fails if one still holds
+cargo xtask cell down
+cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills
+```
+
+`cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
+in the k3s node: `docker exec k3d-mandate-cell-server-0 kubectl get pods -n ws-ws1`. Behind a
+TLS-inspecting proxy, set `MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle so the node can pull.
+These are local-cell results, never staging's (DEC-967 item 5).
+
+### The drills
+
+| Drill | What holds | Its seeded bug |
+|---|---|---|
+| `boot` | The migration hook succeeded, and every object of the release, each network policy included, is in the cell | The default-deny policy deleted |
+| `journal` | The CLI opens a control stream in the cell's journal, and a Job exports it and verifies it by journal spec §11 | One byte of the segment changed before it is verified |
+| `compose` | The Compose file on the host's docker: Postgres initializes the roles, the migration applies, the CLI opens a control stream, and its export verifies | The first event's hash changed before it is verified |
+| `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
+
+A seeded run counts as caught only when its report names the planted bug's own symptom
+(`rehash_mismatch`, a live host reached, the deleted policy missing), never any failure. In the
+seeded egress run, with the workspace's policies deleted, the probes open TCP connections to the
+live trading hosts from the runner, to prove the drill can see a leak; they send no byte, so no
+request reaches a broker (AGENTS.md rule 8).
+
+The kill switch with the exporter, API and deployment manager down (OPS-4), kills at each step of
+submission, two executors for one account (OPS-3), the upgrade drill (OPS-7) and the restore drill
+(OPS-8) join as their processes land.
+
+## The Compose file
+
+For one host: `docker compose -f deploy/cell/compose/compose.json up` with `MANDATE_WORKSPACE`
+and `MANDATE_IMAGE_MANDATE` (pinned by digest) set, and under `deploy/cell/compose/secrets/`
+(never committed) `postgres-superuser` and one `journal-role-<role>.pgpass` per role holding
+`*:*:mandate:<role>:<password>`, owned by uid 999 with mode 0600, which libpq and sqlx require.
+Every Compose service runs as that one non-root user, the library Postgres image's, so its
+first-start script and each process can read the same files.
+`docker compose run control workspace open …` runs the CLI.
+
+`docker compose run` of `control` or `journal-verify` needs a writable `/work`, given with
+`-v <dir>:/work`, as `cargo xtask cell drill compose` does.
+
+Residuals on one host, disclosed: every service shares the one internal network, so Compose does
+not isolate processes from each other or refuse inbound connections between them as the chart's
+policies do; Compose cannot filter egress by destination, so a process with no
+external target sits on the internal network alone, which has no route out, and one with an
+external target also joins `egress`, which the host firewall must narrow; and the journal's
+connections on the internal bridge network are not TLS.

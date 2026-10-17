@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mandate-journal-db values",
+  "description": "Settings only: every password is made in the cluster by the chart, never a value (DEC-822 item 4).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "instances",
+    "image",
+    "storage",
+    "resources",
+    "operatorNamespace"
+  ],
+  "properties": {
+    "instances": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    },
+    "image": {
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$"
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "size",
+        "storageClass"
+      ],
+      "properties": {
+        "size": {
+          "type": "string",
+          "pattern": "^[0-9]+(Mi|Gi)$"
+        },
+        "storageClass": {
+          "type": "string"
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu",
+        "memory"
+      ],
+      "properties": {
+        "cpu": {
+          "type": "string"
+        },
+        "memory": {
+          "type": "string"
+        }
+      }
+    },
+    "operatorNamespace": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

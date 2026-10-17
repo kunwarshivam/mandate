@@ -1,0 +1,4 @@
+# Cell #1: k3s on one or two VMs (DEC-967 item 7). The same chart as k3d and a managed cluster;
+# only values differ (DEC-967 item 6). Images are set at install, pinned by digest.
+workspace: ws1
+environment: paper
