@@ -533,3 +533,22 @@ fn a_path_that_does_not_decode_is_the_one_401_or_the_404() {
         assert!(String::from_utf8_lossy(&with.body).contains(r#""code":"not_found""#));
     }
 }
+
+#[test]
+fn an_undecodable_path_on_a_reduction_only_session_is_reduction_only() {
+    let f = fixture();
+    seed(&f);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Operator])]));
+    let cookie = signed_in(&f, alice());
+    assert_eq!(
+        f.sessions.refresh(
+            &cookie,
+            mandate_api_server::session::Answer::Unreachable,
+            at(T0 + 1)
+        ),
+        Ok(None)
+    );
+    let reply = get(&f, "/v1/workspaces/%FF/agents", Some(&cookie));
+    assert_eq!(reply.status, 403);
+    assert!(String::from_utf8_lossy(&reply.body).contains(r#""code":"reduction_only""#));
+}

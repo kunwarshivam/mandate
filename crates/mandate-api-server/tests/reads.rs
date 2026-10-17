@@ -389,3 +389,42 @@ fn a_body_that_is_not_json_is_skipped_never_guessed() {
     assert_eq!(folded[0].approval_id, id(2));
     assert!(matches!(folded[0].content, Value::Object(_)));
 }
+
+#[test]
+fn resolved_approvals_requested_together_list_by_approval_id() {
+    let a = format!("agent:{WS}:agt_a");
+    let b = format!("agent:{WS}:agt_b");
+    let mut first = request(&a, 1, 10, 1);
+    let mut second = request(&b, 2, 10, 2);
+    first.recorded_at = at(9);
+    second.recorded_at = at(9);
+    let mut views = approvals(
+        "agt_a",
+        &[
+            first.clone(),
+            answer(&a, 3, 1, "ApprovalTimedOut", r#","on_timeout":"skip""#),
+        ],
+    );
+    views.extend(approvals(
+        "agt_b",
+        &[
+            second.clone(),
+            answer(&b, 4, 2, "ApprovalTimedOut", r#","on_timeout":"skip""#),
+        ],
+    ));
+    let listed: Vec<String> = inbox(views.clone(), Filter::Resolved)
+        .into_iter()
+        .map(|a| a.approval_id)
+        .collect();
+    assert_eq!(listed, vec![id(2), id(1)]);
+    views.reverse();
+    let listed: Vec<String> = inbox(views, Filter::Resolved)
+        .into_iter()
+        .map(|a| a.approval_id)
+        .collect();
+    assert_eq!(
+        listed,
+        vec![id(2), id(1)],
+        "whatever order the agents are read in"
+    );
+}

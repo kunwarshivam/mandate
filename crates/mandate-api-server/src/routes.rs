@@ -372,17 +372,20 @@ pub async fn one_approval(
     }
 }
 
-/// A path that does not decode: the one 401 without a session, else the 404 an absent id gets.
+/// A path that does not decode: the one 401 without a session, `reduction_only` for a session that
+/// reaches only pause and the kill switch, else the 404 an absent id gets.
 async fn path_refused(app: &App, headers: &HeaderMap) -> Response {
-    let live = session_cookie(headers)
-        .zip(app.clock.now())
-        .is_some_and(|(cookie, now)| {
-            app.sessions
-                .authenticate(&cookie, Request::Other, now)
-                .is_ok()
-        });
-    if live {
+    let Some((cookie, now)) = session_cookie(headers).zip(app.clock.now()) else {
+        return unauthenticated();
+    };
+    if app
+        .sessions
+        .authenticate(&cookie, Request::Other, now)
+        .is_ok()
+    {
         Refused::NotFound.response()
+    } else if app.sessions.reduction_only(&cookie, now) {
+        Refused::ReductionOnly.response()
     } else {
         unauthenticated()
     }
