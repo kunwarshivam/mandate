@@ -195,3 +195,39 @@ describe("the edge middleware with sign-in off", () => {
     }
   });
 });
+
+describe("the mock workspace API at /v1 (DEC-975 item 10)", () => {
+  const PATHS = ["/v1", "/v1/workspaces/ws_probe/health", "/v1/workspaces/ws_probe/approvals/01JBH3BTZ8K2M4N6P8R0S2T4V6/responses"];
+
+  it("answers 404 in every build without the scenario switch, with sign-in on or off, before any sign-in route", async () => {
+    for (const auth of [false, true])
+      for (const signedIn of [false, true])
+        for (const path of PATHS) {
+          session.auth = auth;
+          session.signedIn = signedIn;
+          session.calls = 0;
+          const response = await middleware(request(path));
+          const at = `${path} auth=${auth} signedIn=${signedIn}`;
+          expect(response.status, at).toBe(404);
+          expect(response.headers.get("location"), at).toBeNull();
+          expect(response.headers.get("x-middleware-rewrite"), at).toBeNull();
+          expect(response.headers.get("x-middleware-next"), at).toBeNull();
+          expect(session.calls, at).toBe(0);
+        }
+  });
+
+  it("reaches the route in development and the e2e build, where the scenario switch is on", async () => {
+    dev.scenarios = true;
+    session.auth = false;
+    for (const path of PATHS) expect((await middleware(request(path))).headers.get("x-middleware-next"), path).toBe("1");
+  });
+
+  it("leaves a path that only begins with the letters alone, such as /v1x or /v10", async () => {
+    session.auth = false;
+    for (const path of ["/v1x", "/v10", "/v1x/workspaces"]) expect((await middleware(request(path))).status, path).not.toBe(404);
+  });
+
+  it("is matched by the middleware, so no build serves /v1 around it", () => {
+    for (const path of PATHS) expect(matched(path), path).toBe(true);
+  });
+});

@@ -1,0 +1,176 @@
+[
+  {
+    "label": "an empty as_of",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "api_version v2",
+    "set": {
+      "/api_version": "v2"
+    }
+  },
+  {
+    "label": "a missing agent_id",
+    "remove": [
+      "/agents/0/agent_id"
+    ]
+  },
+  {
+    "label": "a missing environment",
+    "remove": [
+      "/agents/0/environment"
+    ]
+  },
+  {
+    "label": "a missing mandate_version",
+    "remove": [
+      "/agents/0/mandate_version"
+    ]
+  },
+  {
+    "label": "a missing deployed_at",
+    "remove": [
+      "/agents/0/deployed_at"
+    ]
+  },
+  {
+    "label": "a missing mode",
+    "remove": [
+      "/agents/0/mode"
+    ]
+  },
+  {
+    "label": "a missing pending_approvals",
+    "remove": [
+      "/agents/0/pending_approvals"
+    ]
+  },
+  {
+    "label": "an agent id with a slash",
+    "set": {
+      "/agents/0/agent_id": "agt/1"
+    }
+  },
+  {
+    "label": "an agent id of 65 characters",
+    "set": {
+      "/agents/0/agent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "label": "environment staging",
+    "set": {
+      "/agents/0/environment": "staging"
+    }
+  },
+  {
+    "label": "a mandate version that is not a sha256 ref",
+    "set": {
+      "/agents/0/mandate_version": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+    }
+  },
+  {
+    "label": "deployed_at without nanoseconds",
+    "set": {
+      "/agents/0/deployed_at": "2026-10-08T13:00:00Z"
+    }
+  },
+  {
+    "label": "mode recovering",
+    "set": {
+      "/agents/0/mode": "recovering"
+    }
+  },
+  {
+    "label": "mode as a number",
+    "set": {
+      "/agents/0/mode": 0
+    }
+  },
+  {
+    "label": "negative pending approvals",
+    "set": {
+      "/agents/0/pending_approvals": -1
+    }
+  },
+  {
+    "label": "pending approvals as a string",
+    "set": {
+      "/agents/0/pending_approvals": "1"
+    }
+  },
+  {
+    "label": "pending approvals as a fraction",
+    "set": {
+      "/agents/0/pending_approvals": 1.5
+    }
+  },
+  {
+    "label": "an unknown agent member",
+    "set": {
+      "/agents/0/limits": {}
+    }
+  },
+  {
+    "label": "a missing agents list",
+    "remove": [
+      "/agents"
+    ]
+  },
+  {
+    "label": "agents as an object",
+    "set": {
+      "/agents": {}
+    }
+  },
+  {
+    "label": "mode outside the closed set",
+    "set": {
+      "/agents/0/mode": "mutant_value"
+    }
+  },
+  {
+    "label": "environment outside the closed set",
+    "set": {
+      "/agents/0/environment": "mutant_value"
+    }
+  },
+  {
+    "label": "a list row with account positions",
+    "set": {
+      "/agents/0/account_positions": []
+    }
+  },
+  {
+    "label": "a list row missing label",
+    "remove": [
+      "/agents/0/label"
+    ]
+  },
+  {
+    "label": "a list row missing mandate",
+    "remove": [
+      "/agents/0/mandate"
+    ]
+  },
+  {
+    "label": "an unknown list row member",
+    "set": {
+      "/agents/0/extra": 1
+    }
+  }
+]

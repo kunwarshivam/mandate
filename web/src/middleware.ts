@@ -26,9 +26,15 @@ function preferenceRedirect(request: NextRequest): NextResponse | null {
  * OpenNext runs edge middleware, not Node's proxy, so this file imports nothing from `node:` and
  * sets no `runtime`. With sign-in off (`authEnabled`, DEC-211) this is the dev preference switch alone. With it on, it
  * also refreshes the Supabase session and applies `authRoute`: a signed-out visitor sees the welcome
- * page at `/` and is sent to sign in from any other screen.
+ * page at `/` and is sent to sign in from any other screen. Outside development and the e2e build, the
+ * mock workspace API at `/v1` is a plain 404 before anything else, so no production build, Next's or
+ * the Workers one, with sign-in on or off, answers there.
  */
+/** The mock workspace API's prefix (`src/app/v1/`, DEC-975 item 10): served only where the scenario switch is on. */
+const MOCK_API = /^\/v1(\/|$)/;
+
 export async function middleware(request: NextRequest): Promise<NextResponse> {
+  if (!scenariosEnabled && MOCK_API.test(request.nextUrl.pathname)) return new NextResponse(null, { status: 404 });
   const preference = preferenceRedirect(request);
   if (!authEnabled) return preference ?? NextResponse.next();
   const { response, signedIn } = await updateSession(request);
