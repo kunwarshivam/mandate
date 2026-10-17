@@ -98,15 +98,18 @@ pub fn accounts(control: &[StoredEvent]) -> Vec<String> {
     found
 }
 
-/// The rows of `rows` caused by `command`, with their payloads.
-fn caused<'a>(rows: &'a [StoredEvent], command: &str) -> Vec<(&'a StoredEvent, Value)> {
-    rows.iter()
-        .filter_map(|row| {
-            let event = parse(&row.body).ok()?;
-            let cause = event.get("causation_id").and_then(Value::as_str)?;
-            (cause == command).then(|| (row, event.get("payload").cloned().unwrap_or(Value::Null)))
-        })
-        .collect()
+/// The rows of `rows` caused by `command`, with their payloads; `None` when a row does not parse,
+/// so the read reports `journal_unavailable` rather than a shorter list.
+fn caused<'a>(rows: &'a [StoredEvent], command: &str) -> Option<Vec<(&'a StoredEvent, Value)>> {
+    let mut found = Vec::new();
+    for row in rows {
+        let event = parse(&row.body).ok()?;
+        let cause = event.get("causation_id").and_then(Value::as_str);
+        if cause == Some(command) {
+            found.push((row, event.get("payload").cloned().unwrap_or(Value::Null)));
+        }
+    }
+    Some(found)
 }
 
 fn object(members: Vec<(&str, Value)>) -> Value {
@@ -172,8 +175,10 @@ async fn reported(
             .map_err(|_| Refused::JournalUnavailable)?;
         read.push(rows);
     }
-    let steps: Vec<(&StoredEvent, Value)> =
-        read.iter().flat_map(|rows| caused(rows, command)).collect();
+    let mut steps: Vec<(&StoredEvent, Value)> = Vec::new();
+    for rows in &read {
+        steps.extend(caused(rows, command).ok_or(Refused::JournalUnavailable)?);
+    }
     let phase = phase(
         steps
             .iter()

@@ -630,6 +630,9 @@ async fn stepped(
         Ok(reader) => reader,
         Err(refusal) => return refusal.response(),
     };
+    if !in_workspace(&reader.control, &null) {
+        return Refused::NotFound.response();
+    }
     let Some(presented) = journaled(forwarded.presented) else {
         return Refused::Invalid.response();
     };

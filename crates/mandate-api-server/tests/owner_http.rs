@@ -716,3 +716,101 @@ fn the_phase_is_the_most_final_steps() {
     assert_eq!(reason(&json(r#"{"reason":""}"#)), None);
     assert_eq!(reason(&json(r#"{"reason":3}"#)), None);
 }
+
+#[test]
+fn an_absent_agent_is_the_one_404_before_the_port_is_asked() {
+    let f = fixture(true);
+    let cookie = signed_in(&f, alice());
+    let resume = format!(r#"{{"record":null,"step_up":{EVIDENCE}}}"#);
+    refused(
+        &post(&f, &ws("/agents/agt_x/resume"), &cookie, KEY, &resume),
+        404,
+        ProblemCode::NotFound,
+    );
+    let stop =
+        format!(r#"{{"release":false,"warning_shown":null,"record":null,"step_up":{EVIDENCE}}}"#);
+    refused(
+        &post(&f, &ws("/agents/agt_x/stop"), &cookie, KEY, &stop),
+        404,
+        ProblemCode::NotFound,
+    );
+    assert!(
+        f.asked.0.lock().expect("unpoisoned").is_empty(),
+        "no assertion is spent on a 404"
+    );
+}
+
+#[test]
+fn a_verified_stop_binds_what_it_confirms() {
+    let f = fixture(true);
+    let cookie = signed_in(&f, alice());
+    let warning = reference(WARNING.as_bytes());
+    let releasing = format!(
+        r#"{{"release":true,"warning_shown":"{warning}","record":null,"step_up":{EVIDENCE}}}"#
+    );
+    assert_eq!(
+        post(&f, &ws("/agents/agt_a/stop"), &cookie, KEY, &releasing).status,
+        202
+    );
+    let plain =
+        format!(r#"{{"release":false,"warning_shown":null,"record":null,"step_up":{EVIDENCE}}}"#);
+    assert_eq!(
+        post(&f, &ws("/agents/agt_a/stop"), &cookie, KEY_2, &plain).status,
+        202
+    );
+    assert_eq!(
+        *f.asked.0.lock().expect("unpoisoned"),
+        vec![
+            (StepUpActionKind::Stop, bound("stop_release", 3)),
+            (StepUpActionKind::Stop, bound("stop", 4)),
+        ]
+    );
+    let (_, event) = written(&f);
+    assert_eq!(member(&event, &["payload", "step_up"]), &json(EVIDENCE));
+}
+
+#[test]
+fn command_status_nulls_a_non_code_reason_and_refuses_an_unparsable_row() {
+    let f = fixture(false);
+    let cookie = signed_in(&f, alice());
+    let reply = post(
+        &f,
+        &ws("/agents/agt_a/resume"),
+        &cookie,
+        KEY,
+        r#"{"record":null,"step_up":null}"#,
+    );
+    assert_eq!(reply.status, 202);
+    let command = derived("resume", KEY);
+    {
+        let mut streams = f.journal.streams.lock().expect("unpoisoned");
+        let rows = streams.get_mut(&agent_stream()).expect("seeded");
+        rows.push(row(
+            &agent_stream(),
+            2,
+            "AgentModeChanged",
+            r#"{"reason":"Not A Code"}"#,
+            Some(&command),
+        ));
+    }
+    let answer = body(&get(&f, &ws(&format!("/commands/{command}")), &cookie));
+    assert_eq!(member(&answer, &["phase"]), &Value::Str("applied".into()));
+    let steps = member(&answer, &["steps"]).as_array().expect("steps");
+    assert_eq!(
+        member(&steps[0], &["reason"]),
+        &Value::Null,
+        "a reason that is not a code is null"
+    );
+    {
+        let mut streams = f.journal.streams.lock().expect("unpoisoned");
+        let rows = streams.get_mut(&agent_stream()).expect("seeded");
+        let mut broken = row(&agent_stream(), 3, "ObservationRecorded", "{}", None);
+        broken.body = b"not json".to_vec();
+        rows.push(broken);
+    }
+    refused(
+        &get(&f, &ws(&format!("/commands/{command}")), &cookie),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+}
