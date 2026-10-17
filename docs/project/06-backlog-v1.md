@@ -2911,13 +2911,15 @@ enables `live` (ES-23, OPS-5).
   a wrong `Host` gets 421 and a `POST /token` without `application/json` gets 415; a test signs in
   through `POST /v1/sessions` with a stub token for a linked subject, and is refused for a subject
   linked under another issuer; and the E2E lane's `cell demo` runs it in the server's network
-  namespace once E21-53 is on `main`.
+  namespace, started before the server, once E21-53 is on `main`. Lane R1's image build (E21-8)
+  fails when `RUSTFLAGS` or `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` is set (DEC-2100 item 2).
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
   issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
-  refuses to start with its `MANDATE_API_JWKS_URL` setting refusal when the URL is `http` and
-  `MANDATE_DEPLOYMENT_TIER` is anything but `dev` or `ci` (no value included), shown by a test for
-  each tier, and still starts with an `https` URL in every tier.
+  reads `MANDATE_DEPLOYMENT_TIER` with `mandate_release::startup::Tier::from_setting` (§3.11 item
+  2), and refuses to start with its `MANDATE_API_JWKS_URL` setting refusal when the URL is `http`
+  and the tier is anything but `dev` or `ci` (no value included), shown by a test for each tier;
+  and it still starts with an `https` URL in every tier.
 
 ## Won't (v1)
 

@@ -497,7 +497,10 @@ per workspace deployment (item 6).
    and `MANDATE_API_WORKSPACE` and `MANDATE_API_ORG`: the one
    workspace this deployment hosts and its organization, as ULIDs. Every other workspace in a path
    is absent (API-9's 404), and the organization is what `authorize` checks the pair against;
-   journal spec §9.12's records name neither. `MANDATE_API_ARTIFACTS`, optional, is the
+   journal spec §9.12's records name neither. `MANDATE_DEPLOYMENT_TIER` is the deployment tier, read as every
+   process reads it (`dev`, `ci`, `staging`, or `production`; no value or any other is
+   `production`). Outside `dev` and `ci`, an `http` `MANDATE_API_JWKS_URL` refuses the start
+   (E21-53, [DEC-2100](../project/decisions/DEC-2100.md) item 9). `MANDATE_API_ARTIFACTS`, optional, is the
    content-addressed store's directory, read only, from which the agent reads take the mandate
    document the journal names by digest ([DEC-1020](../project/decisions/DEC-1020.md)). As a guard against a secret placed in the environment (DEC-822
    item 4), a variable whose name contains `SECRET`, `PASSWORD`, `TOKEN`, or `KEY` (ASCII
@@ -508,8 +511,7 @@ per workspace deployment (item 6).
    world-readable. In a `dev` or `ci` cell only, the three issuer settings may name the local stub
    issuer ([DEC-2100](../project/decisions/DEC-2100.md)), which runs on loopback with a key it
    makes at each start, so a cell without the managed issuer can open a session. The server reads
-   them the same way. The stub refuses to run in any other tier, and the server refuses an `http`
-   key-set URL outside `dev` and `ci` (E21-53, DEC-2100 item 9).
+   them the same way, and the stub refuses to run in any other tier.
 3. **Probes.** On the probes' listener only, `GET /livez` and `GET /readyz`, unauthenticated and
    reading no data. The body is `{"status": "live"}`, `{"status": "ready"}`, or, with 503,
    `{"status": "not_ready"}`; any other request there is 404 with no body. Readiness is the
