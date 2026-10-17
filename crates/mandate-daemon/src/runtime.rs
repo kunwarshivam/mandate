@@ -96,7 +96,64 @@ impl<S: Store> RuntimeProcess<S> {
     /// writer epoch on the agent stream (fencing every earlier process), folds the stream, and hands
     /// the core `Input::Started`. Only once that batch commits is the process ready.
     pub fn start(store: S, wiring: Wiring, config: &Config, now: UtcNanos) -> Self {
-        todo!()
+        let deployment = &config.deployment;
+        let stream = |kind: &str, rest: &str| StreamId::parse(&format!("{kind}:{rest}"));
+        let workspace = deployment.workspace.0.as_str();
+        let mut this = Self {
+            store,
+            wiring,
+            state: RuntimeState::new(deployment.clone()),
+            lifecycle: Lifecycle::new(Kind::Runtime, config.liveness, now),
+            environment: config.environment,
+            agent: stream("agent", &format!("{workspace}:{}", deployment.agent.0)),
+            control: stream("ctl", workspace),
+            clock: stream("clock", workspace),
+            epoch: 0,
+            control_handed: None,
+            clock_handed: 0,
+            pending: None,
+            written_at: now,
+        };
+        if config.environment != Environment::Paper {
+            this.lifecycle.observe(now, Lifecycled::Failed);
+            return this;
+        }
+        this.lifecycle.observe(now, Lifecycled::StartupPassed);
+        let Some(agent) = this.agent.clone() else {
+            this.lifecycle.observe(now, Lifecycled::Failed);
+            return this;
+        };
+        let Some(epoch) = this.store.take_ownership(&agent) else {
+            this.lifecycle.observe(now, Lifecycled::Failed);
+            return this;
+        };
+        this.epoch = epoch;
+        this.lifecycle.observe(now, Lifecycled::EpochTaken);
+        let replayed = this
+            .store
+            .rows(&agent)
+            .and_then(|rows| this.fold_rows(&rows));
+        let Some(head) = replayed else {
+            this.lifecycle.observe(now, Lifecycled::Failed);
+            return this;
+        };
+        this.lifecycle.observe(
+            now,
+            Lifecycled::Replayed {
+                position: head,
+                head,
+            },
+        );
+        if head == 0 && !matches!(this.open(now), Ran::Committed) {
+            return this;
+        }
+        this.hand(
+            now,
+            now,
+            Input::Started(WriterEpoch(epoch)),
+            &mut Vec::new(),
+        );
+        this
     }
 
     /// Journal spec §2's stream lifecycle: the process that owns a new agent stream writes its
@@ -125,13 +182,39 @@ impl<S: Store> RuntimeProcess<S> {
     /// One pass of the loop at the injected time `now`: an input in doubt first, then the control
     /// stream, then the clock stream's latest tick. Returns the alerts whose drafts committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
-        todo!()
+        let mut alerts = Vec::new();
+        if self.exited() {
+            return alerts;
+        }
+        self.lifecycle.observe(now, Lifecycled::Heartbeat);
+        if let Some((input, at)) = self.pending.take()
+            && !self.hand(now, at, input, &mut alerts)
+        {
+            return alerts;
+        }
+        if self.control_pass(now, &mut alerts) {
+            self.clock_pass(now, &mut alerts);
+        }
+        alerts
     }
 
     /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits
     /// `Drained`, or `DrainIncomplete` if it is still in doubt.
     pub fn drain(&mut self, now: UtcNanos) {
-        todo!()
+        if self.exited() {
+            return;
+        }
+        self.lifecycle.observe(now, Lifecycled::DrainRequested);
+        let settled = match self.pending.take() {
+            Some((input, at)) => self.hand(now, at, input, &mut Vec::new()),
+            None => true,
+        };
+        let last = if settled {
+            Lifecycled::Settled
+        } else {
+            Lifecycled::Failed
+        };
+        self.lifecycle.observe(now, last);
     }
 
     pub fn lifecycle(&self) -> &Lifecycle {

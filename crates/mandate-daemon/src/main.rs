@@ -103,9 +103,15 @@ fn host_now() -> UtcNanos {
 }
 
 fn run(config: &Config, owner: &str, socket: &Path) -> Result<u8, &'static str> {
-
-    todo!()
-
+    let terminate = Arc::new(AtomicBool::new(false));
+    watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
+    let process = RuntimeProcess::start(
+        MemoryStore::default(),
+        fixture::wiring(owner),
+        config,
+        host_now(),
+    );
+    serve(process, &mut Sleep, socket, &terminate)
 }
 
 fn serve<S: Store>(
