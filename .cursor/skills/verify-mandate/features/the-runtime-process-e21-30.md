@@ -20,9 +20,12 @@
   draft without references stopping the process, a property test over interleavings of kill
   switches, ticks, lost answers, and restarts with an oracle from the control rows; and for the
   account stream, the startup hold lifting on a clean reconciliation, the account folded before the
-  start, the latest establishment followed and another connection's ignored, an unreadable account
-  handing no tick, an unfoldable record or a changed account stopping the process, and a property
-  test whose oracle derives the effective mode from the account rows alone.
+  start, the latest establishment followed and another connection's or environment's ignored, an
+  unreadable account handing no tick, an unfoldable record, another environment's row, or a changed
+  account stopping the process, and a property test whose oracle derives the effective mode and the
+  startup hold from the account rows alone. `mandate-runtime`'s
+  `a_reconciliation_from_before_the_start_does_not_lift_a_hold_taken_with_an_intent_outstanding`
+  (DEC-1014 item 6).
   `tests/process.rs`: the binary's refusals, probes, and SIGTERM drain. `mandate-runtime`'s
   `an_owner_kill_switch_without_a_bid_records_null_bid_members_and_its_owner`.
 - **Run:** `cargo nextest run -p mandate-daemon -p mandate-store -p mandate-runtime -p mandate-shell`.

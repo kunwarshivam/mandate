@@ -182,7 +182,7 @@ impl<S: Store> RuntimeProcess<S> {
         let Some(control) = self.control.as_ref().and_then(|c| self.store.rows(c)) else {
             return false;
         };
-        self.account = account_of(&control, self.state.deployment());
+        self.account = account_of(&control, self.state.deployment(), self.environment);
         match self.account.clone() {
             Some(account) => matches!(self.fold_account(&account), Account::Folded),
             None => true,
@@ -298,7 +298,7 @@ impl<S: Store> RuntimeProcess<S> {
     /// the clock may be read: an account that cannot be read hands no tick, so nothing is decided
     /// on a mode that may be stale.
     fn account_pass(&mut self, now: UtcNanos, control: &[StoredEvent]) -> bool {
-        let named = account_of(control, self.state.deployment());
+        let named = account_of(control, self.state.deployment(), self.environment);
         match (&self.account, named) {
             (Some(followed), Some(named)) if *followed != named => {
                 self.lifecycle.observe(now, Lifecycled::Failed);
@@ -320,14 +320,20 @@ impl<S: Store> RuntimeProcess<S> {
         }
     }
 
-    /// Folds the rows of `account` past the core's head for it. A row the core cannot fold is never
-    /// skipped (DEC-85).
+    /// Folds the rows of `account` past the core's head for it. A row the core cannot fold, or one
+    /// journaled for another environment, is never skipped (DEC-85, `AGENTS.md` rule 8).
     fn fold_account(&mut self, account: &StreamId) -> Account {
         let Some(rows) = self.store.rows(account) else {
             return Account::Unreadable;
         };
         let head = self.state.head(account.as_str()).map_or(0, |seq| seq.0);
         let fresh: Vec<StoredEvent> = rows.into_iter().filter(|r| r.seq > head).collect();
+        if fresh
+            .iter()
+            .any(|r| r.environment != self.environment.as_str())
+        {
+            return Account::Unfoldable;
+        }
         let Ok(events) = tailed(&fresh) else {
             return Account::Unfoldable;
         };
@@ -515,15 +521,21 @@ impl<S: Store> RuntimeProcess<S> {
 }
 
 /// The account stream the latest version-2 `ConnectionEstablished` of the deployment's connection
-/// names on the control stream (journal spec §9.8: an account stream belongs to the connection whose
-/// establishment names its `account_ref`). `None` until one does.
-fn account_of(control: &[StoredEvent], deployment: &Deployment) -> Option<StreamId> {
+/// in `environment` names on the control stream (journal spec §9.8: an account stream belongs to
+/// the connection whose establishment names its `account_ref`). `None` until one does.
+fn account_of(
+    control: &[StoredEvent],
+    deployment: &Deployment,
+    environment: Environment,
+) -> Option<StreamId> {
     let reference = control.iter().rev().find_map(|row| {
         if row.event_type != "ConnectionEstablished" || row.schema_version != 2 {
             return None;
         }
         let payload = parse(&row.body).ok()?.get("payload")?.clone();
-        if payload.get("connection_id")?.as_str()? != deployment.connection.0 {
+        if payload.get("connection_id")?.as_str()? != deployment.connection.0
+            || payload.get("environment")?.as_str()? != environment.as_str()
+        {
             return None;
         }
         payload.get("account_ref")?.as_str().map(str::to_owned)
