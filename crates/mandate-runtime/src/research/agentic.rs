@@ -54,6 +54,8 @@ pub(super) struct Agentic {
     transcript: Vec<TurnRef>,
     counts: Counts,
     instruments_read: BTreeSet<String>,
+    /// The run's read-result bytes left, as the loop last counted them (§6.9 step 5).
+    result_bytes_left: u32,
 }
 
 impl Agentic {
@@ -77,7 +79,8 @@ enum Stage {
         turn: u32,
         response: Digest,
         results: BTreeMap<u32, Digest>,
-        dispatched: Vec<u32>,
+        /// Each dispatched call's index and tool, in reply order.
+        dispatched: Vec<(u32, Tool)>,
     },
 }
 
@@ -203,6 +206,7 @@ pub(super) fn start(
             transcript: Vec::new(),
             counts: Counts::default(),
             instruments_read: BTreeSet::new(),
+            result_bytes_left: agentic.bounds.max_run_result_bytes,
         },
         universe_bytes,
     ))
@@ -439,10 +443,7 @@ pub(super) fn replied(
             run_id: run.run_id.clone(),
             turn,
             calls: reply.dispatch.clone(),
-            result_bytes_left: started
-                .bounds
-                .max_run_result_bytes
-                .saturating_sub(u32::try_from(agentic.counts.result_bytes).unwrap_or(u32::MAX)),
+            result_bytes_left: agentic.result_bytes_left,
             cut_off: run.cut_off,
             allowlist_version: started.allowlist_version,
         }));
@@ -450,7 +451,11 @@ pub(super) fn replied(
         turn,
         response,
         results,
-        dispatched: reply.dispatch.iter().map(|call| call.index).collect(),
+        dispatched: reply
+            .dispatch
+            .iter()
+            .map(|call| (call.index, call.tool))
+            .collect(),
     };
     Ok(out)
 }
@@ -561,7 +566,8 @@ pub(super) fn dispatched(
         });
     };
     let answered: Vec<u32> = results.iter().map(|r| r.call.index).collect();
-    if answered != dispatched || results.iter().any(|r| r.call.turn != turn) {
+    let indices: Vec<u32> = dispatched.iter().map(|(index, _)| *index).collect();
+    if answered != indices || results.iter().any(|r| r.call.turn != turn) {
         return Err(RuntimeError::NotInterpreted {
             what: "results that are not exactly the dispatch's calls, in order".to_owned(),
             story: "E19-13",
@@ -593,10 +599,15 @@ pub(super) fn dispatched(
             &observations,
             batch,
         )?;
-        agentic.counts.result_bytes = agentic
-            .counts
-            .result_bytes
-            .saturating_add(u64::from(result.bytes));
+        let read = dispatched
+            .iter()
+            .any(|(index, tool)| *index == result.call.index && tool.class() == ToolClass::Read);
+        if read {
+            agentic.counts.result_bytes = agentic
+                .counts
+                .result_bytes
+                .saturating_add(u64::from(result.bytes));
+        }
         contents.insert(result.call.index, result.content);
         loop_results.push(ToolResult {
             call: result.call,
@@ -621,7 +632,8 @@ pub(super) fn dispatched(
         .on_results(&loop_results)
         .map_err(loop_error)?
     {
-        mandate_research_run::agentic::Next::Turn { .. } => {
+        mandate_research_run::agentic::Next::Turn { result_bytes_left } => {
+            agentic.result_bytes_left = result_bytes_left;
             next_turn(run, agentic, config, state, at, batch, &mut out)?;
         }
         mandate_research_run::agentic::Next::End(reason) => {
