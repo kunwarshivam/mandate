@@ -6,20 +6,21 @@
 //! module only decides, from journaled facts, what the next step is, so a replay decides the same
 //! (HI-3). It reads no clock and does no I/O: the run's time left arrives as a duration.
 //!
-//! **Signatures only.** Every body that decides something returns
-//! [`ResearchRunError::Unimplemented`] until slice 3 lands (DEC-990 item 3), so the core's tests can
-//! be written against this shape first.
+//! Slice 3 decides everything a `final_output` run needs: each turn's offer, a reply's total order,
+//! the screening of reads against the run's frozen scope, the in-batch bounds, a dispatch's
+//! results, and the end. An `action_tools` run's actions are ordered and counted against
+//! `max_theses` here, but their verdicts, the repeated refusals among them, and the pending theses
+//! a `done` end commits are the core's mediation, slice 4's (ADR-0005).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_canon::Value;
 use mandate_gateway::money::Usd6;
 use mandate_time::UtcNanos;
 
 use crate::error::ResearchRunError;
 use crate::item::{ItemId, ItemKind, Symbol};
 use crate::output::CandidateOutput;
-
-const STORY: &str = "E19-13";
 
 /// The run kind, fixed at the start from the trigger and folded state (§6.9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -393,15 +394,27 @@ pub enum FoldedEvent {
     Ended(EndReason),
 }
 
+/// A refused or failed result's identity for `max_repeat_denials`: the tool, its canonical
+/// arguments, and the code (§6.11).
+type DenialKey = (Tool, String, &'static str);
+
 /// The run's loop state: a pure fold of its own records.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunState {
     start: RunStart,
     turns: u32,
     tool_calls: u32,
-    result_bytes: u32,
+    theses: u32,
+    read_bytes: u32,
     spent: Usd6,
+    received: BTreeSet<(ItemKind, ItemId)>,
+    denials: BTreeMap<DenialKey, u32>,
+    outstanding: Vec<ToolCallId>,
+    dispatched: BTreeMap<ToolCallId, ToolCall>,
+    refused_last: BTreeMap<ToolCallId, Code>,
+    denied_at_dispatch: bool,
     pending: Vec<PendingProposal>,
+    stop: Option<EndReason>,
     ended: Option<EndReason>,
 }
 
@@ -412,9 +425,17 @@ impl RunState {
             start,
             turns: 0,
             tool_calls: 0,
-            result_bytes: 0,
-            spent: Usd6::default(),
+            theses: 0,
+            read_bytes: 0,
+            spent: Usd6::ZERO,
+            received: BTreeSet::new(),
+            denials: BTreeMap::new(),
+            outstanding: Vec::new(),
+            dispatched: BTreeMap::new(),
+            refused_last: BTreeMap::new(),
+            denied_at_dispatch: false,
             pending: Vec::new(),
+            stop: None,
             ended: None,
         }
     }
@@ -427,19 +448,40 @@ impl RunState {
     /// Takes the seed's items (§6.9 step 2), so a later `news.get` or `filings.get` may name them.
     ///
     /// # Errors
-    /// [`ResearchRunError::Unimplemented`] until slice 3.
+    /// [`ResearchRunError::LoopOrder`] once a turn has been taken or the run has ended.
     pub fn on_seed(&mut self, items: &[(ItemKind, ItemId)]) -> Result<(), ResearchRunError> {
-        let _ = items;
-        Err(ResearchRunError::Unimplemented { story: STORY })
+        if self.turns > 0 || self.ended.is_some() {
+            return Err(ResearchRunError::LoopOrder {
+                what: "a seed after the run's first turn",
+            });
+        }
+        self.received.extend(items.iter().cloned());
+        Ok(())
     }
 
-    /// The next turn's plan, given the run's time left on the risk clock (§6.9 step 3).
+    /// The next turn's plan, given the run's time left on the risk clock (§6.9 step 3): the menu,
+    /// only the action tools in the last turn, and no tool once no tool call is left.
     ///
     /// # Errors
-    /// [`ResearchRunError::Unimplemented`] until slice 3.
+    /// [`ResearchRunError::LoopOrder`] when the run has stopped, a dispatch is out, or no turn is
+    /// left.
     pub fn turn(&self, time_left_ms: u64) -> Result<TurnPlan, ResearchRunError> {
-        let _ = (time_left_ms, self.turns, self.spent, self.ended);
-        Err(ResearchRunError::Unimplemented { story: STORY })
+        self.ready("a turn")?;
+        let bounds = &self.start.bounds;
+        if self.turns >= bounds.max_turns {
+            return Err(ResearchRunError::LoopOrder {
+                what: "a turn past max_turns",
+            });
+        }
+        let turn = self.turns.saturating_add(1);
+        Ok(TurnPlan {
+            turn,
+            tools: self.offer(turn),
+            spend_ceiling: self.start.cost_ceiling.saturating_sub(self.spent),
+            time_left_ms,
+            turns_left: bounds.max_turns.saturating_sub(self.turns),
+            tool_calls_left: self.calls_left(),
+        })
     }
 
     /// Takes a turn's reply: orders its calls, screens reads, applies the in-batch bounds (§6.9 step 4).
@@ -447,36 +489,418 @@ impl RunState {
     /// [`RunState::on_results`] counts only the dispatched results.
     ///
     /// # Errors
-    /// [`ResearchRunError::Unimplemented`] until slice 3.
+    /// [`ResearchRunError::LoopOrder`] for a reply to a turn that was not asked for.
     pub fn on_reply(&mut self, reply: &ReplyInput) -> Result<Reply, ResearchRunError> {
-        let _ = (reply, self.tool_calls);
-        Err(ResearchRunError::Unimplemented { story: STORY })
+        self.ready("a reply")?;
+        let turn = self.turns.saturating_add(1);
+        if reply.turn != turn || turn > self.start.bounds.max_turns {
+            return Err(ResearchRunError::LoopOrder {
+                what: "a reply to a turn that was not asked for",
+            });
+        }
+        let offered = self.offer(turn);
+        let calls_left = self.calls_left();
+        self.turns = turn;
+        self.spent = self
+            .spent
+            .checked_add(reply.cost)
+            .unwrap_or(Usd6::from_micros(u64::MAX));
+        self.refused_last.clear();
+        if !reply.ok {
+            return Ok(self.stopping(Vec::new(), Vec::new(), EndReason::Error));
+        }
+        let calls = &reply.tool_calls;
+        let count = u32::try_from(calls.len()).unwrap_or(u32::MAX);
+        self.tool_calls = self.tool_calls.saturating_add(count);
+        if calls.is_empty() {
+            let shape = if turn >= self.start.bounds.max_turns {
+                Some(Bound::MaxTurns)
+            } else if calls_left == 0 {
+                Some(Bound::MaxToolCalls)
+            } else {
+                None
+            };
+            return Ok(self.stopping(Vec::new(), Vec::new(), EndReason::Done(shape)));
+        }
+        let ordered = total_order(calls);
+        let well_formed = count <= self.start.bounds.max_tool_calls_per_turn
+            && calls.iter().all(|call| offered.contains(&call.tool))
+            && calls
+                .iter()
+                .enumerate()
+                .all(|(at, call)| usize::try_from(call.index).is_ok_and(|index| index == at));
+        if !well_formed {
+            let refused = refuse_rest(&ordered, turn, &BTreeMap::new(), 0);
+            return Ok(self.stopping(ordered, refused, EndReason::Error));
+        }
+        if count > calls_left {
+            let refused = ordered
+                .iter()
+                .map(|call| (id(turn, call), Code::CallBudget))
+                .collect();
+            return Ok(self.stopping(ordered, refused, EndReason::Bound(Bound::MaxToolCalls)));
+        }
+        let mut codes: BTreeMap<u32, Code> = BTreeMap::new();
+        let mut bound = None;
+        let mut taken = 0;
+        for (at, call) in ordered.iter().enumerate() {
+            taken = at.saturating_add(1);
+            match call.tool.class() {
+                ToolClass::Action if call.tool == Tool::ProposeThesis => {
+                    self.theses = self.theses.saturating_add(1);
+                    if self.theses > self.start.bounds.max_theses {
+                        codes.insert(call.index, Code::MaxTheses);
+                        bound = Some(Bound::MaxTheses);
+                    }
+                }
+                ToolClass::Read => {
+                    if let Some(code) = self.screen(call) {
+                        if self.deny(call, code) {
+                            codes.insert(call.index, Code::MaxRepeatDenials);
+                            bound = Some(Bound::MaxRepeatDenials);
+                        } else {
+                            codes.insert(call.index, code);
+                        }
+                    }
+                }
+                ToolClass::Action | ToolClass::Think => {}
+            }
+            if bound.is_some() {
+                break;
+            }
+        }
+        if let Some(bound) = bound {
+            let refused = refuse_rest(&ordered, turn, &codes, taken);
+            return Ok(self.stopping(ordered, refused, EndReason::Bound(bound)));
+        }
+        let refused: Vec<(ToolCallId, Code)> = ordered
+            .iter()
+            .filter_map(|call| codes.get(&call.index).map(|code| (id(turn, call), *code)))
+            .collect();
+        self.refused_last = refused.iter().copied().collect();
+        let dispatch: Vec<ToolCall> = calls
+            .iter()
+            .filter(|call| call.tool.class() != ToolClass::Action)
+            .filter(|call| !codes.contains_key(&call.index))
+            .cloned()
+            .collect();
+        let mut ends = None;
+        if dispatch.is_empty() {
+            if turn >= self.start.bounds.max_turns {
+                ends = Some(EndReason::Done(Some(Bound::MaxTurns)));
+                self.stop = ends;
+            }
+        } else {
+            self.outstanding = dispatch.iter().map(|call| id(turn, call)).collect();
+            self.dispatched = dispatch
+                .iter()
+                .map(|call| (id(turn, call), call.clone()))
+                .collect();
+        }
+        Ok(Reply {
+            ordered,
+            refused,
+            dispatch,
+            ends,
+        })
     }
 
     /// Takes a dispatch's results, counting bytes and repeated refusals (§6.9 step 5).
     ///
     /// # Errors
-    /// [`ResearchRunError::Unimplemented`] until slice 3.
+    /// [`ResearchRunError::LoopOrder`] unless the results are exactly the dispatch's calls, in order.
     pub fn on_results(&mut self, results: &[ToolResult]) -> Result<Next, ResearchRunError> {
-        let _ = (results, self.result_bytes);
-        Err(ResearchRunError::Unimplemented { story: STORY })
+        let answered: Vec<ToolCallId> = results.iter().map(|result| result.call).collect();
+        if self.ended.is_some() || self.outstanding.is_empty() || answered != self.outstanding {
+            return Err(ResearchRunError::LoopOrder {
+                what: "results that are not exactly the dispatch's calls, in order",
+            });
+        }
+        for result in results {
+            self.take_result(result)?;
+        }
+        Ok(self.after_dispatch())
     }
 
     /// Ends the run: which pending theses to commit, which to discard (§6.9 step 6).
     ///
     /// # Errors
-    /// [`ResearchRunError::Unimplemented`] until slice 3.
+    /// [`ResearchRunError::LoopOrder`] for a run that has already ended.
     pub fn end(&mut self, reason: EndReason) -> Result<EndPlan, ResearchRunError> {
-        let _ = (reason, &self.pending);
-        Err(ResearchRunError::Unimplemented { story: STORY })
+        if self.ended.is_some() {
+            return Err(ResearchRunError::LoopOrder {
+                what: "a second end",
+            });
+        }
+        self.ended = Some(reason);
+        self.outstanding.clear();
+        let (commit, discarded) = if matches!(reason, EndReason::Done(_)) {
+            (self.pending.clone(), Vec::new())
+        } else {
+            (
+                Vec::new(),
+                self.pending.iter().map(|pending| pending.call).collect(),
+            )
+        };
+        Ok(EndPlan {
+            reason,
+            commit,
+            discarded,
+        })
     }
 
-    /// Folds one of the run's records back, so a replay rebuilds the state (HI-3).
+    /// Folds one of the run's records back, so a replay rebuilds the state (HI-3). A refusal the
+    /// reply's own fold already produced is checked and skipped; a dispatched result is taken, and
+    /// the last one of a dispatch decides the step after it.
     ///
     /// # Errors
-    /// [`ResearchRunError::Unimplemented`] until slice 3.
+    /// [`ResearchRunError::LoopOrder`] for a record out of the run's order, or a refusal that is
+    /// not the one the reply's fold produced.
     pub fn fold(&mut self, event: &FoldedEvent) -> Result<(), ResearchRunError> {
-        let _ = event;
-        Err(ResearchRunError::Unimplemented { story: STORY })
+        match event {
+            FoldedEvent::Started(start) => {
+                if self.turns > 0 || self.ended.is_some() {
+                    return Err(ResearchRunError::LoopOrder {
+                        what: "a second start",
+                    });
+                }
+                *self = Self::start(start.clone());
+            }
+            FoldedEvent::Seeded(items) => self.on_seed(items)?,
+            FoldedEvent::Turn(reply) => {
+                self.on_reply(reply)?;
+            }
+            FoldedEvent::Result(result) => {
+                if let Some(code) = self.refused_last.get(&result.call) {
+                    if result.outcome != ToolOutcome::Refused || result.code != Some(*code) {
+                        return Err(ResearchRunError::LoopOrder {
+                            what: "a refusal the reply's fold did not produce",
+                        });
+                    }
+                } else if self.outstanding.first() == Some(&result.call) {
+                    self.take_result(result)?;
+                    if self.outstanding.is_empty() {
+                        self.after_dispatch();
+                    }
+                } else {
+                    return Err(ResearchRunError::LoopOrder {
+                        what: "a result for no call the run has out",
+                    });
+                }
+            }
+            FoldedEvent::Ended(reason) => {
+                self.end(*reason)?;
+            }
+        }
+        Ok(())
     }
+
+    fn ready(&self, what: &'static str) -> Result<(), ResearchRunError> {
+        if self.ended.is_some() || self.stop.is_some() || !self.outstanding.is_empty() {
+            return Err(ResearchRunError::LoopOrder { what });
+        }
+        Ok(())
+    }
+
+    fn calls_left(&self) -> u32 {
+        self.start
+            .bounds
+            .max_tool_calls
+            .saturating_sub(self.tool_calls)
+    }
+
+    /// The tools turn `turn` offers (§6.9 step 3).
+    fn offer(&self, turn: u32) -> BTreeSet<Tool> {
+        if self.calls_left() == 0 {
+            return BTreeSet::new();
+        }
+        if turn >= self.start.bounds.max_turns {
+            return self
+                .start
+                .menu
+                .iter()
+                .copied()
+                .filter(|tool| tool.class() == ToolClass::Action)
+                .collect();
+        }
+        self.start.menu.clone()
+    }
+
+    fn stopping(
+        &mut self,
+        ordered: Vec<ToolCall>,
+        refused: Vec<(ToolCallId, Code)>,
+        reason: EndReason,
+    ) -> Reply {
+        self.stop = Some(reason);
+        self.refused_last = refused.iter().copied().collect();
+        Reply {
+            ordered,
+            refused,
+            dispatch: Vec::new(),
+            ends: Some(reason),
+        }
+    }
+
+    /// The code a read is refused before it runs, if any: a symbol outside the run's frozen scope,
+    /// or an item the run never received of the kind the tool takes (§6.10).
+    fn screen(&self, call: &ToolCall) -> Option<Code> {
+        let arguments = mandate_canon::parse(call.arguments.as_bytes()).ok();
+        let member = |name: &str| arguments.as_ref().and_then(|value| value.get(name));
+        match call.tool {
+            Tool::MarketBars => {
+                let symbol = member("symbol").and_then(Value::as_str);
+                (!symbol.is_some_and(|symbol| self.in_scope(symbol))).then_some(Code::OutOfUniverse)
+            }
+            Tool::MarketQuote | Tool::NewsSearch | Tool::FilingsSearch => {
+                let symbols = member("symbols").and_then(Value::as_array);
+                let all_in = symbols.is_some_and(|symbols| {
+                    !symbols.is_empty()
+                        && symbols
+                            .iter()
+                            .all(|symbol| symbol.as_str().is_some_and(|s| self.in_scope(s)))
+                });
+                (!all_in).then_some(Code::OutOfUniverse)
+            }
+            Tool::NewsGet => self.unreceived(member("item"), ItemKind::News),
+            Tool::FilingsGet => self.unreceived(member("item"), ItemKind::Filing),
+            Tool::MemoryPositions
+            | Tool::MemoryTheses
+            | Tool::MemoryRuns
+            | Tool::RecordsQuery
+            | Tool::MandateRead
+            | Tool::Note
+            | Tool::Plan
+            | Tool::ProposeThesis
+            | Tool::Invalidate
+            | Tool::ProposeExit => None,
+        }
+    }
+
+    fn in_scope(&self, symbol: &str) -> bool {
+        Symbol::new(symbol).is_ok_and(|symbol| self.start.data_universe.contains(&symbol))
+    }
+
+    fn unreceived(&self, item: Option<&Value>, kind: ItemKind) -> Option<Code> {
+        let known = item
+            .and_then(Value::as_str)
+            .and_then(|text| ItemId::new(text).ok())
+            .is_some_and(|item| self.received.contains(&(kind, item)));
+        (!known).then_some(Code::UnknownItem)
+    }
+
+    /// Counts one refusal; true when it is the repeat that reaches `max_repeat_denials` (§6.11).
+    fn deny(&mut self, call: &ToolCall, code: Code) -> bool {
+        let seen = self
+            .denials
+            .entry((call.tool, call.arguments.clone(), code.as_str()))
+            .or_insert(0);
+        *seen = seen.saturating_add(1);
+        *seen >= self.start.bounds.max_repeat_denials
+    }
+
+    fn take_result(&mut self, result: &ToolResult) -> Result<(), ResearchRunError> {
+        if self.outstanding.first() != Some(&result.call) {
+            return Err(ResearchRunError::LoopOrder {
+                what: "a result out of the dispatch's order",
+            });
+        }
+        self.outstanding.remove(0);
+        let Some(call) = self.dispatched.remove(&result.call) else {
+            return Err(ResearchRunError::LoopOrder {
+                what: "a result for no dispatched call",
+            });
+        };
+        if call.tool.class() == ToolClass::Read {
+            self.read_bytes = self.read_bytes.saturating_add(result.bytes);
+        }
+        let kind = match call.tool {
+            Tool::NewsSearch | Tool::NewsGet => Some(ItemKind::News),
+            Tool::FilingsSearch => Some(ItemKind::Filing),
+            _ => None,
+        };
+        if let Some(kind) = kind.filter(|_| result.outcome == ToolOutcome::Ok) {
+            self.received
+                .extend(result.items.iter().cloned().map(|item| (kind, item)));
+        }
+        let denied = match (result.outcome, result.code) {
+            (
+                ToolOutcome::Ok,
+                None | Some(Code::Admissible | Code::Removed | Code::ExitRequested),
+            ) => None,
+            (_, Some(code)) => Some(code),
+            (_, None) => Some(Code::Unavailable),
+        };
+        if let Some(code) = denied
+            && self.deny(&call, code)
+        {
+            self.denied_at_dispatch = true;
+        }
+        Ok(())
+    }
+
+    /// The step after a dispatch's last result: the bound a repeated refusal reached, the end of
+    /// the last turn, or the next turn.
+    fn after_dispatch(&mut self) -> Next {
+        let ends = if std::mem::take(&mut self.denied_at_dispatch) {
+            Some(EndReason::Bound(Bound::MaxRepeatDenials))
+        } else if self.turns >= self.start.bounds.max_turns {
+            Some(EndReason::Done(Some(Bound::MaxTurns)))
+        } else {
+            None
+        };
+        if let Some(reason) = ends {
+            self.stop = Some(reason);
+            return Next::End(reason);
+        }
+        Next::Turn {
+            result_bytes_left: self
+                .start
+                .bounds
+                .max_run_result_bytes
+                .saturating_sub(self.read_bytes),
+        }
+    }
+}
+
+fn id(turn: u32, call: &ToolCall) -> ToolCallId {
+    ToolCallId {
+        turn,
+        index: call.index,
+    }
+}
+
+/// A reply's calls in the batch's one total order (§6.9 step 4): invalidations, then exit
+/// requests, then theses, then reads and thinks, each group in reply order.
+fn total_order(calls: &[ToolCall]) -> Vec<ToolCall> {
+    let rank = |tool: Tool| match tool {
+        Tool::Invalidate => 0,
+        Tool::ProposeExit => 1,
+        Tool::ProposeThesis => 2,
+        _ => 3,
+    };
+    let mut ordered = calls.to_vec();
+    ordered.sort_by_key(|call| rank(call.tool));
+    ordered
+}
+
+/// The reply's refusals in the batch's order when a bound ends it there (§6.9 step 4, HI-24): the
+/// codes already decided, and `run_ended` for every call with no result yet. An action taken
+/// before the bound, among the first `mediated` calls of the order, has the core's verdict as its
+/// result and is not refused.
+fn refuse_rest(
+    ordered: &[ToolCall],
+    turn: u32,
+    codes: &BTreeMap<u32, Code>,
+    mediated: usize,
+) -> Vec<(ToolCallId, Code)> {
+    ordered
+        .iter()
+        .enumerate()
+        .filter_map(|(at, call)| match codes.get(&call.index) {
+            Some(code) => Some((id(turn, call), *code)),
+            None if at < mediated && call.tool.class() == ToolClass::Action => None,
+            None => Some((id(turn, call), Code::RunEnded)),
+        })
+        .collect()
 }
