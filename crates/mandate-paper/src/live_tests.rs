@@ -84,10 +84,16 @@ fn record(seq: u64, event_type: &str, payload: &str) -> ControlRecord {
     }
 }
 
-/// A live deployment of the tracer mandate on a live Robinhood connection, its document stored
-/// under `name`, and `extra` records after it.
+/// A live deployment of the tracer mandate on a live Robinhood connection, with the stop-limit
+/// offset V-008 asks for on its profile (DEC-1152 item 1), its document stored under `name`, and
+/// `extra` records after it.
 fn deployment(name: &str, extra: &[(&str, &str)]) -> (Vec<ControlRecord>, FsArtifactStore) {
-    let live = MANDATE.replace(r#""environment": "paper""#, r#""environment": "live""#);
+    let live = MANDATE
+        .replace(r#""environment": "paper""#, r#""environment": "live""#)
+        .replace(
+            r#""crypto_stop_limit_offset": null"#,
+            r#""crypto_stop_limit_offset": "0.01""#,
+        );
     let bytes = to_canonical(&canonical(&live));
     let version = Digest::of(&bytes);
     let root = std::env::temp_dir().join(format!("live-start-{name}-{}", std::process::id()));

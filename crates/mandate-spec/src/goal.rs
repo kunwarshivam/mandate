@@ -225,6 +225,7 @@ mod tests {
             eligibility_failures: BTreeSet::new(),
             previous_version: None,
             current_mandate_version: None,
+            stop_limit_asset_classes: crate::context::stop_limit_asset_classes("alpaca"),
         };
         Ok(ValidatedMandate::new(
             Mandate::parse(&with_all(changes))?,
