@@ -26,12 +26,16 @@
 //! `Debug`, and an [`Outcome`] or a [`DispatchError`] holds no input (NT-2).
 //!
 //! [`step`] turns committed alerts into journaled notices and sends (spec §5.1, E8-10, DEC-704).
+//! [`due`] reads from the notice stream alone which sends are due again on §5.3's schedule, which
+//! are abandoned at their window's end, and which wait (E8-10 slice D4, DEC-707).
 //!
 //! Every entry point returns a `Result`, so a stub reports [`DispatchError::Unimplemented`]
 //! (DEC-77).
 
+mod due;
 mod step;
 
+pub use due::{Due, Next, due};
 pub use step::{Config, Journal, NoticeWriter, step};
 
 use mandate_notify::{NotifyError, Outcome, Reason};

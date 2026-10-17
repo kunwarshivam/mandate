@@ -1,0 +1,8 @@
+file = "crates/mandate-dispatcher/src/step/tests/retry.rs"
+test = "a_retry_is_the_next_attempt_under_one_key_with_its_own_variants_verdict"
+reason = """
+E8-10 slice D4 (DEC-707): `step` is already implemented (slice D2) and treats every attempted send
+as finished, journaling only attempt 1, so this test fails on that answer rather than at the
+`due` stub. The code PR that implements `due` and has the step act on it deletes this file with
+the test's `#[ignore]` line.
+"""

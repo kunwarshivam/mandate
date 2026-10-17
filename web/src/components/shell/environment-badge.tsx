@@ -1,11 +1,23 @@
 import { cn } from "@/lib/utils";
-import type { Environment } from "@/fixtures/types";
+import type { ShownEnvironment } from "@/fixtures/types";
 
 /**
  * Shown wherever an agent, a connection, or money appears (brief §5, rule 8). Paper is the account's
- * state, so it wears the account's lapis, hatched.
+ * state, so it wears the account's lapis, hatched. Over the workspace API an environment nothing names
+ * is "not reported", never paper (DEC-1096), so a live account is never labelled paper.
  */
-export function EnvironmentBadge({ environment, className }: { environment: Environment; className?: string }) {
+export function EnvironmentBadge({ environment, className }: { environment: ShownEnvironment; className?: string }) {
+  if (environment === "unknown") {
+    return (
+      <span
+        data-slot="environment-badge"
+        data-environment="unknown"
+        className={cn("inline-flex h-8 items-center rounded-md border border-border px-3 text-label font-semibold whitespace-nowrap text-foreground", className)}
+      >
+        ENVIRONMENT NOT REPORTED
+      </span>
+    );
+  }
   if (environment === "live") {
     return (
       <span data-slot="environment-badge" className={cn("inline-flex h-8 items-center rounded-md bg-foreground px-3 text-label font-semibold text-background", className)}>
