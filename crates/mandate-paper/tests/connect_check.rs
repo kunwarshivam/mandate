@@ -20,8 +20,8 @@ use mandate_domain::Environment;
 use mandate_journal::{AppendOutcome, MemoryJournal, StreamId, TrustedStart, verify_events};
 use mandate_mcp::{ALLOWLIST, CallClass, Listed, McpError};
 use mandate_paper::{
-    ACCOUNT_NUMBER_VAR, CheckArgs, CheckPorts, Observed, PaperError, SeenContract, connect_check,
-    observe, parse_check,
+    ACCOUNT_NUMBER_VAR, CheckArgs, CheckPorts, Observed, PaperError, REHEARSAL_ENDPOINT_VAR,
+    SeenContract, connect_check, observe, parse_check,
 };
 use mandate_rh_sim::{Sim, SimServer, Variant};
 use mandate_robinhood::{RobinhoodConnector, Tickers, Tools};
@@ -537,10 +537,24 @@ fn the_arguments_name_ids_and_one_acknowledgement_only() {
     }
 }
 
-/// The default build holds no Robinhood host, so the binary's connect check refuses before any
-/// login and names neither the account nor the DSN.
+/// The binary's connect check refuses before any login, in every build, and names neither the
+/// account nor the DSN. The run is handed a rehearsal endpoint off loopback, Robinhood's own
+/// address, so no build has an endpoint it may dial: the default build holds no Robinhood host
+/// (LT-1), the `live` build refuses the rehearsal's variable beside its pinned host, and the
+/// rehearsal build (`rh-sim`, alone or with `live`, which it wins over) refuses any endpoint not
+/// on loopback (DEC-922 items 1 and 2). Without the variable, the `live` build would log in to
+/// Robinhood itself, which no test may (rule 8). The expected refusal is read from the suite's
+/// own `cfg`, never the crate's `Build`, so a build that dials where it should refuse, or
+/// refuses for another build's reason, fails here (DEC-963).
 #[test]
-fn the_default_binary_refuses_the_connect_check_before_any_login() {
+fn the_binary_refuses_the_connect_check_before_any_login() {
+    let refusal = if cfg!(feature = "rh-sim") {
+        "the rehearsal endpoint is not plain http on a loopback address\n"
+    } else if cfg!(feature = "live") {
+        "MANDATE_RH_SIM_ENDPOINT is set in a build that is not the rehearsal\n"
+    } else {
+        "this build holds no Robinhood host\n"
+    };
     let output = Command::new(env!("CARGO_BIN_EXE_mandate-paper"))
         .args([
             "--connect-check",
@@ -556,13 +570,17 @@ fn the_default_binary_refuses_the_connect_check_before_any_login() {
         ])
         .env_clear()
         .env(ACCOUNT_NUMBER_VAR, NUMBER)
+        .env(
+            REHEARSAL_ENDPOINT_VAR,
+            "https://agent.robinhood.com/mcp/trading",
+        )
         .output()
         .unwrap();
     assert!(!output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert_eq!(stdout, "");
-    assert_eq!(stderr, "this build holds no Robinhood host\n");
+    assert_eq!(stderr, refusal);
     for secret in [NUMBER, "hunter2", "db-sentinel"] {
         assert!(!stderr.contains(secret), "{stderr}");
     }
