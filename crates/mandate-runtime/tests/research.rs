@@ -283,8 +283,10 @@ fn no_run_starts_unless_the_mode_is_normal() {
     assert!(starts(&paused).is_empty(), "HI-15: paused");
 }
 
+/// DEC-2205: until the agentic `monitor` run, no `single_call` run starts in `exits_only`; skipping
+/// it only delays a removal.
 #[test]
-fn exits_only_starts_no_run_until_an_invalidation_can_be_journaled() {
+fn exits_only_starts_no_single_call_run() {
     let f = Fixture::new();
     let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
     let mut lp = Loop::new(1);
