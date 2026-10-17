@@ -4211,7 +4211,7 @@ batch its turn's record heads, in reply order.
 | `tool` | `text` | A name in the run's `menu`: rule 175 |
 | `class` | `read` \| `think` \| `action` | The tool's class ([agent harness spec §6.10](agent-harness.md#610-tools)) |
 | `arguments_ref` | `ref` | The arguments as the reply gave them, as canonical JSON (§4), stored as an artifact |
-| `provenance` | `[ulid]` | For an action, the `event_id`s of the `ToolResultRecorded` records of untrusted reads and run summaries the prompt it was written from held, strictly ascending; empty otherwise: rule 177 |
+| `provenance` | `[ulid]` | For an action, the `event_id`s of the run's `ToolResultRecorded` records with `untrusted` true that the prompt it was written from held, strictly ascending; empty otherwise: rule 177. The seed's items are named by the turn's `ModelInvocationRecorded.observations` |
 
 **`ToolResultRecorded`**: a tool call's result, exactly once: an action's in its turn's batch, a
 read's or a think's in a later batch with the `ObservationRecorded` of the items it returned, before
@@ -4221,7 +4221,8 @@ the next turn's call is sent (agent harness spec HI-24).
 |---|---|---|
 | `tool_call` | `ulid` | The `event_id` of its `ToolCallRecorded`: rule 178 |
 | `result` | `ok` \| `refused` \| `failed` | `ok`: the read or think ran, or the action was mediated, whatever its verdict. `refused`: the harness ran nothing. `failed`: a read did not answer: rule 179 |
-| `code` | `text?` | The verdict or reason code the model was told: an action's verdict (agent harness spec §6.13), a refusal's or failure's reason (§6.10, §6.11), or an `answer`'s check (§15). Lower-case letters, digits, `_`, and `:`; `null` only for an `ok` read or think: rule 179 |
+| `code` | `admitted` \| `asked` \| `removed` \| `unknown_instrument` \| `unknown_evidence` \| `duplicate_instrument` \| `forbidden_language` \| `revisions_not_enabled` \| `unknown_thesis` \| `direction_not_allowed` \| `asset_class_not_allowed` \| `not_eligible` \| `source_not_allowed` \| `not_corroborated` \| `universe_full` \| `cooldown` \| `not_admitted` \| `out_of_universe` \| `unknown_item` \| `unavailable` \| `call_budget` \| `max_theses` \| `max_repeat_denials` \| `run_ended` \| `null` | The model-visible code it was told (agent harness spec §6.13 item 5): an action's verdict, or a refusal's or failure's reason. `null` only for an `ok` read or think: rule 179. Lane EX's change adds its `answer` checks to this list |
+| `untrusted` | `boolean` | The result holds third-party or model-written text (news, filings, theses, run summaries), so an action written after it records it as provenance (agent harness spec §6.12) |
 | `content_ref` | `ref` | The result as the model was given it, stored as an artifact, with licensed text replaced by its digest once licensed sources are read (agent harness spec §6.6); for a refusal or failure, the `{"error": code}` object |
 | `bytes` | `integer` | The byte length of the result as the model was given it |
 | `truncated` | `boolean` | A harness cap removed something from a read's result; the model's own `limit` or `count` is not a cap: rule 179 |
@@ -4257,13 +4258,14 @@ number order after the members' types:
      and `kind` fits `trigger.kind`: `ideate` a schedule, `monitor` a schedule or an event, `owner`
      an owner question, `explain` an approval (`payload.trigger.kind`); the first that fails.
 173. Agent stream: no earlier `RunStarted` has the same `correlation_id` (`correlation_id`), and an
-     `explain` run's `trigger.cause` names no earlier `explain` run's (`payload.trigger.cause`), so
-     an approval is explained once. A stream rule: `append` reads the stream's earlier records, and
+     `explain` or `owner` run's `trigger.cause` names no earlier run's of the same kind
+     (`payload.trigger.cause`), so an approval is explained once and an owner question answered by
+     one run. A stream rule: `append` reads the stream's earlier records, and
      a range judges it from the stream's start; rules 174 to 183 are stream rules too.
 174. Agent stream: a `ToolCallRecorded`, `ToolResultRecorded`, `RunSummaryRecorded`, or `RunEnded`
      has the `correlation_id` of an earlier `RunStarted` (`correlation_id`), and no `RunEnded` of
      that run precedes it (`correlation_id`); a second `RunSummaryRecorded` of a run is refused
-     (`correlation_id`).
+     (`correlation_id`), and a `RunEnded` follows its run's `RunSummaryRecorded` (`correlation_id`).
 175. `ToolCallRecorded`: `call_id` names an earlier `ModelInvocationRecorded` of the stream whose
      `purpose` is `research` and whose `outcome` is `ok` (`payload.call_id`), with the same
      `correlation_id` (`correlation_id`) and `config_refs.model_version`
@@ -4290,12 +4292,16 @@ number order after the members' types:
      instrument twice (`payload.watch`).
 182. `RunEnded`: `bound` is not `null` exactly when `reason` is `bound` (`payload.bound`).
 183. Agent stream, a `ModelInvocationRecorded` with `purpose` `research` whose `correlation_id` is
-     an agentic run's: it follows that run's `RunStarted` and no `RunEnded` of the run precedes it
-     (`correlation_id`). Every other §9.19 rule is unchanged.
+     an agentic run's: it follows that run's `RunStarted` (`correlation_id`), and no `RunEnded` of the
+     run precedes it unless that `RunEnded`'s `reason` is `deadline` or `mode` and the record's
+     `verdicts` is empty (`correlation_id`). A late reply to a cancelled run is so still journaled,
+     and rule 175 keeps any tool call of it out (no tool call follows a `RunEnded`, rule 174), as
+     agent harness spec §5.3 says. Every other §9.19 rule is unchanged.
 
 **Checked by no rule at append**, so the writer and its tests own them: that a reply has exactly as
 many `ToolCallRecorded` records as tool calls, which needs the response artifact; that every listed
-observation and provenance entry names a record of the run; that `bytes` is the artifact's length;
+observation names an `ObservationRecorded` of the agent stream (an item first observed by an
+earlier run is named, never journaled again) and every provenance entry a record of the run; that `bytes` is the artifact's length;
 that the arguments satisfy the tool's pinned schema, which the gateway checked; that the next turn's
 record follows every result of the turn before it (agent harness spec HI-24); that an action's `code`
 equals its journaled verdict (HI-25); and that `RunEnded`'s counts match the run's records.
@@ -4304,7 +4310,8 @@ equals its journaled verdict (HI-25); and that `RunEnded`'s counts match the run
 `mandate-journal`'s tests hold an invalid draft for every member type and rule above, and valid
 drafts for the cases a rule might be misread to refuse (a refusal with no observations, an `ok` read
 with none, a think result with no code, an index after a refused call of the same reply, a turn
-record with verdicts and action calls, an `explain` run per approval).
+record with verdicts and action calls, an `explain` run per approval, a late turn record after a
+`deadline` end).
 
 ## 10. Anchoring
 

@@ -161,7 +161,7 @@ names it; the gateway's own tests prove the INF side, and these prove the caller
 | HI-8 | **Runs are bounded, by independent counters.** At most one run is in flight per agent. No scheduled run starts before `next_proposal_at` (§5.3). No run reads more than its retrieval plan's caps. A `single_call` run makes one model call. An agentic run stays inside every bound of §6.11: turns, tool calls, result bytes, repeated denials, its deadline on the risk clock, and its cost ceiling (with inference spec §7.3's disclosed provider excess). Every bound but result size ends the run, and its `RunEnded` names it. Spend caps are the gateway's (INF-7) | Property over random schedules, model replies, tool results, clock ticks, and crashes: an oracle that counts runs, turns, tool calls, bytes, denials, and spend from the journal and the meter stream itself (never from the core's loop state) asserts every bound, that a run reaching one has no output after the batch that reached it, and that its `RunEnded` names that bound |
 | HI-9 | **A spent budget means fewer ideas, never more risk.** With a binding cap or budget, no buy draft is larger than without it, no opening or increase exists that does not exist without it, no sell is proposed that is not proposed without it, and every risk-exit, protective-order, and kill-switch draft is byte-identical (DEC-120, INF-7, rule 2). Stale research outputs may shrink or withhold buys (§7.3 step 3), and a discretionary exit that waited on a research verdict may be absent, as under any model outage (MI-10); both are the intended effect | Property: one input sequence run with and without a binding cap; compare every draft pairwise by an independent oracle on size and side |
 | HI-10 | **Injected text is bounded.** Whatever a news item or filing says, it can at most yield a thesis or an invalidation. A thesis enters the working universe only through §8.5, and its first order is decided by the autonomy rules with the admission ceiling (§6.2 step 5). An invalidation only removes (MI-19). With a compromised model, no limit is breached | The adversarial bench (E19-6): injection fixtures for every source, in the retrieval plan's reads and in every tool's results, and a compromised model that follows every injected instruction it can express as a tool call; zero limit breaches, zero orders without a dry-run allow, and no read outside the scope HI-4 names |
-| HI-11 | **Inputs hold only what they may.** A call's inputs, every turn's included, contain only: data from the data plane at or before the cut-off, the agent's own memory (§6.4), the owner's `behavior.description`, and the working-universe facts §6.4 lists. Never a credential, a vault reference, personal data, a dollar figure of the agent or account, or another agent's or workspace's data (INF-8, caller side) | Canary test: plant canary values in the vault, in another agent's memory, in another workspace, and in the agent's equity; scan every prompt artifact of a run, every turn's, and every tool result artifact for them |
+| HI-11 | **Inputs hold only what they may.** A call's inputs, every turn's included, contain only: data from the data plane at or before the cut-off, the agent's own memory (§6.4), the owner's `behavior.description`, the working-universe facts §6.4 lists, and in an agentic run `mandate.read`'s facts and §6.13's model-visible codes. Never a credential, a vault reference, personal data, a dollar figure of the agent or account, or another agent's or workspace's data (INF-8, caller side) | Canary test: plant canary values in the vault, in another agent's memory, in another workspace, and in the agent's equity; scan every prompt artifact of a run, every turn's, and every tool result artifact for them; plant an operator halt, a latched limit, and a cost cap, and find no code naming them |
 | HI-12 | **No credentials in the harness.** The harness process holds no broker credential, no vault access, and no provider key (INF-14, caller side) | The process starts and runs with the vault and every provider key absent from its environment; a static check that the research path names no vault port |
 | HI-13 | **No look-ahead.** Every read filters on knowledge time at or before the run's cut-off (DP-1); published or event time is a displayed field only. A thesis's `as_of` is the cut-off, never a time the model states | Property: a data-plane double holding records whose event time is before the cut-off and knowledge time after it; no observation or artifact of the run contains them |
 | HI-14 | **Risk reduction does not depend on research.** With the gateway and the research worker removed, every exit, protective order, and kill switch still runs (rule 13, INF-13) | Run the trading loop with no research worker and a failing gateway; the kill switch, owner exits, and the family-F flatten cases still pass |
@@ -178,7 +178,7 @@ names it; the gateway's own tests prove the INF side, and these prove the caller
 | HI-25 | **Feedback is truthful.** The verdict an action tool returns to the model equals the journaled verdict: the rule 151 verdict, the admission's result on the thesis record, the invalidation's record, or the approval raised. A refusal's code never carries a limit value, a size, a price, or a dollar figure | Property: for every action call of random runs, an oracle that folds the thesis, invalidation, and approval records itself derives the verdict and compares it with the `ToolResultRecorded` artifact; a canary limit value is never found in any result artifact |
 | HI-26 | **Owner words are confirmed.** No action an `owner` run proposes from the owner's words proceeds without the owner seeing the exact request and confirming it, with step-up where it adds risk (§6.13, §15) | Property over random owner messages and compromised replies: every intent caused by an owner run follows an owner confirmation of that exact request |
 | HI-27 | **Proposals that reach a person are rate-limited.** Per agent per day: owner questions, asks raised by the agent's own proposals (mandate spec §6.4's ask budget), and mandate-change proposals stay within their limits, whatever the model asks for | Property with a compromised model that asks on every turn: an oracle counting the journaled questions, approvals, and proposals per agent per risk day finds none over its limit |
-| HI-28 | **Queries stay inside.** A tool call reads the workspace data service's point-in-time store or the agent's own folds and nothing else: it never makes the data plane fetch from a source, and no argument the model wrote reaches any host but the gateway's own call to the pinned model (§6.10, DP-9) | Run random agentic runs with the sources' HTTPS transport and every network port replaced by doubles that fail the test on any request; a canary term in a tool argument is found in no request any double saw |
+| HI-28 | **Queries stay inside.** A tool call reads the workspace data service's point-in-time store or the agent's own folds and nothing else: it never makes the data plane fetch from a source, and no argument the model wrote reaches any host but the gateway's own call to the pinned model (§6.10, DP-9) | Run random agentic runs with the sources' HTTPS transport and every network port replaced by doubles that fail the test on any request; a canary term in a tool argument is found in no request any double saw, the gateway's own calls to the model excepted, since the transcript carries the arguments there |
 
 ## 4. Components
 
@@ -303,7 +303,7 @@ stateDiagram-v2
     Calling --> Judging: ModelInvocationRecorded committed with outcome ok and a final answer
     Calling --> Dispatching: agentic: the turn's record and its ToolCallRecorded batch committed, tool calls within the bounds
     Dispatching --> Calling: every ToolResultRecorded and its ObservationRecorded batch committed (§6.9 step 5, HI-24)
-    Calling --> Idle: agentic: an error outcome, a final reply, the last turn, or a bound; RunSummaryRecorded and RunEnded in the same batch
+    Calling --> Idle: agentic: an error outcome, a final_output reply judged in its batch, an action_tools summary, the last turn, or a bound; RunSummaryRecorded and RunEnded in the same batch
     Retrieving --> Cancelled: mode tightens, kill switch, Stop, a version change (§5.4), or the run's deadline
     Calling --> Cancelled: as above
     Dispatching --> Cancelled: as above
@@ -506,7 +506,7 @@ for itself, which MI-16 forbids (DEC-132 items 6 and 7).
 | `as_of`, `expires_at` | Platform | `as_of` is the cut-off; `expires_at = as_of + horizon_s` (§8.2) |
 | `asset_class` | Platform | From the instrument snapshot |
 | `evidence_sources`, `evidence_ref` | Platform | The sources of the cited items, as retrieved; the cited items as an artifact |
-| `corroboration` | Platform | Derived from the retrieved items and market data by E17-7's rule (§13 item 3) |
+| `corroboration` | Platform | Derived from the retrieved items and market data by E17-7's rule (§13 item 3); in an agentic run from the seed's items only, never the model's tool reads (§6.13) |
 | `model_id`, `model_version`, `content_hash`, `allowlist_version` | Platform | From the pins |
 
 **Harness checks** run after the gateway's schema check and before admission. They cover only what
@@ -536,8 +536,8 @@ corroboration, the lineage cap, and a full universe.
 | `RunStarted` | agent | When an agentic run starts, before its seed's observations | Closed in [journal spec §9.22](journal.md#922-run-records-dec-2203): kind, trigger, mode, menu, the frozen scope, the cost ceiling, and the deadline |
 | `ToolCallRecorded` | agent | Every tool call of a committed reply, in the batch its turn's record heads (§6.9 step 4) | Closed in journal spec §9.22: the turn, its index in the reply, the tool and its class, the arguments as an artifact, and an action's provenance |
 | `ToolResultRecorded` | agent | Every tool call's result, refused ones included: an action's in the turn's batch, a read's or a think's with the items it returned, before the next turn's call effect (HI-24) | Closed in journal spec §9.22: the result and its code, the content as an artifact, bytes, `truncated`, and the observations |
-| `RunSummaryRecorded` | agent | When an agentic run ends, but for a crash | Closed in journal spec §9.22: the typed summary of §6.12 |
-| `RunEnded` | agent | With the summary, in the batch that ends the run, or on its own when the core cancels it | Closed in journal spec §9.22: why it ended, and its counts |
+| `RunSummaryRecorded` | agent | When an agentic run ends, but for a crash, cancelled runs included (with an empty `watch`), just before its `RunEnded` | Closed in journal spec §9.22: the typed summary of §6.12 |
+| `RunEnded` | agent | After the summary, in the batch that ends the run, or in a batch of the two when the core cancels it | Closed in journal spec §9.22: why it ended, and its counts |
 | Candidate verdicts | agent | With the judging batch; in an agentic run, on the record of the turn that holds the candidates: the final reply's for `final_output`, each action turn's for `action_tools` | The `verdicts` member of `ModelInvocationRecorded` (journal spec §9.19 rule 151, DEC-998 item 1). Until `mandate-journal` registers it, no run is judged (§6.2 preconditions, HI-22) |
 | `ThesisProposed`, `ThesisRevised` | agent | Every thesis admission judged | Closed in [journal spec §9.4](journal.md#94-research-agent-thesis-records-dec-413) |
 | `ModelOutputRecorded` | agent | Each judged thesis, `ignored` null only when admitted | Closed in [journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177) |
@@ -626,7 +626,7 @@ state alone, before anything untrusted is read (§6.10):
 |---|---|---|---|
 | `ideate` | The schedule: `behavior.research.interval_s` (§5.3), in mode `normal` with room in the working universe | The brief, the data universe's seed reads, memory | Theses and invalidations |
 | `monitor` | The schedule, in mode `exits_only` or with a full universe, while the agent has an active thesis | The brief, the held instruments' and active theses' seed reads, their lineages, memory | Invalidations only |
-| `owner`, `explain` | A desk message; an ASK raised | §15's | §15's: answers and explanations, never an order or a thesis |
+| `owner`, `explain` | A desk message; an ASK raised | §15's, lane EX's change, which declares them; until it lands no entry offers them | §15's: answers and explanations, never an order or a thesis |
 
 With no kind due, no run starts and nothing is called. **Event triggers wait.** A monitoring run
 started by a news item, a filing, a price move, a fill, or a refusal would add an evaluation trigger
@@ -641,7 +641,9 @@ delays trading.
 - **`final_output`** (the guaranteed path, DEC-2203 item 5). The run reads and thinks, and its last
   reply is §6.5's structured output, `{"theses": [...], "invalidations": [...]}`, plus a typed
   `watch` list for the run summary (§6.12). It is judged once, at the end, exactly as a
-  `single_call` run's output is (§6.2 step 5). No proposal is mediated mid-run.
+  `single_call` run's output is (§6.2 step 5). No proposal is mediated mid-run. **The output schema
+  is pinned per run kind:** a `monitor` run's has no `theses` member, so the gateway refuses a
+  monitoring thesis as `schema_invalid` and no thesis from a monitoring run ever reaches judging.
 - **`action_tools`** (the next step). The model proposes through action tools during the run, each
   mediated at once and its verdict fed back as the tool result (§6.13). The final reply is the run
   summary alone.
@@ -660,7 +662,9 @@ One run, in order:
 3. **Turn *k*** (from 1). The worker sends one gateway call, filled as §10.1 says, with the prompt
    in the stable order of §6.12 and:
    - `turns`: the transcript so far, each earlier reply by its response artifact and each tool
-     result exactly as its `ToolResultRecorded` artifact holds it;
+     result as the model was given it: today the `ToolResultRecorded` artifact itself; once licensed
+     text is read, that artifact with each digest filled from the store, inside the licence's horizon
+     (§6.6);
    - `tools`: the run's menu; in the last turn (*k* = `max_turns`) only the action tools of an
      `action_tools` entry, or none; and none once the run has no tool call left, so the model must
      end;
@@ -680,24 +684,37 @@ One run, in order:
      summary. Either way the run ends (`done`);
    - a reply with more tool calls than the run has left runs none of them: each gets a
      `ToolResultRecorded` refused `call_budget` in the same batch, and the run ends (`bound`);
-   - for an `action_tools` entry, the batch also mediates each action call in reply order (§6.13):
-     its verdict (the turn record's rule 151 verdicts for a thesis or an invalidation), each judged
-     thesis's record and output, each accepted invalidation's record (E19-5), and the action's
-     `ToolResultRecorded`; the executor then copies admissions and removals (§6.2 step 6).
-5. **Read and think.** The core emits one dispatch effect with the reply's read and think calls in
+   - for an `action_tools` entry, the batch also mediates the reply's action calls (§6.13), **theses
+     first, then invalidations, each in reply order**, the order of rule 151's verdicts: each one's
+     verdict on the turn's record, each judged thesis's record and output, each accepted
+     invalidation's record (E19-5), and each action's `ToolResultRecorded`, in that same order; the
+     transcript shows results by their call's `index`. The executor then copies admissions and
+     removals (§6.2 step 6);
+   - **a bound reached while mediating ends the run in that batch:** the call that reaches it (a
+     `propose_thesis` past `max_theses`, or a second identical refusal, §6.11) is refused with the
+     bound's code, every later call of the reply, reads and thinks included, is refused `run_ended`,
+     so every call still has one result (HI-24), nothing is dispatched, and the run ends (`bound`).
+5. **Read and think.** If the reply has no read or think call, turn *k* + 1 follows at once.
+   Otherwise the core emits one dispatch effect with the reply's read and think calls in
    reply order, each with the run's scope (§6.10). A think call (`note`, `plan`) has nothing to run:
    its result is `ok`. The worker runs the reads one after another through the read-only ports,
    applies the caps, and hands every result back. The core journals in one batch, for each call in
-   order: an `ObservationRecorded` for each item a read returned that the run has not observed, then
-   its `ToolResultRecorded`. Then turn *k* + 1, at step 3; after the last turn the run ends
+   order: an `ObservationRecorded` for each item a read returned that the agent stream does not
+   already hold (§6.10), then its `ToolResultRecorded`. Then turn *k* + 1, at step 3; after the last turn the run ends
    (`bound`).
-6. **End.** The run ends with `RunSummaryRecorded` (§6.12) and `RunEnded` naming why: `done`,
-   `bound` with the bound's name, `deadline`, `cost`, `mode` (a mode change, a version change,
-   Stop, or the kill switch cancelled it), or `error`, in the batch that ends it, or on their own
-   when the core cancels the run. A run with no `RunEnded` crashed (§6.6).
+6. **End.** The run ends with `RunSummaryRecorded` (§6.12) and then `RunEnded` naming why: `done`,
+   `bound` with the bound's name, `deadline` (the risk clock passed the run's deadline, or a turn
+   ended `deadline_exceeded` on a deadline that `r` had cut), `cost`, `mode` (a mode change, a
+   version change, Stop, or the kill switch cancelled it), or `error`, in the batch that ends it, or
+   as a batch of their own when the core cancels the run. A cancelled run's summary has an empty
+   `watch` list, since no final output gave one. The core never waits for a cancellation's
+   acknowledgment to end a run, so a hung worker cannot keep one in flight. A run with no `RunEnded`
+   crashed (§6.6).
 
 At every step the run is cancelled exactly as §5.3 and §5.4 say, and when the risk clock passes its
-deadline. A reply or a read that arrives after that is §5.3's late result. What a cancelled run had
+deadline. A reply or a read that arrives after that is §5.3's late result: a late reply is still
+journaled as `ModelInvocationRecorded`, after the run's `RunEnded`, with no verdicts and no tool
+call records (journal spec rule 183), so the call's record and cost are complete (INF-6, INF-10). What a cancelled run had
 already committed stands as journaled: an admission is a record, and the mode that cancelled the run
 holds any opening it would lead to.
 
@@ -742,8 +759,8 @@ or the folded journal, under the run's scope:
 | `memory.positions` | None | The agent's held instruments: held since, whether removed, the current thesis id. No quantity, price, or dollar figure | 50 | Declared |
 | `memory.theses` | `status`: active, closed, or both | The agent's theses and lineages with their outcomes and scores: §6.3's `theses` read | 50 | Declared |
 | `memory.runs` | `limit`: 1 to 5 | The agent's latest run summaries (§6.12), marked untrusted | 5 | Declared |
-| `records.query` | `kind`: `admission`, `invalidation`, `refusal`; `limit`: 1 to 20 | The agent's own verdicts and refusals, as instrument, time, and reason code. No quantity, price, or dollar figure | 20 | Declared |
-| `mandate.read` | None | The envelope's facts that carry no money: allowed asset classes, `max_instruments`, the data universe, the horizon bound, the cadence, and the autonomy policy's shape (which purposes are AUTO, ASK, or DENY, and that delegations exist). No allocation, limit value, or dollar figure (HI-11; DEC-2203 item 19) | — | Declared |
+| `records.query` | `kind`: `admission`, `invalidation`, `refusal`; `limit`: 1 to 20 | The agent's own verdicts and refusals, as instrument, time, and §6.13's model-visible code. No quantity, price, dollar figure, or precise reason the model may not see | 20 | Declared |
+| `mandate.read` | None | The envelope's facts that carry no money and no limit: allowed asset classes, `max_instruments`, the data universe, the horizon bound, and the research cadence. No allocation, limit value, autonomy rule, delegation, or dollar figure (HI-11; DEC-2203 item 19) | — | Declared |
 | `market.screen`, `fundamentals.get`, `calendar.get` | — | A registered screen's members; XBRL facts; earnings dates and market hours | — | When the data plane serves them, as a new research entry |
 
 **Think tools** have no effect outside the run's transcript:
@@ -799,8 +816,10 @@ returns `{"error": "<reason>"}` and nothing else, and that object is what its re
 read (`unavailable`: no answer within `tool_timeout_s`, or a refusal) brings no items, and the run
 goes on.
 
-**Every item has one identity.** An item is observed once per run; a later read that returns it again
-names its first observation. Each is one `ObservationRecorded` with the read's source, the item's
+**Every item has one identity.** An item is observed once on the agent stream, by the run that first
+read it: a later read, in that run or any later one, names that first `ObservationRecorded` and
+journals no other, as §6.3 says the seed does, so re-reading cannot fake `DuplicateContent` or swell
+the drift fold. Each is one `ObservationRecorded` with the read's source, the item's
 instrument, the run's cut-off as `as_of`, and the item's record as `data_ref`:
 
 | Read | One item is | Its key |
@@ -823,10 +842,10 @@ is configuration (DEC-2203 item 9).
 | `max_tool_calls` (per run) | 24 | The entry | A reply asking for more than the run has left runs none of them; each is refused `call_budget`, and the run ends. Once none is left, the next turn is offered no tool and must end |
 | `max_tool_calls_per_turn` | 4 | The entry | More in a reply is `schema_invalid` at the gateway, and the run ends |
 | `max_output_tokens` (per turn) | The entry's | The entry | The gateway's own bound (inference spec §3.4) |
-| `max_theses` (per run) | 4 | The entry | §6.5's cap: more is `schema_invalid` |
+| `max_theses` (per run) | 4 | The entry | `final_output`: §6.5's cap in the output schema, so more is `schema_invalid` and the run ends (`error`). `action_tools`: a `propose_thesis` past it is refused `max_theses`, every later call of its reply `run_ended`, and the run ends (`bound`). Refused proposals do not count |
 | `max_result_bytes` (per read) | 24,000 | The entry | The result is cut, oldest items first, and `truncated` |
 | `max_run_result_bytes` | 96,000 | The entry | Each read is cut to what the run has left; at zero it is empty and `truncated` |
-| `max_repeat_denials` | 2 | The entry | A second identical refused call (the same tool, arguments, and reason) in one run ends it (`bound`). A refusal never reveals a limit value beyond what `mandate.read` shows |
+| `max_repeat_denials` | 2 | The entry | A second identical refused call (the same tool, arguments, and code) in one run is refused `max_repeat_denials`, every later call of its reply `run_ended`, and the run ends (`bound`). A code never reveals a limit value (§6.13) |
 | `max_run_s` | 900 s on the risk clock | The entry | The core cancels the run at the first tick at or after its deadline (`deadline`) |
 | `tool_timeout_s` | 10 s | The entry | The read fails `unavailable`; the run goes on |
 | Cost per run, `research_run_cost_cap_usd` | None: the workspace sets it. With none set, no agentic run starts (rule 3) | Workspace configuration | The next turn's reservation does not fit under `spend_ceiling_usd`: the call ends `budget_exhausted`, and the run ends (`cost`) |
@@ -878,10 +897,14 @@ data, ever. Hidden reasoning is never evidence: a provider's reasoning tokens ar
 of any record a decision rests on, and only text tool calls, outputs, and records count.
 
 **Provenance.** Every action call and every text shown to the owner records which untrusted results
-were in its context: the action's `ToolCallRecorded` carries `provenance`, the `event_id`s of the
-`ToolResultRecorded` records of untrusted reads and run summaries in the prompt it was written
-from ("written after reading"). A reviewer and an `explain` run can then see what may have steered
-it.
+were in its context ("written after reading"). Every `ToolResultRecorded` says whether its result is
+`untrusted`: any result holding third-party or model-written text (news, filings, theses, run
+summaries read through `memory.runs`) is. An action's `ToolCallRecorded` carries `provenance`, the
+`event_id`s of the run's untrusted `ToolResultRecorded` records its prompt held; the seed's items are
+named by the turn's own `ModelInvocationRecorded.observations`, which every turn holds. A
+`final_output` thesis's provenance is its final turn's: that record's `observations` and every
+untrusted result of the run before it. A reviewer and an `explain` run can then see what may have
+steered it.
 
 ### 6.13 Permissions
 
@@ -895,15 +918,25 @@ it.
 4. **The builder and the gate are the hook the model cannot override.** The binding gate still runs
    at submission on the account stream.
 5. **Feedback is the point, and it is truthful** (HI-25). Every action's result is its journaled
-   verdict: `admitted`, `asked` (with the approval's id), `denied` with a typed reason code, `held`,
-   or a harness check's code, and nothing else. A reason is a code (`over_max_instruments`,
-   `not_eligible`, `cooldown`, `gate:max_position`, ...) and never carries a limit value, a size, a
-   price, or a dollar figure. The model sees why and can adjust; a repeated identical denial ends the
-   run (§6.11).
-6. **Corroboration is the platform's.** A thesis's corroboration (§8.5) is computed from the
-   platform's own reads, the run's seed and a corroboration read the core makes for that instrument
-   when it judges, never from what the model chose to read (HI-18). So a model steered toward one
-   source cannot manufacture its own corroboration.
+   verdict, told in a **closed set of model-visible codes**, the same in `records.query`:
+
+   | The model is told | When |
+   |---|---|
+   | `admitted`, `asked`, `removed` | The thesis was admitted (and, if its first order will ask, `asked`); the invalidation removed the instrument |
+   | `unknown_instrument`, `unknown_evidence`, `duplicate_instrument`, `forbidden_language`, `revisions_not_enabled`, `unknown_thesis` | §6.5's harness checks |
+   | `direction_not_allowed`, `asset_class_not_allowed`, `not_eligible`, `source_not_allowed`, `not_corroborated`, `universe_full`, `cooldown` | §8.5's reasons the model can act on, each about a fact `mandate.read` or the run's own reads already show |
+   | `not_admitted` | Every other §8.5 reason: an operator halt, the flow monitor, the cost cap, and anything that reflects account state (drawdown, daily loss, buying power, a limit's headroom). The thesis record keeps the precise reason; the model never sees it |
+   | `out_of_universe`, `unknown_item`, `unavailable`, `call_budget`, `max_theses`, `max_repeat_denials`, `run_ended` | A refused or failed tool call (§6.10, §6.11, §6.9 step 4) |
+
+   No code carries a limit value, a size, a price, or a dollar figure, and none names a halt, a
+   monitor, or account state. The model sees why where it can act on it and can adjust; a second
+   identical refusal ends the run (§6.11).
+6. **Corroboration is the platform's.** A thesis's corroboration (§8.5) is derived only from the
+   run's seed, the items the entry's pinned retrieval plan read and journaled before the first turn,
+   never from what the model chose to read (HI-18). So a model steered toward one source cannot
+   manufacture its own corroboration; an instrument whose seed holds no corroborating item is refused
+   `not_corroborated`, whatever the model read. Citing a tool-read item as evidence is allowed;
+   counting it toward corroboration is not.
 7. **Owner words are confirmed** (HI-26). An owner run's reading of the owner's words never becomes
    an action the owner has not seen: the exact request is shown and needs the owner's tap, with
    step-up where the action adds risk (§15).
@@ -960,7 +993,7 @@ Exits, protection, kill switches, pending approvals, and quant models are untouc
 (HI-9, HI-14).
 
 **An agentic run's bounds** (§6.11) are treated like an error kind: the run ends with no output and
-is not retried, the next run waits for its due time, and nothing else changes (HI-24). Three runs in a
+is not retried, the next run waits for its due time, and nothing else changes (HI-8). Three runs in a
 row whose `RunEnded` names the same bound alert the operator with the bound's name, never
 content, because a
 pinned bound that every run reaches is a research-entry defect for a new version to fix (§8.4).
@@ -1054,11 +1087,10 @@ E17-8) before users' agents may pin it.
 | Malicious content | Injection that steers the model's reads: "search for X", "read filing Y", "keep reading" | Every read stays inside the data universe, the allowlist, and the cut-off (HI-4, HI-13); the run's tool calls, bytes, turns, and cost are capped (§6.11). The worst it buys is more allowlisted data, up to the run's ceiling, and still at most a thesis (HI-10) |
 | Malicious content | Injection that tries to exfiltrate through a tool argument, a search term or an item id | No tool call reaches a source or any host; terms are matched inside the data service and never sent (HI-28). Terms are short words, and the inputs hold nothing secret to send (HI-11) |
 | Malicious content | A huge item, or a filing read range by range, to flood the context | Per-item, per-result, and per-run byte caps cut it, oldest first, and the record says so (§6.11); the prompt stays bounded, so a turn's maximum cost does too |
-| Bad model | A tool-call storm: many calls a turn, or every turn | At most 4 a turn and 12 a run; a reply over what is left runs none of them and ends the run (§6.11, HI-24) |
-| Bad model | Never answers, calling tools until the end | The last turn is offered no tool, so it must answer or the run ends (§6.9 step 3) |
+| Bad model | A tool-call storm: many calls a turn, or every turn | §6.11's bounds: at most 4 a turn and 24 a run; a reply over what is left runs none of them and ends the run (§6.11, HI-8) |
+| Bad model | Never answers, calling tools until the end | The last turn is offered no read or think tool, so it must give its opinion or the run ends (§6.9 step 3) |
 | Bad model | Names an instrument outside the data universe, in a tool call or a thesis | The tool call is refused `out_of_universe` and reads nothing; a thesis is refused `unknown_instrument` or by §8.5's floor, as in v0.1 |
 | Bad model | Invents a tool, or arguments its schema does not admit | The gateway refuses the reply `schema_invalid`: the run ends with no output, and nothing is run (inference spec INF-5) |
-| Malicious content | Injection that tries to exfiltrate data | No outbound path exists, and the inputs hold only public data and the agent's own memory (HI-11) |
 | Malicious content | Injection that forces invalidations to churn the book | An invalidation only removes; exits are paced by the conduct controls; re-entry waits for `reentry_cooldown_s` ([§5.3](mandate.md#53-position-exposure-order-size-count-and-cooldown)) |
 | Malicious content | Text aimed at the approver ("approve now") | The approval card shows model text as quoted research-agent text with links to its sources (DEC-126). Disclosed, not blocked |
 | Malicious insider | Changes the template or swaps the model | A new content hash needs the owner's confirmation (§8.4); the gateway never substitutes (DEC-67). With one aggregator in front of every call (DEC-432 item 14), that rests on INF-2 with DEC-432 item 9's locked routing and item 10's reported-identity check |
@@ -1068,7 +1100,7 @@ E17-8) before users' agents may pin it.
 | Model outage | The provider is down or slow | Missing means safe (HI-6); research stops; theses expire at their horizon (§7.3) |
 | Runaway cost | A crash loop or a retry storm | One run in flight; the interval counts from the last reservation, any turn's; no re-send under an old `call_id`; reservations stay counted (§5.3, inference spec §7.3) |
 | Runaway cost | An agentic run that keeps calling | `max_turns`, and `spend_ceiling_usd` on every turn: the run cannot reserve past the workspace's `research_run_cost_cap_usd`, and every daily, monthly, and deployment cap still binds beneath it (§6.11, inference spec §7.3) |
-| Bad model | Floods proposals | `max_theses` (the core stops offering `propose_thesis` once the run has made that many and refuses an over-count `call_budget`), `max_tool_calls`, the per-turn bound, and HI-27's daily limits; every thesis still needs §8.5 and its first order the admission ceiling |
+| Bad model | Floods proposals | `max_theses` (a `propose_thesis` past it is refused `max_theses` and ends the run), `max_tool_calls`, the per-turn bound, and HI-27's daily limits; every thesis still needs §8.5 and its first order the admission ceiling |
 | Bad model | Probes refusals to learn the account's limits | A refusal is a code that carries no limit value, size, price, or dollar figure (HI-25), and a repeated identical denial ends the run (§6.11) |
 | Malicious content | Injection that steers an invalidation of a held position | Mitigated and disclosed: an invalidation only removes, its exits are discretionary, paced by the conduct controls, and re-entry waits for `reentry_cooldown_s`; the action records its provenance, so a reviewer sees what it read (§6.12) |
 | Bad model | Uses `note` to plant instructions for later | A note stays in its own run's record; no later run, owner, or check reads it (§6.10) |
@@ -1250,7 +1282,7 @@ Provider and vendor choice, and provider data terms, are DEC-432 items 14 and 15
    account stream's fold alone is the working universe (§2.3).
 3. **How corroboration is derived.** `mandate-research` takes it as a platform fact; no document
    says how the platform derives it from retrieved items and market data (E17-7). The harness
-   supplies the inputs; the rule is E17-7's.
+   supplies the inputs, and in an agentic run only the seed's (§6.13 item 6); the rule is E17-7's.
 4. **The invalidation record** (§6.7, E19-5): its event type, its members, and whether the executor
    copies `UniverseChanged` from it directly. It must also carry DEC-433 item 19's case, a revoked
    source.

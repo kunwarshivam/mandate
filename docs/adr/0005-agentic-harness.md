@@ -119,8 +119,9 @@ records it.
 - Delivery, from the design input: slice 1 the specs (lane AH, 10/19); slice 2 the gateway's tool
   calls and per-turn metering (lanes I1 and AH); slice 3 the loop with read and think tools (AH);
   slice 4 action tools with verdict feedback (AH and I2); slice 5 the shell's driver (I2, after R0);
-  slice 6 the desk and transcript view (EX and W2); slice 7 the demo scenario end to end. The
-  `single_call` run stays as the fallback mode for the demo.
+  slice 6 the desk and transcript view (EX and W2); slice 7 the demo scenario end to end. If the
+  agentic slices are not ready, the demo agents pin a `single_call` entry instead: a choice of pin
+  made before the demo, never a runtime fallback (DEC-2203 item 13).
 - To monitor: verdict feedback may teach a model, within a run, to propose only what passes
   admission (Goodhart pressure; memo question 2); the regression evaluation reports it.
 
