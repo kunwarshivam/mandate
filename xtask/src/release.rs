@@ -100,48 +100,252 @@ impl Paths {
 /// The `RUSTFLAGS` of a release build: a static C runtime, and every machine path remapped to a
 /// fixed prefix, so two checkouts in two places build the same bytes.
 pub(crate) fn rustflags(paths: &Paths) -> String {
-    let _ = paths;
-    String::new()
+    let remap = |from: &Path, to: &str| format!("--remap-path-prefix={}={to}", from.display());
+    [
+        "-C".to_owned(),
+        "target-feature=+crt-static".to_owned(),
+        remap(&paths.root, "/mandate"),
+        remap(&paths.cargo_home, "/cargo"),
+        remap(&paths.rustup_home, "/rustup"),
+    ]
+    .join(" ")
 }
 
 /// The `cargo` arguments of a release build: every [`BINARIES`] package, `--locked`, the release
 /// profile, the musl [`TARGET`], and no feature flag of any kind.
 pub(crate) fn build_args(target_dir: &Path) -> Vec<String> {
-    let _ = target_dir;
-    Vec::new()
+    let mut args: Vec<String> = [
+        "auditable",
+        "build",
+        "--locked",
+        "--release",
+        "--target",
+        TARGET,
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    for (package, _) in BINARIES {
+        args.extend(["-p".to_owned(), package.to_owned()]);
+    }
+    args.extend(["--target-dir".to_owned(), target_dir.display().to_string()]);
+    args
 }
 
 /// `SHA256SUMS` in `sha256sum`'s own format, `<hex>  <name>`, one line a binary, sorted by name.
 pub(crate) fn sums_text(sums: &BTreeMap<String, String>) -> String {
-    let _ = sums;
-    String::new()
+    sums.iter()
+        .map(|(name, hex)| format!("{hex}  {name}\n"))
+        .collect()
 }
 
 /// Reads a `SHA256SUMS` [`sums_text`] wrote: each line `<64 lowercase hex>  <name>`, each name
 /// once.
 pub(crate) fn parse_sums(text: &str) -> Result<BTreeMap<String, String>> {
-    let _ = text;
-    bail!("unimplemented (E21-8)")
+    let mut sums = BTreeMap::new();
+    for line in text.lines() {
+        let (hex, name) = line
+            .split_once("  ")
+            .with_context(|| format!("not a SHA256SUMS line: {line:?}"))?;
+        ensure!(
+            hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+            "not 64 lowercase hex digits: {line:?}"
+        );
+        ensure!(
+            !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')),
+            "not a plain binary name: {line:?}"
+        );
+        ensure!(
+            sums.insert(name.to_owned(), hex.to_owned()).is_none(),
+            "{name} is listed twice"
+        );
+    }
+    ensure!(!sums.is_empty(), "SHA256SUMS lists no binary");
+    Ok(sums)
 }
 
 /// Whether two builds' `SHA256SUMS` name the same binaries, every [`BINARIES`] binary among them,
 /// with the same digests.
 pub(crate) fn compare_sums(a: &str, b: &str) -> Result<()> {
-    let _ = (a, b);
-    bail!("unimplemented (E21-8)")
+    let (a, b) = (parse_sums(a)?, parse_sums(b)?);
+    for (_, bin) in BINARIES {
+        ensure!(a.contains_key(bin), "the first build has no {bin}");
+        ensure!(b.contains_key(bin), "the second build has no {bin}");
+    }
+    let names = |sums: &BTreeMap<String, String>| sums.keys().cloned().collect::<Vec<_>>();
+    ensure!(
+        names(&a) == names(&b),
+        "the builds name different binaries: {:?} and {:?}",
+        names(&a),
+        names(&b)
+    );
+    let differ: Vec<&String> = a
+        .iter()
+        .filter(|(name, hex)| b.get(*name) != Some(*hex))
+        .map(|(name, _)| name)
+        .collect();
+    ensure!(differ.is_empty(), "not reproducible: {differ:?} differ");
+    Ok(())
 }
 
 /// `cargo xtask release tools`: installs each [`TOOLS`] entry under [`TOOLS_DIR`], checked
 /// against its SHA-256, and returns the directory that holds them.
 pub(crate) fn tools(root: &Path) -> Result<PathBuf> {
-    let _ = root;
-    bail!("unimplemented (E21-8)")
+    let bin = root.join(TOOLS_DIR).join("bin");
+    fs::create_dir_all(&bin).with_context(|| format!("creating {}", bin.display()))?;
+    for tool in TOOLS {
+        let stamp = bin.join(format!(".{}-{}", tool.name, tool.version));
+        if stamp.is_file() && bin.join(tool.name).is_file() {
+            continue;
+        }
+        eprintln!("    release: installing {} {}", tool.name, tool.version);
+        let work = root
+            .join(TOOLS_DIR)
+            .join(format!("{}-{}", tool.name, tool.version));
+        fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
+        let archive = work.join("archive");
+        run(Command::new("curl")
+            .args([
+                "-sSfL",
+                "--retry",
+                "5",
+                "--retry-delay",
+                "2",
+                "--retry-all-errors",
+                "-o",
+            ])
+            .arg(&archive)
+            .arg(tool.url))?;
+        let actual = sha256(&archive)?;
+        ensure!(
+            actual == tool.sha256,
+            "{} {}: SHA-256 {actual}, pinned {}",
+            tool.name,
+            tool.version,
+            tool.sha256
+        );
+        run(Command::new("tar")
+            .arg("-xf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&work)
+            .arg(tool.member))?;
+        fs::copy(work.join(tool.member), bin.join(tool.name))
+            .with_context(|| format!("installing {}", tool.name))?;
+        fs::write(&stamp, tool.sha256).with_context(|| format!("writing {}", stamp.display()))?;
+    }
+    Ok(bin)
 }
 
 /// `cargo xtask release build <out>`.
 pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
-    let _ = (root, out);
-    bail!("unimplemented (E21-8)")
+    let tools = tools(root)?;
+    let paths = Paths::from_env(root)?;
+    let epoch = git(root, &["log", "-1", "--format=%ct", "HEAD"])?;
+    let commit = git(root, &["rev-parse", "HEAD"])?;
+    run(Command::new("rustup").args(["target", "add", TARGET]))?;
+    let path = env::join_paths(
+        std::iter::once(tools.clone())
+            .chain(env::split_paths(&env::var_os("PATH").unwrap_or_default())),
+    )
+    .context("joining PATH")?;
+    let target_dir = root.join(TARGET_DIR);
+    let mut cargo = Command::new("cargo");
+    cargo
+        .current_dir(root)
+        .args(build_args(&target_dir))
+        .env("PATH", path)
+        .env("RUSTFLAGS", rustflags(&paths))
+        .env("SOURCE_DATE_EPOCH", &epoch)
+        .env("CARGO_INCREMENTAL", "0")
+        .env(format!("CC_{}", TARGET.replace('-', "_")), TARGET_CC)
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env_remove("CARGO_BUILD_RUSTFLAGS")
+        .env_remove(format!(
+            "CARGO_TARGET_{}_RUSTFLAGS",
+            TARGET.replace('-', "_").to_uppercase()
+        ))
+        .env_remove("RUSTC_WRAPPER")
+        .env_remove("RUSTC_WORKSPACE_WRAPPER");
+    run(&mut cargo)?;
+    let bin_out = out.join("bin");
+    let sbom_out = out.join("sbom");
+    for dir in [&bin_out, &sbom_out] {
+        fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    let mut sums = BTreeMap::new();
+    for (_, bin) in BINARIES {
+        let built = target_dir.join(TARGET).join("release").join(bin);
+        let shipped = bin_out.join(bin);
+        fs::copy(&built, &shipped).with_context(|| format!("copying {}", built.display()))?;
+        sums.insert(bin.to_owned(), sha256(&shipped)?);
+        run(Command::new(tools.join("syft"))
+            .env("SYFT_CHECK_FOR_APP_UPDATE", "false")
+            .args([
+                "scan",
+                "-q",
+                "--source-name",
+                bin,
+                "--source-version",
+                &commit,
+                "-o",
+            ])
+            .arg(format!(
+                "cyclonedx-json={}",
+                sbom_out.join(format!("{bin}.cdx.json")).display()
+            ))
+            .arg(format!("file:{}", shipped.display())))?;
+    }
+    let text = sums_text(&sums);
+    let sums_file = out.join("SHA256SUMS");
+    fs::write(&sums_file, &text).with_context(|| format!("writing {}", sums_file.display()))?;
+    eprint!("    release {commit} (SOURCE_DATE_EPOCH={epoch}):\n{text}");
+    println!("digest={}", sha256(&sums_file)?);
+    Ok(())
+}
+
+/// The SHA-256 of the file at `path`, as `sha256sum` prints it.
+fn sha256(path: &Path) -> Result<String> {
+    let out = Command::new("sha256sum")
+        .arg(path)
+        .output()
+        .context("starting `sha256sum`")?;
+    ensure!(
+        out.status.success(),
+        "`sha256sum {}` failed",
+        path.display()
+    );
+    let text = String::from_utf8(out.stdout).context("sha256sum printed non-UTF-8")?;
+    text.split_whitespace()
+        .next()
+        .map(str::to_owned)
+        .with_context(|| format!("sha256sum printed nothing for {}", path.display()))
+}
+
+fn git(root: &Path, args: &[&str]) -> Result<String> {
+    let out = Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+        .context("starting `git`")?;
+    ensure!(out.status.success(), "`git {}` failed", args.join(" "));
+    Ok(String::from_utf8(out.stdout)
+        .context("git printed non-UTF-8")?
+        .trim()
+        .to_owned())
+}
+
+fn run(command: &mut Command) -> Result<()> {
+    eprintln!("    $ {command:?}");
+    let status = command
+        .status()
+        .with_context(|| format!("starting {command:?}"))?;
+    if !status.success() {
+        bail!("{command:?} failed with {status}");
+    }
+    Ok(())
 }
 
 /// `cargo xtask release compare <a> <b>`: two output directories of [`build`].
@@ -240,10 +444,9 @@ mod tests {
     /// No shipped package is the runner, the one crate that may declare `live`.
     #[test]
     fn no_shipped_package_may_declare_live() -> Result<()> {
-        let policy: toml::Table = fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("layers.toml"),
-        )?
-        .parse()?;
+        let policy: toml::Table =
+            fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("layers.toml"))?
+                .parse()?;
         let crates = policy
             .get("crates")
             .and_then(toml::Value::as_table)

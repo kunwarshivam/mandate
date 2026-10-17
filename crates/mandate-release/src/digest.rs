@@ -1,7 +1,8 @@
 //! The build digest: the SHA-256 of an executable's bytes (DEC-970 item 4).
 
+use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use mandate_canon::Digest;
 
@@ -19,44 +20,57 @@ pub enum ReleaseError {
     /// A reference that is not `sha256:` followed by 64 lowercase hex digits.
     #[error("not a build digest reference")]
     NotAReference,
-    /// The tests-first stub (DEC-921): the body lands in the implementation commit.
-    #[error("unimplemented ({story})")]
-    Unimplemented { story: &'static str },
 }
 
-const STORY: &str = "E21-8";
+/// The prefix of the `sha256:<hex>` content reference (journal spec §3).
+const PREFIX: &str = "sha256:";
 
 impl BuildDigest {
     /// The digest of `bytes`.
     pub fn of_bytes(bytes: &[u8]) -> Self {
-        let _ = bytes;
-        Self(Digest::ZERO)
+        Self(Digest::of(bytes))
     }
 
     /// The digest of the file at `path`.
     pub fn of_file(path: &Path) -> Result<Self, ReleaseError> {
-        let _ = path;
-        Err(ReleaseError::Unimplemented { story: STORY })
+        fs::read(path)
+            .map(|bytes| Self::of_bytes(&bytes))
+            .map_err(|error| ReleaseError::Unreadable(error.kind()))
     }
 
-    /// The digest of the executable this process is running.
+    /// The digest of the executable this process is running. On Linux it reads `/proc/self/exe`,
+    /// which names the running file even after the path it was started from is replaced, so a
+    /// release installed over a running one cannot make it journal the new release's digest.
     pub fn running() -> Result<Self, ReleaseError> {
-        Err(ReleaseError::Unimplemented { story: STORY })
+        Self::of_file(&running_executable()?)
     }
 
     /// Reads a `sha256:<hex>` reference, the form [`BuildDigest::reference`] writes.
     pub fn from_reference(reference: &str) -> Result<Self, ReleaseError> {
-        let _ = reference;
-        Err(ReleaseError::Unimplemented { story: STORY })
+        reference
+            .strip_prefix(PREFIX)
+            .and_then(Digest::from_hex)
+            .map(Self)
+            .ok_or(ReleaseError::NotAReference)
     }
 
     /// The 64 lowercase hex digits, as `SHA256SUMS` writes them.
     pub fn to_hex(&self) -> String {
-        String::new()
+        self.0.to_hex()
     }
 
     /// The `sha256:<hex>` content reference the envelope's `actor.build` member holds.
     pub fn reference(&self) -> String {
-        String::new()
+        format!("{PREFIX}{}", self.0.to_hex())
     }
+}
+
+#[cfg(target_os = "linux")]
+fn running_executable() -> Result<PathBuf, ReleaseError> {
+    Ok(PathBuf::from("/proc/self/exe"))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn running_executable() -> Result<PathBuf, ReleaseError> {
+    std::env::current_exe().map_err(|error| ReleaseError::Unreadable(error.kind()))
 }
