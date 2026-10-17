@@ -9,6 +9,7 @@ spec:
   instances: {{ .Values.instances }}
   imageName: {{ .Values.image | quote }}
   enableSuperuserAccess: false
+  smartShutdownTimeout: {{ .Values.smartShutdownTimeout }}
   storage:
     size: {{ .Values.storage.size | quote }}
     {{- with .Values.storage.storageClass }}

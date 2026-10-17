@@ -9,6 +9,7 @@
     "image",
     "storage",
     "resources",
+    "smartShutdownTimeout",
     "operatorNamespace"
   ],
   "properties": {
@@ -53,6 +54,11 @@
           "type": "string"
         }
       }
+    },
+    "smartShutdownTimeout": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 180
     },
     "operatorNamespace": {
       "type": "string",

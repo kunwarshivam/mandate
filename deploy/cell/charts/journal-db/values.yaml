@@ -17,5 +17,11 @@ resources:
   cpu: 500m
   memory: 512Mi
 
+# Seconds a stopping instance waits for its clients to disconnect before it aborts their open
+# transactions (CloudNativePG's smart, then fast, shutdown). The runtime keeps a pooled connection
+# that never disconnects by itself, so a longer wait only delays every restart; a commit already
+# acknowledged is kept either way (`synchronous_commit`, `fsync`). DEC-1013 item 6.
+smartShutdownTimeout: 10
+
 # The namespace the CloudNativePG operator runs in, which reaches the instances' status port.
 operatorNamespace: cnpg-system
