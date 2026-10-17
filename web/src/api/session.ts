@@ -1,5 +1,5 @@
 /**
- * The browser's session with the workspace API (workspace API spec §3.11 items 5 and 6; DEC-1006).
+ * The browser's session with the workspace API (workspace API spec §3.11 items 5 and 6; DEC-1095).
  * The app trades the sign-in client's access token for the API's own session cookie with
  * `POST /v1/sessions`, refreshes it with `POST /v1/sessions/refresh` before its five-minute access
  * lifetime ends, and ends it with `DELETE /v1/sessions/current`. A refresh rotates the cookie's

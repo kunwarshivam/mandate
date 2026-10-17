@@ -158,7 +158,7 @@ and the charts and sample headlines are not drawn over the API: DEC-975 has the 
 provisional read bodies the API server serves until `schemas/workspace-api/read-models/` lands.
 `/demo` always reads the fixtures. With sign-in on, the browser first opens an API session with
 `POST /v1/sessions` from its Supabase access token and refreshes it every four minutes, one tab at a
-time (`src/api/session.ts`, DEC-1006); a read answered `membership_unavailable` shows that state, and no session
+time (`src/api/session.ts`, DEC-1095); a read answered `membership_unavailable` shows that state, and no session
 shows "Sign in to see your workspace".
 
 To try it locally against the mock API the dev server serves at `/v1`:
