@@ -652,3 +652,150 @@ fn a_restart_lists_an_unknown_order_on_a_no_query_profile() {
     let ran = next.run(Input::Started(epoch), &ports);
     one_listing(&ran, &id, "restart");
 }
+
+/// R0's R18 (DEC-1150 items 1 and 2): a working order — accepted at the broker, its cancel asked
+/// and refused — on a profile that cannot query by client order id. Its doubt is asked by the
+/// profile's own listing, never by a query the connector refuses unsent, and the listing's answer
+/// is adopted only from the one record that names it by our own id.
+fn refused_cancel(ports: &Ports<'_>, query: bool) -> (Shell, ClientOrderId, Ran) {
+    let mut shell = Shell::new(1);
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(ports);
+    shell.state = shell.state.clone().with_profile(profile(query));
+    let sent = shell.run(handoff(INTENT, AGENT, opening(AAPL, "10", "150")), ports);
+    let id = sent.submissions()[0].client_order_id.clone();
+    let mut answer = exact("b-1", "accepted").order;
+    answer.client_order_id = Some(id.as_str().to_owned());
+    shell.run(Input::Broker(Ok(BrokerOutcome::Submitted(answer))), ports);
+    assert_state(&shell, &id, OrderState::Accepted, "the broker accepted it");
+    let cancel = shell.run(
+        Input::Command(mandate_executor::Command::CancelOpenings {
+            agent: mandate_executor::AgentId(AGENT.to_owned()),
+            instrument: common::instrument(AAPL),
+        }),
+        ports,
+    );
+    assert!(
+        cancel.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id } if *client_order_id == id
+        )),
+        "the opening's cancel is asked: {:?}",
+        cancel.requests
+    );
+    let refused = shell.run(
+        Input::Broker(Ok(BrokerOutcome::Rejected(
+            mandate_executor::BrokerReject {
+                client_order_id: Some(id.as_str().to_owned()),
+                http_status: 0,
+                code: Some("cancel_refused".to_owned()),
+                message: "the broker refused the cancel".to_owned(),
+            },
+        ))),
+        ports,
+    );
+    (shell, id, refused)
+}
+
+fn by_client_id(ran: &Ran) -> usize {
+    ran.requests
+        .iter()
+        .filter(|r| matches!(r, BrokerRequest::GetOrderByClientId(_)))
+        .count()
+}
+
+#[test]
+fn a_working_order_is_listed_never_queried_by_id_on_a_no_query_profile() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let (_, id, queried) = refused_cancel(&ports, true);
+    assert_eq!(
+        by_client_id(&queried),
+        1,
+        "the control: a profile that queries by client order id asks by it"
+    );
+    let (shell, id_no_query, listed_ran) = refused_cancel(&ports, false);
+    assert_eq!(id, id_no_query, "the same derived key");
+    assert_eq!(
+        by_client_id(&listed_ran),
+        0,
+        "a query the connector would refuse unsent is never asked: {:?}",
+        listed_ran.requests
+    );
+    let since = RiskClock::from_secs(submitted_at(&shell, &id).secs() - MARGIN_S);
+    let listing = OrderListing {
+        client_order_id: id.clone(),
+        instrument: common::instrument(AAPL),
+        origin: OrderOrigin::Agentic,
+        created_since: since,
+    };
+    assert_eq!(
+        listed_ran.requests,
+        vec![BrokerRequest::ListOrders(listing)],
+        "the profile's own listing asks after it instead"
+    );
+}
+
+/// The record naming our id, `status`, as the listing gives it.
+fn named(id: &ClientOrderId, status: &str) -> ListedOrder {
+    let mut record = exact("b-1", status);
+    record.order.client_order_id = Some(id.as_str().to_owned());
+    record
+}
+
+#[test]
+fn a_working_orders_listing_adopts_only_the_record_naming_it() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let held = |shell: &Shell, id: &ClientOrderId, why: &str| {
+        let order = shell.state.order(id).expect("the order is in the fold");
+        assert!(
+            !order.state.is_terminal() && order.filled_qty == Qty::ZERO,
+            "{why}: still working, never assumed filled or gone: {:?}",
+            order.state
+        );
+    };
+    let (mut shell, id, _) = refused_cancel(&ports, false);
+    let ran = shell.run(listed(&id, vec![exact("b-1", "canceled")]), &ports);
+    sends_nothing(&ran, "a record naming no id");
+    held(
+        &shell,
+        &id,
+        "a working order is never adopted by look-alike",
+    );
+    let ran = shell.run(
+        listed(&id, vec![named(&id, "canceled"), named(&id, "canceled")]),
+        &ports,
+    );
+    sends_nothing(&ran, "two records naming it");
+    held(&shell, &id, "two records naming it");
+    let mut foreign = exact("b-2", "canceled");
+    foreign.order.client_order_id = Some("ref_id someone-else".to_owned());
+    shell.run(listed(&id, vec![foreign]), &ports);
+    held(&shell, &id, "a record naming another id");
+
+    shell.run(
+        listed(&id, vec![exact("b-9", "accepted"), named(&id, "canceled")]),
+        &ports,
+    );
+    let order = shell.state.order(&id).expect("the order is in the fold");
+    assert_eq!(
+        order.state,
+        OrderState::Canceled,
+        "the one record naming it is the broker's description of it (§5.7)"
+    );
+}
+
+#[test]
+fn a_working_orders_listing_under_a_queryable_profile_adopts_nothing() {
+    let fixture = Fixture::new();
+    let ports = fixture.ports();
+    let (mut shell, id, _) = refused_cancel(&ports, true);
+    shell.run(listed(&id, vec![named(&id, "canceled")]), &ports);
+    let order = shell.state.order(&id).expect("the order is in the fold");
+    assert!(
+        !order.state.is_terminal(),
+        "never asked, so never adopted: {:?}",
+        order.state
+    );
+}

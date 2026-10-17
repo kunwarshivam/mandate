@@ -64,6 +64,14 @@ impl<T: Tools> RobinhoodConnector<T> {
         }
     }
 
+    /// The broker's order id this connector's place answered for `key`, or restored for it from
+    /// the journal (DEC-860 item 7), or `None` for a key it never placed.
+    pub(crate) fn placed_id(&self, key: &ClientOrderId) -> Option<&str> {
+        self.placed
+            .get(key)
+            .map(|order| order.broker_order_id.as_str())
+    }
+
     /// Replaces the registered tickers with `tickers` (DEC-956 item 1): a session opened before
     /// the run read its confirmed mandate registers the pinned instrument's ticker here, before
     /// its preflight, and every call from then on names instruments by it.

@@ -442,7 +442,12 @@ export type Scenario =
 
 export interface Workspace {
   scenario: Scenario;
-  status: "ready" | "loading" | "unreachable";
+  /**
+   * Over the workspace API (DEC-975) two more: `signed_out`, no API session could be opened, and
+   * `membership_unavailable`, the API could not read the workspace's memberships (spec §3.5). The
+   * fixtures use neither.
+   */
+  status: "ready" | "loading" | "unreachable" | "signed_out" | "membership_unavailable";
   /** Whether the deployment answers commands with a journal entry, or goes quiet after taking them. */
   journal: "answers" | "silent";
   now: Iso;
