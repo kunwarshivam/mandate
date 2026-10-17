@@ -5,6 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use mandate_canon::Digest;
+use ring::digest::{SHA256, digest};
 
 /// The SHA-256 of an executable's bytes, the digest the release's `SHA256SUMS` lists for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -26,9 +27,15 @@ pub enum ReleaseError {
 const PREFIX: &str = "sha256:";
 
 impl BuildDigest {
-    /// The digest of `bytes`.
+    /// The digest of `bytes`, hashed by `ring`, whose assembly keeps a process's start fast even
+    /// in a debug build, where hashing a test binary of tens of megabytes in plain Rust took
+    /// seconds.
     pub fn of_bytes(bytes: &[u8]) -> Self {
-        Self(Digest::of(bytes))
+        let mut out = [0u8; 32];
+        for (slot, byte) in out.iter_mut().zip(digest(&SHA256, bytes).as_ref()) {
+            *slot = *byte;
+        }
+        Self(Digest::from_bytes(out))
     }
 
     /// The digest of the file at `path`.
@@ -66,7 +73,7 @@ impl BuildDigest {
 }
 
 /// The file this process runs: `/proc/self/exe` on Linux, elsewhere the path it was started from.
-fn running_executable() -> Result<PathBuf, ReleaseError> {
+pub(crate) fn running_executable() -> Result<PathBuf, ReleaseError> {
     if cfg!(target_os = "linux") {
         return Ok(PathBuf::from("/proc/self/exe"));
     }

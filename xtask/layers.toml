@@ -138,13 +138,15 @@ pure = true
 allowed_external = ["ruint", "rust_decimal", "thiserror"]
 
 # The release a process runs (E21-8, DEC-972): the build digest of its own executable, the SHA-256
-# the reproducible release build's SHA256SUMS lists, which the process journals as `actor.build`.
-# Above mandate-canon, whose digest it uses; not pure, because it reads the executable's file.
+# the reproducible release build's SHA256SUMS lists, which the process journals as `actor.build`;
+# and the start-up signature check (E21-35, DEC-971, OPS-15), which verifies the executable's
+# cosign signature with `ring` (ECDSA P-256) against compiled-in release keys. Above
+# mandate-canon, whose digest it uses; not pure, because it reads the executable's file.
 [crates.mandate-release]
 layer = 1
 safety_critical = true
 pure = false
-allowed_external = ["thiserror"]
+allowed_external = ["base64", "ring", "thiserror"]
 
 [crates.mandate-time]
 layer = 0
