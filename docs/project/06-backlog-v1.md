@@ -2558,6 +2558,136 @@ v0.2 fixes ([DEC-434](decisions/DEC-434.md) items 21 to 24).
   executor implementation (#174); and §14 and DEC-434 item 12 say once whether E21 is in the epic
   overview.
 
+Rows E21-28 to E21-39 come from the [managed-cells plan](tasks/managed-cells.md)
+([DEC-967](decisions/DEC-967.md), Proposed until the founder confirms the relayed answers). Each
+names its lane. None buys hosting, and none edits `crates/mandate-paper/src/lib.rs` or
+`crates/mandate-shell/src/control.rs`, `adapters.rs` or `paper/` before R0 closes (DEC-967 item 2).
+Every environment they build is paper or a venue demo; no image enables `live` (ES-23, OPS-5).
+
+- **E21-28 (Proposed, M8; SC; lane P1)** As an operator, I want one process lifecycle every
+  long-running process shares, so that liveness, readiness, drain and the crash-loop bound mean the
+  same thing everywhere (design §3.4, §7.3). *Accepted when:* a new pure crate `mandate-process`
+  folds its inputs (writer-epoch outcomes, replay position, reconciliation result, heartbeats,
+  drain requests, injected time) into `starting`, `replaying`, `ready`, `not_ready`, `draining` and
+  `exited`, with no clock read or randomness; readiness holds only with the writer epoch held, the
+  stream replayed to its head, and (executor) the last reconciliation passed; a state-machine
+  property test with an independent oracle covers every transition, a `Fenced` append in every
+  state (always `exited` before any further side effect), and a kill switch arriving in every state
+  the process is up, which is never gated on readiness; a drain past its bound ends `exited`, never
+  forced; the crash-loop bound is counted over journaled restarts, not the orchestrator's; and each
+  oracle fails on a seeded bug.
+- **E21-29 (Proposed, M8; SC; lane P2)** As an operator, I want the scheduler run as its own
+  process, one per workspace, so that the risk clock and durable timers have one writer (design
+  §3.1, OPS-14). *Accepted when:* it is the only writer of the workspace's `clock:` stream, fenced
+  by epoch; a second scheduler is `Fenced` before it appends; a clock offset out of tolerance is
+  journaled as journal spec §5.4 says and the events meanwhile are flagged; a test feeding an
+  out-of-tolerance offset shows no order path consumes the host clock instead; its probes come from
+  `mandate-process`; and it holds nothing secret.
+- **E21-30 (Proposed, M8; SC; lane P3)** As an owner, I want my agent's runtime and my account's
+  executor run as long-running processes in the cell, so that the agent trades unattended within
+  its mandate (design §3.1, §3.4). E21-2's criteria, met in the local cell (E21-37). *Accepted
+  when:* a new crate `mandate-daemon` runs one runtime per agent deployment and one executor per
+  account over the existing crates, using `mandate-shell` and `mandate-paper` only through their
+  public items; each loop tails its inputs from the journal with `LISTEN`/`NOTIFY` only as a wake-up
+  hint, and a test that drops every notification changes no outcome; kill-switch and risk-exit
+  inputs are read before any other (ES-06); killing either process at each step of submission
+  recovers it from the journal with zero duplicates; a process that is not ready takes no opening
+  but still applies the kill switch and, once replayed, risk exits; the runtime has no broker
+  credential and no route to a broker; the executor's broker in CI is a fixture, never a broker
+  host; and each image is built without the `live` feature.
+- **E21-31 (Proposed, M8; SC; lane A1)** As a workspace member, I want the workspace API served by
+  its own process in the cell, so that the web app and the CLI reach my deployment the same way
+  (design §3.1, §9; the API server, "A2" in `deploy/README.md`). *Accepted when:* a new crate
+  `mandate-api-server` serves exactly the routes E10-10 to E10-14 have landed, over `mandate-api`'s
+  contract and the identity crates' sessions, and no route of its own; every route without
+  credentials returns E10-10's single 401 body; every data read takes a `mandate-tenant` scope, and
+  a cross-workspace test at the HTTP layer returns E10-10's single 404; it binds only loopback or
+  the pod's own address behind the cell's one ingress; it starts with no secret in its environment
+  (DEC-822 item 4) and reads its session key from a mounted file; its probes come from
+  `mandate-process` and a drain finishes in-flight requests and refuses new ones with a retryable
+  problem; and a canary-secret scan of its responses and logs finds nothing (API-11). Its HTTP
+  server dependency is approved through its `docs/dependencies.md` row first.
+- **E21-32 (Proposed, M8; SC; lane V2)** As an owner, I want my credential held behind one
+  `SecretSource` interface with the local vault and OpenBao as interchangeable backends, so that the
+  cell and a hybrid site use the same code (design §5.2, §5.6; DEC-434 item 14). *Accepted when:* a
+  new crate `mandate-vault` defines `SecretSource` (write-only entry, a lease for exactly one
+  connection, renewal, revoke, and the token-exchange grant of design §5.2), and one conformance
+  suite passes against both backends; the OpenBao backend speaks to a pinned OpenBao in the local
+  cell over TLS with per-process policies and no wildcard; a runtime's identity reads nothing and an
+  executor's exactly its own connection; a vault outage stops no running executor before its lease
+  expires (E21-9); no secret is ever an environment variable; the OpenBao dev-server mode is
+  refused outside tests; and a canary-secret scan of logs, metrics and the journal finds nothing
+  (OPS-1). Builds on E10-13's V1 (DEC-692) being complete.
+- **E21-33 (Proposed, M8; SC; lane D1; journal spec first if needed)** As an owner, I want a
+  deployment manager that keeps each deployed agent's processes running and leaves a crash-looping
+  agent paused, so that my agent is managed without anyone watching (design §3.4, §11 "Bad
+  deploy"). *Accepted when:* before its tests, the stream and event that record its pause are
+  named, and a journal spec change with test vectors lands first if the catalogue has none; a new
+  crate `mandate-deploy-manager` derives the desired processes only from the control stream
+  (`AgentDeployed`, `AgentStopped`, kill switches) and starts, stops and replaces them through an
+  orchestrator port with a Kubernetes adapter and a Compose adapter; it never starts a process for
+  an agent the control stream does not deploy, and a property test over random event sequences
+  with an independent oracle shows it; after the crash-loop bound the agent is left `Paused`, the
+  pause is journaled and an opaque alert raised; it holds no broker credential and sends no order;
+  and its own outage stops no running process and no kill switch (OPS-4).
+- **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
+  with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
+  web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
+  `mandate agent pause` and `mandate agent kill` are in the binary (deploy/README *Deferred*) at
+  agent, connection and workspace scope, and an agent-scoped kill uses no cancel-all or
+  close-position (trading spec §5.5); each runs as a one-off Kubernetes Job and a `docker compose
+  run` with only the journal's role; a local-cell test with the API, the deployment manager, the
+  metrics exporter, the model gateway and the control plane all unreachable shows each scope's
+  `KillSwitchActivated` in every stream owner; and the runbook RB-03 names the command.
+- **E21-35 (Proposed, M8 then M11; lane R2)** As the founder, I want the cell's images built
+  from `main` by digest, signed, and checked at start, so that only a release I can identify runs
+  against a broker (design §7.1, OPS-15, ES-17). *Accepted when:* images hold E21-8's static
+  binaries on an empty base, run as non-root with a read-only root filesystem and no shell; each is
+  signed with cosign and its digest and signature recorded; a process outside dev and CI refuses to
+  start when its signature does not verify, and journals its build digest (`actor.build`) when it
+  does; CI signs with an ephemeral test key, and only the founder's hardware key signs an image for a
+  hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
+  never from a branch; and a test shows an unsigned and a wrongly signed image both refused.
+- **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart and one
+  Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
+  host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
+  render the processes of design §3.1 that exist, one pod or service each; a workspace's executors,
+  runtimes and data service share a node by pod affinity; the executor and scheduler have requests
+  equal to limits; every process type has a default-deny egress policy allowing exactly its §3.1
+  network column (E21-1), and the token-exchange process alone may reach DEC-821's token host;
+  the data plane accepts no inbound connection; migrations run as a Job under the migration-owner
+  role before processes roll, never at start (OPS-13); secrets arrive only as mounted files, never
+  environment variables (DEC-822 item 4); `helm lint`, a schema check and a test that renders the
+  chart and asserts each of these pass in CI; and `environment` accepts only `paper` or `backtest`.
+- **E21-37 (Proposed, M8; lane C1; its drills test SC paths)** As the founder, I want a local and CI cell, so that every
+  process, the chart and the drills are proven before any hosting is bought (DEC-967 item 3).
+  *Accepted when:* `cargo xtask cell up` brings up a kind or k3d cluster on a developer machine and
+  on the CI runner and installs the chart from the change's own images, with no cloud account, no
+  broker credential and no broker host; `cargo xtask cell drill` runs, as each process exists: a
+  kill of each process at each step of submission with zero duplicates; two executors for one
+  account with the older `Fenced` before it sends (OPS-3); a request to each live trading host
+  failing at the network layer from every process (OPS-5); the kill switch with the API, the
+  deployment manager and the exporter down (OPS-4, E21-34); the upgrade drill of E21-7 (OPS-7);
+  and a restore of the cell's Postgres passing journal spec §11 over every stream (OPS-8); each
+  drill fails on a seeded bug before it is trusted; the CI job finishes in under ten minutes,
+  sharded by drill (DEC-464); and its results are recorded as local-cell results, never staging's
+  (DEC-967 item 5).
+- **E21-38 (Proposed, M9; lane W1)** As the founder, I want `web/` served from Cloudflare Workers,
+  the one hosting spend approved (DEC-967 item 3), so that the app is reachable before a cell is
+  hosted. *Accepted when:* `web/` builds for Workers through an adapter approved by its
+  `docs/dependencies.md` row; it deploys from `main` only, by a workflow whose deploy token is an
+  environment secret no PR job can read (ES-12); the bundle holds no secret and no API host but the
+  configured one; it runs on fixtures until a hosted cell exists; and the existing `web/` checks
+  pass on the Workers build.
+- **E21-39 (Proposed, M8; lane O3)** As an operator, I want the cell's own alert path, so that a
+  metric-sourced §8.2 alert reaches someone without a paging vendor yet (design §8.1, §8.2; DEC-434
+  item 20). *Accepted when:* the chart runs a Prometheus and an Alertmanager pinned by digest,
+  scraping each process's exporter (E21-3) inside the cell only; the metric-sourced rows of §8.2
+  are rules in the repository, each fired by a local-cell fault test; alert payloads carry an
+  opaque ID, a reason code and a runbook link only (OPS-10), shown by a payload capture; the sink
+  is a placeholder until the founder picks a paging tool (the plan's H6); and losing the whole
+  alert path changes no order (OPS-11).
+
 ## Won't (v1)
 
 Live retail trading before counsel signs off; users outside the US; options; Interactive Brokers and Coinbase connectors; native mobile apps; WebAssembly plug-ins; SAML and SCIM;
