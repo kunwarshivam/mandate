@@ -1867,8 +1867,13 @@ name = "mandate-daemon"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-gateway",
  "mandate-journal",
+ "mandate-num",
  "mandate-process",
+ "mandate-research",
+ "mandate-research-driver",
+ "mandate-research-run",
  "mandate-runtime",
  "mandate-store",
  "mandate-time",
