@@ -247,6 +247,7 @@ fn every_other_refusal_to_open_is_the_one_401() {
             &f.issuer
                 .token_from("https://evil.test/auth/v1", ALICE, T0 + 3_600),
         ),
+        format!(r#"{{"token":"{}"}}"#, f.issuer.token(ALICE, T0 + 3_600)),
     ] {
         let reply = call(&f, "POST", "/v1/sessions", &browser_with(None), &body);
         assert_eq!(reply.status, 401, "{body}");

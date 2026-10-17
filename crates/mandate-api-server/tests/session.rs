@@ -490,3 +490,65 @@ fn no_randomness_opens_nothing() {
     );
     assert!(store.is_empty());
 }
+
+#[test]
+fn pause_or_kill_switch_first_on_a_lapsed_session_is_served() {
+    for reduction in [Request::Pause, Request::KillSwitch] {
+        let store = sessions();
+        let cookie = store
+            .open(alice(), SUBJECT.to_owned(), None, at(T0))
+            .expect("opened");
+        assert!(!store.is_empty());
+        assert!(
+            store
+                .authenticate(cookie.value(), reduction, at(T0 + ACCESS_S + 1))
+                .is_ok(),
+            "{reduction:?} with no request before it"
+        );
+    }
+}
+
+#[test]
+fn an_ordinary_request_on_a_lapsed_session_does_not_narrow_it() {
+    let store = sessions();
+    let cookie = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    assert_eq!(
+        store.authenticate(cookie.value(), Request::Other, at(T0 + ACCESS_S + 1)),
+        Err(Unauthenticated)
+    );
+    assert_eq!(
+        store.authenticate(cookie.value(), Request::Pause, at(T0 + IDLE_S + 1)),
+        Err(Unauthenticated),
+        "still a full session, so its idle timeout ended it; an outage session would have none"
+    );
+}
+
+#[test]
+fn a_session_is_purged_at_its_absolute_lifetime_exactly() {
+    let store = sessions();
+    store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    store
+        .open(
+            bob(),
+            "sha256:bbbb".to_owned(),
+            None,
+            at(T0 + ABSOLUTE_S - 1),
+        )
+        .expect("opened");
+    assert_eq!(store.len(), 2, "one second before, the first is kept");
+    store
+        .open(bob(), "sha256:bbbb".to_owned(), None, at(T0 + ABSOLUTE_S))
+        .expect("opened");
+    assert_eq!(store.len(), 2, "at its absolute end the first is purged");
+}
+
+#[test]
+fn the_system_clock_reads_the_present() {
+    use mandate_api_server::clock::{Clock, SystemClock};
+    let now = SystemClock.now().expect("the host's clock");
+    assert!(now.secs() > 1_790_000_000, "{}", now.secs());
+}

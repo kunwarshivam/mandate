@@ -10,7 +10,7 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use common::{TestIssuer, at, serve};
 use mandate_api_server::keys::{FetchError, FetchedKeys, MAX_BYTES};
-use mandate_api_server::token::{Checked, Issuer, Keys, TokenCheck};
+use mandate_api_server::token::{Checked, FixedKeys, Issuer, Keys, TokenCheck};
 use mandate_authn::{Algorithm, IssuerConfig};
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -136,4 +136,41 @@ fn a_body_too_large_or_not_a_key_set_is_refused_and_the_last_set_kept() {
     }
     let keys = FetchedKeys::new("http://127.0.0.1:9/jwks").expect("a fetcher");
     assert_eq!(runtime.block_on(keys.fetch()), Err(FetchError::Unavailable));
+}
+
+/// `issuer`'s key set, padded with trailing spaces to exactly `len` bytes.
+fn padded(issuer: &TestIssuer, len: usize) -> String {
+    let json = issuer.jwks_json();
+    format!("{json}{}", " ".repeat(len - json.len()))
+}
+
+#[test]
+fn the_body_bound_is_exactly_max_bytes() {
+    let runtime = runtime();
+    let issuer = TestIssuer::new("es256-1");
+    for (len, accepted) in [(2_000, true), (MAX_BYTES, true), (MAX_BYTES + 1, false)] {
+        let addr = host(padded(&issuer, len), Arc::new(AtomicU16::new(0)));
+        let keys = FetchedKeys::new(&format!("http://{addr}/jwks")).expect("a fetcher");
+        let fetched = runtime.block_on(keys.fetch());
+        assert_eq!(fetched.is_ok(), accepted, "{len}: {fetched:?}");
+        assert_eq!(keys.current().is_some(), accepted, "{len}");
+        if !accepted {
+            assert_eq!(fetched, Err(FetchError::Body));
+        }
+    }
+}
+
+#[test]
+fn fixed_keys_hand_back_what_they_hold() {
+    let issuer = TestIssuer::new("es256-1");
+    let held = FixedKeys(Some(Arc::new(issuer.jwks())));
+    assert!(held.current().is_some());
+    assert!(FixedKeys(None).current().is_none());
+    let config =
+        IssuerConfig::new(&issuer.issuer, &["authenticated"], &[Algorithm::Es256]).expect("cfg");
+    let check = Issuer::new(config, Arc::new(held));
+    assert!(matches!(
+        check.check(&issuer.token("alice", 1_791_003_600), at(1_791_000_000)),
+        Checked::Subject { .. }
+    ));
 }
