@@ -240,8 +240,17 @@ impl Manager {
     /// instance is never started again and, while desired, never stopped: neither readiness nor a
     /// kill switch stops a process.
     pub fn decide(&mut self, observed: &[Instance], now: UtcNanos) -> Vec<Decision> {
-        let _stub = (observed, now, step);
-        Vec::new()
+        let slots: Vec<Slot> = self.slots.keys().cloned().collect();
+        slots
+            .into_iter()
+            .filter_map(|slot| {
+                let desired = self.desired(&slot);
+                let state = self.slots.get_mut(&slot)?;
+                let instances: Vec<&Instance> =
+                    observed.iter().filter(|i| i.slot == slot).collect();
+                step(&slot, state, desired, &instances, now)
+            })
+            .collect()
     }
 }
 

@@ -102,7 +102,8 @@ pub enum Fact {
     Opened {
         environment: String,
     },
-    /// A connection's account, from its version-2 `ConnectionEstablished` (journal spec §9.8).
+    /// A connection's account, from its `ConnectionEstablished` (journal spec §9.8); version 1,
+    /// which names no account, is not read.
     Connected {
         connection: String,
         account: String,
@@ -191,7 +192,7 @@ fn read(row: &StoredEvent) -> Option<Fact> {
         "StreamOpened" => Some(Fact::Opened {
             environment: row.environment.clone(),
         }),
-        "ConnectionEstablished" if row.schema_version == 2 => Some(Fact::Connected {
+        "ConnectionEstablished" => Some(Fact::Connected {
             connection: text("connection_id")?.to_owned(),
             account: text("account_ref")?.to_owned(),
         }),

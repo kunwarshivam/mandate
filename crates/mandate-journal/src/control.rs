@@ -94,6 +94,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || crate::records::CONTROL.contains(&event_type)
                 || crate::control_plane::CONTROL.contains(&event_type)
                 || crate::membership::CONTROL.contains(&event_type)
+                || crate::deployment::CONTROL.contains(&event_type)
         }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
@@ -135,6 +136,7 @@ pub(crate) fn payload(
         .or_else(|| crate::connections::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::records::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::control_plane::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::deployment::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::notices::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::membership::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
@@ -161,6 +163,7 @@ pub(crate) fn payload(
         causation_id,
     )?;
     crate::control_plane::rules(event_type, &payload, actor)?;
+    crate::deployment::rules(event_type, &payload, actor)?;
     crate::notices::rules(event_type, &payload, causation_id)?;
     crate::membership::rules(event_type, &payload, actor, event_time)?;
     let p = Payload(&payload);

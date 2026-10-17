@@ -2687,7 +2687,7 @@ enables `live` (ES-23, OPS-5).
   an agent the control stream does not deploy, and a property test over random event sequences
   with an independent oracle shows it; after the crash-loop bound the agent is left `Paused`, the
   pause is journaled and an opaque alert raised; it holds no broker credential and sends no order;
-  and its own outage stops no running process and no kill switch (OPS-4). *Slice 1* ([DEC-1170](decisions/DEC-1170.md)): journal spec v0.47 §9.20's records, the
+  and its own outage stops no running process and no kill switch (OPS-4). *Slice 1* ([DEC-1170](decisions/DEC-1170.md)): journal spec v0.48 §9.21's records, the
   crate's fold, driver, fake and Kubernetes adapter, with the property test. *Left:* the process
   binary (loop, probes, Postgres journal port, the resolver over stored mandates), the chart's
   templates, RBAC and Deployment, the Compose adapter, the restart drill through `cargo xtask cell

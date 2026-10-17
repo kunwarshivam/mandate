@@ -4,7 +4,7 @@
   policy, crash-loop bound, at most one writer), §3.6 (the kill-switch path), §8.2 (the crash-loop
   alert); [journal spec](../../../../docs/specs/journal.md) §5.2 (write before acting), §9.21 (the
   manager's three records, rules 165 to 168); DEC-1170.
-- **Code:** `crates/mandate-deploy-manager`. `src/control.rs` (`fact`: the control stream's
+- **Code:** `mandate-deploy-manager` (`crates/mandate-deploy-manager`). `src/control.rs` (`fact`: the control stream's
   deployments, stops and kill switches, and the manager's own records, through a `Resolver` for
   accounts), `src/manager.rs` (`Manager`: the fold, `desired`, `covers`, and `decide`, one step per
   slot; `backoff`), `src/record.rs` (`Record`: the §9.21 drafts with deterministic event ids),

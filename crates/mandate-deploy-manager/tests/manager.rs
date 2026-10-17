@@ -1035,3 +1035,51 @@ fn a_start_whose_agent_is_stopped_while_it_is_journaled_is_not_carried_out() {
     tick(&mut m, 2);
     assert!(m.orchestrator().fake.calls().is_empty());
 }
+
+#[test]
+fn a_second_agent_on_a_crash_looped_executors_account_leaves_it_paused() {
+    let journal = Journal::new();
+    let mut m = manager(
+        &journal,
+        accounts(&[
+            ("agent_a", "01J8Z2ACCT00000000000000A1"),
+            ("agent_b", "01J8Z2ACCT00000000000000A1"),
+        ]),
+    );
+    deploy(&journal, &mut m, "agent_a", 1);
+    let second = crash_loop_it(&mut m, &ex("01J8Z2ACCT00000000000000A1"), 2);
+    deploy(&journal, &mut m, "agent_b", second);
+    for s in second + 1..second + 400 {
+        tick(&mut m, s);
+    }
+    assert!(
+        m.manager.paused(&ex("01J8Z2ACCT00000000000000A1")),
+        "only every agent stopped ends it"
+    );
+    assert_eq!(starts(&mut m, &ex("01J8Z2ACCT00000000000000A1")).len(), 6);
+}
+
+#[test]
+fn a_deployment_the_resolver_cannot_read_during_the_pass_is_still_reported() {
+    let journal = Journal::new();
+    let resolver = accounts(&[
+        ("agent_a", "01J8Z2ACCT00000000000000A1"),
+        ("agent_b", "01J8Z2ACCT00000000000000A2"),
+    ]);
+    let outage = resolver.unavailable.clone();
+    let mut m = manager(&journal, resolver);
+    deploy(&journal, &mut m, "agent_a", 1);
+    m.orchestrator().fake.crash(&rt("agent_a"));
+    tick(&mut m, 2);
+    *outage.borrow_mut() = true;
+    journal.after_append.borrow_mut().push(deployed("agent_b"));
+    assert_eq!(
+        block_on(m.tick(at(3))),
+        Err(Halt::Resolver),
+        "the restart's re-read deferred it"
+    );
+    assert_eq!(starts(&mut m, &rt("agent_a")), vec![1, 2]);
+    *outage.borrow_mut() = false;
+    tick(&mut m, 4);
+    assert_eq!(starts(&mut m, &rt("agent_b")), vec![1]);
+}

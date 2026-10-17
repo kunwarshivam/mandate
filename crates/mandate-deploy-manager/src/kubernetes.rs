@@ -225,18 +225,43 @@ impl Kubernetes {
 
 impl Orchestrator for Kubernetes {
     async fn observe(&mut self) -> Result<Vec<Instance>, Unavailable> {
-        let _stub = (self.pods(), instance);
-        Err(Unavailable)
+        let selector = format!(
+            "{MANAGED_BY}={MANAGER},{WORKSPACE}={}",
+            hex16(&self.workspace)
+        );
+        let url = reqwest::Url::parse_with_params(&self.pods(), [("labelSelector", selector)])
+            .map_err(|_| Unavailable)?;
+        let (status, body) = self.send(Method::GET, url.to_string(), None).await?;
+        if status != StatusCode::OK {
+            return Err(Unavailable);
+        }
+        let list: Value = serde_json::from_slice(&body).map_err(|_| Unavailable)?;
+        list.get("items")
+            .and_then(Value::as_array)
+            .ok_or(Unavailable)?
+            .iter()
+            .map(instance)
+            .collect()
     }
 
     async fn start(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
-        let _stub = (self.pods(), instance);
-        Err(Unavailable)
+        let pod = self.manifest(slot, generation).ok_or(Unavailable)?;
+        let (status, _) = self.send(Method::POST, self.pods(), Some(&pod)).await?;
+        if status.is_success() || status == StatusCode::CONFLICT {
+            Ok(())
+        } else {
+            Err(Unavailable)
+        }
     }
 
     async fn stop(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
-        let _stub = (self.pods(), instance);
-        Err(Unavailable)
+        let url = format!("{}/{}", self.pods(), self.pod_name(slot, generation));
+        let (status, _) = self.send(Method::DELETE, url, None).await?;
+        if status.is_success() || status == StatusCode::NOT_FOUND {
+            Ok(())
+        } else {
+            Err(Unavailable)
+        }
     }
 }
 
