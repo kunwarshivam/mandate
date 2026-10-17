@@ -78,7 +78,6 @@ fn the_deployments_own_variables_pass_the_guard() {
             "postgresql://owlhead_api@localhost/owlhead?host=/var/run/postgresql",
         ),
         ("MANDATE_API_APP_ORIGIN", "https://app.owlhead.ai"),
-        ("MANDATE_API_SUBJECT_LINKS", "/etc/owlhead/subject-links"),
         ("MANDATE_VAULT_DIR", "/var/lib/owlhead/vault"),
         ("ALPACA_OAUTH_CLIENT_ID", "public-client-id"),
     ];

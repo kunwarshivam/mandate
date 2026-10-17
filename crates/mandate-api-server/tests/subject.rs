@@ -227,6 +227,21 @@ fn a_symlink_at_the_link_path_is_refused() {
     );
 }
 
+/// A hard link at the path is the same file, so the checks on that file are the ones that apply.
+#[test]
+fn a_hard_link_at_the_path_is_the_file_it_names() {
+    let target = links(&two(), 0o644);
+    let hard = target.with_file_name("hard");
+    fs::hard_link(&target, &hard).expect("a hard link");
+    assert_eq!(principal(&hard, ISSUER, ALICE), Ok(id(ALICE_ID)));
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o666)).expect("its mode");
+    assert_eq!(
+        principal(&hard, ISSUER, ALICE),
+        Err(LinkRefusal::Exposed),
+        "the file's own mode still refuses it"
+    );
+}
+
 /// DEC-1023: the server reads one fixed path, no setting.
 #[test]
 fn the_link_file_is_the_one_fixed_path() {

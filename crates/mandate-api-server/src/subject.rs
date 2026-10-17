@@ -1,11 +1,12 @@
 //! The subject link (§3.11 item 7, DEC-978 item 7): which user principal an identity-provider
-//! subject signs in as, read from a root-owned file of digests at each sign-in and refresh.
+//! subject signs in as, read from the root-owned file [`SUBJECT_LINKS`] at each sign-in and refresh
+//! (DEC-1023).
 //!
 //! Each line is `sha256:<64 lowercase hex> <principal ULID>`. The digest is SHA-256 over the
 //! canonical JSON of `{"issuer", "subject"}`, so no raw subject is stored and a subject of another
-//! issuer never maps. A file that is not a regular file, is writable by group or others, is owned
-//! by neither the process's user nor root, holds a malformed line, or names one digest twice is
-//! refused whole: no line of it is read.
+//! issuer never maps. A file that is not a regular file, is not itself at the path (a symlink
+//! there included), is writable by group or others, is owned by neither the process's user nor
+//! root, holds a malformed line, or names one digest twice is refused whole: no line of it is read.
 
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -31,7 +32,8 @@ const DIGEST_HEX: usize = 64;
 pub enum LinkRefusal {
     /// The file is absent, unreadable, or not a regular file.
     Unreadable,
-    /// The file is writable by group or others, or owned by another user.
+    /// The path does not itself name the file opened (a symlink there included), or the file is
+    /// writable by group or others, or owned by another user.
     Exposed,
     /// A line is not `sha256:<hex> <ULID>`.
     Malformed,
