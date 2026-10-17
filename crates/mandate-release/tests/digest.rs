@@ -62,7 +62,10 @@ fn the_digest_of_a_file_is_the_sha256_of_its_bytes() -> Result<(), Box<dyn std::
 fn a_missing_file_is_unreadable_and_names_no_path() {
     let path = scratch("missing");
     let refused = BuildDigest::of_file(&path);
-    assert_eq!(refused, Err(ReleaseError::Unreadable(io::ErrorKind::NotFound)));
+    assert_eq!(
+        refused,
+        Err(ReleaseError::Unreadable(io::ErrorKind::NotFound))
+    );
     if let Err(error) = refused {
         let text = error.to_string();
         assert!(!text.contains("mandate-release-missing"), "{text}");

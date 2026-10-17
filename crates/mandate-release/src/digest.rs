@@ -65,12 +65,10 @@ impl BuildDigest {
     }
 }
 
-#[cfg(target_os = "linux")]
+/// The file this process runs: `/proc/self/exe` on Linux, elsewhere the path it was started from.
 fn running_executable() -> Result<PathBuf, ReleaseError> {
-    Ok(PathBuf::from("/proc/self/exe"))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn running_executable() -> Result<PathBuf, ReleaseError> {
+    if cfg!(target_os = "linux") {
+        return Ok(PathBuf::from("/proc/self/exe"));
+    }
     std::env::current_exe().map_err(|error| ReleaseError::Unreadable(error.kind()))
 }
