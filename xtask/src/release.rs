@@ -16,6 +16,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -39,6 +40,25 @@ pub(crate) const BINARIES: [(&str, &str); 3] = [
 /// Where `release build` keeps its own target directory, apart from the workspace's, because its
 /// flags differ and would rebuild everything there.
 const TARGET_DIR: &str = "target/release-build";
+
+/// The only variables the build inherits, beside the ones it sets: the home directory, the
+/// terminal, and the network's proxy and certificate settings, which reach the registry and
+/// nothing the compiler sees. Everything else is cleared, above all what `cargo run` hands xtask
+/// itself (`CARGO_*`, `RUSTUP_TOOLCHAIN`), which changed the workspace crates' metadata hashes
+/// between two checkouts.
+const PASSED_ENV: [&str; 11] = [
+    "HOME",
+    "TERM",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "NO_PROXY",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CARGO_HTTP_CAINFO",
+];
 
 /// Where `release tools` installs the pinned tools.
 const TOOLS_DIR: &str = "target/release-tools";
@@ -253,22 +273,22 @@ pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
     .context("joining PATH")?;
     let target_dir = root.join(TARGET_DIR);
     let mut cargo = Command::new("cargo");
+    cargo.env_clear();
+    for name in PASSED_ENV {
+        if let Some(value) = env::var_os(name) {
+            cargo.env(name, value);
+        }
+    }
     cargo
         .current_dir(root)
         .args(build_args(&target_dir))
         .env("PATH", path)
+        .env("CARGO_HOME", &paths.cargo_home)
+        .env("RUSTUP_HOME", &paths.rustup_home)
         .env("RUSTFLAGS", rustflags(&paths))
         .env("SOURCE_DATE_EPOCH", &epoch)
         .env("CARGO_INCREMENTAL", "0")
-        .env(format!("CC_{}", TARGET.replace('-', "_")), TARGET_CC)
-        .env_remove("CARGO_ENCODED_RUSTFLAGS")
-        .env_remove("CARGO_BUILD_RUSTFLAGS")
-        .env_remove(format!(
-            "CARGO_TARGET_{}_RUSTFLAGS",
-            TARGET.replace('-', "_").to_uppercase()
-        ))
-        .env_remove("RUSTC_WRAPPER")
-        .env_remove("RUSTC_WORKSPACE_WRAPPER");
+        .env(format!("CC_{}", TARGET.replace('-', "_")), TARGET_CC);
     run(&mut cargo)?;
     let bin_out = out.join("bin");
     let sbom_out = out.join("sbom");
@@ -337,9 +357,12 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
         .to_owned())
 }
 
+/// Runs `command` with its stdout sent to stderr, so the build's stdout holds only its
+/// `digest=` line for `$GITHUB_OUTPUT`.
 fn run(command: &mut Command) -> Result<()> {
     eprintln!("    $ {command:?}");
     let status = command
+        .stdout(io::stderr())
         .status()
         .with_context(|| format!("starting {command:?}"))?;
     if !status.success() {
