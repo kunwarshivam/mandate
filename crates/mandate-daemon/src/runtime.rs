@@ -81,6 +81,9 @@ pub struct RuntimeProcess<S> {
     environment: Environment,
     agent: Option<StreamId>,
     control: Option<StreamId>,
+    /// The account stream the wiring names (DEC-2209): `None` reads none, and `Some(None)` is a
+    /// named account that makes no stream id, which stops the process at start.
+    account: Option<Option<StreamId>>,
     clock: Option<StreamId>,
     epoch: u64,
     /// The control stream's head when it was last handed whole while ready.
@@ -101,6 +104,10 @@ impl<S: Store> RuntimeProcess<S> {
         let deployment = &config.deployment;
         let stream = |kind: &str, rest: &str| StreamId::parse(&format!("{kind}:{rest}"));
         let workspace = deployment.workspace.0.as_str();
+        let account = wiring
+            .account
+            .as_deref()
+            .map(|account| stream("acct", &format!("{workspace}:{account}")));
         let mut this = Self {
             store,
             wiring,
@@ -109,13 +116,14 @@ impl<S: Store> RuntimeProcess<S> {
             environment: config.environment,
             agent: stream("agent", &format!("{workspace}:{}", deployment.agent.0)),
             control: stream("ctl", workspace),
+            account,
             clock: stream("clock", workspace),
             epoch: 0,
             control_handed: None,
             pending: None,
             written_at: now,
         };
-        if config.environment != Environment::Paper {
+        if config.environment != Environment::Paper || matches!(this.account, Some(None)) {
             this.lifecycle.observe(now, Lifecycled::Failed);
             return this;
         }
@@ -154,6 +162,10 @@ impl<S: Store> RuntimeProcess<S> {
                 }
                 Ran::Stopped => return this,
             }
+        }
+        if !this.fold_account() {
+            this.lifecycle.observe(now, Lifecycled::Failed);
+            return this;
         }
         this.hand(
             now,
@@ -200,7 +212,7 @@ impl<S: Store> RuntimeProcess<S> {
         {
             return alerts;
         }
-        if self.control_pass(now, &mut alerts) {
+        if self.control_pass(now, &mut alerts) && self.account_pass(now) {
             self.clock_pass(now, &mut alerts);
         }
         alerts
@@ -262,6 +274,28 @@ impl<S: Store> RuntimeProcess<S> {
             }
         }
         self.control_handed = Some(head);
+        true
+    }
+
+    /// The account stream's rows past the core's own head for it, each folded once, in journal
+    /// order, as the shell folds the account rows it commits (DEC-2209 items 3 to 5). The core acts
+    /// on them at the next input, the tick that follows: it settles its startup hold and journals any
+    /// change of mode then (MI-6). Whether the stream was read and every row folded, so the clock
+    /// pass may follow; a row the core cannot fold stops the process.
+    fn account_pass(&mut self, now: UtcNanos) -> bool {
+        let Some(Some(account)) = self.account.clone() else {
+            return true;
+        };
+        let Some(events) = self.store.rows(&account).and_then(|r| tailed(&r).ok()) else {
+            return false;
+        };
+        let head = self.state.head(account.as_str()).map_or(0, |seq| seq.0);
+        for event in events.iter().filter(|event| event.seq.0 > head) {
+            if fold(&mut self.state, event).is_err() {
+                self.lifecycle.observe(now, Lifecycled::Failed);
+                return false;
+            }
+        }
         true
     }
 
@@ -431,6 +465,21 @@ impl<S: Store> RuntimeProcess<S> {
 
     /// Folds `rows` of the agent stream into the core; the stream's head after them, or `None` for
     /// a row the core cannot fold.
+    /// The account stream folded after the agent stream and before `Input::Started`, as the shell
+    /// folds it, so the startup hold is taken with the broker's last known truth (DEC-2209 item 2).
+    /// Whether every row folded; with no account named there is nothing to fold.
+    fn fold_account(&mut self) -> bool {
+        let Some(Some(account)) = self.account.clone() else {
+            return true;
+        };
+        let Some(events) = self.store.rows(&account).and_then(|r| tailed(&r).ok()) else {
+            return false;
+        };
+        events
+            .iter()
+            .all(|event| fold(&mut self.state, event).is_ok())
+    }
+
     fn fold_rows(&mut self, rows: &[StoredEvent]) -> Option<u64> {
         for event in tailed(rows).ok()? {
             fold(&mut self.state, &event).ok()?;
