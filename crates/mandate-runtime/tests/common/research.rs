@@ -1,5 +1,6 @@
 //! The research loop's harness: the in-memory shell extended with a [`ResearchState`], the worker
-//! over recorded fixtures, a recorded gateway, the research agent's admission context, and an order
+//! over recorded fixtures, `mandate-gateway` over its recorded fake (the default in every test and
+//! CI job, with no network to any model provider), the research agent's admission context, and an order
 //! plan that sizes through the real `conviction_linear` builder and classifies through the real
 //! autonomy rules (`mandate-builder`), so a test runs bars and news to an ask with nothing faked
 //! between the thesis and the gate but the gate itself.
@@ -13,8 +14,22 @@ use mandate_builder::{
     ModelOutput as BuilderOutput, ModelVersion as BuilderVersion, RiskContext, SignalModel, Sizing,
     classify, propose,
 };
-use mandate_canon::{Digest, Value, parse};
+use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_domain::{AssetClass, AssetId as DomainAsset, AutonomyDecision, MarketSession};
+use mandate_gateway::fake::{Recorded, RecordedTransport};
+use mandate_gateway::guard::GuardContext;
+use mandate_gateway::meter::{Caps, DeploymentMeter, MemoryMeter, Meter, MeterStore, StoreError};
+use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
+use mandate_gateway::openrouter::OpenRouter;
+use mandate_gateway::policy::EndpointPolicy;
+use mandate_gateway::provider::{
+    Clock, Delivery, HttpRequest, ManualClock, NoKeys, ProviderKey, SecretError, SecretSource,
+    SequentialIds, Transport,
+};
+use mandate_gateway::registry::{
+    Endpoint, Identity, Locality, PinnedContent, Registry, Reported, Route, Snapshot, Status,
+};
+use mandate_gateway::{CallRecord, Gateway, Outcome, RateCaps, Settings};
 use mandate_num::{CostBasis, FeeRate, MarkPrice, Price, Qty, Signed, SizeFraction, Unit, Usd};
 use mandate_research::{
     AdmissionFacts, AllowlistVersion, AssetId, LineageState, MandateEnvelope, PolicyOverlay,
@@ -22,10 +37,10 @@ use mandate_research::{
     WorkingUniverse,
 };
 use mandate_research_run::{
-    Allowlist, Bar, BarReader, CallContext, CallOutcome, Filing, FilingReader, GatewayReply,
-    InstrumentFact, InstrumentReader, ItemId, ModelGateway, ModelPin, NewsItem, NewsReader,
-    OutputBounds, ReadError, Readers, ResearchCall, RetrievalPlan, Scope, SourceId, Symbol,
-    TextQuery, retrieve, settle,
+    Allowlist, Answer, Bar, BarReader, CallContext, CallPlan, Filing, FilingReader, GatewayParts,
+    InstrumentFact, InstrumentReader, ItemId, ModelPin, NewsItem, NewsReader, NoHostedTransport,
+    OutputBounds, ReadError, Readers, ResearchEntry, ResearchTransport, Retrieval, RetrievalPlan,
+    Scope, SourceId, Symbol, TextQuery, call, recorded_reply, research_gateway, retrieve,
 };
 use mandate_runtime::{
     ActiveThesis, ActorKind, Autonomy, Classified, DecisionClip, Effect, EventDraft, FoldedEvent,
@@ -57,6 +72,11 @@ const NEWS: &str = include_str!("../fixtures/research/news.json");
 const INSTRUMENTS: &str = include_str!("../fixtures/research/instruments.json");
 pub const RESPONSE_AAPL: &str = include_str!("../fixtures/research/response-aapl.json");
 pub const RESPONSE_INJECTION: &str = include_str!("../fixtures/research/response-injection.json");
+
+/// The wall-clock instant of `secs`, as the gateway's clock reads it.
+pub fn instant(secs: i64) -> UtcNanos {
+    at(secs)
+}
 
 fn at(secs: i64) -> UtcNanos {
     UtcNanos::from_parts(secs, 0).unwrap_or_else(|e| panic!("{secs} is an instant: {e}"))
@@ -99,14 +119,6 @@ fn price(text: &str) -> Price {
 
 fn usd(text: &str) -> Usd {
     Usd::parse(text).unwrap_or_else(|e| panic!("`{text}` is USD: {e}"))
-}
-
-pub fn pin() -> ModelPin {
-    ModelPin {
-        model_id: RESEARCH_MODEL.to_owned(),
-        model_version: "0.1.0".to_owned(),
-        content_hash: Digest::of(b"llm.research_agent:0.1.0"),
-    }
 }
 
 /// The recorded data plane: bars, news (one item off the allowlist, one injection, one known after
@@ -222,40 +234,316 @@ impl InstrumentReader for RecordedPlane {
     }
 }
 
-/// A gateway double that answers every call with one recorded outcome. `answer` builds it from the
-/// request, so a test can choose a reply, a failure, a late reply, or another identity.
-pub struct RecordedGateway<F: Fn(&ResearchCall) -> CallOutcome> {
-    pub answer: F,
-    pub calls: RefCell<Vec<ResearchCall>>,
-}
+/// The research entry's pinned model: one OpenRouter slug served by one upstream (DEC-997 item 2).
+pub const SLUG: &str = "anthropic/claude-sonnet-4.5";
+pub const UPSTREAM: &str = "anthropic";
+pub const REPORTED_PROVIDER: &str = "Anthropic";
+/// How long a recorded reply takes; the call's deadline is 120 s after dispatch.
+pub const LATENCY_MS: u64 = 30_000;
 
-impl<F: Fn(&ResearchCall) -> CallOutcome> ModelGateway for RecordedGateway<F> {
-    fn call(&self, request: &ResearchCall) -> CallOutcome {
-        self.calls.borrow_mut().push(request.clone());
-        (self.answer)(request)
+pub fn entry() -> ResearchEntry {
+    ResearchEntry {
+        model_id: RESEARCH_MODEL.to_owned(),
+        model_version: "0.1.0".to_owned(),
+        identity: Identity {
+            provider: "anthropic".to_owned(),
+            model_name: SLUG.to_owned(),
+            snapshot: Snapshot::Dated("claude-sonnet-4-5-20250929".to_owned()),
+            quantization: None,
+        },
+        deadline_ms: 120_000,
+        max_output_tokens: 4_096,
+        seed: Some(7),
+        plan: RetrievalPlan::v0_1(),
+        bounds: OutputBounds::v0_1(),
     }
 }
 
-/// An `ok` reply carrying `output`, from the pin, 30 seconds after dispatch.
-pub fn reply_with(request: &ResearchCall, output: &[u8]) -> GatewayReply {
-    GatewayReply {
-        call_id: request.call_id.clone(),
-        reported: request.model.clone(),
-        output: output.to_vec(),
-        request_digest: Digest::of(request.call_id.as_bytes()),
-        prompt_ref: Digest::of(b"prompt"),
-        response_ref: Digest::of(output),
-        cost_usd: usd("0.03"),
-        completed_at: at(request.deadline.secs().saturating_sub(90)),
+pub fn pin() -> ModelPin {
+    entry().content().model_ref()
+}
+
+fn endpoint() -> Endpoint {
+    let usd6 = |t: &str| Usd6::parse(t).unwrap_or_else(|e| panic!("{e}"));
+    Endpoint {
+        id: "openrouter:anthropic".to_owned(),
+        host: "openrouter.ai".to_owned(),
+        region: "us".to_owned(),
+        locality: Locality::Hosted,
+        route: Route {
+            upstream: UPSTREAM.to_owned(),
+            reported_provider: REPORTED_PROVIDER.to_owned(),
+        },
+        prices: PriceTable::new(
+            TokenPrice::per_million(usd6("3")),
+            TokenPrice::per_million(usd6("15")),
+            TokenPrice::per_million(usd6("0.3")),
+            Digest::of(b"openrouter anthropic price table 1"),
+        )
+        .unwrap_or_else(|e| panic!("{e}")),
     }
 }
 
-pub fn recorded<'a>(
-    output: &'a str,
-) -> RecordedGateway<impl Fn(&ResearchCall) -> CallOutcome + 'a> {
-    RecordedGateway {
-        answer: move |request: &ResearchCall| Ok(reply_with(request, output.as_bytes())),
-        calls: RefCell::new(Vec::new()),
+fn registry() -> Registry {
+    registry_of(entry().content())
+}
+
+/// An entry whose output schema also admits `predecessor_thesis_id`, as one would once §8.6 item
+/// 5 allows revisions, so a revision reaches the harness's own check.
+pub fn revisable_content() -> PinnedContent {
+    let mut content = entry().content();
+    content.model_version = "0.1.1".to_owned();
+    let schema =
+        String::from_utf8(to_canonical(&content.output_schema)).unwrap_or_else(|e| panic!("{e}"));
+    let thesis_text = r#""invalidation":{"max_length":2000,"type":"string"},"thesis":"#;
+    assert_eq!(schema.matches(thesis_text).count(), 1, "{schema}");
+    let widened = schema.replace(
+        thesis_text,
+        r#""invalidation":{"max_length":2000,"type":"string"},"predecessor_thesis_id":{"max_length":128,"type":"string"},"thesis":"#,
+    );
+    content.output_schema = parse(widened.as_bytes()).unwrap_or_else(|e| panic!("{e:?}"));
+    content
+}
+
+fn registry_of(content: PinnedContent) -> Registry {
+    let pin = content.model_ref();
+    let mut registry = Registry::new();
+    registry
+        .register(content)
+        .unwrap_or_else(|e| panic!("the research entry registers: {e}"));
+    let probe = Reported {
+        model: Some(SLUG.to_owned()),
+        provider: Some(REPORTED_PROVIDER.to_owned()),
+    };
+    registry
+        .add_endpoint(&pin, endpoint(), &[probe])
+        .unwrap_or_else(|e| panic!("{e}"));
+    registry
+        .set_status(&pin, Status::Offered)
+        .unwrap_or_else(|e| panic!("{e}"));
+    registry
+}
+
+/// What the model and the gateway do with the run's one call: the pinned model answers with this
+/// output, or the call ends with this outcome, produced the way the gateway itself produces it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Model {
+    Output(String),
+    Outcome(Outcome),
+    /// The pinned model's reply carrying this output, read after the call's deadline.
+    Late(String),
+    /// A reply carrying this output from a model other than the pin's (INF-2).
+    Impostor(String),
+    /// The pinned model's reply carrying this output, through [`revisable_content`]'s entry.
+    Revisable(String),
+}
+
+pub fn recorded(output: &str) -> Model {
+    Model::Output(output.to_owned())
+}
+
+pub fn failing(outcome: Outcome) -> Model {
+    Model::Outcome(outcome)
+}
+
+pub type TestGateway = Gateway<ResearchTransport<NoHostedTransport>, MemoryMeter, ManualClock>;
+
+fn usage() -> Usage {
+    Usage {
+        input: 2_000,
+        output: 300,
+        cached: 0,
+    }
+}
+
+/// The pinned model's reply carrying `output`.
+pub fn reply(output: &str) -> Vec<u8> {
+    recorded_reply(output, SLUG, REPORTED_PROVIDER, usage())
+}
+
+fn delivered(status: u16, body: Vec<u8>, latency_ms: u64) -> Recorded {
+    Recorded {
+        latency_ms,
+        delivery: Delivery::Response {
+            status,
+            body,
+            retry_after_ms: None,
+        },
+    }
+}
+
+/// The gateway over the recorded fake, its clock at `now`, set up to end the next call as `model`
+/// says. Only `credential_invalid` needs a vault with no key behind the hosted transport's place,
+/// which no default gateway has, so that one is built by hand.
+pub fn gateway_for(model: &Model, now: UtcNanos) -> TestGateway {
+    let mut recorded = RecordedTransport::new();
+    let mut caps = budget();
+    let mut policy = EndpointPolicy::new(
+        BTreeSet::from([Locality::Hosted]),
+        Some(BTreeSet::from([UPSTREAM.to_owned()])),
+        None,
+    );
+    let mut guard = GuardContext::default();
+    let mut rate = RateCaps {
+        per_workspace: 100,
+        per_agent: 100,
+    };
+    match model {
+        Model::Output(output) => recorded.script(vec![delivered(200, reply(output), LATENCY_MS)]),
+        Model::Revisable(output) => {
+            recorded.script(vec![delivered(200, reply(output), LATENCY_MS)])
+        }
+        Model::Late(output) => recorded.script(vec![delivered(200, reply(output), 200_000)]),
+        Model::Impostor(output) => recorded.script(vec![delivered(
+            200,
+            recorded_reply(output, "anthropic/claude-substitute", REPORTED_PROVIDER, usage()),
+            LATENCY_MS,
+        )]),
+        Model::Outcome(outcome) => match outcome {
+            Outcome::Ok => recorded.script(vec![delivered(
+                200,
+                reply(r#"{"invalidations":[],"theses":[]}"#),
+                LATENCY_MS,
+            )]),
+            Outcome::PolicyDenied => policy = EndpointPolicy::local_only(),
+            Outcome::BudgetExhausted => caps = Caps::new(Usd6::from_micros(1)),
+            Outcome::RateLimitedLocal => {
+                rate = RateCaps {
+                    per_workspace: 0,
+                    per_agent: 0,
+                }
+            }
+            Outcome::InputRejected => guard.account_identifiers = vec!["large caps".to_owned()],
+            Outcome::DeadlineExceeded => {
+                recorded.script(vec![delivered(200, reply("{}"), 200_000)])
+            }
+            Outcome::RateLimitedProvider => recorded.script(vec![Recorded {
+                latency_ms: 10,
+                delivery: Delivery::Response {
+                    status: 429,
+                    body: Vec::new(),
+                    retry_after_ms: Some(600_000),
+                },
+            }]),
+            Outcome::ContentRefused => recorded.script(vec![delivered(
+                200,
+                format!(
+                    r#"{{"choices":[{{"finish_reason":"content_filter","index":0,"message":{{"content":null,"role":"assistant"}}}}],"id":"gen-refused","model":"{SLUG}","provider":"{REPORTED_PROVIDER}","usage":{{"completion_tokens":0,"prompt_tokens":10}}}}"#
+                )
+                .into_bytes(),
+                LATENCY_MS,
+            )]),
+            Outcome::SchemaInvalid => {
+                recorded.script(vec![delivered(200, reply("not json"), LATENCY_MS)])
+            }
+            Outcome::IdentityMismatch => recorded.script(vec![delivered(
+                200,
+                recorded_reply(
+                    r#"{"invalidations":[],"theses":[]}"#,
+                    "anthropic/claude-other",
+                    REPORTED_PROVIDER,
+                    usage(),
+                ),
+                LATENCY_MS,
+            )]),
+            Outcome::ProviderUnavailable => recorded.script(
+                (0..3)
+                    .map(|_| Recorded {
+                        latency_ms: 10_000,
+                        delivery: Delivery::ConnectFailed,
+                    })
+                    .collect(),
+            ),
+            Outcome::ModelWithdrawn
+            | Outcome::MeterUnavailable
+            | Outcome::CredentialInvalid => {}
+        },
+    }
+    let mut meter = MemoryMeter::new();
+    if *model == Model::Outcome(Outcome::MeterUnavailable) {
+        meter.fail_with(Some(StoreError::Unavailable));
+    }
+    let parts = GatewayParts {
+        settings: Settings {
+            workspace_id: super::WORKSPACE.to_owned(),
+            policy,
+            guard,
+            rate,
+        },
+        registry: match model {
+            Model::Revisable(_) => registry_of(revisable_content()),
+            _ => registry(),
+        },
+        meter: Meter::new(meter, caps, deployment_meter()),
+        clock: ManualClock::at(now),
+        ids: Box::new(SequentialIds::starting_at(1 << 80)),
+    };
+    let mut gateway = if *model == Model::Outcome(Outcome::CredentialInvalid) {
+        Gateway::new(
+            parts.settings,
+            parts.registry,
+            Box::new(OpenRouter),
+            ResearchTransport::Recorded(recorded),
+            Box::new(NoKeys),
+            parts.meter,
+            parts.clock,
+            parts.ids,
+        )
+    } else {
+        research_gateway(
+            parts,
+            Box::new(NoKeys),
+            None::<NoHostedTransport>,
+            recorded,
+            UPSTREAM,
+        )
+        .0
+    };
+    if *model == Model::Outcome(Outcome::ModelWithdrawn) {
+        gateway.withdraw(&pin()).unwrap_or_else(|e| panic!("{e}"));
+    }
+    gateway
+}
+
+/// A call record for a call no run planned: what a stray or substituted answer looks like.
+pub fn stray_record(call_id: &str, world: &World) -> CallRecord {
+    let plan = CallPlan {
+        run_id: call_id.to_owned(),
+        call_id: call_id.to_owned(),
+        workspace_id: super::WORKSPACE.to_owned(),
+        agent_id: super::AGENT.to_owned(),
+        model: pin(),
+        as_of: at(CUT_OFF),
+        deadline_ms: 120_000,
+        max_output_tokens: 4_096,
+        observations: Vec::new(),
+    };
+    let retrieval = Retrieval {
+        cut_off: at(CUT_OFF),
+        items: Vec::new(),
+        drops: Vec::new(),
+    };
+    record_for(
+        &failing(Outcome::ProviderUnavailable),
+        &plan,
+        &retrieval,
+        world,
+        at(CUT_OFF),
+    )
+}
+
+/// The gateway's record of one call for `plan`, dispatched at `dispatched`, as `model` says.
+pub fn record_for(
+    model: &Model,
+    plan: &CallPlan,
+    retrieval: &Retrieval,
+    world: &World,
+    dispatched: UtcNanos,
+) -> CallRecord {
+    let mut gateway = gateway_for(model, dispatched);
+    match call(&mut gateway, plan, retrieval, world.call_context()) {
+        Ok((_, Answer::Recorded(record))) => record,
+        other => panic!("the test gateway records every call it is handed: {other:?}"),
     }
 }
 
@@ -505,15 +793,30 @@ impl Loop {
 }
 
 /// The worker's half of one run, as the shell's research task runs it: the start request's
-/// retrieval, the captured observations handed in, the call request's call, and its settled
-/// answer handed in. Returns the requests the core emitted on the way.
+/// retrieval, the captured observations handed in, the call request sent through the gateway at
+/// the run's cut-off, and the gateway's answer handed in at `answered_at`. Returns the requests the
+/// core emitted on the way.
 pub fn worker_run(
     lp: &mut Loop,
     now: RiskClock,
     ports: &Ports<'_>,
     world: &World,
     plane: &RecordedPlane,
-    gateway: &dyn ModelGateway,
+    model: &Model,
+    answered_at: RiskClock,
+) -> Vec<ResearchRequest> {
+    let mut gateway = gateway_for(model, at(now.secs()));
+    worker_run_on(lp, now, ports, world, plane, &mut gateway, answered_at)
+}
+
+/// [`worker_run`] through a gateway the caller built, whose clock is moved to the run's cut-off.
+pub fn worker_run_on<T: Transport, S: MeterStore, C: Clock>(
+    lp: &mut Loop,
+    now: RiskClock,
+    ports: &Ports<'_>,
+    world: &World,
+    plane: &RecordedPlane,
+    gateway: &mut Gateway<T, S, C>,
     answered_at: RiskClock,
 ) -> Vec<ResearchRequest> {
     let mut seen = Vec::new();
@@ -556,33 +859,37 @@ pub fn worker_run(
     else {
         return seen;
     };
-    let call = ResearchCall::build(&plan, &retrieval, world.call_context(), at(cut_off.secs()))
+    gateway.clock_mut().wait_until(at(cut_off.secs()));
+    let (_, answer) = call(gateway, &plan, &retrieval, world.call_context())
         .unwrap_or_else(|e| panic!("the call builds from its journaled items: {e}"));
-    let outcome = settle(&call, gateway.call(&call));
-    let called = lp.run(
-        ResearchInput::Called {
+    let input = match answer {
+        Answer::Recorded(record) => ResearchInput::Called {
             run_id,
             at: answered_at,
-            outcome,
+            record: Box::new(record),
         },
-        ports,
-        world,
-    );
+        Answer::Refused(error) => ResearchInput::Refused {
+            run_id,
+            at: answered_at,
+            error,
+        },
+    };
+    let called = lp.run(input, ports, world);
     seen.extend(called.requests.clone());
     seen
 }
 
-/// A whole run and its judging: the worker's run, then the poll that judges the committed call.
+/// A whole run: the worker's run, answered 30 seconds after the start, then a poll.
 pub fn full_run(
     lp: &mut Loop,
     now: RiskClock,
     ports: &Ports<'_>,
     world: &World,
     plane: &RecordedPlane,
-    gateway: &dyn ModelGateway,
+    model: &Model,
 ) {
     let answered = clock(now.secs().saturating_add(30));
-    worker_run(lp, now, ports, world, plane, gateway, answered);
+    worker_run(lp, now, ports, world, plane, model, answered);
     lp.run(
         ResearchInput::Poll(clock(now.secs().saturating_add(31))),
         ports,
@@ -824,4 +1131,87 @@ pub fn copy_admissions(lp: &Loop, world: &mut World) {
             world.admit(instrument);
         }
     }
+}
+
+/// The gateway's parts as a demo cell configures them: the research entry on its one OpenRouter
+/// endpoint, the $50 monthly cap, and a manual clock at `now`.
+pub fn demo_parts(now: UtcNanos) -> GatewayParts<MemoryMeter, ManualClock> {
+    GatewayParts {
+        settings: Settings {
+            workspace_id: super::WORKSPACE.to_owned(),
+            policy: EndpointPolicy::new(
+                BTreeSet::from([Locality::Hosted]),
+                Some(BTreeSet::from([UPSTREAM.to_owned()])),
+                None,
+            ),
+            guard: GuardContext::default(),
+            rate: RateCaps {
+                per_workspace: 100,
+                per_agent: 100,
+            },
+        },
+        registry: registry(),
+        meter: Meter::new(MemoryMeter::new(), budget(), deployment_meter()),
+        clock: ManualClock::at(now),
+        ids: Box::new(SequentialIds::starting_at(1 << 80)),
+    }
+}
+
+/// A transport replaying the pinned model's reply carrying `output`, once.
+pub fn scripted(output: &str) -> RecordedTransport {
+    let mut transport = RecordedTransport::new();
+    transport.script(vec![delivered(200, reply(output), LATENCY_MS)]);
+    transport
+}
+
+/// A key source holding one fixture key, never a real credential: the vault's stand-in.
+pub struct FixtureVault;
+
+pub const FIXTURE_KEY: &str = "fixture-key-not-a-secret-0001";
+
+impl SecretSource for FixtureVault {
+    fn provider_key(&self, upstream: &str) -> Result<ProviderKey, SecretError> {
+        if upstream == UPSTREAM {
+            Ok(ProviderKey::new(FIXTURE_KEY.to_owned()))
+        } else {
+            Err(SecretError::Missing)
+        }
+    }
+}
+
+/// A stand-in for the cell's hosted transport, with no network: it replays like the recorded fake
+/// and keeps every key it was handed, so a test can show which transport a call went through.
+#[derive(Default)]
+pub struct HostedDouble {
+    pub inner: RecordedTransport,
+    pub keys: Vec<String>,
+}
+
+impl Transport for HostedDouble {
+    fn send(
+        &mut self,
+        request: &HttpRequest,
+        key: Option<&ProviderKey>,
+        deadline: UtcNanos,
+        clock: &mut dyn Clock,
+    ) -> Delivery {
+        self.keys
+            .extend(key.map(|key| key.expose_secret().to_owned()));
+        self.inner.send(request, key, deadline, clock)
+    }
+}
+
+/// A workspace's monthly model budget for the tests, a setting (DEC-2207 item 1): $50 here.
+pub fn budget() -> Caps {
+    Caps::new(Usd6::dollars(50).unwrap_or_else(|e| panic!("{e}")))
+}
+
+/// A deployment meter of its own, with a cap far above any workspace's, so the tests meet only the
+/// workspace's caps (DEC-2207).
+pub fn deployment_meter() -> DeploymentMeter {
+    DeploymentMeter::new(
+        Box::new(MemoryMeter::new()),
+        Usd6::dollars(1_000_000).unwrap_or_else(|e| panic!("{e}")),
+        Box::new(SequentialIds::starting_at(1 << 100)),
+    )
 }

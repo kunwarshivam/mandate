@@ -1,25 +1,19 @@
 //! The one gateway call a run makes (§6.2 step 3, §10.1; inference spec §3), and how the harness
 //! treats each way it can fail (§7.3).
 
-use mandate_canon::{Digest, Value, parse};
+use std::collections::BTreeMap;
+
+use mandate_canon::{Int, Key, Object, Value, parse, to_canonical};
 use mandate_domain::AssetClass;
-use mandate_num::Usd;
+use mandate_gateway::meter::MeterStore;
+use mandate_gateway::provider::{Clock, Transport};
+use mandate_gateway::registry::ModelRef as ModelPin;
+use mandate_gateway::{CallRecord, CallRequest, Gateway, KeyOwner, Outcome, Purpose, RequestError};
 use mandate_time::UtcNanos;
 
 use crate::error::ResearchRunError;
 use crate::item::{ItemId, ItemKind, SourceId, Symbol};
 use crate::retrieve::Retrieval;
-
-/// The pinned identity of the research agent: id, version, and content hash (mandate spec §8.1,
-/// V-007). The content hash covers the template, the retrieval plan, the output bounds, the
-/// deadline, and the model (DEC-431 item 5), so a different value in any of them is a different
-/// pin.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ModelPin {
-    pub model_id: String,
-    pub model_version: String,
-    pub content_hash: Digest,
-}
 
 /// What the runtime core hands the worker once the run's observations are journaled: the ids and
 /// limits of the call, and the `ObservationRecorded` event id of each retrieved item, in the
@@ -161,40 +155,125 @@ impl ResearchCall {
     }
 }
 
-/// A gateway reply with outcome `ok` (inference spec §3.2): the model's bytes, the identity the
-/// provider reported, and the artifacts the shell stored.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GatewayReply {
-    pub call_id: String,
-    pub reported: ModelPin,
-    pub output: Vec<u8>,
-    pub request_digest: Digest,
-    pub prompt_ref: Digest,
-    pub response_ref: Digest,
-    pub cost_usd: Usd,
-    pub completed_at: UtcNanos,
+impl ResearchCall {
+    /// The gateway's request for this call (inference spec §3.1): the typed inputs rendered as one
+    /// canonical JSON text per template slot ([`crate::RESEARCH_INPUTS`]), never prompt text, and
+    /// the journaled observations as the retrieved context. The prompt itself is the gateway's to
+    /// render from the pinned template, inside data sections (§6.4).
+    ///
+    /// # Errors
+    /// [`ResearchRunError::InvalidId`] when an input cannot be written as canonical text.
+    pub fn request(&self) -> Result<CallRequest, ResearchRunError> {
+        Ok(CallRequest {
+            call_id: self.call_id.clone(),
+            workspace_id: self.workspace_id.clone(),
+            agent_id: Some(self.agent_id.clone()),
+            purpose: Purpose::Research,
+            model: self.model.clone(),
+            inputs: render_inputs(&self.inputs)?,
+            as_of: self.as_of,
+            deadline: self.deadline,
+            observations: self
+                .inputs
+                .items
+                .iter()
+                .map(|item| item.observation.clone())
+                .collect(),
+            key_owner: KeyOwner::Platform,
+            run_kind: None,
+            turns: Vec::new(),
+            tools: Vec::new(),
+            spend_ceiling: None,
+        })
+    }
 }
 
-/// Inference spec §3.3's error kinds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ErrorKind {
-    PolicyDenied,
-    BudgetExhausted,
-    RateLimitedLocal,
-    MeterUnavailable,
-    InputRejected,
-    ModelWithdrawn,
-    DeadlineExceeded,
-    ProviderUnavailable,
-    RateLimitedProvider,
-    CredentialInvalid,
-    ContentRefused,
-    SchemaInvalid,
-    IdentityMismatch,
+/// The typed inputs as the template's slots: `context`, `items`, and `memory`, each canonical JSON.
+///
+/// # Errors
+/// [`ResearchRunError::InvalidId`] when an input cannot be written as canonical text.
+pub fn render_inputs(inputs: &CallInputs) -> Result<BTreeMap<String, String>, ResearchRunError> {
+    let symbols = |list: &[Symbol]| {
+        Value::Array(
+            list.iter()
+                .map(|symbol| Value::Str(symbol.as_str().to_owned()))
+                .collect(),
+        )
+    };
+    let context = object(vec![
+        (
+            "asset_classes",
+            Value::Array(
+                inputs
+                    .asset_classes
+                    .iter()
+                    .map(|class| Value::Str(class.as_str().to_owned()))
+                    .collect(),
+            ),
+        ),
+        ("cut_off", Value::Str(inputs.cut_off.to_string())),
+        ("data_universe", symbols(&inputs.data_universe)),
+        ("description", Value::Str(inputs.description.clone())),
+        ("held", symbols(&inputs.held)),
+        (
+            "max_instruments",
+            Value::Int(
+                Int::new(u64::from(inputs.max_instruments))
+                    .ok_or(ResearchRunError::InvalidId { what: "inputs" })?,
+            ),
+        ),
+        ("working_universe", symbols(&inputs.working_universe)),
+    ])?;
+    let items = inputs
+        .items
+        .iter()
+        .map(|item| {
+            object(vec![
+                ("body", item.body.clone()),
+                ("item_id", Value::Str(item.item_id.as_str().to_owned())),
+                ("kind", Value::Str(item.kind.as_str().to_owned())),
+                ("observation", Value::Str(item.observation.clone())),
+                ("source", Value::Str(item.source.as_str().to_owned())),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let memory = inputs
+        .theses
+        .iter()
+        .map(|thesis| {
+            object(vec![
+                ("expires_at", Value::Str(thesis.expires_at.to_string())),
+                ("symbol", Value::Str(thesis.symbol.as_str().to_owned())),
+                ("thesis_id", Value::Str(thesis.thesis_id.clone())),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    [
+        ("context", context),
+        ("items", Value::Array(items)),
+        ("memory", Value::Array(memory)),
+    ]
+    .into_iter()
+    .map(|(name, value)| {
+        String::from_utf8(to_canonical(&value))
+            .map(|text| (name.to_owned(), text))
+            .map_err(|_| ResearchRunError::InvalidId { what: "inputs" })
+    })
+    .collect()
 }
 
-/// What the harness does about one failed call besides treating the output as missing, which it
-/// always does (HI-6, §7.3).
+/// A canonical object of `members`.
+fn object(members: Vec<(&str, Value)>) -> Result<Value, ResearchRunError> {
+    let mut out = Object::new();
+    for (name, value) in members {
+        let key = Key::new(name).map_err(|_| ResearchRunError::InvalidId { what: "inputs" })?;
+        out.insert(key, value);
+    }
+    Ok(Value::Object(out))
+}
+
+/// What the harness does about one call besides treating a failed call's output as missing, which
+/// it always does (HI-6, §7.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Treatment {
     /// Alert the operator with opaque text (rule 6).
@@ -205,72 +284,56 @@ pub struct Treatment {
     pub deadline_streak: bool,
 }
 
-impl ErrorKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::PolicyDenied => "policy_denied",
-            Self::BudgetExhausted => "budget_exhausted",
-            Self::RateLimitedLocal => "rate_limited_local",
-            Self::MeterUnavailable => "meter_unavailable",
-            Self::InputRejected => "input_rejected",
-            Self::ModelWithdrawn => "model_withdrawn",
-            Self::DeadlineExceeded => "deadline_exceeded",
-            Self::ProviderUnavailable => "provider_unavailable",
-            Self::RateLimitedProvider => "rate_limited_provider",
-            Self::CredentialInvalid => "credential_invalid",
-            Self::ContentRefused => "content_refused",
-            Self::SchemaInvalid => "schema_invalid",
-            Self::IdentityMismatch => "identity_mismatch",
-        }
-    }
-
-    /// §7.3's table. No kind is ever retried within the run: the gateway has already retried what
-    /// it may, and sampling again until something parses would select outputs (DEC-432 item 3).
-    pub fn treatment(self) -> Treatment {
-        Treatment {
-            alert_operator: matches!(
-                self,
-                Self::PolicyDenied
-                    | Self::CredentialInvalid
-                    | Self::MeterUnavailable
-                    | Self::InputRejected
-            ),
-            disable_research: self == Self::ModelWithdrawn,
-            deadline_streak: self == Self::DeadlineExceeded,
-        }
+/// §7.3's table over the gateway's outcomes. `ok` has no treatment. No outcome is ever retried
+/// within the run: the gateway has already retried what it may, and sampling again until something
+/// parses would select outputs (DEC-432 item 3).
+pub fn treatment(outcome: Outcome) -> Treatment {
+    Treatment {
+        alert_operator: matches!(
+            outcome,
+            Outcome::PolicyDenied
+                | Outcome::CredentialInvalid
+                | Outcome::MeterUnavailable
+                | Outcome::InputRejected
+        ),
+        disable_research: outcome == Outcome::ModelWithdrawn,
+        deadline_streak: outcome == Outcome::DeadlineExceeded,
     }
 }
 
-/// A failed call: its id, the kind, and when the answer arrived.
+/// The gateway's answer to one research call: its record, which the core journals whatever the
+/// outcome, or a request the gateway could not make at all, which has no record (inference spec
+/// §3.1).
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one answer per run, handed straight to the core; boxing the record buys nothing"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CallFailure {
-    pub call_id: String,
-    pub kind: ErrorKind,
-    pub completed_at: UtcNanos,
+pub enum Answer {
+    Recorded(CallRecord),
+    Refused(RequestError),
 }
 
-/// Exactly one of a reply or a typed failure (inference spec §3.2).
-pub type CallOutcome = Result<GatewayReply, CallFailure>;
-
-/// The gateway's answer re-checked against the request: a reply for another call, from another
-/// identity, or completed after the deadline is a failure here whatever the gateway said
-/// (INF-2, INF-3, caller side). A failure is passed through with the request's call id.
-pub fn settle(request: &ResearchCall, outcome: CallOutcome) -> CallOutcome {
-    let failure = |kind, completed_at| CallFailure {
-        call_id: request.call_id.clone(),
-        kind,
-        completed_at,
+/// The worker's call (§6.2 step 3): builds the call for `plan` over `retrieval` at the gateway's
+/// own clock, so the deadline is the dispatch instant plus `deadline_ms` (DEC-431 item 24), and
+/// sends it through the gateway, which renders, guards, reserves, calls, and validates.
+///
+/// # Errors
+/// [`ResearchRunError`] when the call cannot be built; nothing is then sent.
+pub fn call<T: Transport, S: MeterStore, C: Clock>(
+    gateway: &mut Gateway<T, S, C>,
+    plan: &CallPlan,
+    retrieval: &Retrieval,
+    context: CallContext,
+) -> Result<(ResearchCall, Answer), ResearchRunError> {
+    let dispatched_at = gateway.clock_mut().now();
+    let built = ResearchCall::build(plan, retrieval, context, dispatched_at)?;
+    let request = built.request()?;
+    let answer = match gateway.call(&request) {
+        Ok(record) => Answer::Recorded(record),
+        Err(error) => Answer::Refused(error),
     };
-    match outcome {
-        Ok(reply) if reply.call_id != request.call_id || reply.reported != request.model => {
-            Err(failure(ErrorKind::IdentityMismatch, reply.completed_at))
-        }
-        Ok(reply) if reply.completed_at > request.deadline => {
-            Err(failure(ErrorKind::DeadlineExceeded, reply.completed_at))
-        }
-        Ok(reply) => Ok(reply),
-        Err(failed) => Err(failure(failed.kind, failed.completed_at)),
-    }
+    Ok((built, answer))
 }
 
 /// `at` plus `ms` milliseconds, exactly.

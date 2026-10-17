@@ -5,16 +5,16 @@
 mod common;
 
 use common::research::{
-    AAPL, CUT_OFF, INTERVAL_S, Loop, MSFT, RESEARCH_MODEL, RESPONSE_AAPL, RecordedGateway,
-    RecordedPlane, World, full_run, pin, production_preconditions, recorded, reply_with,
-    worker_run,
+    AAPL, CUT_OFF, INTERVAL_S, Loop, MSFT, Model, RESEARCH_MODEL, RESPONSE_AAPL, RecordedPlane,
+    World, failing, full_run, pin, production_preconditions, record_for, recorded, worker_run,
 };
 use common::{
     ACCOUNT_STREAM, AllowGate, FixedPlan, TestIds, clock, event, ports, text, universe, with_clock,
 };
 use mandate_canon::Value;
+use mandate_gateway::{CallRecord, Outcome, RequestError};
 use mandate_research::{AssetId, WorkingUniverse};
-use mandate_research_run::{CallFailure, CallOutcome, ErrorKind, ModelPin, ResearchCall};
+use mandate_research_run::{CallPlan, ModelPin, Retrieval};
 use mandate_runtime::{
     ActiveThesis, Command, Effect, Input, Mode, ResearchInput, ResearchRequest, RiskClock,
     RuntimeError, WriterEpoch, handle,
@@ -54,19 +54,6 @@ fn cancels(step: &mandate_runtime::ResearchStep) -> Vec<String> {
         .collect()
 }
 
-fn failing(kind: ErrorKind) -> RecordedGateway<impl Fn(&ResearchCall) -> CallOutcome> {
-    RecordedGateway {
-        answer: move |request: &ResearchCall| {
-            Err(CallFailure {
-                call_id: request.call_id.clone(),
-                kind,
-                completed_at: request.as_of,
-            })
-        },
-        calls: std::cell::RefCell::new(Vec::new()),
-    }
-}
-
 fn payload_text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
@@ -97,7 +84,7 @@ fn no_run_starts_while_the_journal_cannot_record_the_verdicts() {
     world.preconditions = production_preconditions();
     assert!(
         !world.preconditions.hold(),
-        "mandate-journal registers neither record yet"
+        "mandate-journal registers no invalidation verdict yet (E19-5)"
     );
     let step = lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world);
     assert!(
@@ -105,6 +92,24 @@ fn no_run_starts_while_the_journal_cannot_record_the_verdicts() {
         "§6.2 preconditions: no run starts"
     );
     assert!(step.effects.is_empty());
+}
+
+/// The shell's catalogue reads `mandate-journal`'s own registration, never a constant: §9.19 closes
+/// the agent stream's `ModelInvocationRecorded` with its `verdicts` (E15-8, DEC-2201), and no
+/// invalidation verdict is registered until E19-5.
+#[test]
+fn the_journal_catalog_reads_mandate_journal_s_registration() {
+    use mandate_runtime::{JournalCatalog, RecordCatalog, ResearchRecord};
+    assert_eq!(
+        JournalCatalog.registers(ResearchRecord::CandidateVerdicts),
+        mandate_journal::closes(
+            "ModelInvocationRecorded",
+            1,
+            mandate_journal::StreamType::Agent
+        )
+    );
+    assert!(JournalCatalog.registers(ResearchRecord::CandidateVerdicts));
+    assert!(!JournalCatalog.registers(ResearchRecord::InvalidationVerdict));
 }
 
 #[test]
@@ -189,7 +194,7 @@ fn the_interval_counts_from_the_last_call() {
     boot(&mut lp, &ports);
     let world = World::open();
     let plane = RecordedPlane::load();
-    let gateway = failing(ErrorKind::ProviderUnavailable);
+    let gateway = failing(Outcome::ProviderUnavailable);
     worker_run(
         &mut lp,
         clock(CUT_OFF),
@@ -429,25 +434,52 @@ fn every_item_is_journaled_before_the_call_is_requested() {
             Some("2026-10-16T20:00:00.000000000Z"),
             "every observation's as_of is the run's cut-off"
         );
+        assert_ne!(
+            payload_text(&event.payload, "source"),
+            Some("src.anonymous_blog"),
+            "DEC-101: the source off the allowlist is never journaled or sent"
+        );
     }
-    let calls = gateway.calls.borrow();
-    assert_eq!(calls.len(), 1, "HI-8: one call per run");
-    assert_eq!(calls[0].model, pin());
-    assert!(
-        calls[0]
-            .inputs
-            .items
-            .iter()
-            .all(|item| item.item_id.as_str() != "nw-20261017-aapl-late"),
-        "HI-13: the item known after the cut-off is never sent"
+    let records = lp.events("ModelInvocationRecorded");
+    assert_eq!(records.len(), 1, "HI-8: one call per run");
+    let model = records[0]
+        .payload
+        .get("model")
+        .unwrap_or_else(|| panic!("the record names its model"));
+    assert_eq!(
+        payload_text(model, "model_id"),
+        Some(pin().model_id.as_str())
     );
+    assert_eq!(
+        payload_text(model, "content_hash"),
+        Some(format!("sha256:{}", pin().content_hash).as_str())
+    );
+    let named: Vec<&str> = records[0]
+        .payload
+        .get("observations")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let mut sorted = ids.clone();
+    sorted.sort();
+    assert_eq!(
+        named, sorted,
+        "rule 150: the retrieved context is the journaled observations, ascending"
+    );
+    let retrieval = mandate_research_run::retrieve(
+        &common::research::config().plan,
+        &world.scope(clock(CUT_OFF)),
+        plane.readers(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(retrieval.items.len(), ids.len());
     assert!(
-        calls[0]
-            .inputs
-            .items
-            .iter()
-            .all(|item| item.source.as_str() != "src.anonymous_blog"),
-        "DEC-101: the source off the allowlist is never sent"
+        retrieval.items.iter().all(|item| item
+            .item_id()
+            .is_ok_and(|id| id.as_str() != "nw-20261017-aapl-late")),
+        "HI-13: the item known after the cut-off is never sent"
     );
 }
 
@@ -474,13 +506,7 @@ fn an_empty_retrieval_ends_the_run_without_a_call() {
 
 #[test]
 fn a_failed_call_is_journaled_and_ends_the_run_with_no_output() {
-    for kind in [
-        ErrorKind::BudgetExhausted,
-        ErrorKind::DeadlineExceeded,
-        ErrorKind::SchemaInvalid,
-        ErrorKind::IdentityMismatch,
-        ErrorKind::PolicyDenied,
-    ] {
+    for kind in Outcome::ALL.into_iter().filter(|kind| *kind != Outcome::Ok) {
         let f = Fixture::new();
         let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
         let mut lp = Loop::new(1);
@@ -496,22 +522,26 @@ fn a_failed_call_is_journaled_and_ends_the_run_with_no_output() {
             &failing(kind),
         );
         let records = lp.events("ModelInvocationRecorded");
-        assert_eq!(records.len(), 1, "{}", kind.as_str());
+        assert_eq!(records.len(), 1, "{}", kind.code());
         assert_eq!(
             payload_text(&records[0].payload, "outcome"),
-            Some(kind.as_str())
+            Some(kind.code())
         );
         assert_eq!(
             payload_text(&records[0].payload, "purpose"),
             Some("research")
         );
+        assert_eq!(
+            records[0].payload.get("verdicts"),
+            Some(&Value::Array(Vec::new())),
+            "rule 151: no verdicts without an ok"
+        );
         assert!(
             lp.events("ModelOutputRecorded").is_empty(),
             "HI-6: {}",
-            kind.as_str()
+            kind.code()
         );
         assert!(lp.events("ThesisProposed").is_empty());
-        assert!(lp.events("CandidateVerdictsRecorded").is_empty());
         assert_eq!(lp.research.in_flight(), None);
     }
 }
@@ -530,7 +560,7 @@ fn an_operator_alert_is_opaque_and_follows_the_call_record() {
         &ports,
         &world,
         &plane,
-        &failing(ErrorKind::PolicyDenied),
+        &failing(Outcome::PolicyDenied),
     );
     let called = &lp.steps[2];
     let record = lp.events("ModelInvocationRecorded")[0].event_id.clone();
@@ -555,10 +585,10 @@ fn three_deadline_misses_in_a_row_alert_the_operator_once() {
     boot(&mut lp, &ports);
     let world = World::open();
     let plane = RecordedPlane::load();
-    let gateway = failing(ErrorKind::DeadlineExceeded);
+    let gateway = failing(Outcome::DeadlineExceeded);
     let mut alerts = Vec::new();
     for run in 0..4 {
-        let now = CUT_OFF + run * (i64::from(INTERVAL_S) + 100);
+        let now = CUT_OFF + run * (i64::from(INTERVAL_S) + 300);
         full_run(&mut lp, clock(now), &ports, &world, &plane, &gateway);
         let called = &lp.steps[lp.steps.len() - 2];
         alerts.push(
@@ -586,7 +616,7 @@ fn a_withdrawn_model_disables_research_for_its_pin() {
         &ports,
         &world,
         &plane,
-        &failing(ErrorKind::ModelWithdrawn),
+        &failing(Outcome::ModelWithdrawn),
     );
     let later = clock(CUT_OFF + 2 * i64::from(INTERVAL_S));
     assert!(starts(&lp.run(ResearchInput::Poll(later), &ports, &world)).is_empty());
@@ -602,7 +632,7 @@ fn a_withdrawn_model_disables_research_for_its_pin() {
 }
 
 #[test]
-fn an_admitted_thesis_is_judged_only_after_its_call_record_commits() {
+fn the_call_record_heads_the_judging_batch_and_carries_the_verdicts() {
     let f = Fixture::new();
     let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
     let mut lp = Loop::new(1);
@@ -624,41 +654,48 @@ fn an_admitted_thesis_is_judged_only_after_its_call_record_commits() {
         .last()
         .cloned()
         .unwrap_or_else(|| panic!("a step ran"));
-    let drafted: Vec<String> = called
+    let drafts: Vec<mandate_runtime::EventDraft> = called
         .effects
         .iter()
         .filter_map(|effect| match effect {
-            Effect::Journal(draft) => Some(draft.event_type.clone()),
+            Effect::Journal(draft) => Some(draft.clone()),
             _ => None,
         })
         .collect();
+    let types: Vec<&str> = drafts.iter().map(|d| d.event_type.as_str()).collect();
     assert_eq!(
-        drafted,
-        vec!["ModelInvocationRecorded"],
-        "§6.2 step 4 alone"
+        types,
+        vec![
+            "ModelInvocationRecorded",
+            "ThesisProposed",
+            "ModelOutputRecorded"
+        ],
+        "§6.2 steps 4 and 5 in one batch, the call record first (INF-10)"
     );
-    lp.run(ResearchInput::Poll(clock(CUT_OFF + 31)), &ports, &world);
-    let types = lp.types();
-    let record = types
-        .iter()
-        .position(|t| t == "ModelInvocationRecorded")
-        .unwrap_or_else(|| panic!("recorded"));
-    let thesis = types
-        .iter()
-        .position(|t| t == "ThesisProposed")
-        .unwrap_or_else(|| panic!("judged"));
-    assert!(
-        record < thesis,
-        "HI-2: the response is committed before anything reads it"
+    assert_eq!(drafts[1].causation_id.as_ref(), Some(&drafts[0].event_id));
+    assert_eq!(drafts[2].causation_id.as_ref(), Some(&drafts[1].event_id));
+    let verdicts = drafts[0]
+        .payload
+        .get("verdicts")
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    assert_eq!(verdicts.len(), 1, "HI-22: one verdict per candidate");
+    assert_eq!(
+        verdicts[0].get("candidate").and_then(Value::as_int),
+        Some(0)
+    );
+    assert_eq!(payload_text(&verdicts[0], "kind"), Some("thesis"));
+    assert_eq!(payload_text(&verdicts[0], "result"), Some("judged"));
+    assert_eq!(
+        payload_text(&drafts[0].payload, "prompt_ref"),
+        payload_text(&drafts[1].payload, "prompt_ref"),
+        "the thesis names the call's own prompt"
     );
     assert_eq!(
-        &types[thesis..],
-        &[
-            "ThesisProposed".to_owned(),
-            "ModelOutputRecorded".to_owned(),
-            "CandidateVerdictsRecorded".to_owned()
-        ]
+        payload_text(&drafts[0].payload, "response_ref"),
+        payload_text(&drafts[1].payload, "response_ref")
     );
+    assert_eq!(lp.research.in_flight(), None, "the run is done");
 }
 
 #[test]
@@ -743,24 +780,72 @@ fn judged_with(output: &str, world: &World) -> Loop {
     let mut lp = Loop::new(1);
     boot(&mut lp, &ports);
     let plane = RecordedPlane::load();
-    let owned = output.to_owned();
-    let gateway = RecordedGateway {
-        answer: move |request: &ResearchCall| Ok(reply_with(request, owned.as_bytes())),
-        calls: std::cell::RefCell::new(Vec::new()),
-    };
-    full_run(&mut lp, clock(CUT_OFF), &ports, world, &plane, &gateway);
+    full_run(
+        &mut lp,
+        clock(CUT_OFF),
+        &ports,
+        world,
+        &plane,
+        &recorded(output),
+    );
     lp
 }
 
+/// Every candidate's verdict, in response order: the harness's result, and for a thesis handed to
+/// admission its thesis record's (`admitted`, `renewed` for a lineage it continues, or the §8.5
+/// reason), and `judged` for an invalidation handed on.
 fn verdicts(lp: &Loop) -> Vec<String> {
-    lp.events("CandidateVerdictsRecorded")
-        .first()
-        .and_then(|event| event.payload.get("verdicts"))
+    let records = lp.events("ModelInvocationRecorded");
+    let Some(record) = records.first() else {
+        return Vec::new();
+    };
+    let mut theses = lp.shell.agent_journal.iter().filter(|event| {
+        matches!(
+            event.event_type.as_str(),
+            "ThesisProposed" | "ThesisRevised"
+        )
+    });
+    record
+        .payload
+        .get("verdicts")
         .and_then(Value::as_array)
         .unwrap_or_default()
         .iter()
-        .filter_map(|verdict| payload_text(verdict, "verdict").map(str::to_owned))
+        .map(|verdict| {
+            let result = payload_text(verdict, "result").unwrap_or_default();
+            if result != "judged" || payload_text(verdict, "kind") != Some("thesis") {
+                return result.to_owned();
+            }
+            let thesis = &theses
+                .next()
+                .unwrap_or_else(|| panic!("a judged thesis has its record"))
+                .payload;
+            if thesis.get("admitted") != Some(&Value::Bool(true)) {
+                return payload_text(thesis, "reason")
+                    .unwrap_or_default()
+                    .to_owned();
+            }
+            if payload_text(thesis, "lineage_id") == payload_text(thesis, "thesis_id") {
+                "admitted".to_owned()
+            } else {
+                "renewed".to_owned()
+            }
+        })
         .collect()
+}
+
+/// The judged call's record: its outcome and how many verdicts it carries.
+fn judged_record(lp: &Loop) -> (Option<String>, usize) {
+    let records = lp.events("ModelInvocationRecorded");
+    assert_eq!(records.len(), 1, "one record per call");
+    (
+        payload_text(&records[0].payload, "outcome").map(str::to_owned),
+        records[0]
+            .payload
+            .get("verdicts")
+            .and_then(Value::as_array)
+            .map_or(0, <[Value]>::len),
+    )
 }
 
 fn thesis(instrument: &str, evidence: &[&str], text: &str) -> String {
@@ -794,13 +879,6 @@ fn each_harness_check_refuses_with_its_own_reason_and_admits_nothing() {
             ),
             "forbidden_language",
         ),
-        (
-            thesis("AAPL", &[SERVICES, SUPPLY], "x").replace(
-                r#""evidence""#,
-                r#""predecessor_thesis_id":"01PRED","evidence""#,
-            ),
-            "revisions_not_enabled",
-        ),
     ];
     for (candidate, reason) in cases {
         let lp = judged_with(
@@ -814,6 +892,56 @@ fn each_harness_check_refuses_with_its_own_reason_and_admits_nothing() {
         );
         assert!(lp.events("ModelOutputRecorded").is_empty(), "{reason}");
     }
+}
+
+#[test]
+fn a_revision_a_schema_admits_is_still_refused_while_revisions_are_not_enabled() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let mut world = World::open();
+    if let Some(config) = world.config.as_mut() {
+        config.pin = common::research::revisable_content().model_ref();
+    }
+    let revision = thesis("AAPL", &[SERVICES, SUPPLY], "x").replace(
+        r#""evidence""#,
+        r#""predecessor_thesis_id":"01PRED","evidence""#,
+    );
+    let plane = RecordedPlane::load();
+    full_run(
+        &mut lp,
+        clock(CUT_OFF),
+        &ports,
+        &world,
+        &plane,
+        &Model::Revisable(format!(r#"{{"theses":[{revision}],"invalidations":[]}}"#)),
+    );
+    assert_eq!(
+        verdicts(&lp),
+        vec!["revisions_not_enabled".to_owned()],
+        "§6.5: the harness refuses a revision whatever the schema admits"
+    );
+    assert!(lp.events("ThesisProposed").is_empty());
+}
+
+#[test]
+fn a_revision_fails_the_pinned_schema_while_revisions_are_not_enabled() {
+    let world = World::open();
+    let revision = thesis("AAPL", &[SERVICES, SUPPLY], "x").replace(
+        r#""evidence""#,
+        r#""predecessor_thesis_id":"01PRED","evidence""#,
+    );
+    let lp = judged_with(
+        &format!(r#"{{"theses":[{revision}],"invalidations":[]}}"#),
+        &world,
+    );
+    assert_eq!(
+        judged_record(&lp),
+        (Some("schema_invalid".to_owned()), 0),
+        "DEC-1120 item 3: §6.5 refuses revisions until §8.6 item 5 allows them"
+    );
+    assert!(lp.events("ThesisProposed").is_empty());
 }
 
 #[test]
@@ -832,7 +960,7 @@ fn a_second_thesis_for_the_same_instrument_is_a_duplicate() {
 }
 
 #[test]
-fn an_invalidation_of_no_active_thesis_is_unknown_and_one_of_an_active_thesis_is_accepted() {
+fn an_invalidation_of_no_active_thesis_is_unknown_and_one_of_an_active_thesis_is_judged() {
     let mut world = World::open();
     world.active = vec![ActiveThesis {
         thesis_id: "01ACTIVE".to_owned(),
@@ -844,17 +972,52 @@ fn an_invalidation_of_no_active_thesis_is_unknown_and_one_of_an_active_thesis_is
     }];
     let lp = judged_with(
         &format!(
-            r#"{{"theses":[],"invalidations":[{{"thesis_id":"01NOPE","evidence":[]}},{{"thesis_id":"01ACTIVE","evidence":["{SERVICES}"]}}]}}"#
+            r#"{{"theses":[],"invalidations":[{{"thesis_id":"01NOPE","evidence":[]}},{{"thesis_id":"01ACTIVE","evidence":["{SERVICES}"]}},{{"thesis_id":"01ACTIVE2","evidence":[]}}]}}"#
         ),
         &world,
     );
     assert_eq!(
         verdicts(&lp),
-        vec!["unknown_thesis".to_owned(), "accepted".to_owned()]
+        vec![
+            "unknown_thesis".to_owned(),
+            "judged".to_owned(),
+            "unknown_thesis".to_owned()
+        ]
     );
+    let record = &lp.events("ModelInvocationRecorded")[0].payload;
+    let kinds: Vec<&str> = record
+        .get("verdicts")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|v| payload_text(v, "kind"))
+        .collect();
+    assert_eq!(kinds, vec!["invalidation"; 3]);
     assert!(
         lp.events("ModelOutputRecorded").is_empty(),
         "an invalidation never adds an output"
+    );
+}
+
+#[test]
+fn an_invalidation_citing_unretrieved_evidence_is_handed_on_for_e19_5_to_judge() {
+    let mut world = World::open();
+    world.active = vec![ActiveThesis {
+        thesis_id: "01ACTIVE".to_owned(),
+        lineage_id: "01ACTIVE".to_owned(),
+        revision: 0,
+        instrument: AssetId::new(MSFT).unwrap_or_else(|e| panic!("{e}")),
+        symbol: mandate_research_run::Symbol::new("MSFT").unwrap_or_else(|e| panic!("{e}")),
+        expires_at: clock(CUT_OFF + 86_400),
+    }];
+    let lp = judged_with(
+        r#"{"theses":[],"invalidations":[{"thesis_id":"01ACTIVE","evidence":["invented-id"]}]}"#,
+        &world,
+    );
+    assert_eq!(
+        verdicts(&lp),
+        vec!["judged".to_owned()],
+        "rule 151: unknown_evidence is a thesis's result only (DEC-1120 item 6)"
     );
 }
 
@@ -915,39 +1078,93 @@ fn a_full_universe_refuses_the_admission() {
 }
 
 #[test]
-fn an_output_the_harness_cannot_parse_is_journaled_as_rejected_with_no_candidates() {
+fn an_output_the_harness_cannot_read_is_recorded_with_no_verdicts_and_judges_nothing() {
     let world = World::open();
+    for (what, output) in [
+        (
+            "a conviction outside [-1, 1] the schema language cannot bound",
+            thesis("AAPL", &[SERVICES, SUPPLY], "x")
+                .replace(r#""0.6","confidence""#, r#""5","confidence""#),
+        ),
+        (
+            "text with a control character",
+            thesis("AAPL", &[SERVICES, SUPPLY], "a\\u0007b"),
+        ),
+    ] {
+        let lp = judged_with(
+            &format!(r#"{{"theses":[{output}],"invalidations":[]}}"#),
+            &world,
+        );
+        assert_eq!(judged_record(&lp), (Some("ok".to_owned()), 0), "{what}");
+        assert!(lp.events("ThesisProposed").is_empty(), "{what}");
+        assert!(lp.events("ModelOutputRecorded").is_empty(), "{what}");
+    }
     let lp = judged_with(
         r#"{"theses":[{"instrument":"AAPL"}],"invalidations":[]}"#,
         &world,
     );
-    let judged = lp.events("CandidateVerdictsRecorded");
-    assert_eq!(judged.len(), 1);
     assert_eq!(
-        payload_text(&judged[0].payload, "outcome"),
-        Some("output_rejected")
+        judged_record(&lp),
+        (Some("schema_invalid".to_owned()), 0),
+        "the gateway's schema refuses a partial thesis"
     );
-    assert!(verdicts(&lp).is_empty());
-    assert!(lp.events("ThesisProposed").is_empty());
+}
+
+/// Drives one run to its call request, folding everything back, and returns the run id, the call
+/// plan, and the retrieval.
+fn until_call(
+    lp: &mut Loop,
+    ports: &mandate_runtime::Ports<'_>,
+    world: &World,
+) -> (String, CallPlan, Retrieval) {
+    let plane = RecordedPlane::load();
+    let started = lp.run(ResearchInput::Poll(clock(CUT_OFF)), ports, world);
+    let Some(ResearchRequest::Start { run_id, cut_off }) = started.requests.first().cloned() else {
+        panic!("a run starts");
+    };
+    let retrieval = mandate_research_run::retrieve(
+        &common::research::config().plan,
+        &world.scope(cut_off),
+        plane.readers(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let items = retrieval
+        .items
+        .iter()
+        .map(|item| {
+            mandate_runtime::RetrievedObservation::capture(item, cut_off)
+                .unwrap_or_else(|e| panic!("{e}"))
+                .0
+        })
+        .collect();
+    let retrieved = lp.run(
+        ResearchInput::Retrieved {
+            run_id: run_id.clone(),
+            items,
+        },
+        ports,
+        world,
+    );
+    let Some(ResearchRequest::Call(plan)) = retrieved.requests.first().cloned() else {
+        panic!("a call is requested");
+    };
+    (run_id, plan, retrieval)
 }
 
 #[test]
-fn an_output_judged_under_another_pin_is_not_pinned() {
+fn an_answer_arriving_under_another_pin_is_recorded_and_judged_as_nothing() {
     let f = Fixture::new();
     let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
     let mut lp = Loop::new(1);
     boot(&mut lp, &ports);
     let mut world = World::open();
-    let plane = RecordedPlane::load();
-    let gateway = recorded(RESPONSE_AAPL);
-    worker_run(
-        &mut lp,
-        clock(CUT_OFF),
-        &ports,
+    let (run_id, plan, retrieval) = until_call(&mut lp, &ports, &world);
+    let record = record_for(
+        &recorded(RESPONSE_AAPL),
+        &plan,
+        &retrieval,
         &world,
-        &plane,
-        &gateway,
-        clock(CUT_OFF + 30),
+        common::research::instant(CUT_OFF),
     );
     if let Some(config) = world.config.as_mut() {
         config.pin = ModelPin {
@@ -955,17 +1172,24 @@ fn an_output_judged_under_another_pin_is_not_pinned() {
             ..pin()
         };
     }
-    let polled = lp.run(ResearchInput::Poll(clock(CUT_OFF + 31)), &ports, &world);
-    assert!(starts(&polled).is_empty());
-    let judged = lp.events("CandidateVerdictsRecorded");
-    assert_eq!(judged.len(), 1, "HI-22: the candidates are still journaled");
+    let step = lp.run(
+        ResearchInput::Called {
+            run_id,
+            at: clock(CUT_OFF + 30),
+            record: Box::new(record),
+        },
+        &ports,
+        &world,
+    );
+    assert!(starts(&step).is_empty());
     assert_eq!(
-        payload_text(&judged[0].payload, "outcome"),
-        Some("not_pinned")
+        judged_record(&lp),
+        (Some("ok".to_owned()), 0),
+        "the call is recorded, with no candidate judged"
     );
     assert!(
         lp.events("ThesisProposed").is_empty(),
-        "HI-17: the version in effect judges"
+        "HI-17: the version in effect judges, and it no longer runs this pin"
     );
     assert!(lp.events("ModelOutputRecorded").is_empty());
 }
@@ -1035,41 +1259,7 @@ fn a_late_answer_to_a_cancelled_run_is_journaled_and_never_used() {
     let mut lp = Loop::new(1);
     boot(&mut lp, &ports);
     let world = World::open();
-    let plane = RecordedPlane::load();
-    let gateway = recorded(RESPONSE_AAPL);
-    let requests = {
-        let started = lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world);
-        started.requests
-    };
-    let Some(ResearchRequest::Start { run_id, cut_off }) = requests.first().cloned() else {
-        panic!("a run starts");
-    };
-    let retrieval = mandate_research_run::retrieve(
-        &common::research::config().plan,
-        &world.scope(cut_off),
-        plane.readers(),
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
-    let items = retrieval
-        .items
-        .iter()
-        .map(|item| {
-            mandate_runtime::RetrievedObservation::capture(item, cut_off)
-                .unwrap_or_else(|e| panic!("{e}"))
-                .0
-        })
-        .collect();
-    let retrieved = lp.run(
-        ResearchInput::Retrieved {
-            run_id: run_id.clone(),
-            items,
-        },
-        &ports,
-        &world,
-    );
-    let Some(ResearchRequest::Call(plan)) = retrieved.requests.first().cloned() else {
-        panic!("a call is requested");
-    };
+    let (run_id, plan, retrieval) = until_call(&mut lp, &ports, &world);
     let past = lp.run(ResearchInput::Poll(clock(CUT_OFF + 500)), &ports, &world);
     assert_eq!(cancels(&past), vec![run_id.clone()]);
     lp.run(
@@ -1080,29 +1270,42 @@ fn a_late_answer_to_a_cancelled_run_is_journaled_and_never_used() {
         &ports,
         &world,
     );
-    let call = ResearchCall::build(
+    let record = record_for(
+        &recorded(RESPONSE_AAPL),
         &plan,
         &retrieval,
-        world.call_context(),
-        mandate_time::UtcNanos::EPOCH,
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
-    let outcome = mandate_research_run::settle(
-        &call,
-        mandate_research_run::ModelGateway::call(&gateway, &call),
+        &world,
+        common::research::instant(CUT_OFF + 400),
+    );
+    let mut other = record.clone();
+    other.call_id = mandate_canon::encode_ulid(1 << 99);
+    let substituted = lp.step(
+        ResearchInput::Called {
+            run_id: run_id.clone(),
+            at: clock(CUT_OFF + 600),
+            record: Box::new(other),
+        },
+        &ports,
+        &world,
+    );
+    assert!(
+        matches!(substituted, Err(RuntimeError::NotInterpreted { .. })),
+        "a record of another call is not the cancelled call's"
     );
     lp.run(
         ResearchInput::Called {
             run_id,
             at: clock(CUT_OFF + 600),
-            outcome,
+            record: Box::new(record),
         },
         &ports,
         &world,
     );
-    let records = lp.events("ModelInvocationRecorded");
-    assert_eq!(records.len(), 1, "§5.3: the record of the call is complete");
-    assert_eq!(records[0].payload.get("used"), Some(&Value::Bool(false)));
+    assert_eq!(
+        judged_record(&lp),
+        (Some("ok".to_owned()), 0),
+        "§5.3: the record of the call is complete, and nothing in it is used"
+    );
     lp.run(ResearchInput::Poll(clock(CUT_OFF + 601)), &ports, &world);
     assert!(lp.events("ThesisProposed").is_empty());
     assert!(lp.events("ModelOutputRecorded").is_empty());
@@ -1130,11 +1333,10 @@ fn a_cancellation_before_dispatch_forgets_the_run() {
         ResearchInput::Called {
             run_id: started[0].0.clone(),
             at: clock(CUT_OFF + 2),
-            outcome: Err(CallFailure {
-                call_id: "x".to_owned(),
-                kind: ErrorKind::ProviderUnavailable,
-                completed_at: mandate_time::UtcNanos::EPOCH,
-            }),
+            record: Box::new(common::research::stray_record(
+                &mandate_canon::encode_ulid(1 << 98),
+                &world,
+            )),
         },
         &ports,
         &world,
@@ -1218,10 +1420,48 @@ fn a_restart_restores_the_schedule_and_never_judges_the_lost_run() {
         starts(&polled).is_empty(),
         "the interval still counts from the call"
     );
-    assert!(
-        restarted.events("ThesisProposed").is_empty(),
-        "§5.4: not judged after the restart"
+    assert_eq!(
+        restarted.events("ThesisProposed").len(),
+        1,
+        "judged once, in the call's own step, and never again after the restart"
     );
+}
+
+#[test]
+fn a_run_lost_to_a_restart_never_takes_its_late_answer() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    let (run_id, plan, retrieval) = until_call(&mut lp, &ports, &world);
+    let (shell, _) = lp.shell.restart(&ports);
+    let mut restarted = Loop {
+        shell,
+        research: mandate_runtime::ResearchState::new(),
+        steps: Vec::new(),
+    };
+    let record = record_for(
+        &recorded(RESPONSE_AAPL),
+        &plan,
+        &retrieval,
+        &world,
+        common::research::instant(CUT_OFF),
+    );
+    let late = restarted.step(
+        ResearchInput::Called {
+            run_id,
+            at: clock(CUT_OFF + 30),
+            record: Box::new(record),
+        },
+        &ports,
+        &world,
+    );
+    assert!(
+        matches!(late, Err(RuntimeError::NotInterpreted { .. })),
+        "§5.4: a run in flight is lost with its process"
+    );
+    assert!(restarted.events("ModelInvocationRecorded").is_empty());
 }
 
 #[test]
@@ -1252,7 +1492,7 @@ fn drift_folds_each_text_item_once() {
     boot(&mut lp, &ports);
     let world = World::open();
     let plane = RecordedPlane::load();
-    let gateway = failing(ErrorKind::ProviderUnavailable);
+    let gateway = failing(Outcome::ProviderUnavailable);
     full_run(&mut lp, clock(CUT_OFF), &ports, &world, &plane, &gateway);
     let first = lp
         .research
@@ -1341,54 +1581,99 @@ fn an_unresolved_append_blocks_research_until_the_same_input_retries() {
     assert_eq!(retried, first, "the same drafts and the same call request");
 }
 
-fn rejection(lp: &Loop) -> (Option<String>, Option<String>) {
-    let judged = lp.events("CandidateVerdictsRecorded");
+fn rejected(lp: &Loop) {
     assert_eq!(
-        judged.len(),
-        1,
-        "HI-22: one verdict record per committed call"
-    );
-    (
-        payload_text(&judged[0].payload, "outcome").map(str::to_owned),
-        payload_text(&judged[0].payload, "rejection").map(str::to_owned),
-    )
-}
-
-#[test]
-fn a_blank_invalidation_rejects_the_output_with_a_verdict_record() {
-    let world = World::open();
-    let blank = thesis("AAPL", &[SERVICES, SUPPLY], "x").replace("It stops.", "   ");
-    let lp = judged_with(
-        &format!(r#"{{"theses":[{blank}],"invalidations":[]}}"#),
-        &world,
-    );
-    assert_eq!(
-        rejection(&lp),
-        (Some("output_rejected".to_owned()), Some("range".to_owned()))
-    );
-    assert!(lp.events("ThesisProposed").is_empty());
-}
-
-#[test]
-fn a_candidate_the_platform_cannot_fill_rejects_the_output_with_a_verdict_record() {
-    let mut world = World::open();
-    if let Some(config) = world.config.as_mut() {
-        config.pin.model_id = String::new();
-    }
-    let lp = judged_with(RESPONSE_AAPL, &world);
-    assert_eq!(
-        rejection(&lp),
-        (
-            Some("output_rejected".to_owned()),
-            Some("unfillable_candidate".to_owned())
-        )
+        judged_record(lp),
+        (Some("ok".to_owned()), 0),
+        "HI-6: the call is recorded and nothing is judged"
     );
     assert!(lp.events("ThesisProposed").is_empty());
     assert!(lp.events("ModelOutputRecorded").is_empty());
 }
 
 #[test]
-fn a_snapshot_the_platform_cannot_read_rejects_the_output_with_a_verdict_record() {
+fn a_blank_invalidation_is_judged_as_nothing() {
+    let world = World::open();
+    let blank = thesis("AAPL", &[SERVICES, SUPPLY], "x").replace("It stops.", "   ");
+    let lp = judged_with(
+        &format!(r#"{{"theses":[{blank}],"invalidations":[]}}"#),
+        &world,
+    );
+    rejected(&lp);
+}
+
+#[test]
+fn a_pin_the_gateway_does_not_hold_ends_the_run_and_disables_research_for_it() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let mut world = World::open();
+    if let Some(config) = world.config.as_mut() {
+        config.pin.model_version = "0.9.0".to_owned();
+    }
+    let plane = RecordedPlane::load();
+    full_run(
+        &mut lp,
+        clock(CUT_OFF),
+        &ports,
+        &world,
+        &plane,
+        &recorded(RESPONSE_AAPL),
+    );
+    assert!(
+        lp.events("ModelInvocationRecorded").is_empty(),
+        "inference spec §3.1: a request the gateway cannot make has no record"
+    );
+    assert_eq!(lp.research.in_flight(), None, "HI-6: the run ends");
+    let later = clock(CUT_OFF + 2 * i64::from(INTERVAL_S));
+    assert!(
+        starts(&lp.run(ResearchInput::Poll(later), &ports, &world)).is_empty(),
+        "the same refusal would repeat, so research waits for a new version"
+    );
+    if let Some(config) = world.config.as_mut() {
+        config.pin = pin();
+    }
+    let repinned = lp.run(ResearchInput::Poll(clock(later.secs() + 1)), &ports, &world);
+    assert_eq!(starts(&repinned).len(), 1);
+}
+
+#[test]
+fn a_refusal_for_a_run_not_in_flight_is_refused() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    let stray = lp.step(
+        ResearchInput::Refused {
+            run_id: "01NORUN".to_owned(),
+            at: clock(CUT_OFF),
+            error: RequestError::UnknownModel,
+        },
+        &ports,
+        &world,
+    );
+    assert!(matches!(stray, Err(RuntimeError::NotInterpreted { .. })));
+    let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
+    let early = lp.step(
+        ResearchInput::Refused {
+            run_id: started[0].0.clone(),
+            at: clock(CUT_OFF + 1),
+            error: RequestError::UnknownModel,
+        },
+        &ports,
+        &world,
+    );
+    assert!(
+        matches!(early, Err(RuntimeError::NotInterpreted { .. })),
+        "a refusal before a call was requested"
+    );
+    assert_eq!(lp.research.in_flight(), Some(started[0].0.as_str()));
+}
+
+#[test]
+fn a_snapshot_the_platform_cannot_read_is_judged_as_nothing() {
     let f = Fixture::new();
     let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
     let mut lp = Loop::new(1);
@@ -1406,13 +1691,7 @@ fn a_snapshot_the_platform_cannot_read_rejects_the_output_with_a_verdict_record(
         &plane,
         &recorded(RESPONSE_AAPL),
     );
-    assert_eq!(
-        rejection(&lp),
-        (
-            Some("output_rejected".to_owned()),
-            Some("unreadable_snapshot".to_owned())
-        )
-    );
+    rejected(&lp);
 }
 
 #[test]
@@ -1485,100 +1764,141 @@ fn an_empty_retrieval_holds_the_interval_like_a_call() {
 }
 
 /// Drives one run through its call by hand, without folding anything back, and returns the run id.
+/// Drives one run through its call by hand, without folding the call's step back, and returns the
+/// run id and that step's drafts.
 fn called_unfolded(
     lp: &mut Loop,
     ports: &mandate_runtime::Ports<'_>,
     world: &World,
-    outcome: impl Fn(&ResearchCall) -> CallOutcome,
-) -> (String, Vec<mandate_runtime::EventDraft>) {
-    let plane = RecordedPlane::load();
-    let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), ports, world));
-    let run_id = started[0].0.clone();
-    let retrieval = mandate_research_run::retrieve(
-        &common::research::config().plan,
-        &world.scope(clock(CUT_OFF)),
-        plane.readers(),
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
-    let items = retrieval
-        .items
-        .iter()
-        .map(|item| {
-            mandate_runtime::RetrievedObservation::capture(item, clock(CUT_OFF))
-                .unwrap_or_else(|e| panic!("{e}"))
-                .0
-        })
-        .collect();
-    let retrieved = lp.run(
-        ResearchInput::Retrieved {
-            run_id: run_id.clone(),
-            items,
-        },
-        ports,
-        world,
-    );
-    let Some(ResearchRequest::Call(plan)) = retrieved.requests.first().cloned() else {
-        panic!("a call is requested");
-    };
-    let call = ResearchCall::build(
+    model: &Model,
+    change: impl Fn(&mut CallRecord),
+) -> (
+    String,
+    Result<Vec<mandate_runtime::EventDraft>, RuntimeError>,
+) {
+    let (run_id, plan, retrieval) = until_call(lp, ports, world);
+    let mut record = record_for(
+        model,
         &plan,
         &retrieval,
-        world.call_context(),
-        mandate_time::UtcNanos::EPOCH,
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
-    let answer = outcome(&call);
+        world,
+        common::research::instant(CUT_OFF),
+    );
+    change(&mut record);
     let step = mandate_runtime::handle_research(
         &mut lp.shell.state,
         &mut lp.research,
         ResearchInput::Called {
             run_id: run_id.clone(),
             at: clock(CUT_OFF + 30),
-            outcome: answer,
+            record: Box::new(record),
         },
         ports,
         &world.context(),
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
-    let drafts = step
-        .effects
-        .into_iter()
-        .filter_map(|effect| match effect {
-            Effect::Journal(draft) => Some(draft),
-            _ => None,
-        })
-        .collect();
+    );
+    let drafts = step.map(|step| {
+        step.effects
+            .into_iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) => Some(draft),
+                _ => None,
+            })
+            .collect()
+    });
     (run_id, drafts)
 }
 
 #[test]
-fn the_core_re_checks_the_answer_s_call_and_identity_whatever_the_worker_did() {
-    for change in 0..2 {
+fn the_core_refuses_a_record_of_another_call_identity_or_context() {
+    for change in 0..6 {
         let f = Fixture::new();
         let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
         let mut lp = Loop::new(1);
         boot(&mut lp, &ports);
         let world = World::open();
-        let (_, drafts) = called_unfolded(&mut lp, &ports, &world, |call| {
-            let mut reply = reply_with(call, RESPONSE_AAPL.as_bytes());
-            if change == 0 {
-                reply.reported.model_version = "9.9.9".to_owned();
-            } else {
-                reply.call_id = "01SOMEOTHERCALL".to_owned();
-            }
-            Ok(reply)
-        });
-        assert_eq!(drafts.len(), 1, "the call record alone");
-        assert_eq!(
-            payload_text(&drafts[0].payload, "outcome"),
-            Some("identity_mismatch"),
-            "change {change}"
+        let (run_id, drafts) = called_unfolded(
+            &mut lp,
+            &ports,
+            &world,
+            &recorded(RESPONSE_AAPL),
+            |record| match change {
+                0 => record.model.model_version = "9.9.9".to_owned(),
+                1 => record.call_id = mandate_canon::encode_ulid(1 << 97),
+                2 => record.purpose = mandate_gateway::Purpose::LlmSignal,
+                3 => record.agent_id = Some("agent-b".to_owned()),
+                4 => {
+                    record.observations.pop();
+                }
+                _ => record.model.content_hash = mandate_canon::Digest::of(b"other"),
+            },
+        );
+        assert!(
+            matches!(drafts, Err(RuntimeError::NotInterpreted { .. })),
+            "change {change}: never journaled as this run's call"
         );
         assert_eq!(
             lp.research.in_flight(),
-            None,
-            "a substituted answer ends the run unjudged"
+            Some(run_id.as_str()),
+            "change {change}: the run waits for its own call's record, or its bound"
         );
+    }
+}
+
+#[test]
+fn an_ok_record_past_its_deadline_is_recorded_and_never_judged() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    let (_, drafts) = called_unfolded(
+        &mut lp,
+        &ports,
+        &world,
+        &recorded(RESPONSE_AAPL),
+        |record| {
+            record.completed_at = mandate_time::UtcNanos::from_parts(
+                record.deadline.secs(),
+                record.deadline.nanos() + 1,
+            )
+            .unwrap_or_else(|e| panic!("{e}"));
+        },
+    );
+    let drafts = drafts.unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(drafts.len(), 1, "the call record alone (INF-3)");
+    assert_eq!(drafts[0].event_type, "ModelInvocationRecorded");
+    assert_eq!(
+        drafts[0].payload.get("verdicts"),
+        Some(&Value::Array(Vec::new()))
+    );
+    assert_eq!(lp.research.in_flight(), None);
+}
+
+#[test]
+fn a_record_completed_after_the_run_s_bound_is_never_judged_whatever_its_deadline() {
+    for (completed, judged) in [(CUT_OFF + 60 + 120, true), (CUT_OFF + 60 + 120 + 1, false)] {
+        let f = Fixture::new();
+        let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &ports);
+        let world = World::open();
+        let (_, drafts) = called_unfolded(
+            &mut lp,
+            &ports,
+            &world,
+            &recorded(RESPONSE_AAPL),
+            |record| {
+                record.deadline = common::research::instant(CUT_OFF + 86_400);
+                record.completed_at = common::research::instant(completed);
+            },
+        );
+        let drafts = drafts.unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            drafts.len() > 1,
+            judged,
+            "§7.1: completed at {completed}, the bound is the start plus 60 s plus 120 s"
+        );
+        assert_eq!(drafts[0].event_type, "ModelInvocationRecorded");
     }
 }
 
@@ -1589,54 +1909,39 @@ fn the_schedule_counts_from_an_answer_before_its_record_folds_back() {
     let mut lp = Loop::new(1);
     boot(&mut lp, &ports);
     let world = World::open();
-    called_unfolded(&mut lp, &ports, &world, |call| {
-        Err(CallFailure {
-            call_id: call.call_id.clone(),
-            kind: ErrorKind::ProviderUnavailable,
-            completed_at: call.as_of,
-        })
-    });
+    let (_, drafts) = called_unfolded(
+        &mut lp,
+        &ports,
+        &world,
+        &failing(Outcome::ProviderUnavailable),
+        |_| {},
+    );
+    assert!(drafts.is_ok());
     assert_eq!(lp.research.last_call(), Some(clock(CUT_OFF + 30)));
 }
 
 #[test]
-fn a_call_record_that_never_folds_back_frees_the_loop_after_the_bound() {
+fn an_ok_record_is_judged_in_its_own_step_before_anything_folds_back() {
     let f = Fixture::new();
     let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
     let mut lp = Loop::new(1);
     boot(&mut lp, &ports);
     let world = World::open();
-    let (run_id, drafts) = called_unfolded(&mut lp, &ports, &world, |call| {
-        Ok(reply_with(call, RESPONSE_AAPL.as_bytes()))
-    });
-    for event in drafts {
-        let seq = lp.shell.head().0 + 1;
-        let stored = mandate_runtime::FoldedEvent {
-            stream: common::AGENT_STREAM.to_owned(),
-            seq: mandate_runtime::Seq(seq),
-            event_id: event.event_id.clone(),
-            event_type: event.event_type.clone(),
-            causation_id: event.causation_id.clone(),
-            actor: mandate_runtime::ActorKind::Agent,
-            payload: event.payload.clone(),
-        };
-        lp.shell.agent_journal.push(stored.clone());
-        mandate_runtime::fold(&mut lp.shell.state, &stored).unwrap_or_else(|e| panic!("{e}"));
-    }
-    let bound = CUT_OFF + 60 + 120;
-    lp.run(ResearchInput::Poll(clock(bound)), &ports, &world);
+    let (_, drafts) = called_unfolded(&mut lp, &ports, &world, &recorded(RESPONSE_AAPL), |_| {});
+    let types: Vec<String> = drafts
+        .unwrap_or_else(|e| panic!("{e}"))
+        .into_iter()
+        .map(|draft| draft.event_type)
+        .collect();
     assert_eq!(
-        lp.research.in_flight(),
-        Some(run_id.as_str()),
-        "within the bound it waits"
+        types,
+        vec![
+            "ModelInvocationRecorded".to_owned(),
+            "ThesisProposed".to_owned(),
+            "ModelOutputRecorded".to_owned()
+        ]
     );
-    lp.run(ResearchInput::Poll(clock(bound + 1)), &ports, &world);
-    assert_eq!(
-        lp.research.in_flight(),
-        None,
-        "past the bound the unfolded record is given up"
-    );
-    assert!(lp.events("ThesisProposed").is_empty());
+    assert_eq!(lp.research.in_flight(), None);
 }
 
 fn booted() -> (Fixture, World) {
@@ -1720,11 +2025,10 @@ fn worker_inputs_for_a_run_not_in_its_state_are_refused() {
         ResearchInput::Called {
             run_id: run_id.clone(),
             at: clock(CUT_OFF + 1),
-            outcome: Err(CallFailure {
-                call_id: "x".to_owned(),
-                kind: ErrorKind::ProviderUnavailable,
-                completed_at: mandate_time::UtcNanos::EPOCH,
-            }),
+            record: Box::new(common::research::stray_record(
+                &mandate_canon::encode_ulid(1 << 98),
+                &world,
+            )),
         },
         &ports,
         &world,
@@ -1824,14 +2128,32 @@ fn an_acknowledgment_forgets_a_run_unless_its_planned_call_was_dispatched() {
         boot(&mut lp, &ports);
         let started = starts(&lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world));
         let run_id = started[0].0.clone();
+        let mut record =
+            common::research::stray_record(&mandate_canon::encode_ulid(1 << 98), &world);
         if planned {
-            lp.run(
+            let retrieval = mandate_research_run::retrieve(
+                &common::research::config().plan,
+                &world.scope(clock(CUT_OFF)),
+                RecordedPlane::load().readers(),
+            )
+            .unwrap_or_else(|e| panic!("{e}"));
+            let step = lp.run(
                 ResearchInput::Retrieved {
                     run_id: run_id.clone(),
                     items: retrieved_items(&world, CUT_OFF),
                 },
                 &ports,
                 &world,
+            );
+            let Some(ResearchRequest::Call(plan)) = step.requests.first().cloned() else {
+                panic!("a call is requested");
+            };
+            record = record_for(
+                &failing(Outcome::ProviderUnavailable),
+                &plan,
+                &retrieval,
+                &world,
+                common::research::instant(CUT_OFF),
             );
         }
         world.config = None;
@@ -1847,12 +2169,8 @@ fn an_acknowledgment_forgets_a_run_unless_its_planned_call_was_dispatched() {
         let answer = lp.step(
             ResearchInput::Called {
                 run_id,
-                at: clock(CUT_OFF + 2),
-                outcome: Err(CallFailure {
-                    call_id: "x".to_owned(),
-                    kind: ErrorKind::ProviderUnavailable,
-                    completed_at: mandate_time::UtcNanos::EPOCH,
-                }),
+                at: clock(CUT_OFF + 40),
+                record: Box::new(record),
             },
             &ports,
             &world,
@@ -1918,7 +2236,33 @@ fn the_research_fold_reads_only_research_call_records() {
     );
     assert!(
         research.fold(&unreadable).is_err(),
-        "a research record without called_at"
+        "a research record without completed_at"
+    );
+    let readable = event(
+        common::AGENT_STREAM,
+        4,
+        "ModelInvocationRecorded",
+        common::object(&[
+            ("purpose", text("research")),
+            ("completed_at", text("2026-10-16T20:00:30.500000000Z")),
+        ]),
+    );
+    research.fold(&readable).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(research.last_call(), Some(clock(CUT_OFF + 30)));
+    let earlier = event(
+        common::AGENT_STREAM,
+        5,
+        "ModelInvocationRecorded",
+        common::object(&[
+            ("purpose", text("research")),
+            ("completed_at", text("2026-10-16T20:00:10.000000000Z")),
+        ]),
+    );
+    research.fold(&earlier).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        research.last_call(),
+        Some(clock(CUT_OFF + 30)),
+        "the latest call anchors the schedule"
     );
 }
 
@@ -1951,7 +2295,7 @@ fn the_drift_fold_classes_news_and_filings_apart() {
         &ports,
         &world,
         &plane,
-        &failing(ErrorKind::ProviderUnavailable),
+        &failing(Outcome::ProviderUnavailable),
     );
     let mut expected = mandate_research::drift::DriftState::new();
     let observe = |source: &str, class, at: i64, id: &str, length: u64| {
@@ -2090,4 +2434,91 @@ fn a_cited_source_off_the_admission_allowlist_never_corroborates() {
         payload_text(record, "reason"),
         Some("source_not_allowlisted")
     );
+}
+
+/// A research batch the journal refused stored nothing (DEC-2204): until it is abandoned the single
+/// writer holds trading behind it, and once it is, trading and the kill switch are taken at once,
+/// the run in flight is dropped, and nothing is left in doubt.
+#[test]
+fn a_refused_research_batch_is_abandoned_and_trading_is_not_held_behind_it() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    let started = lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world);
+    let Some(ResearchRequest::Start { run_id, .. }) = started.requests.first().cloned() else {
+        panic!("a due run starts: {started:?}");
+    };
+    let refused = mandate_runtime::handle_research(
+        &mut lp.shell.state,
+        &mut lp.research,
+        ResearchInput::Retrieved {
+            run_id,
+            items: retrieved_items(&world, CUT_OFF),
+        },
+        &ports,
+        &world.context(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        refused
+            .effects
+            .iter()
+            .any(|e| matches!(e, Effect::Journal(_))),
+        "the step has drafts the journal will refuse"
+    );
+    assert!(
+        matches!(
+            handle(&mut lp.shell.state, Input::Tick(clock(CUT_OFF + 1)), &ports),
+            Err(RuntimeError::AppendUnresolved { .. })
+        ),
+        "a batch in doubt holds trading until it is settled"
+    );
+    assert!(mandate_runtime::abandon_refused_research(
+        &mut lp.shell.state,
+        &mut lp.research
+    ));
+    assert_eq!(lp.research.in_flight(), None, "the run is dropped");
+    assert!(handle(&mut lp.shell.state, Input::Tick(clock(CUT_OFF + 1)), &ports).is_ok());
+    let killed = handle(
+        &mut lp.shell.state,
+        Input::Command(Command::KillSwitch {
+            scope: mandate_runtime::KillScope::Agent(mandate_runtime::AgentId(
+                "agent-a".to_owned(),
+            )),
+            initiator: mandate_runtime::Initiator::Owner,
+            confirmation: None,
+        }),
+        &ports,
+    );
+    assert!(killed.is_ok(), "the kill switch is taken: {killed:?}");
+    assert!(
+        !mandate_runtime::abandon_refused_research(&mut lp.shell.state, &mut lp.research),
+        "nothing research wrote is in doubt any more"
+    );
+}
+
+/// Only a research input's batch is ever abandoned: a trading batch in doubt keeps the writer held
+/// until the shell settles it, as journal spec §5.1 requires.
+#[test]
+fn a_trading_batch_in_doubt_is_never_abandoned_as_research() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let paused = handle(&mut lp.shell.state, Input::Command(Command::Pause), &ports)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        paused.iter().any(|e| matches!(e, Effect::Journal(_))),
+        "the pause journals a batch, left unappended"
+    );
+    assert!(!mandate_runtime::abandon_refused_research(
+        &mut lp.shell.state,
+        &mut lp.research
+    ));
+    assert!(matches!(
+        handle(&mut lp.shell.state, Input::Tick(clock(CUT_OFF + 1)), &ports),
+        Err(RuntimeError::AppendUnresolved { .. })
+    ));
 }

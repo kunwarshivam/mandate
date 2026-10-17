@@ -84,6 +84,8 @@ fn the_request_is_locked_to_one_upstream_with_zero_retention_and_no_capability()
         &mandate_gateway::provider::Prompt {
             system: "s".to_owned(),
             user: "u".to_owned(),
+            tools: vec![],
+            transcript: vec![],
         },
     );
     let json: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
@@ -441,7 +443,8 @@ fn credentials_rejected_by_the_provider_or_missing_from_the_vault_are_credential
         Box::new(mandate_gateway::provider::NoKeys),
         mandate_gateway::meter::Meter::new(
             mandate_gateway::meter::MemoryMeter::new(),
-            Caps::demo(),
+            common::caps(),
+            common::deployment(),
         ),
         mandate_gateway::provider::ManualClock::at(at(START)),
         Box::new(mandate_gateway::provider::SequentialIds::starting_at(5)),
@@ -707,7 +710,8 @@ fn local_rate_caps_refuse_before_any_reservation() {
         Box::new(TestKey),
         mandate_gateway::meter::Meter::new(
             mandate_gateway::meter::MemoryMeter::new(),
-            Caps::demo(),
+            common::caps(),
+            common::deployment(),
         ),
         mandate_gateway::provider::ManualClock::at(at(START)),
         Box::new(mandate_gateway::provider::SequentialIds::starting_at(5)),
@@ -757,7 +761,8 @@ fn a_call_exactly_one_window_old_no_longer_counts() {
         Box::new(TestKey),
         mandate_gateway::meter::Meter::new(
             mandate_gateway::meter::MemoryMeter::new(),
-            Caps::demo(),
+            common::caps(),
+            common::deployment(),
         ),
         mandate_gateway::provider::ManualClock::at(at(START)),
         Box::new(mandate_gateway::provider::SequentialIds::starting_at(5)),
@@ -801,7 +806,8 @@ fn the_workspace_rate_cap_counts_every_agent() {
         Box::new(TestKey),
         mandate_gateway::meter::Meter::new(
             mandate_gateway::meter::MemoryMeter::new(),
-            Caps::demo(),
+            common::caps(),
+            common::deployment(),
         ),
         mandate_gateway::provider::ManualClock::at(at(START)),
         Box::new(mandate_gateway::provider::SequentialIds::starting_at(5)),
@@ -971,7 +977,7 @@ fn every_refusal_sends_nothing_reserves_nothing_costs_nothing_and_is_journalable
     use mandate_gateway::policy::EndpointPolicy;
     let mut refusals = Vec::new();
     let (registry_a, model) = registry();
-    let mut local_only = gateway_with(EndpointPolicy::local_only(), Caps::demo(), registry_a);
+    let mut local_only = gateway_with(EndpointPolicy::local_only(), common::caps(), registry_a);
     refusals.push((
         local_only.call(&request(&model, 1)).unwrap(),
         local_only.transport().sent().len(),
@@ -983,7 +989,7 @@ fn every_refusal_sends_nothing_reserves_nothing_costs_nothing_and_is_journalable
         broke.transport().sent().len(),
     ));
     let (registry_c, _) = registry();
-    let mut fenced = gateway_with(hosted_policy(), Caps::demo(), registry_c);
+    let mut fenced = gateway_with(hosted_policy(), common::caps(), registry_c);
     fenced
         .meter_mut()
         .store_mut()
@@ -1018,7 +1024,8 @@ fn every_refusal_sends_nothing_reserves_nothing_costs_nothing_and_is_journalable
         Box::new(TestKey),
         mandate_gateway::meter::Meter::new(
             mandate_gateway::meter::MemoryMeter::new(),
-            Caps::demo(),
+            common::caps(),
+            common::deployment(),
         ),
         mandate_gateway::provider::ManualClock::at(at(START)),
         Box::new(mandate_gateway::provider::SequentialIds::starting_at(5)),
@@ -1084,6 +1091,8 @@ fn open_weights_pin_their_one_quantization() {
         &mandate_gateway::provider::Prompt {
             system: "s".to_owned(),
             user: "u".to_owned(),
+            tools: vec![],
+            transcript: vec![],
         },
     );
     let json: serde_json::Value = serde_json::from_slice(&request.body).unwrap();

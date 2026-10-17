@@ -1,7 +1,7 @@
 //! The event catalogue (journal spec §9): which streams may hold each event type, and the
 //! `config_refs` keys each requires at append.
 
-use crate::StreamType::{self, Account, Agent, Control, Notice, Scheduler};
+use crate::StreamType::{self, Account, Agent, Control, Meter, Notice, Scheduler};
 
 pub(crate) const FEE: &str = "fee_config";
 pub(crate) const CAL: &str = "trading_calendar";
@@ -41,7 +41,8 @@ const NONE: &[&str] = &[];
 /// (mandate spec §6.1); its payload schema is not closed yet (journal spec §9.1).
 pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
     let e = match event_type {
-        "StreamOpened" => entry(&[Account, Agent, Control, Scheduler, Notice], NONE),
+        "StreamOpened" => entry(&[Account, Agent, Control, Scheduler, Notice, Meter], NONE),
+        "MeterReserved" | "MeterSettled" => entry(&[Meter], NONE),
         "TradingDayStarted" | "ClockAdvanced" => entry(&[Account, Scheduler], NONE),
         "KillSwitchActivated" => entry(&[Account, Agent], NONE),
         "OwnerAcknowledged" => entry(&[Account, Control], NONE),
@@ -133,7 +134,10 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "CatalogEntryRegistered"
         | "DataBundleImported"
         | "UsageReportSealed"
-        | "ControlPlaneMessageRefused" => entry(CONTROL, NONE),
+        | "ControlPlaneMessageRefused"
+        | "ProcessStartIssued"
+        | "ProcessStopIssued"
+        | "ProcessCrashLooped" => entry(CONTROL, NONE),
 
         "ConnectionEstablished" | "ConnectionCredentialRotated" => entry(&[Control, Account], NONE),
         "ConnectionRefused" | "ConnectionRequested" => entry(CONTROL, NONE),

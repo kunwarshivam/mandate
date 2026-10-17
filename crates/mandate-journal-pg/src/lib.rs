@@ -26,8 +26,8 @@ use std::collections::BTreeMap;
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::{
     AppendOutcome, ArtifactSource, Draft, Environment, EventCheck, EventFailure, Head, Invalid,
-    InvalidReason, StoredEvent, StreamId, TrustedStart, check_batch, config_artifact_refusal, seal,
-    verify_events,
+    InvalidReason, STREAM_RULE_TYPES, StoredEvent, StreamId, TrustedStart, check_batch,
+    check_stream, config_artifact_refusal, reads_stream, seal, stream_rule_records, verify_events,
 };
 use mandate_time::UtcNanos;
 use sqlx::postgres::{PgDatabaseError, PgPoolOptions, PgRow, PgSeverity};
@@ -346,6 +346,9 @@ impl Request<'_> {
                 actual_hash: head.hash,
             })));
         }
+        if let Some(step) = self.stream_rules(tx).await? {
+            return Ok(step);
+        }
 
         let mut environment = None;
         if head.seq > 0 {
@@ -396,6 +399,37 @@ impl Request<'_> {
             .await?;
         }
         Ok(Step::Commit(sealed.rows))
+    }
+
+    /// Journal spec v0.46 §9.19's stream rules 153 and 158, as `MemoryJournal::append` judges them:
+    /// when a draft of the batch is judged by one, the stream's earlier records of the types they
+    /// read, under the locked head, each checked as a stored row first.
+    async fn stream_rules(
+        &self,
+        tx: &mut Transaction<'static, Postgres>,
+    ) -> Result<Option<Step>, sqlx::Error> {
+        if !reads_stream(self.batch) {
+            return Ok(None);
+        }
+        let rows = sqlx::query(sql(format!(
+            "SELECT {COLUMNS} FROM events WHERE stream_id = $1 AND event_type = ANY($2) ORDER BY seq"
+        )))
+        .bind(self.stream.as_str())
+        .bind(STREAM_RULE_TYPES.as_slice())
+        .fetch_all(&mut **tx)
+        .await?
+        .iter()
+        .map(decode_event)
+        .collect::<Result<Vec<_>, _>>()?;
+        for row in &rows {
+            if let Err(e) = check_row(row) {
+                return Ok(Some(Step::Done(Err(e))));
+            }
+        }
+        let earlier = stream_rule_records(&rows);
+        Ok(check_stream(&earlier, self.batch)
+            .err()
+            .map(|(draft, error)| Step::Done(Ok(AppendOutcome::Invalid { draft, error }))))
     }
 
     /// The stream rules and sealing of `MemoryJournal::append`, from the locked head.

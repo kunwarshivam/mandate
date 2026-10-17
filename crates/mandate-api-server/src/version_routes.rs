@@ -1,0 +1,917 @@
+//! The version and deployment routes (§3.11 item 11, §4.1, §4.2, §5.1,
+//! [DEC-2101](../../../docs/project/decisions/DEC-2101.md)): `POST
+//! /v1/workspaces/{ws}/mandate-versions`, `GET …/mandate-versions/{v}/confirmation`, `POST
+//! …/mandate-versions/{v}/confirm`, `POST …/agents`, and `POST …/agents/{id}/go-live`.
+//!
+//! Each command is checked in §3.3 item 1's order (the session, the CSRF mark, the key, then the
+//! body, decoded strictly), authorized for a user by its matrix row, compared with the event its
+//! key already holds before anything is judged again (§3.4 step 1), then judged as the CLI judges
+//! it, step-up last, through the port that verifies nothing until E9-4 (DEC-2101 item 2). Its
+//! record is in the store and its event on the control stream before the answer (rule 5).
+
+use std::collections::BTreeSet;
+use std::sync::Arc;
+
+use axum::body::{Body, Bytes};
+use axum::extract::rejection::PathRejection;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::Response;
+use mandate_api::envelope::{Record, StepUpEvidence};
+use mandate_api::problem::{CurrentBase, Effect, Problem, ProblemCode, Violation};
+use mandate_api::requests::ConfirmRequest;
+use mandate_api::responses::Classification;
+use mandate_api::wire::{EventId, Id, Ref, decode, encode};
+use mandate_authn::Request;
+use mandate_canon::{Value, parse, to_canonical};
+use mandate_identity::{Permission, StepUpActionKind};
+use mandate_journal::{StoredEvent, StreamId};
+use mandate_spec::Mandate;
+
+use crate::commands::{Event, Settled, Writer, envelope};
+use crate::http::{App, browser, problem, problem_body};
+use crate::objects::ObjectStore;
+use crate::reads::account_ref;
+use crate::routes::{
+    Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
+};
+use crate::stepup::Action;
+use crate::versions::{
+    CONFIRMED, CREATED, DEPLOYED, FIRST_VERSION, Pending, Refusal, active, check, confirm_digest,
+    deploy_digest, envelope_paths, instruments, last_confirmed, latest, object, reference, screen,
+    stored, text,
+};
+use crate::writes::{
+    Gate, appended, derived_for, id_text, one_key, principal_text, ref_text, strict, unknown,
+};
+
+/// The message every violation these routes report carries: the code and the pointer say what and
+/// where, and nothing from the body is echoed (rule 6).
+const MESSAGE: &str = "The request does not meet this rule.";
+
+/// A refused request, answered by one problem document.
+enum Answer {
+    Refused(Refused),
+    Code(StatusCode, ProblemCode),
+    Invalid(Vec<Violation>),
+    Stale(String),
+    Unknown(EventId),
+}
+
+impl From<Refused> for Answer {
+    fn from(refused: Refused) -> Self {
+        Self::Refused(refused)
+    }
+}
+
+impl Answer {
+    fn response(self) -> Response {
+        match self {
+            Self::Refused(refused) => refused.response(),
+            Self::Code(status, code) => problem(status, problem_body(code)),
+            Self::Invalid(violations) => {
+                let body = Problem::of(ProblemCode::Invalid, Effect::None, None, None)
+                    .ok()
+                    .map(|problem| Problem {
+                        violations,
+                        ..problem
+                    });
+                problem(StatusCode::UNPROCESSABLE_ENTITY, encoded(body.as_ref()))
+            }
+            Self::Stale(current) => {
+                let body = Ref::try_from(current).ok().and_then(|current| {
+                    let base = Some(CurrentBase::Ref(current));
+                    Problem::of(ProblemCode::StaleBase, Effect::None, None, base).ok()
+                });
+                problem(StatusCode::CONFLICT, encoded(body.as_ref()))
+            }
+            Self::Unknown(id) => unknown(id),
+        }
+    }
+
+    fn schema(path: &str, code: &str) -> Self {
+        Self::Invalid(vec![Violation::Schema {
+            path: path.to_owned(),
+            code: code.to_owned(),
+            message: MESSAGE.to_owned(),
+        }])
+    }
+
+    fn rules(path: &str, codes: &[&str]) -> Self {
+        let violations = codes
+            .iter()
+            .map(|code| Violation::Rule {
+                path: path.to_owned(),
+                code: (*code).to_owned(),
+                message: MESSAGE.to_owned(),
+            })
+            .collect();
+        Self::Invalid(violations)
+    }
+
+    fn of(refusal: Refusal) -> Self {
+        match refusal {
+            Refusal::Rules(codes) => Self::rules("", &codes),
+            Refusal::Unregistered => {
+                Self::schema("/universe/pinned_instruments", "instrument_unregistered")
+            }
+            Refusal::Unreadable => Self::Refused(Refused::JournalUnavailable),
+        }
+    }
+
+    fn step_up(code: ProblemCode) -> Self {
+        Self::Code(StatusCode::UNAUTHORIZED, code)
+    }
+}
+
+/// A problem's bytes; an empty body only for one `mandate-api` cannot encode.
+fn encoded(problem: Option<&Problem>) -> Bytes {
+    problem
+        .and_then(|problem| encode(problem).ok())
+        .map(Bytes::from)
+        .unwrap_or_default()
+}
+
+/// One of these routes' answers, as a response.
+fn answered(answer: Result<Response, Answer>) -> Response {
+    answer.unwrap_or_else(Answer::response)
+}
+
+/// What every command here has once admitted: its gate, body, authorized reader, the store, the
+/// control stream's environment, and the principal's id.
+struct Admitted {
+    gate: Gate,
+    body: Bytes,
+    reader: Reader,
+    objects: Arc<dyn ObjectStore>,
+    environment: String,
+    principal: String,
+}
+
+/// §3.3's checks, the strict body's bytes, and `permission`'s row for a user; then the store and
+/// the control stream's environment, read from its first row (a workspace with none is the one
+/// 404).
+async fn admitted(
+    app: &App,
+    headers: &HeaderMap,
+    workspace: &str,
+    permission: Permission,
+    body: Body,
+) -> Result<Admitted, Answer> {
+    let (gate, body) = strict(app, headers, body).await?;
+    let reader = authorized(
+        app,
+        &gate.admitted,
+        gate.now,
+        workspace,
+        permission,
+        Unreadable::Command,
+    )
+    .await?;
+    let objects = app.objects.clone().ok_or(Refused::JournalUnavailable)?;
+    let environment = reader
+        .control
+        .first()
+        .map(|row| row.environment.clone())
+        .ok_or(Refused::NotFound)?;
+    let principal = principal_text(&gate).ok_or(Refused::JournalUnavailable)?;
+    Ok(Admitted {
+        gate,
+        body,
+        reader,
+        objects,
+        environment,
+        principal,
+    })
+}
+
+/// A check's pending confirmation of `paths`.
+fn confirming(paths: &[String]) -> Pending<'_> {
+    Pending {
+        created: None,
+        confirmed: Some(paths),
+    }
+}
+
+/// A record member as the journal's canonical value.
+fn record_value(record: &Record) -> Option<Value> {
+    parse(&encode(record).ok()?).ok()
+}
+
+/// Step-up evidence as the journal's canonical value (journal spec §9.2), or `null`.
+fn evidence_value(evidence: Option<&StepUpEvidence>) -> Option<Value> {
+    match evidence {
+        Some(evidence) => parse(&encode(evidence).ok()?).ok(),
+        None => Some(Value::Null),
+    }
+}
+
+/// `record`'s canonical bytes, and the event naming it and `version` with `members`.
+fn recorded(
+    record: &Value,
+    version: &str,
+    event_type: &'static str,
+    mut members: Vec<(&'static str, Value)>,
+    config_refs: Vec<(&'static str, Value)>,
+) -> Option<(Vec<u8>, Event)> {
+    let bytes = to_canonical(record);
+    let record_ref = reference(&bytes);
+    members.push(("record_ref", text(&record_ref)));
+    let mut refs = [version.to_owned(), record_ref];
+    refs.sort();
+    let event = Event {
+        event_type,
+        payload: object(members)?,
+        artifact_refs: refs.iter().map(|r| text(r)).collect(),
+        config_refs,
+    };
+    Some((bytes, event))
+}
+
+/// A command ready to append: its derived id, its record's bytes, and its draft.
+struct Drafted {
+    id: EventId,
+    text: String,
+    record: Vec<u8>,
+    draft: Vec<u8>,
+}
+
+/// `event` under §3.4's id for `operation`, with its record's bytes.
+fn drafted(
+    admitted: &Admitted,
+    operation: &str,
+    (record, event): (Vec<u8>, Event),
+) -> Result<Drafted, Answer> {
+    let (id, text) = derived_for(&admitted.gate, &admitted.reader.workspace, operation)
+        .ok_or(Refused::JournalUnavailable)?;
+    let writer = Writer {
+        workspace: &admitted.reader.workspace,
+        principal: &admitted.principal,
+        event_id: &text,
+        environment: &admitted.environment,
+        now: admitted.gate.now,
+    };
+    let draft = envelope(&writer, &event).ok_or(Refused::JournalUnavailable)?;
+    Ok(Drafted {
+        id,
+        text,
+        record,
+        draft,
+    })
+}
+
+/// The event the key already holds (§3.4 step 1): `Some` of the stored row, or of the conflict.
+fn repeat(admitted: &Admitted, drafted: &Drafted) -> Option<Result<StoredEvent, Answer>> {
+    let settled = crate::writes::repeated(&admitted.reader.control, &drafted.text, &drafted.draft)?;
+    Some(outcome(settled, &drafted.id))
+}
+
+/// Stores the record, then appends the draft (rule 5).
+async fn commit(app: &App, admitted: &Admitted, drafted: Drafted) -> Result<StoredEvent, Answer> {
+    admitted
+        .objects
+        .put(&drafted.record)
+        .map_err(|_| Refused::JournalUnavailable)?;
+    let settled = appended(
+        app,
+        &admitted.reader,
+        &drafted.text,
+        &drafted.draft,
+        admitted.gate.now,
+    )
+    .await;
+    outcome(settled, &drafted.id)
+}
+
+/// An append's outcome: the stored row, or its problem.
+fn outcome(settled: Settled, id: &EventId) -> Result<StoredEvent, Answer> {
+    match settled {
+        Settled::Stored(row) => Ok(*row),
+        Settled::Conflict => Err(Answer::Code(
+            StatusCode::CONFLICT,
+            ProblemCode::IdempotencyConflict,
+        )),
+        Settled::Unknown => Err(Answer::Unknown(id.clone())),
+        Settled::Unavailable => Err(Refused::JournalUnavailable.into()),
+    }
+}
+
+/// Judges `evidence` for `action` through the port: `step_up_required` without any (§3.5).
+fn stepped_up(
+    app: &App,
+    admitted: &Admitted,
+    evidence: Option<&StepUpEvidence>,
+    action: &Action,
+) -> Result<(), Answer> {
+    let evidence = evidence.ok_or(Answer::step_up(ProblemCode::StepUpRequired))?;
+    app.step_up
+        .verify(
+            evidence,
+            action,
+            admitted.gate.admitted.principal,
+            admitted.gate.now,
+        )
+        .map_err(Answer::step_up)
+}
+
+/// `members` with the event's watermark, enveloped, as `status`.
+fn served(
+    status: StatusCode,
+    admitted: &Admitted,
+    row: &StoredEvent,
+    mut members: Vec<(&str, Value)>,
+) -> Response {
+    members.push((
+        "as_of",
+        Value::Array(watermark(std::slice::from_ref(row)).into_iter().collect()),
+    ));
+    enveloped(status, admitted.gate.now, members)
+}
+
+/// The version's document, recorded on the control stream and in the store, or the one 404.
+fn document(admitted: &Admitted, version: &str) -> Result<(Value, Mandate), Answer> {
+    latest(&admitted.reader.control, CREATED, version).ok_or(Refused::NotFound)?;
+    Ok(stored(admitted.objects.as_ref(), version).ok_or(Refused::NotFound)?)
+}
+
+/// `POST /v1/workspaces/{ws}/mandate-versions` (§3.11 item 11, DEC-2101 item 3).
+pub async fn create_version(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<String>, PathRejection>,
+    body: Body,
+) -> Response {
+    let Ok(Path(workspace)) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    answered(created(&app, &headers, &workspace, body).await)
+}
+
+async fn created(
+    app: &App,
+    headers: &HeaderMap,
+    workspace: &str,
+    body: Body,
+) -> Result<Response, Answer> {
+    let admitted = admitted(app, headers, workspace, Permission::DraftVersion, body).await?;
+    let value = parse(&admitted.body).map_err(|_| Answer::schema("", "malformed"))?;
+    let mandate = Mandate::parse(&value).map_err(|_| Answer::schema("", "mandate"))?;
+    match value.get("environment").and_then(Value::as_str) {
+        Some("live") => {
+            return Err(Answer::Code(
+                StatusCode::CONFLICT,
+                ProblemCode::LiveUnavailable,
+            ));
+        }
+        Some(environment) if environment == admitted.environment => {}
+        _ => return Err(Answer::schema("/environment", "environment")),
+    }
+    let canonical = mandate
+        .canonical_bytes()
+        .map_err(|_| Answer::schema("", "mandate"))?;
+    let version = reference(&canonical);
+    let paths = envelope_paths(&value);
+    let provenance = paths
+        .iter()
+        .map(|path| object(vec![("path", text(path)), ("source", text("user_entered"))]))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(Refused::JournalUnavailable)?;
+    let record = object(vec![
+        ("kind", text("mandate_version_record")),
+        ("mandate_version", text(&version)),
+        ("user", text(&admitted.principal)),
+    ])
+    .ok_or(Refused::JournalUnavailable)?;
+    let event = recorded(
+        &record,
+        &version,
+        CREATED,
+        vec![
+            ("mandate_version", text(&version)),
+            ("provenance", Value::Array(provenance.clone())),
+        ],
+        Vec::new(),
+    )
+    .ok_or(Refused::JournalUnavailable)?;
+    let drafted = drafted(&admitted, "create_version", event)?;
+    let created = object(vec![
+        ("mandate_version", text(&version)),
+        ("provenance", Value::Array(provenance)),
+    ])
+    .ok_or(Refused::JournalUnavailable)?;
+    let pending = Pending {
+        created: Some(&created),
+        confirmed: Some(&paths),
+    };
+    let date = admitted.gate.now.date();
+    let control = &admitted.reader.control;
+    let objects = admitted.objects.as_ref();
+    let earlier = repeat(&admitted, &drafted)
+        .map(|repeated| repeated.map(|row| (StatusCode::ACCEPTED, row)))
+        .or_else(|| {
+            latest(control, CREATED, &version).map(|row| Ok((StatusCode::OK, row.clone())))
+        });
+    if let Some(earlier) = earlier {
+        let (status, row) = earlier?;
+        let warnings =
+            check((control, &[]), objects, (&mandate, ""), pending, date).unwrap_or_default();
+        return Ok(version_created(
+            status, &admitted, &row, &version, &warnings,
+        ));
+    }
+    let warnings =
+        check((control, &[]), objects, (&mandate, ""), pending, date).map_err(Answer::of)?;
+    instruments(control, objects, &value).map_err(Answer::of)?;
+    objects
+        .put(&canonical)
+        .map_err(|_| Refused::JournalUnavailable)?;
+    let row = commit(app, &admitted, drafted).await?;
+    Ok(version_created(
+        StatusCode::ACCEPTED,
+        &admitted,
+        &row,
+        &version,
+        &warnings,
+    ))
+}
+
+/// `commands/version-created`.
+fn version_created(
+    status: StatusCode,
+    admitted: &Admitted,
+    row: &StoredEvent,
+    version: &str,
+    warnings: &[&str],
+) -> Response {
+    served(
+        status,
+        admitted,
+        row,
+        vec![
+            ("command_id", string(&row.event_id)),
+            ("phase", string("recorded")),
+            ("mandate_version", string(version)),
+            (
+                "warnings",
+                Value::Array(warnings.iter().map(|w| string(w)).collect()),
+            ),
+        ],
+    )
+}
+
+/// `GET /v1/workspaces/{ws}/mandate-versions/{v}/confirmation` (§3.11 item 11, DEC-2101 item 4).
+pub async fn confirmation(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((workspace, version))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    answered(screened(&app, &headers, &workspace, &version).await)
+}
+
+async fn screened(
+    app: &App,
+    headers: &HeaderMap,
+    workspace: &str,
+    version: &str,
+) -> Result<Response, Answer> {
+    let (admitted, now) = session(app, headers, Request::Other)?;
+    let reader = authorized(
+        app,
+        &admitted,
+        now,
+        workspace,
+        Permission::DraftVersion,
+        Unreadable::Read,
+    )
+    .await?;
+    let objects = app.objects.clone().ok_or(Refused::JournalUnavailable)?;
+    latest(&reader.control, CREATED, version).ok_or(Refused::NotFound)?;
+    let (document, mandate) = stored(objects.as_ref(), version).ok_or(Refused::NotFound)?;
+    let required = envelope_paths(&document);
+    let warnings = check(
+        (&reader.control, &[]),
+        objects.as_ref(),
+        (&mandate, ""),
+        confirming(&required),
+        now.date(),
+    )
+    .map_err(Answer::of)?;
+    let shown = screen(version, required, warnings);
+    let members = vec![
+        ("mandate_version", string(version)),
+        ("document", document),
+        ("agent_id", Value::Null),
+        ("base_version", Value::Null),
+        ("classification", string(FIRST_VERSION)),
+        (
+            "required_paths",
+            Value::Array(shown.required_paths.iter().map(|p| string(p)).collect()),
+        ),
+        (
+            "warnings",
+            Value::Array(shown.warnings.iter().map(|w| string(w)).collect()),
+        ),
+        ("step_up_required", Value::Bool(true)),
+        ("screen_digest", string(&shown.digest)),
+        (
+            "as_of",
+            Value::Array(watermark(&reader.control).into_iter().collect()),
+        ),
+    ];
+    Ok(enveloped(StatusCode::OK, now, members))
+}
+
+/// `POST /v1/workspaces/{ws}/mandate-versions/{v}/confirm` (§5.1, DEC-2101 item 5).
+pub async fn confirm(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+    body: Body,
+) -> Response {
+    let Ok(Path((workspace, version))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    answered(confirmed(&app, &headers, &workspace, &version, body).await)
+}
+
+async fn confirmed(
+    app: &App,
+    headers: &HeaderMap,
+    workspace: &str,
+    version: &str,
+    body: Body,
+) -> Result<Response, Answer> {
+    let admitted = admitted(
+        app,
+        headers,
+        workspace,
+        Permission::ConfirmRiskIncreasing,
+        body,
+    )
+    .await?;
+    let request = decode::<ConfirmRequest>(&admitted.body).map_err(|refused| {
+        let mandate_api::wire::Refused::Invalid { violations } = refused;
+        Answer::Invalid(violations)
+    })?;
+    if request.agent_id.is_some() {
+        return Err(Answer::schema("/agent_id", "agent_link_unavailable"));
+    }
+    if request.base_version.is_some() {
+        return Err(Answer::schema("/base_version", "no_base"));
+    }
+    let mut paths = request.confirmed_paths.clone();
+    paths.sort();
+    let acknowledged: Vec<String> = request
+        .warnings_acknowledged
+        .iter()
+        .filter_map(id_text)
+        .collect();
+    let mut sorted_acknowledged: Vec<&str> = acknowledged.iter().map(String::as_str).collect();
+    sorted_acknowledged.sort_unstable();
+    let shown_digest = ref_text(&request.screen_digest).ok_or(Refused::JournalUnavailable)?;
+    let record = object(vec![
+        ("kind", text("mandate_confirmation_record")),
+        ("mandate_version", text(version)),
+        (
+            "record",
+            record_value(&request.record).ok_or(Refused::JournalUnavailable)?,
+        ),
+        ("screen_digest", text(&shown_digest)),
+        (
+            "step_up",
+            evidence_value(request.step_up.as_ref()).ok_or(Refused::JournalUnavailable)?,
+        ),
+        ("user", text(&admitted.principal)),
+        (
+            "warnings_acknowledged",
+            Value::Array(sorted_acknowledged.iter().map(|w| text(w)).collect()),
+        ),
+    ])
+    .ok_or(Refused::JournalUnavailable)?;
+    let event = recorded(
+        &record,
+        version,
+        CONFIRMED,
+        vec![
+            ("mandate_version", text(version)),
+            (
+                "confirmed_paths",
+                Value::Array(paths.iter().map(|p| text(p)).collect()),
+            ),
+        ],
+        Vec::new(),
+    )
+    .ok_or(Refused::JournalUnavailable)?;
+    let drafted = drafted(&admitted, "confirm_version", event)?;
+    if let Some(repeated) = repeat(&admitted, &drafted) {
+        return Ok(confirm_accepted(
+            StatusCode::ACCEPTED,
+            &admitted,
+            &repeated?,
+        ));
+    }
+    let (document, mandate) = document(&admitted, version)?;
+    if request.classification_shown != Classification::RiskIncreasing {
+        return Err(Answer::Code(
+            StatusCode::CONFLICT,
+            ProblemCode::ClassificationChanged,
+        ));
+    }
+    let required = envelope_paths(&document);
+    if paths != required {
+        return Err(Answer::rules("/confirmed_paths", &["V-020"]));
+    }
+    let control = &admitted.reader.control;
+    let objects = admitted.objects.as_ref();
+    let date = admitted.gate.now.date();
+    let warnings = check(
+        (control, &[]),
+        objects,
+        (&mandate, ""),
+        confirming(&required),
+        date,
+    )
+    .map_err(Answer::of)?;
+    instruments(control, objects, &document).map_err(Answer::of)?;
+    let shown: BTreeSet<&str> = warnings.iter().copied().collect();
+    let owned: BTreeSet<&str> = acknowledged.iter().map(String::as_str).collect();
+    if shown != owned || owned.len() != acknowledged.len() {
+        return Err(Answer::schema("/warnings_acknowledged", "unacknowledged"));
+    }
+    if screen(version, required, warnings).digest != shown_digest {
+        return Err(Answer::Code(
+            StatusCode::CONFLICT,
+            ProblemCode::ClassificationChanged,
+        ));
+    }
+    if let Some((row, last)) = last_confirmed(control)
+        && last == version
+    {
+        return Ok(confirm_accepted(StatusCode::OK, &admitted, row));
+    }
+    let digest = confirm_digest(version).ok_or(Refused::JournalUnavailable)?;
+    let action = Action {
+        kind: StepUpActionKind::ConfirmVersion,
+        digest,
+    };
+    stepped_up(app, &admitted, request.step_up.as_ref(), &action)?;
+    let row = commit(app, &admitted, drafted).await?;
+    Ok(confirm_accepted(StatusCode::ACCEPTED, &admitted, &row))
+}
+
+/// `commands/confirm-accepted` for a first version.
+fn confirm_accepted(status: StatusCode, admitted: &Admitted, row: &StoredEvent) -> Response {
+    served(
+        status,
+        admitted,
+        row,
+        vec![
+            ("command_id", string(&row.event_id)),
+            ("phase", string("recorded")),
+            ("classification", string(FIRST_VERSION)),
+            ("applies", string("next_safe_point")),
+        ],
+    )
+}
+
+/// The deploy body (DEC-2101 item 6), decoded strictly by the server until its schema and its
+/// `mandate-api` type land together.
+struct DeployBody {
+    agent_id: String,
+    mandate_version: String,
+    backtest_id: Value,
+    record: Value,
+    step_up: Option<StepUpEvidence>,
+}
+
+/// The members a deploy body names, in its order.
+const DEPLOY_MEMBERS: [&str; 5] = [
+    "agent_id",
+    "mandate_version",
+    "backtest_id",
+    "record",
+    "step_up",
+];
+
+/// `body` as a deploy: an object of exactly [`DEPLOY_MEMBERS`], each in its type and canonical
+/// form, else `invalid` at the first member that fails.
+fn deploy_body(body: &[u8]) -> Result<DeployBody, Answer> {
+    let Ok(Value::Object(members)) = parse(body) else {
+        return Err(Answer::schema("", "type"));
+    };
+    if let Some(unknown) = members
+        .keys()
+        .find(|k| !DEPLOY_MEMBERS.contains(&k.as_str()))
+    {
+        return Err(Answer::schema(
+            &format!("/{}", unknown.as_str()),
+            "unknown_member",
+        ));
+    }
+    let member = |name: &str| {
+        members
+            .get(name)
+            .ok_or_else(|| Answer::schema(&format!("/{name}"), "missing"))
+    };
+    let non_canonical = |name: &str| Answer::schema(&format!("/{name}"), "non_canonical");
+    let agent = member("agent_id")?.as_str().map(str::to_owned);
+    let agent_id = agent
+        .and_then(|a| Id::try_from(a).ok())
+        .and_then(|id| id_text(&id))
+        .ok_or_else(|| non_canonical("agent_id"))?;
+    let version = member("mandate_version")?.as_str().map(str::to_owned);
+    let mandate_version = version
+        .and_then(|v| Ref::try_from(v).ok())
+        .and_then(|r| ref_text(&r))
+        .ok_or_else(|| non_canonical("mandate_version"))?;
+    let backtest_id = match member("backtest_id")? {
+        Value::Null => Value::Null,
+        Value::Str(id) => Id::try_from(id.clone())
+            .ok()
+            .and_then(|id| id_text(&id))
+            .map(Value::Str)
+            .ok_or_else(|| non_canonical("backtest_id"))?,
+        _ => return Err(non_canonical("backtest_id")),
+    };
+    let record = decode::<Record>(&to_canonical(member("record")?))
+        .ok()
+        .and_then(|record| record_value(&record))
+        .ok_or_else(|| non_canonical("record"))?;
+    let step_up = match member("step_up")? {
+        Value::Null => None,
+        other => Some(
+            decode::<StepUpEvidence>(&to_canonical(other)).map_err(|_| non_canonical("step_up"))?,
+        ),
+    };
+    Ok(DeployBody {
+        agent_id,
+        mandate_version,
+        backtest_id,
+        record,
+        step_up,
+    })
+}
+
+/// `POST /v1/workspaces/{ws}/agents` (§4.2, DEC-2101 item 6).
+pub async fn deploy(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<String>, PathRejection>,
+    body: Body,
+) -> Response {
+    let Ok(Path(workspace)) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    answered(deployed(&app, &headers, &workspace, body).await)
+}
+
+async fn deployed(
+    app: &App,
+    headers: &HeaderMap,
+    workspace: &str,
+    body: Body,
+) -> Result<Response, Answer> {
+    let admitted = admitted(app, headers, workspace, Permission::Deploy, body).await?;
+    let request = deploy_body(&admitted.body)?;
+    let (agent, version) = (&request.agent_id, &request.mandate_version);
+    let stream = format!("agent:{}:{agent}", admitted.reader.workspace);
+    if StreamId::parse(&stream).is_none() {
+        return Err(Answer::schema("/agent_id", "agent_invalid"));
+    }
+    let record = object(vec![
+        ("agent_id", text(agent)),
+        ("backtest_id", request.backtest_id.clone()),
+        ("kind", text("deployment_record")),
+        ("mandate_version", text(version)),
+        ("record", request.record.clone()),
+        (
+            "step_up",
+            evidence_value(request.step_up.as_ref()).ok_or(Refused::JournalUnavailable)?,
+        ),
+        ("user", text(&admitted.principal)),
+    ])
+    .ok_or(Refused::JournalUnavailable)?;
+    let event = recorded(
+        &record,
+        version,
+        DEPLOYED,
+        vec![
+            ("agent_id", text(agent)),
+            ("mandate_version", text(version)),
+        ],
+        vec![("mandate_version", text(version))],
+    )
+    .ok_or(Refused::JournalUnavailable)?;
+    let drafted = drafted(&admitted, "deploy", event)?;
+    if let Some(repeated) = repeat(&admitted, &drafted) {
+        return Ok(command_accepted(
+            StatusCode::ACCEPTED,
+            &admitted,
+            &repeated?,
+        ));
+    }
+    let (document, mandate) = document(&admitted, version)?;
+    match document.get("environment").and_then(Value::as_str) {
+        Some("live") => {
+            return Err(Answer::Code(
+                StatusCode::CONFLICT,
+                ProblemCode::LiveUnavailable,
+            ));
+        }
+        Some(environment) if environment == admitted.environment => {}
+        _ => return Err(Answer::schema("/mandate_version", "environment")),
+    }
+    let control = &admitted.reader.control;
+    let confirmed = latest(control, CONFIRMED, version)
+        .ok_or_else(|| Answer::schema("/mandate_version", "version_unconfirmed"))?;
+    if let Some((last, current)) = last_confirmed(control)
+        && last.seq != confirmed.seq
+    {
+        return Err(Answer::Stale(current));
+    }
+    if let Some((row, deployed)) = active(control, agent) {
+        if deployed == *version {
+            return Ok(command_accepted(StatusCode::OK, &admitted, row));
+        }
+        return Err(Answer::schema("/agent_id", "agent_active"));
+    }
+    let objects = admitted.objects.as_ref();
+    let date = admitted.gate.now.date();
+    let account = match account_ref(control, mandate.connection_id.as_str()) {
+        Some(reference) => {
+            let stream = format!("acct:{}:{reference}", admitted.reader.workspace);
+            app.journal
+                .rows(&stream)
+                .await
+                .map_err(|_| Refused::JournalUnavailable)?
+        }
+        None => Vec::new(),
+    };
+    check(
+        (control, &account),
+        objects,
+        (&mandate, agent),
+        Pending::default(),
+        date,
+    )
+    .map_err(Answer::of)?;
+    instruments(control, objects, &document).map_err(Answer::of)?;
+    let digest = deploy_digest(agent, version).ok_or(Refused::JournalUnavailable)?;
+    let action = Action {
+        kind: StepUpActionKind::Deploy,
+        digest,
+    };
+    stepped_up(app, &admitted, request.step_up.as_ref(), &action)?;
+    let row = commit(app, &admitted, drafted).await?;
+    Ok(command_accepted(StatusCode::ACCEPTED, &admitted, &row))
+}
+
+/// `commands/command-accepted`.
+fn command_accepted(status: StatusCode, admitted: &Admitted, row: &StoredEvent) -> Response {
+    served(
+        status,
+        admitted,
+        row,
+        vec![
+            ("command_id", string(&row.event_id)),
+            ("phase", string("recorded")),
+        ],
+    )
+}
+
+/// `POST /v1/workspaces/{ws}/agents/{id}/go-live` (§4.2, DEC-2101 item 7): `live_unavailable`
+/// once §3.3's checks and the deploy row pass, before the body is read.
+pub async fn go_live(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((workspace, _agent))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    answered(refused_live(&app, &headers, &workspace).await)
+}
+
+async fn refused_live(app: &App, headers: &HeaderMap, workspace: &str) -> Result<Response, Answer> {
+    let (admitted, now) = session(app, headers, Request::Other)?;
+    if !browser(headers, &app.settings.app_origin) {
+        return Err(Refused::Forbidden.into());
+    }
+    one_key(headers).ok_or(Refused::Invalid)?;
+    authorized(
+        app,
+        &admitted,
+        now,
+        workspace,
+        Permission::Deploy,
+        Unreadable::Command,
+    )
+    .await?;
+    Err(Answer::Code(
+        StatusCode::CONFLICT,
+        ProblemCode::LiveUnavailable,
+    ))
+}

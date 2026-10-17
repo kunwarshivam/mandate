@@ -22,12 +22,14 @@
 //! thesis's `ModelOutputRecorded`, which the existing order builder, the gate's dry run, and the
 //! autonomy rules then judge like any model output (HI-1, HI-10).
 //!
-//! # Records that do not exist yet
+//! # The call record
 //!
-//! `ModelInvocationRecorded` on the agent stream is not closed (E15-8), and neither the candidates'
-//! verdict record (E15-8) nor the invalidation verdict (E19-5) is in the journal spec. The drafts
-//! here are DEC-996's provisional shapes, and [`Preconditions`] keeps every run from starting until
-//! the journal registers both records, so no provisional draft reaches a production journal.
+//! The worker calls through `mandate-gateway` (DEC-1120), and the core journals the gateway's own
+//! [`CallRecord`] as journal spec §9.19's agent-stream `ModelInvocationRecorded`, whatever its
+//! outcome. An `ok` record is judged in the step it arrives, and its verdicts go in the record,
+//! which heads the judging batch (rule 151, INF-10). `mandate-journal` does not register that
+//! record or the invalidation verdict (E19-5) yet, so [`Preconditions`] keeps every run from
+//! starting until it does.
 
 mod judge;
 
@@ -35,14 +37,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
 use mandate_canon::{Digest, Value};
+use mandate_gateway::{CallRecord, Outcome, Purpose, RequestError, Verdict};
 use mandate_research::drift::{DriftState, InputClass, InputObservation};
 use mandate_research::{
     AdmissionFacts, ContentHash, LineageState, PolicyOverlay, SourceId as ResearchSource,
     ValidatedMandate, WorkingUniverse, next_proposal_at,
 };
 use mandate_research_run::{
-    CallFailure, CallOutcome, CallPlan, ErrorKind, GatewayReply, InstrumentFact, ItemId, ItemKind,
-    ModelPin, OutputBounds, RetrievalPlan, RetrievedItem, SourceId, Symbol,
+    CallPlan, InstrumentFact, ItemId, ItemKind, ModelPin, OutputBounds, RetrievalPlan,
+    RetrievedItem, SourceId, Symbol, treatment,
 };
 use mandate_time::UtcNanos;
 
@@ -54,6 +57,7 @@ use crate::step::{Batch, observed};
 use crate::types::{
     Effect, EventId, FoldedEvent, Input, Mode, NotificationRef, Observation, RiskClock,
 };
+use judge::Judged;
 
 /// The research entry's pinned configuration (§1.3, inference spec §4.1): the identity, the call's
 /// deadline and token bound, the retrieval plan, the output bounds, and the owner's description.
@@ -87,13 +91,22 @@ pub trait RecordCatalog {
     fn registers(&self, record: ResearchRecord) -> bool;
 }
 
-/// `mandate-journal`'s catalogue as of this change: it registers neither record, so no research
-/// run starts in any deployment until E19-5 and E15-8 register them and change this answer.
+/// `mandate-journal`'s own catalogue. The candidates' verdicts are registered once the agent
+/// stream's `ModelInvocationRecorded` is closed with its `verdicts` (journal spec §9.19, E15-8); no
+/// invalidation verdict is registered until E19-5 adds the record, so no research run starts in any
+/// deployment until then.
 pub struct JournalCatalog;
 
 impl RecordCatalog for JournalCatalog {
-    fn registers(&self, _record: ResearchRecord) -> bool {
-        false
+    fn registers(&self, record: ResearchRecord) -> bool {
+        match record {
+            ResearchRecord::CandidateVerdicts => mandate_journal::closes(
+                "ModelInvocationRecorded",
+                1,
+                mandate_journal::StreamType::Agent,
+            ),
+            ResearchRecord::InvalidationVerdict => false,
+        }
     }
 }
 
@@ -242,11 +255,18 @@ pub enum ResearchInput {
         run_id: String,
         items: Vec<RetrievedObservation>,
     },
-    /// The gateway's settled answer, at the risk clock it arrived.
+    /// The gateway's record of the run's one call, whatever its outcome, at the risk clock it
+    /// arrived. The shell has stored the prompt and response artifacts it names.
     Called {
         run_id: String,
         at: RiskClock,
-        outcome: CallOutcome,
+        record: Box<CallRecord>,
+    },
+    /// A call the gateway could not make at all, which has no record (inference spec §3.1).
+    Refused {
+        run_id: String,
+        at: RiskClock,
+        error: RequestError,
     },
     /// The worker's acknowledgment of a cancellation: `dispatched` says whether a call had left,
     /// whose late answer is still journaled (§5.3).
@@ -280,14 +300,6 @@ pub struct ResearchStep {
 enum Phase {
     Retrieving,
     Calling {
-        observations: Vec<EventId>,
-        items: Vec<ItemFacts>,
-    },
-    /// The call record is drafted; judging waits until it is folded back as committed (HI-2).
-    Recorded {
-        invocation: EventId,
-        committed: bool,
-        reply: GatewayReply,
         observations: Vec<EventId>,
         items: Vec<ItemFacts>,
     },
@@ -369,22 +381,11 @@ impl ResearchState {
         {
             return Ok(());
         }
-        let called = payload::stamped_clock_of(&event.payload, "called_at")
-            .ok_or_else(|| payload::non_canonical("called_at"))?;
-        self.last_call = Some(self.last_call.map_or(called, |last| last.max(called)));
-        if let Some(Run {
-            phase:
-                Phase::Recorded {
-                    invocation,
-                    committed,
-                    ..
-                },
-            ..
-        }) = self.run.as_mut()
-            && *invocation == event.event_id
-        {
-            *committed = true;
-        }
+        let completed = payload::str_of(&event.payload, "completed_at")
+            .and_then(|text| UtcNanos::parse(text).ok())
+            .ok_or_else(|| payload::non_canonical("completed_at"))?;
+        let completed = RiskClock::from_secs(completed.secs());
+        self.last_call = Some(self.last_call.map_or(completed, |last| last.max(completed)));
         Ok(())
     }
 
@@ -402,6 +403,23 @@ impl ResearchState {
     pub fn drift(&self) -> &DriftState {
         &self.drift
     }
+}
+
+/// A research batch the journal refused, which stored nothing: the runtime forgets its doubt of
+/// it, so trading inputs, the kill switch among them, are no longer held behind a batch that can
+/// never commit (`AGENTS.md` rules 3 and 13), and the run in flight is dropped. Returns whether a
+/// research batch was in doubt. A trading batch in doubt is never touched: only a research input's
+/// batch is forgotten, and the caller stops sending research inputs (DEC-2204).
+pub fn abandon_refused_research(state: &mut RuntimeState, research: &mut ResearchState) -> bool {
+    let research_batch = state
+        .unresolved_batch()
+        .is_some_and(|doubted| matches!(doubted.input, Input::Research(_)));
+    if research_batch {
+        state.forget_refused();
+        research.doubted = None;
+        research.run = None;
+    }
+    research_batch
 }
 
 /// The research step. Like [`crate::handle`] it is the only producer of research effects, it
@@ -446,13 +464,13 @@ pub fn handle_research(
             };
             retrieved(state, research, run_id, items, context, &mut step)?;
         }
-        ResearchInput::Called {
-            run_id,
-            at,
-            outcome,
-        } => {
+        ResearchInput::Called { run_id, at, record } => {
             not_behind(state, *at)?;
-            called(research, run_id, *at, outcome, &mut batch)?;
+            called(state, research, run_id, record, context, &mut batch)?;
+        }
+        ResearchInput::Refused { run_id, at, error } => {
+            not_behind(state, *at)?;
+            refused(research, run_id, *error)?;
         }
         ResearchInput::Cancelled { run_id, dispatched } => {
             acknowledged(research, run_id, *dispatched);
@@ -555,31 +573,13 @@ fn polled(
 ) -> Result<(), RuntimeError> {
     let allowed = research_allowed(state, research, context);
     if let Some(run) = research.run.take() {
-        match &run.phase {
-            Phase::Recorded {
-                committed: false, ..
-            } => {
-                if now <= run.bound {
-                    research.run = Some(run);
-                }
-            }
-            Phase::Recorded {
-                committed: true, ..
-            } => {
-                if let (Some(config), Some(_)) = (context.config, allowed.as_ref()) {
-                    judge::judge(&run, config, context, batch)?;
-                }
-            }
-            Phase::Retrieving | Phase::Calling { .. } => {
-                if allowed.as_ref() == Some(&run.pin) && now <= run.bound {
-                    research.run = Some(run);
-                } else {
-                    requests.push(ResearchRequest::Cancel {
-                        run_id: run.run_id.clone(),
-                    });
-                    remember_cancelled(research, run);
-                }
-            }
+        if allowed.as_ref() == Some(&run.pin) && now <= run.bound {
+            research.run = Some(run);
+        } else {
+            requests.push(ResearchRequest::Cancel {
+                run_id: run.run_id.clone(),
+            });
+            remember_cancelled(research, run);
         }
         return Ok(());
     }
@@ -622,7 +622,7 @@ fn remember_cancelled(research: &mut ResearchState, run: Run) {
             pin: run.pin,
             observations,
         }),
-        Phase::Retrieving | Phase::Recorded { .. } => None,
+        Phase::Retrieving => None,
     };
     research.cancelled.insert(run.run_id, call);
 }
@@ -749,89 +749,157 @@ fn fold_drift(research: &mut ResearchState, items: &[RetrievedObservation]) {
     }
 }
 
-/// The gateway's settled answer: always journaled as `ModelInvocationRecorded`, whatever the
-/// outcome and whether or not its run was cancelled (§5.3, §6.6). Only an `ok` answer to the run
-/// in flight goes on to judging, and only once its record has committed.
+/// The gateway's record of a call: always journaled as `ModelInvocationRecorded`, whatever the
+/// outcome and whether or not its run was cancelled (§5.3, §6.6). An `ok` record of the run in
+/// flight, on time, under the pin research still runs, is judged in the same step, and its
+/// verdicts go in the record, which heads the batch (§6.2 steps 4 and 5, journal spec §9.19). A
+/// record of another call, pin, purpose, agent, or retrieved context is refused and never
+/// journaled as this run's (INF-2, caller side). A judgment the core cannot write is no judgment:
+/// the record is still journaled, with no verdicts, so a paid call is never left unrecorded and the
+/// schedule still counts from it (HI-8, DEC-1120 item 7). A record completed after the run's own
+/// wall-clock bound is never judged, whatever deadline it carries (§7.1).
 fn called(
+    state: &RuntimeState,
     research: &mut ResearchState,
     run_id: &str,
-    at: RiskClock,
-    outcome: &CallOutcome,
+    record: &CallRecord,
+    context: &ResearchContext<'_>,
     batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
+    let agent = state.deployment().agent.0.as_str();
     let in_flight = research
         .run
         .take_if(|run| run.run_id == run_id && matches!(run.phase, Phase::Calling { .. }));
     let Some(run) = in_flight else {
-        let Some(cancelled) = research.cancelled.remove(run_id).flatten() else {
+        let owned = research
+            .cancelled
+            .get(run_id)
+            .and_then(Option::as_ref)
+            .is_some_and(|call| owns(record, &call.call_id, &call.pin, &call.observations, agent));
+        let cancelled = if owned {
+            research.cancelled.remove(run_id).flatten()
+        } else {
+            None
+        };
+        let Some(cancelled) = cancelled else {
             return Err(RuntimeError::NotInterpreted {
-                what: "a call answer for a run that never called".to_owned(),
+                what: "a call record for a run that never called, or of another call".to_owned(),
                 story: "E19-3",
             });
         };
-        let call = Call {
-            run_id,
-            call_id: &cancelled.call_id,
-            pin: &cancelled.pin,
-            at,
-            observations: &cancelled.observations,
-            used: false,
-        };
-        let id = batch.journal("ModelInvocationRecorded", None, invocation(&call, outcome)?)?;
-        research.last_call = Some(research.last_call.map_or(at, |last| last.max(at)));
-        treat(research, &cancelled.pin, outcome, id, batch);
+        let id = batch.journal("ModelInvocationRecorded", None, invocation(record, &[])?)?;
+        note_call(research, record);
+        treat(research, &cancelled.pin, record.outcome, id, batch);
         return Ok(());
     };
     let Phase::Calling {
         observations,
         items,
-    } = run.phase.clone()
+    } = &run.phase
     else {
         research.run = Some(run);
         return Ok(());
     };
-    let call = Call {
-        run_id,
-        call_id: &run.call_id,
-        pin: &run.pin,
-        at,
-        observations: &observations,
-        used: true,
-    };
-    let outcome = &checked(&run, outcome);
-    let id = batch.journal("ModelInvocationRecorded", None, invocation(&call, outcome)?)?;
-    research.last_call = Some(research.last_call.map_or(at, |last| last.max(at)));
-    treat(research, &run.pin, outcome, id.clone(), batch);
-    if let Ok(reply) = outcome {
-        research.run = Some(Run {
-            phase: Phase::Recorded {
-                invocation: id,
-                committed: false,
-                reply: reply.clone(),
-                observations,
-                items,
-            },
-            ..run
+    if !owns(record, &run.call_id, &run.pin, observations, agent) {
+        research.run = Some(run);
+        return Err(RuntimeError::NotInterpreted {
+            what: "a call record of another call, pin, agent, or retrieved context".to_owned(),
+            story: "E19-3",
         });
     }
+    let judged = match context.config {
+        Some(config)
+            if record.outcome == Outcome::Ok
+                && record.completed_at <= record.deadline
+                && record.completed_at.secs() <= run.bound.secs()
+                && research_allowed(state, research, context).as_ref() == Some(&run.pin) =>
+        {
+            let called = Called {
+                observations,
+                items,
+            };
+            judge::judge(&run, &called, record, config, context, batch).unwrap_or_default()
+        }
+        _ => Judged::default(),
+    };
+    let (body, theses) = match invocation(record, &judged.verdicts) {
+        Ok(body) => (body, judged.theses),
+        Err(_) => (invocation(record, &[])?, Vec::new()),
+    };
+    let id = batch.journal("ModelInvocationRecorded", None, body)?;
+    for thesis in theses {
+        let thesis_record = batch.journal(thesis.event_type, Some(id.clone()), thesis.body)?;
+        if let Some(output) = thesis.output {
+            batch.journal("ModelOutputRecorded", Some(thesis_record), output)?;
+        }
+    }
+    note_call(research, record);
+    treat(research, &run.pin, record.outcome, id, batch);
     Ok(())
 }
 
-/// The worker's settled answer checked again by the core: a reply for another call, or from an
-/// identity other than the run's pin, is `identity_mismatch` here whatever the worker said, so a
-/// shell that skipped `settle` still cannot have a substituted answer judged (INF-2, caller side).
-/// The deadline is the worker's to check, since only it knows the dispatch instant.
-fn checked(run: &Run, outcome: &CallOutcome) -> CallOutcome {
-    match outcome {
-        Ok(reply) if reply.call_id != run.call_id || reply.reported != run.pin => {
-            Err(CallFailure {
-                call_id: run.call_id.clone(),
-                kind: ErrorKind::IdentityMismatch,
-                completed_at: reply.completed_at,
-            })
+/// Whether `record` is the record of this call: its id, pin, purpose, agent, and exactly the
+/// journaled observations it was planned with, in order.
+fn owns(
+    record: &CallRecord,
+    call_id: &str,
+    pin: &ModelPin,
+    observations: &[EventId],
+    agent: &str,
+) -> bool {
+    record.call_id == call_id
+        && record.model == *pin
+        && record.purpose == Purpose::Research
+        && record.agent_id.as_deref() == Some(agent)
+        && record
+            .observations
+            .iter()
+            .map(String::as_str)
+            .eq(observations.iter().map(|id| id.0.as_str()))
+}
+
+/// The schedule counts from the call's completion, the instant the record carries, so a restart
+/// folds back the same anchor (HI-8).
+fn note_call(research: &mut ResearchState, record: &CallRecord) {
+    let completed = RiskClock::from_secs(record.completed_at.secs());
+    research.last_call = Some(
+        research
+            .last_call
+            .map_or(completed, |last| last.max(completed)),
+    );
+}
+
+/// The journaled context of the call being judged: its run's observations and their items' facts.
+struct Called<'a> {
+    observations: &'a [EventId],
+    items: &'a [ItemFacts],
+}
+
+/// A call the gateway could not make (another workspace's, a malformed call id, an agent and
+/// purpose that disagree, or a pin the registry does not hold): the run ends with no output and no
+/// record (HI-6, inference spec §3.1), and research waits for a new version of the pin, since the
+/// same request would be refused again. A refusal for a cancelled run's call ends that run too.
+fn refused(
+    research: &mut ResearchState,
+    run_id: &str,
+    _error: RequestError,
+) -> Result<(), RuntimeError> {
+    let in_flight = research
+        .run
+        .take_if(|run| run.run_id == run_id && matches!(run.phase, Phase::Calling { .. }));
+    let Some(run) = in_flight else {
+        if research.cancelled.get(run_id).is_some_and(Option::is_some) {
+            research.cancelled.remove(run_id);
+            return Ok(());
         }
-        other => other.clone(),
-    }
+        return Err(RuntimeError::NotInterpreted {
+            what: "a refused call for a run that never called".to_owned(),
+            story: "E19-3",
+        });
+    };
+    research.withdrawn.insert(run.pin);
+    research.last_attempt = Some(run.cut_off);
+    Ok(())
 }
 
 /// §7.3's treatment beyond "missing": an opaque operator alert, research disabled for a withdrawn
@@ -840,15 +908,11 @@ fn checked(run: &Run, outcome: &CallOutcome) -> CallOutcome {
 fn treat(
     research: &mut ResearchState,
     pin: &ModelPin,
-    outcome: &CallOutcome,
+    outcome: Outcome,
     record: EventId,
     batch: &mut Batch<'_>,
 ) {
-    let Err(CallFailure { kind, .. }) = outcome else {
-        research.deadline_streak = 0;
-        return;
-    };
-    let treatment = kind.treatment();
+    let treatment = treatment(outcome);
     if treatment.disable_research {
         research.withdrawn.insert(pin.clone());
     }
@@ -858,7 +922,7 @@ fn treat(
             message_key: "research_call_refused",
         });
     }
-    if *kind != ErrorKind::DeadlineExceeded {
+    if !treatment.deadline_streak {
         research.deadline_streak = 0;
         return;
     }
@@ -872,6 +936,13 @@ fn treat(
     }
 }
 
+/// `ModelInvocationRecorded`'s agent-stream payload (journal spec §9.19), with the verdicts.
+fn invocation(record: &CallRecord, verdicts: &[Verdict]) -> Result<Value, RuntimeError> {
+    record
+        .agent_payload(verdicts)
+        .map_err(|_| payload::non_canonical("model_invocation"))
+}
+
 /// The worker's acknowledgment of a cancellation, its own or the core's. One that never
 /// dispatched a call has nothing left to answer, so it is forgotten; one that did stays
 /// remembered, so its late answer is journaled.
@@ -883,67 +954,4 @@ fn acknowledged(research: &mut ResearchState, run_id: &str, dispatched: bool) {
     if !(dispatched && called) {
         research.cancelled.remove(run_id);
     }
-}
-
-/// One call's identity and context, for its record.
-struct Call<'a> {
-    run_id: &'a str,
-    call_id: &'a str,
-    pin: &'a ModelPin,
-    at: RiskClock,
-    observations: &'a [EventId],
-    used: bool,
-}
-
-/// `ModelInvocationRecorded`'s provisional payload (DEC-996 item 4): inference spec §3.6's members
-/// that a settled outcome carries, the run id in place of the envelope's `correlation_id`, the
-/// retrieved context as the run's observation ids, and whether the answer was used.
-fn invocation(call: &Call<'_>, outcome: &CallOutcome) -> Result<Value, RuntimeError> {
-    let digest = |value: &Digest| payload::text(&format!("sha256:{value}"));
-    let (kind, reply, completed) = match outcome {
-        Ok(reply) => ("ok", Some(reply), reply.completed_at),
-        Err(failure) => (failure.kind.as_str(), None, failure.completed_at),
-    };
-    let reported = match reply {
-        Some(reply) => payload::object(vec![
-            ("model_id", payload::text(&reply.reported.model_id)),
-            (
-                "model_version",
-                payload::text(&reply.reported.model_version),
-            ),
-            ("content_hash", digest(&reply.reported.content_hash)),
-        ])?,
-        None => Value::Null,
-    };
-    let reference =
-        |pick: fn(&GatewayReply) -> &Digest| reply.map_or(Value::Null, |r| digest(pick(r)));
-    payload::object(vec![
-        ("run_id", payload::text(call.run_id)),
-        ("call_id", payload::text(call.call_id)),
-        ("purpose", payload::text("research")),
-        ("model_id", payload::text(&call.pin.model_id)),
-        ("model_version", payload::text(&call.pin.model_version)),
-        ("content_hash", digest(&call.pin.content_hash)),
-        ("outcome", payload::text(kind)),
-        ("reported_identity", reported),
-        ("request_digest", reference(|r| &r.request_digest)),
-        ("prompt_ref", reference(|r| &r.prompt_ref)),
-        ("response_ref", reference(|r| &r.response_ref)),
-        (
-            "cost_usd",
-            reply.map_or(Value::Null, |r| payload::text(&r.cost_usd.to_string())),
-        ),
-        ("called_at", payload::stamp(call.at, "called_at")?),
-        ("completed_at", payload::text(&completed.to_string())),
-        (
-            "retrieved_context",
-            Value::Array(
-                call.observations
-                    .iter()
-                    .map(|id| payload::text(&id.0))
-                    .collect(),
-            ),
-        ),
-        ("used", Value::Bool(call.used)),
-    ])
 }

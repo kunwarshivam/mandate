@@ -1,6 +1,7 @@
 //! The dispatcher's step over the journal, its outbox (notifications spec §5.1, NT-3, NT-8; E8-10
 //! slice D2, DEC-701 item 3, DEC-704). A [`step`] reads the committed `OwnerAlertSent` events of
-//! its subject streams, journals one `NoticeIssued` per cause before any send, sends each notice
+//! its subject streams and the `ApprovalRequested` events of their agent streams (slice D7a,
+//! DEC-2501), journals one `NoticeIssued` per cause before any send, sends each notice
 //! to each recipient's push channel and again on §5.3's schedule while it fails `retryable`
 //! ([`crate::due`], slice D4, DEC-707), and journals each outcome, and each send abandoned at its
 //! window's end, as `NoticeAttempted`. Every
@@ -67,7 +68,12 @@ impl NoticeWriter {
 /// What the dispatcher reads and writes: the committed rows of a stream in `seq` order, and one
 /// all-or-nothing append to a [`NoticeWriter`]'s stream at its epoch.
 pub trait Journal {
-    fn committed(&self, stream: &StreamId) -> Vec<StoredEvent>;
+    /// The committed rows of `stream` in `seq` order (DEC-2500 item 3).
+    ///
+    /// # Errors
+    /// [`DispatchError::JournalUnavailable`] when the store cannot answer. A failed read is never
+    /// an empty stream: read as one, it would re-open the notice stream and re-issue every cause.
+    fn committed(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError>;
     fn append_notices(
         &mut self,
         writer: &NoticeWriter,
@@ -81,7 +87,8 @@ pub trait Journal {
 #[derive(Debug, Clone, Copy)]
 pub struct Config<'a> {
     pub writer: &'a NoticeWriter,
-    /// The workspace's agent, account, and control streams, whose alerts are causes.
+    /// The workspace's agent, account, and control streams, whose alerts, and the agent streams'
+    /// approval requests, are causes (DEC-2501 item 1).
     pub subjects: &'a [StreamId],
     /// The push channels, by opaque recipient id, every notice goes to until roles exist (E9-2;
     /// spec §3.3, DEC-704 item 4).
@@ -92,8 +99,9 @@ pub struct Config<'a> {
     pub build: &'a str,
 }
 
-/// A committed `OwnerAlertSent` as the step reads it: its event id and stream, its kind, its
-/// owner command, and whether it is on a control stream (DEC-705).
+/// A committed `OwnerAlertSent` or `ApprovalRequested` as the step reads it: its event id and
+/// stream, its kind, its owner command (none for a request), and whether it is on a control stream
+/// (DEC-705, DEC-2501).
 struct Cause {
     event: String,
     stream: String,
@@ -150,7 +158,9 @@ pub(crate) struct Notices {
 /// # Errors
 /// [`DispatchError::Fenced`] when a newer dispatcher owns the notice stream and
 /// [`DispatchError::NotCommitted`] for any other append that does not commit, each before the
-/// next send; [`DispatchError::Notify`] when the random source fails.
+/// next send; [`DispatchError::Notify`] when the random source fails; and
+/// [`DispatchError::JournalUnavailable`] when a read fails, which ends the step before it issues,
+/// sends, or appends anything more (DEC-2500 item 3).
 pub fn step(
     config: &Config<'_>,
     journal: &mut dyn Journal,
@@ -159,8 +169,8 @@ pub fn step(
     now: UtcNanos,
 ) -> Result<(), DispatchError> {
     let stream = config.writer.stream()?;
-    let before = notices_of(&journal.committed(stream));
-    let alerts = causes(journal, config.subjects);
+    let before = notices_of(&read(journal, stream)?);
+    let alerts = causes(journal, config.subjects)?;
     let fresh = fresh(&alerts, &before.issued)?;
     if !fresh.is_empty() {
         let recipients: BTreeSet<&str> = config.audience.iter().map(|&(r, _)| r).collect();
@@ -197,7 +207,7 @@ pub fn step(
         }
         append(journal, config.writer, before.head, now, &drafts)?;
     }
-    let rows = journal.committed(stream);
+    let rows = read(journal, stream)?;
     let mut head = notices_of(&rows).head;
     for pending in pending(&rows, config.audience, now)? {
         let due = &pending.due;
@@ -296,13 +306,26 @@ impl Record {
     }
 }
 
-/// The committed `OwnerAlertSent` of the subject streams, the streams in the order given and each
-/// in `seq` order. A batch the journal refused, a fenced one included, has no row, so it is no
-/// cause (spec §5.1 step 1, NT-8).
-fn causes(journal: &dyn Journal, subjects: &[StreamId]) -> Vec<Cause> {
+/// The committed causes of the subject streams, the streams in the order given and each in `seq`
+/// order: every `OwnerAlertSent`, and every `ApprovalRequested` on an agent stream, read by its
+/// envelope alone and never its payload (DEC-2501 items 1 and 5). An `ApprovalRequested` on any
+/// other stream is no cause, so rule 125 never refuses the batch it would join. A batch the
+/// journal refused, a fenced one included, has no row, so it is no cause (spec §5.1 step 1, NT-8).
+/// A subject stream that cannot be read ends the step.
+fn causes(journal: &dyn Journal, subjects: &[StreamId]) -> Result<Vec<Cause>, DispatchError> {
     let mut alerts = Vec::new();
     for stream in subjects {
-        for row in journal.committed(stream) {
+        for row in read(journal, stream)? {
+            if row.event_type == "ApprovalRequested" && stream.stream_type() == StreamType::Agent {
+                alerts.push(Cause {
+                    event: row.event_id,
+                    stream: stream.as_str().to_owned(),
+                    kind: "approval_requested".to_owned(),
+                    command: None,
+                    control: false,
+                });
+                continue;
+            }
             let alert = payload(&row).filter(|_| row.event_type == "OwnerAlertSent");
             let Some(alert) = alert else { continue };
             alerts.push(Cause {
@@ -317,7 +340,14 @@ fn causes(journal: &dyn Journal, subjects: &[StreamId]) -> Vec<Cause> {
             });
         }
     }
-    alerts
+    Ok(alerts)
+}
+
+/// One read of `stream`'s committed rows; a read that fails ends the step with the store's closed
+/// [`DispatchError::JournalUnavailable`], so nothing more is issued, sent, or appended, and the
+/// failure is never read as an empty stream (DEC-2500 item 3).
+fn read(journal: &dyn Journal, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
+    journal.committed(stream)
 }
 
 /// One cause per notice key that has no `NoticeIssued` yet, in first-read order: the key's

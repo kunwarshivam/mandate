@@ -108,8 +108,8 @@ below.
 ### The demo
 
 `cargo xtask cell demo` is the whole local cell on a laptop, with paper and demo data only and no
-credential. It runs `cell up`, opens the `demo` workspace and verifies its control stream in the
-cell, and prints each part as `ready` or `skipped` with the lane it waits on. Then it runs `web/`
+credential. It runs `cell up`, opens the demo workspace (`01KDEM0000000000000000000W`, the one the
+cell's API server hosts) and verifies its control stream in the cell, and prints each part as `ready` or `skipped` with the lane it waits on. Then it runs `web/`
 at http://127.0.0.1:4317 in the foreground (Ctrl-C stops it; the cell keeps running). With
 `--no-web` it stops after the summary; CI runs it that way at the end of the `cell` job, which also
 upgrades every release in place.
@@ -123,8 +123,44 @@ upgrades every release in place.
 | The founding membership | Lane ID1's `mandate membership` gesture is in the CLI |
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
 
+The API server listens only on its pod's loopback, so nothing in the cluster reaches it until the
+tunnel's route lands. The demo forwards http://127.0.0.1:8787 to it with the machine's own `kubectl`,
+or prints the `kubectl port-forward` command when there is none, and checks that `/v1` answers with
+the one 401. The forward outlives the demo until its pod goes or it is stopped; a later demo
+reuses one that still answers. Sign-in waits on lane SI's stub issuer (DEC-2100) and on subject links: until both are
+in the cell, every sign-in is refused. The session signing key is made in the pod's memory at each
+start. The interim `api` image carries a CA bundle found on the building host (`SSL_CERT_FILE`, else
+the usual Debian, Fedora, openSUSE or Alpine path), without which the server refuses to start; when `cell up` cannot install the workspace release, it prints the API pod's
+state, logs and the namespace's events. A cell that pulls its `mandate` image (`MANDATE_CELL_IMAGE`) has no API image yet, so it
+skips the API's parts.
+
 A part whose lane is not on `main` is named as skipped, never faked. `web/` needs Node.js at the
 release in `web/.nvmrc` and npm; the first run does `npm ci`.
+
+### The demo's scenario
+
+`cargo xtask cell demo --scenario demo` (E21-54, DEC-2002) runs the demo's story on the cell, its
+six steps in order, with paper and demo data only and no credential. Each gesture whose pieces are
+on `main` runs in the cell, in one Job of the `control` process, and passes only when it printed
+what its success prints. Each missing link prints as `gap` with the PR or story that closes it; a
+gap never fails the run and is never faked. The run ends, in the same pod, by exporting the
+workspace's control stream and verifying it by journal spec §11 against the artifact store its
+gestures wrote, so every artifact a record names is checked. Each run uses a fresh workspace,
+`demo<run id>`.
+
+| Step | Runs today | Gaps, and what closes each |
+|---|---|---|
+| 1. Sign in, see the workspace | `workspace open` (paper), `workspace found` | Sign-in and the workspace read through the API: the API server (#1457) and `mandate identity link` (#1529) are on `main`; still needed are the API's cell image (lane A1) and E21-52's stub token issuer (spec #1535, crate not built; lane SI) |
+| 2. Deploy under a confirmed envelope | `config register`, `model register`, `version create`, `version confirm` shown then typed, `agent deploy` shown then typed | The same from `web/`: E10-11, E10-12 (lane A2); the agent's processes started from `AgentDeployed`: E21-33 (lane D1) |
+| 3. Research, through the gateway's recorded fake | Nothing yet | The runtime process is on `main` (#1521); still needed are its image (lane P), the shell's research driver (DEC-996 item 2, lane I2), E15-8, and E19-5 (spec on `main`, #1543) |
+| 4. Sized, gated, asked, approved, filled, protected | `approvals list` (empty until the runtime asks) | The runtime's image (#1521 is on `main`; lane P); approval from `web/`: E9-4 (lane SU); the fill and the stop on a fixture broker: E21-30's executor slice (lane X) |
+| 5. A backtest of the same version | Nothing yet | The backtest (#1482) and `web/`'s report screen (#1549) are on `main`; still needed are a way to run it in the cell and its API read (E4-4, lane I4) |
+| 6. The kill switch from `web/` | Nothing yet | The API's cell image (lane A1; #1457's route is on `main`); the processes stopping on it: the runtime's image (#1521 is on `main`), E21-30's executor slice, E21-34 (lane O4, #1537) |
+
+The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
+every opening asked, protection on. CI's `cell-demo` job, which no required check depends on, runs
+the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecting proxy, set
+`MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle first.
 
 ### The drills
 
@@ -166,7 +202,12 @@ and `MANDATE_IMAGE_MANDATE` (pinned by digest) set, and under `deploy/cell/compo
 `*:*:mandate:<role>:<password>`, owned by uid 999 with mode 0600, which libpq and sqlx require.
 Every Compose service runs as that one non-root user, the library Postgres image's, so its
 first-start script and each process can read the same files.
-`docker compose run control workspace open …` runs the CLI.
+`docker compose run control workspace open …` runs the CLI. The `api` service also needs
+`MANDATE_IMAGE_API`, the settings `MANDATE_API_ORG`, `MANDATE_API_WORKSPACE`, `MANDATE_API_ISSUER`,
+`MANDATE_API_AUDIENCE`, `MANDATE_API_JWKS_URL`, `MANDATE_API_APP_ORIGIN` and
+`MANDATE_DEPLOYMENT_TIER`, and `secrets/api-session-signing-key`: at least 32 random bytes, owned by
+uid 999 with mode 0600. It listens on its container's loopback and mounts no subject links, so
+every sign-in is refused there until a later change adds both.
 
 `docker compose run` of `control` or `journal-verify` needs a writable `/work`, given with
 `-v <dir>:/work`, as `cargo xtask cell drill compose` does.

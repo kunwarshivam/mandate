@@ -2,12 +2,12 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type Fetch, OPERATIONS, createWorkspaceClient } from "./client";
-import { type CommandScope, prepareApprovalResponse, prepareOwnerCommand } from "./commands";
+import { type CommandScope, prepareApprovalResponse, prepareConfirm, prepareOwnerCommand } from "./commands";
 import { createMockServer } from "./mock-server";
 import { WEB_OPERATIONS, operationFor } from "./operations";
 import { type ApiView, loadApi } from "./read-models";
 import type { Operation } from "./types";
-import type { CommandKind } from "@/lib/mock-runtime";
+import type { CommandKind, ConfirmRecord } from "@/lib/mock-runtime";
 
 /**
  * The web app is one client of the published workspace API (DEC-967 item 13, DEC-975): every call it
@@ -59,6 +59,12 @@ const SCHEMA_OF: Readonly<Record<Operation, string>> = {
   confirm_version: "confirm-request",
 };
 
+/** A new agent's A5 record, as the set-up's confirm sends it (DEC-2401). */
+const CONFIRM_RECORD: ConfirmRecord = { screen: "A5", environment: "paper", shown: ["Your agent", "Version 1"], paths: ["/capital/allocation_usd", "/environment"], classification: "risk_increasing" };
+const CONFIRM_VERSION = `sha256:${"1f".repeat(32)}` as const;
+/** What `GET .../confirmation` would serve; the client passes it through (DEC-2401 item 4). */
+const SERVED_DIGEST = `sha256:${"5d".repeat(32)}` as const;
+
 interface Schema {
   required?: string[];
   properties?: Record<string, { enum?: unknown[]; const?: unknown; properties?: Record<string, { enum?: unknown[] }> }>;
@@ -107,6 +113,9 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
   it("matches a request to its operation only whole, under this workspace, and with documented query members", () => {
     expect(operationFor("GET", `https://api.owlhead.ai/v1/workspaces/${WS}/agents/agt_1`, WS)?.id).toBe("agent");
     expect(operationFor("GET", `/v1/workspaces/${WS}/approvals?state=pending`, WS)?.id).toBe("approvals");
+    expect(operationFor("GET", `/v1/workspaces/${WS}/backtests/bt_01JBR2C4D6E8F0G2H4J6K8M0N2`, WS)?.id).toBe("backtest");
+    expect(operationFor("GET", `/v1/workspaces/${WS}/backtests`, WS)).toBeNull();
+    expect(operationFor("POST", `/v1/workspaces/${WS}/backtests`, WS)).toBeNull();
     expect(operationFor("POST", `/v1/workspaces/${WS}/agents/agt_1/pause`, WS)?.id).toBe("pause");
     expect(operationFor("POST", `/v1/workspaces/${WS}/kill-switch`, WS)?.id).toBe("kill_switch");
     expect(operationFor("GET", `/v1/workspaces/${WS}/approvals?state=pending&secret=1`, WS)).toBeNull();
@@ -133,6 +142,7 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
         const prepared = prepareApprovalResponse(client, approval, response, { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: false });
         if (prepared.ok) for (const command of prepared.commands) sent.push(await client.send(command));
       }
+    sent.push(await client.send(prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification: "risk_increasing" } })));
     for (const outcome of sent) if (outcome.ok) await client.commandStatus(outcome.accepted.event_id);
     expect(sent.length).toBeGreaterThan(KINDS.length);
     expect(calls.length).toBeGreaterThan(10);
@@ -156,11 +166,19 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
       const prepared = prepareApprovalResponse(client, approval, response, { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: true });
       if (prepared.ok) for (const c of prepared.commands) bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
     }
-    expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response"]));
+    for (const classification of ["risk_increasing", "risk_reducing", "neutral"] as const) {
+      const c = prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification } });
+      bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
+    }
+    expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response", "confirm_version"]));
     for (const { operation, body } of bodies) {
       const schema = schemaFor(operation);
       for (const member of schema.required ?? []) expect(Object.hasOwn(body, member), `${operation} needs ${member}`).toBe(true);
       for (const member of Object.keys(body)) expect(Object.hasOwn(schema.properties ?? {}, member), `${operation} has no ${member}`).toBe(true);
+      for (const [member, value] of Object.entries(body)) {
+        const allowed = schema.properties?.[member]?.enum;
+        if (allowed) expect(allowed, `${operation}.${member}`).toContain(value);
+      }
       expect(JSON.stringify(body), operation).not.toMatch(/"requested_by"/);
     }
     for (const { operation, body } of bodies.filter((b) => b.operation === "kill_switch")) {

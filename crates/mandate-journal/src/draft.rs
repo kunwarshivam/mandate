@@ -7,7 +7,9 @@ use mandate_canon::{Object, Value, parse, to_canonical};
 use mandate_time::UtcNanos;
 
 use crate::schema::{Ty, normalize, normalize_record, parse_digest_ref, payload_schema};
-use crate::{Environment, Invalid, InvalidReason, StreamId, StreamType, agent, catalogue, control};
+use crate::{
+    Environment, Invalid, InvalidReason, StreamId, StreamType, agent, catalogue, control, scheduler,
+};
 
 static ENVELOPE: &[(&str, Ty)] = &[
     ("envelope_version", Ty::Int),
@@ -109,9 +111,21 @@ impl Draft {
 
         let written = fields.get("payload").unwrap_or(&Value::Null);
         let causation_id = fields.get("causation_id");
+        let scheduled = scheduler::governs(&stream_id);
         let closed = agent::governs(&stream_id, event_type);
         let controlled = control::governs(&stream_id, event_type);
-        let payload = if closed {
+        let payload = if scheduled {
+            scheduler::payload(
+                event_type,
+                int("schema_version"),
+                written,
+                &scheduler::Envelope {
+                    actor: fields.get("actor"),
+                    clock_source: fields.get("clock_source"),
+                    causation_id,
+                },
+            )?
+        } else if closed {
             agent::payload(event_type, int("schema_version"), written, causation_id)?
         } else if controlled {
             control::payload(
@@ -148,7 +162,9 @@ impl Draft {
             return Err(Invalid::new(InvalidReason::PiiRefs, "pii_refs"));
         }
 
-        if closed {
+        if scheduled {
+            scheduler::subject(event_type, &stream_id, &payload)?;
+        } else if closed {
             agent::subject_and_copy(event_type, &stream_id, &payload, causation_id)?;
         } else if controlled {
             crate::connections::copy(event_type, int("schema_version"), &payload, causation_id)?;
@@ -315,9 +331,11 @@ fn subject(stream_id: &StreamId, payload: &Value) -> Option<String> {
             field("workspace_id")?,
             field("account_ref")?
         )),
-        StreamType::Agent | StreamType::Control | StreamType::Scheduler | StreamType::Notice => {
-            None
-        }
+        StreamType::Agent
+        | StreamType::Control
+        | StreamType::Scheduler
+        | StreamType::Notice
+        | StreamType::Meter => None,
     }
 }
 

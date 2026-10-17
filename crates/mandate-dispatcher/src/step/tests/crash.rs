@@ -1,8 +1,10 @@
 //! E8-10 slice D3 (NT-8, spec §5.1, DEC-704 item 3, DEC-710 item 5): a crash after every effect of
 //! a step, then a restarted dispatcher over the same journal, judged by NT-8's oracle. The oracle
 //! reads the committed journal, the configured audience (the journal names recipients but not
-//! their channels before NT-10), and the provider's captures; never the step's state.
+//! their channels before NT-10), and the provider's captures; never the step's state. Slice D7a
+//! (DEC-2501) runs the same crashes with approval requests among the causes.
 
+use super::approval::{AG, agent, approval};
 use super::{
     A1, AUDIENCE, BUILD, CTL, Checked, Counter, Gate, Shared, alerts, kill_switch, now, payloads,
     provider, run_over, text, world, writer,
@@ -10,7 +12,7 @@ use super::{
 use crate::DispatchError;
 use crate::step::{Config, Journal, NoticeWriter, step};
 use mandate_canon::{Value, parse};
-use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId, StreamType};
 use mandate_notify::{
     AddressHandle, FixtureProvider, IdempotencyKey, NoticeId, Notification, NotifyError, Origin,
     Outcome, Provider, PushChannel, Recipient, Sent,
@@ -26,6 +28,12 @@ use std::rc::Rc;
 const SUBJECTS: [&str; 2] = [CTL, A1];
 /// One step over [`SUBJECTS`] makes nine effects: the issue batch, then four sends and their records.
 const EFFECTS: usize = 9;
+/// The subject streams of every crash scenario with approvals: [`SUBJECTS`] and the agent stream,
+/// whose two approval requests (one at each version) add two notices and four sends.
+const WITH_APPROVALS: [&str; 3] = [CTL, A1, AG];
+/// One step over [`WITH_APPROVALS`] makes seventeen effects: the issue batch, then eight sends and
+/// their records.
+const APPROVAL_EFFECTS: usize = 17;
 
 /// What a step did last before its crash.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,7 +75,7 @@ impl Fuse {
 struct Crashing(Shared, Rc<RefCell<Fuse>>);
 
 impl Journal for Crashing {
-    fn committed(&self, stream: &StreamId) -> Vec<StoredEvent> {
+    fn committed(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
         self.0.committed(stream)
     }
     fn append_notices(
@@ -118,6 +126,7 @@ impl Provider for Flaky<'_> {
 /// address whose send was in flight at the crash, so that send is neither made again nor recorded.
 struct Restarts {
     journal: Shared,
+    subjects: &'static [&'static str],
     fx: FixtureProvider,
     random: Counter,
     drops_in_flight: bool,
@@ -134,6 +143,7 @@ impl Restarts {
         let fx = provider(&journal)?.fx;
         Ok(Self {
             journal,
+            subjects: &SUBJECTS,
             fx,
             random: Counter(0),
             drops_in_flight,
@@ -141,6 +151,17 @@ impl Restarts {
             crashes: 0,
             crashed_after_send: 0,
         })
+    }
+
+    /// [`Restarts::new`]'s journal with the agent stream and its two approval requests, read over
+    /// [`WITH_APPROVALS`].
+    fn with_approvals(drops_in_flight: bool) -> Result<Self, Box<dyn Error>> {
+        let mut dispatcher = Self::new(drops_in_flight)?;
+        agent(&dispatcher.journal)?;
+        approval(&dispatcher.journal, 20, 1, "aapl", "rule:large_order")?;
+        approval(&dispatcher.journal, 21, 2, "msft", "rule:large_order")?;
+        dispatcher.subjects = &WITH_APPROVALS;
+        Ok(dispatcher)
     }
 
     /// One step by a newly started dispatcher, crashing after its `at`-th effect if it gets there.
@@ -154,7 +175,11 @@ impl Restarts {
             .into_iter()
             .filter(|(_, channel)| !self.forgotten.contains(channel))
             .collect();
-        let subjects: Vec<StreamId> = SUBJECTS.iter().filter_map(|s| StreamId::parse(s)).collect();
+        let subjects: Vec<StreamId> = self
+            .subjects
+            .iter()
+            .filter_map(|s| StreamId::parse(s))
+            .collect();
         let origin = Origin::parse("https://app.example.invalid")?;
         let config = Config {
             writer: &writer,
@@ -196,7 +221,8 @@ impl Restarts {
     }
 }
 
-/// The notice key of a committed `OwnerAlertSent`: its owner command, or its own event id.
+/// The notice key of a committed cause: an `OwnerAlertSent`'s owner command, or its own event id,
+/// which is an `ApprovalRequested`'s key too, as it names no owner command.
 fn key(row: &StoredEvent) -> Option<String> {
     let payload = parse(&row.body).ok()?.get("payload")?.clone();
     let command = payload.get("owner_command").and_then(Value::as_str);
@@ -204,17 +230,26 @@ fn key(row: &StoredEvent) -> Option<String> {
 }
 
 /// NT-8's oracle. From the committed journal alone it derives the notice key of every
-/// `OwnerAlertSent` on `subjects`, and the sends due: `(notice, recipient, channel)` for each
+/// `OwnerAlertSent` on `subjects` and of every `ApprovalRequested` on an agent stream among them
+/// (its own event id, spec §3.4), and the sends due: `(notice, recipient, channel)` for each
 /// recipient a `NoticeIssued` lists and each of that recipient's configured channels. It finds one
 /// `NoticeIssued` per key, exactly one `NoticeAttempted` per due send and none other, and every
 /// captured send a due send under that send's own idempotency key, with every due send captured.
-fn nt8(journal: &Shared, subjects: &[&str], sends: &[Sent]) -> Result<(), Box<dyn Error>> {
+pub(super) fn nt8(
+    journal: &Shared,
+    subjects: &[&str],
+    sends: &[Sent],
+) -> Result<(), Box<dyn Error>> {
     let j = journal.0.borrow();
     let mut keys = BTreeSet::new();
     for subject in subjects {
-        let rows = j.rows(&StreamId::parse(subject).ok_or("subject")?);
-        for row in rows.iter().filter(|r| r.event_type == "OwnerAlertSent") {
-            keys.insert(key(row).ok_or("alert payload")?);
+        let sid = StreamId::parse(subject).ok_or("subject")?;
+        let agent = sid.stream_type() == StreamType::Agent;
+        let cause = |r: &&StoredEvent| {
+            r.event_type == "OwnerAlertSent" || (agent && r.event_type == "ApprovalRequested")
+        };
+        for row in j.rows(&sid).iter().filter(cause) {
+            keys.insert(key(row).ok_or("cause payload")?);
         }
     }
     let issued = payloads(journal, "NoticeIssued");
@@ -354,6 +389,50 @@ fn the_oracle_catches_a_restart_that_drops_the_send_in_flight_at_a_crash() -> Ch
     }
     assert_eq!(
         caught, 4,
+        "every crash between a send and its record drops it under the bug"
+    );
+    Ok(())
+}
+
+#[test]
+fn with_approval_causes_a_restart_after_any_crash_makes_and_records_every_due_send() -> Checked {
+    let mut plans: Vec<Vec<usize>> = (0..=APPROVAL_EFFECTS).map(|at| vec![at]).collect();
+    for first in 0..APPROVAL_EFFECTS {
+        plans.extend((0..APPROVAL_EFFECTS).map(|second| vec![first, second]));
+    }
+    for plan in plans {
+        let mut dispatcher = Restarts::with_approvals(false)?;
+        dispatcher.run(&plan)?;
+        let sends = dispatcher.fx.sent()?;
+        nt8(&dispatcher.journal, &WITH_APPROVALS, sends).map_err(|e| format!("{plan:?}: {e}"))?;
+        let approvals = payloads(&dispatcher.journal, "NoticeIssued")
+            .iter()
+            .filter(|p| text(p, "kind") == "approval_requested" && text(p, "cause_stream") == AG)
+            .count();
+        assert_eq!(approvals, 2, "{plan:?}: one notice per approval request");
+        let resent = sends.len().checked_sub(8);
+        assert_eq!(
+            resent,
+            Some(dispatcher.crashed_after_send),
+            "{plan:?}: a send is made again only when a crash fell between it and its record"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn with_approval_causes_the_oracle_catches_a_restart_that_drops_the_send_in_flight() -> Checked {
+    let mut caught = 0usize;
+    for at in 0..=APPROVAL_EFFECTS {
+        let mut dispatcher = Restarts::with_approvals(true)?;
+        dispatcher.run(&[at])?;
+        let verdict = nt8(&dispatcher.journal, &WITH_APPROVALS, dispatcher.fx.sent()?);
+        let dropped = !dispatcher.forgotten.is_empty();
+        assert_eq!(verdict.is_err(), dropped, "crash at {at}: {verdict:?}");
+        caught = caught.wrapping_add(usize::from(dropped));
+    }
+    assert_eq!(
+        caught, 8,
         "every crash between a send and its record drops it under the bug"
     );
     Ok(())

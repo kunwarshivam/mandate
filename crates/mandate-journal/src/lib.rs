@@ -28,11 +28,14 @@ mod connections;
 mod control;
 mod control_plane;
 mod control_verify;
+mod deployment;
 mod draft;
+mod gateway;
 mod membership;
 mod merkle;
 mod notices;
 mod records;
+mod scheduler;
 mod schema;
 mod start;
 mod verify;
@@ -42,6 +45,40 @@ pub use agent::{
     AgentStreamCheck, AgentStreamFailure, HeldAnchor, HeldAnchorError, held_anchor,
     verify_agent_stream, verify_agent_stream_anchored,
 };
+
+/// Whether the journal closes `event_type` at `schema_version` on `stream`: the catalogue admits it
+/// there and a schema is registered for it, so a draft is judged member by member rather than
+/// refused `unknown_schema`. `mandate-runtime`'s `JournalCatalog` reads its answer for the agent
+/// stream's `ModelInvocationRecorded` (agent harness spec §6.2's verdicts precondition, E15-8).
+pub fn closes(event_type: &str, schema_version: u64, stream: StreamType) -> bool {
+    catalogue::lookup(event_type).is_some_and(|entry| entry.streams.contains(&stream))
+        && (control::closed_schema(event_type, schema_version, stream).is_some()
+            || (stream == StreamType::Agent && agent::closes(event_type, schema_version)))
+}
+
+/// The event types the stream rules of journal spec §9.19 read (rules 153 and 158).
+pub const STREAM_RULE_TYPES: [&str; 3] =
+    ["ModelInvocationRecorded", "MeterReserved", "MeterSettled"];
+
+/// Whether a draft of `batch` is judged by a stream rule (journal spec §9.19 rules 153 and 158), so
+/// `append` reads the stream's earlier records of [`STREAM_RULE_TYPES`] to judge it.
+pub fn reads_stream(batch: &[Draft]) -> bool {
+    batch.iter().any(|draft| {
+        matches!(
+            (draft.event_type(), draft.stream_id().stream_type()),
+            ("ModelInvocationRecorded", StreamType::Agent)
+                | ("MeterReserved" | "MeterSettled", StreamType::Meter)
+        )
+    })
+}
+
+/// The stream's stored records a stream rule reads, as drafts for [`check_stream`], in order.
+pub fn stream_rule_records(rows: &[StoredEvent]) -> Vec<Draft> {
+    rows.iter()
+        .filter(|row| STREAM_RULE_TYPES.contains(&row.event_type.as_str()))
+        .filter_map(|row| stored_draft(row).and_then(|bytes| Draft::parse(&bytes).ok()))
+        .collect()
+}
 
 /// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, §9.5's rule 45 on the
 /// account stream (DEC-446 item 3), §9.10's rule 84 clause on the control stream (DEC-671), then
@@ -67,6 +104,7 @@ pub use control_verify::{
     verify_break_glass_causes,
 };
 pub use draft::Draft;
+pub use gateway::check_stream;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
 pub use start::{
     AnchorRecord, AnchorRecordError, ColdRead, ManifestStart, ResolvedStart, StartRequest,
@@ -103,7 +141,7 @@ impl Environment {
     }
 }
 
-/// The five stream types of journal spec §2.
+/// The stream types of journal spec §2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StreamType {
     Account,
@@ -113,10 +151,14 @@ pub enum StreamType {
     /// `ntf:{workspace_id}`, whose single writer is the workspace's notification dispatcher
     /// (journal spec v0.12 §2, §9.15, DEC-720).
     Notice,
+    /// `meter:{workspace_id}`, whose single writer is the workspace's model gateway meter (journal
+    /// spec v0.46 §2, §9.19, DEC-998 item 3).
+    Meter,
 }
 
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,
-/// `clock:{workspace_id}`, or `ntf:{workspace_id}`, each segment `[A-Za-z0-9_-]+` (journal spec §2).
+/// `clock:{workspace_id}`, `ntf:{workspace_id}`, or `meter:{workspace_id}`, each segment
+/// `[A-Za-z0-9_-]+` (journal spec §2).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StreamId {
     text: String,
@@ -132,6 +174,7 @@ impl StreamId {
             ["ctl", _] => StreamType::Control,
             ["clock", _] => StreamType::Scheduler,
             ["ntf", _] => StreamType::Notice,
+            ["meter", _] => StreamType::Meter,
             _ => return None,
         };
         parts
@@ -679,6 +722,12 @@ impl MemoryJournal {
                 actual_seq: head.seq,
                 actual_hash: head.hash,
             };
+        }
+        if reads_stream(&batch) {
+            let earlier = stream_rule_records(self.rows(stream));
+            if let Err((draft, error)) = check_stream(&earlier, &batch) {
+                return AppendOutcome::Invalid { draft, error };
+            }
         }
 
         let mut environment = self

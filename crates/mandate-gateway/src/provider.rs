@@ -9,6 +9,7 @@ use mandate_time::UtcNanos;
 
 use crate::money::Usage;
 use crate::registry::{Endpoint, PinnedContent, Reported};
+use crate::tools::{ToolDeclaration, TranscriptTurn, WireCall};
 
 /// Time, as an input (ADR-0001 ES-05).
 pub trait Clock {
@@ -155,12 +156,17 @@ pub trait Transport {
     ) -> Delivery;
 }
 
-/// The rendered prompt: the pinned system text, and the user text with each slot filled from a
-/// typed input inside a delimited data section (inference spec §8.3).
+/// The rendered prompt, in the stable order of inference spec §3.1: the pinned system text, the
+/// tool declarations offered in this turn, the user text with each slot filled from a typed input
+/// inside a delimited data section (inference spec §8.3), and the transcript of the run's earlier
+/// turns, each result inside its own data section. A `single_call` prompt has no tools and no
+/// transcript.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prompt {
     pub system: String,
     pub user: String,
+    pub tools: Vec<ToolDeclaration>,
+    pub transcript: Vec<TranscriptTurn>,
 }
 
 /// A provider's response, as the adapter read it. The identity that served it is read apart, by
@@ -169,13 +175,16 @@ pub struct Prompt {
 pub struct Reply {
     pub request_id: Option<String>,
     pub content: Option<String>,
+    /// The reply's tool calls in reply order, unvalidated; a reply with any is a tool-call reply.
+    pub tool_calls: Vec<WireCall>,
     pub refused: bool,
     pub usage: Usage,
 }
 
 /// One provider's wire format.
 pub trait ProviderAdapter {
-    /// The request for `prompt` to `endpoint`, with the entry's pins and no capability (INF-5).
+    /// The request for `prompt` to `endpoint`, with the entry's pins, and no capability but the
+    /// tool declarations `prompt` offers (INF-5).
     fn request(&self, content: &PinnedContent, endpoint: &Endpoint, prompt: &Prompt)
     -> HttpRequest;
     /// The response body read, or `None` when it is not the provider's response shape.
