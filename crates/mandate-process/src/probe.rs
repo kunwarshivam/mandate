@@ -4,10 +4,11 @@
 //! probe is judged at comes from the caller.
 
 use std::fs;
-use std::io::{self, BufRead, BufReader, Read, Write};
-use std::os::unix::fs::FileTypeExt;
+use std::io::{self, Read, Write};
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
@@ -16,10 +17,13 @@ use mandate_time::UtcNanos;
 
 use crate::lifecycle::{Snapshot, State, nanos};
 
-/// The longest request or reply line read, and how long a peer may stay silent, so that one
-/// client cannot hold the socket from the orchestrator's probes.
-const LINE_BOUND: u64 = 64;
+/// The longest request or reply read, in one read of at most this long, and how many connections
+/// are answered at once; a connection over that is closed unanswered. A request or reply is one
+/// read, never a loop of reads, so a peer that trickles bytes holds its own connection for at most
+/// one silence bound, and never the others (DEC-970 item 5).
+const LINE_BOUND: usize = 64;
 const SILENCE_BOUND: Duration = Duration::from_secs(1);
+const CONNECTION_BOUND: usize = 8;
 
 /// Every word an answer can carry.
 const WORDS: [&str; 5] = ["live", "stopped", "stalled", "ready", "not_ready"];
@@ -109,12 +113,13 @@ impl Status {
 /// `readyz`) from `status`, judged at `clock()`, on a thread of its own until the process exits.
 /// The reply is one line, `ok <word>` or `fail <word>`; an unknown request is `fail not_found`.
 /// A socket left at `path` by an earlier process is replaced; any other file there is refused.
+/// The new socket is readable and writable by its owner only.
 ///
 /// # Errors
 /// `AlreadyExists` for a file at `path` that is not a socket, or the bind's own.
 pub fn serve<C>(path: &Path, status: Status, clock: C) -> io::Result<()>
 where
-    C: Fn() -> UtcNanos + Send + 'static,
+    C: Fn() -> UtcNanos + Send + Sync + 'static,
 {
     match fs::symlink_metadata(path) {
         Ok(meta) if meta.file_type().is_socket() => fs::remove_file(path)?,
@@ -128,9 +133,20 @@ where
         Err(error) => return Err(error),
     }
     let listener = UnixListener::bind(path)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    let clock = Arc::new(clock);
+    let open = Arc::new(AtomicUsize::new(0));
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
-            let _answered = respond(&stream, &status, &clock);
+            if open.fetch_add(1, Ordering::SeqCst) >= CONNECTION_BOUND {
+                open.fetch_sub(1, Ordering::SeqCst);
+                continue;
+            }
+            let (status, clock, open) = (status.clone(), Arc::clone(&clock), Arc::clone(&open));
+            thread::spawn(move || {
+                let _answered = respond(&stream, &status, &*clock);
+                open.fetch_sub(1, Ordering::SeqCst);
+            });
         }
     });
     Ok(())
@@ -139,7 +155,7 @@ where
 fn respond<C: Fn() -> UtcNanos>(stream: &UnixStream, status: &Status, clock: &C) -> io::Result<()> {
     stream.set_read_timeout(Some(SILENCE_BOUND))?;
     stream.set_write_timeout(Some(SILENCE_BOUND))?;
-    let line = read_line(stream)?;
+    let line = read_once(stream)?;
     let reply = match Probe::parse(line.trim_end()) {
         Some(probe) => answer(probe, status.snapshot(), clock()),
         None => Answer {
@@ -148,7 +164,7 @@ fn respond<C: Fn() -> UtcNanos>(stream: &UnixStream, status: &Status, clock: &C)
         },
     };
     let verdict = if reply.ok { "ok" } else { "fail" };
-    writeln!(&mut &*stream, "{verdict} {}", reply.word)
+    (&mut &*stream).write_all(format!("{verdict} {}\n", reply.word).as_bytes())
 }
 
 /// Asks the socket at `path` for `probe`: what a process's `exec` probe subcommand runs.
@@ -160,8 +176,8 @@ pub fn query(path: &Path, probe: Probe) -> io::Result<Answer> {
     let stream = UnixStream::connect(path)?;
     stream.set_read_timeout(Some(SILENCE_BOUND))?;
     stream.set_write_timeout(Some(SILENCE_BOUND))?;
-    writeln!(&mut &stream, "{}", probe.word())?;
-    let line = read_line(&stream)?;
+    (&mut &stream).write_all(format!("{}\n", probe.word()).as_bytes())?;
+    let line = read_once(&stream)?;
     let invalid = || io::Error::new(io::ErrorKind::InvalidData, "unexpected probe reply");
     let (verdict, word) = line.trim_end().split_once(' ').ok_or_else(invalid)?;
     let word = WORDS
@@ -175,8 +191,13 @@ pub fn query(path: &Path, probe: Probe) -> io::Result<Answer> {
     }
 }
 
-fn read_line(stream: &UnixStream) -> io::Result<String> {
-    let mut line = String::new();
-    BufReader::new(stream.take(LINE_BOUND)).read_line(&mut line)?;
-    Ok(line)
+/// One read of at most [`LINE_BOUND`] bytes; anything that is not UTF-8 reads as empty.
+fn read_once(stream: &UnixStream) -> io::Result<String> {
+    let mut buffer = [0u8; LINE_BOUND];
+    let read = (&mut &*stream).read(&mut buffer)?;
+    Ok(buffer
+        .get(..read)
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .unwrap_or_default()
+        .to_owned())
 }

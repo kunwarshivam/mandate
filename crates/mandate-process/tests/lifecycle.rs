@@ -286,6 +286,22 @@ fn a_drain_past_its_bound_is_abandoned_and_a_repeated_request_never_extends_it()
 }
 
 #[test]
+fn an_input_past_the_drain_bound_finds_the_drain_already_abandoned() {
+    let bound = i64::try_from(DRAIN_BOUND.as_secs()).unwrap_or_else(|e| panic!("{e}"));
+    for input in [Input::Fenced, Input::Settled, Input::Failed] {
+        let mut lifecycle = Lifecycle::new(Kind::Writer, LIVENESS, at(0, 0));
+        lifecycle.observe(at(0, 0), Input::DrainRequested);
+        assert!(lifecycle.permits(Action::KillSwitch));
+        assert_eq!(
+            lifecycle.observe(at(bound, 1), input),
+            State::Exited(Exit::DrainIncomplete),
+            "{input:?}"
+        );
+        assert!(!lifecycle.permits(Action::KillSwitch));
+    }
+}
+
+#[test]
 fn an_earlier_time_never_moves_the_fold_back() {
     let mut lifecycle = Lifecycle::new(Kind::Service, LIVENESS, at(0, 0));
     lifecycle.observe(at(500, 0), Input::DrainRequested);

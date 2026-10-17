@@ -11,9 +11,10 @@
   drains that cross their bound to the nanosecond, comparing after every input the state, every
   action's permission (the kill switch in every state the process is up) and liveness with an
   oracle that recomputes them from the whole history; a fixed sweep that reaches every transition
-  and none backwards; and five seeded bugs the oracle catches (the kill switch or risk exits gated
-  on readiness, a fenced append ignored while draining, a drain never abandoned, a reconciliation
-  from before the epoch). `tests/lifecycle.rs`: each transition, gate, permission, the drain
+  and none backwards; and seven seeded bugs the oracle catches (an opening while not ready, the
+  kill switch after exit, the kill switch or risk exits gated on readiness, a fenced append
+  ignored while draining, a drain never abandoned, a reconciliation from before the epoch). `tests/lifecycle.rs`: each transition, gate, permission, the drain
   bound, liveness, exit codes, and the crash-loop bound's edges. `tests/probe.rs`: the answers,
-  the socket's replies, a stale socket, a silent or long client.
+  the socket's replies, a stale socket, a silent, long or trickling client, the connection
+  bound, and the socket's mode.
 - **Run:** `cargo nextest run -p mandate-process -p mandate-agentd`.

@@ -12,6 +12,7 @@ pub const DRAIN_BOUND: Duration = Duration::from_secs(90);
 /// The crash-loop bound (design §3.4, Proposed): this many restarts within
 /// [`CRASH_LOOP_WINDOW`].
 pub const CRASH_LOOP_RESTARTS: usize = 5;
+/// The window of the crash-loop bound (design §3.4, Proposed: ten minutes).
 pub const CRASH_LOOP_WINDOW: Duration = Duration::from_secs(600);
 
 const NANOS_PER_SEC: i128 = 1_000_000_000;
@@ -170,7 +171,10 @@ impl Lifecycle {
 
     /// Folds `input`, observed at `at`, and returns the new state. The fold's time is the latest
     /// `at` it has seen, so an earlier one never moves it back. A drain past its bound is
-    /// abandoned before the input is applied, and an exited process ignores every input.
+    /// abandoned before the input is applied, so an input that arrives after the bound, a
+    /// `Fenced` one included, finds the process already exited `DrainIncomplete`; an exited
+    /// process ignores every input. The bounds are judged only here: a loop must keep observing,
+    /// at least a [`Input::Heartbeat`] each tick, and one that stops is caught by liveness.
     pub fn observe(&mut self, at: UtcNanos, input: Input) -> State {
         self.now = self.now.max(nanos(at));
         if self.exit.is_some() {

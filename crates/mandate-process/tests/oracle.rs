@@ -418,6 +418,10 @@ fn the_fold_matches_the_oracle_over_the_sweep() {
 struct KillSwitchOnlyWhenReady(Lifecycle);
 /// A lifecycle that lets risk exits wait for readiness.
 struct RiskExitOnlyWhenReady(Lifecycle);
+/// A lifecycle that opens while not ready.
+struct OpenWhileNotReady(Lifecycle);
+/// A lifecycle that still applies the kill switch after it exited.
+struct ActsAfterExit(Lifecycle);
 /// A lifecycle that ignores a fenced append while draining.
 struct FencedIgnoredWhileDraining(Lifecycle);
 /// A lifecycle that waits for a drain however long it takes.
@@ -458,6 +462,29 @@ impl Subject for RiskExitOnlyWhenReady {
             Action::RiskExit => self.0.state() == State::Ready,
             _ => self.0.permits(action),
         }
+    }
+    delegate!();
+}
+
+impl Subject for OpenWhileNotReady {
+    fn observe(&mut self, at: UtcNanos, input: Input) -> State {
+        self.0.observe(at, input)
+    }
+    fn permits(&self, action: Action) -> bool {
+        match action {
+            Action::Open => matches!(self.0.state(), State::Ready | State::NotReady),
+            _ => self.0.permits(action),
+        }
+    }
+    delegate!();
+}
+
+impl Subject for ActsAfterExit {
+    fn observe(&mut self, at: UtcNanos, input: Input) -> State {
+        self.0.observe(at, input)
+    }
+    fn permits(&self, action: Action) -> bool {
+        action == Action::KillSwitch || self.0.permits(action)
     }
     delegate!();
 }
@@ -515,12 +542,18 @@ type Maker = dyn Fn(Kind) -> Box<dyn Subject>;
 
 #[test]
 fn the_oracle_catches_every_seeded_bug() {
-    let bugs: [(&str, &Maker); 5] = [
+    let bugs: [(&str, &Maker); 7] = [
         ("kill switch gated on readiness", &|k| {
             Box::new(KillSwitchOnlyWhenReady(fresh(k)))
         }),
         ("risk exit gated on readiness", &|k| {
             Box::new(RiskExitOnlyWhenReady(fresh(k)))
+        }),
+        ("open while not ready", &|k| {
+            Box::new(OpenWhileNotReady(fresh(k)))
+        }),
+        ("kill switch after exit", &|k| {
+            Box::new(ActsAfterExit(fresh(k)))
         }),
         ("fenced ignored while draining", &|k| {
             Box::new(FencedIgnoredWhileDraining(fresh(k)))

@@ -3,6 +3,7 @@
 
 use std::fs;
 use std::io::{ErrorKind, Read, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -94,9 +95,13 @@ fn socket(name: &str) -> PathBuf {
 }
 
 fn ask(path: &PathBuf, request: &[u8]) -> String {
+    ask_within(path, request, Duration::from_secs(5))
+}
+
+fn ask_within(path: &PathBuf, request: &[u8], wait: Duration) -> String {
     let mut stream = UnixStream::connect(path).unwrap_or_else(|e| panic!("connect: {e}"));
     stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(wait))
         .unwrap_or_else(|e| panic!("timeout: {e}"));
     stream
         .write_all(request)
@@ -190,4 +195,61 @@ fn a_silent_or_long_winded_client_cannot_hold_the_socket() {
 fn a_query_of_nothing_fails_rather_than_passes() {
     let path = socket("absent");
     assert!(query(&path, Probe::Ready).is_err());
+}
+
+#[test]
+fn a_trickling_client_holds_only_its_own_connection() {
+    let path = socket("trickle");
+    serve(
+        &path,
+        Status::new(Snapshot::unbounded(State::Ready)),
+        || at(0, 0),
+    )
+    .unwrap_or_else(|e| panic!("serve: {e}"));
+    let mut trickle = UnixStream::connect(&path).unwrap_or_else(|e| panic!("connect: {e}"));
+    trickle
+        .write_all(b"r")
+        .unwrap_or_else(|e| panic!("write: {e}"));
+    assert_eq!(
+        ask_within(&path, b"readyz\n", Duration::from_millis(500)),
+        "ok ready\n",
+        "a probe is answered while another client trickles"
+    );
+    drop(trickle);
+    let _removed = fs::remove_file(&path);
+}
+
+#[test]
+fn connections_over_the_bound_are_closed_unanswered_and_the_socket_is_the_owners_only() {
+    let path = socket("bound");
+    serve(
+        &path,
+        Status::new(Snapshot::unbounded(State::Ready)),
+        || at(0, 0),
+    )
+    .unwrap_or_else(|e| panic!("serve: {e}"));
+    let mode = fs::metadata(&path)
+        .unwrap_or_else(|e| panic!("metadata: {e}"))
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+    let silent: Vec<UnixStream> = (0..8)
+        .map(|_| UnixStream::connect(&path).unwrap_or_else(|e| panic!("connect: {e}")))
+        .collect();
+    thread::sleep(Duration::from_millis(100));
+    let mut over = UnixStream::connect(&path).unwrap_or_else(|e| panic!("connect: {e}"));
+    let _sent = over.write_all(b"readyz\n");
+    let mut reply = String::new();
+    let _read = over.read_to_string(&mut reply);
+    assert_eq!(reply, "", "a connection over the bound gets no answer");
+    drop(silent);
+    let answered = (0..50).any(|_| {
+        thread::sleep(Duration::from_millis(20));
+        ask_within(&path, b"readyz\n", Duration::from_millis(500)) == "ok ready\n"
+    });
+    assert!(
+        answered,
+        "the socket answers again once the silent clients leave"
+    );
+    let _removed = fs::remove_file(&path);
 }
