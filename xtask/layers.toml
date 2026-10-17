@@ -45,6 +45,9 @@
 #      layer 2 by DEC-713); and mandate-process, the lifecycle every long-running process shares
 #      (E21-28, DEC-994): above mandate-journal, whose `Fenced` outcome it reads, and below every
 #      process crate that imports it
+#   3  mandate-alerts, the §8.2 operator alerts (E21-4, DEC-1070): above mandate-journal, whose
+#      stored record it reads, and mandate-notify, whose minted id and canary scan it reuses; kept
+#      off every crate that writes a stream or reaches a broker, so an alert can never act (OPS-10)
 #   4  mandate-dispatcher, the notification process (E8-10, E8-14, DEC-701 item 2): above
 #      mandate-journal, whose notice stream it alone appends to, and above mandate-push-relay, whose
 #      request it builds (raised from layer 3 by DEC-713); its forbidden_internal list names every
@@ -193,6 +196,17 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The §8.2 operator alerts (E21-4, infrastructure design §8.2, OPS-10, DEC-1070): a closed alert set
+# raised from stored journal records and from signals, with a payload of an opaque id and fixed
+# text only. It reads the journal's stored record and reaches no writer, executor, runtime,
+# connector, or the CLI, so raising an alert can never append, act, or trade.
+[crates.mandate-alerts]
+layer = 3
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+forbidden_internal = ["mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-cli", "mandate-paper", "mandate-agentd", "mandate-risk", "mandate-approval", "mandate-dispatcher", "mandate-webpush", "mandate-push-relay", "mandate-connections", "mandate-vault-local", "mandate-api", "mandate-authn"]
+
 [crates.mandate-push-relay]
 layer = 3
 safety_critical = true
@@ -268,6 +282,30 @@ allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
 # an order, or read a credential.
 [crates.mandate-cp-agent]
 layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["ring"]
+forbidden_internal = [
+    "mandate-journal",
+    "mandate-journal-pg",
+    "mandate-journal-cold",
+    "mandate-spec",
+    "mandate-runtime",
+    "mandate-executor",
+    "mandate-connections",
+    "mandate-vault-local",
+    "mandate-shell",
+    "mandate-agentd",
+    "mandate-paper",
+]
+
+# The global control plane's first slice (E21-43 with E20-1, E20-2, E20-5; DEC-984): the
+# directory, enrollment, routing and fleet health, over a store it declares. It runs outside every
+# cell (design §3), so it reaches no journal, runtime, executor, connector, vault, or process crate,
+# and not the cell's control-plane agent or its workspace-services handler: nothing it holds is a
+# path into a deployment (CP-4, CP-7, CP-12).
+[crates.mandate-cp]
+layer = 2
 safety_critical = true
 pure = true
 allowed_external = ["ring"]
