@@ -4930,3 +4930,7 @@ From the Robinhood connector correctness follow-ups ([DEC-956](decisions/DEC-956
 - **Sessions in Postgres (DEC-978 item 6).** The API holds session records in its process, so it
   runs as one replica and a restart ends every session. Move them to a Postgres store with the
   workspace's row-level security before a second replica is deployed.
+- **Read models as projections (DEC-979 item 7).** The API's agent and approval reads fold every
+  deployed agent's stream on each request, which is unbounded. Project them per stream with
+  watermarks, woken by `LISTEN`/`NOTIFY` (workspace API spec §6.1), before an agent's stream grows
+  past what one request can read.
