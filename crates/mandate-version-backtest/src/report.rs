@@ -10,9 +10,10 @@ use mandate_risk::Purpose;
 use mandate_time::{Date, UtcNanos};
 
 use super::{RecordedOutput, RecordedThesis, VersionInput};
-use crate::metrics::Metrics;
-use crate::report::{decimal, int, metrics, object, optional, text};
-use crate::{BacktestError, Observation};
+use mandate_backtest::encode::{decimal, metrics, optional, text};
+use mandate_backtest::{Metrics, Observation};
+
+use crate::VersionError;
 
 /// The version this module writes. `report_version` 1 is E4-2's baseline report.
 pub const VERSION_REPORT_VERSION: u32 = 2;
@@ -156,9 +157,12 @@ impl VersionDigests {
     /// Each digest is SHA-256 of the canonical bytes of the input it names: the bar input as E4-2
     /// digests it, the recorded outputs and theses in the order given, and every setting the run
     /// reads besides the mandate, which the report names by its own version hash.
-    pub fn of(input: &VersionInput<'_>) -> Result<Self, BacktestError> {
-        let bars =
-            crate::report::bar_input(input.bars, input.coverage_start, input.first_bar_volumes)?;
+    pub fn of(input: &VersionInput<'_>) -> Result<Self, VersionError> {
+        let bars = mandate_backtest::encode::bar_input(
+            input.bars,
+            input.coverage_start,
+            input.first_bar_volumes,
+        )?;
         let outputs = input
             .outputs
             .iter()
@@ -182,7 +186,7 @@ fn digest(value: &Value) -> Digest {
     Digest::of(&mandate_canon::to_canonical(value))
 }
 
-fn output_value(recorded: &RecordedOutput) -> Result<Value, BacktestError> {
+fn output_value(recorded: &RecordedOutput) -> Result<Value, VersionError> {
     let output = &recorded.output;
     object(vec![
         ("received_at", decimal(recorded.received_at)),
@@ -198,7 +202,7 @@ fn output_value(recorded: &RecordedOutput) -> Result<Value, BacktestError> {
     ])
 }
 
-fn thesis_value(thesis: &RecordedThesis) -> Result<Value, BacktestError> {
+fn thesis_value(thesis: &RecordedThesis) -> Result<Value, VersionError> {
     object(vec![
         ("thesis_id", text(&thesis.thesis_id)),
         ("received_at", decimal(thesis.received_at)),
@@ -236,7 +240,7 @@ pub struct VersionReport {
 
 impl VersionReport {
     /// The report as DEC-1001 item 2's canonical object.
-    pub fn canonical(&self) -> Result<Value, BacktestError> {
+    pub fn canonical(&self) -> Result<Value, VersionError> {
         let mut outcome_counts = Vec::new();
         for outcome in DecisionOutcome::ALL {
             let count = self
@@ -323,18 +327,18 @@ impl VersionReport {
     }
 
     /// `to_canonical` of [`VersionReport::canonical`]: the artifact's bytes.
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, BacktestError> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, VersionError> {
         Ok(mandate_canon::to_canonical(&self.canonical()?))
     }
 
     /// SHA-256 of the artifact's bytes: the report's `ref` (DEC-1001 item 1).
-    pub fn digest(&self) -> Result<Digest, BacktestError> {
+    pub fn digest(&self) -> Result<Digest, VersionError> {
         Ok(Digest::of(&self.canonical_bytes()?))
     }
 
     /// Each reason that occurred with its count: the gate's for rows the gate judged, the
     /// builder's for its holds.
-    fn reason_counts(&self, gate: bool) -> Result<Value, BacktestError> {
+    fn reason_counts(&self, gate: bool) -> Result<Value, VersionError> {
         let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
         for row in &self.decisions {
             let judged_by_gate = matches!(
@@ -352,16 +356,16 @@ impl VersionReport {
         let members = counts
             .into_iter()
             .map(|(reason, count)| Ok((reason, count_value(count)?)))
-            .collect::<Result<Vec<_>, BacktestError>>()?;
+            .collect::<Result<Vec<_>, VersionError>>()?;
         object(members)
     }
 }
 
-fn count_value(count: usize) -> Result<Value, BacktestError> {
+fn count_value(count: usize) -> Result<Value, VersionError> {
     int(u32::try_from(count).map_err(|_| NumError::Overflow)?)
 }
 
-fn row_value(row: &DecisionRow) -> Result<Value, BacktestError> {
+fn row_value(row: &DecisionRow) -> Result<Value, VersionError> {
     object(vec![
         ("at", decimal(row.at)),
         ("date", decimal(row.date)),
@@ -384,13 +388,13 @@ fn row_value(row: &DecisionRow) -> Result<Value, BacktestError> {
 
 /// The four purposes a run can decide. An owner exit and a protective order are never a decision
 /// of the run, so either here is refused rather than spelled.
-fn purpose_name(purpose: Purpose) -> Result<&'static str, BacktestError> {
+fn purpose_name(purpose: Purpose) -> Result<&'static str, VersionError> {
     match purpose {
         Purpose::Open => Ok("open"),
         Purpose::Increase => Ok("increase"),
         Purpose::DiscretionaryExit => Ok("discretionary_exit"),
         Purpose::RiskExit => Ok("risk_exit"),
-        Purpose::OwnerExit | Purpose::Protective => Err(BacktestError::Num(NumError::NotCanonical)),
+        Purpose::OwnerExit | Purpose::Protective => Err(VersionError::Num(NumError::NotCanonical)),
     }
 }
 
@@ -403,7 +407,7 @@ fn mode_name(mode: AgentMode) -> &'static str {
     }
 }
 
-fn equity_points(observations: &[Observation]) -> Result<Value, BacktestError> {
+fn equity_points(observations: &[Observation]) -> Result<Value, VersionError> {
     observations
         .iter()
         .map(|observation| {
@@ -414,4 +418,14 @@ fn equity_points(observations: &[Observation]) -> Result<Value, BacktestError> {
         })
         .collect::<Result<Vec<_>, _>>()
         .map(Value::Array)
+}
+
+/// `mandate_backtest::encode::object` with this crate's error.
+pub(crate) fn object(members: Vec<(&str, Value)>) -> Result<Value, VersionError> {
+    Ok(mandate_backtest::encode::object(members)?)
+}
+
+/// `mandate_backtest::encode::int` with this crate's error.
+pub(crate) fn int(count: u32) -> Result<Value, VersionError> {
+    Ok(mandate_backtest::encode::int(count)?)
 }

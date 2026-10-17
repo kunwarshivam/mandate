@@ -10,8 +10,10 @@ use mandate_risk::{DayTradeRegime, EtpClass, Exchange, GateConfig};
 
 use super::report::{VersionDigests, VersionReport, reference};
 use super::{VersionInput, half_spread};
-use crate::report::{decimal, int, object, text};
-use crate::{BacktestError, MetricsConfig};
+use crate::VersionError;
+use crate::report::{int, object};
+use mandate_backtest::MetricsConfig;
+use mandate_backtest::encode::{decimal, text};
 
 /// What one `BacktestRunRecorded` says: the run's id, the version, the input digests, the
 /// runner's build, and either the report or the run's refusal.
@@ -21,12 +23,12 @@ pub struct RunRecord<'a> {
     pub mandate_version: Digest,
     pub inputs: VersionDigests,
     pub code_build: Digest,
-    pub outcome: Result<&'a VersionReport, &'a BacktestError>,
+    pub outcome: Result<&'a VersionReport, &'a VersionError>,
 }
 
 /// The `BacktestRunRecorded` payload at `schema_version` 1 (journal spec §9.18): `report` and
 /// `refusal` are `null` exactly as rule 143 says, and `marker` is always `backtest`.
-pub fn backtest_run_recorded(record: &RunRecord<'_>) -> Result<Value, BacktestError> {
+pub fn backtest_run_recorded(record: &RunRecord<'_>) -> Result<Value, VersionError> {
     let (report, result, refusal) = match record.outcome {
         Ok(report) => (reference(&report.digest()?), "completed", Value::Null),
         Err(error) => (Value::Null, "refused", text(error.code())),
@@ -51,13 +53,13 @@ pub fn backtest_run_recorded(record: &RunRecord<'_>) -> Result<Value, BacktestEr
 /// and the bars and records, which have digests of their own: the fill model, fees, the gate's
 /// settings, the connection's profile by content hash, the account, the instrument reference, the
 /// corporate-action dates, and the report's statistics.
-pub(super) fn configuration(input: &VersionInput<'_>) -> Result<Value, BacktestError> {
+pub(super) fn configuration(input: &VersionInput<'_>) -> Result<Value, VersionError> {
     let settings = input.settings;
     let instrument = input.instrument;
     object(vec![
-        ("sim", crate::report::sim(&settings.sim)?),
+        ("sim", mandate_backtest::encode::sim(&settings.sim)?),
         ("half_spread_bps", decimal(half_spread(&settings.sim))),
-        ("fees", crate::report::fees(&settings.fees)?),
+        ("fees", mandate_backtest::encode::fees(&settings.fees)?),
         ("gate", gate(&settings.gate)?),
         ("profile", reference(&settings.profile.content_hash())),
         (
@@ -88,7 +90,7 @@ pub(super) fn configuration(input: &VersionInput<'_>) -> Result<Value, BacktestE
                         mandate_num::ShareIncrement::Whole => "whole",
                     }),
                 ),
-                ("tick", crate::report::tick(instrument.tick)?),
+                ("tick", mandate_backtest::encode::tick(instrument.tick)?),
                 ("qty_increment", decimal(instrument.qty_increment)),
                 ("min_order_size", decimal(instrument.min_order_size)),
                 ("exchange", text(exchange(instrument.exchange))),
@@ -124,7 +126,7 @@ pub(super) fn configuration(input: &VersionInput<'_>) -> Result<Value, BacktestE
     ])
 }
 
-fn gate(config: &GateConfig) -> Result<Value, BacktestError> {
+fn gate(config: &GateConfig) -> Result<Value, VersionError> {
     object(vec![
         ("price_floor", decimal(config.price_floor)),
         ("liquidity_floor_usd", decimal(config.liquidity_floor_usd)),
@@ -167,7 +169,7 @@ fn gate(config: &GateConfig) -> Result<Value, BacktestError> {
     ])
 }
 
-fn regime(regime: DayTradeRegime) -> Result<Value, BacktestError> {
+fn regime(regime: DayTradeRegime) -> Result<Value, VersionError> {
     match regime {
         DayTradeRegime::LegacyPdt => object(vec![("kind", text("legacy_pdt"))]),
         DayTradeRegime::IntradayMargin { maintenance_excess } => object(vec![
@@ -177,7 +179,7 @@ fn regime(regime: DayTradeRegime) -> Result<Value, BacktestError> {
     }
 }
 
-fn metrics(config: &MetricsConfig) -> Result<Value, BacktestError> {
+fn metrics(config: &MetricsConfig) -> Result<Value, VersionError> {
     object(vec![
         ("periods_per_year", int(config.periods_per_year)?),
         ("risk_free_per_period", decimal(config.risk_free_per_period)),

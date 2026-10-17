@@ -128,7 +128,7 @@ impl Report {
 
 /// One metric block, every decimal as the canonical text its `Display` produces, every count as an
 /// integer, and every undefined figure as `Null` beside the reason it is absent (DEC-127 item 7).
-pub(crate) fn metrics(block: &Metrics) -> Result<Value, BacktestError> {
+pub fn metrics(block: &Metrics) -> Result<Value, BacktestError> {
     object(vec![
         ("period_count", int(block.period_count)?),
         ("first_date", decimal(block.first_date)),
@@ -194,7 +194,7 @@ pub(crate) fn metrics(block: &Metrics) -> Result<Value, BacktestError> {
 /// bar from (DEC-106 item 4), and the median volume it would read at each bar's start, `null` where
 /// there is none (spec §6.4 rule 3). The medians are taken for every bar rather than only for the
 /// bars that open a session, so this digest does not restate the model's rule for which bars ask.
-pub(crate) fn bar_input(
+pub fn bar_input(
     bars: &[SimBar],
     coverage_start: mandate_time::UtcNanos,
     first_bar_volumes: &dyn mandate_sim::FirstBarVolumes,
@@ -287,7 +287,7 @@ fn configuration(config: &RunConfig) -> Result<Value, BacktestError> {
     ])
 }
 
-pub(crate) fn sim(config: &SimConfig) -> Result<Value, BacktestError> {
+pub fn sim(config: &SimConfig) -> Result<Value, BacktestError> {
     let latency = |nanos: u64| -> Result<Value, BacktestError> {
         Int::new(nanos)
             .map(Value::Int)
@@ -330,7 +330,7 @@ pub(crate) fn sim(config: &SimConfig) -> Result<Value, BacktestError> {
 /// The fee configuration as the digest sees it. `fee_rounding` appears only when it is
 /// `per_fee_per_fill`: absent means `daily_total` (spec §6.2, DEC-960), so every report under the
 /// default keeps the digest it had before the field existed.
-pub(crate) fn fees(config: &FeeConfig) -> Result<Value, BacktestError> {
+pub fn fees(config: &FeeConfig) -> Result<Value, BacktestError> {
     let mut equities = vec![
         ("sec_rate", decimal(config.equities.sec_rate)),
         ("taf_per_share", decimal(config.equities.taf_per_share)),
@@ -356,7 +356,7 @@ pub(crate) fn fees(config: &FeeConfig) -> Result<Value, BacktestError> {
     object(vec![("equities", equities), ("crypto", crypto)])
 }
 
-pub(crate) fn tick(rule: TickRule) -> Result<Value, BacktestError> {
+pub fn tick(rule: TickRule) -> Result<Value, BacktestError> {
     match rule {
         TickRule::RegNmsEquity => object(vec![("rule", text("reg_nms_equity"))]),
         TickRule::Increment(increment) => object(vec![
@@ -389,7 +389,7 @@ fn strategy(strategy: Strategy) -> Result<Value, BacktestError> {
 
 /// An object of `members`, or `not_canonical` for a key outside the canonical key grammar, which
 /// none of this crate's literal keys is (journal spec §4.1).
-pub(crate) fn object(members: Vec<(&str, Value)>) -> Result<Value, BacktestError> {
+pub fn object(members: Vec<(&str, Value)>) -> Result<Value, BacktestError> {
     members
         .into_iter()
         .map(|(name, value)| {
@@ -401,21 +401,21 @@ pub(crate) fn object(members: Vec<(&str, Value)>) -> Result<Value, BacktestError
         .map(Value::Object)
 }
 
-pub(crate) fn text(value: &str) -> Value {
+pub fn text(value: &str) -> Value {
     Value::Str(value.to_owned())
 }
 
 /// A decimal, a date, or an instant as the canonical text its `Display` produces (spec §2.1).
-pub(crate) fn decimal<T: fmt::Display>(value: T) -> Value {
+pub fn decimal<T: fmt::Display>(value: T) -> Value {
     Value::Str(value.to_string())
 }
 
 /// An absent figure is `Null`; a present one is its canonical text.
-pub(crate) fn optional<T: fmt::Display>(value: Option<T>) -> Value {
+pub fn optional<T: fmt::Display>(value: Option<T>) -> Value {
     value.map_or(Value::Null, decimal)
 }
 
-pub(crate) fn int(count: u32) -> Result<Value, BacktestError> {
+pub fn int(count: u32) -> Result<Value, BacktestError> {
     Int::new(u64::from(count))
         .map(Value::Int)
         .ok_or(BacktestError::Num(NumError::Overflow))

@@ -10,15 +10,15 @@
 //! - **Asks never trade.** A version whose every opening asks places no order and has no fill.
 //! - **Exits are never denied** by the gate (`AGENTS.md` rule 13).
 
-mod version_common;
+mod common;
 
-use mandate_backtest::{DecisionOutcome, RecordedOutput, VersionRun};
+use common::*;
 use mandate_num::Price;
 use mandate_risk::Purpose;
 use mandate_sim::SimBar;
 use mandate_time::UtcNanos;
+use mandate_version_backtest::{DecisionOutcome, RecordedOutput, VersionRun};
 use proptest::prelude::*;
-use version_common::*;
 
 /// Every fill inside its bar, read from the bars themselves, as trading spec §6.4 allows it: never
 /// at a price better than any the bar traded (a buy at or above its low, a sell at or below its
@@ -130,14 +130,14 @@ fn outputs_received_by_each_decision(
 /// received by its instant is admitted, unexpired and not invalidated, recomputed from the records.
 fn openings_only_on_an_active_thesis(
     run: &VersionRun,
-    theses: &[mandate_backtest::RecordedThesis],
+    theses: &[mandate_version_backtest::RecordedThesis],
 ) -> Result<(), String> {
     for row in &run.report.decisions {
         let opening = matches!(row.purpose, Some(Purpose::Open | Purpose::Increase));
         if !opening || row.outcome != DecisionOutcome::Submitted {
             continue;
         }
-        let mut latest: Option<&mandate_backtest::RecordedThesis> = None;
+        let mut latest: Option<&mandate_version_backtest::RecordedThesis> = None;
         for thesis in theses.iter().filter(|thesis| thesis.received_at <= row.at) {
             let later = latest.is_none_or(|kept| {
                 (thesis.received_at, &thesis.thesis_id) > (kept.received_at, &kept.thesis_id)
@@ -311,7 +311,7 @@ proptest! {
             .map(|(index, (from, length, admitted, invalidated))| {
                 let received = at(&format!("{}T13:{:02}:00Z", days[*from], 25 + index));
                 let until = days.get(from + length).copied().unwrap_or(days[days.len() - 1]);
-                mandate_backtest::RecordedThesis {
+                mandate_version_backtest::RecordedThesis {
                     thesis_id: format!("th_{index}"),
                     invalidated_at: invalidated
                         .and_then(|after| days.get(from + after))
@@ -323,7 +323,7 @@ proptest! {
             .collect();
         let mut theses = theses;
         if anchor {
-            theses.insert(0, mandate_backtest::RecordedThesis {
+            theses.insert(0, mandate_version_backtest::RecordedThesis {
                 thesis_id: "th_anchor".to_owned(),
                 ..thesis(at(&format!("{}T12:00:00Z", days[1])), at("2026-12-01T12:00:00Z"), true)
             });

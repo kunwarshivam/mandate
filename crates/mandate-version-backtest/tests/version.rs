@@ -1,20 +1,20 @@
 //! Hand-calculated cases for the version backtest (E4-4, DEC-1000) and its report and record
 //! (E4-5, DEC-1001). Each case names the decision item it pins.
 
-mod version_common;
+mod common;
 
+use common::*;
 use mandate_accounting::{AssetClass, Side};
-use mandate_backtest::{BacktestError, DecisionOutcome, RunRecord, VersionDigests};
 use mandate_canon::{Digest, Value};
 use mandate_risk::Purpose;
 use mandate_sim::{OrderEnd, OrderKind};
+use mandate_version_backtest::{DecisionOutcome, RunRecord, VersionDigests, VersionError};
 use serde_json::Value as Json;
-use version_common::*;
 
 /// The period count every case runs: 20 to open the liquidity window, then ten more.
 const DAYS: usize = 30;
 
-fn rows_with(run: &mandate_backtest::VersionRun, outcome: DecisionOutcome) -> usize {
+fn rows_with(run: &mandate_version_backtest::VersionRun, outcome: DecisionOutcome) -> usize {
     run.report
         .decisions
         .iter()
@@ -148,7 +148,7 @@ fn an_output_received_after_the_decision_is_never_used() {
     }
 }
 
-fn refusal(result: Result<mandate_backtest::VersionRun, BacktestError>) -> &'static str {
+fn refusal(result: Result<mandate_version_backtest::VersionRun, VersionError>) -> &'static str {
     match result {
         Ok(_) => panic!("the run should refuse"),
         Err(error) => error.code(),
@@ -165,7 +165,7 @@ fn a_record_received_before_its_data_refuses_the_run() {
         refusal(run(&pinned(), &flat_bars(DAYS), &outputs, &[])),
         "record_before_its_data"
     );
-    let invalidated_early = vec![mandate_backtest::RecordedThesis {
+    let invalidated_early = vec![mandate_version_backtest::RecordedThesis {
         invalidated_at: Some(at("2026-09-01T12:00:00Z")),
         ..thesis(at("2026-09-02T12:00:00Z"), at("2026-10-30T12:00:00Z"), true)
     }];
@@ -178,7 +178,7 @@ fn a_record_received_before_its_data_refuses_the_run() {
         )),
         "record_before_its_data"
     );
-    let ahead_of_receipt = vec![mandate_backtest::RecordedThesis {
+    let ahead_of_receipt = vec![mandate_version_backtest::RecordedThesis {
         as_of: at("2026-09-02T12:00:01Z"),
         ..thesis(at("2026-09-02T12:00:00Z"), at("2026-10-30T12:00:00Z"), true)
     }];
@@ -200,11 +200,11 @@ fn a_thesis_from_earlier_data_or_invalidated_on_receipt_is_accepted() {
     let days = trading_days(DAYS);
     let received = at("2026-09-02T12:00:00Z");
     let expires = at("2026-10-30T12:00:00Z");
-    let from_earlier_data = mandate_backtest::RecordedThesis {
+    let from_earlier_data = mandate_version_backtest::RecordedThesis {
         as_of: at("2026-09-01T20:00:00Z"),
         ..thesis(received, expires, true)
     };
-    let invalidated_on_receipt = mandate_backtest::RecordedThesis {
+    let invalidated_on_receipt = mandate_version_backtest::RecordedThesis {
         thesis_id: "th_02".to_owned(),
         invalidated_at: Some(received),
         ..thesis(received, expires, true)
@@ -585,7 +585,7 @@ fn the_record_names_the_report_or_the_refusal() {
     let settings = settings();
     let instrument = xyz();
     let medians = Median(qty("10000000"));
-    let input = mandate_backtest::VersionInput {
+    let input = mandate_version_backtest::VersionInput {
         mandate: &mandate,
         settings: &settings,
         instrument: &instrument,
@@ -598,10 +598,10 @@ fn the_record_names_the_report_or_the_refusal() {
     };
     let inputs = VersionDigests::of(&input).unwrap_or_else(|e| panic!("{}", e.code()));
     let completed =
-        mandate_backtest::run_version(&input).unwrap_or_else(|e| panic!("{}", e.code()));
+        mandate_version_backtest::run_version(&input).unwrap_or_else(|e| panic!("{}", e.code()));
     assert_eq!(completed.report.inputs, inputs);
     let build = Digest::of(b"build");
-    let record = mandate_backtest::backtest_run_recorded(&RunRecord {
+    let record = mandate_version_backtest::backtest_run_recorded(&RunRecord {
         backtest_id: "bt_01",
         mandate_version: completed.report.mandate_version,
         inputs,
@@ -646,8 +646,8 @@ fn the_record_names_the_report_or_the_refusal() {
             "theses",
         ]
     );
-    let error = BacktestError::CorporateActionInRange(days[3]);
-    let refused = mandate_backtest::backtest_run_recorded(&RunRecord {
+    let error = VersionError::CorporateActionInRange(days[3]);
+    let refused = mandate_version_backtest::backtest_run_recorded(&RunRecord {
         backtest_id: "bt_02",
         mandate_version: completed.report.mandate_version,
         inputs,
@@ -920,7 +920,7 @@ fn thesis_visibility_holds_at_its_edges() {
     let outputs = daily_outputs(&days, "0.5");
     let bars = flat_bars(DAYS);
     let decision = |index: usize| at(&format!("{}T13:30:00Z", days[index]));
-    let opened = |theses: &[mandate_backtest::RecordedThesis]| {
+    let opened = |theses: &[mandate_version_backtest::RecordedThesis]| {
         run(&research(), &bars, &outputs, theses)
             .unwrap_or_else(|e| panic!("the run completes: {}", e.code()))
             .report
@@ -940,13 +940,13 @@ fn thesis_visibility_holds_at_its_edges() {
         None,
         "expired exactly at the first open decision"
     );
-    let invalidated = mandate_backtest::RecordedThesis {
+    let invalidated = mandate_version_backtest::RecordedThesis {
         invalidated_at: Some(decision(20)),
         ..thesis(at("2026-09-02T12:00:00Z"), at("2026-10-30T12:00:00Z"), true)
     };
     assert_eq!(opened(&[invalidated]), None, "invalidated exactly then");
     let admitted = thesis(at("2026-09-02T12:00:00Z"), at("2026-10-30T12:00:00Z"), true);
-    let refused_renewal = mandate_backtest::RecordedThesis {
+    let refused_renewal = mandate_version_backtest::RecordedThesis {
         thesis_id: "th_02".to_owned(),
         ..thesis(
             at("2026-09-03T12:00:00Z"),
@@ -968,7 +968,7 @@ fn thesis_visibility_holds_at_its_edges() {
 fn a_classification_made_after_the_decision_is_not_seen() {
     let days = trading_days(DAYS);
     let mut instrument = xyz();
-    instrument.etp_classifications = vec![mandate_backtest::EtpClassification {
+    instrument.etp_classifications = vec![mandate_version_backtest::EtpClassification {
         at: at(&format!("{}T21:00:00Z", days[DAYS - 1])),
         class: mandate_risk::EtpClass::Plain,
     }];

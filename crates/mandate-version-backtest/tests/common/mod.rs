@@ -12,10 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_accounting::{
     AccountType, AssetClass, Config, CryptoFees, EquityFees, FeeRounding, InstrumentId, TafCapBasis,
 };
-use mandate_backtest::{
-    EtpClassification, InstrumentReference, MetricsConfig, RecordedOutput, RecordedThesis,
-    VersionInput, VersionRun, VersionSettings,
-};
+use mandate_backtest::MetricsConfig;
 use mandate_builder::{Direction, ModelOutput, ModelVersion};
 use mandate_canon::Digest;
 use mandate_domain::{
@@ -31,6 +28,10 @@ use mandate_sim::{FirstBarVolumes, Instrument, Nanos, Session, SimBar, SimConfig
 use mandate_spec::document::{ModelId, ProvenanceMap};
 use mandate_spec::{Mandate, ValidatedMandate, ValidationContext};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
+use mandate_version_backtest::{
+    EtpClassification, InstrumentReference, RecordedOutput, RecordedThesis, VersionInput,
+    VersionRun, VersionSettings,
+};
 use serde_json::Value as Json;
 
 /// The pinned base's one instrument (`XYZ`).
@@ -428,7 +429,7 @@ pub fn run(
     bars: &[SimBar],
     outputs: &[RecordedOutput],
     theses: &[RecordedThesis],
-) -> Result<VersionRun, mandate_backtest::BacktestError> {
+) -> Result<VersionRun, mandate_version_backtest::VersionError> {
     run_with(mandate, &settings(), &xyz(), bars, outputs, theses, &[])
 }
 
@@ -440,12 +441,12 @@ pub fn run_with(
     outputs: &[RecordedOutput],
     theses: &[RecordedThesis],
     corporate_actions: &[Date],
-) -> Result<VersionRun, mandate_backtest::BacktestError> {
+) -> Result<VersionRun, mandate_version_backtest::VersionError> {
     let medians = Median(qty("10000000"));
     let coverage_start = bars
         .first()
         .map_or(at("2026-09-01T00:00:00Z"), |bar| bar.start);
-    mandate_backtest::run_version(&VersionInput {
+    mandate_version_backtest::run_version(&VersionInput {
         mandate,
         settings,
         instrument,

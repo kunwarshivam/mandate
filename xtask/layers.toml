@@ -58,6 +58,7 @@
 #   7  mandate-alpaca, mandate-robinhood, mandate-backtest. `mandate-alpaca` is an adapter over the core (ES-02's
 #      "adapters depend on the core, never the reverse"): it implements the `BrokerConnector` that
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
+#   8  mandate-version-backtest (E4-4, DEC-1000), above mandate-backtest and mandate-executor
 #   8  mandate-shell, the process shell (E7-7, DEC-138; the shell's dependency on backtest is
 #      deleted with the tracer's signal path, DEC-475 item 6): the lowest layer that sees the
 #      order path (`mandate-runtime`, `mandate-executor`, `mandate-alpaca`) and no model at all; and
@@ -329,7 +330,7 @@ layer = 6
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
-forbidden_internal = ["mandate-backtest"]
+forbidden_internal = ["mandate-backtest", "mandate-version-backtest"]
 
 [crates.mandate-sim]
 layer = 6
@@ -364,6 +365,16 @@ allowed_external = ["sqlx", "thiserror"]
 
 [crates.mandate-backtest]
 layer = 7
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+# A mandate version's backtest through its own decision path (E4-4, DEC-1000): above
+# mandate-backtest, whose fold and encoders it shares, and mandate-executor, whose protection pricing
+# it calls. In neither process group, and no workspace service may reach it, since it links the
+# executor (DEC-986).
+[crates.mandate-version-backtest]
+layer = 8
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]

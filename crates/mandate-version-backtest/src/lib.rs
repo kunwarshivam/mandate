@@ -1,3 +1,13 @@
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::float_arithmetic,
+    clippy::float_cmp,
+    clippy::as_conversions
+)]
 //! A backtest of a confirmed mandate version through the decision path its agent runs (backlog
 //! E4-4, [DEC-1000](../../../docs/project/decisions/DEC-1000.md); PRD FR-4.1, FR-4.2, FR-4.5).
 //!
@@ -7,13 +17,19 @@
 //! `mandate_risk::trim_proposals`), the order builder (`mandate_builder::propose`), the gate's two
 //! passes (`mandate_risk::evaluate`), autonomy (`mandate_builder::classify`), and the executor's
 //! protection (`mandate_executor::equity_bracket_prices`, `mandate_executor::protective_shape`).
-//! Orders go to `mandate-sim`'s fill model and fills to `mandate-accounting`'s fold, as in E4-2.
+//! Orders go to `mandate-sim`'s fill model and fills to `mandate-accounting`'s fold through
+//! `mandate-backtest`'s own fold ([`mandate_backtest::Working`]), as in E4-2.
+//!
+//! **Why a crate of its own.** The executor's protection pricing is an agent-process crate, and
+//! `mandate-backtest` is reached by the workspace services through `mandate-modelhost`'s baseline
+//! model. Workspace services and agent processes meet only in the journal (DEC-986), so the path
+//! that links the executor lives here, in neither process group (DEC-1000).
 //!
 //! **There is no model port.** Model outputs and theses arrive as [`RecordedOutput`] and
 //! [`RecordedThesis`], each visible only from its receive time, so the run cannot call a model and
 //! cannot see a record before it was journaled (DEC-1000 items 3 and 4).
 //!
-//! Like [`crate::run`], the run is pure: no clock, no file, no randomness, ordered collections only,
+//! Like `mandate_backtest::run`, the run is pure: no clock, no file, no randomness, ordered collections only,
 //! and the same inputs give the same report bytes (ES-21, FR-4.5).
 
 mod gate;
@@ -53,10 +69,96 @@ use mandate_spec::ValidatedMandate;
 use mandate_spec::risk::{self, Opening, RiskState, SessionClock, Step};
 use mandate_time::{Date, ExchangeCalendar, UtcNanos, new_york_date_and_hour, new_york_midnight};
 
-use crate::{
+use mandate_backtest::{
     BacktestError, BacktestInput, Metrics, MetricsConfig, Observation, RunConfig, RunFill,
     Strategy, Totals, Working,
 };
+
+/// Why a version backtest refused to run or could not finish.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum VersionError {
+    #[error("a backtest needs at least one bar that closes a period")]
+    NoBars,
+    #[error("a version backtest runs US equities only in this slice")]
+    AssetClassNotSupported,
+    #[error("the data snapshot holds a corporate action on {0} inside the run")]
+    CorporateActionInRange(Date),
+    #[error(
+        "record {0} was received before its own data cut-off, or invalidated before it was received"
+    )]
+    RecordBeforeItsData(usize),
+    #[error("model output {0} is not pinned by the mandate version")]
+    OutputNotPinned(usize),
+    #[error("record {0} is for another instrument than the run's")]
+    RecordOtherInstrument(usize),
+    #[error("thesis record {0} repeats an earlier record's thesis id")]
+    DuplicateThesis(usize),
+    #[error(
+        "the executor offers no protective order for this position under the connection's profile"
+    )]
+    ProtectionNotPlaceable,
+    #[error("bar {0} is not a regular-session bar, which a version backtest's slice 1 requires")]
+    BarOutsideRegularSession(usize),
+    #[error("the agent-scoped flatten planned no sell for a held position")]
+    FlattenWithoutSell,
+    #[error("the committed trading calendar could not be read")]
+    CalendarUnavailable,
+    #[error("a liquidity figure could not be computed: {0}")]
+    Liquidity(&'static str),
+    #[error(transparent)]
+    Backtest(#[from] BacktestError),
+    #[error(transparent)]
+    Builder(#[from] mandate_builder::BuilderError),
+    /// The gate refused to decide; its code is kept, since `GateError` is neither `Clone` nor `Eq`.
+    #[error("the gate could not decide: {0}")]
+    Gate(&'static str),
+    #[error(transparent)]
+    Spec(#[from] mandate_spec::SpecError),
+    #[error(transparent)]
+    Executor(#[from] mandate_executor::ExecutorError),
+    #[error(transparent)]
+    Sim(#[from] mandate_sim::SimError),
+    #[error(transparent)]
+    Accounting(#[from] mandate_accounting::AccountingError),
+    #[error(transparent)]
+    Num(#[from] NumError),
+    #[error(transparent)]
+    Time(#[from] mandate_time::TimeError),
+}
+
+impl From<mandate_risk::GateError> for VersionError {
+    fn from(error: mandate_risk::GateError) -> Self {
+        Self::Gate(error.code())
+    }
+}
+
+impl VersionError {
+    /// Stable reason code (ADR-0001 ES-09).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::NoBars => "no_bars",
+            Self::AssetClassNotSupported => "asset_class_not_supported",
+            Self::CorporateActionInRange(_) => "corporate_action_in_range",
+            Self::RecordBeforeItsData(_) => "record_before_its_data",
+            Self::OutputNotPinned(_) => "output_not_pinned",
+            Self::RecordOtherInstrument(_) => "record_other_instrument",
+            Self::DuplicateThesis(_) => "duplicate_thesis",
+            Self::ProtectionNotPlaceable => "protection_not_placeable",
+            Self::BarOutsideRegularSession(_) => "bar_outside_regular_session",
+            Self::FlattenWithoutSell => "flatten_without_sell",
+            Self::CalendarUnavailable => "calendar_unavailable",
+            Self::Liquidity(code) | Self::Gate(code) => code,
+            Self::Backtest(e) => e.code(),
+            Self::Builder(e) => e.code(),
+            Self::Spec(e) => e.code(),
+            Self::Executor(e) => e.code(),
+            Self::Sim(e) => e.code(),
+            Self::Accounting(e) => e.code(),
+            Self::Num(e) => e.code(),
+            Self::Time(e) => e.code(),
+        }
+    }
+}
 
 /// Seconds the gate's order-size participation cap looks back over (trading spec §9.6).
 const TRAILING_WINDOW_S: u64 = 300;
@@ -176,7 +278,7 @@ pub struct VersionRun {
 /// `record_other_instrument`, and `protection_not_placeable`; E4-2's `no_bars` and
 /// `bar_trade_date_mismatch`; and the arithmetic, fill-model, accounting, risk-state, gate, and
 /// calendar errors the run wraps. Every error refuses the whole run: no partial report exists.
-pub fn run_version(input: &VersionInput<'_>) -> Result<VersionRun, BacktestError> {
+pub fn run_version(input: &VersionInput<'_>) -> Result<VersionRun, VersionError> {
     check_inputs(input)?;
     let benchmark_config = benchmark_config(input)?;
     let benchmark_input = BacktestInput {
@@ -185,10 +287,10 @@ pub fn run_version(input: &VersionInput<'_>) -> Result<VersionRun, BacktestError
         coverage_start: input.coverage_start,
         first_bar_volumes: input.first_bar_volumes,
     };
-    crate::check_trade_dates(&benchmark_input)?;
-    let benchmark = crate::walk(&benchmark_input, benchmark_config.strategy)?;
+    mandate_backtest::check_trade_dates(&benchmark_input)?;
+    let benchmark = mandate_backtest::walk(&benchmark_input, benchmark_config.strategy)?;
     let calendar =
-        ExchangeCalendar::us_equities().map_err(|_| BacktestError::CalendarUnavailable)?;
+        ExchangeCalendar::us_equities().map_err(|_| VersionError::CalendarUnavailable)?;
     let clock = RegularSeconds {
         calendar: &calendar,
     };
@@ -227,11 +329,11 @@ pub fn run_version(input: &VersionInput<'_>) -> Result<VersionRun, BacktestError
 }
 
 /// The confirmed version's content hash, which names the report's mandate (DEC-1001 item 2).
-pub(crate) fn mandate_version(mandate: &ValidatedMandate) -> Result<Digest, BacktestError> {
+pub(crate) fn mandate_version(mandate: &ValidatedMandate) -> Result<Digest, VersionError> {
     Ok(mandate
         .mandate()
         .version()
-        .map_err(|_| BacktestError::Num(NumError::NotCanonical))?
+        .map_err(|_| VersionError::Num(NumError::NotCanonical))?
         .digest())
 }
 
@@ -242,36 +344,36 @@ fn research_agent(mandate: &ValidatedMandate) -> bool {
 }
 
 /// DEC-1000 items 3, 6 and 8, before anything is simulated: every refusal names the input.
-fn check_inputs(input: &VersionInput<'_>) -> Result<(), BacktestError> {
+fn check_inputs(input: &VersionInput<'_>) -> Result<(), VersionError> {
     let instrument = input.instrument;
     if instrument.instrument.asset_class != AssetClass::UsEquity {
-        return Err(BacktestError::AssetClassNotSupported);
+        return Err(VersionError::AssetClassNotSupported);
     }
     let (Some(first), Some(last)) = (input.bars.first(), input.bars.last()) else {
-        return Err(BacktestError::NoBars);
+        return Err(VersionError::NoBars);
     };
     if let Some(index) = input
         .bars
         .iter()
         .position(|bar| !matches!(bar.session, Session::Regular))
     {
-        return Err(BacktestError::BarOutsideRegularSession(index));
+        return Err(VersionError::BarOutsideRegularSession(index));
     }
     if let Some(date) = input
         .corporate_actions
         .iter()
         .find(|date| first.trade_date <= **date && **date <= last.trade_date)
     {
-        return Err(BacktestError::CorporateActionInRange(*date));
+        return Err(VersionError::CorporateActionInRange(*date));
     }
     let models = BuilderMandate::try_from(input.mandate)?.models;
     for (index, recorded) in input.outputs.iter().enumerate() {
         let output = &recorded.output;
         if output.instrument != instrument.asset {
-            return Err(BacktestError::RecordOtherInstrument(index));
+            return Err(VersionError::RecordOtherInstrument(index));
         }
         if recorded.received_at < output.as_of {
-            return Err(BacktestError::RecordBeforeItsData(index));
+            return Err(VersionError::RecordBeforeItsData(index));
         }
         let pinned = models.iter().any(|model| {
             model.id == output.model_id
@@ -279,22 +381,22 @@ fn check_inputs(input: &VersionInput<'_>) -> Result<(), BacktestError> {
                 && model.content_hash == output.content_hash
         });
         if !pinned {
-            return Err(BacktestError::OutputNotPinned(index));
+            return Err(VersionError::OutputNotPinned(index));
         }
     }
     let mut thesis_ids = BTreeSet::new();
     for (index, thesis) in input.theses.iter().enumerate() {
         if !thesis_ids.insert(thesis.thesis_id.as_str()) {
-            return Err(BacktestError::DuplicateThesis(index));
+            return Err(VersionError::DuplicateThesis(index));
         }
         if thesis.instrument != instrument.asset {
-            return Err(BacktestError::RecordOtherInstrument(index));
+            return Err(VersionError::RecordOtherInstrument(index));
         }
         let invalidated_early = thesis
             .invalidated_at
             .is_some_and(|at| at < thesis.received_at);
         if thesis.received_at < thesis.as_of || invalidated_early {
-            return Err(BacktestError::RecordBeforeItsData(index));
+            return Err(VersionError::RecordBeforeItsData(index));
         }
     }
     Ok(())
@@ -302,7 +404,7 @@ fn check_inputs(input: &VersionInput<'_>) -> Result<(), BacktestError> {
 
 /// The benchmark's configuration: buy-and-hold of the same instrument from the version's
 /// allocation, through the same fill model and fees (DEC-1001 item 2, DEC-127 item 13).
-fn benchmark_config(input: &VersionInput<'_>) -> Result<RunConfig, BacktestError> {
+fn benchmark_config(input: &VersionInput<'_>) -> Result<RunConfig, VersionError> {
     let settings = input.settings;
     Ok(RunConfig {
         sim: settings.sim,
@@ -319,7 +421,7 @@ fn benchmark_config(input: &VersionInput<'_>) -> Result<RunConfig, BacktestError
     })
 }
 
-fn allocation(mandate: &ValidatedMandate) -> Result<Usd, BacktestError> {
+fn allocation(mandate: &ValidatedMandate) -> Result<Usd, VersionError> {
     Ok(Usd::parse(
         mandate.mandate().capital.allocation_usd.as_str(),
     )?)
@@ -470,8 +572,8 @@ impl<'a, 'c> Run<'a, 'c> {
         config: &'a RunConfig,
         calendar: &'c ExchangeCalendar,
         clock: &'c RegularSeconds<'c>,
-    ) -> Result<Self, BacktestError> {
-        let first = input.bars.first().ok_or(BacktestError::NoBars)?;
+    ) -> Result<Self, VersionError> {
+        let first = input.bars.first().ok_or(VersionError::NoBars)?;
         let starting_cash = allocation(input.mandate)?;
         let risk = RiskState::open(
             input.mandate,
@@ -528,9 +630,9 @@ impl<'a, 'c> Run<'a, 'c> {
     /// The walk, bar by bar, in DEC-1000 item 1's order: the risk days the bar's start passes, the
     /// decision when the previous bar closed a period, this bar's fills, the protection an ended
     /// order leaves to place, then the close's marks, fee charges and period observation.
-    fn walk(&mut self) -> Result<(), BacktestError> {
+    fn walk(&mut self) -> Result<(), VersionError> {
         let bars = self.input.bars;
-        let closing = crate::closing_bars(bars);
+        let closing = mandate_backtest::closing_bars(bars);
         let mut decides = false;
         for (index, bar) in bars.iter().enumerate() {
             self.dates.insert(bar.trade_date);
@@ -560,7 +662,7 @@ impl<'a, 'c> Run<'a, 'c> {
     /// The instant a bar closes: the earlier of the next bar's start and the end of the session
     /// that holds its start on the committed calendar, its regular session, since slice 1 takes
     /// regular-session bars only (DEC-1000 items 3 and 8).
-    fn close_instant(&self, index: usize, bar: &SimBar) -> Result<UtcNanos, BacktestError> {
+    fn close_instant(&self, index: usize, bar: &SimBar) -> Result<UtcNanos, VersionError> {
         let next = index
             .checked_add(1)
             .and_then(|next| self.input.bars.get(next))
@@ -575,14 +677,14 @@ impl<'a, 'c> Run<'a, 'c> {
             (Some(next), Some(end)) => Ok(next.min(end)),
             (None, Some(end)) => Ok(end),
             (Some(next), None) => Ok(next),
-            (None, None) => Err(BacktestError::BarOutsideRegularSession(index)),
+            (None, None) => Err(VersionError::BarOutsideRegularSession(index)),
         }
     }
 
     /// Steps the risk state with `RiskDayStarted` at the New York midnight that opens each risk day
     /// after the last step's and up to `until`'s, then starts the day's inputs when `until` opens a
     /// new day (mandate spec §5.4).
-    fn cross_midnights(&mut self, until: UtcNanos) -> Result<(), BacktestError> {
+    fn cross_midnights(&mut self, until: UtcNanos) -> Result<(), VersionError> {
         let (mut day, _) = new_york_date_and_hour(self.last_step)?;
         let (today, _) = new_york_date_and_hour(until)?;
         while day < today {
@@ -601,7 +703,7 @@ impl<'a, 'c> Run<'a, 'c> {
 
     /// Starts a new risk day: yesterday's day trades join the earlier ones, and the day's counts
     /// start from empty (trading spec §9.2, §9.6).
-    fn roll_day(&mut self, today: Date) -> Result<(), BacktestError> {
+    fn roll_day(&mut self, today: Date) -> Result<(), VersionError> {
         if let (Some(_), Some(last)) = (self.today_date, self.last_close) {
             let fold = self.day_trades(last.at)?;
             self.earlier_day_trades.extend(fold.today);
@@ -619,7 +721,7 @@ impl<'a, 'c> Run<'a, 'c> {
         at: UtcNanos,
         session: MarketSession,
         input: risk::Input,
-    ) -> Result<(), BacktestError> {
+    ) -> Result<(), VersionError> {
         let outcome = self.risk.step(&Step { at, session, input })?;
         self.last_step = at;
         self.latched
@@ -628,7 +730,7 @@ impl<'a, 'c> Run<'a, 'c> {
         Ok(())
     }
 
-    fn position(&self) -> Result<Qty, BacktestError> {
+    fn position(&self) -> Result<Qty, VersionError> {
         Ok(self
             .account
             .position(&self.input.instrument.ledger_id)
@@ -638,7 +740,7 @@ impl<'a, 'c> Run<'a, 'c> {
 
     /// The bid and the ask at a decision: the last close moved by the fill model's half spread,
     /// each rounded against the agent onto the tick (DEC-1000 item 7).
-    fn quote(&self, close: Price) -> Result<(Price, Price), BacktestError> {
+    fn quote(&self, close: Price) -> Result<(Price, Price), VersionError> {
         let half = half_spread(&self.input.settings.sim);
         let tick = self.input.instrument.tick;
         Ok((
@@ -656,12 +758,12 @@ impl<'a, 'c> Run<'a, 'c> {
     /// No agent order works into a decision: every agent order is a day order, its remainder
     /// canceled at its session's end (trading spec §6.4 rule 2), and decisions come one a trading
     /// day, at its first regular bar. So the flatten that §6.2 step 1 puts first never waits on one.
-    fn decide(&mut self, index: usize, bar: &SimBar) -> Result<(), BacktestError> {
+    fn decide(&mut self, index: usize, bar: &SimBar) -> Result<(), VersionError> {
         let t = bar.start;
         self.step(t, MarketSession::Regular, risk::Input::Clock)?;
         let date = bar.trade_date;
         self.working = None;
-        let last = self.last_close.ok_or(BacktestError::NoBars)?;
+        let last = self.last_close.ok_or(VersionError::NoBars)?;
         let (bid, ask) = self.quote(last.close)?;
         let candidate = match self.candidate(t, bid, ask)? {
             Ok(candidate) => candidate,
@@ -763,7 +865,7 @@ impl<'a, 'c> Run<'a, 'c> {
         t: UtcNanos,
         bid: Price,
         ask: Price,
-    ) -> Result<Result<Candidate, Unproposed>, BacktestError> {
+    ) -> Result<Result<Candidate, Unproposed>, VersionError> {
         let snapshot = self.risk.snapshot();
         let position = self.position()?;
         if matches!(snapshot.agent_mode, AgentMode::Paused | AgentMode::Stopped)
@@ -841,7 +943,7 @@ impl<'a, 'c> Run<'a, 'c> {
     /// `flatten_and_pause` rung or the floor starts is the automated kill switch, whose orders
     /// §5.5 exempts from the agent's mode, so the gate is told that origin, never `risk_engine`,
     /// which `paused` would hold.
-    fn flatten(&self, t: UtcNanos, bid: Price, position: Qty) -> Result<Candidate, BacktestError> {
+    fn flatten(&self, t: UtcNanos, bid: Price, position: Qty) -> Result<Candidate, VersionError> {
         let session = mandate_risk::session_at(t, &self.input.settings.gate, AssetClass::UsEquity)?;
         let plan = mandate_risk::agent_flatten(&FlattenInput {
             agent: AGENT,
@@ -859,10 +961,7 @@ impl<'a, 'c> Run<'a, 'c> {
             max_exit_offset: self.input.settings.gate.collar_liquid_x,
             owner_floor_price: None,
         })?;
-        let sell = plan
-            .sells
-            .first()
-            .ok_or(BacktestError::FlattenWithoutSell)?;
+        let sell = plan.sells.first().ok_or(VersionError::FlattenWithoutSell)?;
         let (kind, limit) = match (sell.pricing, sell.floor_price) {
             (FlattenPricing::MarketOrLadder, _) => (ProposedKind::Market, bid),
             (FlattenPricing::ExitPriceLadder, floor) => (ProposedKind::Plain, floor.unwrap_or(bid)),
@@ -879,7 +978,7 @@ impl<'a, 'c> Run<'a, 'c> {
     }
 
     /// §5.5's `trim_to_target` sell, priced at the bid.
-    fn trim(&self, t: UtcNanos, bid: Price) -> Result<Option<Candidate>, BacktestError> {
+    fn trim(&self, t: UtcNanos, bid: Price) -> Result<Option<Candidate>, VersionError> {
         let snapshot = gate::risk_snapshot(self.risk.snapshot())?;
         let position = self.position()?;
         let instruments = BTreeMap::from([(self.risk_asset.clone(), self.instrument_snapshot(t)?)]);
@@ -938,7 +1037,7 @@ impl<'a, 'c> Run<'a, 'c> {
         !research_agent(self.input.mandate) || self.active_thesis(t).is_some()
     }
 
-    fn market(&self, t: UtcNanos, bid: Price, ask: Price) -> Result<Market, BacktestError> {
+    fn market(&self, t: UtcNanos, bid: Price, ask: Price) -> Result<Market, VersionError> {
         let session = mandate_risk::session_at(t, &self.input.settings.gate, AssetClass::UsEquity)?;
         Ok(Market {
             instrument: self.input.instrument.asset.clone(),
@@ -957,7 +1056,7 @@ impl<'a, 'c> Run<'a, 'c> {
     fn builder_account(
         &self,
         bid: Price,
-    ) -> Result<mandate_builder::AccountSnapshot, BacktestError> {
+    ) -> Result<mandate_builder::AccountSnapshot, VersionError> {
         let position = self.position()?;
         let basis = self
             .account
@@ -975,7 +1074,7 @@ impl<'a, 'c> Run<'a, 'c> {
         })
     }
 
-    fn risk_context(&self, t: UtcNanos, bid: Price) -> Result<RiskContext, BacktestError> {
+    fn risk_context(&self, t: UtcNanos, bid: Price) -> Result<RiskContext, VersionError> {
         let snapshot = self.risk.snapshot();
         let position = self.position()?;
         let basis = self
@@ -1007,7 +1106,7 @@ impl<'a, 'c> Run<'a, 'c> {
     fn instrument_snapshot(
         &self,
         t: UtcNanos,
-    ) -> Result<mandate_risk::InstrumentSnapshot, BacktestError> {
+    ) -> Result<mandate_risk::InstrumentSnapshot, VersionError> {
         let reference = self.input.instrument;
         let classification = reference
             .etp_classifications
@@ -1043,7 +1142,7 @@ impl<'a, 'c> Run<'a, 'c> {
 
     /// `mandate-liquidity`'s daily figures over the last 20 closed periods, or none with fewer, in
     /// which case every opening fails closed (DEC-1000 item 7).
-    fn liquidity(&self) -> Result<Option<mandate_liquidity::DailyLiquidity>, BacktestError> {
+    fn liquidity(&self) -> Result<Option<mandate_liquidity::DailyLiquidity>, VersionError> {
         let Some(from) = self.periods.len().checked_sub(LIQUIDITY_PERIODS) else {
             return Ok(None);
         };
@@ -1059,12 +1158,12 @@ impl<'a, 'c> Run<'a, 'c> {
             .collect();
         mandate_liquidity::daily_liquidity(&window)
             .map(Some)
-            .map_err(|error| BacktestError::Liquidity(error.code()))
+            .map_err(|error| VersionError::Liquidity(error.code()))
     }
 
     /// The last closed bar's volume spread evenly over its regular seconds, times 300, truncated
     /// to the share grid (DEC-1000 item 7, `participation_from_bar_volume`).
-    fn trailing_volume(&self) -> Result<Option<Qty>, BacktestError> {
+    fn trailing_volume(&self) -> Result<Option<Qty>, VersionError> {
         let Some(last) = self.last_close else {
             return Ok(None);
         };
@@ -1081,7 +1180,7 @@ impl<'a, 'c> Run<'a, 'c> {
         )?))
     }
 
-    fn day_trades(&self, now: UtcNanos) -> Result<mandate_risk::DayTradeFold, BacktestError> {
+    fn day_trades(&self, now: UtcNanos) -> Result<mandate_risk::DayTradeFold, VersionError> {
         let held = BTreeMap::from([(self.risk_asset.clone(), self.today.held_overnight)]);
         Ok(mandate_risk::fold_day_trades(&DayTradeInput {
             now,
@@ -1096,7 +1195,7 @@ impl<'a, 'c> Run<'a, 'c> {
         &self,
         position: Qty,
         bid: Price,
-    ) -> Result<mandate_risk::AccountSnapshot, BacktestError> {
+    ) -> Result<mandate_risk::AccountSnapshot, VersionError> {
         let buying_power = self
             .account
             .buying_power(mandate_accounting::Reservations::NONE)?;
@@ -1115,7 +1214,7 @@ impl<'a, 'c> Run<'a, 'c> {
                     open_qty: order.qty,
                     protective: true,
                     opening: false,
-                    submitted_on: self.today_date.ok_or(BacktestError::NoBars)?,
+                    submitted_on: self.today_date.ok_or(VersionError::NoBars)?,
                 },
             );
             resting.insert(
@@ -1145,7 +1244,7 @@ impl<'a, 'c> Run<'a, 'c> {
         &self,
         position: Qty,
         bid: Price,
-    ) -> Result<mandate_risk::AgentSnapshot, BacktestError> {
+    ) -> Result<mandate_risk::AgentSnapshot, VersionError> {
         let snapshot = self.risk.snapshot();
         let restrictions = snapshot
             .instrument_restrictions
@@ -1176,7 +1275,7 @@ impl<'a, 'c> Run<'a, 'c> {
 
     /// §9.6's inputs at a decision: no order of the day yet (DEC-1000 item 8), the latest fill on
     /// each side, and the day's participation, which is the resting protection's open quantity.
-    fn conduct(&self) -> Result<mandate_risk::ConductState, BacktestError> {
+    fn conduct(&self) -> Result<mandate_risk::ConductState, VersionError> {
         let open_protective = self
             .protection
             .as_ref()
@@ -1203,7 +1302,7 @@ impl<'a, 'c> Run<'a, 'c> {
         ask: Price,
         candidate: &Candidate,
         pass: GatePass,
-    ) -> Result<Decision, BacktestError> {
+    ) -> Result<Decision, VersionError> {
         let position = self.position()?;
         let universe = mandate_risk::WorkingUniverse::Known {
             instruments: if self.in_universe(t) {
@@ -1283,7 +1382,7 @@ impl<'a, 'c> Run<'a, 'c> {
         decided_at: UtcNanos,
         order: SimOrder,
         protective: bool,
-    ) -> Result<Working, BacktestError> {
+    ) -> Result<Working, VersionError> {
         let index = u32::try_from(self.orders.len()).map_err(|_| NumError::Overflow)?;
         let outcome = simulate(
             &self.input.settings.sim,
@@ -1321,7 +1420,7 @@ impl<'a, 'c> Run<'a, 'c> {
     /// Records the cancel of the resting protection before an agent order (trading spec §5.3):
     /// the protection is no longer folded from bar `index` on, and its recorded end is the cancel,
     /// after the last bar it worked through.
-    fn canceled(&mut self, protection: &Working, index: usize) -> Result<(), BacktestError> {
+    fn canceled(&mut self, protection: &Working, index: usize) -> Result<(), VersionError> {
         let slot = usize::try_from(protection.index).map_err(|_| NumError::Overflow)?;
         if let Some(order) = self.orders.get_mut(slot) {
             order.end = OrderEnd::Expired {
@@ -1332,7 +1431,7 @@ impl<'a, 'c> Run<'a, 'c> {
     }
 
     /// Folds bar `index`'s fills of the agent order and of the protection, in that order.
-    fn fold_fills(&mut self, index: usize, bar: &SimBar) -> Result<(), BacktestError> {
+    fn fold_fills(&mut self, index: usize, bar: &SimBar) -> Result<(), VersionError> {
         let mut folded = Vec::new();
         if let Some(order) = self.working.as_mut() {
             folded.extend(order.fold_bar(index, bar.start, self.config)?);
@@ -1360,7 +1459,7 @@ impl<'a, 'c> Run<'a, 'c> {
         Ok(())
     }
 
-    fn apply_fill(&mut self, fill: RunFill) -> Result<(), BacktestError> {
+    fn apply_fill(&mut self, fill: RunFill) -> Result<(), VersionError> {
         let execution: &Execution = &fill.execution;
         self.account = self
             .account
@@ -1400,7 +1499,7 @@ impl<'a, 'c> Run<'a, 'c> {
     /// Places the executor's protection on the whole position after an agent order ended (DEC-1000
     /// item 1.7): the bracket prices from the latest entry's limit, then `protective_shape`; none
     /// refuses the run.
-    fn place_protection(&mut self, at: UtcNanos) -> Result<(), BacktestError> {
+    fn place_protection(&mut self, at: UtcNanos) -> Result<(), VersionError> {
         self.protection_pending = false;
         let position = self.position()?;
         if position.is_zero() {
@@ -1409,11 +1508,11 @@ impl<'a, 'c> Run<'a, 'c> {
         let protection = &self.input.mandate.mandate().protection;
         let entry = self
             .last_entry_limit
-            .ok_or(BacktestError::ProtectionNotPlaceable)?;
+            .ok_or(VersionError::ProtectionNotPlaceable)?;
         let stop_distance = protection
             .stop_distance
             .as_ref()
-            .ok_or(BacktestError::ProtectionNotPlaceable)?;
+            .ok_or(VersionError::ProtectionNotPlaceable)?;
         let take_profit = protection
             .take_profit_distance
             .as_ref()
@@ -1434,14 +1533,14 @@ impl<'a, 'c> Run<'a, 'c> {
             prices,
             offset,
         )?
-        .ok_or(BacktestError::ProtectionNotPlaceable)?;
+        .ok_or(VersionError::ProtectionNotPlaceable)?;
         let kind = match (shape.oco, shape.stop_price, shape.limit_price) {
             (Some(legs), _, _) => OrderKind::Oco {
                 limit: legs.take_profit,
                 stop: legs.stop,
             },
             (None, Some(stop), Some(limit)) => OrderKind::StopLimit { stop, limit },
-            _ => return Err(BacktestError::ProtectionNotPlaceable),
+            _ => return Err(VersionError::ProtectionNotPlaceable),
         };
         let order = SimOrder {
             side: Side::Sell,
@@ -1466,7 +1565,7 @@ impl<'a, 'c> Run<'a, 'c> {
         bar: &SimBar,
         close_at: UtcNanos,
         closes_period: bool,
-    ) -> Result<(), BacktestError> {
+    ) -> Result<(), VersionError> {
         self.account = self
             .account
             .apply(
@@ -1493,7 +1592,12 @@ impl<'a, 'c> Run<'a, 'c> {
             volume: bar.volume,
             regular_seconds,
         });
-        for day in crate::charges_due(bar, &self.dates, &mut self.charged, AssetClass::UsEquity)? {
+        for day in mandate_backtest::charges_due(
+            bar,
+            &self.dates,
+            &mut self.charged,
+            AssetClass::UsEquity,
+        )? {
             self.account = self
                 .account
                 .apply(
@@ -1534,7 +1638,7 @@ impl<'a, 'c> Run<'a, 'c> {
 
     /// The fills, fees and notionals the strategy's metric block is computed from (DEC-127 items
     /// 10, 11 and 22).
-    fn totals(&self) -> Result<Totals, BacktestError> {
+    fn totals(&self) -> Result<Totals, VersionError> {
         let mut buy_notional = Usd::ZERO;
         let mut sell_notional = Usd::ZERO;
         let mut filled_qty = Qty::ZERO;
@@ -1578,7 +1682,7 @@ pub(crate) fn half_spread(sim: &SimConfig) -> mandate_num::Bps {
 
 /// `numerator / denominator` as decimal text exact to nine places, truncated: the share of a bar's
 /// volume the trailing window holds.
-fn ratio_text(numerator: u64, denominator: u64) -> Result<String, BacktestError> {
+fn ratio_text(numerator: u64, denominator: u64) -> Result<String, VersionError> {
     let scaled = numerator
         .checked_mul(1_000_000_000)
         .and_then(|scaled| scaled.checked_div(denominator))

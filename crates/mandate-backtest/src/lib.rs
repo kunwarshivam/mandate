@@ -33,17 +33,19 @@
 mod metrics;
 mod report;
 mod strategy;
-mod version;
 
 pub use metrics::{Metrics, Totals};
 pub use report::{AbsentStatistics, InputDigests, REPORT_VERSION, Report, Sign};
 pub use strategy::{Signal, Strategy, StrategyConfig};
-pub use version::{
-    DecisionOutcome, DecisionRow, EtpClassification, InstrumentReference, Limitation,
-    RecordedOutput, RecordedThesis, RunRecord, VERSION_REPORT_VERSION, VersionDigests,
-    VersionInput, VersionOrder, VersionReport, VersionRun, VersionSettings, backtest_run_recorded,
-    run_version,
-};
+
+/// The report's canonical encoders, shared with `mandate-version-backtest` so a version report
+/// writes every block it has in common with this crate's report byte for byte as this crate does
+/// (DEC-1001 item 2).
+pub mod encode {
+    pub use crate::report::{
+        bar_input, decimal, fees, int, metrics, object, optional, sim, text, tick,
+    };
+}
 
 use core::cmp::Ordering;
 use std::collections::BTreeSet;
@@ -75,41 +77,6 @@ pub enum BacktestError {
     StrategyWindowsCrossed,
     #[error("a year must hold at least one period")]
     PeriodsPerYearNotPositive,
-    #[error("a version backtest runs US equities only in this slice")]
-    AssetClassNotSupported,
-    #[error("the data snapshot holds a corporate action on {0} inside the run")]
-    CorporateActionInRange(Date),
-    #[error(
-        "record {0} was received before its own data cut-off, or invalidated before it was received"
-    )]
-    RecordBeforeItsData(usize),
-    #[error("model output {0} is not pinned by the mandate version")]
-    OutputNotPinned(usize),
-    #[error("record {0} is for another instrument than the run's")]
-    RecordOtherInstrument(usize),
-    #[error("thesis record {0} repeats an earlier record's thesis id")]
-    DuplicateThesis(usize),
-    #[error(
-        "the executor offers no protective order for this position under the connection's profile"
-    )]
-    ProtectionNotPlaceable,
-    #[error("bar {0} is not a regular-session bar, which a version backtest's slice 1 requires")]
-    BarOutsideRegularSession(usize),
-    #[error("the agent-scoped flatten planned no sell for a held position")]
-    FlattenWithoutSell,
-    #[error("the committed trading calendar could not be read")]
-    CalendarUnavailable,
-    #[error("a liquidity figure could not be computed: {0}")]
-    Liquidity(&'static str),
-    #[error(transparent)]
-    Builder(#[from] mandate_builder::BuilderError),
-    /// The gate refused to decide; its code is kept, since `GateError` is neither `Clone` nor `Eq`.
-    #[error("the gate could not decide: {0}")]
-    Gate(&'static str),
-    #[error(transparent)]
-    Spec(#[from] mandate_spec::SpecError),
-    #[error(transparent)]
-    Executor(#[from] mandate_executor::ExecutorError),
     #[error(transparent)]
     Sim(#[from] SimError),
     #[error(transparent)]
@@ -118,12 +85,6 @@ pub enum BacktestError {
     Num(#[from] NumError),
     #[error(transparent)]
     Time(#[from] TimeError),
-}
-
-impl From<mandate_risk::GateError> for BacktestError {
-    fn from(error: mandate_risk::GateError) -> Self {
-        Self::Gate(error.code())
-    }
 }
 
 impl BacktestError {
@@ -135,21 +96,6 @@ impl BacktestError {
             Self::EquityNotPositive(_) => "equity_not_positive",
             Self::StrategyWindowsCrossed => "strategy_windows_crossed",
             Self::PeriodsPerYearNotPositive => "periods_per_year_not_positive",
-            Self::AssetClassNotSupported => "asset_class_not_supported",
-            Self::CorporateActionInRange(_) => "corporate_action_in_range",
-            Self::RecordBeforeItsData(_) => "record_before_its_data",
-            Self::OutputNotPinned(_) => "output_not_pinned",
-            Self::RecordOtherInstrument(_) => "record_other_instrument",
-            Self::DuplicateThesis(_) => "duplicate_thesis",
-            Self::ProtectionNotPlaceable => "protection_not_placeable",
-            Self::BarOutsideRegularSession(_) => "bar_outside_regular_session",
-            Self::FlattenWithoutSell => "flatten_without_sell",
-            Self::CalendarUnavailable => "calendar_unavailable",
-            Self::Liquidity(code) => code,
-            Self::Builder(e) => e.code(),
-            Self::Gate(code) => code,
-            Self::Spec(e) => e.code(),
-            Self::Executor(e) => e.code(),
             Self::Sim(e) => e.code(),
             Self::Accounting(e) => e.code(),
             Self::Num(e) => e.code(),
@@ -307,7 +253,7 @@ pub fn run(input: &BacktestInput<'_>) -> Result<BacktestRun, BacktestError> {
 /// the bar's start, and for crypto, which has no trade date (spec §2.2), the UTC date of its start.
 /// Either disagreement fails the run, so a mislabelled bar cannot silently move a period boundary
 /// (DEC-127 item 20).
-pub(crate) fn check_trade_dates(input: &BacktestInput<'_>) -> Result<(), BacktestError> {
+pub fn check_trade_dates(input: &BacktestInput<'_>) -> Result<(), BacktestError> {
     let config = input.config;
     for (index, bar) in input.bars.iter().enumerate() {
         let expected = match config.instrument.asset_class {
@@ -323,15 +269,15 @@ pub(crate) fn check_trade_dates(input: &BacktestInput<'_>) -> Result<(), Backtes
 
 /// One strategy's walk over the bars: the periods it observed, the fills it folded, the orders it
 /// submitted, and the account they left behind, which holds the fee totals the report shows.
-pub(crate) struct Walk {
-    pub(crate) equity: Vec<Observation>,
+pub struct Walk {
+    pub equity: Vec<Observation>,
     fills: Vec<RunFill>,
     orders: Vec<SubmittedOrder>,
     account: Account,
 }
 
 impl Walk {
-    pub(crate) fn metrics(&self, config: &RunConfig) -> Result<Metrics, BacktestError> {
+    pub fn metrics(&self, config: &RunConfig) -> Result<Metrics, BacktestError> {
         Metrics::of(
             config.starting_cash,
             &self.equity,
@@ -368,19 +314,19 @@ impl Walk {
 
 /// The order the loop is waiting on: its run-wide index, the order itself, the fills the model
 /// returned for it, how many of them have been folded, and how it ended.
-pub(crate) struct Working {
-    pub(crate) index: u32,
-    pub(crate) order: SimOrder,
-    pub(crate) fills: Vec<SimFill>,
-    pub(crate) folded: usize,
-    pub(crate) end: OrderEnd,
+pub struct Working {
+    pub index: u32,
+    pub order: SimOrder,
+    pub fills: Vec<SimFill>,
+    pub folded: usize,
+    pub end: OrderEnd,
 }
 
 impl Working {
     /// The fills of this order in bar `index`, in the order the model returned them, each with the
     /// execution built from it: `o<index>` as the client order ID, `o<index>-f<ordinal>` as the fill
     /// ID, and the bar's start as the execution instant (DEC-127 item 21).
-    pub(crate) fn fold_bar(
+    pub fn fold_bar(
         &mut self,
         index: usize,
         at: UtcNanos,
@@ -413,7 +359,7 @@ impl Working {
     /// The bar this order stopped working in — its last fill's, or the `at_bar` a day order's
     /// remainder was canceled after, both read from the model rather than recomputed — and `None`
     /// while it is still working (DEC-127 item 18).
-    pub(crate) fn stopped_in(&self) -> Option<usize> {
+    pub fn stopped_in(&self) -> Option<usize> {
         let last_fill = self.fills.last().map(|fill| fill.bar);
         match self.end {
             OrderEnd::Filled => last_fill,
@@ -424,7 +370,7 @@ impl Working {
 
     /// The quantity this order has not filled yet among the fills folded so far: what still rests
     /// at the broker for the gate's participation count (trading spec §9.6).
-    pub(crate) fn remaining(&self) -> Result<Qty, BacktestError> {
+    pub fn remaining(&self) -> Result<Qty, BacktestError> {
         let mut filled = Qty::ZERO;
         for fill in self.fills.iter().take(self.folded) {
             filled = filled.checked_add(fill.qty)?;
@@ -434,7 +380,7 @@ impl Working {
 
     /// Whether this order had stopped working before bar `index`. An order works through the end of
     /// the bar in which it stops (spec §5.3 rule 6), so that bar submits no replacement.
-    pub(crate) fn free_before(&self, index: usize) -> bool {
+    pub fn free_before(&self, index: usize) -> bool {
         self.stopped_in()
             .is_some_and(|stopped| matches!(stopped.cmp(&index), Ordering::Less))
     }
@@ -443,7 +389,7 @@ impl Working {
 /// Walks the bars once, in index order, doing at each bar what DEC-127 item 2 fixes: the cash
 /// movements `Account::due` makes due, the bar's fills, the bar-close mark, the fee charges spec §6.2
 /// and §6.3 date, the period observation when this bar closes a period, and last the decision.
-pub(crate) fn walk(input: &BacktestInput<'_>, strategy: Strategy) -> Result<Walk, BacktestError> {
+pub fn walk(input: &BacktestInput<'_>, strategy: Strategy) -> Result<Walk, BacktestError> {
     let config = input.config;
     let mut account = Account::opening(config.account_type, config.starting_cash, []);
     let mut equity: Vec<Observation> = Vec::new();
@@ -633,7 +579,7 @@ fn intent(
 /// which is spec §8.2's official close, or the last bar of a crypto UTC date. A trade date the input
 /// covers only outside the regular session is no period, and its bars are folded into the next one
 /// (DEC-127 item 3).
-pub(crate) fn closing_bars(bars: &[SimBar]) -> Vec<bool> {
+pub fn closing_bars(bars: &[SimBar]) -> Vec<bool> {
     let mut later: BTreeSet<Date> = BTreeSet::new();
     let mut closing: Vec<bool> = bars
         .iter()
@@ -660,7 +606,7 @@ pub(crate) fn closing_bars(bars: &[SimBar]) -> Vec<bool> {
 ///
 /// Both comparisons are read through [`Ord`] rather than through operators, because no fixture has a
 /// bar exactly at an instant that a shifted operator would move it across.
-pub(crate) fn charges_due(
+pub fn charges_due(
     bar: &SimBar,
     dates: &BTreeSet<Date>,
     charged: &mut BTreeSet<Date>,

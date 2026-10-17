@@ -1593,18 +1593,11 @@ name = "mandate-backtest"
 version = "0.0.0"
 dependencies = [
  "mandate-accounting",
- "mandate-builder",
  "mandate-canon",
- "mandate-domain",
- "mandate-executor",
- "mandate-liquidity",
  "mandate-num",
- "mandate-risk",
  "mandate-sim",
- "mandate-spec",
  "mandate-time",
  "proptest",
- "serde_json",
  "thiserror",
 ]
 
@@ -2136,6 +2129,27 @@ name = "mandate-vault-local"
 version = "0.0.0"
 dependencies = [
  "secrecy",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-version-backtest"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-backtest",
+ "mandate-builder",
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-executor",
+ "mandate-liquidity",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-sim",
+ "mandate-spec",
+ "mandate-time",
+ "proptest",
+ "serde_json",
  "thiserror",
 ]
 

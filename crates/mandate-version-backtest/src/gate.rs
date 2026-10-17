@@ -15,26 +15,26 @@ use mandate_spec::ValidatedMandate;
 use mandate_spec::document::{LadderAction, ScaleAction as DocumentScaleAction};
 use mandate_spec::risk::{self, Snapshot};
 
-use crate::BacktestError;
+use crate::VersionError;
 
 /// The confirmed mandate as the gate reads it, with the goal running.
 pub(super) fn mandate(
     validated: &ValidatedMandate,
-) -> Result<mandate_risk::ValidatedMandate, BacktestError> {
+) -> Result<mandate_risk::ValidatedMandate, VersionError> {
     with_goal(validated, GoalState::Running)
 }
 
 /// The same mandate with the goal complete and holding (mandate spec §3.1).
 pub(super) fn mandate_holding(
     validated: &ValidatedMandate,
-) -> Result<mandate_risk::ValidatedMandate, BacktestError> {
+) -> Result<mandate_risk::ValidatedMandate, VersionError> {
     with_goal(validated, GoalState::Holding)
 }
 
 fn with_goal(
     validated: &ValidatedMandate,
     goal: GoalState,
-) -> Result<mandate_risk::ValidatedMandate, BacktestError> {
+) -> Result<mandate_risk::ValidatedMandate, VersionError> {
     let document = validated.mandate();
     let risk = &document.risk;
     let scale_action = match risk.scale_action {
@@ -62,7 +62,7 @@ fn with_goal(
                 scale_action: Some(scale_action),
             })
         })
-        .collect::<Result<Vec<_>, BacktestError>>()?;
+        .collect::<Result<Vec<_>, VersionError>>()?;
     Ok(mandate_risk::ValidatedMandate::from_validated_parts(
         RiskLimits {
             max_position_usd: Usd::parse(risk.max_position_usd.as_str())?,
@@ -83,15 +83,15 @@ fn with_goal(
 
 /// The gate's id for the run's instrument: the asset id's own text. The gate refuses only an empty
 /// id, which a parsed asset id never is, so a refusal is the id's text not being canonical.
-pub(super) fn asset(asset: &AssetId) -> Result<mandate_risk::AssetId, BacktestError> {
+pub(super) fn asset(asset: &AssetId) -> Result<mandate_risk::AssetId, VersionError> {
     mandate_risk::AssetId::new(asset.as_str())
-        .map_err(|_| BacktestError::Num(mandate_num::NumError::NotCanonical))
+        .map_err(|_| VersionError::Num(mandate_num::NumError::NotCanonical))
 }
 
 /// The risk state's snapshot narrowed to the fields the gate reads.
 pub(super) fn risk_snapshot(
     snapshot: &Snapshot,
-) -> Result<mandate_risk::RiskSnapshot, BacktestError> {
+) -> Result<mandate_risk::RiskSnapshot, VersionError> {
     Ok(mandate_risk::RiskSnapshot {
         agent_equity: snapshot.agent_equity,
         high_water_mark: snapshot.high_water_mark,
