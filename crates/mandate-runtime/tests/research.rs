@@ -2648,3 +2648,90 @@ fn an_invalidation_frees_only_its_own_instrument_s_slot() {
         "the thesis is refused and the invalidation judged, theses first (rule 151)"
     );
 }
+
+/// A research batch the journal refused stored nothing (DEC-2204): until it is abandoned the single
+/// writer holds trading behind it, and once it is, trading and the kill switch are taken at once,
+/// the run in flight is dropped, and nothing is left in doubt.
+#[test]
+fn a_refused_research_batch_is_abandoned_and_trading_is_not_held_behind_it() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let world = World::open();
+    let started = lp.run(ResearchInput::Poll(clock(CUT_OFF)), &ports, &world);
+    let Some(ResearchRequest::Start { run_id, .. }) = started.requests.first().cloned() else {
+        panic!("a due run starts: {started:?}");
+    };
+    let refused = mandate_runtime::handle_research(
+        &mut lp.shell.state,
+        &mut lp.research,
+        ResearchInput::Retrieved {
+            run_id,
+            items: retrieved_items(&world, CUT_OFF),
+        },
+        &ports,
+        &world.context(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        refused
+            .effects
+            .iter()
+            .any(|e| matches!(e, Effect::Journal(_))),
+        "the step has drafts the journal will refuse"
+    );
+    assert!(
+        matches!(
+            handle(&mut lp.shell.state, Input::Tick(clock(CUT_OFF + 1)), &ports),
+            Err(RuntimeError::AppendUnresolved { .. })
+        ),
+        "a batch in doubt holds trading until it is settled"
+    );
+    assert!(mandate_runtime::abandon_refused_research(
+        &mut lp.shell.state,
+        &mut lp.research
+    ));
+    assert_eq!(lp.research.in_flight(), None, "the run is dropped");
+    assert!(handle(&mut lp.shell.state, Input::Tick(clock(CUT_OFF + 1)), &ports).is_ok());
+    let killed = handle(
+        &mut lp.shell.state,
+        Input::Command(Command::KillSwitch {
+            scope: mandate_runtime::KillScope::Agent(mandate_runtime::AgentId(
+                "agent-a".to_owned(),
+            )),
+            initiator: mandate_runtime::Initiator::Owner,
+            confirmation: None,
+        }),
+        &ports,
+    );
+    assert!(killed.is_ok(), "the kill switch is taken: {killed:?}");
+    assert!(
+        !mandate_runtime::abandon_refused_research(&mut lp.shell.state, &mut lp.research),
+        "nothing research wrote is in doubt any more"
+    );
+}
+
+/// Only a research input's batch is ever abandoned: a trading batch in doubt keeps the writer held
+/// until the shell settles it, as journal spec §5.1 requires.
+#[test]
+fn a_trading_batch_in_doubt_is_never_abandoned_as_research() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let paused = handle(&mut lp.shell.state, Input::Command(Command::Pause), &ports)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        paused.iter().any(|e| matches!(e, Effect::Journal(_))),
+        "the pause journals a batch, left unappended"
+    );
+    assert!(!mandate_runtime::abandon_refused_research(
+        &mut lp.shell.state,
+        &mut lp.research
+    ));
+    assert!(matches!(
+        handle(&mut lp.shell.state, Input::Tick(clock(CUT_OFF + 1)), &ports),
+        Err(RuntimeError::AppendUnresolved { .. })
+    ));
+}

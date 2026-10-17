@@ -836,6 +836,7 @@ fn commanded(
                 initiator: Initiator::Owner,
                 confirmation: judged.confirmation.as_ref(),
                 step_up: Some((judged.status, &judged.step_up)),
+                user: Some(user),
                 cause,
             },
             ports,

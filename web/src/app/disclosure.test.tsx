@@ -1,5 +1,7 @@
+import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AppShell } from "@/components/shell/app-shell";
+import { BACKTESTS_BY_AGENT } from "@/fixtures/backtests";
 import { AGENT_IDS, SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
 import { isRecordRoute } from "@/lib/frozen";
 import { agentHref, positionHref } from "@/lib/screens";
@@ -97,6 +99,14 @@ describe("[[DISCLOSURE-PERFORMANCE]] beside every P&L figure", () => {
   ])("finds P&L on %s, so the route scan below has something to check", async (_, path) => {
     await renderPath(path, "normal");
     expect(pnlFigures().length).toBeGreaterThan(0);
+  });
+
+  it.each(Object.values(BACKTESTS_BY_AGENT).flat())("finds net P&L on the backtest report /backtests/%s once it is read, each beside its disclosure", async (id) => {
+    await renderPath(`/backtests/${id}`, "normal");
+    await screen.findByRole("region", { name: "The run" });
+    const completed = screen.getByRole("region", { name: "The run" }).textContent?.includes("Completed");
+    expect(pnlFigures().length > 0).toBe(Boolean(completed));
+    expect(undisclosed()).toEqual([]);
   });
 
   it.each(SCENARIOS.flatMap((s) => pathsFor(s.id).map((path) => [path, s.id] as const)))("%s in %s shows no P&L without its disclosure in its region", async (path, scenario) => {
