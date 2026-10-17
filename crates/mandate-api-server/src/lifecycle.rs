@@ -55,7 +55,6 @@ impl Local {
 
 impl Lifecycle for Local {
     fn ready(&self) -> bool {
-        let _ = &self.drain;
-        false
+        !self.drain.draining()
     }
 }

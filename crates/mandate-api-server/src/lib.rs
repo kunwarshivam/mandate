@@ -26,6 +26,3 @@
 pub mod config;
 pub mod http;
 pub mod lifecycle;
-
-/// The story every stub in this crate belongs to.
-pub const STORY: &str = "E21-31";

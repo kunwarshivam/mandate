@@ -4,7 +4,9 @@
 
 use std::ffi::OsStr;
 use std::fmt;
+use std::fs;
 use std::net::{IpAddr, SocketAddr};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 /// The session signing key's file name under `$CREDENTIALS_DIRECTORY` (`deploy/systemd`).
@@ -12,6 +14,9 @@ pub const SESSION_KEY_FILE: &str = "session-signing-key";
 
 /// The shortest session signing key accepted, in bytes: HMAC-SHA256's block of security.
 pub const MIN_SESSION_KEY_BYTES: usize = 32;
+
+/// The permission bits of a file's group and others; a credential file must have none.
+const OTHERS_AND_GROUP: u32 = 0o077;
 
 /// Name fragments that mark a variable as secret-shaped, matched ASCII case-insensitively.
 pub const SECRET_NAME_PARTS: [&str; 4] = ["SECRET", "PASSWORD", "TOKEN", "KEY"];
@@ -33,8 +38,6 @@ pub enum StartRefusal {
     SessionKeyExposed,
     /// A required setting is absent or malformed; carries only its name.
     Setting { name: &'static str },
-    /// The check is not implemented yet (DEC-77).
-    Unimplemented,
 }
 
 impl fmt::Display for StartRefusal {
@@ -53,7 +56,6 @@ impl fmt::Display for StartRefusal {
             Self::Setting { name } => {
                 write!(f, "a required setting is absent or malformed: {name}")
             }
-            Self::Unimplemented => write!(f, "{} has not been implemented yet", crate::STORY),
         }
     }
 }
@@ -86,8 +88,13 @@ pub fn check_bind(
     bind: SocketAddr,
     pod_address: Option<IpAddr>,
 ) -> Result<SocketAddr, StartRefusal> {
-    let _ = (bind, pod_address);
-    Err(StartRefusal::Unimplemented)
+    let ip = bind.ip();
+    let local = ip.is_loopback() || (!ip.is_unspecified() && Some(ip) == pod_address);
+    if local {
+        Ok(bind)
+    } else {
+        Err(StartRefusal::BindNotLocal)
+    }
 }
 
 /// Refuses an environment holding any variable whose name contains one of
@@ -100,8 +107,16 @@ where
     I: IntoIterator<Item = (K, V)>,
     K: AsRef<OsStr>,
 {
-    let _ = vars.into_iter().count();
-    Err(StartRefusal::Unimplemented)
+    for (name, _) in vars {
+        let name = name.as_ref().to_string_lossy();
+        let upper = name.to_ascii_uppercase();
+        if SECRET_NAME_PARTS.iter().any(|part| upper.contains(part)) {
+            return Err(StartRefusal::SecretInEnvironment {
+                name: name.into_owned(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Refuses a database URL that carries a password, in its user information or as a `password`
@@ -110,8 +125,24 @@ where
 /// # Errors
 /// [`StartRefusal::PasswordInDatabaseUrl`].
 pub fn check_database_url(url: &str) -> Result<(), StartRefusal> {
-    let _ = url;
-    Err(StartRefusal::Unimplemented)
+    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let (authority_and_path, query) = after_scheme.split_once('?').unwrap_or((after_scheme, ""));
+    let authority = authority_and_path
+        .split_once('/')
+        .map_or(authority_and_path, |(authority, _)| authority);
+    let userinfo_has_password = authority
+        .rsplit_once('@')
+        .is_some_and(|(userinfo, _)| userinfo.contains(':'));
+    let query_has_password = query.split('&').any(|pair| {
+        pair.split_once('=')
+            .map_or(pair, |(key, _)| key)
+            .eq_ignore_ascii_case("password")
+    });
+    if userinfo_has_password || query_has_password {
+        Err(StartRefusal::PasswordInDatabaseUrl)
+    } else {
+        Ok(())
+    }
 }
 
 /// Reads [`SESSION_KEY_FILE`] from `credentials_dir`: at least [`MIN_SESSION_KEY_BYTES`], and
@@ -121,6 +152,14 @@ pub fn check_database_url(url: &str) -> Result<(), StartRefusal> {
 /// [`StartRefusal::SessionKeyMissing`], [`StartRefusal::SessionKeyExposed`], or
 /// [`StartRefusal::SessionKeyTooShort`], in that order.
 pub fn read_session_key(credentials_dir: &Path) -> Result<SessionKey, StartRefusal> {
-    let _ = credentials_dir;
-    Err(StartRefusal::Unimplemented)
+    let path = credentials_dir.join(SESSION_KEY_FILE);
+    let metadata = fs::metadata(&path).map_err(|_| StartRefusal::SessionKeyMissing)?;
+    if metadata.permissions().mode() & OTHERS_AND_GROUP != 0 {
+        return Err(StartRefusal::SessionKeyExposed);
+    }
+    let bytes = fs::read(&path).map_err(|_| StartRefusal::SessionKeyMissing)?;
+    if bytes.len() < MIN_SESSION_KEY_BYTES {
+        return Err(StartRefusal::SessionKeyTooShort);
+    }
+    Ok(SessionKey(bytes))
 }
