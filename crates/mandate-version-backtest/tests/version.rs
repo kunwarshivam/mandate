@@ -8,7 +8,9 @@ use mandate_accounting::{AssetClass, Side};
 use mandate_canon::{Digest, Value};
 use mandate_risk::Purpose;
 use mandate_sim::{OrderEnd, OrderKind};
-use mandate_version_backtest::{DecisionOutcome, RunRecord, VersionDigests, VersionError};
+use mandate_version_backtest::{
+    DecisionOutcome, RunRecord, VersionDigests, VersionError, VersionObjects,
+};
 use serde_json::Value as Json;
 
 /// The period count every case runs: 20 to open the liquidity window, then ten more.
@@ -664,6 +666,51 @@ fn the_record_names_the_report_or_the_refusal() {
         refused.get("result"),
         Some(&Value::Str("refused".to_owned()))
     );
+}
+
+/// Journal spec §6.3 and §11 check 6: each digest a record names is SHA-256 of the canonical
+/// bytes of the object `VersionObjects` hands the runner to store, so every reference resolves.
+/// The oracle hashes the objects itself, and reads one member of each, so four objects that were
+/// one, or empty, would fail it.
+#[test]
+fn each_digest_is_of_the_object_a_runner_stores() {
+    let days = trading_days(DAYS);
+    let outputs = daily_outputs(&days, "0.5");
+    let bars = flat_bars(DAYS);
+    let mandate = pinned();
+    let settings = settings();
+    let instrument = xyz();
+    let medians = Median(qty("10000000"));
+    let theses = [thesis(
+        at("2026-09-01T13:00:00Z"),
+        at("2026-12-01T00:00:00Z"),
+        true,
+    )];
+    let input = mandate_version_backtest::VersionInput {
+        mandate: &mandate,
+        settings: &settings,
+        instrument: &instrument,
+        bars: &bars,
+        coverage_start: bars[0].start,
+        first_bar_volumes: &medians,
+        outputs: &outputs,
+        theses: &theses,
+        corporate_actions: &[],
+    };
+    let objects = VersionObjects::of(&input).unwrap_or_else(|e| panic!("{}", e.code()));
+    let hashed = |value: &Value| Digest::of(&mandate_canon::to_canonical(value));
+    let digests = VersionDigests::of(&input).unwrap_or_else(|e| panic!("{}", e.code()));
+    assert_eq!(objects.digests(), digests);
+    assert_eq!(hashed(&objects.bars), digests.bars);
+    assert_eq!(hashed(&objects.model_outputs), digests.model_outputs);
+    assert_eq!(hashed(&objects.theses), digests.theses);
+    assert_eq!(hashed(&objects.config), digests.config);
+    let rows = objects.bars.get("rows").and_then(Value::as_array);
+    assert_eq!(rows.map(<[Value]>::len), Some(DAYS));
+    let count = |value: &Value| value.as_array().map_or(0, <[Value]>::len);
+    assert_eq!(count(&objects.model_outputs), outputs.len());
+    assert_eq!(count(&objects.theses), 1);
+    assert!(objects.config.get("fees").is_some(), "{:?}", objects.config);
 }
 
 /// DEC-1000 item 1.2 and `AGENTS.md` rule 13: a fall to 90 puts the 600 USD position's loss of 60
