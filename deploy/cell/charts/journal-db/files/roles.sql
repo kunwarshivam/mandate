@@ -37,6 +37,15 @@ GRANT CONNECT ON DATABASE mandate TO mandate_verify;
 ALTER ROLE mandate_verify IN DATABASE mandate SET search_path = journal;
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_api') THEN
+    CREATE ROLE mandate_api LOGIN IN ROLE mandate_journal_app;
+  END IF;
+END
+$$;
+GRANT CONNECT ON DATABASE mandate TO mandate_api;
+ALTER ROLE mandate_api IN DATABASE mandate SET search_path = journal;
+DO $$
+BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_runtime') THEN
     CREATE ROLE mandate_runtime LOGIN IN ROLE mandate_journal_app;
   END IF;
