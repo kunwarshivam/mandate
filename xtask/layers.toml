@@ -49,6 +49,9 @@
 #      stored record it reads, and mandate-notify, whose minted id and canary scan it reuses; kept
 #      off every crate that writes a stream or reaches a broker, so an alert can never act (OPS-10)
 #   4  mandate-dispatcher, the notification process (E8-10, E8-14, DEC-701 item 2): above
+#   4  mandate-deploy-manager, the deployment manager (E21-33, DEC-1170): a workspace service above
+#      mandate-process and mandate-journal, kept off every stream writer but the control stream;
+#      mandate-dispatcher, the notification process (E8-10, E8-14, DEC-701 item 2): above
 #      mandate-journal, whose notice stream it alone appends to, and above mandate-push-relay, whose
 #      request it builds (raised from layer 3 by DEC-713); its forbidden_internal list names every
 #      crate that writes an agent, account, or control stream (NT-3 at rung 1, DEC-701 item 3);
@@ -116,6 +119,7 @@ workspace_services = [
     "mandate-cli",
     "mandate-cp-agent",
     "mandate-cp-site",
+    "mandate-deploy-manager",
     "mandate-dispatcher",
 ]
 agent_process = [
@@ -230,6 +234,32 @@ layer = 3
 safety_critical = true
 pure = true
 allowed_external = []
+
+# The deployment manager (E21-33, DEC-1170): a workspace service at layer 4, above
+# mandate-process, whose crash-loop bound it applies, and mandate-journal, whose control stream it
+# reads and appends its three records to. It reaches the orchestrator over plain HTTPS (D-3) and may
+# never reach a crate that writes an agent or account stream, holds a broker credential, or edits a
+# mandate: the runtime, the executor, the connectors, the shell, the CLI, the paper binary, the
+# agent process, the order builder, the risk gate and the mandate document crate.
+[crates.mandate-deploy-manager]
+layer = 4
+safety_critical = true
+pure = false
+allowed_external = ["reqwest", "rustls", "serde_json"]
+forbidden_internal = [
+    "mandate-agentd",
+    "mandate-alpaca",
+    "mandate-builder",
+    "mandate-cli",
+    "mandate-executor",
+    "mandate-mcp",
+    "mandate-paper",
+    "mandate-risk",
+    "mandate-robinhood",
+    "mandate-runtime",
+    "mandate-shell",
+    "mandate-spec",
+]
 
 # The notification dispatcher (E8-10, E8-14, DEC-701): a process crate, above mandate-journal. It
 # may never reach a crate that writes an agent, account, or control stream: the runtime, the

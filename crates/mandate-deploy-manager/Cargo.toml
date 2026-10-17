@@ -1,0 +1,23 @@
+[package]
+name = "mandate-deploy-manager"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The deployment manager: keeps each deployed agent's processes running through an orchestrator port, journals every start, stop and crash loop first, and never gates the kill switch (E21-33, DEC-1170)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-journal.workspace = true
+mandate-process.workspace = true
+mandate-time.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "time"] }
