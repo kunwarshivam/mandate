@@ -456,13 +456,13 @@ pub(crate) enum Door {
 pub(crate) fn door(
     holding: bool,
     held: bool,
-    submitted: bool,
+    opened: bool,
     purpose: mandate_executor::Purpose,
 ) -> Door {
     if !(holding && purpose.adds_risk()) {
         return Door::Pass;
     }
-    if held || submitted {
+    if held || opened {
         return Door::Second;
     }
     Door::Hold
@@ -945,8 +945,8 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
-    /// E1b's watch over the run's one risk-adding submission (DEC-858 items 3 to 5). Each wake pauses, moves
-    /// the event time to the clock, and reads the entry back ([`entry_read`]: by its client order
+    /// E1b's watch over the run's one risk-adding submission (DEC-858 items 3 to 5). Each wake
+    /// pauses, moves the event time to the clock, and reads the entry back ([`entry_read`]: by its client order
     /// id, or by the profile's listing where it cannot query by it, DEC-1150 item 3), then ticks the
     /// executor; the first wake at or past the bound hands the executor `CancelOpenings` in place
     /// of the read. Every wake asks the run's LT-10 question ([`watch_may_end`], DEC-912 item 3),
