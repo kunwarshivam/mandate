@@ -893,6 +893,11 @@ fn rule_173_a_run_starts_once_and_an_approval_or_question_starts_one_run() {
             None,
         ),
         (
+            "after_a_single_call_under_the_same_id",
+            |s| s.insert(0, vec![single_call()]),
+            None,
+        ),
+        (
             "first.run_before_cause",
             |s| {
                 explain_first(s, ITEM);
@@ -2107,4 +2112,46 @@ fn the_catalogue_closes_the_run_records_on_the_agent_stream_and_their_rules_read
             "{event_type} is read for the stream rules"
         );
     }
+}
+
+/// A `single_call` research record carrying the run's id as its correlation: no `RunStarted`
+/// precedes it, so it starts no run (rule 173 counts only `RunStarted`s, rule 183 reaches only a run
+/// that started).
+fn single_call() -> Value {
+    let mut call = turn();
+    set(
+        &mut call,
+        "event_id",
+        Some(Value::Str("01J9GZ01A000000000000000M9".into())),
+    );
+    set(
+        &mut call,
+        "payload.call_id",
+        Some(Value::Str("01J9GZ01A000000000000000C9".into())),
+    );
+    call
+}
+
+/// Rule 183 reaches a research record only when an earlier `RunStarted` names its run: an earlier
+/// `RunEnded` alone, which no stream that passed rule 174 holds, does not make the record a late
+/// turn. Judged straight through `check_stream`, since `append` never stores such an end.
+#[test]
+fn rule_183_reaches_only_a_run_that_started() {
+    let parse = |body: &Value| Draft::parse(&to_canonical(body)).unwrap();
+    let earlier = vec![parse(&ended())];
+    let late = parse(&single_call());
+    assert_eq!(
+        check_stream(&earlier, std::slice::from_ref(&late)).err(),
+        None
+    );
+    let mut started = vec![parse(&started())];
+    started.extend(earlier);
+    let refused = check_stream(&started, std::slice::from_ref(&late))
+        .err()
+        .map(|(i, e)| (i, e.reason.code().to_owned(), e.path));
+    assert_eq!(
+        refused,
+        Some((0, "schema".to_owned(), "correlation_id".to_owned())),
+        "after its run's start and a `done` end, a turn record with verdicts is refused"
+    );
 }
