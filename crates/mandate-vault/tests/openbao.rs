@@ -28,7 +28,7 @@ use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource, RoleCredentials, provision};
 use mandate_vault::policy::{Identity, Mounts};
-use mandate_vault::source::{Grant, SecretSource};
+use mandate_vault::source::Grant;
 use secrecy::SecretString;
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
@@ -184,6 +184,7 @@ conformance!(
     an_outage_stops_no_executor_before_its_lease_expires,
     a_revoked_connection_ends_its_lease_at_the_next_renewal,
     no_debug_or_refusal_shows_a_secret,
+    after_revoke_the_session_takes_no_lease,
 );
 
 #[tokio::test(flavor = "current_thread")]
@@ -273,11 +274,10 @@ async fn a_wrong_secret_id_or_role_is_refused() {
         &runtime.secret_id,
         now,
     )
-    .await
-    .unwrap();
+    .await;
     assert_eq!(
-        claimed.lease(&c("c1"), now).await.map(drop),
+        claimed.map(drop),
         Err(SourceError::Denied),
-        "claiming an identity grants nothing: the server's policy for the role decides"
+        "a login whose role is not the claimed identity's"
     );
 }

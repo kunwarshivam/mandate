@@ -43,8 +43,18 @@ impl fmt::Debug for Lease {
 /// The instants a lease taken at `now` renews at and expires at, each capped by `cap` (the
 /// backend's own expiry, such as an OpenBao token's), or `None` when they are out of range.
 pub fn lease_times(now: UtcNanos, cap: Option<UtcNanos>) -> Option<(UtcNanos, UtcNanos)> {
-    let _ = (now, cap);
-    None
+    let after = |secs: i64| {
+        now.secs()
+            .checked_add(secs)
+            .and_then(|s| UtcNanos::from_parts(s, now.nanos()).ok())
+    };
+    let mut expires_at = after(LEASE_SECS)?;
+    let mut renew_at = after(RENEW_SECS)?;
+    if let Some(cap) = cap {
+        expires_at = expires_at.min(cap);
+        renew_at = renew_at.min(cap);
+    }
+    Some((renew_at, expires_at))
 }
 
 /// Holds an executor's lease and applies the renewal rule.
@@ -60,19 +70,40 @@ impl LeaseKeeper {
 
     /// Whether a renewal is due at `now`: a lease is held and `now` is at or past its `renew_at`.
     pub fn renewal_due(&self, now: UtcNanos) -> bool {
-        let _ = now;
-        false
+        self.lease
+            .as_ref()
+            .is_some_and(|lease| now >= lease.renew_at && now < lease.expires_at)
     }
 
-    /// Applies a renewal's outcome, as the module's rule says.
+    /// Applies a renewal's outcome, as the module's rule says. A lease already expired at `now`
+    /// stays dropped: only a new lease, not a renewal, brings a credential back.
     pub fn apply(&mut self, outcome: Result<Lease, SourceError>, now: UtcNanos) {
-        let _ = (outcome, now);
+        self.expire(now);
+        let Some(held) = self.lease.as_ref() else {
+            return;
+        };
+        match outcome {
+            Ok(renewed) if renewed.connection == held.connection => self.lease = Some(renewed),
+            Err(error) if error.is_outage() => {}
+            Ok(_) | Err(_) => self.lease = None,
+        }
     }
 
     /// The token while the lease holds at `now`; the lease is dropped at its expiry.
     pub fn secret(&mut self, now: UtcNanos) -> Option<&SecretSlice<u8>> {
-        let _ = now;
-        None
+        self.expire(now);
+        self.lease.as_ref().map(|lease| &lease.secret)
+    }
+
+    /// Drops the lease once `now` reaches its expiry.
+    fn expire(&mut self, now: UtcNanos) {
+        if self
+            .lease
+            .as_ref()
+            .is_some_and(|lease| now >= lease.expires_at)
+        {
+            self.lease = None;
+        }
     }
 
     /// The held lease, if any, without checking its expiry.

@@ -12,61 +12,95 @@
 //! `owlhead_exec` (DEC-692 item 6 enforces the grant in code there).
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mandate_connections::record::{ConnectionId, Environment};
 use mandate_time::UtcNanos;
-use mandate_vault_local::store::Opened;
-use secrecy::SecretSlice;
+use mandate_vault_local::VaultError;
+use mandate_vault_local::entry::{ALPACA_CLIENT_SECRET_KEY_REF, Entry, KeyRef};
+use mandate_vault_local::store::{ApiVault, ExecutorVault, Opened};
+use ring::rand::{SecureRandom, SystemRandom};
+use secrecy::{ExposeSecret, SecretSlice, SecretString};
 
 use crate::SourceError;
-use crate::lease::Lease;
-use crate::policy::{Identity, SecretPath};
-use crate::source::{Grant, SecretSource};
+use crate::lease::{Lease, lease_times};
+use crate::policy::{Access, Identity, SecretPath, require};
+use crate::source::{GRANT_SECS, Grant, SecretSource};
 
-const STORY: &str = "E21-32";
+/// The role name every local grant carries: the local backend has no roles.
+const LOCAL_ROLE: &str = "local";
 
-/// A grant the book issued: its connection, its expiry, and whether it was used.
-#[derive(Debug, Clone)]
+/// A grant the book issued: its connection, its expiry, its secret, and whether it was used.
 struct IssuedGrant {
     connection: ConnectionId,
     expires_at: UtcNanos,
+    secret_id: SecretString,
     used: bool,
 }
 
 /// The grants one process issued, by accessor.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct GrantBook {
-    issued: Mutex<BTreeMap<String, (IssuedGrant, [u8; 32])>>,
+    issued: Mutex<BTreeMap<String, IssuedGrant>>,
+}
+
+impl std::fmt::Debug for GrantBook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GrantBook(redacted)")
+    }
+}
+
+/// The vault a session holds, in the role its identity runs as.
+#[derive(Debug)]
+enum Held {
+    Api(ApiVault),
+    Executor(ExecutorVault),
+    Nothing,
 }
 
 /// One process's session with the local vault.
 #[derive(Debug)]
 pub struct LocalSource {
     identity: Identity,
-    vault: Option<Opened>,
+    held: Held,
     environment: Environment,
     grants: Arc<GrantBook>,
+    revoked: AtomicBool,
 }
 
 impl LocalSource {
     /// A session as `identity` over `vault`, which must be in the role the identity runs as:
     /// the API's for [`Identity::Api`] and [`Identity::ConnectionManager`], the executor's for
-    /// the token exchange, an executor, and the secret import, and none for a runtime. Any other
-    /// pairing is [`SourceError::Config`]. The token exchange is opened with
-    /// [`LocalSource::with_grant`], never here.
+    /// an executor and the secret import, and none for a runtime. Any other pairing, and the
+    /// token exchange, which is opened with [`LocalSource::with_grant`], is
+    /// [`SourceError::Config`].
     pub fn new(
         identity: Identity,
         vault: Option<Opened>,
         environment: Environment,
         grants: Arc<GrantBook>,
     ) -> Result<Self, SourceError> {
-        let _ = (identity, vault, environment, grants);
-        Err(SourceError::Unimplemented { story: STORY })
+        let held = match (&identity, vault) {
+            (Identity::Api | Identity::ConnectionManager, Some(Opened::Api(v))) => Held::Api(v),
+            (Identity::Executor(_) | Identity::SecretImport, Some(Opened::Executor(v))) => {
+                Held::Executor(v)
+            }
+            (Identity::Runtime, None) => Held::Nothing,
+            _ => return Err(SourceError::Config),
+        };
+        Ok(Self {
+            identity,
+            held,
+            environment,
+            grants,
+            revoked: AtomicBool::new(false),
+        })
     }
 
     /// The token exchange's session, through a grant this process's book issued: unused, not
-    /// expired at `now`, for its connection. The grant is spent by this call.
+    /// expired at `now`, for its connection, with its secret id. The grant is spent by this
+    /// call; a refused one is not.
     pub fn with_grant(
         grant: &Grant,
         vault: Opened,
@@ -74,8 +108,71 @@ impl LocalSource {
         grants: Arc<GrantBook>,
         now: UtcNanos,
     ) -> Result<Self, SourceError> {
-        let _ = (grant, vault, environment, grants, now);
-        Err(SourceError::Unimplemented { story: STORY })
+        let Opened::Executor(vault) = vault else {
+            return Err(SourceError::Config);
+        };
+        {
+            let mut book = grants.issued.lock().map_err(|_| SourceError::Unavailable)?;
+            let issued = book
+                .get_mut(&grant.accessor)
+                .ok_or(SourceError::GrantInvalid)?;
+            let valid = !issued.used
+                && now < issued.expires_at
+                && issued.connection == grant.connection
+                && issued.secret_id.expose_secret() == grant.secret_id.expose_secret();
+            if !valid {
+                return Err(SourceError::GrantInvalid);
+            }
+            issued.used = true;
+        }
+        Ok(Self {
+            identity: Identity::TokenExchange(grant.connection.clone()),
+            held: Held::Executor(vault),
+            environment,
+            grants,
+            revoked: AtomicBool::new(false),
+        })
+    }
+
+    /// The local entry for `path`.
+    fn entry(&self, path: &SecretPath) -> Result<Entry, SourceError> {
+        let key_ref = |c: &ConnectionId| {
+            KeyRef::new(&format!("connections/{}", c.as_str())).map_err(|_| SourceError::Config)
+        };
+        Ok(match path {
+            SecretPath::Code(c) => Entry::code(key_ref(c)?, c.clone(), self.environment),
+            SecretPath::Token(c) => Entry::token(key_ref(c)?, c.clone(), self.environment),
+            SecretPath::ClientSecret => Entry::client_secret(
+                KeyRef::new(ALPACA_CLIENT_SECRET_KEY_REF).map_err(|_| SourceError::Config)?,
+            ),
+        })
+    }
+
+    fn executor(&self) -> Result<&ExecutorVault, SourceError> {
+        match &self.held {
+            Held::Executor(v) => Ok(v),
+            Held::Api(_) | Held::Nothing => Err(SourceError::Denied),
+        }
+    }
+
+    /// Reads `path` after the policy check, through the executor's file checks.
+    fn read_entry(&self, path: &SecretPath) -> Result<Option<SecretSlice<u8>>, SourceError> {
+        require(&self.identity, Access::Read, path)?;
+        let entry = self.entry(path)?;
+        self.executor()?.read(&entry).map_err(from_vault)
+    }
+}
+
+/// A local vault refusal as a source refusal: a failure to reach the files is an outage, an
+/// entry that fails its checks is an integrity refusal, and the rest are refusals.
+fn from_vault(error: VaultError) -> SourceError {
+    match error {
+        VaultError::Io => SourceError::Unavailable,
+        VaultError::FileMismatch { .. }
+        | VaultError::EntryMalformed
+        | VaultError::EntryRejected => SourceError::Integrity,
+        VaultError::WrongRole { .. } => SourceError::Denied,
+        _ => SourceError::Malformed,
     }
 }
 
@@ -85,33 +182,55 @@ impl SecretSource for LocalSource {
     }
 
     async fn put(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {
-        let _ = (path, secret, &self.vault, &self.environment, &self.grants);
-        Err(SourceError::Unimplemented { story: STORY })
+        require(&self.identity, Access::Write, path)?;
+        let entry = self.entry(path)?;
+        match &self.held {
+            Held::Api(v) => v.put_code(&entry, secret),
+            Held::Executor(v) => v.put(&entry, secret),
+            Held::Nothing => return Err(SourceError::Denied),
+        }
+        .map_err(from_vault)
     }
 
     async fn read(&self, path: &SecretPath) -> Result<Option<SecretSlice<u8>>, SourceError> {
-        let _ = path;
-        Err(SourceError::Unimplemented { story: STORY })
+        self.read_entry(path)
     }
 
     async fn delete(&self, path: &SecretPath) -> Result<(), SourceError> {
-        let _ = path;
-        Err(SourceError::Unimplemented { story: STORY })
+        require(&self.identity, Access::Delete, path)?;
+        let entry = self.entry(path)?;
+        match &self.held {
+            Held::Api(v) => v.delete(&entry),
+            Held::Executor(v) => v.delete(&entry),
+            Held::Nothing => return Err(SourceError::Denied),
+        }
+        .map_err(from_vault)
     }
 
     async fn lease(&self, connection: &ConnectionId, now: UtcNanos) -> Result<Lease, SourceError> {
-        let _ = (connection, now);
-        Err(SourceError::Unimplemented { story: STORY })
+        if self.revoked.load(Ordering::SeqCst) {
+            return Err(SourceError::Denied);
+        }
+        let secret = self
+            .read_entry(&SecretPath::Token(connection.clone()))?
+            .ok_or(SourceError::Missing)?;
+        let (renew_at, expires_at) = lease_times(now, None).ok_or(SourceError::Config)?;
+        Ok(Lease {
+            connection: connection.clone(),
+            secret,
+            expires_at,
+            renew_at,
+        })
     }
 
     async fn renew(&self, lease: &Lease, now: UtcNanos) -> Result<Lease, SourceError> {
-        let _ = (lease, now);
-        Err(SourceError::Unimplemented { story: STORY })
+        self.lease(&lease.connection, now).await
     }
 
     async fn revoke(&self, lease: Lease) -> Result<(), SourceError> {
-        let _ = lease;
-        Err(SourceError::Unimplemented { story: STORY })
+        drop(lease);
+        self.revoked.store(true, Ordering::SeqCst);
+        Ok(())
     }
 
     async fn issue_grant(
@@ -119,12 +238,60 @@ impl SecretSource for LocalSource {
         connection: &ConnectionId,
         now: UtcNanos,
     ) -> Result<Grant, SourceError> {
-        let _ = (connection, now, IssuedGrant::clone);
-        Err(SourceError::Unimplemented { story: STORY })
+        if self.identity != Identity::ConnectionManager {
+            return Err(SourceError::Denied);
+        }
+        let expires_at = now
+            .secs()
+            .checked_add(GRANT_SECS)
+            .and_then(|s| UtcNanos::from_parts(s, now.nanos()).ok())
+            .ok_or(SourceError::Config)?;
+        let random = SystemRandom::new();
+        let mut accessor = [0_u8; 16];
+        let mut secret = [0_u8; 32];
+        random
+            .fill(&mut accessor)
+            .and_then(|()| random.fill(&mut secret))
+            .map_err(|_| SourceError::Unavailable)?;
+        let accessor = hex(&accessor);
+        let secret_id = SecretString::from(hex(&secret));
+        let mut book = self
+            .grants
+            .issued
+            .lock()
+            .map_err(|_| SourceError::Unavailable)?;
+        book.insert(
+            accessor.clone(),
+            IssuedGrant {
+                connection: connection.clone(),
+                expires_at,
+                secret_id: secret_id.clone(),
+                used: false,
+            },
+        );
+        Ok(Grant {
+            connection: connection.clone(),
+            role_id: LOCAL_ROLE.to_owned(),
+            secret_id,
+            accessor,
+            expires_at,
+        })
     }
 
     async fn revoke_grant(&self, grant: &Grant) -> Result<(), SourceError> {
-        let _ = grant;
-        Err(SourceError::Unimplemented { story: STORY })
+        if self.identity != Identity::ConnectionManager {
+            return Err(SourceError::Denied);
+        }
+        self.grants
+            .issued
+            .lock()
+            .map_err(|_| SourceError::Unavailable)?
+            .remove(&grant.accessor);
+        Ok(())
     }
+}
+
+/// Lowercase hex of `bytes`.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

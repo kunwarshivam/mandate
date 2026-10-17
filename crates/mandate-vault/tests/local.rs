@@ -163,6 +163,7 @@ conformance!(
     an_outage_stops_no_executor_before_its_lease_expires,
     a_revoked_connection_ends_its_lease_at_the_next_renewal,
     no_debug_or_refusal_shows_a_secret,
+    after_revoke_the_session_takes_no_lease,
 );
 
 #[tokio::test(flavor = "current_thread")]

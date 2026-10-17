@@ -20,8 +20,8 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | mutants | schema-mutants; or one part of test: test-nextest |
-                        test-doc | test-rh-sim | test-python
+                        postgres | openbao | mutants | schema-mutants; or one part of test:
+                        test-nextest | test-doc | test-rh-sim | test-python
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
   ci mutants --plan     print the mutation matrix this diff needs, as GITHUB_OUTPUT lines
@@ -50,14 +50,15 @@ const FAST_JOB: [&str; 5] = ["lint", "test", "pending", "spec-guard", "portable"
 /// its doctests, the `rh-sim` rehearsal build's tests (DEC-922), and the Python tests. CI runs
 /// them in separate jobs (DEC-871).
 const TEST_PARTS: [&str; 4] = ["test-nextest", "test-doc", "test-rh-sim", "test-python"];
-const FULL_JOB: [&str; 5] = [
+const FULL_JOB: [&str; 6] = [
     "refcases",
     "reference",
     "schemas",
     "supply-chain",
     "postgres",
+    "openbao",
 ];
-const PR_JOBS: [&str; 12] = [
+const PR_JOBS: [&str; 13] = [
     "lint",
     "test",
     "pending",
@@ -68,6 +69,7 @@ const PR_JOBS: [&str; 12] = [
     "supply-chain",
     "spec-guard",
     "postgres",
+    "openbao",
     "mutants",
     "schema-mutants",
 ];
@@ -81,6 +83,11 @@ const SCHEMA_DIR: &str = "schemas/workspace-api";
 /// rather than a skip (DEC-109). CI's `full` and nightly jobs set both.
 const PG_URL: &str = "MANDATE_PG_URL";
 const PG_REQUIRED: &str = "MANDATE_PG_REQUIRED";
+/// The OpenBao dev server `mandate-vault`'s conformance suite runs against (E21-32, DEC-977), and
+/// the switch that makes its absence a failure rather than a skip. CI's `full` job starts the
+/// server with `.github/scripts/start-openbao.sh` and sets both.
+const OPENBAO_ADDR: &str = "MANDATE_OPENBAO_ADDR";
+const OPENBAO_REQUIRED: &str = "MANDATE_OPENBAO_REQUIRED";
 const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
 /// The `K/N` shard CI's `schema-mutants` matrix passes to `cargo xtask ci schema-mutants`, through
 /// the environment because the live-feature check refuses cargo words the shell expands (DEC-688).
@@ -262,6 +269,7 @@ fn ci(job: &str) -> Result<()> {
             spec_guard()
         }
         "postgres" => postgres(),
+        "openbao" => openbao(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "fast" => {
             for part in FAST_JOB {
@@ -475,6 +483,39 @@ fn postgres() -> Result<()> {
         .context("starting `cargo nextest`")?;
     if !status.success() {
         bail!("the Postgres journal tests failed with {status}");
+    }
+    Ok(())
+}
+
+/// `mandate-vault`'s conformance suite against a real OpenBao dev server (E21-32, DEC-977). `test`
+/// runs it too, but it skips there unless `MANDATE_OPENBAO_ADDR` is set; here it must run.
+fn openbao() -> Result<()> {
+    if env::var_os(OPENBAO_ADDR).is_none() {
+        if env::var_os(OPENBAO_REQUIRED).is_some() {
+            bail!("{OPENBAO_REQUIRED} is set but {OPENBAO_ADDR} is not");
+        }
+        eprintln!(
+            "    openbao: {OPENBAO_ADDR} is unset; skipping (see .github/scripts/start-openbao.sh)"
+        );
+        return Ok(());
+    }
+    let args = [
+        "nextest",
+        "run",
+        "--package",
+        "mandate-vault",
+        "--test",
+        "openbao",
+        "--locked",
+    ];
+    eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));
+    let status = Command::new("cargo")
+        .args(args)
+        .env(OPENBAO_REQUIRED, "1")
+        .status()
+        .context("starting `cargo nextest`")?;
+    if !status.success() {
+        bail!("the OpenBao conformance suite failed with {status}");
     }
     Ok(())
 }
@@ -2586,12 +2627,13 @@ const READ_LINES: &[(&str, &str)] = &[
 
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
 /// while its whole text, comments included, holds no cargo word, no `.cargo` and no `CARGO_`
-/// (DEC-873 item 2). `ci.yml` runs the first three and the credential guard (DEC-964), `merge.yml`
-/// the fourth.
+/// (DEC-873 item 2). `ci.yml` runs the first four and the credential guard (DEC-964), `merge.yml`
+/// the fifth.
 const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
     ".github/scripts/start-postgres.sh",
+    ".github/scripts/start-openbao.sh",
     ".github/scripts/merge-approved.sh",
     CREDENTIAL_GUARD,
 ];
@@ -2633,6 +2675,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "LINT_RESULT",
     "MANDATE_MUTANTS_PLANNED",
     "MANDATE_MUTANT_SHARD",
+    "MANDATE_OPENBAO_ADDR",
+    "MANDATE_OPENBAO_CA",
+    "MANDATE_OPENBAO_OPERATOR_TOKEN_FILE",
+    "MANDATE_OPENBAO_REQUIRED",
     "MANDATE_PG_REQUIRED",
     "MANDATE_PG_URL",
     "MANDATE_PR_BODY",

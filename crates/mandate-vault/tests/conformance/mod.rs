@@ -332,3 +332,24 @@ pub async fn no_debug_or_refusal_shows_a_secret<H: Harness>(h: &H) {
         );
     }
 }
+
+/// A revoked lease ends the session's leasing: no lease and no renewal after it.
+pub async fn after_revoke_the_session_takes_no_lease<H: Harness>(h: &H) {
+    let now = at(1_000_000);
+    store_token(h, "c1", "token-1", now).await;
+    let executor = h.source(Identity::Executor(c("c1")), now).await;
+    let lease = executor.lease(&c("c1"), now).await.unwrap();
+    let copy = executor.lease(&c("c1"), now).await.unwrap();
+    executor.revoke(lease).await.unwrap();
+    assert_eq!(
+        executor.lease(&c("c1"), now).await.map(drop),
+        Err(SourceError::Denied)
+    );
+    assert!(
+        executor
+            .renew(&copy, now)
+            .await
+            .is_err_and(|e| !e.is_outage()),
+        "a renewal after revoke is a refusal, which drops the lease"
+    );
+}

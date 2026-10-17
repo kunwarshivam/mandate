@@ -358,6 +358,10 @@ jobs:
     env:
       MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
       MANDATE_PG_REQUIRED: "1"
+      MANDATE_OPENBAO_REQUIRED: "1"
+      MANDATE_OPENBAO_ADDR: https://127.0.0.1:8200
+      MANDATE_OPENBAO_CA: /tmp/openbao/ca.pem
+      MANDATE_OPENBAO_OPERATOR_TOKEN_FILE: /tmp/openbao/token
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -373,6 +377,10 @@ jobs:
       - name: Start PostgreSQL 18 (digest-pinned)
         if: steps.change.outputs.docs_only != 'true'
         run: .github/scripts/start-postgres.sh
+      # mandate-vault's conformance suite against OpenBao in dev mode, fake secrets only (DEC-977).
+      - name: Start OpenBao 2.7.1 (digest-pinned, dev mode)
+        if: steps.change.outputs.docs_only != 'true'
+        run: .github/scripts/start-openbao.sh
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: steps.change.outputs.docs_only != 'true'
         with:
@@ -468,6 +476,10 @@ jobs:
       MANDATE_MUTANTS_PLANNED: ${{ needs.mutants-plan.outputs.mutants }}
       MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
       MANDATE_PG_REQUIRED: "1"
+      MANDATE_OPENBAO_REQUIRED: "1"
+      MANDATE_OPENBAO_ADDR: https://127.0.0.1:8200
+      MANDATE_OPENBAO_CA: /tmp/openbao/ca.pem
+      MANDATE_OPENBAO_OPERATOR_TOKEN_FILE: /tmp/openbao/token
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_PROFILE_DEV_OPT_LEVEL: "1"
@@ -479,6 +491,8 @@ jobs:
           persist-credentials: false
       - name: Start PostgreSQL 18 (digest-pinned)
         run: .github/scripts/start-postgres.sh
+      - name: Start OpenBao 2.7.1 (digest-pinned, dev mode)
+        run: .github/scripts/start-openbao.sh
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: cargo-nextest@0.9.146

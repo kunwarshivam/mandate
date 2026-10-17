@@ -55,8 +55,20 @@ pub enum Access {
 
 /// Whether `identity` may `access` `path`: the table above.
 pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
-    let _ = (identity, access, path);
-    false
+    match (identity, access, path) {
+        (Identity::Api, Access::Write, SecretPath::Code(_))
+        | (
+            Identity::Api | Identity::ConnectionManager,
+            Access::Delete,
+            SecretPath::Code(_) | SecretPath::Token(_),
+        )
+        | (Identity::TokenExchange(_), Access::Read, SecretPath::ClientSecret)
+        | (Identity::SecretImport, Access::Write, SecretPath::ClientSecret) => true,
+        (Identity::TokenExchange(own), Access::Read | Access::Delete, SecretPath::Code(c))
+        | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
+        | (Identity::Executor(own), Access::Read, SecretPath::Token(c)) => own == c,
+        _ => false,
+    }
 }
 
 /// Where in OpenBao the cell's secrets and roles live: the KV v2 mount and the AppRole auth
@@ -79,31 +91,78 @@ impl Default for Mounts {
 
 /// The name of `identity`'s OpenBao policy under `mounts`.
 pub fn policy_name(identity: &Identity, mounts: &Mounts) -> String {
-    let _ = (identity, mounts);
-    String::new()
+    format!("{}-{}", mounts.kv, role_name(identity))
 }
 
 /// The AppRole name of `identity`, one per process type and connection.
 pub fn role_name(identity: &Identity) -> String {
-    let _ = identity;
-    String::new()
+    match identity {
+        Identity::Api => "api".to_owned(),
+        Identity::ConnectionManager => "connection-manager".to_owned(),
+        Identity::TokenExchange(c) => format!("exchange-{}", c.as_str()),
+        Identity::Executor(c) => format!("executor-{}", c.as_str()),
+        Identity::Runtime => "runtime".to_owned(),
+        Identity::SecretImport => "secret-import".to_owned(),
+    }
 }
 
 /// The path of `path` under the mount, without the mount and the `data/` or `metadata/` prefix.
 pub fn kv_path(path: &SecretPath) -> String {
-    let _ = path;
-    String::new()
+    match path {
+        SecretPath::Code(c) => format!("connections/{}/code", c.as_str()),
+        SecretPath::Token(c) => format!("connections/{}/token", c.as_str()),
+        SecretPath::ClientSecret => "platform/alpaca-oauth-client-secret".to_owned(),
+    }
 }
 
 /// The OpenBao policy of `identity`, given every connection the cell holds, in HCL. Each path is
-/// written out for each connection; none holds `*` or `+`. A runtime's policy grants nothing.
+/// written out for each connection; none holds `*` or `+`. A runtime's policy grants nothing: it
+/// is a comment alone, since OpenBao refuses an empty policy.
 pub fn openbao_policy(
     identity: &Identity,
     connections: &[ConnectionId],
     mounts: &Mounts,
 ) -> String {
-    let _ = (identity, connections, mounts);
-    String::new()
+    let mut paths: Vec<SecretPath> = vec![SecretPath::ClientSecret];
+    for connection in connections {
+        paths.push(SecretPath::Code(connection.clone()));
+        paths.push(SecretPath::Token(connection.clone()));
+    }
+    let mut hcl = String::new();
+    for path in &paths {
+        for (access, prefix, capabilities) in [
+            (Access::Read, "data", "\"read\""),
+            (Access::Write, "data", "\"create\", \"update\""),
+            (Access::Delete, "metadata", "\"delete\""),
+        ] {
+            if allows(identity, access, path) {
+                hcl.push_str(&format!(
+                    "path \"{}/{prefix}/{}\" {{\n  capabilities = [{capabilities}]\n}}\n",
+                    mounts.kv,
+                    kv_path(path)
+                ));
+            }
+        }
+    }
+    if *identity == Identity::ConnectionManager {
+        for connection in connections {
+            let role = format!("auth/{}/role/exchange-{}", mounts.auth, connection.as_str());
+            for (suffix, capability) in [
+                ("secret-id", "update"),
+                ("secret-id-accessor/lookup", "update"),
+                ("secret-id-accessor/destroy", "update"),
+                ("role-id", "read"),
+            ] {
+                hcl.push_str(&format!(
+                    "path \"{role}/{suffix}\" {{\n  capabilities = [\"{capability}\"]\n}}\n"
+                ));
+            }
+        }
+    }
+    if hcl.is_empty() {
+        hcl.push_str("# This identity reads, writes, and deletes nothing (infrastructure §5.2).\n");
+    }
+    hcl
 }
 
 /// Refuses as [`SourceError::Denied`] what [`allows`] does not allow.

@@ -195,6 +195,10 @@ fn the_manager_may_issue_and_revoke_only_exchange_grants() {
     for (path, caps) in [
         ("auth/approle/role/exchange-c1/secret-id", "update"),
         (
+            "auth/approle/role/exchange-c1/secret-id-accessor/lookup",
+            "update",
+        ),
+        (
             "auth/approle/role/exchange-c1/secret-id-accessor/destroy",
             "update",
         ),
@@ -206,7 +210,7 @@ fn the_manager_may_issue_and_revoke_only_exchange_grants() {
         );
     }
     let grant_blocks = got.iter().filter(|(p, _)| p.starts_with("auth/")).count();
-    assert_eq!(grant_blocks, 3, "{hcl}");
+    assert_eq!(grant_blocks, 4, "{hcl}");
     for identity in identities() {
         if identity != Identity::ConnectionManager {
             let hcl = openbao_policy(&identity, &[c("c1")], &Mounts::default());
