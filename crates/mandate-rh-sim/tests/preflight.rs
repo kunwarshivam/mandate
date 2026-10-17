@@ -486,6 +486,8 @@ fn a_preflight_of_an_instrument_with_no_ticker_reads_nothing() {
 /// DEC-956 item 1: a position or a working order in a ticker the run did not register reads as
 /// the broker spelled it, so it is never taken for the instrument the run trades; the registered
 /// one reads as its asset id.
+/// The QQQ share fills at 200, below its limit, so the two buys cost less than the account's
+/// cash and the snapshot's `cash` stays readable (DEC-1151 item 7).
 #[test]
 fn an_unregistered_ticker_in_the_snapshot_stays_as_the_broker_spelled_it() {
     let mut core = read_sim().unwrap();

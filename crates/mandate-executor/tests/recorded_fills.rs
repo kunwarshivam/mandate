@@ -14,7 +14,8 @@ mod common;
 
 use common::{
     AGENT, FixedInstruments, FixedMandate, Shell, TestIds, broker_fill, broker_order, config, date,
-    handoff, instrument, opening, ports, price, qty, signed_qty, snapshot, stream_opened,
+    handoff, instrument, key as member, opening, ports, price, qty, risk_exit, signed_qty,
+    snapshot, stream_opened, text,
 };
 use mandate_accounting::Side;
 use mandate_canon::Value;
@@ -30,6 +31,7 @@ const AAPL: &str = FixedInstruments::LIQUID_EQUITY;
 const CPHC: &str = FixedInstruments::THIN_EQUITY;
 const INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ0";
 const SECOND: &str = "01JABCDEFGHJKMNPQRSTVWXYZ1";
+const THIRD: &str = "01JABCDEFGHJKMNPQRSTVWXYZ2";
 const BROKER_ID: &str = "rh-sim-000001";
 /// Tuesday 2026-10-20 at 11:00 in New York, the rehearsal's session.
 const TUESDAY: &str = "2026-10-20T15:00:00Z";
@@ -364,6 +366,212 @@ fn a_ledger_that_is_not_flat_or_a_second_fill_derives_nothing() {
     assert!(
         recorded_fills(&two.state, &[held(AAPL, "2")]).is_empty(),
         "two orders with fills in the instrument"
+    );
+}
+
+/// The account stream of `shell` folded afresh, each record's payload passed through `edit` with
+/// its event type first: the same journal with one member changed, so one guard of
+/// [`recorded_fills`] is the only reason it derives nothing.
+fn replayed(shell: &Shell, edit: impl Fn(&str, &mut Value)) -> Shell {
+    let mut replay = Shell::new(1);
+    for event in &shell.account_journal {
+        let mut event = event.clone();
+        edit(&event.event_type, &mut event.payload);
+        replay.fold_one(&event).expect("the edited journal folds");
+    }
+    replay
+}
+
+/// Sets `name` to `value` in a payload that is an object.
+fn set(payload: &mut Value, name: &str, value: Value) {
+    let Value::Object(members) = payload else {
+        panic!("a payload is an object");
+    };
+    members.insert(member(name), value);
+}
+
+/// The control for every single-fault case below: the R19 journal, replayed unedited, derives the
+/// one fill, so each edit alone is what refuses it.
+#[test]
+fn each_guard_alone_refuses_the_fill() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (shell, id) = adopted_filled(&ports, "1");
+    let positions = vec![held(AAPL, "1")];
+    let control = replayed(&shell, |_, _| {});
+    assert_eq!(
+        recorded_fills(&control.state, &positions),
+        vec![expected(&shell, &id, "1")],
+        "the unedited journal derives the fill"
+    );
+    let cases: [(&str, &str, &str, Value, &str); 4] = [
+        ("OrderSubmitted", "tif", "a GTC entry", text("gtc"), "1"),
+        (
+            "OrderRequestRecorded",
+            "extended_hours",
+            "an entry sent for extended hours",
+            Value::Bool(true),
+            "1",
+        ),
+        (
+            "OrderRequestRecorded",
+            "purpose",
+            "a buy that adds no risk",
+            text("risk_exit"),
+            "1",
+        ),
+        (
+            "OrderStateChanged",
+            "filled_qty",
+            "a record reporting more than the order's quantity, the position agreeing with it",
+            text("2"),
+            "2",
+        ),
+    ];
+    for (event_type, name, why, value, position) in cases {
+        let edited = replayed(&shell, |kind, payload| {
+            if kind == event_type {
+                set(payload, name, value.clone());
+            }
+        });
+        assert!(
+            recorded_fills(&edited.state, &[held(AAPL, position)]).is_empty(),
+            "{why}: nothing is derived"
+        );
+    }
+}
+
+/// The position's average is read against the order's limit: at the limit the fill is derived,
+/// a cent above it nothing is, since no fill of a buy limit order can be above its limit.
+#[test]
+fn an_average_above_the_orders_limit_derives_nothing() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (shell, _) = adopted_filled(&ports, "1");
+    let at = |average: &str| BrokerPosition {
+        avg_entry_price: price(average),
+        ..held(AAPL, "1")
+    };
+    let derived = recorded_fills(&shell.state, &[at("150")]);
+    assert_eq!(
+        derived.iter().map(|fill| fill.price).collect::<Vec<_>>(),
+        [price("150")],
+        "at the limit"
+    );
+    assert!(
+        recorded_fills(&shell.state, &[at("150.01")]).is_empty(),
+        "above the limit"
+    );
+}
+
+/// A round trip booked earlier leaves the ledger's position at zero, not absent, and both its
+/// orders booked all they reported: the next entry is still derived, so a flat ledger is read by
+/// its quantity, never by whether the instrument was ever held.
+#[test]
+fn a_ledger_flat_after_a_round_trip_still_derives_the_next_entry() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let first = accepted(&mut shell, &ports, SECOND, AAPL, "1", "b-0");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-0",
+            Some(&first),
+            "1",
+            "150",
+        ))),
+        &ports,
+    );
+    let ran = shell.run(handoff(THIRD, AGENT, risk_exit(AAPL, "1", "150")), &ports);
+    let exit = ran
+        .submissions()
+        .first()
+        .map(|order| order.client_order_id.as_str().to_owned())
+        .expect("the exit is sent");
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::Submitted(broker_order(
+            "b-1",
+            Some(&exit),
+            AAPL,
+            Side::Sell,
+            "1",
+            "0",
+            "accepted",
+        )))),
+        &ports,
+    );
+    let mut sold = broker_fill("f-1", Some(&exit), "1", "150");
+    sold.side = Side::Sell;
+    shell.run(Input::BrokerUpdate(BrokerUpdate::Fill(sold)), &ports);
+    assert_eq!(
+        shell.state.positions().get(&instrument(AAPL)).copied(),
+        Some(signed_qty("0")),
+        "the round trip is booked, its position zero"
+    );
+    let id = accepted(&mut shell, &ports, INTENT, AAPL, "1", BROKER_ID);
+    described(&mut shell, &ports, &id, AAPL, "1", "1", "filled");
+    let derived = recorded_fills(&shell.state, &[held(AAPL, "1")]);
+    assert_eq!(
+        derived
+            .iter()
+            .map(|fill| fill.fill_id.clone())
+            .collect::<Vec<_>>(),
+        [FillId(format!("record:{id}:1"))]
+    );
+}
+
+/// The reviewer's case for the flat guard alone: the ledger holds a booked share, a second entry
+/// reports one filled, and the broker holds one (the owner sold the first). Position and record
+/// agree, yet the ledger is not flat, so the average may blend two buys and nothing is derived.
+/// An unbooked fill in another instrument blocks nothing.
+#[test]
+fn the_flat_ledger_and_the_instrument_are_each_read_alone() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, CPHC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+
+    let mut holding = fresh(&ports);
+    let first = accepted(&mut holding, &ports, SECOND, AAPL, "1", "b-0");
+    holding.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-0",
+            Some(&first),
+            "1",
+            "150",
+        ))),
+        &ports,
+    );
+    let id = accepted(&mut holding, &ports, INTENT, AAPL, "1", BROKER_ID);
+    described(&mut holding, &ports, &id, AAPL, "1", "1", "filled");
+    assert!(
+        recorded_fills(&holding.state, &[held(AAPL, "1")]).is_empty(),
+        "a ledger holding the instrument"
+    );
+
+    let mut elsewhere = fresh(&ports);
+    let other = accepted(&mut elsewhere, &ports, SECOND, CPHC, "1", "b-2");
+    described(&mut elsewhere, &ports, &other, CPHC, "1", "1", "filled");
+    let id = accepted(&mut elsewhere, &ports, INTENT, AAPL, "1", BROKER_ID);
+    described(&mut elsewhere, &ports, &id, AAPL, "1", "1", "filled");
+    let derived = recorded_fills(&elsewhere.state, &[held(AAPL, "1")]);
+    assert_eq!(
+        derived
+            .iter()
+            .map(|fill| fill.instrument.clone())
+            .collect::<Vec<_>>(),
+        [instrument(AAPL)],
+        "the other instrument's unbooked fill, with no position given for it, blocks nothing"
     );
 }
 
