@@ -44,6 +44,7 @@
 /crates/mandate-daemon/     @kunwarshivam
 /crates/mandate-dispatcher/ @kunwarshivam
 /crates/mandate-domain/     @kunwarshivam
+/crates/mandate-evaluation/ @kunwarshivam
 /crates/mandate-executor/   @kunwarshivam
 /crates/mandate-gateway/    @kunwarshivam
 /crates/mandate-identity-seal/ @kunwarshivam
@@ -65,6 +66,7 @@
 /crates/mandate-push-relay/ @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam
 /crates/mandate-release/    @kunwarshivam
+/crates/mandate-research-driver/ @kunwarshivam
 /crates/mandate-research-run/ @kunwarshivam
 /crates/mandate-research/   @kunwarshivam
 /crates/mandate-rh-sim/     @kunwarshivam
@@ -81,4 +83,5 @@
 /crates/mandate-tenant/     @kunwarshivam
 /crates/mandate-time/       @kunwarshivam
 /crates/mandate-vault-local/ @kunwarshivam
+/crates/mandate-version-backtest/ @kunwarshivam
 /crates/mandate-webpush/    @kunwarshivam

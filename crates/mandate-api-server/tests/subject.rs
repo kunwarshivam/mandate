@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use common::hex;
-use mandate_api_server::subject::{LinkRefusal, digest, principal, principal_owned};
+use mandate_api_server::subject::{
+    Fixed, LinkRefusal, SubjectLinks, digest, principal_at, principal_owned,
+};
 use mandate_identity::PrincipalId;
 
 const ISSUER: &str = "https://issuer.test/auth/v1";
@@ -76,27 +78,30 @@ fn the_digest_is_sha256_of_the_canonical_issuer_and_subject() {
 #[test]
 fn a_linked_subject_signs_in_as_its_principal() {
     let path = links(&two(), 0o644);
-    assert_eq!(principal(&path, ISSUER, ALICE), Ok(id(ALICE_ID)));
-    assert_eq!(principal(&path, ISSUER, BOB), Ok(id(BOB_ID)));
+    assert_eq!(principal_at(&path, ISSUER, ALICE), Ok(id(ALICE_ID)));
+    assert_eq!(principal_at(&path, ISSUER, BOB), Ok(id(BOB_ID)));
     let path = links(&two(), 0o600);
-    assert_eq!(principal(&path, ISSUER, BOB), Ok(id(BOB_ID)));
+    assert_eq!(principal_at(&path, ISSUER, BOB), Ok(id(BOB_ID)));
     let path = links(&two(), 0o640);
-    assert_eq!(principal(&path, ISSUER, ALICE), Ok(id(ALICE_ID)));
+    assert_eq!(principal_at(&path, ISSUER, ALICE), Ok(id(ALICE_ID)));
 }
 
 #[test]
 fn an_unlinked_subject_or_another_issuers_is_not_linked() {
     let path = links(&two(), 0o644);
     assert_eq!(
-        principal(&path, ISSUER, "someone-else"),
+        principal_at(&path, ISSUER, "someone-else"),
         Err(LinkRefusal::NotLinked)
     );
     assert_eq!(
-        principal(&path, "https://other.test/auth/v1", ALICE),
+        principal_at(&path, "https://other.test/auth/v1", ALICE),
         Err(LinkRefusal::NotLinked)
     );
     let path = links("", 0o644);
-    assert_eq!(principal(&path, ISSUER, ALICE), Err(LinkRefusal::NotLinked));
+    assert_eq!(
+        principal_at(&path, ISSUER, ALICE),
+        Err(LinkRefusal::NotLinked)
+    );
 }
 
 #[test]
@@ -104,10 +109,13 @@ fn a_missing_file_or_a_directory_is_unreadable() {
     let path = links(&two(), 0o644);
     let dir = path.parent().expect("its directory").to_path_buf();
     assert_eq!(
-        principal(&dir.join("absent"), ISSUER, ALICE),
+        principal_at(&dir.join("absent"), ISSUER, ALICE),
         Err(LinkRefusal::Unreadable)
     );
-    assert_eq!(principal(&dir, ISSUER, ALICE), Err(LinkRefusal::Unreadable));
+    assert_eq!(
+        principal_at(&dir, ISSUER, ALICE),
+        Err(LinkRefusal::Unreadable)
+    );
 }
 
 #[test]
@@ -115,7 +123,7 @@ fn a_file_others_can_write_is_refused_whole() {
     for mode in [0o664, 0o646, 0o666, 0o620, 0o602] {
         let path = links(&two(), mode);
         assert_eq!(
-            principal(&path, ISSUER, ALICE),
+            principal_at(&path, ISSUER, ALICE),
             Err(LinkRefusal::Exposed),
             "{mode:o}"
         );
@@ -164,19 +172,22 @@ fn a_malformed_line_refuses_the_whole_file() {
     ] {
         let path = links(&format!("{good}\n{bad}\n"), 0o644);
         assert_eq!(
-            principal(&path, ISSUER, ALICE),
+            principal_at(&path, ISSUER, ALICE),
             Err(LinkRefusal::Malformed),
             "{bad:?}"
         );
     }
     let path = links(&format!("{good}\n\n"), 0o644);
-    assert_eq!(principal(&path, ISSUER, ALICE), Err(LinkRefusal::Malformed));
+    assert_eq!(
+        principal_at(&path, ISSUER, ALICE),
+        Err(LinkRefusal::Malformed)
+    );
 }
 
 #[test]
 fn a_last_line_without_its_newline_is_read() {
     let path = links(&format!("{} {ALICE_ID}", expected(ISSUER, ALICE)), 0o644);
-    assert_eq!(principal(&path, ISSUER, ALICE), Ok(id(ALICE_ID)));
+    assert_eq!(principal_at(&path, ISSUER, ALICE), Ok(id(ALICE_ID)));
 }
 
 #[test]
@@ -185,12 +196,12 @@ fn a_digest_named_twice_refuses_the_whole_file_even_for_one_principal() {
     for second in [ALICE_ID, BOB_ID] {
         let path = links(&format!("{alice} {ALICE_ID}\n{alice} {second}\n"), 0o644);
         assert_eq!(
-            principal(&path, ISSUER, ALICE),
+            principal_at(&path, ISSUER, ALICE),
             Err(LinkRefusal::Duplicate),
             "{second}"
         );
         assert_eq!(
-            principal(&path, ISSUER, BOB),
+            principal_at(&path, ISSUER, BOB),
             Err(LinkRefusal::Duplicate),
             "the refusal holds for every subject"
         );
@@ -200,9 +211,12 @@ fn a_digest_named_twice_refuses_the_whole_file_even_for_one_principal() {
 #[test]
 fn the_file_is_read_again_at_each_call() {
     let path = links(&two(), 0o644);
-    assert_eq!(principal(&path, ISSUER, BOB), Ok(id(BOB_ID)));
+    assert_eq!(principal_at(&path, ISSUER, BOB), Ok(id(BOB_ID)));
     fs::write(&path, format!("{} {ALICE_ID}\n", expected(ISSUER, ALICE))).expect("rewrite");
-    assert_eq!(principal(&path, ISSUER, BOB), Err(LinkRefusal::NotLinked));
+    assert_eq!(
+        principal_at(&path, ISSUER, BOB),
+        Err(LinkRefusal::NotLinked)
+    );
     assert_eq!(mine(&path)[1], 0);
 }
 
@@ -211,18 +225,18 @@ fn the_file_is_read_again_at_each_call() {
 #[test]
 fn a_symlink_at_the_link_path_is_refused() {
     let target = links(&two(), 0o644);
-    assert_eq!(principal(&target, ISSUER, ALICE), Ok(id(ALICE_ID)));
+    assert_eq!(principal_at(&target, ISSUER, ALICE), Ok(id(ALICE_ID)));
     let link = target.with_file_name("linked");
     std::os::unix::fs::symlink(&target, &link).expect("a symlink");
     assert_eq!(
-        principal(&link, ISSUER, ALICE),
+        principal_at(&link, ISSUER, ALICE),
         Err(LinkRefusal::Exposed),
         "a symlink to an acceptable file is still refused"
     );
     let dangling = target.with_file_name("dangling");
     std::os::unix::fs::symlink(target.with_file_name("absent"), &dangling).expect("a symlink");
     assert_eq!(
-        principal(&dangling, ISSUER, ALICE),
+        principal_at(&dangling, ISSUER, ALICE),
         Err(LinkRefusal::Unreadable)
     );
 }
@@ -233,10 +247,10 @@ fn a_hard_link_at_the_path_is_the_file_it_names() {
     let target = links(&two(), 0o644);
     let hard = target.with_file_name("hard");
     fs::hard_link(&target, &hard).expect("a hard link");
-    assert_eq!(principal(&hard, ISSUER, ALICE), Ok(id(ALICE_ID)));
+    assert_eq!(principal_at(&hard, ISSUER, ALICE), Ok(id(ALICE_ID)));
     fs::set_permissions(&target, fs::Permissions::from_mode(0o666)).expect("its mode");
     assert_eq!(
-        principal(&hard, ISSUER, ALICE),
+        principal_at(&hard, ISSUER, ALICE),
         Err(LinkRefusal::Exposed),
         "the file's own mode still refuses it"
     );
@@ -249,4 +263,19 @@ fn the_link_file_is_the_one_fixed_path() {
         mandate_api_server::subject::SUBJECT_LINKS,
         "/etc/mandate/subject-links"
     );
+}
+
+/// DEC-1023: the deployment's links read the file at the fixed path, whatever that file holds on
+/// the machine running the test, absent included.
+#[test]
+fn the_deployment_reads_only_the_fixed_path() {
+    let fixed = std::path::Path::new(mandate_api_server::subject::SUBJECT_LINKS);
+    for (issuer, subject) in [(ISSUER, ALICE), (ISSUER, BOB), ("https://other.test", "x")] {
+        let expected = principal_at(fixed, issuer, subject);
+        assert_eq!(
+            mandate_api_server::subject::principal(issuer, subject),
+            expected
+        );
+        assert_eq!(SubjectLinks::principal(&Fixed, issuer, subject), expected);
+    }
 }

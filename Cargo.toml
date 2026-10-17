@@ -21,6 +21,7 @@ mandate-cp-site = { path = "crates/mandate-cp-site", version = "0.0.0" }
 mandate-daemon = { path = "crates/mandate-daemon", version = "0.0.0" }
 mandate-dispatcher = { path = "crates/mandate-dispatcher", version = "0.0.0" }
 mandate-domain = { path = "crates/mandate-domain", version = "0.0.0" }
+mandate-evaluation = { path = "crates/mandate-evaluation", version = "0.0.0" }
 mandate-executor = { path = "crates/mandate-executor", version = "0.0.0" }
 mandate-gateway = { path = "crates/mandate-gateway", version = "0.0.0" }
 mandate-identity = { path = "crates/mandate-identity", version = "0.0.0" }
@@ -51,6 +52,7 @@ mandate-robinhood = { path = "crates/mandate-robinhood", version = "0.0.0" }
 mandate-release = { path = "crates/mandate-release", version = "0.0.0" }
 mandate-research = { path = "crates/mandate-research", version = "0.0.0" }
 mandate-research-run = { path = "crates/mandate-research-run", version = "0.0.0" }
+mandate-research-driver = { path = "crates/mandate-research-driver", version = "0.0.0" }
 mandate-sim = { path = "crates/mandate-sim", version = "0.0.0" }
 mandate-sources = { path = "crates/mandate-sources", version = "0.0.0" }
 mandate-sources-http = { path = "crates/mandate-sources-http", version = "0.0.0" }

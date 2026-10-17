@@ -107,6 +107,9 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
   it("matches a request to its operation only whole, under this workspace, and with documented query members", () => {
     expect(operationFor("GET", `https://api.owlhead.ai/v1/workspaces/${WS}/agents/agt_1`, WS)?.id).toBe("agent");
     expect(operationFor("GET", `/v1/workspaces/${WS}/approvals?state=pending`, WS)?.id).toBe("approvals");
+    expect(operationFor("GET", `/v1/workspaces/${WS}/backtests/bt_01JBR2C4D6E8F0G2H4J6K8M0N2`, WS)?.id).toBe("backtest");
+    expect(operationFor("GET", `/v1/workspaces/${WS}/backtests`, WS)).toBeNull();
+    expect(operationFor("POST", `/v1/workspaces/${WS}/backtests`, WS)).toBeNull();
     expect(operationFor("POST", `/v1/workspaces/${WS}/agents/agt_1/pause`, WS)?.id).toBe("pause");
     expect(operationFor("POST", `/v1/workspaces/${WS}/kill-switch`, WS)?.id).toBe("kill_switch");
     expect(operationFor("GET", `/v1/workspaces/${WS}/approvals?state=pending&secret=1`, WS)).toBeNull();
