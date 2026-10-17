@@ -67,7 +67,8 @@ These are local-cell results, never staging's (DEC-967 item 5).
 
 Only linux/x86_64 can build the static `mandate` binary the cell runs, since no cross toolchain is
 a dependency kind (DEC-1040). On any other host, `cell up` and `cell demo` pull lane R2's signed
-image instead, named by digest in `MANDATE_CELL_IMAGE` (`<registry>/mandate@sha256:<64 hex>`), and
+image instead, named by digest in `MANDATE_CELL_IMAGE` (the cell checks the digest, not yet the
+signature) (`<registry>/mandate@sha256:<64 hex>`), and
 skip the build. Until R2 (E21-35) publishes linux/arm64 and amd64 images there is nothing to pull,
 and both commands stop and say so. A pinned image is used on linux/x86_64 too.
 
@@ -111,7 +112,7 @@ release in `web/.nvmrc` and npm; the first run does `npm ci`.
 | `boot` | The migration hook succeeded, and every object of the release, each network policy included, is in the cell | The default-deny policy deleted |
 | `journal` | The CLI opens a control stream in the cell's journal, and a Job exports it and verifies it by journal spec §11 | One byte of the segment changed before it is verified |
 | `compose` | The Compose file on the host's docker: Postgres initializes the roles, the migration applies, the CLI opens a control stream, and its export verifies | The first event's hash changed before it is verified |
-| `restart` | A control stream written before the journal's Postgres primary pod is deleted still exports and verifies by journal spec §11 once CloudNativePG has the cluster Ready again | A stream id the restart never held is verified, which must read as lost (`export_stream_empty`) |
+| `restart` | A control stream written before the journal's Postgres primary pod is deleted still exports and verifies by journal spec §11 once CloudNativePG has the cluster Ready again | A stream id the restart never held is verified, which must read as lost (`export_stream_empty`): it proves the drill sees a lost stream, not a loss the restart itself caused |
 | `kill-switch` | Skipped, by name, until P1's runtime and executor images and O4's `mandate agent kill` are on `main` (OPS-4) | None until it runs |
 | `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
 
