@@ -1,0 +1,167 @@
+{
+  "about": "The processes of a workspace deployment (infrastructure design §3.1), the one list the Helm chart and the Compose file are both rendered from (E21-36). A process renders only when values.images names its image, so a lane adds its process by building the image; nothing else changes. `built` says whether the process's image exists yet: the Compose file holds exactly the built processes. Edit this file, then run `cargo xtask cell generate --write`, which writes the Compose file and the journal's roles file from it.",
+  "processes": [
+    {
+      "name": "migrate",
+      "row": "The migration Job (§7.2, OPS-13): forward-only SQL from migrations/ under the migration-owner role, before processes roll, never at start",
+      "kind": "migration",
+      "image": "postgres",
+      "built": true,
+      "db_role": "mandate_migrator",
+      "guaranteed": false,
+      "colocate": false,
+      "egress": ["postgres"],
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "64Mi"},
+        "limits": {"cpu": "200m", "memory": "128Mi"}
+      }
+    },
+    {
+      "name": "control",
+      "row": "Workspace control services, Phase 1: the founder's CLI, run as a one-off Job (§3.1)",
+      "kind": "run",
+      "image": "mandate",
+      "built": true,
+      "db_role": "mandate_control",
+      "guaranteed": false,
+      "colocate": false,
+      "egress": ["postgres", "vault", "identity-provider"],
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "64Mi"},
+        "limits": {"cpu": "200m", "memory": "128Mi"}
+      }
+    },
+    {
+      "name": "journal-verify",
+      "row": "A `mandate journal export` then `mandate journal verify` of each named stream (journal spec §11), as a one-off Job",
+      "kind": "verify",
+      "image": "mandate",
+      "built": true,
+      "db_role": "mandate_verify",
+      "guaranteed": false,
+      "colocate": false,
+      "egress": ["postgres"],
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "64Mi"},
+        "limits": {"cpu": "200m", "memory": "128Mi"}
+      }
+    },
+    {
+      "name": "runtime",
+      "row": "Agent runtime, one per agent deployment: no broker credential and no route to a broker (rule 12)",
+      "kind": "service",
+      "image": "runtime",
+      "built": false,
+      "db_role": "mandate_runtime",
+      "guaranteed": false,
+      "colocate": true,
+      "egress": ["postgres", "model-gateway", "artifact-store"],
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "128Mi"},
+        "limits": {"cpu": "250m", "memory": "256Mi"}
+      }
+    },
+    {
+      "name": "executor",
+      "row": "Account executor, one per broker account: Postgres, the vault, and its one connection's broker hosts only",
+      "kind": "service",
+      "image": "executor",
+      "built": false,
+      "db_role": "mandate_executor",
+      "guaranteed": true,
+      "colocate": true,
+      "egress": ["postgres", "vault", "broker"],
+      "resources": {
+        "limits": {"cpu": "250m", "memory": "256Mi"}
+      }
+    },
+    {
+      "name": "token-exchange",
+      "row": "Token-exchange process (DEC-821 item 2): the vault and DEC-821's one token host, nothing else",
+      "kind": "service",
+      "image": "token-exchange",
+      "built": false,
+      "db_role": null,
+      "guaranteed": false,
+      "colocate": false,
+      "egress": ["vault", "token-host"],
+      "resources": {
+        "requests": {"cpu": "50m", "memory": "32Mi"},
+        "limits": {"cpu": "100m", "memory": "64Mi"}
+      }
+    },
+    {
+      "name": "scheduler",
+      "row": "Scheduler, one per workspace: Postgres and time sources",
+      "kind": "service",
+      "image": "scheduler",
+      "built": false,
+      "db_role": "mandate_scheduler",
+      "guaranteed": true,
+      "colocate": false,
+      "egress": ["postgres", "time"],
+      "resources": {
+        "limits": {"cpu": "100m", "memory": "128Mi"}
+      }
+    },
+    {
+      "name": "model-gateway",
+      "row": "Model gateway: Postgres, the vault, and allowed model providers only",
+      "kind": "service",
+      "image": "model-gateway",
+      "built": false,
+      "db_role": "mandate_gateway",
+      "guaranteed": false,
+      "colocate": false,
+      "egress": ["postgres", "vault", "model-gateway", "model-providers"],
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "128Mi"},
+        "limits": {"cpu": "250m", "memory": "256Mi"}
+      }
+    },
+    {
+      "name": "exporter",
+      "row": "Cold exporter and anchorer: Postgres, object storage, and the timestamping authority",
+      "kind": "service",
+      "image": "exporter",
+      "built": false,
+      "db_role": "mandate_exporter",
+      "guaranteed": false,
+      "colocate": false,
+      "egress": ["postgres", "object-storage", "timestamping"],
+      "resources": {
+        "requests": {"cpu": "50m", "memory": "64Mi"},
+        "limits": {"cpu": "100m", "memory": "128Mi"}
+      }
+    },
+    {
+      "name": "data",
+      "row": "Market data service, per workspace: its data host only; it serves the workspace's runtimes and executors over the host-local channel, which is not network (§3.1)",
+      "kind": "service",
+      "image": "data",
+      "built": false,
+      "db_role": null,
+      "guaranteed": false,
+      "colocate": true,
+      "egress": ["market-data"],
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "128Mi"},
+        "limits": {"cpu": "250m", "memory": "256Mi"}
+      }
+    }
+  ],
+  "targets": {
+    "postgres": {"in_cluster": "the workspace journal's Postgres pods, port 5432"},
+    "vault": {"in_cluster": "the vault's pods (V1 and V2), port 8200"},
+    "model-gateway": {"in_cluster": "the model gateway's pods, port 8080: the runtime's calls, and a replica asking the meter holder to reserve (inference spec §3.6)"},
+    "broker": {"external": "the connection's paper broker hosts; empty until a lane sets them, and never a live host (DEC-821 item 4)"},
+    "token-host": {"external": "DEC-821's token host, for the token-exchange process alone"},
+    "time": {"external": "time sources"},
+    "model-providers": {"external": "allowed model providers"},
+    "object-storage": {"external": "the S3 endpoint (S1)"},
+    "timestamping": {"external": "the timestamping authority"},
+    "market-data": {"external": "the workspace's market-data host"},
+    "artifact-store": {"external": "the artifact store's S3 endpoint (§4.3)"},
+    "identity-provider": {"external": "the identity provider (OIDC and JWKS, DEC-820)"}
+  }
+}

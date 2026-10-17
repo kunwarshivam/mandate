@@ -260,6 +260,27 @@ the spec invariants (DP-n) its tests cover.
   (merged), then the implementation PR, which replaces the stub's body, adds the call, retires the
   stub's `SimError::Unimplemented`, deletes only the pending tests' `#[ignore]` lines, and adds one
   assertion each on the reason code and the message ([DEC-386](decisions/DEC-386.md)).
+- **E4-4 (Must, M5; SC)** As an owner, I want to backtest my mandate version through the same
+  decision path my agent runs, so that the report shows what this version would have done, not
+  what a baseline strategy did ([DEC-1000](decisions/DEC-1000.md); PRD FR-4.1, FR-4.2, FR-4.5).
+  *Accepted when:* the run calls the risk state, the order builder, the gate's dry run, autonomy,
+  and the executor's protection prices, in mandate spec §6.2's order, over historical bars; model
+  outputs and theses are replayed from records and visible only from their receive time; the run
+  has no model port; an ASK resolves as a timeout (`skip`, no order); a record before its data, an
+  unpinned output, a record for another instrument, and a corporate action in range each refuse
+  the run by a named code; property tests with independent oracles show the report is a pure
+  function of its inputs (byte-identical) and that no fill lies outside its bar, each oracle shown
+  to fail on a seeded bug; zero missed mutants. *Slice 2:* corporate actions through the
+  accounting fold, several instruments at once, and one shared mapping from a mandate document to
+  the gate's mandate for the backtest and the shell.
+- **E4-5 (Must, M5)** As an owner, I want my backtest report kept as a record with a stable shape,
+  so that the go-live screen and the web app show exactly the report that was produced
+  ([DEC-1001](decisions/DEC-1001.md)). *Accepted when:* the report is canonical JSON at
+  `report_version` 2 with the members DEC-1001 item 2 lists and validates against
+  `schemas/workspace-api/read-models/backtest.schema.json`; `BacktestRunRecorded` (journal spec
+  §9.18) is registered in `mandate-journal` with vectors for rules 143 and 144; `GET
+  /backtests/{id}` serves `read-models/backtest` in the workspace that ran it only; disclosures
+  stay DEC-1003's placeholder names.
 
 ### E5 Journal
 
@@ -2103,6 +2124,14 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   gives index 0 a real figure or removes it. *Done* on `agent/j3-e17-8-basket-nit`: the oracle
   now takes the expected excess from a closed match on the basket's size (`0.2` for one member,
   `0.15` for two). Any other size fails the case rather than defaulting a figure.
+  *Harness ([DEC-1002](decisions/DEC-1002.md), claim
+  [#1463](https://github.com/kunwarshivam/mandate/issues/1463)):* the harness reads the internal
+  paper workspaces' `ThesisProposed` and `ThesisRevised` records, checks each with
+  `check_thesis_record`, scores every closed thesis (admitted or not) by `score::evaluate`, one
+  scorecard per research-agent `(model_id, model_version, content_hash)` (E15-3), costs each
+  thesis against itself, and writes the report artifact and `EvaluationRunRecorded` (journal spec
+  §9.18, rule 145; registration with vectors follows). `GET /evaluations/{id}` serves it in an
+  internal paper workspace only.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled

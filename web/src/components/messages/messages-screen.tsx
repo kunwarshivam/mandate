@@ -142,7 +142,7 @@ function Messages({ agentId, view }: { agentId: string | null; view: ThreadView 
           <p className="text-sm text-pretty text-muted-foreground">Every agent&apos;s thread. Requests waiting for you come first.</p>
         </header>
         <ThreadList ws={ws} now={now} current={agent?.agent_id ?? null} />
-        <FixtureTag className={cn("w-fit", !allFeedsOk(ws) && "lg:hidden")} />
+        <FixtureTag scope="workspace" className={cn("w-fit", !allFeedsOk(ws) && "lg:hidden")} />
       </div>
       {agent ? <Thread agent={agent} view={view} /> : <NoThreadOpen />}
       {agent ? (

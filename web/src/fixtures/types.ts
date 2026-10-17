@@ -378,6 +378,11 @@ export interface ModelOutput {
 
 export interface Approval {
   approval_id: string;
+  /**
+   * The content hash of the request as `ApprovalRequested` holds it (workspace API spec §4.3), which an
+   * answer binds (API-12). The workspace API always sends it; the fixtures leave it out.
+   */
+  content_hash?: ContentRef;
   agent_id: string;
   status: ApprovalStatus;
   requested_at: Iso;
