@@ -31,6 +31,13 @@ function Probe() {
   );
 }
 
+/** The API's own view of the workspace, once the reads have answered. */
+function view() {
+  const v = current().view;
+  if (!v) throw new Error("no view");
+  return v;
+}
+
 function current(): Runtime {
   if (!seen.runtime) throw new Error("no runtime");
   return seen.runtime;
@@ -90,12 +97,13 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
   it("shows nothing until the reads answer, then the workspace they hold, marked as the API's", async () => {
     mount();
     expect(screen.getByTestId("status").textContent).toBe("loading");
-    expect(current().ws.agents).toEqual([]);
+    expect(current().view).toBeNull();
     await ready();
     const fixture = buildWorkspace("approvals");
     expect(current().source).toBe("api");
-    expect(current().ws.agents.map((a) => a.agent_id)).toEqual(fixture.agents.map((a) => a.agent_id));
-    expect(current().ws.approvals.map((a) => a.approval_id)).toEqual(fixture.approvals.map((a) => a.approval_id));
+    expect(view().agents.map((a) => a.agent_id)).toEqual(fixture.agents.map((a) => a.agent_id));
+    expect(view().approvals.map((a) => a.approval_id).sort()).toEqual(fixture.approvals.map((a) => a.approval_id).sort());
+    expect(current().ws.agents).toEqual([]);
     expect(current().reachable).toBe(true);
   });
 
@@ -119,7 +127,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
   it("pauses an agent with one idempotent call, shows it recorded only when the API says so, and follows its status", async () => {
     const { posts, calls } = mount();
     await ready();
-    const agent = current().ws.agents[0].agent_id;
+    const agent = view().agents[0].agent_id;
     let id = "";
     act(() => {
       id = current().send("pause", agent).id;
@@ -139,13 +147,13 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     await ready();
     const ws = current().ws;
     act(() => {
-      current().send("kill", ws.agents[0].agent_id);
+      current().send("kill", view().agents[0].agent_id);
       current().send("stop_all", null);
     });
     await waitFor(() => expect(posts()).toHaveLength(2));
     const bodies = posts().map((p) => ({ path: new URL(p.url).pathname, body: JSON.parse(p.body ?? "{}") as { scope: unknown; environment_shown: unknown } }));
     expect(bodies).toEqual([
-      { path: `/v1/workspaces/${WS}/kill-switch`, body: expect.objectContaining({ scope: { kind: "agent", id: ws.agents[0].agent_id }, environment_shown: ws.environment }) },
+      { path: `/v1/workspaces/${WS}/kill-switch`, body: expect.objectContaining({ scope: { kind: "agent", id: view().agents[0].agent_id }, environment_shown: ws.environment }) },
       { path: `/v1/workspaces/${WS}/kill-switch`, body: expect.objectContaining({ scope: { kind: "connection", id: ws.connection.connection_id }, environment_shown: ws.environment }) },
     ]);
   });
@@ -153,7 +161,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
   it("pauses every agent not stopped when the owner pauses all, one call each", async () => {
     const { posts } = mount("normal");
     await ready();
-    const live = current().ws.agents.filter((a) => a.mode !== "stopped").map((a) => a.agent_id);
+    const live = view().agents.filter((a) => a.mode !== "stopped").map((a) => a.agent_id);
     expect(live.length).toBeGreaterThan(1);
     act(() => {
       current().send("pause_all", null);
@@ -166,7 +174,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
   it("answers a request with the content hash the read gave, and Skip with no step-up and no delegation", async () => {
     const { posts } = mount();
     await ready();
-    const approval = current().ws.approvals.find((a) => a.status === "delivered");
+    const approval = view().approvals.find((a) => a.state === "pending");
     if (!approval) throw new Error("an open request");
     act(() => current().respond(approval.approval_id, "skip", { screen: "D6", environment: "paper", shown: ["Buy 1 XYZ"], modelOutputExpanded: false }));
     await waitFor(() => expect(current().responses[approval.approval_id]?.phase).toBe("recorded"));
@@ -178,12 +186,12 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
   it("says nothing was sent when an approval needs step-up the deployment did not get, never that it was approved", async () => {
     mount();
     await ready();
-    const approval = current().ws.approvals.find((a) => a.status === "delivered");
+    const approval = view().approvals.find((a) => a.state === "pending");
     if (!approval) throw new Error("an open request");
     act(() => current().respond(approval.approval_id, "approve", { screen: "D6", environment: "paper", shown: ["Buy 1 XYZ"], modelOutputExpanded: false }));
     await waitFor(() => expect(current().responses[approval.approval_id]?.phase).toBe("undelivered"));
     expect(current().responses[approval.approval_id]?.reason).toBe("step_up_required");
-    expect(current().ws.approvals.find((a) => a.approval_id === approval.approval_id)?.status).toBe("delivered");
+    expect(view().approvals.find((a) => a.approval_id === approval.approval_id)?.state).toBe("pending");
   });
 
   it("retries an unanswered command with the same key and body, records it once, and calls the result unknown", async () => {
@@ -191,7 +199,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     await ready();
     let id = "";
     act(() => {
-      id = current().send("pause", current().ws.agents[0].agent_id).id;
+      id = current().send("pause", view().agents[0].agent_id).id;
     });
     await waitFor(() => expect(current().commands.find((c) => c.id === id)?.phase).toBe("unknown"));
     expect(posts().length).toBeGreaterThan(1);
@@ -212,6 +220,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     });
     await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("unreachable"));
     expect(current().ws.agents).toEqual([]);
+    expect(current().view).toBeNull();
     act(() => {
       current().send("pause_all", null);
     });
@@ -225,12 +234,13 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("unreachable"));
     expect(current().reachable).toBe(false);
     expect(current().ws.agents).toEqual([]);
+    expect(current().view).toBeNull();
   });
 
   it("refuses set-up and mandate changes it cannot send yet, and sends nothing for them", async () => {
     const { posts } = mount();
     await ready();
-    const agent = current().ws.agents[0];
+    const agent = buildWorkspace("approvals").agents[0];
     let deployment: ReturnType<Runtime["deploy"]> | null = null;
     act(() => {
       deployment = current().deploy({ mandate: agent.mandate, provenance: agent.provenance }, { screen: "A5", environment: "paper", shown: [] });
@@ -245,7 +255,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     mount();
     await ready();
     act(() => {
-      current().send("pause", current().ws.agents[0].agent_id);
+      current().send("pause", view().agents[0].agent_id);
     });
     await waitFor(() => expect(current().commands.at(-1)?.phase).toBe("recorded"));
     expect(local).not.toHaveBeenCalled();
@@ -277,6 +287,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("signed_out"));
     expect(calls.filter((c) => c.method === "GET")).toHaveLength(0);
     expect(current().ws.agents).toEqual([]);
+    expect(current().view).toBeNull();
     expect(screen.queryByTestId("gated")).toBeNull();
     expect(screen.getByRole("link", { name: /sign in/i }).getAttribute("href")).toMatch(/^\/login/);
   });
@@ -289,6 +300,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     const { posts } = mount("approvals", wrap);
     await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("membership_unavailable"));
     expect(current().ws.agents).toEqual([]);
+    expect(current().view).toBeNull();
     expect(screen.queryByTestId("gated")).toBeNull();
     expect(screen.getByRole("heading", { name: "Your membership could not be read" })).toBeTruthy();
     act(() => {

@@ -11,11 +11,19 @@
  */
 import type { WorkspaceClient } from "./client";
 import type { JsonObject, PreparedCommand } from "./types";
-import type { Approval, ContentRef, Workspace } from "@/fixtures/types";
+import type { AgentMode, ContentRef, Environment } from "@/fixtures/types";
 import type { ApprovalRecord, CommandKind, CommandRecord } from "@/lib/mock-runtime";
 import { sha256Hex } from "@/lib/sha256";
 
 export type Prepared = { ok: true; commands: PreparedCommand[] } | { ok: false; reason: string };
+
+/** What a command needs from the last workspace read: the agents and their modes, the connection, and the environment the screen showed. */
+export interface CommandScope {
+  agents: ReadonlyArray<{ agent_id: string; mode: AgentMode | null }>;
+  /** `""` when no connection has been read. */
+  connectionId: string;
+  environment: Environment;
+}
 
 /** Names the web app's build in every record it sends (spec §5, mandate spec §10). */
 export const UI_BUILD = "owlhead-web/E11-9";
@@ -29,7 +37,7 @@ export function recordRef(record: CommandRecord | ApprovalRecord): { artifact: C
 
 const one = (command: PreparedCommand): Prepared => ({ ok: true, commands: [command] });
 
-export function prepareOwnerCommand(client: WorkspaceClient, ws: Workspace, kind: CommandKind, agentId: string | null, record?: CommandRecord): Prepared {
+export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, kind: CommandKind, agentId: string | null, record?: CommandRecord): Prepared {
   const agentCommand = (operation: "pause" | "resume" | "stop", body: JsonObject): Prepared =>
     agentId ? one(client.prepare(operation, { agent: agentId }, body)) : { ok: false, reason: "no_agent" };
   switch (kind) {
@@ -52,7 +60,7 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: Workspace, kind
     }
     case "stop_all":
     case "close_all": {
-      const scope = ws.connection.connection_id ? { kind: "connection" as const, id: ws.connection.connection_id } : { kind: "workspace" as const, id: null };
+      const scope = ws.connectionId ? { kind: "connection" as const, id: ws.connectionId } : { kind: "workspace" as const, id: null };
       return one(client.prepareKillSwitch({ scope, environment_shown: ws.environment, owner_exit: null, record: null, step_up: null }));
     }
     default: {
@@ -62,7 +70,7 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: Workspace, kind
   }
 }
 
-export function prepareApprovalResponse(client: WorkspaceClient, approval: Approval, response: "approve" | "skip", record: ApprovalRecord): Prepared {
+export function prepareApprovalResponse(client: WorkspaceClient, approval: { approval_id: string; content_hash?: ContentRef }, response: "approve" | "skip", record: ApprovalRecord): Prepared {
   if (!approval.content_hash) return { ok: false, reason: "no_content_hash" };
   return one(
     client.prepare(

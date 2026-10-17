@@ -198,7 +198,8 @@ export function ApiRuntimeProvider({
       const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}) };
       const update = (patch: Partial<Command>) => setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, ...patch } : c)));
       setCommands((list) => [...list, command]);
-      const prepared = prepareOwnerCommand(client, wsRef.current.status === "ready" ? wsRef.current : (lastRead.current ?? wsRef.current), kind, agentId, record);
+      const basis = wsRef.current.status === "ready" ? wsRef.current : (lastRead.current ?? wsRef.current);
+      const prepared = prepareOwnerCommand(client, { agents: basis.agents, connectionId: basis.connection.connection_id, environment: basis.environment }, kind, agentId, record);
       void (async () => {
         if (!prepared.ok) return update({ phase: "undelivered" });
         const delivered = await Promise.all(prepared.commands.map(deliver));
@@ -261,7 +262,7 @@ export function ApiRuntimeProvider({
   }, []);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", ws, now, reachable: ws.status !== "unreachable", commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
+    () => ({ source: "api", view: null, ws, now, reachable: ws.status !== "unreachable", commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
     [ws, now, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

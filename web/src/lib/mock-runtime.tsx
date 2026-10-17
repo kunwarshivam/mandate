@@ -6,6 +6,7 @@ import { type NewAgent, addMs, agentIdFor, checkDeploy, deployAgent, fillApprove
 import { clock } from "./format";
 import { type Origin, type Proposal, type Recorded, reachSafePoint, recordChange } from "./mandate-change";
 import { RESTRICTIONS } from "./restrictions";
+import type { ApiView } from "@/api/read-models";
 
 /**
  * A stand-in for the workspace deployment. Commands and approval responses are held in memory
@@ -115,6 +116,8 @@ export interface MandateChangeRequest {
 export interface Runtime {
   /** Where the workspace comes from (DEC-975): the recorded fixtures, or a workspace deployment's API. */
   source: "fixtures" | "api";
+  /** The workspace API's read models as served (DEC-1096); `null` over the fixtures, and until the reads answer. */
+  view: ApiView | null;
   ws: Workspace;
   now: Iso;
   reachable: boolean;
@@ -449,7 +452,7 @@ export function RuntimeProvider({
   );
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
+    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
     [ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
