@@ -70,6 +70,22 @@ nothing is sent; 2n and the agent stream's export find nothing; the control and 
 export and verify. The next blocker on an agent's machine is R5; on the founder's, with the data
 keys, the run reaches the Alpaca market reads and then the chain's R6 to R8.
 
+**Re-run on `claude/r0-sim-market-data` (R5 fixed for the rehearsal, [DEC-961](../decisions/DEC-961.md),
+claim [#1414](https://github.com/kunwarshivam/mandate/issues/1414)), with no Alpaca key in the
+environment, on Saturday 2026-10-17 at about 01:10 UTC:** 1a to 2k pass, with the new 1c (the
+daily-bars writer, an example) and 2a0 (the fixture: `market.json` and the stored daily bars). 2l
+passes R5: the `rh-sim` runner reads the asset record, the IEX quote and the minute bars from the
+fixture (`MANDATE_RH_SIM_MARKET`) and the daily closes from `--bars`, the Robinhood reads answer as
+on DEC-959's run, and the shell's judge accepts the fixture's facts (the asset record bound to the
+instrument, a current, uncrossed IEX quote) and then stops at `the tracer stopped at Validate: a
+run clock inside the regular session` ([R12](#the-blocker-chain-beyond-step-2l)): the run was made
+on a Saturday, and an opening is only judged inside the regular session (rule 12, trading spec
+§9.6). This refusal is correct and needs no code. 2m and 2s stop there too, so nothing is sent, no
+approval is asked (2n to 2p) and the agent stream stays empty (2q, 2r agent); the control and
+account streams export and verify. The rehearsal stops here; the `ask` opening, the grant with
+`cli_confirm`, the fill and the refused second run need a run between 09:30 and 15:50 New York
+time on a trading day.
+
 ## How to run it
 
 ```bash
@@ -98,6 +114,24 @@ covers `scripts/`). The whole run takes under a minute after the builds.
   `RHETF`, which matters at [R5](#the-blocker-chain-beyond-step-2l).
 - **Simulator script:** one agentic account with 100 USD cash and buying power, the regular
   session, `RHETF` quoted at 85, and one scripted buy fill at 85.
+
+## The step table (`claude/r0-sim-market-data`, run on 2026-10-17 at about 01:10 UTC)
+
+`$M` is `MANDATE_RH_SIM_MARKET=$WORK/market`, and `$B` is `--bars
+$WORK/market/daily/alpaca/iex/bars-1Day/RHETF`. 1a to 2k are as in the table below, all PASS.
+
+| Step | R0 | Command | Result | Output (last line) |
+|---|---|---|---|---|
+| 1c | 1 | `cargo build -p mandate-paper --example rehearsal_bars` | PASS | `Finished` |
+| 2a0 | 2 | `rehearsal_bars $WORK/market/daily RHETF 85`, after writing `$WORK/market/market.json` | PASS | the dataset's directory |
+| 1a to 2k | 1 to 3 | as below | PASS | as below |
+| 2l | 2, 4 | `$M MANDATE_RH_SIM_ENDPOINT=<sim> mandate-paper --workspace ws_r0 --agent agent_r0 --account-ref <ref> $J $B --confirm-live` | **FAIL** (R12) | `the tracer stopped at Validate: a run clock inside the regular session` (was `MARKET_UNREAD`: R5) |
+| 2m | 2, 5 | the same with `--place-one-order` | **FAIL** (R12) | the same |
+| 2n | 2, 5 | `mandate approvals list --agent agent_r0 $O $J` | **FAIL** (from 2m) | `no approvals`; 2o and 2p not run |
+| 2q, 2r ctl | 2, 6 | export and verify `ctl:ws_r0` | PASS | `verified, stream ctl:ws_r0, seq 1 to 10, …` |
+| 2q, 2r acct | 2, 6 | export and verify `acct:ws_r0:<ref>` | PASS | `verified, stream acct:ws_r0:<ref>, seq 1 to 2, …` |
+| 2q, 2r agent | 2, 6 | export and verify `agent:ws_r0:agent_r0` | **FAIL** (from 2m) | `export_stream_empty` |
+| 2s | 2, 7 | the placing run again | **FAIL** (R12) | refused before any place call, but by the session, not by the spent record |
 
 ## The step table (`claude/r0-live-workspace`, run at `674a29a`)
 
@@ -148,7 +182,8 @@ once the one before is fixed.
 | R2 | `lapse_evidence_not_supplied`, observed at 2l before the fix | `crates/mandate-paper/src/lib.rs` passed `None` as the snapshot, so `door.rs` called `unsupplied` | The door's lapse needs the agentic account's `AccountSnapshot`, which only the Robinhood connector reads | **Fixed**, [#1390](https://github.com/kunwarshivam/mandate/pull/1390) (claim [#1378](https://github.com/kunwarshivam/mandate/issues/1378); [DEC-947](../decisions/DEC-947.md) items 1 and 2) | `run()` now runs, for a live connection: the door's `chosen` and `account_stream` → `acknowledge` and `harden` → the dial → the shell's `checked_before_credentials` (the whole fold but the door's condition) → the one `connect` → `Session::account_snapshot` → `lapse_read(Some(snapshot))` → `confirmed_version` with the door passed. FT-3 is amended for a live run under DEC-929: the login comes after every check that needs no credential except the configuration and artifacts, and the session only reads until the cycle |
 | R3 | `DeploymentRefusal::Live` | `crates/mandate-paper/src/lib.rs` handed `LiveAdmission::refusing()` | DEC-934 item 4 | **Fixed**, #1378 (DEC-947 item 3) | `live_admission(BUILT_WITH, --confirm-live, the door's answer, the dialed endpoint's host, pinned_host(Build::CURRENT))`. The `rh-sim` build pins `REHEARSAL_HOST` (`127.0.0.1`, the simulator's address) and no longer compiles Robinhood's `MCP_HOST`; the `live` build alone pins `agent.robinhood.com`. DEC-934 item 3's exact equality is unchanged |
 | R4 | `Cause::Absent` with `SESSION_UNBUILT` | `crates/mandate-paper/src/robinhood.rs` (`Linked`) | No MCP session carried the login's token | **Fixed**, #1378 (DEC-947 items 4 and 5) | the session is the login, the pinned transport carrying the token as its bearer (DEC-946's `with_bearer`), `McpClient::connect` (first-connection contract check), one `RobinhoodConnector` scoped to `MANDATE_RH_ACCOUNT_NUMBER`, in the shell's `RobinhoodBridge`. Its preflight is DEC-933 item 2's, its cycle the shell's new `robinhood_production_cycle`, its broker ask #1380's `BrokerAsk::robinhood` |
-| R5 | `Stage::Reconcile` refusals of the market reads | `mandate_shell::paper::market_facts` (`crates/mandate-shell/src/paper/facts.rs:145`) and `robinhood_facts` (`:171`) | A Robinhood run's preflight reads the asset record, IEX quote and minute bars from **Alpaca's** data API (DEC-933 item 2), and `--bars` must come from `mandate download`, so the rehearsal needs the founder's Alpaca data keys, which no agent has (rule 8); and the simulator's quote must name the same instrument and agree with the real IEX quote within the collar (DEC-529 item 12), so the rehearsal must pin the founder's real ticker and script the simulator's quote near its price, not `RHETF` | Not a code defect | The founder runs the rehearsal on their own machine with their data keys, after `mandate download` and `inspect`, and sets the simulator's `quotes` from the latest IEX ask (the script's `sim.json`, one line) |
+| R5 | `Stage::Reconcile` refusals of the market reads (**fixed for the rehearsal** in `claude/r0-sim-market-data`, [DEC-961](../decisions/DEC-961.md): the `rh-sim` build reads them from a fixture, every other build from Alpaca as below) | `mandate_shell::paper::market_facts` (`crates/mandate-shell/src/paper/facts.rs:145`) and `robinhood_facts` (`:171`) | A Robinhood run's preflight reads the asset record, IEX quote and minute bars from **Alpaca's** data API (DEC-933 item 2), and `--bars` must come from `mandate download`, so the rehearsal needs the founder's Alpaca data keys, which no agent has (rule 8); and the simulator's quote must name the same instrument and agree with the real IEX quote within the collar (DEC-529 item 12), so the rehearsal must pin the founder's real ticker and script the simulator's quote near its price, not `RHETF` | Not a code defect | The founder runs the rehearsal on their own machine with their data keys, after `mandate download` and `inspect`, and sets the simulator's `quotes` from the latest IEX ask (the script's `sim.json`, one line) |
+| R12 | `the tracer stopped at Validate: a run clock inside the regular session`, **observed at 2l, 2m and 2s** on 2026-10-17 (a Saturday) | `crates/mandate-shell/src/paper/judge.rs:95` (`regular_session_outside_close_window`), reached from `judge` (`:62`) through `load_contexts_with_clock`, which `run()` calls at `crates/mandate-paper/src/lib.rs:697` | An opening is judged only inside the regular session and outside its last `close_window_minutes` (rule 12, trading spec §9.6), and the run's clock is the system's | Not a code defect | Run the rehearsal between 09:30 and 15:50 New York time on a trading day |
 | R6 | the `ask` opening denied at its deadline | `crates/mandate-paper/src/wiring.rs:296` (`wait_for_the_grant`) | Until item 9 lands, the runtime is never handed the founder's grant, so the opening is skipped at `timeout_s` (`on_timeout: skip`, rule 3) even after `mandate approvals approve` commits it | **Item 9**, [#1367](https://github.com/kunwarshivam/mandate/pull/1367) (`claude/live-grant-cycle-answers`, DEC-940) | — |
 | R7 | the restart (R0 step 7) | the startup reconciliation | A restart after a lost place answer must adopt exactly one matching order or keep it `Unknown` (DEC-529 item 4) | **Item 10** (`claude/unknown-adoption-run-path`) | — |
 
@@ -159,9 +194,9 @@ once the one before is fixed.
 | R11 | `the tracer stopped at Reconcile: the agentic account's snapshot`, **observed at 2l** before the fix | `crates/mandate-shell/src/robinhood.rs` (`RobinhoodBridge::preflight_facts`), reached from `crates/mandate-paper/src/robinhood.rs` (`Linked::preflight`); the refusal was `mandate-mcp`'s `Throttled` on the preflight's first `get_portfolio` | The live start read the account snapshot (three scoped reads, six calls) for the lapse, and the preflight then read it again at once, together with tradability and the quote. After the connect's own calls, the ordinary bucket (`crates/mandate-mcp/src/transport.rs`: 10 tokens, one a second) had no token left, and a throttled read was a refusal, never a wait | **Fixed** in `claude/r0-mcp-read-budget` ([DEC-959](../decisions/DEC-959.md), claim #1408): 2l's Robinhood reads all answer | The fix as built: the live start keeps the lapse's snapshot with the run clock read before it was sent, and the same session's preflight stands on it while it is at most the rule set's quote age bound old (reading only the tradability and the quote), and reads the account again otherwise; every broker read is `CallClass::Read`, which on an empty ordinary bucket waits for its next token when it is due within `read_wait` (2 s) and is refused at once otherwise. Openings and exits never wait |
 
 So the rehearsal can pass only after R8 lands (R9 by DEC-957, R10 by DEC-958, R11 by DEC-959), with R1 and R1b fixed on `main` and R2 to R4 by #1390, in addition to items
-9 and 10, and only on the founder's machine (R5). Without the founder's Alpaca paper keys, a run
-past R1 now stops at the Robinhood preflight with `MARKET_UNREAD`, after the login, the snapshot,
-the lapse and the full fold (DEC-947 item 5).
+9 and 10, and inside the regular session (R12). R5 no longer needs the founder's machine for
+the rehearsal: the `rh-sim` build reads the market from a fixture (DEC-961); the live order still
+reads Alpaca's with the founder's data keys.
 
 ## Findings that need no code
 
@@ -181,9 +216,11 @@ the lapse and the full fold (DEC-947 item 5).
   runner's door refuses it first (`connection_revoked`, DEC-910 item 2), so no run reaches the
   fold with one; a spec reading that refuses it in the fold too would close the gap for every
   caller.
-- **The runner reads Alpaca paper keys from its environment** (DEC-947 item 5): when
-  `MANDATE_ALPACA_PAPER_KEY_ID` and `MANDATE_ALPACA_PAPER_SECRET` are set where the script runs,
-  2l, 2m and 2s pass `MARKET_UNREAD` and make Alpaca's market reads with them. An agent's run
+- **The rehearsal runner reads no Alpaca key** ([DEC-961](../decisions/DEC-961.md) item 1): the
+  `rh-sim` build's Robinhood session takes its market reads from the fixture
+  `MANDATE_RH_SIM_MARKET` names, whatever keys the environment holds; the `live` build without
+  `rh-sim` reads them from Alpaca with `MANDATE_ALPACA_PAPER_KEY_ID` and
+  `MANDATE_ALPACA_PAPER_SECRET` (DEC-947 item 5) and holds no fixture path. An agent's run still
   unsets both (`env -u MANDATE_ALPACA_PAPER_KEY_ID -u MANDATE_ALPACA_PAPER_SECRET
   scripts/r0-rehearsal.sh`), so it reads no credential (rule 8, DEC-929 item 3).
 - **The private journal works on PostgreSQL 16** with the one migration applied by `psql` as the
