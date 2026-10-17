@@ -31,12 +31,12 @@ use mandate_canon::to_canonical;
 use mandate_spec::context::Membership;
 use mandate_spec::validate::{Violation, validate};
 use proptest::prelude::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::artifacts::reference;
 use super::context::{
     GateQuote, PaperClock, ReconcilingPaperContext, TrustedPaperContext, protection_prices,
-    stop_limit_offset,
+    run_stop_limit_classes, stop_limit_offset,
 };
 use super::gate::{gate_mandate, gate_template};
 use super::{
@@ -1923,4 +1923,29 @@ proptest! {
             prop_assert_eq!(fires, mandate != connection, "{:?} on {:?}", mandate, connection);
         }
     }
+}
+
+/// The run's own validation reads Alpaca's stop-limit classes on a paper connection, the only
+/// paper broker (LT-14), and none on a live one, the profile absent, so V-008 fails closed there
+/// (DEC-1152 item 2): the reviewed equity mandate, with no offset, passes V-008 in the paper run's
+/// validation and is refused it in a live run's.
+#[test]
+fn the_runs_validation_reads_alpacas_classes_on_paper_and_none_live() -> Result<(), String> {
+    assert_eq!(
+        run_stop_limit_classes(Environment::Paper),
+        Some(BTreeSet::from([mandate_domain::AssetClass::Crypto]))
+    );
+    assert_eq!(run_stop_limit_classes(Environment::Live), None);
+    let loaded = artifacts()?;
+    for (connection, refused) in [(Environment::Paper, false), (Environment::Live, true)] {
+        let contexts =
+            load_contexts(&loaded, &facts()?, at(NOW)?, &agent(), connection).map_err(text)?;
+        let report = validate(&loaded.mandate, &contexts.run.validation).map_err(text)?;
+        assert_eq!(
+            report.violations.contains(&Violation::V008),
+            refused,
+            "{connection:?}"
+        );
+    }
+    Ok(())
 }

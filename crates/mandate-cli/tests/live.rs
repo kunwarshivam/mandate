@@ -54,12 +54,25 @@ fn reference(text: &str) -> String {
     format!("sha256:{}", Digest::of(&canonical(text)).to_hex())
 }
 
-/// The paper fixture, or the same mandate made `live` on [`CONN`].
+/// The paper fixture, or the same mandate made `live` on [`CONN`], with the stop-limit offset
+/// V-008 asks for on Robinhood's profile (DEC-539 item 2, DEC-1152 item 1).
 fn document(live: bool) -> String {
     if !live {
         return MANDATE.to_owned();
     }
-    let from = [r#""environment":"paper""#, "conn_alpaca_paper_01"];
+    without_offset().replace(NO_OFFSET, r#""crypto_stop_limit_offset":"0.01""#)
+}
+
+/// The fixture's protection with no stop-limit offset.
+const NO_OFFSET: &str = r#""crypto_stop_limit_offset":null"#;
+
+/// The live mandate as [`document`] writes it, but with no stop-limit offset.
+fn without_offset() -> String {
+    let from = [
+        r#""environment":"paper""#,
+        "conn_alpaca_paper_01",
+        NO_OFFSET,
+    ];
     assert!(from.iter().all(|f| MANDATE.contains(f)));
     MANDATE
         .replace(from[0], r#""environment":"live""#)
@@ -323,6 +336,41 @@ fn a_live_mandate_on_the_owners_recorded_robinhood_connection_is_created_confirm
     );
     let again = world.deploy(&live, true);
     assert!(again.is_ok(), "a re-run finds the deployment: {again:?}");
+}
+
+/// R0's R22 (DEC-1152 item 1): on the owner's recorded Robinhood connection, whose profile protects
+/// equities with a stop-limit only, a live equity mandate with no stop-limit offset is created
+/// but refused `version_invalid` (V-008) at its confirmation, before the code is shown and with
+/// nothing appended; the same mandate with the offset is confirmed. The paper fixture, on Alpaca's
+/// profile, needs none.
+#[test]
+fn a_live_robinhood_mandate_without_a_stop_limit_offset_is_refused_at_confirmation() {
+    let mut world = World::with(&[Event::Establish(GOOD)]);
+    let live = in_env(Environment::Live);
+    let bytes = without_offset();
+    let created = create(
+        &mut world.journal,
+        &mut world.store,
+        &live,
+        bytes.as_bytes(),
+        at(NOW),
+    );
+    assert!(created.is_ok(), "{created:?}");
+    let before = world.journal.attempts.len();
+    let version = reference(&bytes);
+    let shown = confirmation(&world.journal, &world.store, &live, &version, at(NOW));
+    assert_eq!(
+        shown.map(drop),
+        Err(ControlError::Refused {
+            reason: "version_invalid"
+        })
+    );
+    assert_eq!(world.journal.attempts.len(), before, "nothing appended");
+    assert!(world.create(&live, true).is_ok());
+    assert!(
+        world.confirm(&live, true).is_ok(),
+        "with the offset it is confirmed"
+    );
 }
 
 /// A paper owner's gestures on the paper fixture, in a paper workspace, are unchanged by a live

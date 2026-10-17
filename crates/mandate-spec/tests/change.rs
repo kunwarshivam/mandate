@@ -60,6 +60,7 @@ fn violations(document: &Value) -> BTreeSet<Violation> {
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
         current_mandate_version: None,
+        stop_limit_asset_classes: mandate_spec::context::stop_limit_asset_classes("alpaca"),
     };
     validate(&parse(document), &context)
         .expect("the document is evaluable")
