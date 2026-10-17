@@ -524,7 +524,7 @@ fn decide(
     {
         return Ok(());
     }
-    let verdict = ports.gate.check(&proposal);
+    let verdict = dry_run(state, ports, &proposal, now);
     let classified = ports.plan.classify(ports.view, &proposal);
     let decision = batch.journal(
         "DecisionMade",
@@ -541,6 +541,24 @@ fn decide(
         }
         DryRunVerdict::Allow => allowed(state, &proposal, &classified, now, ports, decision, batch),
     }
+}
+
+/// The dry run of one proposal at `now`. An opening or increase the connection's checks do not
+/// cover is denied `account_restricted` before the gate is asked, as trading spec §7.3 row 5
+/// denies one on a connection that is not usable; every other proposal, and every exit whatever
+/// the checks say, is the gate's to judge (`AGENTS.md` rule 13, DEC-969 item 4).
+pub(crate) fn dry_run(
+    state: &RuntimeState,
+    ports: &Ports<'_>,
+    proposal: &Proposal,
+    now: RiskClock,
+) -> DryRunVerdict {
+    if proposal.purpose.adds_risk() && !state.connection_admits_openings(now) {
+        return DryRunVerdict::Deny {
+            reason_code: payload::ACCOUNT_RESTRICTED.to_owned(),
+        };
+    }
+    ports.gate.check(proposal)
 }
 
 /// What the autonomy classification does with a proposal the dry run allowed (mandate spec §6):
