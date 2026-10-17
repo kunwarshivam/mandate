@@ -44,9 +44,12 @@ impl Default for System {
 }
 
 impl Entropy for System {
-    /// The tests PR's stub (DEC-77, E8-10 slice D10a): it fills nothing and fails closed.
-    fn fill(&self, _out: &mut [u8]) -> Result<(), EntropyUnavailable> {
-        Err(EntropyUnavailable)
+    /// Fills `out` from the kernel's generator through `ring`. This leaf is implemented in the
+    /// tests PR, not stubbed: its only failure is the closed [`EntropyUnavailable`], which carries no
+    /// `Unimplemented` report, so a stub here would leave a mutant `cargo xtask ci mutants` cannot
+    /// exempt (DEC-137). `OsRandom`'s two traits over it stay stubs until the implementation PR.
+    fn fill(&self, out: &mut [u8]) -> Result<(), EntropyUnavailable> {
+        ring::rand::SecureRandom::fill(&self.0, out).map_err(|_| EntropyUnavailable)
     }
 }
 

@@ -56,6 +56,21 @@ fn a_source_that_cannot_answer_is_entropy_unavailable_on_both_traits() {
     );
 }
 
+/// Live: the kernel's generator fills a whole buffer, and two draws differ.
+#[test]
+fn the_kernel_source_fills_a_whole_buffer_and_two_draws_differ() {
+    let source = System::new();
+    let (mut first, mut second) = ([0u8; 32], [0u8; 32]);
+    assert_eq!(
+        source.fill(&mut first),
+        Ok(()),
+        "the kernel's generator answers"
+    );
+    assert_eq!(source.fill(&mut second), Ok(()), "and answers again");
+    assert_ne!(first, [0u8; 32], "a draw fills its buffer");
+    assert_ne!(first, second, "two 256-bit draws are distinct");
+}
+
 /// Live at the stub and after it: a source that cannot answer never yields a draw, on either trait.
 #[test]
 fn a_source_that_cannot_answer_never_yields_a_draw() {
