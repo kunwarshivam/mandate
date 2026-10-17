@@ -91,6 +91,10 @@ pub enum MigrateError {
     /// The database could not be reached, or a statement other than a migration's failed.
     #[error("the journal database is unavailable")]
     Unavailable(#[source] sqlx::Error),
+    /// The connecting role lacks a privilege the run needs before any migration: to create a
+    /// missing role, or the schema (SQLSTATE 42501).
+    #[error("the connecting role lacks a privilege the run needs (SQLSTATE 42501)")]
+    PrivilegeMissing,
     /// The connecting role cannot act as [`OWNER_ROLE`].
     #[error("the connecting role cannot SET ROLE {OWNER_ROLE}")]
     OwnerRoleNotHeld,
@@ -123,6 +127,7 @@ impl MigrateError {
         match self {
             Self::SchemaInvalid => "schema_invalid",
             Self::Unavailable(_) => "unavailable",
+            Self::PrivilegeMissing => "privilege_missing",
             Self::OwnerRoleNotHeld => "owner_role_not_held",
             Self::SchemaNotOwned => "schema_not_owned",
             Self::SchemaUnrecorded => "schema_unrecorded",
@@ -134,9 +139,20 @@ impl MigrateError {
     }
 }
 
+/// Postgres's `insufficient_privilege`.
+const INSUFFICIENT_PRIVILEGE: &str = "42501";
+
 impl From<sqlx::Error> for MigrateError {
     fn from(e: sqlx::Error) -> Self {
-        Self::Unavailable(e)
+        let denied = e
+            .as_database_error()
+            .and_then(|d| d.code())
+            .is_some_and(|code| code == INSUFFICIENT_PRIVILEGE);
+        if denied {
+            Self::PrivilegeMissing
+        } else {
+            Self::Unavailable(e)
+        }
     }
 }
 
@@ -216,7 +232,7 @@ pub async fn migrate_dsn(dsn: &str, schema: &str) -> Result<MigrationReport, Mig
 ///
 /// # Errors
 /// [`MigrateError::SchemaInvalid`] before connecting; then, each having changed nothing,
-/// [`MigrateError::OwnerRoleNotHeld`], [`MigrateError::SchemaNotOwned`],
+/// [`MigrateError::PrivilegeMissing`], [`MigrateError::OwnerRoleNotHeld`], [`MigrateError::SchemaNotOwned`],
 /// [`MigrateError::SchemaUnrecorded`], a ledger refusal of [`applied_prefix`],
 /// [`MigrateError::Failed`] for a migration whose SQL fails, or [`MigrateError::Unavailable`].
 pub async fn migrate_known(

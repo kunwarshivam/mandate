@@ -215,8 +215,9 @@ fn the_ledger_check_names_what_it_refuses() {
 /// A refusal's message names the file or version it is about, and its code; never more.
 #[test]
 fn every_refusal_has_a_stable_code_and_a_plain_message() {
-    let cases: [(MigrateError, &str, &str); 7] = [
+    let cases: [(MigrateError, &str, &str); 8] = [
         (MigrateError::SchemaInvalid, "schema_invalid", "schema name"),
+        (MigrateError::PrivilegeMissing, "privilege_missing", "42501"),
         (
             MigrateError::OwnerRoleNotHeld,
             "owner_role_not_held",
@@ -645,4 +646,37 @@ fn a_role_that_cannot_act_as_the_owner_is_refused() {
         owned(&["schema_migrations"]),
         "nothing was applied"
     );
+}
+
+/// A role that may act as the owner but not create the schema is refused `privilege_missing`,
+/// not reported as an outage.
+#[test]
+fn a_role_without_a_needed_privilege_is_refused_as_such() {
+    let Some(db) = Scratch::new() else { return };
+    db.run(&[]).unwrap();
+    db.sql(&format!(
+        "DO $$ BEGIN \
+           IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'k0_member') THEN \
+             CREATE ROLE k0_member LOGIN PASSWORD 'k0-member'; \
+           END IF; \
+         EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; \
+         END $$; \
+         GRANT {OWNER_ROLE} TO k0_member; DROP SCHEMA {} CASCADE",
+        db.schema
+    ));
+    let member = {
+        let _entered = db.rt.enter();
+        PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy_with(db.base.clone().username("k0_member").password("k0-member"))
+    };
+    let refused = db
+        .rt
+        .block_on(migrate_known(&member, &db.schema, &[ONE]))
+        .err();
+    assert!(
+        matches!(refused, Some(MigrateError::PrivilegeMissing)),
+        "{refused:?}"
+    );
+    assert!(!db.schema_exists(), "nothing was created");
 }

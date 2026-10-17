@@ -37,7 +37,7 @@ pub struct MigrateArgs {
 ///
 /// # Errors
 /// A refusal whose message carries the runner's code (`schema_invalid`, `unavailable`,
-/// `owner_role_not_held`, `schema_not_owned`, `schema_unrecorded`, `schema_newer`,
+/// `privilege_missing`, `owner_role_not_held`, `schema_not_owned`, `schema_unrecorded`, `schema_newer`,
 /// `migration_changed`, `migration_out_of_order`, `migration_failed`), having printed nothing; no
 /// message names the DSN.
 #[allow(
