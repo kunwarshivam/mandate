@@ -1863,6 +1863,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-daemon"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-process",
+ "mandate-runtime",
+ "mandate-store",
+ "mandate-time",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-dispatcher"
 version = "0.0.0"
 dependencies = [
@@ -1883,6 +1897,21 @@ version = "0.0.0"
 dependencies = [
  "mandate-canon",
  "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-evaluation"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-canon",
+ "mandate-num",
+ "mandate-research",
+ "mandate-spec",
+ "mandate-time",
+ "proptest",
+ "serde_json",
  "thiserror",
 ]
 
@@ -2319,6 +2348,7 @@ dependencies = [
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-process",
+ "mandate-store",
  "mandate-time",
  "proptest",
  "sqlx",
@@ -2425,6 +2455,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-store"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-time",
+ "proptest",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-telemetry"
 version = "0.0.0"
 dependencies = [
@@ -2458,6 +2501,27 @@ name = "mandate-vault-local"
 version = "0.0.0"
 dependencies = [
  "secrecy",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-version-backtest"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-backtest",
+ "mandate-builder",
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-executor",
+ "mandate-liquidity",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-sim",
+ "mandate-spec",
+ "mandate-time",
+ "proptest",
+ "serde_json",
  "thiserror",
 ]
 

@@ -123,7 +123,7 @@ export const AGENT_SECTIONS: readonly AgentSection[] = [
   { key: "mandate/versions", label: "Versions", purpose: "Each confirmed version of this mandate and what changed.", built: true, parent: "mandate" },
   { key: "mandate/edit", label: "Edit", purpose: "Change this mandate's limits; the new version applies only after you confirm it.", built: true, parent: "mandate" },
   { key: "prove", label: "Prove", purpose: "Evidence before money: backtests, a paper run, then going live.", built: true },
-  { key: "prove/backtests", label: "Backtests", purpose: "Hypothetical runs of this mandate on past data, labelled as hypothetical.", built: false, parent: "prove" },
+  { key: "prove/backtests", label: "Backtests", purpose: "Hypothetical runs of this mandate on past data, labelled as hypothetical.", built: true, parent: "prove" },
   { key: "prove/paper", label: "Paper run", purpose: "How this agent has done on paper against its mandate.", built: false, parent: "prove" },
   { key: "prove/live", label: "Go live", purpose: "The checks and confirmations before an agent may use real funds.", built: false, parent: "prove" },
   { key: "activity", label: "Activity", purpose: "Mode changes, orders, and reconciliation events for this agent.", built: true },
@@ -228,6 +228,9 @@ export function crumbsFor(pathname: string, agentLabel: (id: string) => string |
       if (!second) return trail;
       trail.push({ href: `/messages/${second}`, label: agentLabel(second) ?? "Agent" });
       if (rest[0] === "desk") trail.push({ href: pathname, label: "Desk" });
+      return trail;
+    case "backtests":
+      if (second) trail.push({ href: pathname, label: "Backtest" });
       return trail;
     case "approvals":
       trail.push({ href: "/approvals", label: "Approvals" });

@@ -59,11 +59,14 @@
 #      3 by DEC-785 so that E12-3's verification run can use mandate-journal-cold's (layer 3)
 #      verify_tsa and SegmentManifest rather than reimplement them
 #   5  mandate-builder; mandate-research-run, the research worker (E19-2, DEC-431 item 20, DEC-996)
+#   6  mandate-sim, mandate-evaluation (E17-8, DEC-1002), mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
+#      mandate-runtime, mandate-mcp
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-objectstore,
 #      mandate-executor, mandate-runtime, mandate-mcp
 #   7  mandate-alpaca, mandate-robinhood, mandate-backtest. `mandate-alpaca` is an adapter over the core (ES-02's
 #      "adapters depend on the core, never the reverse"): it implements the `BrokerConnector` that
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
+#   8  mandate-version-backtest (E4-4, DEC-1000), above mandate-backtest and mandate-executor
 #   7  also mandate-api-server, the workspace API server (E21-31, DEC-978): above the journal's
 #      Postgres store and the API's contract, and kept from the runtime, executor and connectors
 #   8  mandate-shell, the process shell (E7-7, DEC-138; the shell's dependency on backtest is
@@ -123,6 +126,7 @@ workspace_services = [
 agent_process = [
     "mandate-agentd",
     "mandate-alpaca",
+    "mandate-daemon",
     "mandate-executor",
     "mandate-mcp",
     "mandate-paper",
@@ -445,6 +449,16 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The forward-paper evaluation harness (E17-8, E15-3, DEC-1002): above mandate-research, whose
+# scorer it calls, and mandate-spec, whose record check it runs. It may never reach the backtest,
+# so no scorecard can be computed from a backtest (DEC-99).
+[crates.mandate-evaluation]
+layer = 6
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+forbidden_internal = ["mandate-backtest", "mandate-version-backtest"]
+
 # The agent harness's research worker (agent harness spec §4, E19-2, E19-3; DEC-431 item 20,
 # DEC-996): the retrieval plan, read-only reader ports, the gateway port, and the strict output
 # parse. Layer 5, below mandate-runtime, so it can never name `IntentSink` (HI-1); and kept off
@@ -520,6 +534,16 @@ allowed_external = ["sqlx", "thiserror"]
 
 [crates.mandate-backtest]
 layer = 7
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+# A mandate version's backtest through its own decision path (E4-4, DEC-1000): above
+# mandate-backtest, whose fold and encoders it shares, and mandate-executor, whose protection pricing
+# it calls. In neither process group, and no workspace service may reach it, since it links the
+# executor (DEC-986).
+[crates.mandate-version-backtest]
+layer = 8
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
@@ -621,6 +645,28 @@ pure = false
 allowed_external = ["tokio"]
 forbidden_internal = ["mandate-cli", "mandate-paper"]
 
+# The journal port a long-running process writes and follows through (E21-29, E21-30, DEC-1012):
+# the in-memory journal and Postgres, with tokio driving the Postgres client. Below every process
+# crate that uses it, and above mandate-journal-pg.
+[crates.mandate-store]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["tokio"]
+
+# The agent runtime as a long-running process (E21-30, DEC-1012): one deployment's runtime core
+# over mandate-store, with mandate-process's lifecycle and probes; tokio for the SIGTERM listener.
+# Its forbidden_internal list is what makes "the runtime has no route to a broker" hold by
+# construction: it can never reach the shell, the executor, a connector, the runner, or the CLI.
+[crates.mandate-daemon]
+layer = 8
+safety_critical = true
+pure = false
+allowed_external = ["tokio"]
+forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-paper", "mandate-cli", "mandate-rh-sim"]
+
+# The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over
+# mandate-store, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
 # The workspace API server (E21-31, DEC-978): the one door into a workspace deployment for people
 # and their tools. It records owner input on the control stream and serves reads from the journal;
 # it never places, cancels, or sizes an order and never calls a broker or a runtime (workspace API
@@ -646,7 +692,7 @@ forbidden_internal = [
 # and the SIGTERM listener. It may never reach the runner, the shell, the CLI, or any broker
 # connector: it holds nothing secret and places nothing.
 [crates.mandate-scheduler]
-layer = 7
+layer = 8
 safety_critical = true
 pure = false
 allowed_external = ["tokio"]
