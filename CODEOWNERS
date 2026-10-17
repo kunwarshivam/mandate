@@ -69,6 +69,7 @@
 /crates/mandate-risk/       @kunwarshivam
 /crates/mandate-robinhood/  @kunwarshivam
 /crates/mandate-runtime/    @kunwarshivam
+/crates/mandate-scheduler/  @kunwarshivam
 /crates/mandate-shell-rh-sim/ @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
 /crates/mandate-sim/        @kunwarshivam

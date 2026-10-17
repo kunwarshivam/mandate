@@ -33,6 +33,7 @@ mod membership;
 mod merkle;
 mod notices;
 mod records;
+mod scheduler;
 mod schema;
 mod start;
 mod verify;
