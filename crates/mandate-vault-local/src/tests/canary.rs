@@ -47,6 +47,18 @@ fn the_canary_never_leaves_the_vault_in_the_clear() {
         assert_no_canary(&output, "Debug");
     }
 
+    let mut api_port = ApiPort {
+        vault: &api,
+        connection_id: conn("c1"),
+        environment: Environment::Paper,
+    };
+    api_port
+        .put_code(
+            &VaultKey("ws/c1".to_owned()),
+            AuthorizationCode(SecretString::from(CANARY.to_owned())),
+            mandate_connections::start::PkceVerifier(SecretString::from(CANARY.to_owned())),
+        )
+        .unwrap();
     let mut exec_port = ExecutorPort {
         vault: &executor,
         connection_id: conn("c1"),
@@ -54,8 +66,11 @@ fn the_canary_never_leaves_the_vault_in_the_clear() {
     };
     let waiting = exec_port
         .read_code(&VaultKey("ws/c1".to_owned()))
-        .unwrap_or(None);
+        .unwrap()
+        .unwrap();
+    assert_eq!(waiting.code.0.expose_secret(), CANARY);
     assert_no_canary(&format!("{waiting:?}"), "WaitingCode");
+    assert_no_canary(&format!("{api_port:?}"), "ApiPort");
     assert_no_canary(&format!("{exec_port:?}"), "ExecutorPort");
 }
 
