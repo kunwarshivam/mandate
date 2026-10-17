@@ -2915,6 +2915,28 @@ enables `live` (ES-23, OPS-5).
   Agents create no cloud resource and spend nothing. Follow-ups: rotating the ops tunnel's first
   token (DEC-2000 item 4); the `object-storage` egress CIDRs once E5-7's shipper or E21-41's backups
   run.
+- **E21-52 (Proposed, M8; SC; lane SI)** As an operator of a `dev` or `ci` cell, I want a local stub
+  token issuer, so that `cargo xtask cell demo` can open an API session without the managed issuer
+  (DEC-2100; the E2E lane's gap 1). *Accepted when:* the tool crate `mandate-stub-issuer`, which no
+  crate may depend on, serves one ES256 key set on loopback and signs access tokens the API server
+  verifies unchanged through `MANDATE_API_ISSUER`, `MANDATE_API_AUDIENCE` and `MANDATE_API_JWKS_URL`;
+  its key is made at each start and never stored; tests show that it refuses to start with
+  `stub_issuer_tier` in every tier but `dev` and `ci`, and with `stub_issuer_bind` for an address
+  that is not a loopback IP literal, port 0, or a port in use, each before any key is made; a test
+  builds it with `--release`, runs it, and sees only `stub_issuer_not_built` and exit 2; xtask's
+  profile check refuses debug assertions in `release` and every profile inheriting it; tests show
+  a wrong `Host` gets 421 and a `POST /token` without `application/json` gets 415; a test signs in
+  through `POST /v1/sessions` with a stub token for a linked subject, and is refused for a subject
+  linked under another issuer; and the E2E lane's `cell demo` runs it in the server's network
+  namespace, started before the server, once E21-53 is on `main`. Lane R1's image build (E21-8)
+  fails when `RUSTFLAGS` or `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` is set (DEC-2100 item 2).
+- **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
+  key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
+  issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
+  reads `MANDATE_DEPLOYMENT_TIER` with `mandate_release::startup::Tier::from_setting` (§3.11 item
+  2), and refuses to start with its `MANDATE_API_JWKS_URL` setting refusal when the URL is `http`
+  and the tier is anything but `dev` or `ci` (no value included), shown by a test for each tier;
+  and it still starts with an `https` URL in every tier.
 
 ## Won't (v1)
 
