@@ -332,8 +332,31 @@ pub enum ImageSource {
 /// a digest; any other host than linux/x86_64 needs one, since cargo cannot link the static Linux
 /// binary there without a cross toolchain, which no dependency kind covers (DEC-990 item 1).
 pub fn image_source(os: &str, arch: &str, pinned: Option<&str>) -> Result<ImageSource, String> {
-    let _ = (os, arch, pinned);
-    Err(String::from("image_source is a stub"))
+    match pinned.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(image) => {
+            let (_, digest) = image.split_once("@sha256:").ok_or_else(|| {
+                format!("{IMAGE_ENV}={image} names no digest; it must end in @sha256:<64 hex>")
+            })?;
+            if digest.len() == 64
+                && digest
+                    .chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+            {
+                Ok(ImageSource::Pull(image.to_string()))
+            } else {
+                Err(format!(
+                    "{IMAGE_ENV}={image} names no 64-digit lowercase digest"
+                ))
+            }
+        }
+        None if os == "linux" && arch == "x86_64" => Ok(ImageSource::Build),
+        None => Err(format!(
+            "this host is {os}/{arch}, where the static Linux `mandate` binary cannot be built; \
+             set {IMAGE_ENV} to the R2 lane's signed image by digest (E21-35). Until R2 publishes \
+             linux/arm64 and amd64 images there is none to pull, and the cell runs on linux/x86_64 \
+             only (deploy/cell/README.md, \"On a laptop\")"
+        )),
+    }
 }
 
 fn host_image_source() -> Result<ImageSource> {
