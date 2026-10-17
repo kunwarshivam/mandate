@@ -45,6 +45,8 @@ done
 # system clock. sim_now prints its reading as canonical RFC 3339, read at each process's start.
 CLI_FEATURES=()
 if [ -n "$SIM_CLOCK" ]; then
+  [[ $SIM_CLOCK =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$ ]] ||
+    { echo "--sim-clock: not an RFC 3339 instant" >&2; exit 2; }
   SIM_EPOCH_NS=$(date -u -d "$SIM_CLOCK" +%s%N) || { echo "--sim-clock: not an instant" >&2; exit 2; }
   REAL_EPOCH_NS=$(date -u +%s%N)
   CLI_FEATURES=(--features mandate-cli/rh-sim)
@@ -139,7 +141,7 @@ report() {
 # --- R0 step 1: the builds ------------------------------------------------------------------
 if [ "$BUILD" = 1 ]; then
   step 1a 'Finished' cargo build --manifest-path "$ROOT/Cargo.toml" --bins -p mandate-cli -p mandate-rh-sim \
-    "${CLI_FEATURES[@]}" || true
+    ${CLI_FEATURES[@]+"${CLI_FEATURES[@]}"} || true
   step 1b 'Finished' cargo build --manifest-path "$ROOT/Cargo.toml" --bins -p mandate-paper \
     --features live,rh-sim,mandate-mcp/rh-sim || true
   # The stored daily bars' writer (DEC-961 item 3): an example, built from dev-dependencies only.
@@ -212,7 +214,7 @@ printf '{"ask":"85.01","ask_size":"100","asset_id":"%s","bid":"84.99","bid_size"
   "$ASSET_ID" "$SYMBOL" >"$MARKET/market.json"
 BARS_AT=()
 if [ -n "$SIM_CLOCK" ]; then BARS_AT=("$(sim_now)"); fi
-step 2a0 'bars-1Day' "$BIN/examples/rehearsal_bars" "$MARKET/daily" "$SYMBOL" 85 "${BARS_AT[@]}" || true
+step 2a0 'bars-1Day' "$BIN/examples/rehearsal_bars" "$MARKET/daily" "$SYMBOL" 85 ${BARS_AT[@]+"${BARS_AT[@]}"} || true
 BARS=$(tail -n 1 "$WORK/out/2a0.out")
 BARS=${BARS:-$MARKET/daily}
 step 2a 'resource' curl -sf "${ENDPOINT%/mcp}/.well-known/oauth-protected-resource/mcp" || true

@@ -33,24 +33,39 @@ pub type RunClock = SimClock;
 #[cfg(not(feature = "rh-sim"))]
 pub type RunClock = SystemClock;
 
-/// The run clock the process reads, from its environment `vars`: [`sim_clock`] over the system
-/// clock in the `rh-sim` build.
-///
-/// # Errors
-/// [`PaperError::SimClock`] for a clock variable that is set and is not an RFC 3339 instant.
-#[cfg(feature = "rh-sim")]
-pub fn run_clock(vars: &[(String, String)]) -> Result<RunClock, PaperError> {
-    sim_clock(vars, SystemClock)
+/// A run clock as the process reads it from its environment (DEC-962 item 1).
+pub trait ReadClock: Sized {
+    /// The clock `vars` give this build.
+    ///
+    /// # Errors
+    /// [`PaperError::SimClock`] in the rehearsal build, for a clock variable that is set and is
+    /// not an RFC 3339 instant.
+    fn read(vars: &[(String, String)]) -> Result<Self, PaperError>;
 }
 
-/// The run clock the process reads: the system clock, whatever `vars` holds, in every build
-/// without `rh-sim`.
+impl ReadClock for SystemClock {
+    /// The system clock, whatever `vars` holds.
+    fn read(_vars: &[(String, String)]) -> Result<Self, PaperError> {
+        Ok(SystemClock)
+    }
+}
+
+#[cfg(any(test, feature = "rh-sim"))]
+impl ReadClock for SimClock {
+    /// [`sim_clock`] over the system clock.
+    fn read(vars: &[(String, String)]) -> Result<Self, PaperError> {
+        sim_clock(vars, SystemClock)
+    }
+}
+
+/// The run clock the process reads from its environment `vars`: this build's [`RunClock`]'s
+/// [`ReadClock::read`].
 ///
 /// # Errors
-/// None in this build.
-#[cfg(not(feature = "rh-sim"))]
-pub fn run_clock(_vars: &[(String, String)]) -> Result<RunClock, PaperError> {
-    Ok(SystemClock)
+/// [`PaperError::SimClock`] in the rehearsal build, for a clock variable that is set and is not an
+/// RFC 3339 instant.
+pub fn run_clock(vars: &[(String, String)]) -> Result<RunClock, PaperError> {
+    RunClock::read(vars)
 }
 
 /// The rehearsal's run clock: [`SIM_CLOCK_VAR`]'s instant when it was made, moved from then on

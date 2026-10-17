@@ -100,7 +100,7 @@ pub use robinhood::{
     Build, Dial, EndpointRefusal, Linked, LoggedIn, Market, MarketUnread, REHEARSAL_ENDPOINT_VAR,
     REHEARSAL_HOST, RobinhoodEndpoint, SessionMarket, dial, endpoint, pinned_host, robinhood_reads,
 };
-pub use run_clock::{RunClock, run_clock};
+pub use run_clock::{ReadClock, RunClock, run_clock};
 #[cfg(feature = "rh-sim")]
 pub use run_clock::{SIM_CLOCK_VAR, SimClock};
 pub use snapshot::LapseSnapshot;

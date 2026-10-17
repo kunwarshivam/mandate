@@ -10,8 +10,8 @@ use std::time::Duration;
 use mandate_alpaca::Pause;
 use mandate_time::UtcNanos;
 
-use super::{SIM_CLOCK_VAR, SimClock, sim_clock};
-use crate::PaperError;
+use super::{ReadClock, SIM_CLOCK_VAR, SimClock, sim_clock};
+use crate::{PaperError, SystemClock};
 
 /// A base clock a test moves by hand, held as nanoseconds since the epoch; its pause moves it by
 /// the duration and is ready at once.
@@ -175,4 +175,21 @@ fn an_unreadable_variable_refuses_the_run_and_never_falls_back_to_the_base() {
         PaperError::SimClock.to_string(),
         "the rehearsal's run clock is not an RFC 3339 instant"
     );
+}
+
+#[test]
+fn each_clock_reads_the_environment_as_its_build_does() {
+    let given = vars(Some("2026-10-19T15:00:00Z"));
+    let rehearsal = SimClock::read(&given).expect("a readable clock");
+    let moved = rehearsal.now().secs() - instant("2026-10-19T15:00:00Z").secs();
+    assert!(
+        (0..60).contains(&moved),
+        "the rehearsal clock reads the variable: {moved}"
+    );
+    assert!(matches!(
+        SimClock::read(&vars(Some("next monday"))),
+        Err(PaperError::SimClock)
+    ));
+    let system = SystemClock::read(&vars(Some("next monday"))).expect("the variable is not read");
+    assert_eq!(system, SystemClock);
 }

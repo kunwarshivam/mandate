@@ -36,11 +36,6 @@ const ACCOUNT_REF: &str = "01J0R1CHECK0ACC0VNT000000A";
 const STREAM: &str = "acct:ws_r1:01J0R1CHECK0ACC0VNT000000A";
 
 /// The DSN of the test's own schema, acting as the journal's application role.
-/// This build's run clock with no clock variable: the system's.
-fn clock() -> RunClock {
-    run_clock(&[]).unwrap()
-}
-
 fn dsn(db: &support::TestDb) -> String {
     let url = std::env::var(support::URL_VAR).unwrap();
     let joiner = if url.contains('?') { '&' } else { '?' };
@@ -182,4 +177,9 @@ fn the_connect_checks_ports_never_print_the_dsn() {
     assert!(printed.starts_with("ProductionCheck"), "{printed}");
     assert!(!printed.contains("hunter2"), "{printed}");
     assert!(!printed.contains("db-sentinel"), "{printed}");
+}
+
+/// This build's run clock with no clock variable: the system's.
+fn clock() -> RunClock {
+    run_clock(&[]).unwrap()
 }

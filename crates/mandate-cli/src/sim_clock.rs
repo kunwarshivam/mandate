@@ -41,6 +41,21 @@ pub fn owner_now(value: Option<&str>, system: Now) -> Result<Now, SimClockError>
     })
 }
 
+/// [`owner_now`] over the process's own [`SIM_CLOCK_VAR`]. A value that is not Unicode is read as
+/// empty, so it refuses rather than falling back to `system`.
+///
+/// # Errors
+/// [`SimClockError`] for a value that is not an RFC 3339 instant.
+pub fn from_env(system: Now) -> Result<Now, SimClockError> {
+    let value = std::env::var_os(SIM_CLOCK_VAR);
+    owner_now(
+        value
+            .as_ref()
+            .map(|value| value.to_str().unwrap_or_default()),
+        system,
+    )
+}
+
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
