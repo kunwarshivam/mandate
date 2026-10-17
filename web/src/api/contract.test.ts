@@ -2,12 +2,11 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type Fetch, OPERATIONS, createWorkspaceClient } from "./client";
-import { prepareApprovalResponse, prepareOwnerCommand } from "./commands";
+import { type CommandScope, prepareApprovalResponse, prepareOwnerCommand } from "./commands";
 import { createMockServer } from "./mock-server";
 import { WEB_OPERATIONS, operationFor } from "./operations";
-import { loadWorkspace } from "./reads";
+import { type ApiView, loadApi } from "./read-models";
 import type { Operation } from "./types";
-import type { Workspace } from "@/fixtures/types";
 import type { CommandKind } from "@/lib/mock-runtime";
 
 /**
@@ -81,10 +80,10 @@ function recording(scenario: "normal" | "approvals" = "approvals") {
   return { server, calls, client: createWorkspaceClient({ workspaceId: WS, fetch, baseUrl: "https://api.owlhead.ai" }) };
 }
 
-async function loaded(client: ReturnType<typeof recording>["client"]): Promise<Workspace> {
-  const result = await loadWorkspace(client);
+async function loaded(client: ReturnType<typeof recording>["client"]): Promise<{ view: ApiView; scope: CommandScope }> {
+  const result = await loadApi(client);
   if (!result.ok) throw new Error(`not loaded: ${result.error.code}`);
-  return result.ws;
+  return { view: result.view, scope: { agents: result.view.agents, connectionId: result.ws.connection.connection_id, environment: result.ws.environment } };
 }
 
 const KINDS: CommandKind[] = ["pause", "resume", "stop", "kill", "release", "pause_all", "stop_all", "close_all"];
@@ -123,15 +122,15 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
 
   it("makes no request outside the table while loading the workspace and sending every command and answer", async () => {
     const { client, calls } = recording();
-    const ws = await loaded(client);
+    const { view, scope } = await loaded(client);
     const sent = [];
     for (const kind of KINDS) {
-      const prepared = prepareOwnerCommand(client, ws, kind, kind.endsWith("_all") ? null : ws.agents[0].agent_id, { screen: "D10", environment: ws.environment, title: "Stop", shown: ["one line"], modes: [] });
+      const prepared = prepareOwnerCommand(client, scope, kind, kind.endsWith("_all") ? null : view.agents[0].agent_id, { screen: "D10", environment: scope.environment, title: "Stop", shown: ["one line"], modes: [] });
       if (prepared.ok) for (const command of prepared.commands) sent.push(await client.send(command));
     }
-    for (const approval of ws.approvals.filter((a) => a.status === "delivered"))
+    for (const approval of view.approvals.filter((a) => a.state === "pending"))
       for (const response of ["approve", "skip"] as const) {
-        const prepared = prepareApprovalResponse(client, approval, response, { screen: "D6", environment: ws.environment, shown: ["line"], modelOutputExpanded: false });
+        const prepared = prepareApprovalResponse(client, approval, response, { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: false });
         if (prepared.ok) for (const command of prepared.commands) sent.push(await client.send(command));
       }
     for (const outcome of sent) if (outcome.ok) await client.commandStatus(outcome.accepted.event_id);
@@ -145,16 +144,16 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
 
   it("sends each command body its request schema allows: every required member, and no other", async () => {
     const { client } = recording();
-    const ws = await loaded(client);
+    const { view, scope } = await loaded(client);
     const bodies: Array<{ operation: Operation; body: Record<string, unknown> }> = [];
     for (const kind of KINDS) {
-      const prepared = prepareOwnerCommand(client, ws, kind, kind.endsWith("_all") ? null : ws.agents[0].agent_id, { screen: "D10", environment: ws.environment, title: "Stop", shown: ["one line"], modes: [] });
+      const prepared = prepareOwnerCommand(client, scope, kind, kind.endsWith("_all") ? null : view.agents[0].agent_id, { screen: "D10", environment: scope.environment, title: "Stop", shown: ["one line"], modes: [] });
       if (prepared.ok) for (const c of prepared.commands) bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
     }
-    const approval = ws.approvals.find((a) => a.status === "delivered");
+    const approval = view.approvals.find((a) => a.state === "pending");
     if (!approval) throw new Error("the approvals fixture has an open request");
     for (const response of ["approve", "skip"] as const) {
-      const prepared = prepareApprovalResponse(client, approval, response, { screen: "D6", environment: ws.environment, shown: ["line"], modelOutputExpanded: true });
+      const prepared = prepareApprovalResponse(client, approval, response, { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: true });
       if (prepared.ok) for (const c of prepared.commands) bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
     }
     expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response"]));

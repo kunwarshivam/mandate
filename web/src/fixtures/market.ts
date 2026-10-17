@@ -436,7 +436,8 @@ export function buildMarket(ws: Workspace): Market {
   if (hit) return hit;
   const start = unix(WINDOW_START_ISO);
   const stale = ws.health.market_data.state !== "ok";
-  const end = floorMinute(stale ? unix(ws.health.market_data.as_of) : unix(ws.now));
+  const lastMark = ws.health.market_data.as_of;
+  const end = floorMinute(stale && lastMark !== null ? unix(lastMark) : unix(ws.now));
 
   const owners = new Map<string, Owner>();
   const classes = new Map<string, AssetClass>();

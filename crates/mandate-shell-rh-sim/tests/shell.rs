@@ -484,7 +484,9 @@ fn the_reconciler_reads_only_the_agentic_account_and_maps_its_snapshot() {
 }
 
 /// The positions and working orders are the broker's as `mandate-robinhood` read them, a part
-/// filled order included, and the account is mapped the same way whatever the account holds.
+/// filled order included and named by the key it was placed under (DEC-1151 item 6), and the
+/// account is mapped the same way whatever the account holds: the fill spent 498 of the cash, and
+/// the buying power is clamped to what is left.
 #[test]
 fn the_reconcilers_snapshot_lists_what_the_account_holds() {
     let server = read_server_echoing(true);
@@ -509,7 +511,7 @@ fn the_reconcilers_snapshot_lists_what_the_account_holds() {
     };
     let working = BrokerOrder {
         broker_order_id: order.broker_order_id.clone(),
-        client_order_id: None,
+        client_order_id: Some(key("01JOPEN").as_str().to_owned()),
         instrument: InstrumentId::new("SPY").unwrap(),
         side: Way::Buy,
         qty: qty("2"),
@@ -522,7 +524,17 @@ fn the_reconcilers_snapshot_lists_what_the_account_holds() {
         legs: Vec::new(),
         created_on: None,
     };
-    assert_eq!(snapshot, startup(vec![working], vec![position]));
+    let left = Usd::parse("252.25").unwrap();
+    let mut expected = startup(vec![working], vec![position]);
+    expected.account = BrokerAccount {
+        equity: left,
+        cash: left,
+        buying_power: left,
+        non_marginable_buying_power: left,
+        maintenance_margin: left,
+        ..mapped_account()
+    };
+    assert_eq!(snapshot, expected);
 }
 
 #[test]
@@ -898,5 +910,41 @@ fn a_listing_names_our_order_by_the_broker_id_its_place_answered() {
         named(stranger.connector.call(&listing)),
         vec![(None, "filled".to_owned())],
         "a connector that holds no id for the key names nothing"
+    );
+}
+
+/// R0's R21 (DEC-1151 item 6): a broker that does not echo our `ref_id` lists our working order
+/// with none, so the snapshot names it by the order id this connector's place answered, and the
+/// reconciliation finds it ours rather than the broker's alone. A connector that never placed the
+/// order, and so holds no id for it, names nothing.
+#[test]
+fn a_snapshot_names_our_working_order_by_the_broker_id_its_place_answered() {
+    let server = read_server_echoing(false);
+    let mut placing = shell(&server);
+    submitted(placing.connector.call(&buy("01JOPEN")));
+    let named = |shell: &mut Shell<'_>| {
+        let Shell {
+            connector,
+            reconciler,
+            ..
+        } = shell;
+        reconciler
+            .snapshot(connector, &snapshot_requests())
+            .unwrap()
+            .open_orders
+            .into_iter()
+            .map(|order| order.client_order_id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        named(&mut placing),
+        [Some(key("01JOPEN").as_str().to_owned())],
+        "named by the id the place answered"
+    );
+    let mut stranger = shell(&server);
+    assert_eq!(
+        named(&mut stranger),
+        [None],
+        "a connector that holds no id names nothing"
     );
 }

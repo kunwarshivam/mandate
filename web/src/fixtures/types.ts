@@ -10,6 +10,8 @@ export type ContentRef = `sha256:${string}`;
 export type Iso = string;
 
 export type Environment = "paper" | "live";
+/** What a screen shows: an environment, or "unknown" when nothing served names one, never a guess (DEC-1096). */
+export type ShownEnvironment = Environment | "unknown";
 export type AssetClass = "crypto" | "us_equity";
 export type AgentMode = "normal" | "exits_only" | "paused" | "stopped";
 
@@ -413,11 +415,17 @@ export interface ExternalPosition {
 
 export type HealthState = "ok" | "stale" | "down";
 
+/** One feed: its state, and when it was last true, `null` when nothing reports it (a client clock never stands in; DEC-1096). */
+export interface HealthFeed {
+  state: HealthState;
+  as_of: Iso | null;
+}
+
 export interface Health {
-  market_data: { state: HealthState; as_of: Iso };
-  broker: { state: HealthState; as_of: Iso };
-  deployment: { state: HealthState; as_of: Iso };
-  relay: { state: HealthState; as_of: Iso };
+  market_data: HealthFeed;
+  broker: HealthFeed;
+  deployment: HealthFeed;
+  relay: HealthFeed;
 }
 
 export interface Connection {
@@ -451,7 +459,7 @@ export interface Workspace {
   /** Whether the deployment answers commands with a journal entry, or goes quiet after taking them. */
   journal: "answers" | "silent";
   now: Iso;
-  environment: Environment;
+  environment: ShownEnvironment;
   connection: Connection;
   /**
    * Distinct active members with the approver role, which V-024 counts for a two-approver threshold
