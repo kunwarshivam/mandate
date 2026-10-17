@@ -769,6 +769,7 @@ fn more_calls_than_a_turn_may_hold_end_the_run_error() {
 #[test]
 fn a_run_ended_early_discards_nothing_it_never_held() {
     let mut state = final_output_run(LoopBounds::v0_2());
+    assert_eq!(state.result_bytes_left(), 96_000);
     let plan = state.end(EndReason::Deadline).expect("a cancelled run");
     assert_eq!(plan.reason, EndReason::Deadline);
     assert!(plan.commit.is_empty() && plan.discarded.is_empty());
@@ -1127,4 +1128,67 @@ fn a_folded_refusal_must_be_the_one_the_reply_produced() {
         ),
         "a result for a call that was never out"
     );
+}
+
+#[test]
+fn a_done_end_the_loop_did_not_decide_is_refused() {
+    let mut fresh = final_output_run(LoopBounds::v0_2());
+    assert!(matches!(
+        fresh.end(EndReason::Done(None)),
+        Err(ResearchRunError::LoopOrder { .. })
+    ));
+    let bounds = LoopBounds {
+        max_theses: 0,
+        ..LoopBounds::v0_2()
+    };
+    let mut capped = RunState::start(start_with(OutputMode::ActionTools, action_menu(), bounds));
+    let step = capped
+        .on_reply(&reply(
+            1,
+            10,
+            vec![call(0, Tool::ProposeThesis, r#"{"instrument":"AAPL"}"#)],
+        ))
+        .expect("turn 1");
+    assert_eq!(step.ends, Some(EndReason::Bound(Bound::MaxTheses)));
+    for wrong in [
+        EndReason::Done(None),
+        EndReason::Done(Some(Bound::MaxTurns)),
+    ] {
+        assert!(matches!(
+            capped.clone().end(wrong),
+            Err(ResearchRunError::LoopOrder { .. })
+        ));
+    }
+    capped
+        .end(EndReason::Bound(Bound::MaxTheses))
+        .expect("the loop's own end");
+    let mut done = final_output_run(LoopBounds::v0_2());
+    done.on_reply(&reply(1, 10, Vec::new()))
+        .expect("the final reply");
+    assert!(matches!(
+        done.clone().end(EndReason::Done(Some(Bound::MaxTurns))),
+        Err(ResearchRunError::LoopOrder { .. })
+    ));
+    done.end(EndReason::Mode)
+        .expect("a cancellation still ends a run that would have been done");
+}
+
+#[test]
+fn on_the_last_turn_with_no_call_left_the_done_shape_is_max_turns() {
+    let bounds = LoopBounds {
+        max_turns: 2,
+        max_tool_calls: 1,
+        ..LoopBounds::v0_2()
+    };
+    let mut state = final_output_run(bounds);
+    state
+        .on_reply(&reply(1, 10, vec![call(0, Tool::Note, r#"{"text":"x"}"#)]))
+        .expect("turn 1");
+    state
+        .on_results(&[ok_result(1, 0, 4, Vec::new())])
+        .expect("its result");
+    let step = state
+        .on_reply(&reply(2, 10, Vec::new()))
+        .expect("the final reply");
+    assert_eq!(step.ends, Some(EndReason::Done(Some(Bound::MaxTurns))));
 }
