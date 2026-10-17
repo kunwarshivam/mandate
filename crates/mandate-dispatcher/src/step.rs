@@ -1,6 +1,7 @@
 //! The dispatcher's step over the journal, its outbox (notifications spec §5.1, NT-3, NT-8; E8-10
 //! slice D2, DEC-701 item 3, DEC-704). A [`step`] reads the committed `OwnerAlertSent` events of
-//! its subject streams, journals one `NoticeIssued` per cause before any send, sends each notice
+//! its subject streams and the `ApprovalRequested` events of their agent streams (slice D7a,
+//! DEC-2501), journals one `NoticeIssued` per cause before any send, sends each notice
 //! to each recipient's push channel and again on §5.3's schedule while it fails `retryable`
 //! ([`crate::due`], slice D4, DEC-707), and journals each outcome, and each send abandoned at its
 //! window's end, as `NoticeAttempted`. Every
@@ -81,7 +82,8 @@ pub trait Journal {
 #[derive(Debug, Clone, Copy)]
 pub struct Config<'a> {
     pub writer: &'a NoticeWriter,
-    /// The workspace's agent, account, and control streams, whose alerts are causes.
+    /// The workspace's agent, account, and control streams, whose alerts, and the agent streams'
+    /// approval requests, are causes (DEC-2501 item 1).
     pub subjects: &'a [StreamId],
     /// The push channels, by opaque recipient id, every notice goes to until roles exist (E9-2;
     /// spec §3.3, DEC-704 item 4).
@@ -92,8 +94,9 @@ pub struct Config<'a> {
     pub build: &'a str,
 }
 
-/// A committed `OwnerAlertSent` as the step reads it: its event id and stream, its kind, its
-/// owner command, and whether it is on a control stream (DEC-705).
+/// A committed `OwnerAlertSent` or `ApprovalRequested` as the step reads it: its event id and
+/// stream, its kind, its owner command (none for a request), and whether it is on a control stream
+/// (DEC-705, DEC-2501).
 struct Cause {
     event: String,
     stream: String,
@@ -296,13 +299,25 @@ impl Record {
     }
 }
 
-/// The committed `OwnerAlertSent` of the subject streams, the streams in the order given and each
-/// in `seq` order. A batch the journal refused, a fenced one included, has no row, so it is no
-/// cause (spec §5.1 step 1, NT-8).
+/// The committed causes of the subject streams, the streams in the order given and each in `seq`
+/// order: every `OwnerAlertSent`, and every `ApprovalRequested` on an agent stream, read by its
+/// envelope alone and never its payload (DEC-2501 items 1 and 5). An `ApprovalRequested` on any
+/// other stream is no cause, so rule 125 never refuses the batch it would join. A batch the
+/// journal refused, a fenced one included, has no row, so it is no cause (spec §5.1 step 1, NT-8).
 fn causes(journal: &dyn Journal, subjects: &[StreamId]) -> Vec<Cause> {
     let mut alerts = Vec::new();
     for stream in subjects {
         for row in journal.committed(stream) {
+            if row.event_type == "ApprovalRequested" && stream.stream_type() == StreamType::Agent {
+                alerts.push(Cause {
+                    event: row.event_id,
+                    stream: stream.as_str().to_owned(),
+                    kind: "approval_requested".to_owned(),
+                    command: None,
+                    control: false,
+                });
+                continue;
+            }
             let alert = payload(&row).filter(|_| row.event_type == "OwnerAlertSent");
             let Some(alert) = alert else { continue };
             alerts.push(Cause {
