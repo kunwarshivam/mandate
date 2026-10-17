@@ -269,6 +269,14 @@ environment, on Saturday 2026-10-17, with `--sim-clock 2026-10-20T15:00:00Z`:**
 
 **The rehearsal stops here, at R23.**
 
+R23 stays Proposed (DEC-1152 item 4), so the stricter refusal stands. The script's 2u now
+expects today's refusal, `the account the connection binds is not flat`, and passes; the runbook
+(first live trade, F.4) tells the founder a spent record refuses as `not flat` until R23 is
+decided. When R23 is decided for a zero row read as flat, 2u's expectation moves back to `the
+connection record is spent`. Re-run on 2026-10-17 with `--sim-clock 2026-10-20T15:00:00Z`: every
+step passes and the script exits 0; 2u reads `the account the connection binds is not flat`
+before any place call, and verify reads ctl 1 to 11, agent 1 to 12, acct 1 to 31 as before.
+
 ## The step table (R22's code fixed and the stop's trigger scripted, run on 2026-10-17 with `--sim-clock 2026-10-20T15:00:00Z`)
 
 | Step | R0 | Result | Output (last line) |

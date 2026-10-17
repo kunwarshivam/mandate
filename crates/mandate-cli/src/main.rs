@@ -8,6 +8,7 @@ use mandate_cli::connection::ConnectionCommand;
 use mandate_cli::control::Now;
 use mandate_cli::db::DbCommand;
 use mandate_cli::gestures::{AgentCommand, VersionCommand};
+use mandate_cli::identity::IdentityCommand;
 use mandate_cli::inbox::ApprovalsCommand;
 use mandate_cli::journal::JournalCommand;
 use mandate_cli::register::{ConfigCommand, ModelCommand};
@@ -16,8 +17,8 @@ use mandate_cli::sim_clock::from_env;
 use mandate_cli::vault::VaultCommand;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
-    Cli, Command, artifact, connection, db, download, gestures, inbox, inspect, journal, register,
-    vault, workspace,
+    Cli, Command, artifact, connection, db, download, gestures, identity, inbox, inspect, journal,
+    register, vault, workspace,
 };
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
@@ -120,6 +121,10 @@ fn main() -> anyhow::Result<()> {
                 last
             };
             workspace::found(&args, &mut clock, &mut io::stdout().lock()).map(drop)
+        }
+        Command::Identity(IdentityCommand::Link(args)) => {
+            let linked = identity::link(&args, &mut io::stdin().lock(), &mut io::stdout().lock());
+            linked.map(drop).map_err(Into::into)
         }
         Command::Connection(ConnectionCommand::Record(args)) => {
             connection::run(&args, now()?, &mut io::stdout().lock()).map(drop)
