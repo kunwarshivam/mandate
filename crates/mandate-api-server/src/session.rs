@@ -118,11 +118,13 @@ struct Entry {
     opened: u64,
     absolute_until: i64,
     last_active: i64,
+    /// The digest of the secret the last granted refresh rotated away, and when.
+    previous: Option<([u8; 32], i64)>,
 }
 
 /// How long, in seconds, a cookie a refresh just rotated away still admits a call other than a
 /// refresh (DEC-1022).
-pub const ROTATION_GRACE_S: i64 = 0;
+pub const ROTATION_GRACE_S: i64 = 30;
 
 const ID_BYTES: usize = 16;
 const SECRET_BYTES: usize = 32;
@@ -226,6 +228,7 @@ impl Sessions {
                 opened,
                 absolute_until: now.secs().saturating_add(limits.absolute_s()),
                 last_active: now.secs(),
+                previous: None,
             },
         );
         Ok(self.encode(&id, &secret))
@@ -263,6 +266,7 @@ impl Sessions {
         match refreshed {
             Ok(Refreshed::Rotated { .. }) => {
                 entry.last_active = now.secs();
+                entry.previous = Some((digest_of(&secret), now.secs()));
                 Ok(Some(self.encode(&id, &next)))
             }
             Ok(Refreshed::Outage) => Ok(None),
@@ -296,7 +300,10 @@ impl Sessions {
     /// (§3.11 item 6); that refresh needs no randomness and the store's lock is recovered if
     /// poisoned, so neither can refuse risk reduction. A cookie whose tag verifies but whose
     /// secret is not the current one can only be one this session rotated away (the tag proves the
-    /// server issued that id and secret together): it ends the session, as reuse.
+    /// server issued that id and secret together). The one the last refresh rotated away still
+    /// admits a call for [`ROTATION_GRACE_S`] after it, so a call in flight across a refresh is
+    /// served (it takes no outage refresh, which needs the current secret); any other is refused
+    /// and the session kept. Only [`Sessions::refresh`] treats it as reuse (DEC-1022).
     ///
     /// # Errors
     /// [`Unauthenticated`] for every refusal.
@@ -309,12 +316,15 @@ impl Sessions {
         let (id, secret) = self.decode(cookie).ok_or(Unauthenticated)?;
         let mut store = self.store();
         let entry = store.entries.get_mut(&id).ok_or(Unauthenticated)?;
-        if !holds(entry, &secret) {
-            store.entries.remove(&id);
+        let current = holds(entry, &secret);
+        let graced = entry.previous.is_some_and(|(digest, rotated)| {
+            digest == digest_of(&secret) && now.secs() <= rotated.saturating_add(ROTATION_GRACE_S)
+        });
+        if !(current || graced) {
             return Err(Unauthenticated);
         }
         let mut admitted = entry.record.authorize(request, now);
-        if admitted == Err(SessionRefusal::AccessExpired) && request != Request::Other {
+        if current && admitted == Err(SessionRefusal::AccessExpired) && request != Request::Other {
             let outage = entry.record.refresh(
                 &RefreshSecret(secret),
                 ProviderAnswer::Unreachable,
