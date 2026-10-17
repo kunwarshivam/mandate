@@ -5,7 +5,8 @@
 # No pull-request job can reach it (ES-12): `web.yml` builds and dry-runs the same Worker with no
 # credential. The build gets only the public `NEXT_PUBLIC_*` variables (DEC-823 item 5); the token
 # and the account ID reach the deploy step alone, after the bundle is built, so neither can be
-# inlined into it. `web/scripts/workers.mjs` checks this shape, and that nothing else deploys.
+# inlined into it. `web/scripts/workers.mjs` checks this shape, and that nothing else deploys. The job
+# is off until the repository variable `WEB_DEPLOY_ENABLED` is `true` (DEC-1005 item 7).
 name: web-deploy
 
 on:
@@ -24,7 +25,10 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/main'
+    # Off until the founder accepts DEC-1005 and sets the repository variable WEB_DEPLOY_ENABLED to
+    # true: a job-level condition cannot read the environment's own variables, so it is the
+    # repository's. While it is unset the job is skipped and nothing reads the token.
+    if: github.ref == 'refs/heads/main' && vars.WEB_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     environment: production
     # 15 minutes: the build takes about five; the cap clears a queue, not a hang.

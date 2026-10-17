@@ -152,6 +152,8 @@ const DEPLOY_WORKFLOW = "../.github/workflows/web-deploy.yml";
 const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".github", "workflows");
 /** The deploy workflow's triggers, exactly: a push to `main` touching the app, or a dispatch (DEC-1005 item 1). */
 const DEPLOY_TRIGGERS = ["on:", "  push:", "    branches: [main]", "    paths:", '      - "web/**"', '      - ".github/workflows/web-deploy.yml"', "  workflow_dispatch:"].join("\n");
+/** The deploy job's condition, exactly: `main`, and the switch the founder sets once DEC-1005 is accepted (DEC-1005 item 7). */
+const DEPLOY_IF = "    if: github.ref == 'refs/heads/main' && vars.WEB_DEPLOY_ENABLED == 'true'";
 /** The one step that deploys, and the only secret and variables it may read (DEC-1005 items 2 and 3). */
 const DEPLOY_STEP = { run: "npx wrangler deploy", secrets: ["CLOUDFLARE_API_TOKEN"], vars: ["CLOUDFLARE_ACCOUNT_ID"] };
 /** The deploy workflow's top-level keys: nothing that sets an environment or defaults for every job. */
@@ -236,7 +238,7 @@ function deployWorkflowProblems(tree) {
   const job = jobs[0];
   const [settings, ...steps] = splitAt(job.slice(1), (line) => /^ {6}- /.test(line));
   const has = (lines, wanted) => lines.includes(wanted);
-  if (!has(settings, "    if: github.ref == 'refs/heads/main'")) fail("the deploy job must run only on refs/heads/main (DEC-1005 item 1)");
+  if (!has(settings, DEPLOY_IF)) fail("the deploy job must run only on refs/heads/main, and only once WEB_DEPLOY_ENABLED is true (DEC-1005 items 1 and 7)");
   if (!has(settings, "    environment: production")) fail("the deploy job must use the production environment, which holds the token (DEC-1005 item 2)");
   if (!settings.join("\n").includes("    permissions:\n      contents: read")) fail("the deploy job may only read contents (DEC-1005 item 3)");
   if (!has(job, "          persist-credentials: false")) fail("the checkout must not persist credentials (DEC-1005 item 3)");
@@ -254,7 +256,8 @@ function deployWorkflowProblems(tree) {
     if (vars.some((name) => (isDeploy ? !DEPLOY_STEP.vars.includes(name) : !PUBLIC_VARS.test(name)))) fail(`the build may read only NEXT_PUBLIC_ variables, and the deploy step only ${DEPLOY_STEP.vars.join(", ")} (DEC-1005 item 2)`);
   }
   const outsideSteps = [...[...blocks.entries()].filter(([key]) => key !== "jobs").flatMap(([, block]) => block), ...header, ...settings].join("\n");
-  if (references(outsideSteps, "secrets").length > 0 || references(outsideSteps, "vars").length > 0) fail("only a step may read a secret or a variable, never the whole job (DEC-1005 item 2)");
+  const gated = outsideSteps.replace(DEPLOY_IF, "");
+  if (references(gated, "secrets").length > 0 || references(gated, "vars").length > 0) fail("only a step may read a secret or a variable, never the whole job (DEC-1005 item 2)");
   const sanctioned = deploying.length === 1 ? lines.filter((line) => !deploying[0].includes(line)) : lines;
   problems.push(...deployProblems(DEPLOY_WORKFLOW, sanctioned));
   return [...new Set(problems)];

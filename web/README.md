@@ -26,7 +26,8 @@ npm test
 npm run pending    # every pending test fails at its stub when un-skipped (DEC-750)
 npm run build && npm start
 npm run cf:build   # the Cloudflare Worker through OpenNext (DEC-823, DEC-731); npm run cf:preview runs it locally
-                   # main deploys it through .github/workflows/web-deploy.yml alone (DEC-1005)
+                   # main deploys it through .github/workflows/web-deploy.yml alone, once the repository
+                   # variable WEB_DEPLOY_ENABLED is true (DEC-1005)
 npm run shots      # every screen as PNG files with a contact sheet in .shots/, against a running dev server (DEC-516)
 
 npx playwright install --with-deps --only-shell chromium   # once

@@ -160,7 +160,7 @@ describe("only the deploy job deploys, from main, through the production environ
     expect(hostingProblems(tree({ [DEPLOY]: null }))).toEqual(only("web-deploy.yml: missing"));
     const yml = deployYml();
     expect(yml).toContain("    environment: production\n");
-    expect(yml).toContain("    if: github.ref == 'refs/heads/main'\n");
+    expect(yml).toContain("    if: github.ref == 'refs/heads/main' && vars.WEB_DEPLOY_ENABLED == 'true'\n");
     expect(yml.match(/\bsecrets\.[A-Z_]+/g)).toEqual(["secrets.CLOUDFLARE_API_TOKEN"]);
   });
 
@@ -179,8 +179,12 @@ describe("only the deploy job deploys, from main, through the production environ
   });
 
   it("pending E21-38: flags a deploy job that may run off main, without the production environment, with more rights, or beside another job", () => {
-    expect(deployWith((y) => y.replace("    if: github.ref == 'refs/heads/main'\n", ""))).toEqual(only("refs/heads/main"));
-    expect(deployWith((y) => y.replace("    if: github.ref == 'refs/heads/main'\n", "    if: always()\n"))).toEqual(only("refs/heads/main"));
+    const gate = "    if: github.ref == 'refs/heads/main' && vars.WEB_DEPLOY_ENABLED == 'true'\n";
+    expect(deployWith((y) => y.replace(gate, ""))).toEqual(only("refs/heads/main"));
+    expect(deployWith((y) => y.replace(gate, "    if: always()\n"))).toEqual(only("refs/heads/main"));
+    expect(deployWith((y) => y.replace(gate, "    if: github.ref == 'refs/heads/main'\n"))).toEqual(only("WEB_DEPLOY_ENABLED"));
+    expect(deployWith((y) => y.replace(gate, "    if: vars.WEB_DEPLOY_ENABLED == 'true'\n"))).toEqual([expect.stringContaining("WEB_DEPLOY_ENABLED"), expect.stringContaining("never the whole job")]);
+    expect(deployWith((y) => y.replace(gate, "    if: github.ref == 'refs/heads/main' || vars.WEB_DEPLOY_ENABLED == 'true'\n"))).toEqual([expect.stringContaining("WEB_DEPLOY_ENABLED"), expect.stringContaining("never the whole job")]);
     expect(deployWith((y) => y.replace("    environment: production\n", ""))).toEqual(only("production environment"));
     expect(deployWith((y) => y.replace("    environment: production\n", "    environment: staging\n"))).toEqual(only("production environment"));
     expect(deployWith((y) => y.replace("      contents: read\n", "      contents: write\n"))).toEqual(only("only read contents"));
