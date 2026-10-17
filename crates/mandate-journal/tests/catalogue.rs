@@ -92,7 +92,8 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("OwnerAcknowledged", &[ACCT, CTL], &[]),
     ("ConfigSnapshotRegistered", &[CTL], &[]),
     ("SurveillanceReportGenerated", &[CTL], &[RULE]),
-    ("BacktestRunRecorded", &[CTL], &[RULE]),
+    ("BacktestRunRecorded", &[CTL], &[RULE, MAN]),
+    ("EvaluationRunRecorded", &[CTL], &[RULE]),
     ("PlatformOperatorAction", &[CTL], &[]),
     ("AnchorComputed", &[CTL], &[]),
     ("VerificationRun", &[CTL], &[]),
@@ -241,6 +242,12 @@ const CLOSED_BY_E12_3: [&str; 3] = ["RecordsAccessed", "ExportCreated", "Verific
 /// each becomes.
 const CLOSED_BY_SECTION_9_14: [&str; 2] = ["AnchorComputed", "SegmentExported"];
 
+/// The backtest and evaluation records journal spec v0.45 §9.18 closes at schema version 1
+/// (DEC-1001, DEC-1002), registered by E4-5 and E17-8, so
+/// [`stream_types_and_required_config_refs_match_the_spec`] leaves their schema reason alone;
+/// `tests/backtest_records.rs` asserts each against its vectors.
+const CLOSED_BY_SECTION_9_18: [&str; 2] = ["BacktestRunRecorded", "EvaluationRunRecorded"];
+
 /// The account stream's snapshot, which §9.2 closes with rule 24 and its registration routes there
 /// (DEC-402). It is kept apart from the eleven pairs until that registration is implemented.
 const SNAPSHOT_ON_ACCOUNT: (&str, &str) = ("AccountSnapshotRecorded", ACCT);
@@ -337,6 +344,7 @@ fn stream_types_and_required_config_refs_match_the_spec() {
                 && !section_9_7
                 && !CLOSED_BY_E12_3.contains(event_type)
                 && !CLOSED_BY_SECTION_9_14.contains(event_type)
+                && !CLOSED_BY_SECTION_9_18.contains(event_type)
             {
                 assert_eq!(with_all.reason, expected, "{event_type} in {kind}");
             }
