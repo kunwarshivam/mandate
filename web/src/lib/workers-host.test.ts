@@ -257,6 +257,22 @@ describe("only the deploy job deploys, from main, through the production environ
     expect(hostingProblems(tree({ [ci]: yml.replace(/^jobs:\n/m, "jobs:\n  leak:\n    environment:\n      name: 'Production'\n    runs-on: ubuntu-24.04\n    steps:\n      - run: true\n") }))).toEqual(only("ci.yml: names the production environment"));
     expect(hostingProblems(tree({ [ci]: `${yml}\n# \${{ secrets.CLOUDFLARE_API_TOKEN }}\n` }))).toEqual(only("ci.yml: holds a CLOUDFLARE_"));
   });
+
+  it("pending E21-38: lets r2-lockcheck.yml use the production environment only exactly as reviewed, and flags any edit to it (DEC-1091)", () => {
+    expect(hostingProblems(tree())).toEqual([]);
+    const r2 = "../.github/workflows/r2-lockcheck.yml";
+    const yml = real(r2);
+    for (const edit of [
+      yml.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request:\n"),
+      yml.replace("    if: github.ref == 'refs/heads/main'\n", ""),
+      yml.replace("R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}", "R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}\n          LEAK: ${{ toJSON(secrets) }}"),
+      `${yml}\n# a comment\n`,
+    ]) {
+      expect(edit).not.toBe(yml);
+      expect(hostingProblems(tree({ [r2]: edit })), edit).toEqual(expect.arrayContaining([expect.stringContaining("r2-lockcheck.yml: differs from the reviewed")]));
+    }
+    expect(hostingProblems(tree({ [r2]: `${yml}      - run: npx wrangler deploy\n` }))).toEqual(expect.arrayContaining([expect.stringContaining("r2-lockcheck.yml: runs")]));
+  });
 });
 
 /** A dry run's output directory holding `files`, removed after `check`. */
