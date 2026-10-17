@@ -35,8 +35,8 @@ use mandate_num::{Fraction, Price, Qty, Usd};
 use mandate_robinhood::Quote;
 
 use crate::{
-    Args, BrokerAsk, CollarMembers, Connection, ConnectionRefusal, Opening, PaperError, Ports,
-    QuoteRefusal, SystemClock, run,
+    Args, BrokerAsk, CollarMembers, Connection, ConnectionRefusal, Dial, Opening, PaperError,
+    Ports, QuoteRefusal, SystemClock, run,
 };
 
 /// The paper mandate fixture the suite derives its deployed document from
@@ -73,7 +73,11 @@ impl Ports for Probe {
             .ok_or(PaperError::Control)
     }
 
-    fn connect(&mut self, _connection: &Connection) -> Result<AlpacaPaperHttp, PaperError> {
+    fn connect(
+        &mut self,
+        _connection: &Connection,
+        _dial: Option<&Dial>,
+    ) -> Result<AlpacaPaperHttp, PaperError> {
         self.connects.set(self.connects.get().saturating_add(1));
         Err(PaperError::Credentials)
     }

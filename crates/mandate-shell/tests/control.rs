@@ -12,7 +12,7 @@ use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
 use mandate_num::Usd;
 use mandate_shell::control::{
     Build, Confirmation, ConfirmedVersion, ControlRecord, DeploymentRefusal as Refusal, DoorChecks,
-    LiveAdmission, McpHost, RunFacts, confirmed_version,
+    LiveAdmission, McpHost, RunFacts, checked_before_credentials, confirmed_version,
 };
 use mandate_spec::context::{AgentId, Membership};
 use mandate_spec::{Mandate, Violation};
@@ -127,6 +127,12 @@ impl Stream {
 
     fn refused(&self) -> Option<Refusal> {
         self.read().err()
+    }
+
+    /// The fold's checks before any credential, for a run that supplies `live` (DEC-947 item 2).
+    fn checked(&self, live: LiveAdmission) -> Result<(), Refusal> {
+        let run = RunFacts { live, ..run() };
+        checked_before_credentials(&self.records, &self.store, &run)
     }
 }
 
@@ -491,4 +497,129 @@ proptest! {
         let paper = Stream::deployed();
         prop_assert_eq!(paper.read_admitting(live), paper.read());
     }
+}
+
+/// DEC-947 item 2: before any credential, the fold runs every check it makes and admits a live
+/// deployment on the three conditions a run holds before it reads one (the `live` build,
+/// `--confirm-live`, and the dialed host equal to the pin); the door's own condition is the one
+/// it leaves for after the snapshot. It confirms nothing: it answers no version, only whether the
+/// run may go on to read the credential.
+#[test]
+fn before_credentials_the_fold_admits_on_every_condition_but_the_door() {
+    let stream = live_deployment();
+    let before = LiveAdmission {
+        door: DoorChecks::NotPassed,
+        ..admitted()
+    };
+    assert_eq!(stream.checked(before.clone()), Ok(()));
+    assert_eq!(stream.checked(admitted()), Ok(()), "the door passed too");
+    assert_eq!(
+        stream.read_admitting(before.clone()).err(),
+        Some(Refusal::Live),
+        "the full fold still needs the door"
+    );
+    let host = |dialed: &str| McpHost {
+        dialed: Some(dialed.to_owned()),
+        pinned: Some(PINNED),
+    };
+    let missing = [
+        (
+            "the default build",
+            LiveAdmission {
+                build: Build::Default,
+                ..before.clone()
+            },
+        ),
+        (
+            "no --confirm-live",
+            LiveAdmission {
+                confirmation: Confirmation::Absent,
+                ..before.clone()
+            },
+        ),
+        (
+            "another host",
+            LiveAdmission {
+                host: host("mcp.other.example"),
+                ..before.clone()
+            },
+        ),
+        (
+            "no host dialed",
+            LiveAdmission {
+                host: McpHost {
+                    dialed: None,
+                    pinned: Some(PINNED),
+                },
+                ..before.clone()
+            },
+        ),
+        (
+            "no host pinned",
+            LiveAdmission {
+                host: McpHost {
+                    dialed: Some(PINNED.to_owned()),
+                    pinned: None,
+                },
+                ..before.clone()
+            },
+        ),
+        (
+            "an empty pin",
+            LiveAdmission {
+                host: McpHost {
+                    dialed: Some(String::new()),
+                    pinned: Some(""),
+                },
+                ..before.clone()
+            },
+        ),
+        ("every one", LiveAdmission::refusing()),
+    ];
+    for (case, live) in missing {
+        assert_eq!(stream.checked(live), Err(Refusal::Live), "{case}");
+    }
+}
+
+/// DEC-947 item 2: the check before credentials refuses exactly what the full fold refuses beyond
+/// the door, each V-rule included, and a paper deployment answers as the full fold does.
+#[test]
+fn before_credentials_the_fold_refuses_every_v_rule_and_the_walk() {
+    let before = LiveAdmission {
+        door: DoorChecks::NotPassed,
+        ..admitted()
+    };
+    let live = json(&MANDATE.replace(r#""environment": "paper""#, r#""environment": "live""#));
+    let but_name: Vec<&str> = envelope().into_iter().filter(|p| *p != "name").collect();
+    let established = format!(
+        r#"{{"broker":"robinhood","connection_id":"{CONNECTION}","environment":"live","scopes":["trading"]}}"#
+    );
+    let unconfirmed = Stream::of(&live, &but_name).then("ConnectionEstablished", &established);
+    assert_eq!(
+        unconfirmed.checked(before.clone()).err(),
+        violations(&[Violation::V020])
+    );
+    let paper_live = format!(
+        r#"{{"broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","scopes":["trading"]}}"#
+    );
+    let mismatched = Stream::of(&live, &envelope()).then("ConnectionEstablished", &paper_live);
+    assert_eq!(
+        mismatched.checked(before.clone()).err(),
+        violations(&[Violation::V001])
+    );
+    let stopped = live_deployment().then("AgentStopped", &stop(AGENT));
+    assert_eq!(stopped.checked(before.clone()), Err(Refusal::Stopped));
+    let mut undeployed = live_deployment();
+    undeployed
+        .records
+        .retain(|r| r.event_type != "AgentDeployed");
+    assert_eq!(
+        undeployed.checked(before.clone()),
+        Err(Refusal::NotDeployed)
+    );
+    let refused = checked_before_credentials(&live_deployment().records, &Unavailable, &run());
+    assert_eq!(refused, Err(Refusal::StoreUnavailable));
+    let paper = Stream::deployed();
+    assert_eq!(paper.checked(before), Ok(()));
+    assert_eq!(paper.checked(LiveAdmission::refusing()), Ok(()));
 }

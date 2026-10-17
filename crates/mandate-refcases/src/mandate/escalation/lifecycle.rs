@@ -570,7 +570,7 @@ impl Shell {
     }
 
     fn mark(&mut self, instrument: &str, price: &str, risk_clock: i64) -> Result<(), String> {
-        let members = vec![("instrument", text(instrument)), ("price", text(price))];
+        let members = vec![("instrument_id", text(instrument)), ("price", text(price))];
         self.account("MarkUpdated", members, risk_clock)?;
         self.marks.insert(instrument.to_owned(), price.to_owned());
         Ok(())

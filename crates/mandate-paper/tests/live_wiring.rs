@@ -26,7 +26,7 @@ use mandate_paper::{
     cross_check_the_opening, granted_opening, lt10, lt10_end, reported, session_cap,
     wait_for_the_grant, watch_may_end, watched,
 };
-use mandate_shell::{AskedCycle, Cause, ShellError, Wake};
+use mandate_shell::{AskedCycle, Cause, Mark, ShellError, Wake};
 use mandate_time::UtcNanos;
 
 /// The ask's approval: the `ApprovalRequested`'s event id, an opaque id (TI-8).
@@ -1178,8 +1178,10 @@ impl AskedCycle for Cycle {
         Ok(self.agent.clone())
     }
 
-    fn wake(&mut self, now: UtcNanos) -> Result<Wake, ShellError> {
-        self.log.borrow_mut().push(format!("wake@{}", now.secs()));
+    fn wake(&mut self, now: UtcNanos, mark: &Mark) -> Result<Wake, ShellError> {
+        self.log
+            .borrow_mut()
+            .push(format!("wake@{}:{}", now.secs(), mark.price));
         match self.wakes.pop_front() {
             Some(Ok(wake)) => {
                 self.last = Some(wake.clone());
@@ -1218,6 +1220,49 @@ fn wakes_to_the_grant() -> Vec<Result<Wake, ShellError>> {
     ]
 }
 
+/// A fresh quote read that logs its call and answers the marks `prices` name in turn, read at
+/// the run's clock, the last repeated once they run out.
+fn logged_quotes(
+    log: &Rc<RefCell<Vec<String>>>,
+    prices: &[&str],
+) -> impl FnMut() -> Result<Mark, PaperError> + use<> {
+    let log = Rc::clone(log);
+    let prices: Vec<Price> = prices
+        .iter()
+        .map(|price| Price::parse(price).expect("the fixture price parses"))
+        .collect();
+    let mut read = 0;
+    move || {
+        log.borrow_mut().push("quote".to_owned());
+        let price = prices
+            .get(read)
+            .or(prices.last())
+            .copied()
+            .expect("the fixture names a price");
+        read += 1;
+        Ok(Mark {
+            price,
+            at: UtcNanos::from_parts(NOW_S, 0).expect("the fixture instant parses"),
+        })
+    }
+}
+
+/// A fresh quote read that logs its call and is refused, as a stale or failed IEX read is.
+fn refused_quotes(
+    log: &Rc<RefCell<Vec<String>>>,
+) -> impl FnMut() -> Result<Mark, PaperError> + use<> {
+    let log = Rc::clone(log);
+    move || {
+        log.borrow_mut().push("quote".to_owned());
+        Err(PaperError::Shell(ShellError::Refused {
+            stage: mandate_shell::Stage::MarketData,
+            cause: Cause::Absent {
+                what: "a current, uncrossed IEX quote at the wake",
+            },
+        }))
+    }
+}
+
 /// A cross-check that logs its call and answers `answer`.
 fn logged_check(
     log: &Rc<RefCell<Vec<String>>>,
@@ -1242,6 +1287,7 @@ fn the_opening_leaves_after_the_runtimes_grant_and_the_cross_check() {
         &mut cycle,
         &clock,
         Duration::from_secs(100),
+        logged_quotes(&log, &["255.2"]),
         logged_check(&log, Ok(())),
     );
     assert!(matches!(left, Ok(())), "{left:?}");
@@ -1249,13 +1295,16 @@ fn the_opening_leaves_after_the_runtimes_grant_and_the_cross_check() {
         *log.borrow(),
         [
             "agent",
-            "wake@1000",
-            "wake@1100",
-            "wake@1200",
+            "quote",
+            "wake@1000:255.2",
+            "quote",
+            "wake@1100:255.2",
+            "quote",
+            "wake@1200:255.2",
             "cross_check",
             "submit"
         ],
-        "bind the ask, wake per interval, then check, then the one submit"
+        "bind the ask, read a fresh quote and wake per interval, then check, then the one submit"
     );
 }
 
@@ -1271,6 +1320,7 @@ fn a_raw_answer_alone_never_submits() {
         &mut cycle,
         &clock,
         Duration::from_secs(100),
+        logged_quotes(&log, &["255.2"]),
         logged_check(&log, Ok(())),
     );
     assert!(
@@ -1286,10 +1336,14 @@ fn a_raw_answer_alone_never_submits() {
     );
     assert_eq!(
         log.borrow().last().map(String::as_str),
-        Some("wake@1900"),
+        Some("wake@1900:255.2"),
         "the last wake is the last before the deadline: none at it hands the runtime a tick"
     );
-    assert_eq!(log.borrow().len(), 11, "the binding read and ten wakes");
+    assert_eq!(
+        log.borrow().len(),
+        21,
+        "the binding read and ten wakes, each after its fresh quote"
+    );
 }
 
 /// DEC-529 item 12: a cross-check that refuses after the grant sends nothing.
@@ -1302,6 +1356,7 @@ fn a_refused_cross_check_sends_nothing() {
         &mut cycle,
         &clock,
         Duration::from_secs(100),
+        logged_quotes(&log, &["255.2"]),
         logged_check(
             &log,
             Err(PaperError::CrossCheck(QuoteRefusal::Disagreement)),
@@ -1331,13 +1386,14 @@ fn a_skipped_answer_denies_without_a_submit() {
         &mut cycle,
         &clock,
         Duration::from_secs(100),
+        logged_quotes(&log, &["255.2"]),
         logged_check(&log, Ok(())),
     );
     assert!(
         matches!(left, Err(PaperError::Grant(GrantRefusal::Denied))),
         "{left:?}"
     );
-    assert_eq!(*log.borrow(), ["agent", "wake@1000"]);
+    assert_eq!(*log.borrow(), ["agent", "quote", "wake@1000:255.2"]);
 }
 
 /// A wake the shell refuses stops the wait with the shell's own stop, and nothing is sent.
@@ -1350,6 +1406,7 @@ fn a_refused_wake_stops_the_wait() {
         &mut cycle,
         &clock,
         Duration::from_secs(100),
+        logged_quotes(&log, &["255.2"]),
         logged_check(&log, Ok(())),
     );
     assert!(
@@ -1359,7 +1416,7 @@ fn a_refused_wake_stops_the_wait() {
         ),
         "{left:?}"
     );
-    assert_eq!(*log.borrow(), ["agent", "wake@1000"]);
+    assert_eq!(*log.borrow(), ["agent", "quote", "wake@1000:255.2"]);
 }
 
 /// An ask already past its deadline when the wait binds it denies before any wake.
@@ -1372,6 +1429,7 @@ fn an_ask_past_its_deadline_never_wakes() {
         &mut cycle,
         &clock,
         Duration::from_secs(100),
+        logged_quotes(&log, &["255.2"]),
         logged_check(&log, Ok(())),
     );
     assert!(
@@ -1379,6 +1437,61 @@ fn an_ask_past_its_deadline_never_wakes() {
         "{left:?}"
     );
     assert_eq!(*log.borrow(), ["agent"]);
+}
+
+/// DEC-943 item 2: each wake hands the shell the mark of the quote its own fresh read returned,
+/// in order, so the runtime's re-validation compares the wake's own mark, never the preflight's.
+#[test]
+fn each_wake_hands_the_shell_its_own_fresh_mark() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let mut cycle = Cycle::of(wakes_to_the_grant(), &log);
+    let clock = WaitClock::at(NOW_S);
+    let left = granted_opening(
+        &mut cycle,
+        &clock,
+        Duration::from_secs(100),
+        logged_quotes(&log, &["255.2", "255.3", "255.4"]),
+        logged_check(&log, Ok(())),
+    );
+    assert!(matches!(left, Ok(())), "{left:?}");
+    let wakes: Vec<String> = log
+        .borrow()
+        .iter()
+        .filter(|call| call.starts_with("wake@"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        wakes,
+        ["wake@1000:255.2", "wake@1100:255.3", "wake@1200:255.4"]
+    );
+}
+
+/// DEC-943 item 2, rule 3: a fresh quote that cannot be read — stale past `iex_quote_max_age_s`
+/// or otherwise refused — stops the wait before its wake hands the runtime anything, and nothing
+/// is checked or sent; the age bound is never relaxed to let the grant through.
+#[test]
+fn a_refused_fresh_quote_stops_the_wait_before_its_wake() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let mut cycle = Cycle::of(wakes_to_the_grant(), &log);
+    let clock = WaitClock::at(NOW_S);
+    let left = granted_opening(
+        &mut cycle,
+        &clock,
+        Duration::from_secs(100),
+        refused_quotes(&log),
+        logged_check(&log, Ok(())),
+    );
+    assert!(
+        matches!(
+            &left,
+            Err(PaperError::Shell(ShellError::Refused {
+                cause: Cause::Absent { .. },
+                ..
+            }))
+        ),
+        "{left:?}"
+    );
+    assert_eq!(*log.borrow(), ["agent", "quote"]);
 }
 
 /// LT-10 through `watched` and `lt10` in the shell's terms (DEC-914 items 4 and 5, DEC-940): a

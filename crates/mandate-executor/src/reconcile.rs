@@ -40,8 +40,10 @@ use crate::types::{
 /// 3. **Positions**, compared only *after* step 2 — a difference a missing fill explains is not a
 ///    mismatch, and pausing on it would pause a healthy agent at every restart.
 /// 4. **Cash**, within 0.01 × fills since the last broker cash snapshot plus accrued unposted
-///    fees. Paper's simulated fees and dividends are excluded from this comparison while staying
-///    in P&L and buying power (§10, interpretation 25).
+///    fees. When this snapshot's own report is already the base, the last snapshot is the one
+///    it replaced, and every fill since that one, step 2's too, counts once (DEC-948 item 5).
+///    Paper's simulated fees and dividends are excluded from this comparison while staying in
+///    P&L and buying power (§10, interpretation 25).
 /// 5. **Fees**, exact once posted: a difference alerts and is never silently adjusted.
 /// 6. **`ReconciliationRun` last**, appended with `expected_head` equal to
 ///    [`BrokerSnapshot::taken_at_head`], so an `OrderSubmitted` that landed in between makes the
@@ -90,7 +92,7 @@ pub(crate) fn run(
         }
     }
     positions(batch, snapshot, &mut differences)?;
-    let recorded = cash(batch, snapshot, &mut differences)?;
+    let recorded = cash(batch, snapshot, &before, &mut differences)?;
     if snapshot.reason == ReconcileReason::FeePosting {
         fees(batch, snapshot, recorded, &mut differences)?;
     }
@@ -483,6 +485,14 @@ fn positions(
 /// base the next comparison is measured from. Before any account was reported there is no base to
 /// compare with, and nothing is recorded.
 ///
+/// The shell records the snapshot's own account report before the run (DEC-458), so the base
+/// can be this snapshot: a report folded after its head. Measured from it, the broker's cash would
+/// be compared with itself, and a fill step 2 ingested, which that cash already holds, would be
+/// counted twice (DEC-948 item 5). So the model is then the report it replaced plus every fill
+/// folded since that one, before the report and after it, step 2's included. With no earlier
+/// report there is nothing earlier to measure from, and the snapshot is its own base. A base an
+/// earlier report set is measured from as it stands.
+///
 /// §11's cash row is two tiers, "alert above threshold; pause if persistent": a run out of the
 /// band alerts the owner and pauses nobody, and the [`CASH_PERSISTENT_RUNS`]th consecutive one
 /// pauses every agent until the owner acknowledges `cash`. The count is folded from the recorded
@@ -490,15 +500,34 @@ fn positions(
 fn cash(
     batch: &mut Batch<'_, '_>,
     snapshot: &BrokerSnapshot,
+    before: &ExecutorState,
     differences: &mut Vec<Difference>,
 ) -> Result<Option<EventId>, ExecutorError> {
     let Some(base) = batch.view.observed.clone() else {
         return Ok(None);
     };
-    let model = base.cash.checked_add(batch.view.cash_flow)?;
-    let band = batch
+    let snapshots_own = batch
         .view
-        .fill_notional
+        .observed_at
+        .is_some_and(|at| at > snapshot.taken_at_head);
+    let (model, notional) = match (snapshots_own, batch.view.prior_base) {
+        (true, Some(prior)) => (
+            prior
+                .cash
+                .checked_add(prior.cash_flow)?
+                .checked_add(batch.view.cash_flow)?,
+            prior.fill_notional.checked_add(batch.view.fill_notional)?,
+        ),
+        (true, None) => (
+            base.cash.checked_add(before.cash_flow)?,
+            before.fill_notional,
+        ),
+        (false, _) => (
+            base.cash.checked_add(batch.view.cash_flow)?,
+            batch.view.fill_notional,
+        ),
+    };
+    let band = notional
         .times_fraction(Fraction::parse(CASH_BAND)?)?
         .checked_add(batch.view.unposted_fees.abs())?;
     let drift = snapshot.account.cash.checked_sub(model)?.abs();
