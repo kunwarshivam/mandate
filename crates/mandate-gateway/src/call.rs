@@ -214,7 +214,7 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
     }
 
     /// The calls refused `meter_unavailable` that left an orphan open on the deployment's meter
-    /// stream (DEC-2204 item 4): the count the operator's alert reads.
+    /// stream (DEC-2207 item 4): the count the operator's alert reads.
     pub fn orphans(&self) -> u64 {
         self.orphans
     }

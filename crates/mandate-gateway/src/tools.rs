@@ -1,5 +1,5 @@
 //! Pinned tools and the calls a model makes to them (inference spec v0.4 INF-5, §3.1, §3.2;
-//! DEC-2203, DEC-2204). An `agentic` research entry pins its tool declarations inside its content
+//! DEC-2203, DEC-2207). An `agentic` research entry pins its tool declarations inside its content
 //! hash; a turn offers some of them; a reply's tool calls are validated against the offered
 //! declarations and returned as data. The gateway runs no tool: it names no data-plane, journal, or
 //! source port, so it cannot.
@@ -83,7 +83,7 @@ impl ToolDeclaration {
 /// The name a declared tool goes by on the wire, or `None` when `name` is not a declared name: one
 /// or two segments joined by `.`, each a lowercase letter followed by lowercase letters and
 /// digits, in words joined by single underscores (so no segment holds `__`). The wire name joins
-/// the segments with `__` (DEC-2204), which no declared name can contain, so the mapping is
+/// the segments with `__` (DEC-2207), which no declared name can contain, so the mapping is
 /// one-to-one, and fits [`MAX_WIRE_NAME`].
 pub fn wire_name(name: &str) -> Option<String> {
     let segments: Vec<&str> = name.split('.').collect();
@@ -385,7 +385,7 @@ impl TranscriptTurn {
 
 /// The id a transcript gives the call at `index` of turn `turn` (from 1): `t{turn}c{index}`.
 /// Synthesized, never the provider's, so a reply cannot steer it and a re-run renders the same
-/// request (DEC-2204, HI-3).
+/// request (DEC-2207, HI-3).
 pub fn call_id(turn: usize, index: u32) -> String {
     format!("t{turn}c{index}")
 }

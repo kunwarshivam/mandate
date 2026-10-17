@@ -1,5 +1,5 @@
 //! Tool names, wire names, tool-call validation, the wire schema, `top_p`, and the budget settings
-//! (inference spec v0.4 INF-5, §4.1, §6; DEC-2204 item 1).
+//! (inference spec v0.4 INF-5, §4.1, §6; DEC-2207 item 1).
 
 mod common;
 

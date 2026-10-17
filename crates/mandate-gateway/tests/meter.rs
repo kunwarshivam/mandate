@@ -536,7 +536,7 @@ fn a_meter_that_cannot_be_read_or_appended_refuses() {
     assert_eq!(
         meter.reserve(reservation(1, Some("a"), Purpose::Research, "0.1", day(8))),
         Err(MeterRefusal::Orphaned),
-        "a workspace append that fails after the copy leaves an orphan (DEC-2204 item 4)"
+        "a workspace append that fails after the copy leaves an orphan (DEC-2207 item 4)"
     );
     assert!(meter.store().records().is_empty());
     assert_eq!(
@@ -545,7 +545,7 @@ fn a_meter_that_cannot_be_read_or_appended_refuses() {
             month: 10
         }),
         Ok(Usd6::parse("0.1").unwrap()),
-        "the copy appended before the failed workspace append is an orphan, counted at its maximum (DEC-2204 item 4)"
+        "the copy appended before the failed workspace append is an orphan, counted at its maximum (DEC-2207 item 4)"
     );
     meter.store_mut().limit_appends(None);
     assert_eq!(

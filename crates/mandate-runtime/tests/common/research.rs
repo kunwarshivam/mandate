@@ -1201,13 +1201,13 @@ impl Transport for HostedDouble {
     }
 }
 
-/// A workspace's monthly model budget for the tests, a setting (DEC-2204 item 1): $50 here.
+/// A workspace's monthly model budget for the tests, a setting (DEC-2207 item 1): $50 here.
 pub fn budget() -> Caps {
     Caps::new(Usd6::dollars(50).unwrap_or_else(|e| panic!("{e}")))
 }
 
 /// A deployment meter of its own, with a cap far above any workspace's, so the tests meet only the
-/// workspace's caps (DEC-2204).
+/// workspace's caps (DEC-2207).
 pub fn deployment_meter() -> DeploymentMeter {
     DeploymentMeter::new(
         Box::new(MemoryMeter::new()),

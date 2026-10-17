@@ -389,7 +389,7 @@ pub fn reply(output: &str) -> Vec<u8> {
     recorded_reply(output, SLUG, REPORTED_PROVIDER, usage())
 }
 
-/// A workspace's monthly model budget for the tests, a setting (DEC-2204 item 1): $50 here.
+/// A workspace's monthly model budget for the tests, a setting (DEC-2207 item 1): $50 here.
 pub fn budget() -> Caps {
     Caps::new(Usd6::dollars(50).unwrap())
 }

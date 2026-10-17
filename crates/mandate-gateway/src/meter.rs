@@ -3,7 +3,7 @@
 //! (journal spec §9.19). One meter writer per workspace; a writer that cannot read or append refuses
 //! the call `meter_unavailable`, so nothing is sent.
 //!
-//! **Budgets are settings** ([DEC-2204](../../../docs/project/decisions/DEC-2204.md), DEC-2203 item
+//! **Budgets are settings** ([DEC-2207](../../../docs/project/decisions/DEC-2207.md), DEC-2203 item
 //! 9): no figure is in this crate. The deployment's monthly cap folds from the deployment meter
 //! stream, a copy of every workspace's records, which each reservation reaches before the
 //! workspace's own stream, so any failure between the two only over-counts.
@@ -407,7 +407,7 @@ impl Caps {
 
 /// Why the meter refused a reservation; either way nothing is sent and nothing is recorded on the
 /// workspace's meter stream. `Orphaned` is `meter_unavailable` that left a copy open on the
-/// deployment's stream (DEC-2204 item 4), so its caller alerts the operator.
+/// deployment's stream (DEC-2207 item 4), so its caller alerts the operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeterRefusal {
     BudgetExhausted,
@@ -416,7 +416,7 @@ pub enum MeterRefusal {
 }
 
 /// The deployment's meter writer, as a workspace's writer reaches it: the deployment meter stream
-/// and the deployment's monthly cap, a deployment setting (DEC-2204 items 1 to 3).
+/// and the deployment's monthly cap, a deployment setting (DEC-2207 items 1 to 3).
 pub struct DeploymentMeter {
     store: Box<dyn MeterStore>,
     monthly: Usd6,
@@ -433,7 +433,7 @@ impl fmt::Debug for DeploymentMeter {
 
 impl DeploymentMeter {
     /// The deployment's writer over its stream, with its monthly cap and the source of its copies'
-    /// event ids: each copy is its own record (DEC-2204 item 2).
+    /// event ids: each copy is its own record (DEC-2207 item 2).
     pub fn new(store: Box<dyn MeterStore>, monthly: Usd6, ids: Box<dyn IdSource>) -> Self {
         Self {
             store,
@@ -446,7 +446,7 @@ impl DeploymentMeter {
         self.monthly
     }
 
-    /// Checks the deployment cap and appends the copy, in one step (DEC-2204 item 4).
+    /// Checks the deployment cap and appends the copy, in one step (DEC-2207 item 4).
     fn reserve(&mut self, reservation: &Reservation) -> Result<(), MeterRefusal> {
         let copy = Reservation {
             event_id: self.ids.next_id(),
@@ -470,7 +470,7 @@ impl DeploymentMeter {
             .map_err(|_| MeterRefusal::Unavailable)
     }
 
-    /// Copies a settlement, naming the deployment stream's copy of its reservation (DEC-2204 item
+    /// Copies a settlement, naming the deployment stream's copy of its reservation (DEC-2207 item
     /// 2). With no copy of the call's reservation, nothing is appended.
     fn settle(&mut self, settlement: &Settlement) -> Result<(), StoreError> {
         let records = self.store.read()?;
@@ -534,7 +534,7 @@ impl<S: MeterStore> Meter<S> {
     /// Appends `reservation` only if, for every cap that applies, spend plus its maximum is at
     /// most the cap (inference spec §7.3), the deployment's included. The workspace's caps are
     /// checked first with nothing appended; then the deployment's writer checks its cap and appends
-    /// the copy; then the workspace's own reservation is appended (DEC-2204 item 4). A store that
+    /// the copy; then the workspace's own reservation is appended (DEC-2207 item 4). A store that
     /// cannot be read or appended to refuses; a workspace append that fails after the copy leaves
     /// the copy open, an orphan that only over-counts.
     pub fn reserve(&mut self, reservation: Reservation) -> Result<Reservation, MeterRefusal> {
@@ -562,7 +562,7 @@ impl<S: MeterStore> Meter<S> {
     }
 
     /// Appends the settlement to the workspace's stream, then, only once that is appended, its copy
-    /// to the deployment's (DEC-2204 item 5), so the deployment never counts a call below the
+    /// to the deployment's (DEC-2207 item 5), so the deployment never counts a call below the
     /// workspace's count of it. Either append that fails leaves that stream's reservation open at
     /// its maximum, which never lowers spend (DEC-998 item 5).
     pub fn settle(&mut self, settlement: Settlement) -> Result<(), StoreError> {

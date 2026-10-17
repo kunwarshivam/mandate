@@ -1,4 +1,4 @@
-//! The deployment's model-spend cap (DEC-2204; journal spec v0.50 §9.19's deployment meter stream):
+//! The deployment's model-spend cap (DEC-2207; journal spec v0.50 §9.19's deployment meter stream):
 //! every workspace's reservations and settlements are copied to one deployment stream, each copy its
 //! own record, the copy reaching it before the workspace's own stream, so any failure between them
 //! only over-counts and the deployment's spend never passes its cap.
@@ -232,7 +232,7 @@ fn a_failed_settlement_copy_leaves_the_deployment_counting_the_maximum() {
     assert_eq!(
         b.deployment().spend(OCTOBER),
         Ok(usd("1")),
-        "and so does the deployment: no copy settles a call its workspace has not (DEC-2204 item 5)"
+        "and so does the deployment: no copy settles a call its workspace has not (DEC-2207 item 5)"
     );
 }
 
@@ -288,7 +288,7 @@ fn oracle_spend(records: &[MeterRecord]) -> BTreeMap<String, i128> {
     cost
 }
 
-/// Every claim of DEC-2204 items 3 to 5 over the records: the deployment's spend is at most its cap,
+/// Every claim of DEC-2207 items 3 to 5 over the records: the deployment's spend is at most its cap,
 /// and every call a workspace stream counts the deployment counts at least as high.
 fn check(
     deployment: &[MeterRecord],
@@ -547,7 +547,7 @@ fn the_deployment_cap_counts_its_month_alone_and_every_key_owner() {
     assert_eq!(
         a.reserve(reservation(1, 3, "0.5")),
         Err(MeterRefusal::BudgetExhausted),
-        "a customer's own key counts toward the deployment's cap too (DEC-2204 item 3)"
+        "a customer's own key counts toward the deployment's cap too (DEC-2207 item 3)"
     );
     assert!(a.reserve(reservation(1, 4, "0.4")).is_ok());
 }

@@ -5,7 +5,7 @@
   `ModelInvocationRecorded`, the meter stream, rules 146 to 158, and the deployment meter stream);
   DEC-432, DEC-998, DEC-997 (OpenRouter's routing lock and the $50 a month cap, Proposed; the
   founder's clarification makes it the deployment's), DEC-2203 (inference spec v0.4: turns and
-  pinned tools) and DEC-2204 (the deployment's cap, a setting, folded across workspaces).
+  pinned tools) and DEC-2207 (the deployment's cap, a setting, folded across workspaces).
 - **Code:** `mandate-gateway`, `crates/mandate-gateway/` (layer 1, safety-critical, pure):
   `src/call.rs` (`Gateway::call`, the order of refusals, attempts, settlement, the exact cache),
   `src/registry.rs` (pinned content, the content hash, endpoints and status outside it, the alias

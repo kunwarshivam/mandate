@@ -25,7 +25,7 @@
 //! gates, or places an order, and the crate layering keeps it from reaching any crate that does,
 //! or any mandate or policy writer (INF-16).
 //!
-//! **Budgets are settings** ([`budgets`], DEC-2204): the deployment's monthly cap folds from the
+//! **Budgets are settings** ([`budgets`], DEC-2207): the deployment's monthly cap folds from the
 //! deployment meter stream across every workspace, and no figure is in the code.
 //!
 //! **Pure.** Time, transport, provider keys, and event ids come in through [`provider`]'s traits.

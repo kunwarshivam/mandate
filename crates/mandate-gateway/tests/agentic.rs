@@ -1,5 +1,5 @@
 //! An agentic research run's turns through the gateway (inference spec v0.4 INF-5, §3.1, §3.2,
-//! §4.1, §6, §7.3; DEC-2203, DEC-2204): pinned tools, a turn's request and reply, the transcript,
+//! §4.1, §6, §7.3; DEC-2203, DEC-2207): pinned tools, a turn's request and reply, the transcript,
 //! the run's ceiling, and the wire request OpenRouter is sent.
 
 mod common;

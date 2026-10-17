@@ -4,7 +4,7 @@
 //! pin (INF-1, INF-2, INF-5).
 //!
 //! A tool goes by its wire name ([`tools::wire_name`]: `.` becomes `__`), since OpenRouter's
-//! upstreams take only `[a-zA-Z0-9_-]` in a function name (DEC-2204). The transcript's tool calls
+//! upstreams take only `[a-zA-Z0-9_-]` in a function name (DEC-2207). The transcript's tool calls
 //! carry ids the gateway synthesizes, never the provider's, and their arguments as canonical JSON.
 
 use serde_json::{Map, Number, Value as Json, json};

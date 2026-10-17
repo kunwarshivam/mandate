@@ -1,4 +1,4 @@
-//! Model-spend budgets as settings ([DEC-2204](../../../docs/project/decisions/DEC-2204.md) item 1,
+//! Model-spend budgets as settings ([DEC-2207](../../../docs/project/decisions/DEC-2207.md) item 1,
 //! DEC-2203 item 9): the deployment's monthly cap and each workspace's monthly budget come from
 //! deployment configuration, never from a figure in code. A setting that is missing or unreadable
 //! is an error, and a gateway without its budgets makes no call (`AGENTS.md` rule 3).
