@@ -113,6 +113,25 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `xtask/src`, as a shard within DEC-464's ten-minute budget, and fails on any missed mutant; the
   mutants of `xtask` code that predates the job are either caught or listed, each with its reason,
   in a follow-up story, so the job starts green.
+- **E1-8 (Should)** As an engineer, I want parallel PRs not to collide on DEC numbers or on shared
+  lists, so that about twenty lanes can land at once without a merge conflict or an extra CI cycle
+  each ([DEC-2600](decisions/DEC-2600.md), claim #1494).
+  *Accepted when:* DEC numbers come from per-category ranges of 100 from DEC-2000; a check run by
+  both CI paths refuses two decision files with one number; the registry's cargo "Used by" lists
+  are derived from `cargo metadata`; CODEOWNERS' crate lines are checked sorted; and no check is
+  weaker.
+- **E1-9 (Must)** As a builder sharing GitHub's free runners with sixteen others, I want each
+  PR's CI scoped to what its diff can break, so that finished PRs stop waiting 30 to 60 minutes in
+  the queue without any gate weakening (the founder's "Gate by risk", 2026-10-17; DEC-1190).
+  *Accepted when:* `cargo xtask ci select` computes the changed crates, the crates naming a
+  changed path in their sources, and every reverse dependent of those; tests, doctests, pending
+  tests and the rehearsal and Postgres runs cover that set; `fast-python`, `fast-portable`,
+  `fast-rh-sim-live`, `full-checks` and `schema-mutants` start only when their inputs change;
+  build inputs, CI, xtask, any manifest and unknown paths select everything; mutants on the diff
+  are unchanged; `fast` and `full` stay required and accept a skip only where the selection
+  asked for one; the nightly runs everything on main and opens an opaque issue on failure; and
+  tests cover the selector, its reverse-dependent property, and a seeded break caught through a
+  dependency. Claim #1481.
 
 ### E2 Market data
 
@@ -248,6 +267,27 @@ the spec invariants (DP-n) its tests cover.
   (merged), then the implementation PR, which replaces the stub's body, adds the call, retires the
   stub's `SimError::Unimplemented`, deletes only the pending tests' `#[ignore]` lines, and adds one
   assertion each on the reason code and the message ([DEC-386](decisions/DEC-386.md)).
+- **E4-4 (Must, M5; SC)** As an owner, I want to backtest my mandate version through the same
+  decision path my agent runs, so that the report shows what this version would have done, not
+  what a baseline strategy did ([DEC-1000](decisions/DEC-1000.md); PRD FR-4.1, FR-4.2, FR-4.5).
+  *Accepted when:* the run calls the risk state, the order builder, the gate's dry run, autonomy,
+  and the executor's protection prices, in mandate spec §6.2's order, over historical bars; model
+  outputs and theses are replayed from records and visible only from their receive time; the run
+  has no model port; an ASK resolves as a timeout (`skip`, no order); a record before its data, an
+  unpinned output, a record for another instrument, and a corporate action in range each refuse
+  the run by a named code; property tests with independent oracles show the report is a pure
+  function of its inputs (byte-identical) and that no fill lies outside its bar, each oracle shown
+  to fail on a seeded bug; zero missed mutants. *Slice 2:* corporate actions through the
+  accounting fold, several instruments at once, and one shared mapping from a mandate document to
+  the gate's mandate for the backtest and the shell.
+- **E4-5 (Must, M5)** As an owner, I want my backtest report kept as a record with a stable shape,
+  so that the go-live screen and the web app show exactly the report that was produced
+  ([DEC-1001](decisions/DEC-1001.md)). *Accepted when:* the report is canonical JSON at
+  `report_version` 2 with the members DEC-1001 item 2 lists and validates against
+  `schemas/workspace-api/read-models/backtest.schema.json`; `BacktestRunRecorded` (journal spec
+  §9.18) is registered in `mandate-journal` with vectors for rules 143 and 144; `GET
+  /backtests/{id}` serves `read-models/backtest` in the workspace that ran it only; disclosures
+  stay DEC-1003's placeholder names.
 
 ### E5 Journal
 
@@ -2091,6 +2131,14 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   gives index 0 a real figure or removes it. *Done* on `agent/j3-e17-8-basket-nit`: the oracle
   now takes the expected excess from a closed match on the basket's size (`0.2` for one member,
   `0.15` for two). Any other size fails the case rather than defaulting a figure.
+  *Harness ([DEC-1002](decisions/DEC-1002.md), claim
+  [#1463](https://github.com/kunwarshivam/mandate/issues/1463)):* the harness reads the internal
+  paper workspaces' `ThesisProposed` and `ThesisRevised` records, checks each with
+  `check_thesis_record`, scores every closed thesis (admitted or not) by `score::evaluate`, one
+  scorecard per research-agent `(model_id, model_version, content_hash)` (E15-3), costs each
+  thesis against itself, and writes the report artifact and `EvaluationRunRecorded` (journal spec
+  §9.18, rule 145; registration with vectors follows). `GET /evaluations/{id}` serves it in an
+  internal paper workspace only.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -2332,6 +2380,9 @@ with the founder (DEC-440 items 13 to 17); no story here buys a service or touch
   all four kinds (license, release manifest, catalog entry, data bundle); `cp-agent` reaches the site
   only through a port it declares and workspace services implement; a test shows `cp-agent` never
   takes a writer epoch, and the kill switch commits with `cp-agent` hung.
+  *Follow-up (DEC-983):* a stateful fuzz of message sequences through `cp-agent` into
+  `mandate-cp-site` that also asserts every effect follows its own record (today's fuzz checks one
+  message at a time and the record types only).
 - **E20-4 (Proposed, M8; SC; mandate spec change first)** As an org owner, I want licenses
   verified on site, with states `valid`, `renewal_due`, `grace`, and `lapsed`, where after grace a
   lapsed license refuses only new deployments and new openings; it never blocks an exit, a
@@ -2438,6 +2489,11 @@ items 13 to 20); no story here buys a service or touches live money.
   reproducible, carry an SBOM, and from M11 are signed with my hardware key and checked at start
   (ES-14, ES-17, OPS-15). *Accepted when:* two builds of one commit are byte-identical; each process
   journals its build digest; and outside dev and CI an unsigned binary refuses to start.
+  *Status:* the reproducible build, its SBOMs, the CI double build and `mandate-release`'s
+  `BuildDigest` land with DEC-972. **After R0:** `crates/mandate-shell/src/envelope.rs` and
+  `crates/mandate-cli/src/control.rs` still name a placeholder `build` (a digest of the crate's
+  name and version); switching both to `BuildDigest::running()` is this row's last slice, blocked
+  on R0 closing (DEC-967 item 2, DEC-972 item 7). Signing and the start-up check are E21-35's.
 - **E21-9 (Proposed, M8; SC)** As an owner, I want my broker credential held in the workspace vault,
   leased only to the executor for my connection, and checked for scope, environment, and account at
   every start, so that no other process can use it (design §5). *Accepted when:* a runtime's
@@ -2650,6 +2706,11 @@ enables `live` (ES-23, OPS-5).
   does; CI signs with an ephemeral test key, and only the founder's hardware key signs an image for a
   hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
   never from a branch; and a test shows an unsigned and a wrongly signed image both refused.
+  *Status:* the images, the start-up check in `mandate-agentd`, the CI test-key drill and the
+  `main`-only publish to GHCR land with DEC-971; images for amd64 and arm64, each built natively,
+  under one signed multi-arch index, with DEC-1060. **After R0:** the CLI runs the check (with
+  E21-8's last slice). **Founder:** the hardware key's public half in `RELEASE_KEYS` (H8), until
+  which nothing starts outside dev and CI (DEC-971 item 7). Staging promotion waits on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
@@ -5202,3 +5263,42 @@ From the Robinhood connector correctness follow-ups ([DEC-956](decisions/DEC-956
   refuses every order of an instrument with no registered ticker, exits included; the live wiring
   that builds `RobinhoodConnector` must pass the run's `(asset_id, symbol)` pairs, with a startup
   check that the pinned instrument has one.
+- **Journal the API's sign-ins (DEC-978 item 10, E9-7).** The workspace API server (E21-31) opens
+  and ends browser sessions without journaling them, because the journal registers neither
+  `SessionOpened` nor `SessionRevoked` (identity spec §12.1). Register both, with test vectors, in
+  a journal spec change, then journal each sign-in and end, with `first_seen_device`, so the
+  new-device notice (ID-14) is sent; workspace API spec §3.11 item 9.
+- **Sessions in Postgres (DEC-978 item 6).** The API holds session records in its process, so it
+  runs as one replica and a restart ends every session. Move them to a Postgres store with the
+  workspace's row-level security before a second replica is deployed.
+- **Read models as projections (DEC-979 item 7).** The API's agent and approval reads fold every
+  deployed agent's stream on each request, which is unbounded. Project them per stream with
+  watermarks, woken by `LISTEN`/`NOTIFY` (workspace API spec §6.1), before an agent's stream grows
+  past what one request can read.
+- **Limit usage in the API's agent read (DEC-1020 item 5).** The drawdown rung, the day-trade
+  count, and headroom are not journaled, so the agent read serves none. Once E6-4 journals
+  `RiskLimitTriggered` and `RiskLimitLifted`, and the gate journals its checks' inputs, add them as
+  members folded from those rows.
+- **Per-agent positions (DEC-1020 item 4).** The API's agent read shows the account's holdings at
+  reconciliation. A per-agent view needs the executor's attribution journaled, or a fold of
+  `FillApplied` joined through `OrderRequestRecorded.agent_id` that matches the executor's
+  accounting.
+- **The runtime folds the owner's hold, then the API serves it (DEC-191, DEC-1007 item 1).**
+  Journal spec §9.11 closes `hold_openings` and `lift_hold`, but the runtime's command fold refuses
+  any command it does not know, so a hold would stop it at that event. Fold both into
+  `AgentModeChanged` version 2 (`held`, rules 93 to 95), with tests, then mount the API's
+  `POST /agents/{id}/hold`.
+- **A roles snapshot on each API session (DEC-1007 item 8, before the demo).** The API refuses
+  pause and the kill switch with `membership_unavailable` when the membership read fails, because its
+  sessions keep no roles snapshot. Take the snapshot at sign-in and at each granted refresh, cleared
+  in the same step as a deactivation, so these calls are authorized from it as API-7 and identity
+  spec §4.5 require.
+- **Bind step-up on the API's owner commands and grants (DEC-1007 items 3 and 10).** The API
+  forwards no step-up, so a kill switch through it never carries the owner-exit privilege and an
+  `approved` is refused. Verify the passkey assertion locally (identity spec §3.3), forward it
+  bound, with `step_up_status: bound`, and serve `approved` after checking the mandate's
+  `approvers` (§5.2).
+- **Journal the API-7 members with no place (DEC-1007 item 4).** `record`, `environment_shown`, and
+  a kill switch's `owner_exit` are kept but not written. Close the remaining `OwnerCommandIssued`
+  commands in a journal spec change with these members, then write them and compare them on a
+  repeat.

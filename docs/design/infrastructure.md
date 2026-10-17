@@ -249,7 +249,7 @@ to the journal.
 |---|---|---|
 | **Liveness** | The process loop has handled an input or a heartbeat within its bound | The orchestrator restarts it |
 | **Readiness** | The process holds its writer epoch, has replayed its stream to the head, and its last reconciliation passed (executor) or its mode is known (runtime) | It is not ready: it takes no new openings, and the deployment manager reports the agent as `Recovering`. A runtime that is not ready still forwards kill-switch commands; an executor that is not ready still runs risk exits and protective re-placement once its own replay is done |
-| **Start-up checks** | Signed build (OPS-15), environment matches the stream (ES-23), Postgres durability settings (OPS-2), object lock mode (journal §6.2, hybrid and on-prem), clock offset (journal §5.4) | The process refuses to start trading and alerts |
+| **Start-up checks** | Signed build (OPS-15), environment matches the stream (ES-23), Postgres durability settings (OPS-2), object lock mode (journal §6.2, hybrid and on-prem), clock offset (journal §5.4) | The process refuses to start trading and alerts. For the clock offset, the scheduler measures and journals it and keeps ticking, and an executor takes no new opening while the workspace's last measurement is out of tolerance, older than 15 minutes, or before the first; risk exits, protective orders, and the kill switch are never held by it (journal §9.20, DEC-1010) |
 
 Restart policy: always restart, with exponential back-off. After a crash loop (Proposed: five
 restarts in ten minutes), the deployment manager leaves the agent `Paused` and alerts; it does not
@@ -575,10 +575,15 @@ range's `cause` `token_unverifiable`; any `anchor_unstamped` fails the drill (DE
 2. **Build.** A release job builds from a `main` commit with `--locked`: static Linux binaries
    (rustls only, ES-17), container images pinned by digest, and from M6 a reproducible build
    (`SOURCE_DATE_EPOCH`, a double-build diff) with an SBOM and cargo-auditable metadata (ES-14,
-   ES-17).
+   ES-17). Built by `cargo xtask release build` and proved by `release.yml`'s two builds of each
+   `main` commit on two runners ([DEC-972](../project/decisions/DEC-972.md)); the build digest is
+   the binary's SHA-256, as `SHA256SUMS` lists it.
 3. **Sign.** From M11 or the first external install, images and bundles are signed with cosign
    under the founder's hardware key, with build provenance (ES-17). Every process checks its own
-   signature at start (OPS-15) and journals its build digest (`actor.build`).
+   signature at start (OPS-15) and journals its build digest (`actor.build`). The images, the
+   check and the publish job are [DEC-971](../project/decisions/DEC-971.md): CI signs only with
+   an ephemeral test key; outside dev and CI only a compiled-in release key is trusted, and none
+   is wired until the founder's hardware key is (item 7).
 4. **Promote.** `main` → staging automatically; staging → production by the founder's approval
    while live money is involved (DEC-79). Production rolls out one cell at a time, starting with a
    canary cell of internal workspaces (Proposed).
@@ -753,8 +758,9 @@ are authoritative; a few come from metrics.
   advisories, licenses, and sources; the founder-owned dependency registry
   (`docs/dependencies.md`); gitleaks per PR and over full history weekly; workflow actions pinned by
   commit SHA with `permissions: {}` and no secrets in PR jobs (ES-12, ES-14).
-- **Supply chain, deferred with triggers:** SBOM, cargo-vet, and cargo-auditable at M6; signing and
-  provenance at M11 (ES-14, ES-17).
+- **Supply chain, deferred with triggers:** cargo-vet at M6; signing and provenance at M11 (ES-14,
+  ES-17). The SBOM and cargo-auditable metadata are in the release build
+  ([DEC-972](../project/decisions/DEC-972.md)).
 - **Host hardening:** distroless images, a read-only root filesystem, no shell in production images,
   and non-root users (ES-17 at M11).
 - **Threat model ([draft v0.1](../security/threat-model.md), E21-10, DEC-439):** per process type and per deployment mode, with the

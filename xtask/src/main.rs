@@ -14,6 +14,8 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 mod cell;
+mod image;
+mod release;
 
 const USAGE: &str = "\
 usage: cargo xtask <command>
@@ -22,8 +24,12 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | mutants | schema-mutants | cell; or one part of test: test-nextest |
-                        test-doc | test-rh-sim | test-python
+                        postgres | objectstore | mutants | schema-mutants | cell | sweep; or one part
+                        of test: test-nextest | test-doc | test-rh-sim | test-python. Tests,
+                        pending tests, doctests, the rehearsal, Postgres and object-store runs and `portable` run over
+                        the crates the diff selects (DEC-1190); with no diff base, all of them
+  ci select             print which scoped jobs this diff runs, as GITHUB_OUTPUT lines
+  ci sweep --plan       print tonight's share of the whole-crate mutation sweep (DEC-1190)
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
   ci mutants --plan     print the mutation matrix this diff needs, as GITHUB_OUTPUT lines
@@ -33,10 +39,28 @@ commands:
   markers               check for debt markers and #[ignore] without a pending story
   feature-map [--index] check the verification skill's feature map against the workspace, or
                         list its feature files and titles
-  deps                  check every direct dependency against docs/dependencies.md
+  deps [--used-by]      check every direct dependency against docs/dependencies.md, or list
+                        each cargo dependency with the crates that use it
+  decisions             check that no two decision files take one DEC number
   live-feature          check that only the runner may build `live`, and CI only compiles it or
                         tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
+  release tools         install the release build's pinned tools under $CARGO_HOME
+  release build <out>   build the release binaries reproducibly into <out>, with SHA256SUMS and an
+                        SBOM each, and print digest=<sha256 of SHA256SUMS> (E21-8)
+  release compare <a> <b>
+                        check that two release builds' SHA256SUMS are identical
+  release images <dist> <out> [--test-sign]
+                        write one OCI image a release binary into <out>/images, signed by an
+                        ephemeral test key with --test-sign (E21-35)
+  release drill <dist> <out>
+                        run the signed, unsigned and wrongly signed images' start-up check
+  release publish <dist> <out>
+                        push this arch's images to GHCR, sign them keyless and attest their SBOMs
+                        (main only, from CI)
+  release publish-index <out>
+                        push and sign the multi-arch index over every arch's published images
+                        (main only, from CI, after each arch's publish)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
   cell drill [--seeded] [boot|journal|egress]...
@@ -58,19 +82,20 @@ commands:
 /// CI runs `fast`'s parts in parallel jobs, `test` split into [`TEST_PARTS`] and its nextest run
 /// partitioned, and its required `fast` verdict is an aggregate over them (DEC-871); `cargo xtask
 /// ci fast` still runs this whole group unsharded. `portable` runs on macOS in CI (DEC-954).
-const FAST_JOB: [&str; 5] = ["lint", "test", "pending", "spec-guard", "portable"];
+const FAST_JOB: &[&str] = &["lint", "test", "pending", "spec-guard", "portable"];
 /// The parts of `test`, in the order `cargo xtask ci test` runs them: the workspace's nextest run,
 /// its doctests, the `rh-sim` rehearsal build's tests (DEC-922), and the Python tests. CI runs
 /// them in separate jobs (DEC-871).
-const TEST_PARTS: [&str; 4] = ["test-nextest", "test-doc", "test-rh-sim", "test-python"];
-const FULL_JOB: [&str; 5] = [
+const TEST_PARTS: &[&str] = &["test-nextest", "test-doc", "test-rh-sim", "test-python"];
+const FULL_JOB: &[&str] = &[
     "refcases",
     "reference",
     "schemas",
     "supply-chain",
     "postgres",
+    "objectstore",
 ];
-const PR_JOBS: [&str; 13] = [
+const PR_JOBS: &[&str] = &[
     "lint",
     "test",
     "pending",
@@ -81,6 +106,7 @@ const PR_JOBS: [&str; 13] = [
     "supply-chain",
     "spec-guard",
     "postgres",
+    "objectstore",
     "mutants",
     "schema-mutants",
     "cell",
@@ -95,6 +121,11 @@ const SCHEMA_DIR: &str = "schemas/workspace-api";
 /// rather than a skip (DEC-109). CI's `full` and nightly jobs set both.
 const PG_URL: &str = "MANDATE_PG_URL";
 const PG_REQUIRED: &str = "MANDATE_PG_REQUIRED";
+/// The S3-compatible test store `mandate-objectstore`'s conformance suite uses, and the switch that
+/// makes its absence a failure rather than a skip (E21-40, DEC-973). CI's `full` and mutants jobs
+/// set both, with the store `.github/scripts/start-minio.sh` starts.
+const S3_URL: &str = "MANDATE_S3_URL";
+const S3_REQUIRED: &str = "MANDATE_S3_REQUIRED";
 const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
 /// The `K/N` shard CI's `schema-mutants` matrix passes to `cargo xtask ci schema-mutants`, through
 /// the environment because the live-feature check refuses cargo words the shell expands (DEC-688).
@@ -187,6 +218,18 @@ fn run() -> Result<()> {
             print!("{}", plan.outputs());
             Ok(())
         }
+        ["ci", "sweep", "--plan"] => {
+            let plan = sweep_plan(Path::new("."), sweep_night()?)?;
+            eprintln!(
+                "    sweep: {} mutant(s) over {} shard(s), {} of them tonight, every shard once in {} runs",
+                plan.mutants,
+                plan.total,
+                plan.tonight.len(),
+                plan.rotation
+            );
+            print!("{}", plan.outputs());
+            Ok(())
+        }
         ["ci", "schema-mutants", shard] => {
             eprintln!("==> ci schema-mutants {shard}");
             schema_mutants(Some(shard), &mut pinned_python)
@@ -197,9 +240,27 @@ fn run() -> Result<()> {
         ["feature-map"] => feature_map(),
         ["feature-map", "--index"] => feature_map_index(),
         ["deps"] => deps(),
+        ["deps", "--used-by"] => deps_used_by(),
+        ["decisions"] => decision_numbers(Path::new(".")),
         ["live-feature"] => live_feature_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
+        ["release", "tools"] => {
+            release::tools(&release::Paths::from_env(&root)?.cargo_home).map(drop)
+        }
+        ["release", "build", out] => release::build(&root, Path::new(out)),
+        ["release", "compare", a, b] => release::compare(Path::new(a), Path::new(b)),
+        ["release", "images", dist, out] => {
+            release::images(&root, Path::new(dist), Path::new(out), false)
+        }
+        ["release", "images", dist, out, "--test-sign"] => {
+            release::images(&root, Path::new(dist), Path::new(out), true)
+        }
+        ["release", "drill", dist, out] => release::drill(&root, Path::new(dist), Path::new(out)),
+        ["release", "publish", dist, out] => {
+            release::publish(&root, Path::new(dist), Path::new(out))
+        }
+        ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
         ["cell", "up"] => cell::up(),
         ["cell", "down"] => cell::down(),
         ["cell", "demo"] => cell::demo(true),
@@ -246,6 +307,7 @@ fn ci(job: &str) -> Result<()> {
         "test-doc" | "test-rh-sim" | "test-python" => test_part(job, None),
         "pending" => pending(),
         "portable" => portable(),
+        "select" => ci_select(),
         "cell" => cell::ci(),
         "refcases" => refcases(false),
         "reference" => {
@@ -298,7 +360,9 @@ fn ci(job: &str) -> Result<()> {
             spec_guard()
         }
         "postgres" => postgres(),
+        "objectstore" => objectstore(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
+        "sweep" => sweep(Path::new(".")),
         "fast" => {
             for part in FAST_JOB {
                 ci(part)?;
@@ -312,9 +376,6 @@ fn ci(job: &str) -> Result<()> {
             Ok(())
         }
         "nightly" => {
-            for part in PR_JOBS {
-                ci(part)?;
-            }
             for seed in 1..=10 {
                 reference(&["mandate/fuzz.py", &seed.to_string()])?;
             }
@@ -330,6 +391,12 @@ fn ci(job: &str) -> Result<()> {
 /// CI's `fast-portable` job runs it on macOS, where the founder runs the CLIs, so a Linux-only
 /// call in the runner fails a required check; on Linux it repeats what `lint` and `test` cover.
 fn portable() -> Result<()> {
+    if !selection()?.runner() {
+        eprintln!(
+            "    portable: the diff reaches no crate {RUNNER_CRATE} is built from (DEC-1190)"
+        );
+        return Ok(());
+    }
     sh(
         "cargo",
         &[
@@ -359,22 +426,44 @@ fn portable() -> Result<()> {
     )
 }
 
-/// One of [`TEST_PARTS`]; `partition`, a `K/N` counted from 1, runs only the nextest run's `K`th
-/// of `N` slices (DEC-871).
+/// One of [`TEST_PARTS`], over the crates the diff selects (DEC-1190); `partition`, a `K/N`
+/// counted from 1, runs only the nextest run's `K`th of `N` slices (DEC-871).
 fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
     match part {
         "test-nextest" => {
-            let args = nextest_args(partition)?;
+            let selected = selection()?;
+            if !selected.tests() {
+                eprintln!("    test-nextest: no crate affected (DEC-1190)");
+                return Ok(());
+            }
+            let args = nextest_args(partition, scoped_packages(&selected).as_deref())?;
             sh(
                 "cargo",
                 &args.iter().map(String::as_str).collect::<Vec<_>>(),
             )
         }
         "test-doc" => {
-            if workspace_has_library()? {
-                sh("cargo", &["test", "--workspace", "--locked", "--doc"])?;
+            let selected = selection()?;
+            let meta = metadata()?;
+            let libraries: Vec<&str> = workspace_packages(&meta)
+                .into_iter()
+                .filter(|p| p.targets.iter().any(|t| t.kind.iter().any(|k| k == "lib")))
+                .filter(|p| selected.crates.contains(&p.name))
+                .map(|p| p.name.as_str())
+                .collect();
+            if libraries.is_empty() {
+                eprintln!("    test-doc: no selected crate has a library (DEC-1190)");
+                return Ok(());
             }
-            Ok(())
+            let mut args = vec!["test", "--locked", "--doc"];
+            if selected.everything.is_some() {
+                args.push("--workspace");
+            } else {
+                for library in &libraries {
+                    args.extend(["--package", library]);
+                }
+            }
+            sh("cargo", &args)
         }
         "test-rh-sim" => rh_sim_tests(),
         "test-python" => uv_tools(&["pytest", "-q"]),
@@ -382,11 +471,25 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
     }
 }
 
+/// The `--package` list a scoped run passes, or `None` for a `--workspace` run, when the
+/// selection is everything (DEC-1190).
+fn scoped_packages(selected: &Selection) -> Option<Vec<String>> {
+    selected
+        .everything
+        .is_none()
+        .then(|| selected.crates.iter().cloned().collect())
+}
+
 /// The `rh-sim` rehearsal build's tests (DEC-922): `mandate-mcp` and the runner, `mandate-paper`,
 /// each with the feature, which no workspace crate turns on, so the workspace's own run never
 /// builds it; `mandate-mcp`'s login tests run the simulator binary built here. Each package runs
 /// in its own build, so neither's feature is unified into the other's (DEC-963).
 fn rh_sim_tests() -> Result<()> {
+    let tested = selection()?.among(&REHEARSAL_TESTED);
+    if tested.is_empty() {
+        eprintln!("    test-rh-sim: no crate declaring `{REHEARSAL}` is affected (DEC-1190)");
+        return Ok(());
+    }
     sh(
         "cargo",
         &[
@@ -408,7 +511,7 @@ fn rh_sim_tests() -> Result<()> {
         .as_str()
         .context("cargo metadata names no target directory")?;
     let binary = Path::new(target).join("debug").join("mandate-rh-sim");
-    rehearsal_runs(|args| {
+    rehearsal_runs(&tested, |args| {
         eprintln!(
             "    $ {RH_SIM_BIN_ENV}={} cargo {}",
             binary.display(),
@@ -422,11 +525,14 @@ fn rh_sim_tests() -> Result<()> {
     })
 }
 
-/// [`REHEARSAL_TESTED`]'s `rh-sim` test runs, one `cargo nextest run` a package, in order, each
-/// through `run`, which takes the `cargo` arguments and says how the run exited; the first that
-/// fails stops the rest and is named in the error.
-fn rehearsal_runs(mut run: impl FnMut(&[&str]) -> Result<ExitStatus>) -> Result<()> {
-    for package in REHEARSAL_TESTED {
+/// The `rh-sim` test runs of `packages`, some of [`REHEARSAL_TESTED`], one `cargo nextest run` a
+/// package, in order, each through `run`, which takes the `cargo` arguments and says how the run
+/// exited; the first that fails stops the rest and is named in the error.
+fn rehearsal_runs(
+    packages: &[&str],
+    mut run: impl FnMut(&[&str]) -> Result<ExitStatus>,
+) -> Result<()> {
+    for &package in packages {
         let args = [
             "nextest",
             "run",
@@ -449,19 +555,21 @@ fn rehearsal_runs(mut run: impl FnMut(&[&str]) -> Result<ExitStatus>) -> Result<
 /// build: every workspace crate that declares it (DEC-922, DEC-963, DEC-962 item 2).
 const REHEARSAL_TESTED: [&str; 3] = ["mandate-mcp", "mandate-paper", "mandate-cli"];
 
-/// The arguments of the workspace's nextest run, every test or, with `partition` (`K/N`, `1 <= K
-/// <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every test
-/// once (DEC-871).
-fn nextest_args(partition: Option<&str>) -> Result<Vec<String>> {
-    let mut args: Vec<String> = [
-        "nextest",
-        "run",
-        "--workspace",
-        "--locked",
-        "--no-tests=pass",
-    ]
-    .map(String::from)
-    .to_vec();
+/// The arguments of the workspace's nextest run over `packages`, or the whole workspace when
+/// there are none to scope it to (DEC-1190): every test of them or, with `partition` (`K/N`, `1
+/// <= K <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every
+/// test once (DEC-871).
+fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<Vec<String>> {
+    let mut args: Vec<String> = ["nextest", "run"].map(String::from).to_vec();
+    match packages {
+        None => args.push("--workspace".to_owned()),
+        Some(packages) => {
+            for package in packages {
+                args.extend(["--package".to_owned(), package.clone()]);
+            }
+        }
+    }
+    args.extend(["--locked", "--no-tests=pass"].map(String::from));
     if let Some(partition) = partition {
         let parsed = partition.split_once('/').and_then(|(k, n)| {
             let plain = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
@@ -493,16 +601,16 @@ fn postgres() -> Result<()> {
         );
         return Ok(());
     }
-    let args = [
-        "nextest",
-        "run",
-        "--package",
-        "mandate-journal-pg",
-        "--package",
-        "mandate-cli",
-        "--locked",
-        "--no-tests=pass",
-    ];
+    let tested = selection()?.among(&PG_TESTED);
+    if tested.is_empty() {
+        eprintln!("    postgres: no crate with Postgres tests is affected (DEC-1190)");
+        return Ok(());
+    }
+    let mut args = vec!["nextest", "run"];
+    for package in &tested {
+        args.extend(["--package", package]);
+    }
+    args.extend(["--locked", "--no-tests=pass"]);
     eprintln!("    $ {PG_REQUIRED}=1 cargo {}", args.join(" "));
     let status = Command::new("cargo")
         .args(args)
@@ -511,6 +619,573 @@ fn postgres() -> Result<()> {
         .context("starting `cargo nextest`")?;
     if !status.success() {
         bail!("the Postgres journal tests failed with {status}");
+    }
+    Ok(())
+}
+
+/// The object store's conformance suite against a real S3-compatible store (E21-40, DEC-973),
+/// run only when the selection holds `mandate-objectstore` (DEC-1190). `test` runs it too, but it
+/// skips there unless `MANDATE_S3_URL` is set; here it must run.
+fn objectstore() -> Result<()> {
+    if env::var_os(S3_URL).is_none() {
+        if env::var_os(S3_REQUIRED).is_some() {
+            bail!("{S3_REQUIRED} is set but {S3_URL} is not");
+        }
+        eprintln!(
+            "    objectstore: {S3_URL} is unset; skipping (see crates/mandate-objectstore/README.md)"
+        );
+        return Ok(());
+    }
+    let tested = selection()?.among(&S3_TESTED);
+    if tested.is_empty() {
+        eprintln!("    objectstore: no crate with object-store tests is affected (DEC-1190)");
+        return Ok(());
+    }
+    let mut args = vec!["nextest", "run"];
+    for package in &tested {
+        args.extend(["--package", package]);
+    }
+    args.extend(["--locked", "--no-tests=pass"]);
+    eprintln!("    $ {S3_REQUIRED}=1 cargo {}", args.join(" "));
+    let status = Command::new("cargo")
+        .args(args)
+        .env(S3_REQUIRED, "1")
+        .status()
+        .context("starting `cargo nextest`")?;
+    if !status.success() {
+        bail!("the object store conformance suite failed with {status}");
+    }
+    Ok(())
+}
+
+/// The packages whose tests need the S3 test store (E21-40): `cargo xtask ci objectstore` runs
+/// those of them the selection holds.
+const S3_TESTED: [&str; 1] = ["mandate-objectstore"];
+
+/// The paths whose change selects every crate and every job (DEC-1190 item 3): the workspace's
+/// build inputs, its tool configuration, CI itself, and xtask, which runs every check. Every
+/// `Cargo.toml` is one too, wherever it is ([`selects_everything`]): a manifest can change a
+/// feature or a dependency other crates are built with. An entry ending in `/` is a directory.
+const EVERY_JOB_PATHS: [&str; 11] = [
+    "Cargo.lock",
+    "rust-toolchain.toml",
+    "rust-toolchain",
+    "deny.toml",
+    "clippy.toml",
+    ".cargo/",
+    ".config/",
+    ".github/",
+    "xtask/",
+    ".gitignore",
+    ".python-version",
+];
+
+/// The paths outside every crate that the selection knows (DEC-1190 item 3): each is read by a
+/// job that runs on every change outside the documentation (`fast-lint`, `full-checks`,
+/// `fast-python`), by `web.yml`, or by the crates whose sources name it ([`source_references`]).
+/// Markdown anywhere is known too. A changed path outside every crate and outside this list
+/// selects everything, so a new top-level directory is never assumed unread.
+const KNOWN_OUTSIDE_CRATES: [&str; 18] = [
+    "docs/",
+    "web/",
+    "python/",
+    "reference/",
+    "schemas/",
+    "fixtures/",
+    "migrations/",
+    "config/",
+    "deploy/",
+    "scripts/",
+    "assets/",
+    ".cursor/",
+    ".claude/",
+    "vercel.json",
+    "_typos.toml",
+    ".gitleaks.toml",
+    "CODEOWNERS",
+    "LICENSE*",
+];
+
+/// The paths the workspace API schema checkers and their mutation sweep read besides `schemas/`
+/// (DEC-1190 item 2): every spec, `check_planned.py` globbing `docs/specs/*.md` (the journal
+/// spec among them), the backlog it checks planned operations against, and the requirements file
+/// that pins their Python environment ([`pinned_python`]).
+const SCHEMA_SWEEP_INPUTS: [&str; 4] = [
+    "schemas/",
+    "docs/specs/",
+    "docs/project/06-backlog-v1.md",
+    "reference/mandate/requirements.txt",
+];
+
+/// The runner, the one crate whose `live` build the founder runs (DEC-529): `fast-portable` lints
+/// and tests it on macOS (DEC-954) and `fast-rh-sim-live` runs its rehearsal build (DEC-964), so
+/// both run exactly when it is selected.
+const RUNNER_CRATE: &str = "mandate-paper";
+
+/// The binaries a test runs by a path an environment variable names, each with the crate that
+/// builds it (DEC-1190 item 2): `mandate-mcp`'s rehearsal tests run the simulator `test-rh-sim`
+/// builds (DEC-922 item 3) without depending on its crate. A crate whose sources name the variable
+/// is selected whenever the binary's crate is, as if it depended on it.
+const BINARY_COUPLINGS: [(&str, &str); 1] = [(RH_SIM_BIN_ENV, "mandate-rh-sim")];
+
+/// The prefix [`source_references`] gives a [`BINARY_COUPLINGS`] reference, a crate rather than a
+/// path, so no path matches it.
+const BINARY_REFERENCE: &str = "bin:";
+
+/// The packages whose tests need the database (ADR-0001 ES-08, DEC-520): `cargo xtask ci postgres`
+/// runs those of them the selection holds.
+const PG_TESTED: [&str; 2] = ["mandate-journal-pg", "mandate-cli"];
+
+/// Whether `path` is `entry`, lies under it when `entry` names a directory (ends in `/`), or
+/// starts with it when `entry` ends in `*`.
+fn path_under(path: &str, entry: &str) -> bool {
+    if let Some(prefix) = entry.strip_suffix('*') {
+        path.starts_with(prefix)
+    } else if entry.ends_with('/') {
+        path.starts_with(entry)
+    } else {
+        path == entry
+    }
+}
+
+/// Whether a change to `path` selects every crate and every job (DEC-1190 item 3).
+fn selects_everything(path: &str) -> bool {
+    EVERY_JOB_PATHS.iter().any(|entry| path_under(path, entry))
+        || path == "Cargo.toml"
+        || path.ends_with("/Cargo.toml")
+}
+
+/// The documentation the short path of DEC-112 skips, exactly as `.github/scripts/docs-only.sh`
+/// classifies it: Markdown anywhere, `docs/`, `CODEOWNERS` and `LICENSE*`, except the feature
+/// map, the reference-case YAML and the workspace API spec, which checks read. xtask's tests run
+/// the script over the same paths and require the same answer.
+fn is_docs_path(path: &str) -> bool {
+    if path.starts_with(".cursor/skills/verify-mandate/features/")
+        || path.starts_with("docs/specs/reference-cases/")
+        || path == "docs/specs/workspace-api.md"
+    {
+        return false;
+    }
+    path.ends_with(".md")
+        || path.starts_with("docs/")
+        || path == "CODEOWNERS"
+        || path.starts_with("LICENSE")
+}
+
+/// The workspace's crates as the selection reads them (DEC-1190 item 2).
+#[derive(Clone, Debug, Default)]
+struct CrateGraph {
+    /// Each member's directory, relative to the repository root.
+    dirs: BTreeMap<String, String>,
+    /// The members each member depends on directly, of every kind (normal, dev and build): a
+    /// dependent's tests link what it depends on.
+    deps: BTreeMap<String, BTreeSet<String>>,
+    /// Whether some member turns a feature of another member on, directly or by forwarding one of
+    /// its own (`x = ["member/feat"]`), or turns its defaults off: a `--package` build would then
+    /// unify that member's features differently from the `--workspace` build, so the selection
+    /// takes everything rather than reason about it.
+    member_features: bool,
+}
+
+/// The [`CrateGraph`] of the workspace at `root`.
+fn crate_graph(root: &Path) -> Result<CrateGraph> {
+    let meta = metadata_in(root)?;
+    let dirs: BTreeMap<String, String> = package_dirs(root)?.into_iter().collect();
+    let members = member_dirs(&meta);
+    let mut graph = CrateGraph {
+        dirs,
+        ..CrateGraph::default()
+    };
+    for pkg in workspace_packages(&meta) {
+        let on: Vec<&Dependency> = pkg
+            .dependencies
+            .iter()
+            .filter(|dep| on_member(dep, &members))
+            .collect();
+        graph.member_features |= on
+            .iter()
+            .any(|dep| !dep.features.is_empty() || !dep.uses_default_features)
+            || pkg.features.values().flatten().any(|value| {
+                let named = value.trim_start_matches("dep:");
+                let named = named
+                    .split('/')
+                    .next()
+                    .unwrap_or(named)
+                    .trim_end_matches('?');
+                value.contains('/') && on.iter().any(|dep| dep.name == named)
+            });
+        graph.deps.insert(
+            pkg.name.clone(),
+            on.iter().map(|dep| dep.name.clone()).collect(),
+        );
+    }
+    Ok(graph)
+}
+
+/// `seeds` and every member that depends on one of them, directly or through other members.
+fn dependents_closure(graph: &CrateGraph, seeds: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut dependents: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (krate, deps) in &graph.deps {
+        for dep in deps {
+            dependents
+                .entry(dep.as_str())
+                .or_default()
+                .push(krate.as_str());
+        }
+    }
+    let mut reached = BTreeSet::new();
+    let mut pending: Vec<&str> = seeds.iter().map(String::as_str).collect();
+    while let Some(next) = pending.pop() {
+        if reached.insert(next.to_owned()) {
+            pending.extend(dependents.get(next).into_iter().flatten().copied());
+        }
+    }
+    reached
+}
+
+/// The member whose directory holds `path`, the innermost when directories nest.
+fn owning_crate<'g>(graph: &'g CrateGraph, path: &str) -> Option<&'g str> {
+    graph
+        .dirs
+        .iter()
+        .filter(|(_, dir)| path_under(path, &format!("{dir}/")))
+        .max_by_key(|(_, dir)| dir.len())
+        .map(|(name, _)| name.as_str())
+}
+
+/// The repository paths each member's Rust sources name (DEC-1190 item 2): every piece of every
+/// string literal that could be a path, a leading `/` dropped (`concat!(env!(..), "/../..")`),
+/// resolved against the file's directory (`include_str!`), the crate's directory
+/// (`CARGO_MANIFEST_DIR`), `crates/` (a sibling crate named from a computed `crates` directory)
+/// and the repository root, so a test reading `docs/specs/identity.md`, another crate's fixtures
+/// or another crate's source is selected when that file changes. A
+/// piece with `*` is kept as a prefix ending in `*`. The scan over-approximates on purpose: a
+/// literal that is not a path costs at most a crate selected more, never one selected less. The
+/// one reading it drops is a directory above the crate's own, `crates` itself: a `..` piece read
+/// against the crate's directory names it, and path-traversal tests are full of `..`. A crate that
+/// reads other crates' files names them below `crates/`, as `mandate-paper` names
+/// `mandate-shell`'s fixtures; xtask, which reads them all, selects everything when it changes.
+fn source_references(
+    root: &Path,
+    graph: &CrateGraph,
+) -> Result<BTreeMap<String, BTreeSet<String>>> {
+    let mut args = vec![
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+    ];
+    args.extend(graph.dirs.values().map(String::as_str));
+    let files = output_in(root, "git", &args)?;
+    let mut references: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for file in files.lines().filter(|f| f.ends_with(".rs")) {
+        let Some(owner) = owning_crate(graph, file) else {
+            continue;
+        };
+        let Ok(text) = fs::read_to_string(root.join(file)) else {
+            continue;
+        };
+        let crate_dir = graph.dirs.get(owner).cloned().unwrap_or_default();
+        let file_dir = file.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
+        let named = references.entry(owner.to_owned()).or_default();
+        for (token, _) in tokens(&text) {
+            if let Token::Str(literal) = token {
+                named.extend(
+                    BINARY_COUPLINGS
+                        .iter()
+                        .filter(|(var, _)| literal == *var)
+                        .map(|(_, binary)| format!("{BINARY_REFERENCE}{binary}")),
+                );
+                named.extend(
+                    literal_paths(&literal, file_dir, &crate_dir)
+                        .into_iter()
+                        .filter(|path| !path_under(&crate_dir, &format!("{path}/"))),
+                );
+            }
+        }
+    }
+    Ok(references)
+}
+
+/// The repository paths `literal`, found in a file in `file_dir` of the crate in `crate_dir`,
+/// could name ([`source_references`]).
+fn literal_paths(literal: &str, file_dir: &str, crate_dir: &str) -> BTreeSet<String> {
+    let path_char = |c: char| c.is_ascii_alphanumeric() || "-_./*@+".contains(c);
+    let mut found = BTreeSet::new();
+    for piece in literal.split(|c: char| !path_char(c)) {
+        if piece.is_empty() || piece.contains("//") {
+            continue;
+        }
+        let (piece, glob) = match piece.split_once('*') {
+            Some((before, _)) => (before, true),
+            None => (piece, false),
+        };
+        let piece = piece.trim_start_matches('/');
+        for base in [file_dir, crate_dir, "crates", ""] {
+            if let Some(mut path) = normalized_join(base, piece) {
+                if glob {
+                    path.push('*');
+                }
+                found.insert(path);
+            }
+        }
+    }
+    found
+}
+
+/// `piece` joined to `base`, both relative to the repository root, with `.` and `..` resolved:
+/// `None` when the result is the root itself or would leave it.
+fn normalized_join(base: &str, piece: &str) -> Option<String> {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in base.split('/').chain(piece.split('/')) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            part => parts.push(part),
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("/"))
+}
+
+/// Whether `reference`, one of [`source_references`]' paths, names `path`: the path itself, a
+/// directory above it, or, ending in `*`, a prefix of it.
+fn references_path(reference: &str, path: &str) -> bool {
+    match reference.strip_suffix('*') {
+        Some(prefix) => path.starts_with(prefix),
+        None => path == reference || path_under(path, &format!("{reference}/")),
+    }
+}
+
+/// What one diff runs (DEC-1190): the crates whose tests, doctests, pending tests and rehearsal
+/// builds run, and whether the jobs scoped by path run at all. Lint, the spec guard and the
+/// mutation gate are not here: they run on every change as before.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Selection {
+    /// Why every crate and every job runs, when they do.
+    everything: Option<String>,
+    /// The selected crates: those owning a changed path or naming one in their sources, and every
+    /// member depending on one of those, directly or not.
+    crates: BTreeSet<String>,
+    /// Whether `fast-python` runs: a path changed outside every crate, the documentation and `web/`.
+    python: bool,
+    /// Whether `full-checks` runs: a path changed outside the documentation and `web/` (DEC-112).
+    full_checks: bool,
+    /// Whether `schema-mutants` runs: a path the schema sweep reads changed ([`SCHEMA_SWEEP_INPUTS`]).
+    schema_mutants: bool,
+}
+
+impl Selection {
+    /// Every crate of `graph` and every job, for `reason`.
+    fn everything(graph: &CrateGraph, reason: String) -> Self {
+        Self {
+            everything: Some(reason),
+            crates: graph.dirs.keys().cloned().collect(),
+            python: true,
+            full_checks: true,
+            schema_mutants: true,
+        }
+    }
+
+    /// Whether any crate's tests run.
+    fn tests(&self) -> bool {
+        !self.crates.is_empty()
+    }
+
+    /// Whether the runner's macOS check (DEC-954) and its rehearsal build's tests (DEC-964) run.
+    fn runner(&self) -> bool {
+        self.crates.contains(RUNNER_CRATE)
+    }
+
+    /// The selected crates among `packages`, in their order.
+    fn among<'p>(&self, packages: &[&'p str]) -> Vec<&'p str> {
+        packages
+            .iter()
+            .copied()
+            .filter(|package| self.crates.contains(*package))
+            .collect()
+    }
+
+    /// One line saying what runs and why, for the job summaries and the aggregates' logs.
+    fn reasons(&self) -> String {
+        let yes = |on: bool| if on { "runs" } else { "skipped" };
+        let scope = match &self.everything {
+            Some(reason) => format!("everything selected: {reason}"),
+            None if self.crates.is_empty() => "no crate affected".to_owned(),
+            None => format!(
+                "{} crate(s) affected: {}",
+                self.crates.len(),
+                self.crates.iter().cloned().collect::<Vec<_>>().join(", ")
+            ),
+        };
+        format!(
+            "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {}; \
+             schema-mutants {}; lint, the spec guard and mutants run as always (DEC-1190)",
+            yes(self.tests()),
+            yes(self.python),
+            yes(self.runner()),
+            yes(self.full_checks),
+            yes(self.schema_mutants),
+        )
+    }
+
+    /// The selection as `GITHUB_OUTPUT` lines, one boolean a gated job and its line in the
+    /// `reasons` the aggregates print.
+    fn outputs(&self) -> String {
+        format!(
+            "tests={}\npython={}\nportable={}\nrh_sim_live={}\nfull_checks={}\nschema_mutants={}\n\
+             reasons={}\n",
+            self.tests(),
+            self.python,
+            self.runner(),
+            self.runner(),
+            self.full_checks,
+            self.schema_mutants,
+            self.reasons(),
+        )
+    }
+}
+
+/// What the diff of `changed` paths runs (DEC-1190 items 2 and 3); `None` means there is no base
+/// to compare against (a run on main, the nightly), which runs everything. When in doubt it
+/// selects more: a path it does not know, any build input, and a member turning on another
+/// member's feature all select everything.
+fn select(
+    changed: Option<&[String]>,
+    graph: &CrateGraph,
+    references: &BTreeMap<String, BTreeSet<String>>,
+) -> Selection {
+    let Some(changed) = changed else {
+        return Selection::everything(graph, "no diff base, so nothing is scoped".to_owned());
+    };
+    if graph.member_features {
+        return Selection::everything(
+            graph,
+            "a member turns on another member's feature, which a --package build unifies \
+             differently"
+                .to_owned(),
+        );
+    }
+    let mut seeds = BTreeSet::new();
+    let mut python = false;
+    let mut full_checks = false;
+    let mut schema_mutants = false;
+    for path in changed {
+        if selects_everything(path) {
+            return Selection::everything(graph, format!("{path} changed"));
+        }
+        let owner = owning_crate(graph, path);
+        let docs = is_docs_path(path);
+        let web = path_under(path, "web/");
+        if owner.is_none()
+            && !path.ends_with(".md")
+            && !KNOWN_OUTSIDE_CRATES
+                .iter()
+                .any(|entry| path_under(path, entry))
+        {
+            return Selection::everything(graph, format!("{path} is outside every known path"));
+        }
+        seeds.extend(owner.map(str::to_owned));
+        seeds.extend(
+            references
+                .iter()
+                .filter(|(_, named)| {
+                    named
+                        .iter()
+                        .any(|reference| references_path(reference, path))
+                })
+                .map(|(krate, _)| krate.clone()),
+        );
+        full_checks |= !docs && !web;
+        python |= owner.is_none() && !docs && !web;
+        schema_mutants |= SCHEMA_SWEEP_INPUTS
+            .iter()
+            .any(|entry| path_under(path, entry));
+    }
+    let mut crates = dependents_closure(graph, &seeds);
+    loop {
+        let coupled: BTreeSet<String> = references
+            .iter()
+            .filter(|(krate, named)| {
+                !crates.contains(*krate)
+                    && named.iter().any(|reference| {
+                        reference
+                            .strip_prefix(BINARY_REFERENCE)
+                            .is_some_and(|binary| crates.contains(binary))
+                    })
+            })
+            .map(|(krate, _)| krate.clone())
+            .collect();
+        if coupled.is_empty() {
+            break;
+        }
+        seeds.extend(coupled);
+        crates = dependents_closure(graph, &seeds);
+    }
+    Selection {
+        everything: None,
+        crates,
+        python,
+        full_checks,
+        schema_mutants,
+    }
+}
+
+/// The paths a change touches against `base`, renames as a deletion and an addition so both
+/// sides count: the working tree against the merge base of `base` and HEAD, so a local run counts
+/// what is not committed yet, and untracked files too. In CI the tree is the commit, so this is
+/// `base...HEAD`.
+fn changed_paths(root: &Path, base: &str) -> Result<Vec<String>> {
+    let merge_base = output_in(root, "git", &["merge-base", base, "HEAD"])?;
+    let mut changed: BTreeSet<String> = output_in(
+        root,
+        "git",
+        &["diff", "--name-only", "--no-renames", merge_base.trim()],
+    )?
+    .lines()
+    .map(str::to_owned)
+    .collect();
+    changed.extend(
+        output_in(root, "git", &["ls-files", "--others", "--exclude-standard"])?
+            .lines()
+            .map(str::to_owned),
+    );
+    Ok(changed.into_iter().collect())
+}
+
+/// The selection for the repository at `root` against `base` ([`select`]).
+fn selection_in(root: &Path, base: Option<&str>) -> Result<Selection> {
+    let graph = crate_graph(root)?;
+    let changed = base.map(|base| changed_paths(root, base)).transpose()?;
+    let references = source_references(root, &graph)?;
+    Ok(select(changed.as_deref(), &graph, &references))
+}
+
+/// The selection for this run, from the base [`base_ref`] chooses, said on stderr.
+fn selection() -> Result<Selection> {
+    let selected = selection_in(Path::new("."), base_ref()?.as_deref())?;
+    eprintln!("    select: {}", selected.reasons());
+    Ok(selected)
+}
+
+/// `cargo xtask ci select`: the selection as `GITHUB_OUTPUT` lines on stdout, and as a table in
+/// the job's summary when GitHub gives it one (DEC-1190 item 4).
+fn ci_select() -> Result<()> {
+    let selected = selection()?;
+    print!("{}", selected.outputs());
+    if let Some(summary) = env::var_os("GITHUB_STEP_SUMMARY") {
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(summary)
+            .context("opening the job summary")?;
+        writeln!(
+            file,
+            "### Affected-set selection (DEC-1190)\n\n{}\n",
+            selected.reasons()
+        )?;
     }
     Ok(())
 }
@@ -579,6 +1254,7 @@ fn workspace_lint() -> Result<()> {
         ],
     )?;
     layers()?;
+    decision_numbers(Path::new("."))?;
     markers()?;
     proptest_seeds()?;
     feature_map()?;
@@ -586,6 +1262,28 @@ fn workspace_lint() -> Result<()> {
     sh("typos", &[])?;
     uv_tools(&["ruff", "check", "."])?;
     uv_tools(&["ruff", "format", "--check", "."])
+}
+
+/// The decision-number check (DEC-2600 item 3), the one script both CI paths run: the docs-only
+/// path's `docs-checks.sh` and this lint job.
+const DECISION_NUMBERS: &str = ".github/scripts/decision-numbers.sh";
+
+/// [`DECISION_NUMBERS`] over the repository at `root`: refuses two decision files anywhere in the
+/// tree that take one number, and a decision whose heading names a number other than its file's.
+fn decision_numbers(root: &Path) -> Result<()> {
+    let script = repo_root()?.join(DECISION_NUMBERS);
+    eprintln!("    $ bash {DECISION_NUMBERS}");
+    let out = Command::new("bash")
+        .arg(&script)
+        .current_dir(root)
+        .output()
+        .context("starting `bash`")?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    eprint!("{}{stderr}", String::from_utf8_lossy(&out.stdout));
+    if !out.status.success() {
+        bail!("decisions: {}", stderr.trim());
+    }
+    Ok(())
 }
 
 /// Every file under `dir` whose extension is one of `extensions`, sorted by path so the linter's
@@ -691,7 +1389,8 @@ struct Finding {
 /// exception (the `lapis` token names contain "api"): the ramp row is allowed in the design-source
 /// file alone, the same row in a stray file is reported, and a real key pasted into that file is
 /// reported too. The fingerprint rows prove the "Pinned GPG key fingerprints" exception: allowed in
-/// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone.
+/// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone. The signer rows prove the
+/// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -712,7 +1411,17 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let fingerprint = format!("CLOUDFLARE_FINGERPRINT={hex}");
     let not_fingerprint = format!("CLOUDFLARE_KEY={hex}");
     let cloudflare = Some("cloudflare-api-key");
+    let signer = "crates/mandate-objectstore/tests/sigv4.rs";
+    let example = format!("        \"AK{}\".to_owned(),", "IAIOSFODNN7EXAMPLE");
+    let near_example = format!("        \"AK{}\".to_owned(),", "ZZIOSFODNN7EXAMPLE");
     vec![
+        (signer.to_owned(), example.clone(), None),
+        (signer.to_owned(), near_example, Some("alpaca-key-id")),
+        (
+            "crates/mandate-objectstore/tests/s3.rs".to_owned(),
+            example,
+            Some("alpaca-key-id"),
+        ),
         (fixture("page-1.json"), json.clone(), None),
         (fixture("requests.txt"), query.clone(), None),
         (
@@ -926,6 +1635,14 @@ struct Dependency {
     /// The features this dependency turns on in the crate it names.
     #[serde(default)]
     features: Vec<String>,
+    /// Whether the crate it names keeps its default features.
+    #[serde(default = "keeps_defaults")]
+    uses_default_features: bool,
+}
+
+/// What cargo assumes when a dependency says nothing of its default features: they stay on.
+fn keeps_defaults() -> bool {
+    true
 }
 
 #[derive(Deserialize)]
@@ -1003,13 +1720,6 @@ fn on_member(dep: &Dependency, dirs: &BTreeMap<&str, &Path>) -> bool {
         .is_some_and(|path| dirs.get(dep.name.as_str()) == Some(&path))
 }
 
-fn workspace_has_library() -> Result<bool> {
-    let meta = metadata()?;
-    Ok(workspace_packages(&meta)
-        .iter()
-        .any(|p| p.targets.iter().any(|t| t.kind.iter().any(|k| k == "lib"))))
-}
-
 #[derive(Deserialize)]
 struct Layers {
     impure_crates: Vec<String>,
@@ -1079,7 +1789,47 @@ fn layers() -> Result<()> {
     eprintln!("    layers: checking xtask/layers.toml against cargo metadata");
     let policy: Layers = toml::from_str(&fs::read_to_string("xtask/layers.toml")?)
         .context("parsing xtask/layers.toml")?;
-    report(layer_problems(&policy, &metadata()?)?, "layers")
+    let mut problems = layer_problems(&policy, &metadata()?)?;
+    problems.extend(codeowners_problems(
+        &fs::read_to_string("CODEOWNERS").context("reading CODEOWNERS")?,
+        &policy,
+    ));
+    report(problems, "layers")
+}
+
+/// Every way the CODEOWNERS text `text` breaks `policy` (ADR-0001 ES-13, DEC-2600 item 5): a
+/// safety-critical crate with no `/crates/<name>/` line, crate lines out of sorted order, which
+/// would send two PRs adding two crates to the same place in the file, and a crate line kept
+/// twice, which a union merge of two edits to one line leaves.
+fn codeowners_problems(text: &str, policy: &Layers) -> Vec<String> {
+    let lines: Vec<&str> = text
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|path| path.starts_with("/crates/"))
+        .collect();
+    let mut problems = Vec::new();
+    for (name, own) in &policy.crates {
+        let path = format!("/crates/{name}/");
+        if own.safety_critical && !lines.contains(&path.as_str()) {
+            problems.push(format!(
+                "safety-critical crate `{name}` has no `{path}` line in CODEOWNERS"
+            ));
+        }
+    }
+    for pair in lines.windows(2) {
+        if let [before, after] = pair
+            && after <= before
+        {
+            problems.push(if after == before {
+                format!("CODEOWNERS: `{after}` has two lines; keep one")
+            } else {
+                format!(
+                    "CODEOWNERS: `{after}` must come before `{before}`; keep the crate lines sorted"
+                )
+            });
+        }
+    }
+    problems
 }
 
 /// Every way the workspace in `meta` breaks `policy`.
@@ -1295,20 +2045,116 @@ fn process_group_problems(
     problems
 }
 
-/// Rows of `docs/dependencies.md` shaped `| `name` | ecosystem | ...`.
-fn registry() -> Result<BTreeSet<(String, String)>> {
-    let text =
-        fs::read_to_string("docs/dependencies.md").context("reading docs/dependencies.md")?;
-    let mut entries = BTreeSet::new();
+/// The `(ecosystem, name)` of every row of the registry text `text`.
+fn registry(text: &str) -> BTreeSet<(String, String)> {
+    registry_rows(text)
+        .into_iter()
+        .map(|row| (row.ecosystem, row.name))
+        .collect()
+}
+
+/// What a cargo row's "Used by" cell says (DEC-2600 item 4): the crates are derived from `cargo
+/// metadata` by `cargo xtask deps --used-by`, so no PR edits a shared list to add its crate.
+const USED_BY_DERIVED: &str = "`cargo xtask deps --used-by`";
+
+/// One row of the registry's table: its name, ecosystem, and "Used by" cell.
+struct RegistryRow {
+    name: String,
+    ecosystem: String,
+    used_by: String,
+}
+
+/// The rows of the registry text `text` shaped `| `name` | ecosystem | used by | ...`.
+fn registry_rows(text: &str) -> Vec<RegistryRow> {
+    let mut rows = Vec::new();
     for line in text.lines() {
         let cells: Vec<&str> = line.split('|').map(str::trim).collect();
-        if let [_, name, ecosystem, ..] = cells.as_slice()
+        if let [_, name, ecosystem, used_by, ..] = cells.as_slice()
             && let Some(name) = name.strip_prefix('`').and_then(|n| n.strip_suffix('`'))
         {
-            entries.insert((ecosystem.to_string(), name.to_string()));
+            rows.push(RegistryRow {
+                name: name.to_owned(),
+                ecosystem: (*ecosystem).to_owned(),
+                used_by: (*used_by).to_owned(),
+            });
         }
     }
-    Ok(entries)
+    rows
+}
+
+/// Every way the registry text `text` breaks its shape (DEC-2600 item 4): a name registered twice
+/// in one ecosystem, which a union merge of two edits to one row would leave, and a cargo row whose
+/// "Used by" cell is not [`USED_BY_DERIVED`].
+fn registry_problems(text: &str) -> Vec<String> {
+    let mut counts: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    let rows = registry_rows(text);
+    let mut problems = Vec::new();
+    for row in &rows {
+        *counts.entry((&row.ecosystem, &row.name)).or_default() += 1;
+        if row.ecosystem == "cargo" && row.used_by != USED_BY_DERIVED {
+            problems.push(format!(
+                "cargo dependency `{}`'s Used by cell must be {USED_BY_DERIVED}, which derives it \
+                 from cargo metadata, not a hand-kept list",
+                row.name
+            ));
+        }
+    }
+    for ((ecosystem, name), count) in counts {
+        if count > 1 {
+            problems.push(format!(
+                "{ecosystem} dependency `{name}` has {count} rows; keep one"
+            ));
+        }
+    }
+    problems
+}
+
+/// Each external cargo dependency of the workspace in `meta` with the workspace crates that use
+/// it, a crate that uses it only as a dev- or build-dependency marked `(dev)` or `(build)`.
+fn used_by(meta: &Metadata) -> BTreeMap<String, BTreeSet<String>> {
+    let packages = workspace_packages(meta);
+    let internal: BTreeSet<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+    let mut kinds: BTreeMap<&str, BTreeMap<&str, Option<&str>>> = BTreeMap::new();
+    for pkg in &packages {
+        for dep in pkg
+            .dependencies
+            .iter()
+            .filter(|d| !internal.contains(d.name.as_str()))
+        {
+            let kind = kinds
+                .entry(dep.name.as_str())
+                .or_default()
+                .entry(pkg.name.as_str())
+                .or_insert(dep.kind.as_deref());
+            if dep.kind.is_none() {
+                *kind = None;
+            }
+        }
+    }
+    kinds
+        .into_iter()
+        .map(|(dep, users)| {
+            let users = users
+                .into_iter()
+                .map(|(user, kind)| match kind {
+                    Some(kind) => format!("{user} ({kind})"),
+                    None => user.to_owned(),
+                })
+                .collect();
+            (dep.to_owned(), users)
+        })
+        .collect()
+}
+
+/// `cargo xtask deps --used-by`: the registry's "Used by" column for every cargo row, derived.
+fn deps_used_by() -> Result<()> {
+    for (dep, users) in used_by(&metadata()?) {
+        println!(
+            "{dep}: {}",
+            users.into_iter().collect::<Vec<_>>().join(", ")
+        );
+    }
+    Ok(())
 }
 
 /// The uv workspace root and every member listed in its `[tool.uv.workspace].members`.
@@ -1380,11 +2226,13 @@ fn python_direct_dependencies() -> Result<BTreeSet<String>> {
 
 fn deps() -> Result<()> {
     eprintln!("    deps: checking direct dependencies against docs/dependencies.md");
-    let registered = registry()?;
+    let text =
+        fs::read_to_string("docs/dependencies.md").context("reading docs/dependencies.md")?;
+    let registered = registry(&text);
     let meta = metadata()?;
     let packages = workspace_packages(&meta);
     let internal: BTreeSet<&str> = packages.iter().map(|p| p.name.as_str()).collect();
-    let mut problems = Vec::new();
+    let mut problems = registry_problems(&text);
     for pkg in &packages {
         for dep in pkg
             .dependencies
@@ -2691,7 +3539,13 @@ const PROGRAM_IN_AN_ARGUMENT: &str = "a shell or interpreter given its program i
 /// `web-e2e.yml`'s `node -p` probe prints the Playwright version from a `package.json`, and its
 /// `xargs -r sudo rm -f` removes the Microsoft apt source files `grep` lists; `web.yml` and
 /// `web-deploy.yml` measure the Worker's dry run with `web/scripts/workers.mjs` (DEC-731 item 6).
+/// `nightly.yml`'s clock line writes the runner's time, in seconds, to the step's outputs for the
+/// sweep's rotation (DEC-1190 item 5).
 const READ_LINES: &[(&str, &str)] = &[
+    (
+        ".github/workflows/nightly.yml",
+        r##"echo "seconds=$(date -u +%s)" >> "$GITHUB_OUTPUT""##,
+    ),
     (
         ".github/workflows/web-e2e.yml",
         r##"echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT""##,
@@ -2712,12 +3566,13 @@ const READ_LINES: &[(&str, &str)] = &[
 
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
 /// while its whole text, comments included, holds no cargo word, no `.cargo` and no `CARGO_`
-/// (DEC-873 item 2). `ci.yml` runs the first three and the credential guard (DEC-964), `merge.yml`
-/// the fourth.
+/// (DEC-873 item 2). `ci.yml` runs the first four and the credential guard (DEC-964), `merge.yml`
+/// the fifth.
 const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
     ".github/scripts/start-postgres.sh",
+    ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
     CREDENTIAL_GUARD,
 ];
@@ -2741,10 +3596,12 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// and its command-prefix assignments may hold, exactly, beside [`READ_CARGO_NAMES`] (DEC-873
 /// item 5, #1169 round 5 review, B3): the names the repository's workflows set and nothing more,
 /// so `BASH_ENV`, `ENV`, `PATH`, `LD_PRELOAD`, `RUSTUP_TOOLCHAIN` and `NODE_OPTIONS`, in any
-/// case, cannot be read. `ci.yml` and `nightly.yml` set the tool versions and checksums and the
-/// `MANDATE_*` and `*_RESULT` names, `merge.yml` the merge inputs, `web.yml` and `web-e2e.yml`
-/// the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and `web-deploy.yml` the
-/// build's public Supabase values and the deploy step's Cloudflare token and account (DEC-1005).
+/// case, cannot be read. `ci.yml` and `nightly.yml` set the tool versions and checksums, the
+/// `MANDATE_*`, `*_RESULT` and `*_SELECTED` names, the selection's `REASONS`, and the failure
+/// reports' `RUN_URL` and `VERDICTS` (DEC-1190), `merge.yml` the merge inputs, `web.yml` and
+/// `web-e2e.yml` the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and
+/// `web-deploy.yml` the build's public Supabase values and the deploy step's Cloudflare token and
+/// account (DEC-1005).
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
@@ -2753,7 +3610,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "DOCS_ONLY",
     "DO_NOT_TRACK",
     "EVENT",
+    "FAST_RESULT",
     "FULL_CHECKS_RESULT",
+    "FULL_CHECKS_SELECTED",
+    "FULL_RESULT",
     "GH_TOKEN",
     "GITLEAKS_SHA256",
     "GITLEAKS_VERSION",
@@ -2774,7 +3634,12 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_PG_URL",
     "MANDATE_PR_BODY",
     "MANDATE_PR_NUMBER",
+    "MANDATE_S3_ACCESS_KEY_ID",
+    "MANDATE_S3_REQUIRED",
+    "MANDATE_S3_SECRET_ACCESS_KEY",
+    "MANDATE_S3_URL",
     "MANDATE_SCHEMA_SHARD",
+    "MANDATE_SWEEP_CLOCK",
     "MANDATE_TEST_PARTITION",
     "MERGE_APPROVERS",
     "MUTANTS_RESULT",
@@ -2786,12 +3651,24 @@ const READ_ENV_NAMES: &[&str] = &[
     "PLAN_RESULT",
     "PORTABLE_RESULT",
     "POSTGRES_PASSWORD",
+    "PORTABLE_SELECTED",
     "PYTHON_RESULT",
+    "PYTHON_SELECTED",
+    "REASONS",
     "RH_SIM_LIVE_RESULT",
+    "RH_SIM_LIVE_SELECTED",
     "RUN_PRS",
+    "RUN_URL",
     "SCHEMA_MUTANTS_RESULT",
+    "SCHEMA_MUTANTS_SELECTED",
+    "SELECT_RESULT",
+    "TESTS_SELECTED",
     "TEST_RESULT",
+    "VERDICTS",
     "WRANGLER_SEND_METRICS",
+    "R2_ACCESS_KEY_ID",
+    "R2_ENDPOINT",
+    "R2_SECRET_ACCESS_KEY",
 ];
 
 /// Whether `name` may be an `env:` key or a command-prefix assignment: exactly one of
@@ -5746,9 +6623,7 @@ fn mutants_scheduled(
         eprintln!("    mutants: the diff generates no mutants");
         return Ok(());
     }
-    let meta = metadata_in(root)?;
-    let harnesses = simulator_harnesses(&meta);
-    let mut test_packages: Vec<&str> = diff
+    let tested: Vec<String> = diff
         .crates
         .iter()
         .filter(|krate| {
@@ -5756,14 +6631,30 @@ fn mutants_scheduled(
                 .iter()
                 .any(|file| file.starts_with(&krate.src_dir()))
         })
-        .map(|krate| krate.package.as_str())
+        .map(|krate| krate.package.clone())
         .collect();
+    gate_run(root, &diff, shard, &listed, &tested)
+}
+
+/// The gate's run over `diff`'s `listed` mutants, or `shard`'s slice of them, judged by the tests
+/// of `tested` and their external and simulator oracles: what [`mutants_scheduled`] runs for a
+/// pull request and [`sweep_scheduled`] for one shard of the nightly's whole-crate sweep.
+fn gate_run(
+    root: &Path,
+    diff: &GateDiff,
+    shard: Option<MutantShard>,
+    listed: &BTreeMap<String, usize>,
+    tested: &[String],
+) -> Result<()> {
+    let meta = metadata_in(root)?;
+    let harnesses = simulator_harnesses(&meta);
+    let mut test_packages: Vec<&str> = tested.iter().map(String::as_str).collect();
     let closure = workspace_closure(&meta);
     external_oracles(&mut test_packages, &closure);
     simulator_oracles(&mut test_packages, &harnesses);
-    let unoptimised = unoptimised_config(&unoptimised_packages(&listed, &closure));
-    live_tests_judge_every_mutant(root, &listed, &test_packages, &unoptimised)?;
-    let first = TestOrder::write(&shard_packages(root, diff.path()?, shard, &listed)?)?;
+    let unoptimised = unoptimised_config(&unoptimised_packages(listed, &closure));
+    live_tests_judge_every_mutant(root, listed, &test_packages, &unoptimised)?;
+    let first = TestOrder::write(&shard_packages(root, diff.path()?, shard, listed)?)?;
     let args = mutants_args(
         diff.path()?,
         shard,
@@ -5885,7 +6776,19 @@ fn gate_diff(root: &Path, base: Option<&str>) -> Result<Option<GateDiff>> {
         eprintln!("    mutants: no safety-critical crate's source changed");
         return Ok(None);
     }
-    let mut args = vec!["diff".to_owned(), format!("{base}...HEAD"), "--".to_owned()];
+    gate_diff_of(root, crates, touched, &[format!("{base}...HEAD")]).map(Some)
+}
+
+/// The [`GateDiff`] of `touched`, `crates`' source files, over the `git diff` revisions `range`.
+fn gate_diff_of(
+    root: &Path,
+    crates: Vec<MutatedCrate>,
+    touched: Vec<String>,
+    range: &[String],
+) -> Result<GateDiff> {
+    let mut args = vec!["diff".to_owned()];
+    args.extend(range.iter().cloned());
+    args.push("--".to_owned());
     args.extend(touched.iter().cloned());
     let text = output_in(
         root,
@@ -5894,11 +6797,171 @@ fn gate_diff(root: &Path, base: Option<&str>) -> Result<Option<GateDiff>> {
     )?;
     let file = gate_diff_path();
     fs::write(&file, text)?;
-    Ok(Some(GateDiff {
+    Ok(GateDiff {
         crates,
         touched,
         file,
-    }))
+    })
+}
+
+/// git's empty tree. The whole-crate sweep's diff is every safety-critical crate's source against
+/// it, so every line is an added line and every mutant the gate would make in it is in the diff.
+const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/// The diff of the nightly's whole-crate sweep (DEC-1190 item 5): every `.rs` file under a
+/// safety-critical crate's `src/`, as if each were new, through the same [`GateDiff`] the gate
+/// reads, so the sweep is the per-PR gate over a diff that touches everything.
+fn gate_diff_whole(root: &Path) -> Result<Option<GateDiff>> {
+    let crates = mutated_crates(root)?;
+    let mut args = vec!["ls-files".to_owned(), "--".to_owned()];
+    args.extend(crates.iter().map(MutatedCrate::src_dir));
+    let files = output_in(
+        root,
+        "git",
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+    )?;
+    let touched: Vec<String> = files
+        .lines()
+        .filter(|f| f.ends_with(".rs"))
+        .map(str::to_owned)
+        .collect();
+    if touched.is_empty() {
+        eprintln!("    sweep: no safety-critical crate has source");
+        return Ok(None);
+    }
+    gate_diff_of(
+        root,
+        crates,
+        touched,
+        &[EMPTY_TREE.to_owned(), "HEAD".to_owned()],
+    )
+    .map(Some)
+}
+
+/// The mutants a shard of the whole-crate sweep tests at most, so a shard stays within ten
+/// minutes (DEC-1190 item 5): DEC-473 found fourteen or fifteen `mandate-executor` mutants a shard
+/// reaching the cap and eight fitting. Slice sharding over `ceil(n / 8)` shards gives each shard
+/// `ceil(n / ceil(n / 8))` mutants, never more than this.
+const SWEEP_SHARD_MUTANTS: usize = 8;
+
+/// The fewest days one whole-crate sweep is spread over (DEC-1190 item 5): shard `k` runs on the
+/// days whose index is `k` modulo the rotation, so every mutant is tested once a week, and a
+/// night's matrix leaves most of the shared runners to pull requests. [`SweepPlan::rotation_for`] lengthens it once a seventh would not fit one matrix.
+const SWEEP_ROTATION: u64 = 7;
+
+/// GitHub's ceiling on one matrix's jobs.
+const MATRIX_LIMIT: usize = 256;
+
+/// One night's share of the whole-crate sweep: the sweep's mutant count, its shard total, the
+/// runs its rotation takes, and the shards this night runs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SweepPlan {
+    mutants: usize,
+    total: usize,
+    rotation: usize,
+    tonight: Vec<usize>,
+}
+
+impl SweepPlan {
+    /// The sweep's shard total for `mutants` mutants: `ceil(mutants / SWEEP_SHARD_MUTANTS)`.
+    fn shards_for(mutants: usize) -> usize {
+        mutants.div_ceil(SWEEP_SHARD_MUTANTS)
+    }
+
+    /// The runs a rotation over `total` shards takes: [`SWEEP_ROTATION`], or more when a night's
+    /// share would not fit one matrix, so a growing workspace lengthens the rotation rather than
+    /// failing the plan or dropping shards.
+    fn rotation_for(total: usize) -> usize {
+        usize::try_from(SWEEP_ROTATION)
+            .unwrap_or(usize::MAX)
+            .max(total.div_ceil(MATRIX_LIMIT))
+    }
+
+    /// Night `night`'s share of a sweep of `mutants`: every shard whose index is `night` modulo
+    /// the rotation, at most [`MATRIX_LIMIT`] of them.
+    fn for_night(mutants: usize, night: u64) -> Result<Self> {
+        let total = Self::shards_for(mutants);
+        let rotation = Self::rotation_for(total);
+        let turn = usize::try_from(night % u64::try_from(rotation).unwrap_or(u64::MAX))
+            .context("the rotation's turn fits a usize")?;
+        let tonight: Vec<usize> = (0..total).filter(|k| k % rotation == turn).collect();
+        Ok(Self {
+            mutants,
+            total,
+            rotation,
+            tonight,
+        })
+    }
+
+    /// The plan as `GITHUB_OUTPUT` lines, as [`MutantPlan::outputs`] writes them.
+    fn outputs(&self) -> String {
+        let indices: Vec<String> = self.tonight.iter().map(ToString::to_string).collect();
+        format!(
+            "mutants={}\nshards=[{}]\ntotal={}\n",
+            self.mutants,
+            indices.join(","),
+            self.total
+        )
+    }
+}
+
+/// The variable the nightly sets to the runner's clock, in seconds since the Unix epoch: time is
+/// an input (ES-05). Its day picks the day's share of the rotation, so consecutive days cover every
+/// share whatever runs were dispatched or skipped.
+const SWEEP_CLOCK_ENV: &str = "MANDATE_SWEEP_CLOCK";
+
+/// Today's index in the rotation, the days since the Unix epoch of [`SWEEP_CLOCK_ENV`], which the
+/// plan requires.
+fn sweep_night() -> Result<u64> {
+    let value = env::var(SWEEP_CLOCK_ENV)
+        .with_context(|| format!("{SWEEP_CLOCK_ENV} gives the clock the sweep's rotation reads"))?;
+    let seconds = value
+        .parse::<u64>()
+        .with_context(|| format!("{SWEEP_CLOCK_ENV} must be whole seconds; got {value:?}"))?;
+    Ok(seconds / 86_400)
+}
+
+/// `cargo xtask ci sweep --plan`: tonight's share of the whole-crate sweep, from the gate's own
+/// listing of [`gate_diff_whole`].
+fn sweep_plan(root: &Path, night: u64) -> Result<SweepPlan> {
+    let mutants = match gate_diff_whole(root)? {
+        Some(diff) => gate_mutants(root, &diff)?.values().sum(),
+        None => 0,
+    };
+    SweepPlan::for_night(mutants, night)
+}
+
+/// `cargo xtask ci sweep`: one shard of the whole-crate sweep, its shard and the plan's count read
+/// from the environment as the per-PR shards read theirs.
+fn sweep(root: &Path) -> Result<()> {
+    let shard = env::var(MUTANT_SHARD_ENV)
+        .ok()
+        .map(|value| MutantShard::parse(&value))
+        .transpose()
+        .with_context(|| format!("parsing {MUTANT_SHARD_ENV}"))?;
+    let planned = env::var(MUTANTS_PLANNED_ENV)
+        .ok()
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .with_context(|| format!("parsing {MUTANTS_PLANNED_ENV}"))?;
+    sweep_scheduled(root, shard, planned)
+}
+
+/// One shard of the whole-crate sweep (DEC-1190 item 5): the gate over [`gate_diff_whole`], each
+/// shard judged by the tests of the crates its own mutants are in and their oracles, which is what
+/// the gate runs for a pull request touching only those crates.
+fn sweep_scheduled(root: &Path, shard: Option<MutantShard>, planned: Option<usize>) -> Result<()> {
+    let Some(diff) = gate_diff_whole(root)? else {
+        return check_schedule_for(0, shard, planned, SweepPlan::shards_for);
+    };
+    let listed = gate_mutants(root, &diff)?;
+    check_schedule_for(listed.values().sum(), shard, planned, SweepPlan::shards_for)?;
+    let tested = shard_packages(root, diff.path()?, shard, &listed)?;
+    if tested.is_empty() {
+        eprintln!("    sweep: this shard holds no mutant");
+        return Ok(());
+    }
+    gate_run(root, &diff, shard, &listed, &tested)
 }
 
 /// Every mutant the gate tests on `diff`, counted per package: `cargo mutants --list` with the
@@ -5969,6 +7032,19 @@ fn mutants_plan(root: &Path, base: Option<&str>) -> Result<MutantPlan> {
 /// size, or a shard total other than the plan's. Either would mean the shards no longer cover the
 /// listing between them. Without a plan (a local run) any schedule is accepted.
 fn check_schedule(listed: usize, shard: Option<MutantShard>, planned: Option<usize>) -> Result<()> {
+    check_schedule_for(listed, shard, planned, |mutants| {
+        MutantPlan::for_mutants(mutants).shards
+    })
+}
+
+/// [`check_schedule`] for a plan whose shard total for a count is `shards_for` of it: the per-PR
+/// matrix's ([`MutantPlan`]) or the whole-crate sweep's ([`SweepPlan`]).
+fn check_schedule_for(
+    listed: usize,
+    shard: Option<MutantShard>,
+    planned: Option<usize>,
+    shards_for: impl Fn(usize) -> usize,
+) -> Result<()> {
     let Some(planned) = planned else {
         return Ok(());
     };
@@ -5979,7 +7055,7 @@ fn check_schedule(listed: usize, shard: Option<MutantShard>, planned: Option<usi
         );
     }
     if let Some(shard) = shard {
-        let expected = MutantPlan::for_mutants(planned).shards;
+        let expected = shards_for(planned);
         if shard.total != expected {
             bail!(
                 "shard {} names a total of {} but a plan of {planned} mutant(s) runs {expected} \
@@ -6958,8 +8034,13 @@ fn has_pending_tests(root: &Path, dir: &str) -> Result<bool> {
 /// name the story's stub, or a test that can never pass on correct code would pass the gate
 /// (DEC-137). With no pending test there is nothing to run.
 fn pending() -> Result<()> {
+    let selected = selection()?;
     report(
-        pending_problems(Path::new("."), BuildDir::Callers)?,
+        pending_problems(
+            Path::new("."),
+            BuildDir::Callers,
+            scoped_packages(&selected).as_deref(),
+        )?,
         "pending",
     )
 }
@@ -6997,9 +8078,11 @@ fn pending_nextest(root: &Path, args: &[&str], build: BuildDir) -> Command {
     nextest
 }
 
-/// Runs every test the working tree marks pending and names each one that passes or does not run,
-/// building where `build` says.
-fn pending_problems(root: &Path, build: BuildDir) -> Result<Vec<String>> {
+/// Runs every test the working tree marks pending in `packages`, or in the whole workspace when
+/// there are none to scope it to (DEC-1190), and names each one that passes or does not run,
+/// building where `build` says. A behaviour-only row naming a test that is no longer pending is
+/// stale whichever packages run.
+fn pending_problems(root: &Path, build: BuildDir, scope: Option<&[String]>) -> Result<Vec<String>> {
     let mut args = vec![
         "ls-files",
         "--cached",
@@ -7048,15 +8131,28 @@ fn pending_problems(root: &Path, build: BuildDir) -> Result<Vec<String>> {
             )
         })
         .collect();
+    if let Some(scope) = scope {
+        tests.retain(|test| scope.contains(&test.package));
+        if tests.is_empty() {
+            eprintln!("    pending: no pending test in an affected crate (DEC-1190)");
+            return Ok(stale);
+        }
+    }
     let filter = tests
         .iter()
         .map(PendingTestRun::filterset)
         .collect::<Vec<_>>()
         .join(" | ");
-    let args = [
-        "nextest",
-        "run",
-        "--workspace",
+    let mut args = vec!["nextest", "run"];
+    match scope {
+        None => args.push("--workspace"),
+        Some(scope) => {
+            for package in scope {
+                args.extend(["--package", package.as_str()]);
+            }
+        }
+    }
+    args.extend([
         "--locked",
         "--no-fail-fast",
         "--run-ignored",
@@ -7066,7 +8162,7 @@ fn pending_problems(root: &Path, build: BuildDir) -> Result<Vec<String>> {
         "libtest-json",
         "-E",
         &filter,
-    ];
+    ]);
     eprintln!(
         "    pending: {} pending test(s) must fail on this change's code, at their story's stub",
         tests.len()
@@ -8150,7 +9246,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
-    use std::process::{Command, ExitStatus};
+    use std::process::{Command, ExitStatus, Stdio};
     use std::time::Duration;
 
     use anyhow::{Context, Result, bail};
@@ -8163,19 +9259,26 @@ mod tests {
         Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS, Package, PendingTest,
         PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_LIVE_JOB, REHEARSAL_TESTED, SCHEMA_CHECKERS,
         SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome,
-        UnmutatedSource, actionlint_workflows, backticked_paths, base_ref_in, behaviour_only_rows,
-        check_schedule, ci, ci_files, classify, contains_dec_id, contains_word, external_oracles,
-        failure_cause, feature_files, feature_map_problems, files_by_extension, first_panic_line,
+        USED_BY_DERIVED, UnmutatedSource, actionlint_workflows, backticked_paths, base_ref_in,
+        behaviour_only_rows, check_schedule, ci, ci_files, classify, codeowners_problems,
+        contains_dec_id, contains_word, decision_numbers, external_oracles, failure_cause,
+        feature_files, feature_map_problems, files_by_extension, first_panic_line,
         forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
         is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
         live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
         mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
-        plain_comment_lines, preflight_args, proptest_seeds_in, rehearsal_runs, repo_root,
-        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, verdicts,
-        workspace_closure, workspace_packages,
+        plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems, registry_rows,
+        rehearsal_runs, repo_root, schema_mutants, shard_packages, shellcheck_scripts,
+        simulator_harnesses, simulator_oracles, spec_guard_problems, spec_guard_problems_for_pr,
+        status_flip_problems, test_binary, test_order_config, test_outcomes, unique_temp_path,
+        unjudged_mutants, used_by, verdicts, workspace_closure, workspace_packages,
+    };
+    use super::{
+        BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
+        SWEEP_SHARD_MUTANTS, SweepPlan, Token, crate_graph, is_docs_path, literal_paths,
+        nextest_args, normalized_join, references_path, select, selection_in, source_references,
+        tokens,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -8299,6 +9402,7 @@ mod tests {
                 kind: kind.map(str::to_owned),
                 path: Some(PathBuf::from(format!("/nowhere/{dep}"))),
                 features: Vec::new(),
+                uses_default_features: true,
             })
             .collect();
         Package {
@@ -9020,6 +10124,44 @@ mod tests {
                 started.is_some() && gated.is_some() && started < gated,
                 "`{job}` starts the shared, digest-pinned PostgreSQL before `{gate}` (DEC-519): \
                  start at {started:?}, gate at {gated:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The DEC-519 rule for the object store (E21-40, DEC-973): `mandate-objectstore`'s
+    /// conformance suite skips without `MANDATE_S3_URL`, so each job that judges its code starts
+    /// the digest-pinned S3 test store before its gate and requires it.
+    #[test]
+    fn every_mutation_shard_has_the_store_the_objectstore_tests_need() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        for (job, gate) in [
+            ("full-checks", "run: cargo xtask ci full"),
+            ("mutants", "run: cargo xtask ci mutants"),
+        ] {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            let trimmed: Vec<&str> = lines
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- "))
+                .collect();
+            for setting in [
+                "MANDATE_S3_URL: http://127.0.0.1:9000",
+                "MANDATE_S3_REQUIRED: \"1\"",
+            ] {
+                assert!(
+                    trimmed.contains(&setting),
+                    "`{job}` sets `{setting}`, so the conformance suite runs and cannot skip"
+                );
+            }
+            let started = trimmed
+                .iter()
+                .position(|line| *line == "run: .github/scripts/start-minio.sh");
+            let gated = trimmed.iter().position(|line| *line == gate);
+            assert!(
+                started.is_some() && gated.is_some() && started < gated,
+                "`{job}` starts the S3 test store before `{gate}`: start at {started:?}, gate at \
+                 {gated:?}"
             );
         }
         Ok(())
@@ -10286,7 +11428,7 @@ mod tests {
         );
         fx.write("crates/fx/tests/stubs.rs", away)?;
         fx.commit()?;
-        let problems = pending_problems(&fx.0, BuildDir::OwnTree)?;
+        let problems = pending_problems(&fx.0, BuildDir::OwnTree, None)?;
         assert!(
             problems.len() == 1
                 && problems
@@ -10305,7 +11447,7 @@ mod tests {
         )?;
         fx.commit()?;
         assert_eq!(
-            pending_problems(&fx.0, BuildDir::OwnTree)?,
+            pending_problems(&fx.0, BuildDir::OwnTree, None)?,
             Vec::<String>::new(),
             "with its row, it is excused"
         );
@@ -10315,7 +11457,7 @@ mod tests {
             &away.replace("fails_on_behaviour", "renamed"),
         )?;
         fx.commit()?;
-        let problems = pending_problems(&fx.0, BuildDir::OwnTree)?;
+        let problems = pending_problems(&fx.0, BuildDir::OwnTree, None)?;
         assert!(
             problems.iter().any(|p| p.contains(
                 "xtask/behaviour-only/fx__stubs__fails_on_behaviour.toml names \
@@ -11231,7 +12373,7 @@ mod tests {
         )?;
         fx.commit()?;
         for round in 1..=3 {
-            let problems = pending_problems(&fx.0, BuildDir::OwnTree)?;
+            let problems = pending_problems(&fx.0, BuildDir::OwnTree, None)?;
             assert!(
                 problems.len() == 1
                     && problems.iter().all(|p| p.starts_with(
@@ -11360,7 +12502,7 @@ mod tests {
         fx.write("crates/fx/tests/stubs.rs", live)?;
         fx.commit()?;
         assert_eq!(
-            pending_problems(&fx.0, BuildDir::OwnTree)?,
+            pending_problems(&fx.0, BuildDir::OwnTree, None)?,
             Vec::<String>::new(),
             "with no pending test there is nothing to run"
         );
@@ -11376,7 +12518,7 @@ mod tests {
         fx.write("crates/fx/tests/stubs.rs", &format!("{live}{failing}"))?;
         fx.commit()?;
         assert_eq!(
-            pending_problems(&fx.0, BuildDir::OwnTree)?,
+            pending_problems(&fx.0, BuildDir::OwnTree, None)?,
             Vec::<String>::new(),
             "pending tests that fail on the stubs pass the gate"
         );
@@ -11390,7 +12532,7 @@ mod tests {
             &format!("{live}{failing}{away}"),
         )?;
         fx.commit()?;
-        let problems = pending_problems(&fx.0, BuildDir::OwnTree)?;
+        let problems = pending_problems(&fx.0, BuildDir::OwnTree, None)?;
         let problem = problems.first().map(String::as_str).unwrap_or_default();
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(
@@ -11426,7 +12568,7 @@ mod tests {
             "fn unit_passes() { assert!(super::lookup().is_err()); }\n}\n",
         );
         fx.write("crates/fx/src/lib.rs", &format!("{STUBS}{unit}"))?;
-        let mut problems: Vec<String> = pending_problems(&fx.0, BuildDir::OwnTree)?
+        let mut problems: Vec<String> = pending_problems(&fx.0, BuildDir::OwnTree, None)?
             .iter()
             .map(|p| p.split([',', ';']).next().unwrap_or_default().to_owned())
             .collect();
@@ -12018,8 +13160,8 @@ mod tests {
         let full = trimmed("full")?;
         assert!(
             full.iter()
-                .any(|l| l == "needs: [full-checks, mutants-plan, mutants, schema-mutants]"),
-            "`full` needs the plan as well as the matrix"
+                .any(|l| l == "needs: [select, full-checks, mutants-plan, mutants, schema-mutants]"),
+            "`full` needs the selection and the plan as well as the matrix"
         );
         Ok(())
     }
@@ -12048,43 +13190,87 @@ mod tests {
 
     /// DEC-538's `full` verdict, run as GitHub runs it (`bash -e`) over every combination of the
     /// three jobs' results and the plan's count, against a truth table written out here: the
-    /// matrix's skip passes only beside a plan that succeeded and counted zero.
+    /// matrix's skip passes only beside a plan that succeeded and counted zero. DEC-1190 adds the
+    /// selection: `full-checks` passes as skipped only when `select` did not select it, and a
+    /// `full-checks` that ran when unselected, or a selection that failed, fails `full`.
     #[test]
     fn full_accepts_a_skipped_matrix_only_beside_a_plan_of_zero() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
         let script = full_verdict_script(&workflow)?;
         let results = ["success", "failure", "cancelled", "skipped"];
         let mut checked = 0usize;
-        for checks in results {
-            for plan in results {
-                for planned in ["0", "1", "10", "500", "", "01", "x", "-1"] {
-                    for matrix in results {
-                        let expected = checks == "success"
-                            && plan == "success"
-                            && match planned {
-                                "0" => matrix == "skipped",
-                                "1" | "10" | "500" => matrix == "success",
-                                _ => false,
-                            };
-                        let status = Command::new("bash")
-                            .args(["-e", "-c", &script])
-                            .env("FULL_CHECKS_RESULT", checks)
-                            .env("PLAN_RESULT", plan)
-                            .env("PLANNED_MUTANTS", planned)
-                            .env("MUTANTS_RESULT", matrix)
-                            .env("SCHEMA_MUTANTS_RESULT", "success")
-                            .status()?;
-                        assert_eq!(
-                            status.success(),
-                            expected,
-                            "full-checks {checks}, plan {plan} counting {planned:?}, mutants {matrix}"
-                        );
-                        checked = checked.saturating_add(1);
+        for selection in ["success", "failure"] {
+            for selected in ["true", "false", ""] {
+                for checks in results {
+                    for plan in results {
+                        for planned in ["0", "1", "10", "500", "", "01", "x", "-1"] {
+                            for matrix in results {
+                                let checks_as_selected = match selected {
+                                    "true" => checks == "success",
+                                    "false" => checks == "skipped",
+                                    _ => false,
+                                };
+                                let expected = selection == "success"
+                                    && checks_as_selected
+                                    && plan == "success"
+                                    && match planned {
+                                        "0" => matrix == "skipped",
+                                        "1" | "10" | "500" => matrix == "success",
+                                        _ => false,
+                                    };
+                                let status = Command::new("bash")
+                                    .args(["-e", "-c", &script])
+                                    .env("GITHUB_STEP_SUMMARY", "/dev/null")
+                                    .env("SELECT_RESULT", selection)
+                                    .env("FULL_CHECKS_SELECTED", selected)
+                                    .env("SCHEMA_MUTANTS_SELECTED", "true")
+                                    .env("FULL_CHECKS_RESULT", checks)
+                                    .env("PLAN_RESULT", plan)
+                                    .env("PLANNED_MUTANTS", planned)
+                                    .env("MUTANTS_RESULT", matrix)
+                                    .env("SCHEMA_MUTANTS_RESULT", "success")
+                                    .stdout(Stdio::null())
+                                    .status()?;
+                                assert_eq!(
+                                    status.success(),
+                                    expected,
+                                    "select {selection} selecting {selected:?}, full-checks {checks}, \
+                                     plan {plan} counting {planned:?}, mutants {matrix}"
+                                );
+                                checked = checked.saturating_add(1);
+                            }
+                        }
                     }
                 }
             }
         }
-        assert_eq!(checked, 512);
+        assert_eq!(checked, 3072);
+        for (selected, result, passes) in [
+            ("true", "success", true),
+            ("true", "skipped", false),
+            ("false", "skipped", true),
+            ("false", "success", false),
+            ("", "skipped", false),
+        ] {
+            let status = Command::new("bash")
+                .args(["-e", "-c", &script])
+                .env("GITHUB_STEP_SUMMARY", "/dev/null")
+                .env("SELECT_RESULT", "success")
+                .env("FULL_CHECKS_SELECTED", "true")
+                .env("SCHEMA_MUTANTS_SELECTED", selected)
+                .env("FULL_CHECKS_RESULT", "success")
+                .env("PLAN_RESULT", "success")
+                .env("PLANNED_MUTANTS", "0")
+                .env("MUTANTS_RESULT", "skipped")
+                .env("SCHEMA_MUTANTS_RESULT", result)
+                .stdout(Stdio::null())
+                .status()?;
+            assert_eq!(
+                status.success(),
+                passes,
+                "schema-mutants selected {selected:?} and {result}"
+            );
+        }
         Ok(())
     }
 
@@ -12156,7 +13342,8 @@ mod tests {
             .collect();
         let shard_env = format!("{SCHEMA_SHARD_ENV}: ${{{{ matrix.shard }}}}");
         for line in [
-            "if: ${{ !github.event.pull_request.draft }}",
+            "needs: select",
+            "if: needs.select.outputs.schema_mutants == 'true'",
             "timeout-minutes: 10",
             "fail-fast: false",
             "shard: [\"0/6\", \"1/6\", \"2/6\", \"3/6\", \"4/6\", \"5/6\"]",
@@ -12172,6 +13359,10 @@ mod tests {
         for result in ["success", "failure", "cancelled", "skipped", ""] {
             let status = Command::new("bash")
                 .args(["-e", "-c", &script])
+                .env("GITHUB_STEP_SUMMARY", "/dev/null")
+                .env("SELECT_RESULT", "success")
+                .env("FULL_CHECKS_SELECTED", "true")
+                .env("SCHEMA_MUTANTS_SELECTED", "true")
                 .env("FULL_CHECKS_RESULT", "success")
                 .env("PLAN_RESULT", "success")
                 .env("PLANNED_MUTANTS", "0")
@@ -12187,10 +13378,11 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-610: a draft runs no `ci` job. `fast`, `full-checks` and the mutation plan are skipped
-    /// while the pull request is a draft, the matrix follows its plan, `full` is skipped too rather
-    /// than judging skipped jobs, marking a pull request ready starts its run, and a newer push
-    /// still cancels the older run of the same ref.
+    /// DEC-610: a draft runs no `ci` job. `select`, `fast-lint` and the mutation plan are skipped
+    /// while the pull request is a draft, the scoped jobs follow `select` (DEC-1190) and the matrix
+    /// its plan, `fast` and `full` are skipped too rather than judging skipped jobs, the failure
+    /// report runs only on a dispatch on main, marking a pull request ready starts its run, and a
+    /// newer push still cancels the older run of the same ref.
     #[test]
     fn ci_runs_nothing_on_a_draft() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -12206,27 +13398,23 @@ mod tests {
             ),
             "a newer run of the same ref cancels the older one"
         );
+        let report = "if: ${{ always() && github.event_name == 'workflow_dispatch' && \
+                      github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || \
+                      needs.full.result == 'failure') }}";
         for (job, guard) in [
+            ("select", "if: ${{ !github.event.pull_request.draft }}"),
             ("fast-lint", "if: ${{ !github.event.pull_request.draft }}"),
-            ("fast-test", "if: ${{ !github.event.pull_request.draft }}"),
-            (
-                "fast-pending",
-                "if: ${{ !github.event.pull_request.draft }}",
-            ),
-            ("fast-python", "if: ${{ !github.event.pull_request.draft }}"),
-            (
-                "fast-portable",
-                "if: ${{ !github.event.pull_request.draft }}",
-            ),
+            ("fast-test", "needs: select"),
+            ("fast-pending", "needs: select"),
+            ("fast-python", "needs: select"),
+            ("fast-portable", "needs: select"),
+            ("fast-rh-sim-live", "needs: select"),
             (
                 "fast",
                 "if: ${{ always() && !github.event.pull_request.draft }}",
             ),
-            ("full-checks", "if: ${{ !github.event.pull_request.draft }}"),
-            (
-                "schema-mutants",
-                "if: ${{ !github.event.pull_request.draft }}",
-            ),
+            ("full-checks", "needs: select"),
+            ("schema-mutants", "needs: select"),
             (
                 "mutants-plan",
                 "if: ${{ !github.event.pull_request.draft }}",
@@ -12236,6 +13424,7 @@ mod tests {
                 "if: ${{ always() && !github.event.pull_request.draft }}",
             ),
             ("mutants", "needs: mutants-plan"),
+            ("report-main", report),
         ] {
             let lines = workflow_job(&workflow, job)
                 .with_context(|| format!("ci.yml has a `{job}` job"))?;
@@ -12248,6 +13437,8 @@ mod tests {
             "if: ${{ !github.event.pull_request.draft }}",
             "if: ${{ always() && !github.event.pull_request.draft }}",
             "needs: mutants-plan",
+            "needs: select",
+            report,
         ];
         for job in workflow_jobs(&workflow) {
             let lines = workflow_job(&workflow, job)
@@ -12313,7 +13504,7 @@ mod tests {
     fn the_rh_sim_runs_test_each_crate_alone_and_stop_at_the_first_failure() {
         let exited = |code: i32| ExitStatus::from_raw(code << 8);
         let mut ran = Vec::new();
-        let passed = rehearsal_runs(|args| {
+        let passed = rehearsal_runs(&REHEARSAL_TESTED, |args: &[&str]| {
             ran.push(args.join(" "));
             Ok(exited(0))
         });
@@ -12327,7 +13518,7 @@ mod tests {
             ]
         );
         let mut ran = 0;
-        let failed = rehearsal_runs(|_| {
+        let failed = rehearsal_runs(&REHEARSAL_TESTED, |_: &[&str]| {
             ran += 1;
             Ok(exited(1))
         });
@@ -12394,8 +13585,9 @@ mod tests {
     }
 
     /// DEC-964: the crates declaring both `live` and `rh-sim` are the runner alone, and CI's
-    /// `fast-rh-sim-live` job runs each one's guarded tests in the `live,rh-sim` build, skipped on
-    /// the documentation-only path, with read-only permissions and ten minutes (DEC-464).
+    /// `fast-rh-sim-live` job runs each one's guarded tests in the `live,rh-sim` build, started
+    /// only when the selection takes the runner (DEC-1190), with read-only permissions and ten
+    /// minutes (DEC-464).
     #[test]
     fn the_rehearsal_job_tests_every_crate_declaring_live_and_rh_sim() -> Result<()> {
         let root = repo_root()?;
@@ -12419,19 +13611,21 @@ mod tests {
         let job = workflow_job(&workflow, REHEARSAL_LIVE_JOB)
             .with_context(|| format!("ci.yml has `{REHEARSAL_LIVE_JOB}`"))?;
         let trimmed: Vec<&str> = job.iter().map(|line| line.trim()).collect();
-        for package in declaring {
+        for package in &declaring {
             let run = format!("- run: {}", rehearsal_live_run(package));
-            let at = trimmed
-                .iter()
-                .position(|line| *line == run)
-                .with_context(|| format!("`{REHEARSAL_LIVE_JOB}` runs `{run}`"))?;
-            assert_eq!(
-                trimmed.get(at.saturating_add(1)),
-                Some(&"if: steps.change.outputs.docs_only != 'true'"),
-                "the run is skipped on the documentation-only path (DEC-112)"
+            assert!(
+                trimmed.contains(&run.as_str()),
+                "`{REHEARSAL_LIVE_JOB}` runs `{run}`"
             );
         }
+        assert_eq!(
+            declaring,
+            [RUNNER_CRATE],
+            "the job's switch is the runner's (DEC-1190)"
+        );
         for line in [
+            "needs: select",
+            "if: needs.select.outputs.rh_sim_live == 'true'",
             "timeout-minutes: 10",
             "contents: read",
             "persist-credentials: false",
@@ -12500,6 +13694,9 @@ mod tests {
                         trimmed.contains(&"timeout-minutes: 10"),
                         "`{job}` is capped at ten minutes (DEC-464)"
                     );
+                    if job != "fast-lint" {
+                        continue;
+                    }
                     for (index, line) in trimmed.iter().enumerate() {
                         if line.starts_with("- run: cargo xtask ci ") {
                             assert_eq!(
@@ -12551,7 +13748,8 @@ mod tests {
         assert_eq!(shards, expected, "the partitions are 1/N to N/N, each once");
         for shard in &shards {
             assert!(
-                super::nextest_args(Some(shard))?.contains(&format!("--partition=count:{shard}")),
+                super::nextest_args(Some(shard), None)?
+                    .contains(&format!("--partition=count:{shard}")),
                 "{shard} is a partition nextest takes"
             );
         }
@@ -12565,7 +13763,9 @@ mod tests {
             assert!(test.contains(&line), "`fast-test` has `{line}`");
         }
         let fast = workflow_job(&workflow, "fast").context("ci.yml has `fast`")?;
-        let names: Vec<&str> = FAST_CI_JOBS.iter().map(|(name, _)| *name).collect();
+        let names: Vec<&str> = std::iter::once("select")
+            .chain(FAST_CI_JOBS.iter().map(|(name, _)| *name))
+            .collect();
         let needs = format!("needs: [{}]", names.join(", "));
         assert!(
             fast.iter().any(|l| l.trim() == needs),
@@ -12578,14 +13778,16 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-871's `fast` verdict, run as GitHub runs it (`bash -e`) over every combination of its
-    /// six parts' results (DEC-954 adds `fast-portable`, DEC-964 `fast-rh-sim-live`): it passes
-    /// only when every part succeeded, and a skipped part fails it.
+    /// DEC-871's `fast` verdict with DEC-1190's selection, run as GitHub runs it (`bash -e`):
+    /// `select` and `fast-lint` must succeed, and each scoped part must have succeeded where its
+    /// switch is `true` and been skipped where it is `false`; any other switch fails it. Each part
+    /// is judged over every result and switch with the others valid, and 3000 seeded random
+    /// combinations of everything against the same oracle written out here.
     #[test]
     fn fast_passes_only_when_every_part_succeeded() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
         let script = verdict_script(&workflow, "fast")?;
-        let results = ["success", "failure", "cancelled", "skipped", ""];
+        let fast = workflow_job(&workflow, "fast").context("ci.yml has `fast`")?;
         let vars = [
             "LINT_RESULT",
             "TEST_RESULT",
@@ -12594,7 +13796,6 @@ mod tests {
             "PORTABLE_RESULT",
             "RH_SIM_LIVE_RESULT",
         ];
-        let fast = workflow_job(&workflow, "fast").context("ci.yml has `fast`")?;
         for ((job, _), var) in FAST_CI_JOBS.iter().zip(vars) {
             let line = format!("{var}: ${{{{ needs.{job}.result }}}}");
             assert!(
@@ -12602,26 +13803,137 @@ mod tests {
                 "`fast` reads `{line}`"
             );
         }
-        let mut checked = 0usize;
-        for combination in 0..results.len().pow(6) {
-            let mut command = Command::new("bash");
-            command.args(["-e", "-c", &script]);
-            let mut rest = combination;
-            let mut all = true;
-            for var in vars {
-                let result = results.get(rest % results.len()).copied().unwrap_or("");
-                rest /= results.len();
-                all &= result == "success";
-                command.env(var, result);
-            }
-            assert_eq!(
-                command.status()?.success(),
-                all,
-                "`fast` over combination {combination}"
+        let switches = [
+            (
+                "TESTS_SELECTED",
+                "tests",
+                &["TEST_RESULT", "PENDING_RESULT"][..],
+            ),
+            ("PYTHON_SELECTED", "python", &["PYTHON_RESULT"][..]),
+            ("PORTABLE_SELECTED", "portable", &["PORTABLE_RESULT"][..]),
+            (
+                "RH_SIM_LIVE_SELECTED",
+                "rh_sim_live",
+                &["RH_SIM_LIVE_RESULT"][..],
+            ),
+        ];
+        for (var, output, _) in switches {
+            let line = format!("{var}: ${{{{ needs.select.outputs.{output} }}}}");
+            assert!(
+                fast.iter().any(|l| l.trim() == line),
+                "`fast` reads `{line}`"
             );
+        }
+        let oracle = |env: &BTreeMap<&str, &str>| {
+            let get = |name: &str| env.get(name).copied().unwrap_or("");
+            get("SELECT_RESULT") == "success"
+                && get("LINT_RESULT") == "success"
+                && switches.iter().all(|(switch, _, parts)| {
+                    parts.iter().all(|part| match get(switch) {
+                        "true" => get(part) == "success",
+                        "false" => get(part) == "skipped",
+                        _ => false,
+                    })
+                })
+        };
+        let judge = |env: &BTreeMap<&str, &str>| -> Result<bool> {
+            Ok(Command::new("bash")
+                .args(["-e", "-c", &script])
+                .env("GITHUB_STEP_SUMMARY", "/dev/null")
+                .envs(env.iter())
+                .stdout(Stdio::null())
+                .status()?
+                .success())
+        };
+        let valid: BTreeMap<&str, &str> = [
+            ("SELECT_RESULT", "success"),
+            ("LINT_RESULT", "success"),
+            ("TESTS_SELECTED", "true"),
+            ("TEST_RESULT", "success"),
+            ("PENDING_RESULT", "success"),
+            ("PYTHON_SELECTED", "false"),
+            ("PYTHON_RESULT", "skipped"),
+            ("PORTABLE_SELECTED", "true"),
+            ("PORTABLE_RESULT", "success"),
+            ("RH_SIM_LIVE_SELECTED", "false"),
+            ("RH_SIM_LIVE_RESULT", "skipped"),
+        ]
+        .into_iter()
+        .collect();
+        assert!(judge(&valid)? && oracle(&valid), "the valid base passes");
+        let results = ["success", "failure", "cancelled", "skipped", ""];
+        let switch_values = ["true", "false", "", "yes"];
+        let mut checked = 0usize;
+        for name in ["SELECT_RESULT", "LINT_RESULT"] {
+            for result in results {
+                let mut env = valid.clone();
+                env.insert(name, result);
+                assert_eq!(judge(&env)?, result == "success", "{name} {result:?}");
+                checked = checked.saturating_add(1);
+            }
+        }
+        for (switch, _, parts) in switches {
+            for value in switch_values {
+                for first in results {
+                    for second in results {
+                        let mut env = valid.clone();
+                        env.insert(switch, value);
+                        if let Some(part) = parts.first() {
+                            env.insert(part, first);
+                        }
+                        if let Some(part) = parts.get(1) {
+                            env.insert(part, second);
+                        } else if second != "success" {
+                            continue;
+                        }
+                        assert_eq!(judge(&env)?, oracle(&env), "{switch} {env:?}");
+                        checked = checked.saturating_add(1);
+                    }
+                }
+            }
+        }
+        let mut rng = Xorshift(0x5eed_fa57_0000_1006);
+        for case in 0..3000 {
+            let mut env = BTreeMap::new();
+            for name in ["SELECT_RESULT", "LINT_RESULT"] {
+                env.insert(
+                    name,
+                    results.get(rng.below(results.len())).copied().unwrap_or(""),
+                );
+            }
+            for (switch, _, parts) in switches {
+                let on = rng.below(2) == 0;
+                env.insert(
+                    switch,
+                    if rng.below(10) == 0 {
+                        ""
+                    } else if on {
+                        "true"
+                    } else {
+                        "false"
+                    },
+                );
+                for part in parts {
+                    let fitting = if on { "success" } else { "skipped" };
+                    let result = if rng.below(4) == 0 {
+                        results.get(rng.below(results.len())).copied().unwrap_or("")
+                    } else {
+                        fitting
+                    };
+                    env.insert(part, result);
+                }
+            }
+            if rng.below(3) == 0 {
+                env.insert("SELECT_RESULT", "success");
+                env.insert("LINT_RESULT", "success");
+            }
+            assert_eq!(judge(&env)?, oracle(&env), "random case {case}: {env:?}");
             checked = checked.saturating_add(1);
         }
-        assert_eq!(checked, 15625, "every combination of six results is judged");
+        assert_eq!(
+            checked, 3170,
+            "two results, four switches and the random cases"
+        );
         Ok(())
     }
 
@@ -12629,7 +13941,7 @@ mod tests {
     /// shard; none runs every test; anything else fails rather than running some other set.
     #[test]
     fn the_nextest_partition_is_checked() -> Result<()> {
-        let plain = super::nextest_args(None)?;
+        let plain = super::nextest_args(None, None)?;
         assert_eq!(
             plain,
             [
@@ -12645,7 +13957,7 @@ mod tests {
             ("3/3", "count:3/3"),
             ("2/10", "count:2/10"),
         ] {
-            let args = super::nextest_args(Some(partition))?;
+            let args = super::nextest_args(Some(partition), None)?;
             assert_eq!(args.get(..plain.len()), Some(plain.as_slice()));
             assert_eq!(
                 args.get(plain.len()..),
@@ -12657,10 +13969,1216 @@ mod tests {
             "+1/3",
         ] {
             assert!(
-                super::nextest_args(Some(bad)).is_err(),
+                super::nextest_args(Some(bad), None).is_err(),
                 "{bad:?} is refused"
             );
         }
+        Ok(())
+    }
+
+    /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
+    const SELECT_GATES: [(&str, &str); 7] = [
+        ("fast-test", "tests"),
+        ("fast-pending", "tests"),
+        ("fast-python", "python"),
+        ("fast-portable", "portable"),
+        ("fast-rh-sim-live", "rh_sim_live"),
+        ("full-checks", "full_checks"),
+        ("schema-mutants", "schema_mutants"),
+    ];
+
+    /// DEC-1190 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
+    /// switch the selection prints, every scoped job needs it and starts only on its own switch,
+    /// no other job follows it, and no scoped job keeps the documentation-only step it replaced.
+    #[test]
+    fn the_scoped_jobs_follow_the_selection() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let trimmed = |job: &str| -> Result<Vec<String>> {
+            Ok(workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- ").to_owned())
+                .collect())
+        };
+        let select_job = trimmed("select")?;
+        assert!(
+            select_job
+                .iter()
+                .any(|l| l == "run: cargo xtask ci select >> \"$GITHUB_OUTPUT\""),
+            "`select` writes the selection to its outputs"
+        );
+        let graph = sample_graph();
+        let printed: Vec<String> = select(Some(&[]), &graph, &BTreeMap::new())
+            .outputs()
+            .lines()
+            .filter_map(|line| line.split_once('=').map(|(key, _)| key.to_owned()))
+            .collect();
+        for key in &printed {
+            let line = format!("{key}: ${{{{ steps.select.outputs.{key} }}}}");
+            assert!(select_job.contains(&line), "`select` exposes `{line}`");
+        }
+        for (job, key) in SELECT_GATES {
+            assert!(
+                printed.iter().any(|p| p == key),
+                "the selection prints `{key}`"
+            );
+            let lines = trimmed(job)?;
+            let gate = format!("if: needs.select.outputs.{key} == 'true'");
+            assert!(
+                lines.iter().any(|l| l == "needs: select") && lines.contains(&gate),
+                "`{job}` needs `select` and starts on `{gate}`"
+            );
+            assert!(
+                !lines.iter().any(|l| l.contains("docs_only")),
+                "`{job}` no longer classifies the change itself"
+            );
+        }
+        for job in workflow_jobs(&workflow) {
+            let lines = trimmed(job)?;
+            let follows = lines
+                .iter()
+                .any(|l| l.starts_with("if: needs.select.outputs."));
+            assert_eq!(
+                follows,
+                SELECT_GATES.iter().any(|(gated, _)| *gated == job),
+                "`{job}` follows the selection exactly when it is a scoped job"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-1190 item 5 in `nightly.yml`: it runs every night, dispatches `ci` on main (which then
+    /// selects everything and reports its own failure), sizes tonight's sweep from the plan and
+    /// passes each shard its share, starts the database the gate's Postgres tests need, keeps
+    /// every job within ten minutes (DEC-464), and opens an issue on any failed or cancelled job
+    /// carrying only the run's address and the jobs' verdicts.
+    #[test]
+    fn the_nightly_runs_everything_the_pull_requests_skipped() -> Result<()> {
+        let root = repo_root()?;
+        let nightly = fs::read_to_string(root.join(".github/workflows/nightly.yml"))?;
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml"))?;
+        assert!(
+            nightly.contains("  schedule:\n    - cron: \"17 6 * * *\"\n"),
+            "the nightly runs every night"
+        );
+        assert!(
+            ci.contains("\n  workflow_dispatch:\n"),
+            "`ci` can be dispatched"
+        );
+        let trimmed = |workflow: &str, job: &str| -> Result<Vec<String>> {
+            Ok(workflow_job(workflow, job)
+                .with_context(|| format!("the workflow has a `{job}` job"))?
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- ").to_owned())
+                .collect())
+        };
+        let has = |lines: &[String], line: &str| lines.iter().any(|l| l == line);
+        let dispatch = trimmed(&nightly, "dispatch-ci")?;
+        assert!(has(
+            &dispatch,
+            "run: gh api \"repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches\" -f ref=main"
+        ));
+        assert!(has(&dispatch, "actions: write"));
+        let plan = trimmed(&nightly, "sweep-plan")?;
+        for line in [
+            "MANDATE_SWEEP_CLOCK: ${{ steps.clock.outputs.seconds }}",
+            "run: echo \"seconds=$(date -u +%s)\" >> \"$GITHUB_OUTPUT\"",
+            "run: cargo xtask ci sweep --plan >> \"$GITHUB_OUTPUT\"",
+            "mutants: ${{ steps.plan.outputs.mutants }}",
+            "shards: ${{ steps.plan.outputs.shards }}",
+            "total: ${{ steps.plan.outputs.total }}",
+        ] {
+            assert!(has(&plan, line), "`sweep-plan` has `{line}`");
+        }
+        let sweep = trimmed(&nightly, "sweep")?;
+        for line in [
+            "needs: sweep-plan",
+            "shard: ${{ fromJSON(needs.sweep-plan.outputs.shards) }}",
+            "MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/${{ needs.sweep-plan.outputs.total }}",
+            "MANDATE_MUTANTS_PLANNED: ${{ needs.sweep-plan.outputs.mutants }}",
+            "MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres",
+            "MANDATE_PG_REQUIRED: \"1\"",
+            "run: .github/scripts/start-postgres.sh",
+            "max-parallel: 8",
+            "fail-fast: false",
+            "run: cargo xtask ci sweep",
+        ] {
+            assert!(has(&sweep, line), "`sweep` has `{line}`");
+        }
+        for (name, value) in MUTANT_BUILD_PROFILE {
+            let line = format!("{name}: \"{value}\"");
+            assert!(
+                has(&sweep, &line),
+                "`sweep` builds as the per-PR shards do: `{line}`"
+            );
+        }
+        let jobs = workflow_jobs(&nightly);
+        for job in &jobs {
+            let lines = trimmed(&nightly, job)?;
+            let minutes = lines
+                .iter()
+                .find_map(|l| l.strip_prefix("timeout-minutes: "))
+                .and_then(|m| m.parse::<u32>().ok())
+                .with_context(|| format!("`{job}` has a timeout"))?;
+            assert!(
+                minutes <= 10,
+                "`{job}` is capped within ten minutes (DEC-464)"
+            );
+        }
+        let report = trimmed(&nightly, "report")?;
+        let others: Vec<&str> = jobs
+            .iter()
+            .copied()
+            .filter(|job| *job != "report")
+            .collect();
+        assert!(
+            has(&report, &format!("needs: [{}]", others.join(", "))),
+            "`report` follows every other nightly job"
+        );
+        assert!(has(
+            &report,
+            "if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}"
+        ));
+        for (workflow, job) in [(&nightly, "report"), (&ci, "report-main")] {
+            let lines = trimmed(workflow, job)?;
+            assert!(
+                has(&lines, "issues: write"),
+                "`{job}` may open an issue and nothing else"
+            );
+            let issue = lines
+                .iter()
+                .find(|l| l.starts_with("gh api \"repos/${GITHUB_REPOSITORY}/issues\""))
+                .with_context(|| format!("`{job}` opens an issue through the API"))?;
+            for opaque in ["${GITHUB_SHA}", "${RUN_URL}"] {
+                assert!(issue.contains(opaque), "`{job}`'s issue names {opaque}");
+            }
+            assert!(
+                !lines
+                    .iter()
+                    .any(|l| l.contains("logs") || l.contains("steps.")),
+                "`{job}` carries no log or step output"
+            );
+        }
+        Ok(())
+    }
+
+    /// A small workspace for the selection's tests (DEC-1190): `mandate-num` at the bottom,
+    /// `mandate-risk` (safety-critical) on it, `mandate-executor` on that, the runner on the
+    /// executor, `mandate-identity` on `mandate-num` alone, and `mandate-canon` on nothing.
+    fn sample_graph() -> CrateGraph {
+        let mut graph = CrateGraph::default();
+        for (name, deps) in [
+            ("mandate-num", &[][..]),
+            ("mandate-risk", &["mandate-num"][..]),
+            ("mandate-executor", &["mandate-risk"][..]),
+            (RUNNER_CRATE, &["mandate-executor"][..]),
+            ("mandate-identity", &["mandate-num"][..]),
+            ("mandate-canon", &[][..]),
+        ] {
+            graph.dirs.insert(name.to_owned(), format!("crates/{name}"));
+            graph.deps.insert(
+                name.to_owned(),
+                deps.iter().map(|dep| (*dep).to_owned()).collect(),
+            );
+        }
+        graph
+    }
+
+    /// What the sample crates' sources name outside themselves: the identity tests read the
+    /// identity spec, the risk tests a reference-case fixture and, through a glob, every schema.
+    fn sample_references() -> BTreeMap<String, BTreeSet<String>> {
+        [
+            ("mandate-identity", vec!["docs/specs/identity.md"]),
+            (
+                "mandate-risk",
+                vec!["fixtures/refcases/mandate.json", "schemas/*"],
+            ),
+        ]
+        .into_iter()
+        .map(|(krate, paths)| {
+            (
+                krate.to_owned(),
+                paths.into_iter().map(str::to_owned).collect(),
+            )
+        })
+        .collect()
+    }
+
+    fn crate_set(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    /// DEC-1190 items 2 and 3 over sample diffs: each diff's selected crates and scoped jobs,
+    /// written out by hand. A safety-critical crate touched only through a dependency is
+    /// selected; documentation selects only the crates whose sources read it; every build input,
+    /// CI, xtask, any manifest and an unknown path select everything.
+    #[test]
+    fn the_selector_over_sample_diffs() {
+        let graph = sample_graph();
+        let references = sample_references();
+        let all: Vec<&str> = graph.dirs.keys().map(String::as_str).collect();
+        let narrow = |paths: &[&str]| {
+            let changed: Vec<String> = paths.iter().map(|p| (*p).to_owned()).collect();
+            select(Some(&changed), &graph, &references)
+        };
+        struct Expected<'a> {
+            crates: &'a [&'a str],
+            python: bool,
+            full_checks: bool,
+            schema_mutants: bool,
+        }
+        let cases: Vec<(&[&str], Expected)> = vec![
+            (
+                &["README.md", "docs/project/08-work-tracker.md"],
+                Expected {
+                    crates: &[],
+                    python: false,
+                    full_checks: false,
+                    schema_mutants: false,
+                },
+            ),
+            (
+                &["docs/specs/identity.md"],
+                Expected {
+                    crates: &["mandate-identity"],
+                    python: false,
+                    full_checks: false,
+                    schema_mutants: true,
+                },
+            ),
+            (
+                &["crates/mandate-num/src/lib.rs"],
+                Expected {
+                    crates: &[
+                        "mandate-num",
+                        "mandate-risk",
+                        "mandate-executor",
+                        RUNNER_CRATE,
+                        "mandate-identity",
+                    ],
+                    python: false,
+                    full_checks: true,
+                    schema_mutants: false,
+                },
+            ),
+            (
+                &["crates/mandate-risk/tests/limits.rs"],
+                Expected {
+                    crates: &["mandate-risk", "mandate-executor", RUNNER_CRATE],
+                    python: false,
+                    full_checks: true,
+                    schema_mutants: false,
+                },
+            ),
+            (
+                &["crates/mandate-canon/README.md"],
+                Expected {
+                    crates: &["mandate-canon"],
+                    python: false,
+                    full_checks: false,
+                    schema_mutants: false,
+                },
+            ),
+            (
+                &["web/src/app.tsx", "web/package.json"],
+                Expected {
+                    crates: &[],
+                    python: false,
+                    full_checks: false,
+                    schema_mutants: false,
+                },
+            ),
+            (
+                &["fixtures/refcases/mandate.json"],
+                Expected {
+                    crates: &["mandate-risk", "mandate-executor", RUNNER_CRATE],
+                    python: true,
+                    full_checks: true,
+                    schema_mutants: false,
+                },
+            ),
+            (
+                &["schemas/workspace-api/commands/pause-request.schema.json"],
+                Expected {
+                    crates: &["mandate-risk", "mandate-executor", RUNNER_CRATE],
+                    python: true,
+                    full_checks: true,
+                    schema_mutants: true,
+                },
+            ),
+            (
+                &[
+                    "reference/mandate/ref.py",
+                    "python/mandate_tools/tests/test_x.py",
+                ],
+                Expected {
+                    crates: &[],
+                    python: true,
+                    full_checks: true,
+                    schema_mutants: false,
+                },
+            ),
+            (
+                &["reference/mandate/requirements.txt"],
+                Expected {
+                    crates: &[],
+                    python: true,
+                    full_checks: true,
+                    schema_mutants: true,
+                },
+            ),
+            (
+                &["docs/project/06-backlog-v1.md"],
+                Expected {
+                    crates: &[],
+                    python: false,
+                    full_checks: false,
+                    schema_mutants: true,
+                },
+            ),
+            (
+                &["docs/specs/reference-cases/mandate.yaml"],
+                Expected {
+                    crates: &[],
+                    python: true,
+                    full_checks: true,
+                    schema_mutants: true,
+                },
+            ),
+            (
+                &["crates/mandate-canon/src/lib.rs", "docs/specs/identity.md"],
+                Expected {
+                    crates: &["mandate-canon", "mandate-identity"],
+                    python: false,
+                    full_checks: true,
+                    schema_mutants: true,
+                },
+            ),
+        ];
+        for (paths, expected) in cases {
+            let selected = narrow(paths);
+            assert_eq!(selected.everything, None, "{paths:?} is scoped");
+            assert_eq!(
+                selected.crates,
+                crate_set(expected.crates),
+                "{paths:?}'s crates"
+            );
+            assert_eq!(selected.python, expected.python, "{paths:?}'s python");
+            assert_eq!(
+                selected.full_checks, expected.full_checks,
+                "{paths:?}'s full-checks"
+            );
+            assert_eq!(
+                selected.schema_mutants, expected.schema_mutants,
+                "{paths:?}'s schema-mutants"
+            );
+            assert_eq!(
+                selected.tests(),
+                !expected.crates.is_empty(),
+                "{paths:?}'s tests"
+            );
+            assert_eq!(
+                selected.runner(),
+                expected.crates.contains(&RUNNER_CRATE),
+                "{paths:?}'s runner jobs"
+            );
+        }
+        for path in [
+            "Cargo.lock",
+            "Cargo.toml",
+            "crates/mandate-canon/Cargo.toml",
+            "rust-toolchain.toml",
+            "deny.toml",
+            "clippy.toml",
+            ".cargo/config.toml",
+            ".cargo/mutants.toml",
+            ".config/nextest.toml",
+            ".github/workflows/ci.yml",
+            ".github/scripts/docs-only.sh",
+            "xtask/src/main.rs",
+            "xtask/layers.toml",
+            "xtask/behaviour-only/E1-3.toml",
+            ".gitignore",
+            ".python-version",
+            "newtop/thing.txt",
+            "crates/orphan/src/lib.rs",
+            "Makefile",
+        ] {
+            let selected = narrow(&["docs/README.md", path]);
+            assert!(
+                selected.everything.is_some(),
+                "{path} selects everything: {selected:?}"
+            );
+            assert_eq!(
+                selected.crates,
+                crate_set(&all),
+                "{path} selects every crate"
+            );
+            assert!(selected.python && selected.full_checks && selected.schema_mutants);
+            assert!(selected.runner(), "{path} runs the runner's jobs");
+        }
+        let unbased = select(None, &graph, &references);
+        assert!(unbased.everything.is_some(), "no base selects everything");
+        assert_eq!(unbased.crates, crate_set(&all));
+        let mut featured = graph.clone();
+        featured.member_features = true;
+        let changed = vec!["docs/README.md".to_owned()];
+        assert!(
+            select(Some(&changed), &featured, &references)
+                .everything
+                .is_some(),
+            "a member turning on another member's feature selects everything"
+        );
+        let coupled: BTreeMap<String, BTreeSet<String>> = [(
+            "mandate-canon".to_owned(),
+            crate_set(&["bin:mandate-identity"]),
+        )]
+        .into_iter()
+        .collect();
+        let changed = vec!["crates/mandate-num/src/lib.rs".to_owned()];
+        assert!(
+            select(Some(&changed), &graph, &coupled)
+                .crates
+                .contains("mandate-canon"),
+            "a crate running another's binary is selected with it, through its dependencies too"
+        );
+        let changed = vec!["crates/mandate-risk/src/lib.rs".to_owned()];
+        assert!(
+            !select(Some(&changed), &graph, &coupled)
+                .crates
+                .contains("mandate-canon"),
+            "and only then"
+        );
+        let nothing = select(Some(&[]), &graph, &references);
+        assert_eq!(
+            (
+                nothing.tests(),
+                nothing.python,
+                nothing.full_checks,
+                nothing.schema_mutants
+            ),
+            (false, false, false, false),
+            "an empty diff runs no scoped job"
+        );
+    }
+
+    /// The selection's outputs name each gated job's switch once, as `ci.yml`'s `select` job
+    /// exposes them, and carry the one-line reasons.
+    #[test]
+    fn the_selection_outputs_one_switch_per_gated_job() {
+        let graph = sample_graph();
+        let changed = vec!["crates/mandate-risk/src/lib.rs".to_owned()];
+        let selected = select(Some(&changed), &graph, &sample_references());
+        let outputs = selected.outputs();
+        let lines: Vec<&str> = outputs.lines().collect();
+        assert_eq!(
+            lines.get(..6),
+            Some(
+                [
+                    "tests=true",
+                    "python=false",
+                    "portable=true",
+                    "rh_sim_live=true",
+                    "full_checks=true",
+                    "schema_mutants=false",
+                ]
+                .as_slice()
+            )
+        );
+        let reasons = lines.get(6).copied().unwrap_or_default();
+        assert!(
+            reasons.starts_with(
+                "reasons=3 crate(s) affected: mandate-executor, mandate-paper, mandate-risk;"
+            ),
+            "{reasons}"
+        );
+        assert_eq!(lines.len(), 7, "{outputs}");
+    }
+
+    /// A xorshift generator, so the property tests below need no dependency and replay from
+    /// their seed.
+    struct Xorshift(u64);
+
+    impl Xorshift {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        fn below(&mut self, n: usize) -> usize {
+            usize::try_from(self.next() % u64::try_from(n.max(1)).unwrap_or(1)).unwrap_or(0)
+        }
+    }
+
+    /// A random acyclic workspace of `size` crates, each depending only on crates before it.
+    fn random_graph(rng: &mut Xorshift, size: usize) -> CrateGraph {
+        let mut graph = CrateGraph::default();
+        for i in 0..size {
+            let name = format!("c{i:02}");
+            graph.dirs.insert(name.clone(), format!("crates/{name}"));
+            let deps: BTreeSet<String> = (0..i)
+                .filter(|_| rng.below(4) == 0)
+                .map(|j| format!("c{j:02}"))
+                .collect();
+            graph.deps.insert(name, deps);
+        }
+        graph
+    }
+
+    /// The independent oracle: Warshall's transitive closure over the forward edges, and the
+    /// crates that reach a changed one through it, the changed ones included.
+    fn reaching(graph: &CrateGraph, changed: &BTreeSet<String>) -> BTreeSet<String> {
+        let names: Vec<&String> = graph.dirs.keys().collect();
+        let n = names.len();
+        let mut reach = vec![vec![false; n]; n];
+        for (i, a) in names.iter().enumerate() {
+            for (j, b) in names.iter().enumerate() {
+                let edge = graph.deps.get(*a).is_some_and(|deps| deps.contains(*b));
+                if let Some(cell) = reach.get_mut(i).and_then(|row| row.get_mut(j)) {
+                    *cell = edge || i == j;
+                }
+            }
+        }
+        for k in 0..n {
+            for i in 0..n {
+                for j in 0..n {
+                    let through = reach
+                        .get(i)
+                        .and_then(|r| r.get(k))
+                        .copied()
+                        .unwrap_or(false)
+                        && reach
+                            .get(k)
+                            .and_then(|r| r.get(j))
+                            .copied()
+                            .unwrap_or(false);
+                    if through && let Some(cell) = reach.get_mut(i).and_then(|r| r.get_mut(j)) {
+                        *cell = true;
+                    }
+                }
+            }
+        }
+        names
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| {
+                names.iter().enumerate().any(|(j, name)| {
+                    changed.contains(*name)
+                        && reach
+                            .get(*i)
+                            .and_then(|r| r.get(j))
+                            .copied()
+                            .unwrap_or(false)
+                })
+            })
+            .map(|(_, name)| (*name).clone())
+            .collect()
+    }
+
+    /// The paths a property case changes: one source file in each of `changed`.
+    fn sources_of(changed: &BTreeSet<String>) -> Vec<String> {
+        changed
+            .iter()
+            .map(|name| format!("crates/{name}/src/lib.rs"))
+            .collect()
+    }
+
+    /// DEC-1190 item 6, the property: over random workspaces and random changed crates, the
+    /// selected set always holds every crate that depends on a changed one, directly or not, and
+    /// nothing else, by an oracle computed another way ([`reaching`]). The oracle is shown to
+    /// catch a seeded selector that stops at direct dependents.
+    #[test]
+    fn the_selection_holds_every_reverse_dependent_of_a_changed_crate() {
+        let mut rng = Xorshift(0x9e37_79b9_7f4a_7c15);
+        let mut seeded_bug_caught = false;
+        for case in 0..400 {
+            let size = 2 + rng.below(18);
+            let graph = random_graph(&mut rng, size);
+            let changed: BTreeSet<String> = graph
+                .dirs
+                .keys()
+                .filter(|_| rng.below(5) == 0)
+                .cloned()
+                .collect();
+            let expected = reaching(&graph, &changed);
+            let selected = select(Some(&sources_of(&changed)), &graph, &BTreeMap::new());
+            assert_eq!(
+                selected.crates, expected,
+                "case {case}: {graph:?} changing {changed:?}"
+            );
+            assert!(changed.is_subset(&selected.crates), "case {case}");
+            let direct_only: BTreeSet<String> = graph
+                .deps
+                .iter()
+                .filter(|(_, deps)| deps.iter().any(|dep| changed.contains(dep)))
+                .map(|(name, _)| name.clone())
+                .chain(changed.iter().cloned())
+                .collect();
+            seeded_bug_caught |= direct_only != expected;
+        }
+        assert!(
+            seeded_bug_caught,
+            "some case has a dependent two hops away, which a direct-dependents selector misses"
+        );
+    }
+
+    /// The scan reads a path from every form a test names one in: an `include_str!` relative to
+    /// its file, a `CARGO_MANIFEST_DIR` join, a `concat!` prefix, a format string's static parts
+    /// and a glob; a URL and words are not paths it matches, and nothing escapes the root.
+    #[test]
+    fn the_scan_reads_paths_from_every_literal_form() {
+        let file_dir = "crates/mandate-identity/tests";
+        let crate_dir = "crates/mandate-identity";
+        let names = |literal: &str| literal_paths(literal, file_dir, crate_dir);
+        let named =
+            |literal: &str, path: &str| names(literal).iter().any(|r| references_path(r, path));
+        assert!(named(
+            "../../../docs/specs/identity.md",
+            "docs/specs/identity.md"
+        ));
+        assert!(
+            named(
+                "/../../schemas/mandate.schema.json",
+                "schemas/mandate.schema.json"
+            ),
+            "a `concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../..\")` piece resolves from the crate"
+        );
+        assert!(
+            named("mandate-cli/src", "crates/mandate-cli/src/main.rs"),
+            "a sibling crate named from a computed `crates` directory"
+        );
+        assert!(named(
+            "../../fixtures/refcases/journal.json",
+            "fixtures/refcases/journal.json"
+        ));
+        assert!(named(
+            "../../../schemas/",
+            "schemas/workspace-api/envelope.schema.json"
+        ));
+        assert!(named("{}/fixtures/{name}.json", "fixtures/refcases/x.json"));
+        assert!(named("docs/specs/*.md", "docs/specs/journal.md"));
+        assert!(named(
+            "../../mandate-shell/tests/fixtures/tracer/mandate.json",
+            "crates/mandate-shell/tests/fixtures/tracer/mandate.json"
+        ));
+        assert!(named(
+            "reads `docs/specs/identity.md` first",
+            "docs/specs/identity.md"
+        ));
+        assert!(!named(
+            "../../../docs/specs/identity.md",
+            "docs/specs/identity-other.md"
+        ));
+        assert!(!named(
+            "https://example.com/docs/specs/identity.md",
+            "docs/specs/identity.md"
+        ));
+        assert!(!named("the identity spec", "docs/specs/identity.md"));
+        assert!(
+            names("../../../../../..").is_empty(),
+            "nothing above the root"
+        );
+        assert_eq!(normalized_join("crates/x", "../../.."), None);
+        assert_eq!(
+            normalized_join("crates/x/tests", "../src/./lib.rs"),
+            Some("crates/x/src/lib.rs".to_owned())
+        );
+    }
+
+    /// DEC-1190 item 2 on this repository: the cross-tree reads the selection depends on are found
+    /// by the scan, so a change to each file selects the crate that reads it, and no crate but
+    /// xtask is taken to read every crate.
+    #[test]
+    fn the_scan_finds_this_repository_s_cross_tree_reads() -> Result<()> {
+        let root = repo_root()?;
+        let graph = crate_graph(&root)?;
+        assert!(
+            !graph.member_features,
+            "no member turns on another member's feature today"
+        );
+        let references = source_references(&root, &graph)?;
+        for (krate, path) in [
+            ("mandate-identity", "docs/specs/identity.md"),
+            ("mandate-passkey", "docs/specs/identity.md"),
+            ("mandate-api", "docs/specs/workspace-api.md"),
+            (
+                "mandate-api",
+                "schemas/workspace-api/examples/lenient/api7.json",
+            ),
+            ("mandate-journal", "fixtures/refcases/journal.json"),
+            ("mandate-journal-pg", "migrations/0001_journal.sql"),
+            ("mandate-executor", "config/fees/alpaca-2026-09-17.toml"),
+            ("mandate-executor", "crates/mandate-refcases/status.toml"),
+            (
+                "mandate-paper",
+                "crates/mandate-shell/tests/fixtures/tracer/mandate.json",
+            ),
+            ("mandate-spec", "schemas/mandate.schema.json"),
+            ("mandate-refcases", "docs/specs/mandate.md"),
+            ("mandate-notify", "schemas/mandate.schema.json"),
+            ("mandate-marketdata", "crates/mandate-cli/src/main.rs"),
+            ("mandate-mcp", "crates/mandate-rh-sim/src/lib.rs"),
+            ("mandate-mcp", "crates/mandate-rh-sim/contract/tools.json"),
+        ] {
+            let changed = vec![path.to_owned()];
+            let selected = select(Some(&changed), &graph, &references);
+            assert!(
+                selected.crates.contains(krate),
+                "a change to {path} selects {krate}, which reads it: {}",
+                selected.reasons()
+            );
+        }
+        let changed = vec!["crates/mandate-canon/src/lib.rs".to_owned()];
+        let selected = select(Some(&changed), &graph, &references);
+        assert!(
+            selected.crates.contains("mandate-risk"),
+            "mandate-risk is built on mandate-canon"
+        );
+        let changed = vec!["crates/mandate-paper/README.md".to_owned()];
+        let selected = select(Some(&changed), &graph, &references);
+        assert!(
+            selected.runner() && !selected.crates.contains("mandate-risk"),
+            "the runner's own file selects the runner and not the crates it is built on: {}",
+            selected.reasons()
+        );
+        Ok(())
+    }
+
+    /// The paths a crate's raw text could name, found without the tokenizer: every run of path
+    /// characters on each line not starting with `//` (a doc comment cites files it never reads),
+    /// a URL's aside, resolved against the file's directory,
+    /// the crate's, `crates/` and the root, and kept only when it is a tracked file or directory
+    /// outside the crate other than `crates` itself. An independent reading of what
+    /// [`source_references`] must cover.
+    fn raw_outside_paths(
+        root: &Path,
+        graph: &CrateGraph,
+        tracked: &BTreeSet<String>,
+    ) -> Result<BTreeMap<String, BTreeSet<String>>> {
+        let mut found: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for (krate, dir) in &graph.dirs {
+            let prefix = format!("{dir}/");
+            for file in tracked
+                .iter()
+                .filter(|f| f.starts_with(&prefix) && f.ends_with(".rs"))
+            {
+                let text = fs::read_to_string(root.join(file))?;
+                let file_dir = file.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+                let code: String = text
+                    .lines()
+                    .filter(|line| !line.trim_start().starts_with("//"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let runs = code.split(|c: char| !(c.is_ascii_alphanumeric() || "-_./".contains(c)));
+
+                for run in runs.filter(|run| run.contains('/') || run.contains('.')) {
+                    if run.contains("//") {
+                        continue;
+                    }
+                    let run = run.trim_start_matches('/');
+                    for base in [file_dir, dir.as_str(), "crates", ""] {
+                        let mut parts: Vec<&str> = Vec::new();
+                        let mut escaped = false;
+                        for part in base.split('/').chain(run.split('/')) {
+                            match part {
+                                "" | "." => {}
+                                ".." => escaped |= parts.pop().is_none(),
+                                part => parts.push(part),
+                            }
+                        }
+                        let path = parts.join("/");
+                        if escaped
+                            || path.is_empty()
+                            || path == "crates"
+                            || path.starts_with(&prefix)
+                            || path == *dir
+                            || !tracked.contains(&path)
+                        {
+                            continue;
+                        }
+                        found.entry(krate.clone()).or_default().insert(path);
+                    }
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    /// The tracked files of the repository at `root`, with every directory above one.
+    fn tracked_paths(root: &Path) -> Result<BTreeSet<String>> {
+        let mut tracked = BTreeSet::new();
+        for file in output_in(root, "git", &["ls-files"])?.lines() {
+            let mut dir = file;
+            tracked.insert(file.to_owned());
+            while let Some((parent, _)) = dir.rsplit_once('/') {
+                tracked.insert(parent.to_owned());
+                dir = parent;
+            }
+        }
+        Ok(tracked)
+    }
+
+    /// Each `(crate, path)` the raw reading finds that `references` does not name.
+    fn uncovered(
+        raw: &BTreeMap<String, BTreeSet<String>>,
+        references: &BTreeMap<String, BTreeSet<String>>,
+    ) -> Vec<(String, String)> {
+        raw.iter()
+            .flat_map(|(krate, paths)| paths.iter().map(move |path| (krate, path)))
+            .filter(|(krate, path)| {
+                !references
+                    .get(*krate)
+                    .is_some_and(|named| named.iter().any(|r| references_path(r, path)))
+            })
+            .map(|(krate, path)| (krate.clone(), path.clone()))
+            .collect()
+    }
+
+    /// DEC-1190 item 2, the scan's oracle: every tracked path outside a crate that any run of path
+    /// characters in the crate's text names, read without the tokenizer, is one the scan says the
+    /// crate reads, so changing it selects the crate. The oracle is shown to catch a scan that
+    /// misses a rooted `concat!` piece, the gap the independent review found in `mandate-notify`.
+    #[test]
+    fn every_outside_path_a_crate_names_is_one_the_scan_covers() -> Result<()> {
+        let root = repo_root()?;
+        let graph = crate_graph(&root)?;
+        let references = source_references(&root, &graph)?;
+        let tracked = tracked_paths(&root)?;
+        let raw = raw_outside_paths(&root, &graph, &tracked)?;
+        assert!(
+            raw.get("mandate-notify")
+                .is_some_and(|paths| paths.contains("schemas/mandate.schema.json")),
+            "the raw reading sees mandate-notify's schema read"
+        );
+        assert_eq!(uncovered(&raw, &references), Vec::<(String, String)>::new());
+        let mut seeded = references.clone();
+        if let Some(named) = seeded.get_mut("mandate-notify") {
+            named.retain(|r| !references_path(r, "schemas/mandate.schema.json"));
+        }
+        assert!(
+            uncovered(&raw, &seeded).contains(&(
+                "mandate-notify".to_owned(),
+                "schemas/mandate.schema.json".to_owned()
+            )),
+            "a scan missing the rooted piece is caught"
+        );
+        Ok(())
+    }
+
+    /// DEC-1190 item 2: every binary a crate's code is handed by an environment variable is in
+    /// [`BINARY_COUPLINGS`], so the crate follows the one that builds it. A `MANDATE_*_BIN` name off
+    /// the table fails here, as a new test running another crate's binary would otherwise go
+    /// unselected when that crate changes; `CARGO_BIN_EXE_*`, which cargo sets only for the
+    /// reading package's own binaries, needs no entry.
+    #[test]
+    fn every_binary_handed_to_a_test_is_coupled() -> Result<()> {
+        let root = repo_root()?;
+        let graph = crate_graph(&root)?;
+        let tracked = tracked_paths(&root)?;
+        let mut named = BTreeSet::new();
+        for dir in graph.dirs.values().filter(|dir| *dir != "xtask") {
+            let prefix = format!("{dir}/");
+            for file in tracked
+                .iter()
+                .filter(|f| f.starts_with(&prefix) && f.ends_with(".rs"))
+            {
+                for (token, _) in tokens(&fs::read_to_string(root.join(file))?) {
+                    if let Token::Str(literal) = token
+                        && literal.starts_with("MANDATE_")
+                        && literal.ends_with("_BIN")
+                    {
+                        named.insert(literal);
+                    }
+                }
+            }
+        }
+        let coupled: BTreeSet<String> = BINARY_COUPLINGS
+            .iter()
+            .map(|(var, _)| (*var).to_owned())
+            .collect();
+        assert_eq!(
+            named, coupled,
+            "each binary variable a crate reads is coupled"
+        );
+        for (_, binary) in BINARY_COUPLINGS {
+            assert!(
+                graph.dirs.contains_key(binary),
+                "{binary} is a workspace crate"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-1190 item 6, the seeded check: in a fixture workspace whose `gate` crate stands for a
+    /// safety-critical one, a change to `dep` alone, which `gate` is built on, breaks `gate`'s
+    /// test. The selection takes `gate`, and the scoped nextest run it drives fails on that test;
+    /// a seeded selector that runs only the changed crate passes, so the check tells them apart.
+    #[test]
+    fn a_broken_crate_is_caught_through_a_change_to_its_dependency_alone() -> Result<()> {
+        let root = fixture_repository(
+            "select-seeded",
+            &[
+                (
+                    "Cargo.toml",
+                    "[workspace]\nmembers = [\"crates/dep\", \"crates/gate\"]\nresolver = \"3\"\n",
+                ),
+                (
+                    "crates/dep/Cargo.toml",
+                    "[package]\nname = \"dep\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+                ),
+                (
+                    "crates/dep/src/lib.rs",
+                    "pub fn limit() -> u32 {\n    10\n}\n",
+                ),
+                (
+                    "crates/gate/Cargo.toml",
+                    "[package]\nname = \"gate\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n",
+                ),
+                (
+                    "crates/gate/src/lib.rs",
+                    "pub fn allows(qty: u32) -> bool {\n    qty <= dep::limit()\n}\n",
+                ),
+                (
+                    "crates/gate/tests/gate.rs",
+                    "#[test]\nfn the_gate_refuses_eleven() {\n    assert!(!gate::allows(11));\n}\n",
+                ),
+                (".gitignore", "/target\n"),
+            ],
+        )?;
+        fs::copy(
+            repo_root()?.join("rust-toolchain.toml"),
+            root.join("rust-toolchain.toml"),
+        )?;
+        output_in(&root, "cargo", &["generate-lockfile", "--offline"])?;
+        let git = |args: &[&str]| output_in(&root, "git", args);
+        git(&["init", "-q"])?;
+        git(&["add", "-A"])?;
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "base",
+        ])?;
+        let base = git(&["rev-parse", "HEAD"])?.trim().to_owned();
+        fs::write(
+            root.join("crates/dep/src/lib.rs"),
+            "pub fn limit() -> u32 {\n    20\n}\n",
+        )?;
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qam",
+            "loosen dep",
+        ])?;
+        let selected = selection_in(&root, Some(&base))?;
+        assert_eq!(
+            selected.crates,
+            crate_set(&["dep", "gate"]),
+            "{}",
+            selected.reasons()
+        );
+        let run = |packages: &[String]| -> Result<(bool, String)> {
+            let args = nextest_args(None, Some(packages))?;
+            let out = Command::new("cargo")
+                .current_dir(&root)
+                .env_remove(CARGO_TARGET_DIR)
+                .args(&args)
+                .output()?;
+            let mut said = String::from_utf8_lossy(&out.stdout).into_owned();
+            said.push_str(&String::from_utf8_lossy(&out.stderr));
+            Ok((out.status.success(), said))
+        };
+        let scoped: Vec<String> = selected.crates.iter().cloned().collect();
+        let (passed, said) = run(&scoped)?;
+        assert!(
+            !passed && said.contains("FAIL") && said.contains("the_gate_refuses_eleven"),
+            "the scoped run fails on gate's test: {said}"
+        );
+        let (passed, said) = run(&["dep".to_owned()])?;
+        assert!(passed, "a run of the changed crate alone misses it: {said}");
+        fs::remove_dir_all(&root).ok();
+        Ok(())
+    }
+
+    /// DEC-1190 item 5: the sweep's shards each hold at most [`SWEEP_SHARD_MUTANTS`] under slice
+    /// sharding, the nights of one rotation together run every shard exactly once, no night needs
+    /// more than one matrix, the rotation is a week until a seventh outgrows a matrix and longer
+    /// after, and a night's outputs are the matrix GitHub reads.
+    #[test]
+    fn the_sweep_rotation_runs_every_shard_once_a_week() -> Result<()> {
+        for mutants in [0usize, 1, 7, 8, 9, 99, 12_538, 14_336, 14_337, 40_000] {
+            let total = SweepPlan::shards_for(mutants);
+            if mutants > 0 {
+                assert!(
+                    mutants.div_ceil(total) <= SWEEP_SHARD_MUTANTS,
+                    "{mutants} mutants over {total} shards"
+                );
+            }
+            let rotation = SweepPlan::rotation_for(total);
+            assert!(rotation >= 7, "never more often than a seventh a night");
+            let mut seen = vec![0usize; total];
+            for night in 0..u64::try_from(rotation)? {
+                let plan = SweepPlan::for_night(mutants, 20_000 + night)?;
+                assert_eq!(
+                    (plan.mutants, plan.total, plan.rotation),
+                    (mutants, total, rotation)
+                );
+                assert!(
+                    plan.tonight.len() <= MATRIX_LIMIT,
+                    "{mutants}: one matrix a night"
+                );
+                for &k in &plan.tonight {
+                    if let Some(count) = seen.get_mut(k) {
+                        *count += 1;
+                    }
+                }
+            }
+            assert!(
+                seen.iter().all(|&n| n == 1),
+                "{mutants}: every shard once a rotation"
+            );
+        }
+        assert_eq!(
+            SweepPlan::rotation_for(1_792),
+            7,
+            "a seventh fits one matrix"
+        );
+        assert_eq!(
+            SweepPlan::rotation_for(1_793),
+            8,
+            "and past it the rotation grows"
+        );
+        assert_eq!(SWEEP_ROTATION, 7);
+        assert_eq!(
+            SweepPlan::for_night(25, 7)?.tonight,
+            vec![0],
+            "night 7 is night 0 again"
+        );
+        assert_eq!(SweepPlan::for_night(25, 9)?.tonight, vec![2]);
+        assert!(
+            SweepPlan::for_night(25, 4)?.tonight.is_empty(),
+            "four shards leave night 4 idle"
+        );
+        let plan = SweepPlan::for_night(30, 1)?;
+        assert_eq!(plan.outputs(), "mutants=30\nshards=[1]\ntotal=4\n");
+        Ok(())
+    }
+
+    /// The runner the scoped macOS and rehearsal jobs follow is the one crate `xtask/layers.toml`
+    /// marks as building `live` (DEC-529).
+    #[test]
+    fn the_runner_crate_is_the_one_marked_live() -> Result<()> {
+        let root = repo_root()?;
+        let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)?;
+        let marked: Vec<&str> = policy
+            .crates
+            .iter()
+            .filter(|(_, crate_policy)| crate_policy.live_feature)
+            .map(|(name, _)| name.as_str())
+            .collect();
+        assert_eq!(marked, [RUNNER_CRATE]);
+        Ok(())
+    }
+
+    /// The selection's documentation is DEC-112's: `docs-only.sh`, which `fast-lint` and the
+    /// mutation plan still run, calls a diff documentation-only exactly when the selection runs no
+    /// `full-checks`, over paths of every class it names, run in a fixture repository.
+    #[test]
+    fn the_selection_agrees_with_docs_only_sh() -> Result<()> {
+        let repo = repo_root()?;
+        let root = fixture_repository(
+            "select-docs-only",
+            &[
+                (
+                    ".github/scripts/docs-only.sh",
+                    &fs::read_to_string(repo.join(".github/scripts/docs-only.sh"))?,
+                ),
+                (
+                    ".github/scripts/base-ref.sh",
+                    &fs::read_to_string(repo.join(".github/scripts/base-ref.sh"))?,
+                ),
+                ("seed", ""),
+            ],
+        )?;
+        for script in ["docs-only.sh", "base-ref.sh"] {
+            let path = root.join(".github/scripts").join(script);
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
+        }
+        let git = |args: &[&str]| output_in(&root, "git", args);
+        git(&["init", "-q"])?;
+        git(&["add", "-A"])?;
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "base",
+        ])?;
+        let base = git(&["rev-parse", "HEAD"])?.trim().to_owned();
+        let graph = sample_graph();
+        for path in [
+            "README.md",
+            "docs/project/08-work-tracker.md",
+            "docs/design/notes.txt",
+            "docs/specs/reference-cases/mandate.yaml",
+            "docs/specs/workspace-api.md",
+            ".cursor/skills/verify-mandate/features/f.md",
+            ".cursor/skills/other/SKILL.md",
+            "CODEOWNERS",
+            "LICENSE",
+            "LICENSE-APACHE",
+            "web/src/app.tsx",
+            "crates/mandate-num/src/lib.rs",
+            "crates/mandate-num/README.md",
+            "schemas/mandate.schema.json",
+            "python/pyproject.toml",
+        ] {
+            git(&["reset", "-q", "--hard", &base])?;
+            let file = root.join(path);
+            if let Some(dir) = file.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(&file, "changed\n")?;
+            git(&["add", "-A"])?;
+            git(&[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qm",
+                path,
+            ])?;
+            let out = Command::new(root.join(".github/scripts/docs-only.sh"))
+                .current_dir(&root)
+                .env("MANDATE_BASE_REF", &base)
+                .env_remove("GITHUB_EVENT_NAME")
+                .output()?;
+            let said = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+            let changed = vec![path.to_owned()];
+            let selected = select(Some(&changed), &graph, &BTreeMap::new());
+            assert_eq!(
+                said,
+                format!("docs_only={}", !selected.full_checks),
+                "docs-only.sh and the selection agree on {path}"
+            );
+            assert_eq!(
+                is_docs_path(path) || path.starts_with("web/"),
+                !selected.full_checks,
+                "{path}"
+            );
+        }
+        fs::remove_dir_all(&root).ok();
         Ok(())
     }
 
@@ -12693,10 +15211,10 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            11,
-            "one checkout in each source-reading job: `fast-lint`, `fast-test`, `fast-pending`, \
-             `fast-python`, `fast-portable`, `fast-rh-sim-live`, `full-checks`, the mutation \
-             plan, the mutants matrix, `schema-mutants`, and `cell`"
+            12,
+            "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
+             `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
+             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, and `cell`"
         );
         for checkout in checkouts {
             assert!(
@@ -18575,5 +21093,203 @@ jq -r "$filter" "$src"
             "the workspace checks run only after it passes"
         );
         Ok(())
+    }
+
+    /// A fixture git repository for the decision-number check, with `files` untracked, which
+    /// the check reads as it reads a lane's new reservation before its first commit.
+    fn decision_repository(name: &str, files: &[(&str, &str)]) -> Result<PathBuf> {
+        let root = fixture_repository(name, files)?;
+        let status = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&root)
+            .status()?;
+        assert!(status.success(), "git init");
+        Ok(root)
+    }
+
+    /// Two decision files that take one number are refused wherever they sit in the tree, a
+    /// leading zero or a suffix included, each path named; a heading whose number differs from
+    /// its file name is refused; distinct numbers pass (DEC-2600 item 3).
+    #[test]
+    fn two_decision_files_with_one_number_are_refused() -> Result<()> {
+        let dec = |n: &str| format!("# DEC-{n}: a decision\n");
+        let clean = decision_repository(
+            "decisions-clean",
+            &[
+                ("docs/project/decisions/DEC-2600.md", &dec("2600")),
+                ("docs/project/decisions/DEC-2601.md", &dec("2601")),
+                ("docs/project/decisions/README.md", "# Decisions\n"),
+            ],
+        )?;
+        let staged = Command::new("git")
+            .args(["add", "docs/project/decisions/DEC-2601.md"])
+            .current_dir(&clean)
+            .status()?;
+        assert!(staged.success(), "git add");
+        fs::remove_file(clean.join("docs/project/decisions/DEC-2601.md"))?;
+        let passed = decision_numbers(&clean).map_err(|err| format!("{err:#}"));
+        fs::remove_dir_all(&clean).ok();
+        assert_eq!(
+            passed,
+            Ok(()),
+            "distinct numbers pass, and a tracked file deleted from the working tree is skipped"
+        );
+        type Case<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a [&'a str]);
+        let cases: [Case; 3] = [
+            (
+                "decisions-elsewhere",
+                &[
+                    ("docs/project/decisions/DEC-2600.md", "# DEC-2600: one\n"),
+                    ("docs/specs/DEC-2600.md", "# DEC-2600: two\n"),
+                ],
+                &[
+                    "docs/project/decisions/DEC-2600.md",
+                    "docs/specs/DEC-2600.md",
+                ],
+            ),
+            (
+                "decisions-zero",
+                &[
+                    ("docs/project/decisions/DEC-2600.md", "# DEC-2600: one\n"),
+                    (
+                        "docs/project/decisions/DEC-02600-draft.md",
+                        "# DEC-2600: two\n",
+                    ),
+                ],
+                &["DEC-2600.md", "DEC-02600-draft.md"],
+            ),
+            (
+                "decisions-heading",
+                &[(
+                    "docs/project/decisions/DEC-2601.md",
+                    "# DEC-2602: misnumbered\n",
+                )],
+                &["DEC-2601.md", "DEC-2602"],
+            ),
+        ];
+        for (name, files, named) in cases {
+            let root = decision_repository(name, files)?;
+            let refused = decision_numbers(&root)
+                .map_err(|err| format!("{err:#}"))
+                .err();
+            fs::remove_dir_all(&root).ok();
+            let refused = refused.unwrap_or_default();
+            for needle in named {
+                assert!(
+                    refused.contains(needle),
+                    "{name} names `{needle}`: {refused:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The registry refuses a name registered twice in one ecosystem and a cargo row whose
+    /// "Used by" is a hand-kept list; npm and python rows keep their own cells (DEC-2600 item 4).
+    #[test]
+    fn the_registry_refuses_duplicates_and_hand_kept_cargo_lists() {
+        let header = "| Name | Ecosystem | Used by | Purpose |\n|---|---|---|---|\n";
+        let derived = format!("| `anyhow` | cargo | {USED_BY_DERIVED} | errors |\n");
+        let clean = format!(
+            "{header}{derived}| `ruff` | python | python workspace (dev) | lint |\n\
+             | Next.js | npm | web | app |\n"
+        );
+        assert_eq!(registry_problems(&clean), Vec::<String>::new());
+        let rows = registry_rows(&clean);
+        assert_eq!(
+            rows.len(),
+            2,
+            "the header and the npm summary row are not named rows"
+        );
+        assert_eq!(rows[0].name, "anyhow");
+        assert_eq!(rows[0].ecosystem, "cargo");
+        assert_eq!(rows[0].used_by, USED_BY_DERIVED);
+        let twice = format!("{header}{derived}{derived}");
+        assert_eq!(
+            registry_problems(&twice),
+            vec!["cargo dependency `anyhow` has 2 rows; keep one".to_owned()]
+        );
+        let listed = format!("{header}| `anyhow` | cargo | xtask; mandate-cli | errors |\n");
+        assert_eq!(
+            registry_problems(&listed),
+            vec![format!(
+                "cargo dependency `anyhow`'s Used by cell must be {USED_BY_DERIVED}, which derives \
+                 it from cargo metadata, not a hand-kept list"
+            )]
+        );
+    }
+
+    /// "Used by" is derived from the workspace: each external dependency with the crates that use
+    /// it, a dev- or build-only use marked, a normal use winning over a dev one, and workspace
+    /// crates left out (DEC-2600 item 4).
+    #[test]
+    fn used_by_is_derived_from_cargo_metadata() {
+        let meta = workspace(vec![
+            member(
+                "a",
+                &[("serde", None), ("proptest", Some("dev")), ("b", None)],
+            ),
+            member("b", &[("serde", Some("dev")), ("cc", Some("build"))]),
+            member("c", &[("proptest", Some("dev")), ("proptest", None)]),
+        ]);
+        let set = |names: &[&str]| {
+            names
+                .iter()
+                .map(|n| (*n).to_owned())
+                .collect::<BTreeSet<_>>()
+        };
+        let expected = BTreeMap::from([
+            ("cc".to_owned(), set(&["b (build)"])),
+            ("proptest".to_owned(), set(&["a (dev)", "c"])),
+            ("serde".to_owned(), set(&["a", "b (dev)"])),
+        ]);
+        assert_eq!(used_by(&meta), expected);
+    }
+
+    /// CODEOWNERS names every safety-critical crate on its own line, sorted, so two PRs adding two
+    /// crates touch two places; a missing crate, a line kept twice, and an out-of-order line are each
+    /// refused
+    /// (DEC-2600 item 5).
+    #[test]
+    fn codeowners_lists_every_safety_critical_crate_sorted() {
+        let mut layers = policy(
+            &[("mandate-a", 0), ("mandate-b", 1), ("mandate-c", 1)],
+            &[],
+            &[],
+        );
+        for name in ["mandate-a", "mandate-c"] {
+            if let Some(own) = layers.crates.get_mut(name) {
+                own.safety_critical = true;
+            }
+        }
+        let owner = |name: &str| format!("/crates/{name}/ @owner\n");
+        let clean = format!(
+            "/docs/ @owner\n\n{}{}",
+            owner("mandate-a"),
+            owner("mandate-c")
+        );
+        assert_eq!(codeowners_problems(&clean, &layers), Vec::<String>::new());
+        let missing = owner("mandate-a");
+        assert_eq!(
+            codeowners_problems(&missing, &layers),
+            vec![
+                "safety-critical crate `mandate-c` has no `/crates/mandate-c/` line in CODEOWNERS"
+                    .to_owned()
+            ]
+        );
+        let twice = format!(
+            "{}/crates/mandate-a/ @other\n{}",
+            owner("mandate-a"),
+            owner("mandate-c")
+        );
+        assert_eq!(
+            codeowners_problems(&twice, &layers),
+            vec!["CODEOWNERS: `/crates/mandate-a/` has two lines; keep one".to_owned()]
+        );
+        let unsorted = format!("{}{}", owner("mandate-c"), owner("mandate-a"));
+        assert_eq!(
+            codeowners_problems(&unsorted, &layers),
+            vec!["CODEOWNERS: `/crates/mandate-a/` must come before `/crates/mandate-c/`; keep the crate lines sorted".to_owned()]
+        );
     }
 }

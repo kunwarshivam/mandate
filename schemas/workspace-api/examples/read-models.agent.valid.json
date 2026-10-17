@@ -1,0 +1,87 @@
+[
+  {
+    "label": "mode not reported",
+    "set": {
+      "/agent/mode": null
+    }
+  },
+  {
+    "label": "mode exits_only",
+    "set": {
+      "/agent/mode": "exits_only"
+    }
+  },
+  {
+    "label": "mode paused",
+    "set": {
+      "/agent/mode": "paused"
+    }
+  },
+  {
+    "label": "mode stopped",
+    "set": {
+      "/agent/mode": "stopped"
+    }
+  },
+  {
+    "label": "a live agent",
+    "set": {
+      "/agent/environment": "live"
+    }
+  },
+  {
+    "label": "no pending approvals",
+    "set": {
+      "/agent/pending_approvals": 0
+    }
+  },
+  {
+    "label": "no stored document",
+    "set": {
+      "/agent/label": null,
+      "/agent/mandate": null,
+      "/agent/account_positions": null
+    }
+  },
+  {
+    "label": "no positions held",
+    "set": {
+      "/agent/account_positions": []
+    }
+  },
+  {
+    "label": "a goal with an end date",
+    "set": {
+      "/agent/mandate/goal": "accumulate",
+      "/agent/mandate/goal_end_date": "2026-12-31"
+    }
+  },
+  {
+    "label": "a profit stop goal",
+    "set": {
+      "/agent/mandate/goal": "profit_stop"
+    }
+  },
+  {
+    "label": "crypto and equities",
+    "set": {
+      "/agent/mandate/asset_classes": [
+        "crypto",
+        "us_equity"
+      ]
+    }
+  },
+  {
+    "label": "a mismatched position",
+    "set": {
+      "/agent/account_positions/0/broker_qty": "11",
+      "/agent/account_positions/0/mismatch": true
+    }
+  },
+  {
+    "label": "a one-character label",
+    "set": {
+      "/agent/label": "a"
+    }
+  }
+]

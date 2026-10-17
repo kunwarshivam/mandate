@@ -1,0 +1,111 @@
+[
+  {
+    "label": "a running backtest",
+    "set": {
+      "/backtest/state": "running",
+      "/backtest/report_ref": null,
+      "/backtest/report": null
+    }
+  },
+  {
+    "label": "a refused backtest",
+    "set": {
+      "/backtest/state": "refused",
+      "/backtest/refusal": "corporate_action_in_range",
+      "/backtest/report_ref": null,
+      "/backtest/report": null
+    }
+  },
+  {
+    "label": "absent statistics",
+    "set": {
+      "/backtest/report/strategy/variance": null,
+      "/backtest/report/strategy/absent": "fewer_than_two_periods"
+    }
+  },
+  {
+    "label": "zero variance",
+    "set": {
+      "/backtest/report/strategy/absent": "zero_variance"
+    }
+  },
+  {
+    "label": "negative and zero sharpe signs",
+    "set": {
+      "/backtest/report/strategy/sharpe_sign": "negative",
+      "/backtest/report/benchmark/sharpe_sign": "zero"
+    }
+  },
+  {
+    "label": "a pinned-universe version",
+    "set": {
+      "/backtest/report/research_agent": false,
+      "/backtest/report/limitations": [
+        "no_lookahead_by_receive_time",
+        "recorded_model_outputs_only",
+        "admissions_replayed_not_rejudged",
+        "fills_within_bar_range",
+        "spread_from_fill_model",
+        "single_instrument",
+        "daily_decisions",
+        "asks_unanswered_skip",
+        "participation_from_bar_volume",
+        "marks_at_bar_close",
+        "trading_status_assumed"
+      ],
+      "/backtest/report/disclosures": [
+        "LEGEND-HYPOTHETICAL",
+        "NOTE-BACKTEST-LIMITS"
+      ]
+    }
+  },
+  {
+    "label": "no latched limit",
+    "set": {
+      "/backtest/report/risk/limits_latched": []
+    }
+  },
+  {
+    "label": "every latched limit kind",
+    "set": {
+      "/backtest/report/risk/limits_latched": [
+        "max_daily_loss",
+        "lifetime_floor",
+        "profit_stop",
+        "drawdown_ladder[12]"
+      ]
+    }
+  },
+  {
+    "label": "a gate reason",
+    "set": {
+      "/backtest/report/decisions/gate_reasons": {
+        "position_cap": 2
+      }
+    }
+  },
+  {
+    "label": "366 periods per year",
+    "set": {
+      "/backtest/report/strategy/periods_per_year": 366
+    }
+  },
+  {
+    "label": "mode exits_only",
+    "set": {
+      "/backtest/report/risk/most_restrictive_mode": "exits_only"
+    }
+  },
+  {
+    "label": "mode paused",
+    "set": {
+      "/backtest/report/risk/most_restrictive_mode": "paused"
+    }
+  },
+  {
+    "label": "mode stopped",
+    "set": {
+      "/backtest/report/risk/most_restrictive_mode": "stopped"
+    }
+  }
+]

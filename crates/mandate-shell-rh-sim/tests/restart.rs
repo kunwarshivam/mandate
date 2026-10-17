@@ -60,6 +60,7 @@ const SOURCE: &str = "alpaca_iex_daily_bars";
 const FIRST: &str = "2026-09-29T17:00:00Z";
 const RESTART: &str = "2026-09-29T17:01:00Z";
 const ACCOUNT_STREAM: &str = "acct:ws_spy:acct_spy";
+const AGENT_STREAM: &str = "agent:ws_spy:agent_spy";
 
 /// The confirmed document as the file the run's mandate stage reads, written once per process so
 /// parallel test threads never read it half written.
@@ -69,10 +70,16 @@ fn at(text: &str) -> UtcNanos {
     UtcNanos::parse_rfc3339(text).unwrap()
 }
 
-/// SPY's mandate with its order cap raised to the allocation, so one share at 655.20 fits.
+/// SPY's mandate with its order cap raised to the allocation, so one share at 655.20 fits, and
+/// the stop-limit offset V-008 asks for on a profile that protects equities with a stop-limit.
 fn mandate() -> String {
     let mandate = spy_mandate(&model());
-    mandate.replace(r#""max_order_usd": "300""#, r#""max_order_usd": "1000""#)
+    mandate
+        .replace(r#""max_order_usd": "300""#, r#""max_order_usd": "1000""#)
+        .replace(
+            r#""crypto_stop_limit_offset": null"#,
+            r#""crypto_stop_limit_offset": "0.01""#,
+        )
 }
 
 /// What becomes of the calls the first run makes from its place on.
@@ -487,9 +494,10 @@ fn an_unknown_order_is_adopted_on_the_restart_and_never_placed_again() {
     assert_eq!(submitted(&rows).len(), 1, "no second OrderSubmitted");
 }
 
-/// DEC-529 item 4 and trading spec §5.3 rule 9: a place that never reached the broker lists
+/// DEC-529 item 4 and trading spec §5.3 rules 6 and 9: a place that never reached the broker lists
 /// nothing on the restart, so the order stays `Unknown`; the restart reconciles, runs its cycle
-/// on the same rising closes, and places no opening in SPY while the order is `Unknown`.
+/// on the same rising closes, and places no opening in SPY while the order is `Unknown`: the
+/// runtime's dry run holds it, since the first opening still works (DEC-1150 item 5).
 #[test]
 fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
     let server = broker(false);
@@ -542,13 +550,153 @@ fn an_unknown_order_with_no_match_stays_unknown_and_blocks_a_new_opening() {
             )
         })
         .collect();
-    let held = ("deny".to_owned(), "unknown_order_in_flight".to_owned());
+    let decided: Vec<(String, String)> = stages
+        .journal
+        .read(AGENT_STREAM)
+        .unwrap()
+        .iter()
+        .filter(|row| row.event_type == "DecisionMade")
+        .map(|row| {
+            let decision = payload(row);
+            (
+                member(&decision, "dry_run").unwrap_or_default().to_owned(),
+                member(&decision, "reason_code")
+                    .unwrap_or_default()
+                    .to_owned(),
+            )
+        })
+        .collect();
     assert_eq!(
-        gates.last(),
-        Some(&held),
-        "the restart's opening reached the gate, which denied it for the Unknown order: {gates:?}"
+        decided.last(),
+        Some(&("deny".to_owned(), "working_order_limit".to_owned())),
+        "the restart's opening is held while the Unknown one works, by the runtime's dry run \
+         (trading spec §5.3 rule 6, DEC-1150 item 5): {decided:?}"
+    );
+    assert_eq!(
+        gates.len(),
+        1,
+        "so it never reaches the gate, which decided only the first run's opening: {gates:?}"
     );
     if let Ok(report) = &outcome {
         assert!(report.submitted.is_empty(), "{report:?}");
     }
+}
+
+/// The close window's start on the first run's day, 15:50 in New York: the watch's bound.
+const BOUND: &str = "2026-09-29T19:50:00Z";
+/// The price the simulator fills the entry at, its quote.
+const FILLED_AT: &str = "655.2";
+/// More pauses than the watch below needs, so a watch that never ends fails at once.
+const PAUSE_BUDGET: usize = 40;
+
+/// The watch's clock, in whole seconds, which fills the entry at the broker on its first pause:
+/// the broker's word on the fill is then its order record and its position alone (U-R8).
+struct FillingClock {
+    server: Rc<SimServer>,
+    secs: Cell<i64>,
+    pauses: Cell<usize>,
+}
+
+impl mandate_alpaca::Pause for FillingClock {
+    fn now(&self) -> UtcNanos {
+        UtcNanos::from_parts(self.secs.get(), 0).unwrap()
+    }
+
+    async fn pause(&self, duration: std::time::Duration) {
+        let taken = self.pauses.get();
+        assert!(taken < PAUSE_BUDGET, "the watch never ended");
+        if taken == 0 {
+            let [entry] = self
+                .server
+                .drive(|sim| sim.orders(AGENTIC))
+                .unwrap()
+                .unwrap()
+                .try_into()
+                .unwrap_or_else(|all: Vec<mandate_rh_sim::Order>| {
+                    panic!("the entry alone rests at the first pause: {all:?}")
+                });
+            self.server
+                .drive(|sim| sim.fill(&entry.id, entry.quantity, price(FILLED_AT)))
+                .unwrap()
+                .unwrap();
+        }
+        self.pauses.set(taken + 1);
+        let step = i64::try_from(duration.as_secs()).unwrap();
+        self.secs.set(self.secs.get() + step);
+    }
+}
+
+/// R0's R19 and R20 (DEC-1151): the entry fills at the broker while the run watches it, and
+/// Robinhood reports no fill. The watch adopts it `filled` from its order record, the fill is
+/// booked from that record's filled quantity at the position's average price, under the id the
+/// record derives, so the reconciliation finds the position explained and pauses nothing; and
+/// the protective stop is sent and rests at the broker, since the one-order rule counts only an
+/// order that adds risk (`AGENTS.md` rule 13).
+#[test]
+fn a_watched_entry_filled_at_the_broker_is_booked_from_its_record_and_protected() {
+    let server = broker(false);
+    let bridge = bridge(&server, Line::Up, &[]);
+    let (observation, output, bytes) = observed(FIRST);
+    let (mut stages, setup) = stages(FIRST, &bridge, bytes);
+    let watch = mandate_shell::Watch {
+        pause: FillingClock {
+            server: Rc::clone(&server),
+            secs: Cell::new(at(FIRST).secs()),
+            pauses: Cell::new(0),
+        },
+        bound: at(BOUND),
+        interval: std::time::Duration::from_secs(5),
+    };
+    let outcome =
+        mandate_shell::run_observed_watched(&mut stages, &setup, observation, output, &watch);
+    let rows = account_rows(&stages);
+    let [entry] = submitted(&rows)
+        .first()
+        .cloned()
+        .map(|entry| [entry])
+        .unwrap_or_else(|| panic!("the entry is submitted: {outcome:?}"));
+    let fills: Vec<(String, Value)> = rows
+        .iter()
+        .filter(|row| row.event_type.ends_with("FillApplied"))
+        .map(|row| (row.event_type.clone(), payload(row)))
+        .collect();
+    let [(_, fill)] = fills.as_slice() else {
+        panic!("one fill is booked: {fills:?} ({outcome:?})")
+    };
+    assert_eq!(
+        ["fill_id", "client_order_id", "side", "qty_gross", "price"].map(|m| member(fill, m)),
+        [
+            Some(format!("record:{entry}:1").as_str()),
+            Some(entry.as_str()),
+            Some("buy"),
+            Some("1"),
+            Some(FILLED_AT),
+        ],
+        "the record's filled quantity at the position's average price"
+    );
+    let mismatched: Vec<Value> = rows
+        .iter()
+        .filter(|row| row.event_type == "BrokerPositionObserved")
+        .map(payload)
+        .filter(|observed| observed.get("mismatch") == Some(&Value::Bool(true)))
+        .collect();
+    assert!(mismatched.is_empty(), "{mismatched:?}");
+    let held = server.drive(|sim| sim.orders(AGENTIC)).unwrap().unwrap();
+    let stops: Vec<_> = held
+        .iter()
+        .filter(|order| order.order_type == mandate_rh_sim::OrderType::StopLimit)
+        .map(|order| (order.side, order.quantity, order.time_in_force, order.state))
+        .collect();
+    assert_eq!(
+        stops,
+        [(
+            mandate_rh_sim::Side::Sell,
+            mandate_num::Qty::parse("1").unwrap(),
+            mandate_rh_sim::TimeInForce::Gtc,
+            mandate_rh_sim::State::Confirmed,
+        )],
+        "the protective stop rests at the broker: {outcome:?}"
+    );
+    let report = outcome.unwrap_or_else(|stop| panic!("the run ends cleanly: {stop}"));
+    assert_eq!(report.submitted.len(), 2, "the entry, then its stop");
 }

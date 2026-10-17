@@ -28,6 +28,7 @@ Open PRs and claim issues on GitHub are the live record of who holds what.
 | M9 Web app (started early, DEC-200) | On fixtures: the shell, Home, agents, approvals, Messages and the copilot, the set-up chat, sign-in, the landing page (its windows move as a Mac's, its name the product's logo, its buttons grey: DEC-903; a switch between Windows 98 and a System 7 desktop, Windows the default until the Mac is finished: DEC-904; the app's own screens in a second browser tab, a painting per visit, and desktop motion: DEC-905; the app itself live in front, driven by the browser, owls with their own minds, and no explaining copy: DEC-906); the design plan's first five decisions (DEC-511 to DEC-515) on #669 | `web/design/plan.md`, every unticked item, in its order; then the connection to a deployment; after the first paper trade, the founder's Home (signed-in, D1), holdings, search and watchlist stories (E11-10, E11-11; [DEC-528](decisions/DEC-528.md), which also places E10-19 and E19-12 later and defers adoption) |
 | M8 and M9's demo lanes (DEC-820, demo about 2026-10-26) | In progress in five lanes (below): identity spec v0.3, the authn, identity and passkey crates' tests and the passkey implementation; the workspace API contract and schemas; journal spec to v0.21; notifications spec v0.2 and its crates' tests; the web client foundation; the audit read contracts | L1 E9-1 sessions, E9-2 I1 implementation, E9-4 step-up, E9-7; L2 the journal spec queue (after v0.21), E10-13, E10-10 implementation, E10-7, E7-17 (fold tests and DEC-687 merged, the tests' correction in review, then the fold implementation, then the state-machine slice); L3 the E8-9 and E8-14 implementations; L4 the E11-9 slices; L5 E12-6, waiting on E9-2's `authorize` (identity ID-8) |
 | M8, M10 to M13 | Planned; the design layer drafted (DEC-431 to DEC-443) | ADR-0003's code stories (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5) |
+| Intelligence layer, lane I2 (harness research loop, demo 2026-10-26) | In review: `mandate-research-run` (retrieval plan, read-only readers, gateway port, strict parse) and the runtime's `handle_research` (schedule, cancellation, observations before the call, judging through `mandate-research`'s ordered checks), with an end-to-end test on recorded fixtures to an ask and a property over random model outputs ([DEC-996](decisions/DEC-996.md), claim #1462). No run starts until E19-5 and E15-8 register their records | The shell's research driver after R0 (DEC-996 item 2); lane I1's gateway and lane I3's readers behind the ports; E15-8's closed records replacing the provisional ones; E19-5; E17-7's corroboration rule |
 
 **Reference cases.** Journal 46 of 46. Trading domain 13 of 26 cases plus four variants; the rest
 wait on the executor stories (E7-2 to E7-5) and the founder's DEC-129 items. Mandate 359 of 441,
@@ -70,8 +71,15 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   PR over ES-13's 400 lines instead of DEC-77's two; and item 6's hook in an R0 file (a
   production-cycle constructor that takes its journal stage) before the process can host a real
   cycle.
+- **E17-7's allowlist** ([DEC-1130](decisions/DEC-1130.md), claim #1460): item 2, confirming
+  Alpaca news (counsel's answer under DEC-433 item 20) in a new allowlist version; until then the
+  research agent reads SEC EDGAR filings only.
 - **E21-28's lifecycle core** ([DEC-994](decisions/DEC-994.md), claim #1433): item 8, one PR
   over ES-13's 400 lines, as DEC-968 item 9.
+- **CI's nightly mutation sweep** ([DEC-1190](decisions/DEC-1190.md) item 5, claim #1481): a
+  seventh of the whole-crate sweep each night (about 12 runner-hours), every mutant once a week,
+  or the full sweep every night as worded (about 45 to 50 runner-hours on the shared pool;
+  `SWEEP_ROTATION = 1`). Meanwhile the seven-run rotation runs.
 - **DEC-773** (causal trace authorship): (a) should an owner-selected signal model's output read
   `owner_selected`? (b) What does the label say? Meanwhile every quoted item is `platform_authored`.
 - **Decided, record still to land:** DEC-360 (option (c)), DEC-410 item 3, DEC-422 (#514 open).

@@ -25,7 +25,8 @@
 #      and mandate-tenant (DEC-642 item 7, DEC-668): the sealed `Tenant` trait and the ID values it
 #      returns, below mandate-identity, which re-exports them; its allowed_dependents list is the
 #      only thing that may implement `Tenant`
-#   1  mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
+#   1  mandate-cp-agent (E20-3, DEC-982: the control-plane link's inbound checks, kept off the
+#      journal), mandate-domain, mandate-approval, mandate-liquidity, mandate-identity, mandate-gateway (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
 #      mandate-notify, the closed notice (E8-9, DEC-710): below the journal, so it can never reach
 #      the control-stream writer (notifications spec NT-3)
@@ -44,6 +45,9 @@
 #      layer 2 by DEC-713); and mandate-process, the lifecycle every long-running process shares
 #      (E21-28, DEC-994): above mandate-journal, whose `Fenced` outcome it reads, and below every
 #      process crate that imports it
+#   3  mandate-alerts, the §8.2 operator alerts (E21-4, DEC-1070): above mandate-journal, whose
+#      stored record it reads, and mandate-notify, whose minted id and canary scan it reuses; kept
+#      off every crate that writes a stream or reaches a broker, so an alert can never act (OPS-10)
 #   4  mandate-dispatcher, the notification process (E8-10, E8-14, DEC-701 item 2): above
 #      mandate-journal, whose notice stream it alone appends to, and above mandate-push-relay, whose
 #      request it builds (raised from layer 3 by DEC-713); its forbidden_internal list names every
@@ -54,9 +58,9 @@
 #      (read-only audit reads over the journal, scoped to one workspace; E12-6), raised from layer
 #      3 by DEC-785 so that E12-3's verification run can use mandate-journal-cold's (layer 3)
 #      verify_tsa and SegmentManifest rather than reimplement them
-#   5  mandate-builder
-#   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
-#      mandate-runtime, mandate-mcp
+#   5  mandate-builder; mandate-research-run, the research worker (E19-2, DEC-431 item 20, DEC-996)
+#   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-objectstore,
+#      mandate-executor, mandate-runtime, mandate-mcp
 #   7  mandate-alpaca, mandate-robinhood, mandate-backtest. `mandate-alpaca` is an adapter over the core (ES-02's
 #      "adapters depend on the core, never the reverse"): it implements the `BrokerConnector` that
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
@@ -89,8 +93,6 @@ impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
 planned = [
-    "mandate-cp-agent",
-    "mandate-cp-site",
     "mandate-identity-seal",
     "mandate-identity-testkit",
 ]
@@ -136,6 +138,17 @@ layer = 0
 safety_critical = true
 pure = true
 allowed_external = ["ruint", "rust_decimal", "thiserror"]
+
+# The release a process runs (E21-8, DEC-972): the build digest of its own executable, the SHA-256
+# the reproducible release build's SHA256SUMS lists, which the process journals as `actor.build`;
+# and the start-up signature check (E21-35, DEC-971, OPS-15), which verifies the executable's
+# cosign signature with `ring` (ECDSA P-256) against compiled-in release keys. Above
+# mandate-canon, whose digest it uses; not pure, because it reads the executable's file.
+[crates.mandate-release]
+layer = 1
+safety_critical = true
+pure = false
+allowed_external = ["base64", "ring", "thiserror"]
 
 [crates.mandate-time]
 layer = 0
@@ -190,6 +203,17 @@ layer = 1
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+# The §8.2 operator alerts (E21-4, infrastructure design §8.2, OPS-10, DEC-1070): a closed alert set
+# raised from stored journal records and from signals, with a payload of an opaque id and fixed
+# text only. It reads the journal's stored record and reaches no writer, executor, runtime,
+# connector, or the CLI, so raising an alert can never append, act, or trade.
+[crates.mandate-alerts]
+layer = 3
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+forbidden_internal = ["mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-cli", "mandate-paper", "mandate-agentd", "mandate-risk", "mandate-approval", "mandate-dispatcher", "mandate-webpush", "mandate-push-relay", "mandate-connections", "mandate-vault-local", "mandate-api", "mandate-authn"]
 
 [crates.mandate-push-relay]
 layer = 3
@@ -250,6 +274,74 @@ layer = 2
 safety_critical = true
 pure = true
 allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
+
+# The cell's control-plane agent (E20-3, DEC-981; control-plane design §3, CP-4, CP-5): the closed
+# inbound message set and its signature checks, handed to workspace control services through a port
+# this crate declares and they implement. It reaches no journal, runtime, executor, mandate registry
+# or vault crate, directly or through any chain, so it can never append, hold a writer epoch, place
+# an order, or read a credential.
+[crates.mandate-cp-agent]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["ring"]
+forbidden_internal = [
+    "mandate-journal",
+    "mandate-journal-pg",
+    "mandate-journal-cold",
+    "mandate-spec",
+    "mandate-runtime",
+    "mandate-executor",
+    "mandate-connections",
+    "mandate-vault-local",
+    "mandate-shell",
+    "mandate-agentd",
+    "mandate-paper",
+]
+
+# The global control plane's first slice (E21-43 with E20-1, E20-2, E20-5; DEC-984): the
+# directory, enrollment, routing and fleet health, over a store it declares. It runs outside every
+# cell (design §3), so it reaches no journal, runtime, executor, connector, vault, or process crate,
+# and not the cell's control-plane agent or its workspace-services handler: nothing it holds is a
+# path into a deployment (CP-4, CP-7, CP-12).
+[crates.mandate-cp]
+layer = 2
+safety_critical = true
+pure = true
+allowed_external = ["ring"]
+forbidden_internal = [
+    "mandate-journal",
+    "mandate-journal-pg",
+    "mandate-journal-cold",
+    "mandate-spec",
+    "mandate-runtime",
+    "mandate-executor",
+    "mandate-connections",
+    "mandate-vault-local",
+    "mandate-shell",
+    "mandate-agentd",
+    "mandate-paper",
+]
+
+# Workspace control services' side of the control-plane link (E20-3, DEC-983; control-plane design
+# CP-5, CP-9): it implements cp-agent's port, judges each instruction against the journaled
+# sequence, and writes §9.17 records through a port of its own, so it needs no journal crate
+# outside its tests. It never reaches a runtime, executor, connector, vault, or process crate.
+[crates.mandate-cp-site]
+layer = 2
+safety_critical = true
+pure = true
+allowed_external = []
+forbidden_internal = [
+    "mandate-spec",
+    "mandate-runtime",
+    "mandate-executor",
+    "mandate-connections",
+    "mandate-vault-local",
+    "mandate-shell",
+    "mandate-agentd",
+    "mandate-paper",
+]
 
 [crates.mandate-liquidity]
 layer = 1
@@ -326,17 +418,58 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The model gateway (E15-6 to E15-10, inference spec, DEC-997, DEC-998): the one component that
+# calls a model. Pure, over layer-0 values: transport, clock, ids and the provider key come in
+# through traits, so it opens no socket and reads no clock or vault itself. It may never reach the
+# order path, a mandate or policy document's writer, or a credential store (INF-5, INF-14, INF-16).
+[crates.mandate-gateway]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["serde_json", "thiserror"]
+forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-connections", "mandate-vault-local"]
+
 [crates.mandate-research]
 layer = 5
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The agent harness's research worker (agent harness spec §4, E19-2, E19-3; DEC-431 item 20,
+# DEC-996): the retrieval plan, read-only reader ports, the gateway port, and the strict output
+# parse. Layer 5, below mandate-runtime, so it can never name `IntentSink` (HI-1); and kept off
+# every journal crate, so the runtime core stays the agent stream's one writer (HI-16).
+[crates.mandate-research-run]
+layer = 5
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+forbidden_internal = ["mandate-journal", "mandate-journal-pg", "mandate-journal-cold", "mandate-artifacts-fs"]
+
 [crates.mandate-sim]
 layer = 6
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+# The research agent's inputs beyond prices (E17-7, data-plane spec §4, DEC-1130): the vetted-source
+# allowlist, news and filings records, their typed readers, and the guarded fetchers. Layer 6,
+# above mandate-research, whose source and drift types it fills, and level with the executor, so
+# neither the executor nor anything below it (the builder, the gate, accounting) can reach its
+# untrusted text (DP-8). Pure: the HTTPS transport is mandate-sources-http's.
+[crates.mandate-sources]
+layer = 6
+safety_critical = true
+pure = true
+allowed_external = ["secrecy", "serde", "serde_json", "thiserror", "toml"]
+
+# The HTTPS transport for mandate-sources' fetchers (E17-7, DEC-1130 item 3): it only sends to a
+# PermittedUrl the allowlist built, follows no redirect, and caps each body. Layer 7, above
+# mandate-sources; nothing in the trading path depends on it.
+[crates.mandate-sources-http]
+layer = 7
+safety_critical = false
+pure = false
 
 [crates.mandate-marketdata]
 layer = 6
@@ -409,6 +542,14 @@ safety_critical = true
 pure = false
 allowed_external = []
 
+# The object store behind a plain S3 endpoint and its write-once lock check (E21-40, DEC-970):
+# beside mandate-artifacts-fs, the filesystem backend it joins.
+[crates.mandate-objectstore]
+layer = 6
+safety_critical = true
+pure = false
+allowed_external = ["base64", "jiff", "reqwest", "ring", "rustls", "secrecy", "serde", "serde_json", "thiserror", "tokio"]
+
 [crates.mandate-runtime]
 layer = 6
 safety_critical = true
@@ -447,6 +588,17 @@ safety_critical = true
 pure = false
 allowed_external = ["tokio"]
 forbidden_internal = ["mandate-cli", "mandate-paper"]
+
+# The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over the
+# Postgres journal, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
+# and the SIGTERM listener. It may never reach the runner, the shell, the CLI, or any broker
+# connector: it holds nothing secret and places nothing.
+[crates.mandate-scheduler]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["tokio"]
+forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-executor", "mandate-runtime"]
 
 # The paper adapter (E7-19 slice 5, the first paper trade brief's E1a): it hands the model host's
 # output to the shell's production cycle and decides nothing itself. It is the runner: the only
