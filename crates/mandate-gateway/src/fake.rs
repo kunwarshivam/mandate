@@ -377,11 +377,7 @@ impl CompromisedModel {
             }
             Some("array") => {
                 let max = bound("maxItems").unwrap_or(0);
-                let n = if max == 0 {
-                    0
-                } else {
-                    self.below(max).saturating_add(1)
-                };
+                let n = self.below(max.saturating_add(1));
                 let items = schema.get("items").cloned().unwrap_or(Json::Null);
                 Json::Array((0..n).map(|_| self.generate(&items, words)).collect())
             }

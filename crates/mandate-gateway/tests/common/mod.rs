@@ -308,7 +308,7 @@ pub fn tool(name: &str, class: ToolClass, arguments: &str, menu: &[&str]) -> Too
 }
 
 pub const BARS_ARGS: &str = r#"{"type":"object","properties":{"symbol":{"type":"string","max_length":12},"count":{"type":"integer","minimum":1,"maximum":260}}}"#;
-pub const NEWS_ARGS: &str = r#"{"type":"object","properties":{"symbols":{"type":"array","max_items":5,"items":{"type":"string","max_length":12}},"window_h":{"type":"integer","minimum":1,"maximum":168}}}"#;
+pub const NEWS_ARGS: &str = r#"{"type":"object","properties":{"symbols":{"type":"array","max_items":5,"items":{"type":"string","max_length":12}},"window_h":{"type":"integer","minimum":1,"maximum":168},"with_text":{"type":"boolean"}}}"#;
 pub const NOTE_ARGS: &str =
     r#"{"type":"object","properties":{"text":{"type":"string","max_length":2000}}}"#;
 

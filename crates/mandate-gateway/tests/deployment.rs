@@ -498,3 +498,35 @@ fn the_oracle_catches_each_seeded_bug() {
         "a settlement copy naming no copy"
     );
 }
+
+#[test]
+fn a_settlement_copy_names_the_copy_of_its_own_calls_reservation() {
+    let shared = SharedMeter::new();
+    let mut a = workspace_meter(&shared, "5", 1 << 100);
+    let first = a.reserve(reservation(1, 1, "0.4")).unwrap();
+    let second = a.reserve(reservation(1, 2, "0.6")).unwrap();
+    a.settle(settlement(&second, "0.1", 9)).unwrap();
+    let records = shared.records();
+    let copy_of = |call: &str| {
+        records.iter().find_map(|r| match r {
+            MeterRecord::Reserved(x) if x.call_id == call => Some(x.event_id.clone()),
+            _ => None,
+        })
+    };
+    let Some(MeterRecord::Settled(settled)) = records.last() else {
+        panic!("the settlement's copy last");
+    };
+    assert_eq!(Some(settled.reservation.clone()), copy_of(&second.call_id));
+    assert_ne!(Some(settled.reservation.clone()), copy_of(&first.call_id));
+    assert_eq!(a.deployment().spend(OCTOBER), Ok(usd("0.5")));
+}
+
+#[test]
+fn the_deployment_meter_shows_its_cap_and_never_its_store() {
+    let shared = SharedMeter::new();
+    let a = workspace_meter(&shared, "50", 1 << 100);
+    assert_eq!(a.deployment().monthly(), usd("50"));
+    let shown = format!("{:?}", a.deployment());
+    assert!(shown.starts_with("DeploymentMeter"), "{shown}");
+    assert!(shown.contains("monthly"), "{shown}");
+}

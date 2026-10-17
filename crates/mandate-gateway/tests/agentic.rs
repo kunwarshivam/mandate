@@ -193,6 +193,10 @@ fn the_registry_refuses_a_loop_it_could_not_pin() {
         ),
         ("zero theses", Box::new(|a| a.loop_bounds.max_theses = 0)),
         (
+            "a zero read cap",
+            Box::new(|a| a.loop_bounds.max_result_bytes = 0),
+        ),
+        (
             "zero repeat denials",
             Box::new(|a| a.loop_bounds.max_repeat_denials = 0),
         ),
@@ -343,7 +347,7 @@ fn a_request_the_entry_could_not_have_made_is_refused_with_no_record() {
                 vec![Turn {
                     response: calls_body(&[(
                         "news.search",
-                        r#"{"symbols":["AAPL"],"window_h":24}"#,
+                        r#"{"symbols":["AAPL"],"window_h":24,"with_text":false}"#,
                     )]),
                     results: vec!["{}".to_owned()],
                 }],

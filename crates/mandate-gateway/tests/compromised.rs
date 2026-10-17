@@ -273,3 +273,63 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn a_model_that_keeps_to_its_offered_tools_always_gets_its_calls_through() {
+    for strategy in [Strategy::Random, Strategy::FollowResults, Strategy::Repeat] {
+        for seed in 0..30 {
+            let model = CompromisedModel::new(strategy, seed, reported()).with_calls_per_turn(4);
+            let (mut gateway, pinned) = double_gateway(model);
+            let offered = ["market.bars", "news.search", "note"];
+            let records = run(&mut gateway, &pinned, &offered, "news.search", 3);
+            assert_eq!(records.len(), 3, "{strategy:?} seed {seed}");
+            for record in &records {
+                assert_eq!(record.outcome, Outcome::Ok, "{strategy:?} seed {seed}");
+                assert!(!record.tool_calls.is_empty());
+                assert!(every_call_is_offered_and_valid(record, &offered));
+            }
+            assert_eq!(
+                gateway.transport().sent().len(),
+                3,
+                "the double logs each request"
+            );
+            let first: serde_json::Value =
+                serde_json::from_slice(&gateway.transport().sent()[0].body).unwrap();
+            assert_eq!(first["tools"].as_array().unwrap().len(), 3);
+        }
+    }
+}
+
+#[test]
+fn a_hostile_model_tries_every_kind_of_bad_reply() {
+    let mut seen = [false; 3];
+    for seed in 0..60 {
+        let model =
+            CompromisedModel::new(Strategy::Hostile, seed, reported()).with_calls_per_turn(2);
+        let (mut gateway, pinned) = double_gateway(model);
+        let record = gateway
+            .call(&turn_request(&pinned, 1, "ideate", &["note"], vec![]))
+            .unwrap();
+        let reply = OpenRouter
+            .reply(record.response.as_deref().unwrap())
+            .unwrap();
+        let names: Vec<&str> = reply
+            .tool_calls
+            .iter()
+            .filter_map(|c| c.name.as_deref())
+            .collect();
+        if names == ["shell__exec"] {
+            seen[0] = true;
+        } else if reply.tool_calls.len() == 1
+            && reply.tool_calls[0].arguments.as_deref() == Some(r#"{"not_a_parameter":true}"#)
+        {
+            seen[1] = true;
+        } else if reply.tool_calls.len() > 4 {
+            seen[2] = true;
+        }
+    }
+    assert_eq!(
+        seen, [true; 3],
+        "an undeclared tool, bad arguments, and too many calls"
+    );
+}

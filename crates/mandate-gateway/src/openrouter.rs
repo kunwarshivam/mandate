@@ -110,7 +110,6 @@ impl ProviderAdapter for OpenRouter {
         };
         let tool_calls = match message.get("tool_calls") {
             None | Some(Json::Null) => Vec::new(),
-            Some(Json::Array(calls)) if calls.is_empty() => Vec::new(),
             Some(Json::Array(calls)) => calls.iter().map(wire_call).collect(),
             Some(_) => vec![WireCall::default()],
         };

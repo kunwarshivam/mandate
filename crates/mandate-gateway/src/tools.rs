@@ -152,10 +152,10 @@ impl LoopBounds {
         ])
     }
 
-    /// Every bound non-zero, and one turn's calls at most the run's.
+    /// Every bound non-zero, and one turn's calls at most the run's (so the run's are non-zero
+    /// too), and one read's bytes at most the run's.
     pub fn well_formed(&self) -> bool {
         self.max_turns > 0
-            && self.max_tool_calls > 0
             && self.max_tool_calls_per_turn > 0
             && self.max_tool_calls_per_turn <= self.max_tool_calls
             && self.max_theses > 0
