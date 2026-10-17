@@ -86,15 +86,19 @@ impl ToolDeclaration {
 /// the segments with `__` (DEC-2204), which no declared name can contain, so the mapping is
 /// one-to-one, and fits [`MAX_WIRE_NAME`].
 pub fn wire_name(name: &str) -> Option<String> {
-        let _ = name;
-        None
+    let segments: Vec<&str> = name.split('.').collect();
+    if segments.len() > 2 || !segments.iter().all(|s| segment_ok(s)) {
+        return None;
     }
+    let wire = segments.join("__");
+    (wire.len() <= MAX_WIRE_NAME).then_some(wire)
+}
 
 /// The declared name of a wire name, or `None` when no declared name maps to it.
 pub fn declared_name(wire: &str) -> Option<String> {
-        let _ = wire;
-        None
-    }
+    let name = wire.replace("__", ".");
+    (wire_name(&name).as_deref() == Some(wire)).then_some(name)
+}
 
 fn segment_ok(segment: &str) -> bool {
     let mut words = segment.split('_');
@@ -241,9 +245,39 @@ pub fn validate(
     offered: &[&ToolDeclaration],
     per_turn: u32,
 ) -> Result<Vec<ToolCall>, CallsRefused> {
-        let _ = (calls, offered, per_turn);
-        Err(CallsRefused::NoneOffered)
+    if offered.is_empty() {
+        return Err(CallsRefused::NoneOffered);
     }
+    if u32::try_from(calls.len()).map_or(true, |n| n > per_turn) {
+        return Err(CallsRefused::TooMany);
+    }
+    calls
+        .iter()
+        .zip(0u32..)
+        .map(|(call, index)| {
+            let declared = call
+                .name
+                .as_deref()
+                .and_then(declared_name)
+                .ok_or(CallsRefused::NotOffered)?;
+            let tool = offered
+                .iter()
+                .find(|t| t.name == declared)
+                .ok_or(CallsRefused::NotOffered)?;
+            let arguments = call
+                .arguments
+                .as_deref()
+                .and_then(|text| parse(text.as_bytes()).ok())
+                .filter(|value| schema::fits(&tool.arguments, value))
+                .ok_or(CallsRefused::BadArguments)?;
+            Ok(ToolCall {
+                index,
+                name: declared,
+                arguments,
+            })
+        })
+        .collect()
+}
 
 /// One earlier turn of a run, as the caller hands it back (inference spec §3.1 `turns`): the
 /// reply's bytes, by its response artifact, and the caller's result for each of that reply's tool
@@ -292,6 +326,40 @@ pub fn canonical_text(value: &Value) -> String {
 /// The JSON Schema a provider is given for an argument schema in the gateway's language. It only
 /// describes; the gateway's own validator decides (INF-5).
 pub fn wire_schema(schema: &Value) -> Json {
-        let _ = schema;
-        Json::Null
+    let member = |name: &str| schema.get(name).and_then(Value::as_int);
+    match schema.get("type").and_then(Value::as_str) {
+        Some("object") => {
+            let properties = schema.get("properties").and_then(Value::as_object);
+            let mut props = Map::new();
+            let mut required = Vec::new();
+            for (name, inner) in properties.into_iter().flatten() {
+                props.insert(name.as_str().to_owned(), wire_schema(inner));
+                required.push(json!(name.as_str()));
+            }
+            json!({"type": "object", "properties": props, "required": required, "additionalProperties": false})
+        }
+        Some("array") => json!({
+            "type": "array",
+            "items": schema.get("items").map_or(Json::Null, wire_schema),
+            "maxItems": member("max_items"),
+        }),
+        Some("string") => match schema.get("enum").and_then(Value::as_array) {
+            Some(options) => json!({
+                "type": "string",
+                "enum": options.iter().filter_map(Value::as_str).collect::<Vec<_>>(),
+            }),
+            None => json!({"type": "string", "maxLength": member("max_length")}),
+        },
+        Some("integer") => json!({
+            "type": "integer",
+            "minimum": member("minimum"),
+            "maximum": member("maximum"),
+        }),
+        Some("decimal") => json!({
+            "type": "string",
+            "description": "a decimal number written as text, such as \"0.6\"",
+        }),
+        Some("boolean") => json!({"type": "boolean"}),
+        _ => Json::Null,
     }
+}

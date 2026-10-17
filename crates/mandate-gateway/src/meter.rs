@@ -446,15 +446,46 @@ impl DeploymentMeter {
 
     /// Checks the deployment cap and appends the copy, in one step (DEC-2204 item 4).
     fn reserve(&mut self, reservation: &Reservation) -> Result<(), MeterRefusal> {
-        let _ = reservation;
-        Ok(())
+        let copy = Reservation {
+            event_id: self.ids.next_id(),
+            ..reservation.clone()
+        };
+        let records = self.store.read().map_err(|_| MeterRefusal::Unavailable)?;
+        let spent = spend(
+            &records,
+            &Scope::Deployment,
+            Period::month_of(copy.risk_day),
+        )
+        .map_err(|_| MeterRefusal::BudgetExhausted)?;
+        let after = spent
+            .checked_add(copy.max_cost)
+            .map_err(|_| MeterRefusal::BudgetExhausted)?;
+        if after > self.monthly {
+            return Err(MeterRefusal::BudgetExhausted);
+        }
+        self.store
+            .append(MeterRecord::Reserved(copy))
+            .map_err(|_| MeterRefusal::Unavailable)
     }
 
     /// Copies a settlement, naming the deployment stream's copy of its reservation (DEC-2204 item
     /// 2). With no copy of the call's reservation, nothing is appended.
     fn settle(&mut self, settlement: &Settlement) -> Result<(), StoreError> {
-        let _ = settlement;
-        Ok(())
+        let records = self.store.read()?;
+        let reservation = records
+            .iter()
+            .find_map(|r| match r {
+                MeterRecord::Reserved(x) if x.call_id == settlement.call_id => {
+                    Some(x.event_id.clone())
+                }
+                _ => None,
+            })
+            .ok_or(StoreError::Rule158("no copy of the call's reservation"))?;
+        self.store.append(MeterRecord::Settled(Settlement {
+            event_id: self.ids.next_id(),
+            reservation,
+            ..settlement.clone()
+        }))
     }
 
     /// The deployment's spend for one calendar month, from the deployment stream.

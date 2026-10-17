@@ -29,7 +29,13 @@ pub enum BudgetError {
 impl Budgets {
     /// Reads both budgets through `lookup`, the process environment in a cell.
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, BudgetError> {
-        let _ = lookup;
-        Err(BudgetError::Missing(DEPLOYMENT_MONTHLY_VAR))
+        let read = |var: &'static str| -> Result<Usd6, BudgetError> {
+            let text = lookup(var).ok_or(BudgetError::Missing(var))?;
+            Usd6::parse(text.trim()).map_err(|_| BudgetError::Invalid(var))
+        };
+        Ok(Self {
+            deployment_monthly: read(DEPLOYMENT_MONTHLY_VAR)?,
+            workspace_monthly: read(WORKSPACE_MONTHLY_VAR)?,
+        })
     }
 }
