@@ -17,10 +17,10 @@ import {
   type Command,
   type CommandKind,
   type CommandRecord,
-  type Deployment,
   type MandateChangeRequest,
   type Runtime,
   RuntimeContext,
+  type SetUp,
 } from "./mock-runtime";
 
 /** How many times an unanswered command is sent again, with the same key and body (API-4), before it is called unknown. */
@@ -73,7 +73,6 @@ export function ApiRuntimeProvider({
   const [now, setNow] = useState<Iso>(ws.now);
   const [commands, setCommands] = useState<Command[]>([]);
   const [responses, setResponses] = useState<Record<string, ApprovalResponse>>({});
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [mandateChanges, setMandateChanges] = useState<MandateChangeRequest[]>([]);
   const wsRef = useRef(ws);
   /**
@@ -253,15 +252,7 @@ export function ApiRuntimeProvider({
     [client, deliver, follow],
   );
 
-  /** Set-up and mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
-  const deploy = useCallback<Runtime["deploy"]>((request, record) => {
-    counter.current += 1;
-    const deployment: Deployment = { id: `dep-${counter.current}`, phase: "sent", sentAt: nowRef.current, agentId: "", version: mandateVersion(request.mandate), record };
-    setDeployments((list) => [...list, deployment]);
-    window.setTimeout(() => setDeployments((list) => list.map((d) => (d.id === deployment.id ? { ...d, phase: "undelivered", reason: "not_sent" } : d))), 0);
-    return deployment;
-  }, []);
-
+  /** Mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
   const changeMandate = useCallback<Runtime["changeMandate"]>((proposal, origin, record) => {
     counter.current += 1;
     const request: MandateChangeRequest = { id: `chg-${counter.current}`, agentId: proposal.agentId, version: proposal.version, number: proposal.number, phase: "sent", sentAt: nowRef.current, origin, record };
@@ -270,12 +261,70 @@ export function ApiRuntimeProvider({
     return request;
   }, []);
 
+  const [setUps, setSetUps] = useState<SetUp[]>([]);
+  const setUpsRef = useRef<SetUp[]>([]);
+  const patchSetUp = useCallback((id: string, patch: (s: SetUp) => SetUp) => {
+    setUpsRef.current = setUpsRef.current.map((s) => (s.id === id ? patch(s) : s));
+    setSetUps(setUpsRef.current);
+  }, []);
+
+  /**
+   * Step 1 (`POST /mandate-drafts/{id}/versions`) has no request schema yet, so nothing is sent and
+   * nothing is invented: the step answers `not_sent`, and no version exists (DEC-2401 item 4).
+   */
+  const createVersion = useCallback<Runtime["createVersion"]>((request) => {
+    counter.current += 1;
+    const setUp: SetUp = {
+      id: `set-${counter.current}`,
+      agentId: "",
+      version: mandateVersion(request.mandate),
+      created: { phase: "sent", sentAt: nowRef.current, base: null, classification: null, validated: false },
+      confirmed: null,
+      deployed: null,
+    };
+    setUpsRef.current = [...setUpsRef.current, setUp];
+    setSetUps(setUpsRef.current);
+    window.setTimeout(() => patchSetUp(setUp.id, (s) => ({ ...s, created: { ...s.created, phase: "undelivered", reason: "not_sent" } })), 0);
+    return setUp;
+  }, [patchSetUp]);
+
+  /**
+   * Step 2, `POST /mandate-versions/{hash}/confirm` (§5.1), is not sent either: its `screen_digest` and
+   * `classification_shown` are the served `GET .../confirmation`'s, which this client does not read yet,
+   * and a digest computed here would claim a screen the server never served. A version not created is
+   * refused first; otherwise the step answers `not_sent`. No step-up is recorded, since none was sent
+   * (DEC-2401 item 4).
+   */
+  const confirmVersion = useCallback<Runtime["confirmVersion"]>(
+    (setUpId, record) => {
+      const setUp = setUpsRef.current.find((s) => s.id === setUpId);
+      if (!setUp) return;
+      const reason = setUp.created.phase === "recorded" ? "not_sent" : "not_created";
+      patchSetUp(setUpId, (s) => ({ ...s, confirmed: { phase: "sent", sentAt: nowRef.current, record, stepUp: null } }));
+      window.setTimeout(() => patchSetUp(setUpId, (s) => ({ ...s, confirmed: s.confirmed ? { ...s.confirmed, phase: "undelivered", reason } : null })), 0);
+    },
+    [patchSetUp],
+  );
+
+  /** Step 3 (`POST /agents`) has no request schema yet either: not sent, and no agent exists. */
+  const deployVersion = useCallback<Runtime["deployVersion"]>(
+    (setUpId, record) => {
+      if (!setUpsRef.current.some((s) => s.id === setUpId)) return;
+      patchSetUp(setUpId, (s) => ({ ...s, deployed: { phase: "sent", sentAt: nowRef.current, record } }));
+      window.setTimeout(() => patchSetUp(setUpId, (s) => ({ ...s, deployed: s.deployed ? { ...s.deployed, phase: "undelivered", reason: "not_sent" } : null })), 0);
+    },
+    [patchSetUp],
+  );
+
+  /** No route lists a version's backtests (DEC-2400), so the deploy step shows none over the API. */
+  const backtestFor = useCallback<Runtime["backtestFor"]>(() => null, []);
+
   /** `GET /backtests/{id}` (DEC-2400): read when a screen asks, not with the workspace's refresh, since no list names them. */
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
