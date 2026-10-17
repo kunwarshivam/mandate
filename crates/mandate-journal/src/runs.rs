@@ -485,11 +485,11 @@ static TOOL_RESULT_RECORDED: Ty = Ty::Record(&[
 ]);
 
 static RUN_SUMMARY_RECORDED: Ty = Ty::Record(&[
-    ("instruments_read", Ty::List(&Ty::Ident)),
+    ("instruments_read", Ty::List(&Ty::AssetId)),
     (
         "watch",
         Ty::List(&Ty::Record(&[
-            ("instrument_id", Ty::Ident),
+            ("instrument_id", Ty::AssetId),
             (
                 "reason",
                 Ty::OneOf(&[
