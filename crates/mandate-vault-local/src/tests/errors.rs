@@ -20,6 +20,20 @@ fn every_error_has_its_stable_code() {
             "directory_mismatch",
         ),
         (VaultError::Io, "io"),
+        (VaultError::InvalidKeyRef, "invalid_key_ref"),
+        (VaultError::FileMismatch { dir: "tokens" }, "file_mismatch"),
+        (VaultError::EntryMalformed, "entry_malformed"),
+        (VaultError::EntryRejected, "entry_rejected"),
+        (VaultError::SecretSize, "secret_size"),
+        (VaultError::SecretNotPrintable, "secret_not_printable"),
+        (VaultError::WrongRole { kind: "code" }, "wrong_role"),
+        (VaultError::Random, "random"),
+        (
+            VaultError::UnknownUser {
+                name: "owlhead_exec",
+            },
+            "unknown_user",
+        ),
         (
             VaultError::Unimplemented { story: "E10-13" },
             "unimplemented",

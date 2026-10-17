@@ -388,7 +388,7 @@ allowed_external = ["thiserror"]
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["secrecy", "thiserror"]
+allowed_external = ["ring", "secrecy", "thiserror"]
 
 [crates.mandate-alpaca]
 layer = 7
