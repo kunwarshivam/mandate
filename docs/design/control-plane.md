@@ -174,6 +174,11 @@ flowchart LR
 Revoking a deployment's certificate disconnects it, which is an outage from the site's point of
 view (§4), never a trading stop.
 
+In the first slice the binding is the deployment's own Ed25519 key rather than an X.509
+certificate: the plane binds the public key at enrollment and every call is signed with it
+([DEC-984](../project/decisions/DEC-984.md) item 2). "Certificate" in this document reads as that
+key until mutual TLS lands; scope by certificate (§5.2, CP-11) is scope by that key.
+
 ### 3.2 Directory
 
 | Record | Fields |

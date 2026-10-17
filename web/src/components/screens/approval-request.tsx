@@ -13,7 +13,7 @@ import { LimitRail } from "@/components/domain/envelope";
 import { DECISION_KEY, KEY } from "@/components/kumo/key";
 import { ApprovalChart } from "@/components/charts/price-chart";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
-import type { Approval, Environment, ModelOutput, RiskFigure, Workspace } from "@/fixtures/types";
+import type { Approval, ModelOutput, RiskFigure, ShownEnvironment, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { dec, max, mul, sub, ZERO } from "@/lib/decimal";
 import { clock, price, quantity, usd, zoneLabel } from "@/lib/format";
@@ -142,7 +142,7 @@ function NotFound() {
 
 /** The request as D6 shows it, fixed at first render; its status and resolution stay live, outside the record. */
 interface RequestSnapshot {
-  environment: Environment;
+  environment: ShownEnvironment;
   proposer: string;
   approval: Pick<Approval, "requested_at" | "deadline" | "bound" | "trigger" | "risk_impact" | "evidence" | "approvers_required" | "approvals_so_far">;
 }

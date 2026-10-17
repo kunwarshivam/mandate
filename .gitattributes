@@ -1,0 +1,8 @@
+# Lists where two PRs' added lines are always both right, merged by keeping both sides' lines
+# (DEC-2600 item 6). `merge=union` applies only to merges git runs locally (`git merge main` in a
+# lane's checkout); GitHub's web merge and "Update branch" ignore it. The checks still read every
+# merged line: `cargo xtask deps` refuses a dependency row kept twice, `cargo xtask layers` parses
+# layers.toml (a key kept twice fails to parse) and checks CODEOWNERS' crate lines are sorted.
+/docs/dependencies.md merge=union
+/CODEOWNERS merge=union
+/xtask/layers.toml merge=union

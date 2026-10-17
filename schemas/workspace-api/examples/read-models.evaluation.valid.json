@@ -1,0 +1,38 @@
+[
+  {
+    "label": "an evaluation that did not pass",
+    "set": {
+      "/evaluation/report/passed": false
+    }
+  },
+  {
+    "label": "sample variances present",
+    "set": {
+      "/evaluation/report/groups/0/scorecard/sample_variance_basket": "0.01",
+      "/evaluation/report/groups/0/scorecard/sample_variance_index": "0.02"
+    }
+  },
+  {
+    "label": "every unscoreable reason",
+    "set": {
+      "/evaluation/report/groups/0/scorecard/unscoreable": [
+        {
+          "thesis_id": "th_0",
+          "reason": "no_entry_close"
+        },
+        {
+          "thesis_id": "th_1",
+          "reason": "no_exit_close"
+        },
+        {
+          "thesis_id": "th_2",
+          "reason": "no_series"
+        },
+        {
+          "thesis_id": "th_3",
+          "reason": "not_scoreable_direction"
+        }
+      ]
+    }
+  }
+]

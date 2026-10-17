@@ -112,13 +112,67 @@ export function UnreachableNotice() {
       <h1 className="text-h1">Cannot reach your deployment</h1>
       <div className="grid max-w-measure gap-3 text-base">
         <p>
-          It last answered at {clock(ws.health.deployment.as_of)}. No agent data is shown, and none is kept on this device, so nothing here can be out of date.
+          {ws.health.deployment.as_of === null ? "It has not answered." : `It last answered at ${clock(ws.health.deployment.as_of)}.`} No agent data is shown, and none is kept on this device, so nothing here can be out of date.
         </p>
         <p className="text-muted-foreground">
           Agents keep running on the deployment, and protective orders rest at the broker. The Stop control still opens; from here it cannot deliver a request, so it tells
           you how to reach the broker directly.
         </p>
       </div>
+    </div>
+  );
+}
+
+/** No API session could be opened (workspace API spec §3.11 item 5): nothing is read until the owner signs in. */
+export function SignedOutNotice() {
+  return (
+    <div role="alert" data-slot="signed-out-notice" className="reveal grid max-w-2xl gap-4 pt-6 text-foreground sm:pt-12">
+      <Plug aria-hidden className="-ml-2.5 size-12 text-muted-foreground" />
+      <h1 className="text-h1">Sign in to see your workspace</h1>
+      <div className="grid max-w-measure gap-3 text-base">
+        <p>Your deployment needs you signed in before it shows anything. No agent data is shown, and none is kept on this device.</p>
+        <p>
+          <Link href="/login" className="underline underline-offset-4">
+            Sign in
+          </Link>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The deployment answered, but could not read the workspace's memberships (spec §3.5,
+ * `membership_unavailable`): nothing is authorized, so nothing is shown. The Stop control still opens
+ * and still sends.
+ */
+export function MembershipNotice() {
+  return (
+    <div role="alert" data-slot="membership-notice" className="reveal grid max-w-2xl gap-4 pt-6 text-foreground sm:pt-12">
+      <Plug aria-hidden className="-ml-2.5 size-12 text-muted-foreground" />
+      <h1 className="text-h1">Your membership could not be read</h1>
+      <div className="grid max-w-measure gap-3 text-base">
+        <p>Your deployment answered, but could not confirm you belong to this workspace, so it shows nothing yet. This page tries again on its own.</p>
+        <p className="text-muted-foreground">
+          Agents keep running, and protective orders rest at the broker. The Stop control still opens and still sends its request.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A screen the workspace API does not serve yet (DEC-1096): over the API it shows nothing rather than
+ * fixture figures. Home, the agents, an agent, the approvals and a request have screens of their own.
+ */
+export function ApiNotYetNotice() {
+  return (
+    <div role="status" data-slot="api-not-yet" className="reveal grid max-w-2xl gap-4 pt-6 text-foreground sm:pt-12">
+      <Plug aria-hidden className="-ml-2.5 size-12 text-muted-foreground" />
+      <h1 className="text-h1">Not available from your deployment yet</h1>
+      <p className="max-w-measure text-base text-muted-foreground">
+        Your deployment does not serve this screen yet, so it shows nothing rather than an example. Home, your agents and your approvals are served.
+      </p>
     </div>
   );
 }
@@ -151,10 +205,16 @@ export function ScreenSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-/** Loading shows a skeleton and never earlier values; unreachable shows no data at all. */
-export function WorkspaceGate({ children, skeleton }: { children: ReactNode; skeleton?: ReactNode }) {
-  const { ws } = useRuntime();
+/**
+ * Loading shows a skeleton and never earlier values; unreachable, signed out and an unread membership
+ * show no data at all. Over the workspace API only a screen marked `api` (DEC-1096) shows its children.
+ */
+export function WorkspaceGate({ children, skeleton, api = false }: { children: ReactNode; skeleton?: ReactNode; api?: boolean }) {
+  const { ws, source } = useRuntime();
   if (ws.status === "loading") return <>{skeleton ?? <ScreenSkeleton />}</>;
   if (ws.status === "unreachable") return <UnreachableNotice />;
+  if (ws.status === "signed_out") return <SignedOutNotice />;
+  if (ws.status === "membership_unavailable") return <MembershipNotice />;
+  if (source === "api" && !api) return <ApiNotYetNotice />;
   return <>{children}</>;
 }

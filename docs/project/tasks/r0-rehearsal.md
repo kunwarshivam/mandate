@@ -181,6 +181,85 @@ claim #1428), with no Alpaca key in the environment, on Saturday 2026-10-17, wit
 
 **The rehearsal stops here, at R18.**
 
+**Re-run on `claude/r0-runtime-connection-checked` (R18 and the second ask fixed,
+[DEC-1150](../decisions/DEC-1150.md), claim #1428), with no Alpaca key in the environment, on
+Saturday 2026-10-17, with `--sim-clock 2026-10-20T15:00:00Z`:**
+
+- **Passed.**
+  - 1a to 2l, 2n, 2o and 2p pass as before.
+  - 2m passes R18. The watch reads the accepted entry by the profile's listing, and its record is
+    named ours by the broker id the place answered (the simulator does not echo `ref_id`). The
+    executor adopts it as `filled`, 1 share (`OrderStateChanged`, account seq 15).
+  - The second ask is held: agent seq 12 is a `DecisionMade` denied `working_order_limit`, and no
+    second `ApprovalRequested`.
+  - 2q and 2r pass for all three streams (ctl `seq 1 to 11`, agent `1 to 12`, account `1 to 23`).
+  - 2s is refused before any place call: `the account the connection binds is not flat`.
+- **Stopped at R19.** 2m exits non-zero: `the startup reconciliation found a mismatch; the agent
+  stays paused` ([R19](#the-blocker-chain-beyond-step-2l)).
+  - No `FillApplied` is ever journaled, so the ledger holds no shares while the broker holds 1:
+    `BrokerPositionObserved` with `broker_qty` 1 and `mismatch`, then `AgentModeApplied` to
+    `paused` and `ReconciliationRun` with `mismatch`.
+  - B3's protective stop is not placed. The protection records `unprotected_start`,
+    `expiry_unreplaceable` and `unprotected_end` with `uncovered`, and the run is paused, which is
+    the safe stop.
+- **Not reached:** the protective stop resting, its trigger, and the flatten.
+- **Earlier diagnosis corrected:** two diagnostic runs, not committed, named the request that
+  stopped R18 as the shell watch's own `GetOrderByClientId` (`crates/mandate-shell/src/tracer.rs`,
+  `watch`), not the executor's `query_unknown` alone, which had the same gap.
+
+**The rehearsal stops here, at R19.**
+
+**Re-run on `claude/r0-runtime-connection-checked` (R19 to R22 fixed,
+[DEC-1151](../decisions/DEC-1151.md), claim #1428), with no Alpaca key in the environment, on
+Saturday 2026-10-17, with `--sim-clock 2026-10-20T15:00:00Z`:**
+
+- **Every step passes** ([the step table](#the-step-table-r19-to-r22-fixed-run-on-2026-10-17-with---sim-clock-2026-10-20t150000z)).
+- **2m passes R19.**
+  - The watch adopts the entry `filled` from its record (account seq 15).
+  - The reconciliation that follows books the fill from that record and the position, as
+    `LateFillApplied` with `fill_id` `record:<entry>:1`, 1 share at 85, before it compares
+    positions: `BrokerPositionObserved` `mismatch: false`.
+  - Cash is in band: model 15, broker 15. `ReconciliationRun` reads `adopted`, then `clean` on the
+    next round.
+- **B3's stop rests.**
+  - The stop-limit sell of 1 is journaled and sent: GTC, stop 80.76, limit 79.9524.
+  - The simulator accepts it as `rh-sim-000002`.
+  - Its interval ends `acknowledged`, and 2m prints `submitted` for the entry and for the stop.
+- **Fixed on the way.**
+  - **R22:** the first run with R19 alone journaled `expiry_unreplaceable`, because the rehearsal
+    mandate set no stop-limit offset.
+  - **R20:** with the offset set, the run stopped at `the tracer places one order per run, and the
+    executor asked for another` before the stop was sent.
+  - **R21:** behind R20, the rh-sim watched test read the resting stop as the broker's own order,
+    and the simulator's unmoving cash put the booked fill out of the cash band.
+- **2q and 2r** pass for all three streams: ctl `seq 1 to 11`, agent `1 to 12`, account `1 to 31`.
+- **2s** is refused before any place call: `the account the connection binds is not flat`. That is
+  R0 step 7's answer for the held share.
+- **Not scripted, so not reached.**
+  - The stop's trigger: the script's quote never moves.
+  - A flatten: B3's bound flattens only an entry it could not cover, and this one is covered; the
+    script has no owner exit or kill switch step.
+  - Neither is a refusal. A step for each would be a new script feature, which this change does
+    not add.
+
+**The rehearsal passes through B3's resting stop.**
+
+## The step table (R19 to R22 fixed, run on 2026-10-17 with `--sim-clock 2026-10-20T15:00:00Z`)
+
+| Step | R0 | Result | Output (last line) |
+|---|---|---|---|
+| 1a, 1b, 1c | 1 | PASS | `Finished` |
+| 2a0 to 2k | 2, 3 | PASS | `deployed as event … at seq 10` |
+| 2l | 2, 4 | PASS | `the tracer stopped at Classify: the proposal classified ask, and the tracer acts only on auto` |
+| 2n | 2, 5 | PASS | `<approval> agent_r0 pending deadline … remaining 594` |
+| 2o | 2, 5 | PASS | `code …` |
+| 2p | 2, 5 | PASS | `Admitted and sent to the executor; the gate still decides.` |
+| 2m | 2, 5 | PASS (was the reconciliation's mismatch: R19; then `one_order_only`: R20) | `submitted md-…08000002`, then `submitted md-…08000002-p…14000004`, the stop; exit 0 |
+| 2q, 2r ctl | 2, 6 | PASS | `verified, stream ctl:ws_r0, seq 1 to 11, …` |
+| 2q, 2r agent | 2, 6 | PASS | `verified, stream agent:ws_r0:agent_r0, seq 1 to 12, …` |
+| 2q, 2r acct | 2, 6 | PASS | `verified, stream acct:ws_r0:<ref>, seq 1 to 31, …` |
+| 2s | 2, 7 | PASS | refused before any place call: `the account the connection binds is not flat` |
+
 ## How to run it
 
 ```bash
@@ -369,7 +448,11 @@ once the one before is fixed.
 | R15 | none: **observed at 2l** on the Monday clock, exit 0 and no line printed | `crates/mandate-builder/src/builder.rs:220` (an output is fresh only while `now < expires_at`), so `decide` (`crates/mandate-runtime/src/step.rs:510`) gets no proposal and returns with nothing journaled | The model's output is from the last daily close before the run, Friday 2026-10-16 20:00 UTC, and expires one `max_output_age_s` (the mandate's 86400 s) later, before Monday's session opens. A diagnostic build, not committed, printed `ModelOutputRecorded` with `expires_at` `2026-10-17T20:00:00Z` and an empty report | **Expectation fixed** in `claude/r0-runtime-connection-checked` (DEC-969 item 7): 2l now expects the ask and passes on Tuesday; on Monday it fails by design | The age rule is unchanged: on a Monday no daily-close output is fresh, and the schema caps `max_output_age_s` at 86 400, so not even the envelope can cover the weekend. Was proposed: run the rehearsal on a Tuesday to Friday clock (`--sim-clock 2026-10-20T15:00:00Z` moved 2l to the `ask` stop); the live run on a Monday needs a `max_output_age_s` covering the weekend, an envelope field the founder sets. Then 2l's dry run of an `ask` opening exits non-zero at `Classify` (`crates/mandate-shell/src/tracer.rs:428`), so the script's `would place` check for 2l needs to accept that answer |
 | R16 | `Refused (step_up_method); nothing was sent.`, **observed at 2p** on Tuesday's clock: the runtime's `ApprovalResponded` refuses the founder's `cli_confirm` grant, and the ask times out (2m, 2s: `the ask reached its deadline with no grant`) | `crates/mandate-approval/src/stepup.rs:107` (`cli_confirm` on `live` is `StepUpRefusal::Method`), which `crates/mandate-approval/src/admit.rs:241` lifts only when the admission context carries DEC-923's live scope; the shell builds that context's settings with `live_cli_confirm: None` (`crates/mandate-shell/src/adapters.rs:937`, in the `MandateView` the shell hands the runtime), read at `crates/mandate-runtime/src/escalation.rs` (`answered`, `live_cli_confirm: settings.live_cli_confirm…`) | The live `cli_confirm` scope (DEC-923: Robinhood, DEC-529's limits, the one approver) exists in `mandate-approval` and the runtime but no run supplies it, so every live `cli_confirm` grant is refused `step_up_method` | **Fixed** (DEC-970 items 1 to 3): 2p passes | The fix as built: `mandate_shell::approvers::live_cli_confirm` reads the scope as the CLI does, the runner puts it on the run context for a live connection, and the view hands it to the runtime. Was proposed: the shell's mandate view takes the `LiveScope` from the confirmed live version and its connection record (the same facts `mandate approvals approve` checked), never a constant; a safety-critical change (step-up) with its tests first |
 | R17 | `failed, seq 11, artifact_missing` (ctl) and `failed, seq 7, artifact_missing` (agent), **observed at 2r** on Tuesday's clock | `mandate journal verify` (`crates/mandate-journal/src/verify.rs`, `ArtifactMissing`); the agent stream's `ApprovalRequested` lists its own content hash in `artifact_refs` because the shell's envelope collects every digest in the payload (`crates/mandate-shell/src/envelope.rs:103`, `collect_digest_refs`), and the CLI's `ApprovalResponseSubmitted` cites the same hash, but the content object, carried inline in the request's `content`, is never put in the `--store` the run and the CLI share | An exported stream with an approval cannot be verified against the store | **Fixed** (DEC-970 item 4): 2r passes for all three streams | The fix as built: the placing run's journal puts each request's canonical content under its `content_hash` before the append, refusing a mismatch or a failed put. Was proposed: either store the request's content object (canonical bytes, its hash the `content_hash`) in the run's store when the `ApprovalRequested` is appended, or keep an inline content's hash out of `artifact_refs`; which is the journal spec's reading (§3 `artifact_refs`, §11 check 6) needs reading first |
-| R18 | `the tracer stopped at Connector: the request was not sent (not_offered)`, **observed at 2m** on Tuesday's clock, after the entry was sent and accepted (`rh-sim-000001`) and before any fill was read | `crates/mandate-robinhood/src/connector.rs:352` (`call`: `GetOrderByClientId` is not served), reached from the executor's `query_unknown` (`crates/mandate-executor/src/listing.rs:91`), which keeps the by-id lookup for an order whose state is not `Unknown`. Its callers include `overdue` (`crates/mandate-executor/src/protection.rs:704`), which queries a working order whose wait ran past its bound. Two diagnostic builds, not committed, showed the one refused request was `GetOrderByClientId` | Robinhood's profile cannot query by client order id (`query_by_client_order_id: false`), and DEC-529 item 4 and DEC-862 give an `Unknown` order the `ListOrders` fallback, but a working (`accepted`) order's lookup still goes by id, which this connector refuses unsent, and the tracer stops at `Stage::Connector` | **None**; not fixed here (the brief: record and stop) | Give a non-`Unknown` order's lookup the same `ListOrders` fallback on a profile that cannot query by id, or keep the order's state from the broker's own order listing, so the fill is read; a safety-critical executor change (reconciliation) with its tests first |
+| R18 | `the tracer stopped at Connector: the request was not sent (not_offered)`, **observed at 2m** on Tuesday's clock, after the entry was sent and accepted (`rh-sim-000001`) and before any fill was read; **fixed** (DEC-1150): the watch and the executor read a working order by the profile's listing, named by the broker id the place answered | `crates/mandate-robinhood/src/connector.rs:352` (`call`: `GetOrderByClientId` is not served), reached from the executor's `query_unknown` (`crates/mandate-executor/src/listing.rs:91`), which keeps the by-id lookup for an order whose state is not `Unknown`. Its callers include `overdue` (`crates/mandate-executor/src/protection.rs:704`), which queries a working order whose wait ran past its bound. Two diagnostic builds, not committed, showed the one refused request was `GetOrderByClientId` | Robinhood's profile cannot query by client order id (`query_by_client_order_id: false`), and DEC-529 item 4 and DEC-862 give an `Unknown` order the `ListOrders` fallback, but a working (`accepted`) order's lookup still goes by id, which this connector refuses unsent, and the tracer stops at `Stage::Connector` | **Fixed** in `claude/r0-runtime-connection-checked` (DEC-1150 items 1 to 3 and 7): 2m reads the fill | Was proposed: give a non-`Unknown` order's lookup the same `ListOrders` fallback on a profile that cannot query by id, or keep the order's state from the broker's own order listing, so the fill is read; a safety-critical executor change (reconciliation) with its tests first |
+| R19 | `the startup reconciliation found a mismatch; the agent stays paused`, **observed at 2m** on Tuesday's clock after R18's fix, the entry adopted `filled` from the listing; **fixed** (DEC-1151 items 1 to 4) | The executor booked a fill only from a fill report, and on Robinhood's path none reaches it: the connector serves no activities read (`ListActivities` is among the requests `RobinhoodConnector::call` refuses unsent), and the order record carries the filled quantity alone. The reconciliation then read the broker's position against an empty ledger (`BrokerPositionObserved` `mismatch`) and paused the agent | The fill was real at the broker and absent from the journal, so the agent paused, which was correct and safe, and B3's protective stop was never sized | **Fixed** in `claude/r0-runtime-connection-checked` (DEC-1151): 2m books the fill and reconciles clean | As built: `mandate_executor::recorded_fills` reads the fill from the order record's filled quantity and the position's average price, only on a ledger flat in the instrument with no other unbooked fill and a position of exactly that quantity, under the id `record:<key>:<qty>`; Robinhood's reconciler hands it to the reconciliation, which books it before positions are compared. Anything else derives nothing |
+| R20 | `the tracer places one order per run, and the executor asked for another`, **observed at 2m** on Tuesday's clock with R19 and R22 fixed, after the fill and before the stop was sent; **fixed** (DEC-1151 item 5) | `crates/mandate-shell/src/tracer.rs` (`broker`: every submission after the first was `SecondSubmission`) | On a profile with no bracket, B3's stop-limit is a second submission after the entry's fill, and the tracer's one-order rule counted it, against DEC-940 item 2's "a protective order … always passes" and `AGENTS.md` rule 13 | **Fixed** in `claude/r0-runtime-connection-checked`: the rule counts only a submission that adds risk, and the watch watches the run's opening | — |
+| R21 | `the startup reconciliation found a mismatch; the agent stays paused` and `Append { outcome: "Invalid" }`, **observed in** the rh-sim watched test (`crates/mandate-shell-rh-sim/tests/restart.rs`) with R19 and R20 fixed; **fixed** (DEC-1151 items 6 and 7) | `crates/mandate-robinhood/src/preflight.rs` (`account_snapshot` named no order ours) and `crates/mandate-rh-sim/src/lib.rs` (`fill` moved no cash) | The snapshot's working stop, whose record echoes no `ref_id`, read as the broker's own order (`ExternalActivityIngested`, which the journal refuses); and the simulator's cash stayed at 750.25 after a 655.20 buy, so the booked fill fell out of the cash band | **Fixed** in `claude/r0-runtime-connection-checked`: the snapshot names a record as DEC-1150 item 7 names a listed one; the simulator spends a buy's cost from cash and buying power and adds a sale's proceeds to neither | — |
+| R22 | `ProtectionChanged expiry_unreplaceable`, then `unprotected_end` `uncovered`, **observed at 2m** with R19 fixed; **fixed** in the rehearsal mandate (DEC-1151 item 8); the code gap is open | `crates/mandate-spec/src/validate.rs` (`document_rules`: V-008 requires the offset only for crypto) | Robinhood protects US equities with a stop-limit only, and the rehearsal mandate set no `stop_limit_offset`, which V-008 requires for that profile and, without the profile, for every class; `version create` accepted it | **Mandate fixed** (`scripts/r0-rehearsal.sh` sets `0.01`); V-008's code is not changed here | V-008 as the spec reads it, in `mandate-spec` with its reference cases: refuses more, for its own PR. Until then the founder's live mandate must set the offset |
 | R6 | the `ask` opening denied at its deadline | `crates/mandate-paper/src/wiring.rs:296` (`wait_for_the_grant`) | Until item 9 lands, the runtime is never handed the founder's grant, so the opening is skipped at `timeout_s` (`on_timeout: skip`, rule 3) even after `mandate approvals approve` commits it | **Item 9**, [#1367](https://github.com/kunwarshivam/mandate/pull/1367) (`claude/live-grant-cycle-answers`, DEC-940) | — |
 | R7 | the restart (R0 step 7) | the startup reconciliation | A restart after a lost place answer must adopt exactly one matching order or keep it `Unknown` (DEC-529 item 4) | **Item 10** (`claude/unknown-adoption-run-path`) | — |
 
@@ -379,7 +462,7 @@ once the one before is fixed.
 | R10b | none at run time: a live sell's fees can be booked under two cents below Robinhood's own figure | `crates/mandate-accounting/src/account.rs` (`equity_fees`, `charge`) | Robinhood rounds each fee of a trade to cents separately (SEC up, TAF and CAT to the nearest cent), and §6.2 rounds the day's total once (DEC-958 item 4). R0's one order is a buy, which is never understated | **Fixed** by [DEC-960](../decisions/DEC-960.md) (claim #1409): §6.2's `fee_rounding: per_fee_per_fill` and RC-26 (spec PR #1410), then the fold on `claude/fee-rounding-code`: `ROBINHOOD_LIVE` rounds each fee of each fill up to the cent, so a live sell is never booked below Robinhood's figure; paper and Alpaca stay `daily_total` | A per-fill, per-fee ceiling for the Robinhood schedule: a trading-domain spec PR first (§6.2 and a reference case, ES-22), then the fold; the same spec PR changes §6.2's "transcribed from Alpaca's fee schedule" to the broker's |
 | R11 | `the tracer stopped at Reconcile: the agentic account's snapshot`, **observed at 2l** before the fix | `crates/mandate-shell/src/robinhood.rs` (`RobinhoodBridge::preflight_facts`), reached from `crates/mandate-paper/src/robinhood.rs` (`Linked::preflight`); the refusal was `mandate-mcp`'s `Throttled` on the preflight's first `get_portfolio` | The live start read the account snapshot (three scoped reads, six calls) for the lapse, and the preflight then read it again at once, together with tradability and the quote. After the connect's own calls, the ordinary bucket (`crates/mandate-mcp/src/transport.rs`: 10 tokens, one a second) had no token left, and a throttled read was a refusal, never a wait | **Fixed** in `claude/r0-mcp-read-budget` ([DEC-959](../decisions/DEC-959.md), claim #1408): 2l's Robinhood reads all answer | The fix as built: the live start keeps the lapse's snapshot with the run clock read before it was sent, and the same session's preflight stands on it while it is at most the rule set's quote age bound old (reading only the tradability and the quote), and reads the account again otherwise; every broker read is `CallClass::Read`, which on an empty ordinary bucket waits for its next token when it is due within `read_wait` (2 s) and is refused at once otherwise. Openings and exits never wait |
 
-On the rehearsal's clock (DEC-962) R12 to R14 are passed and R15 holds by design on a Monday (DEC-969); on a Tuesday clock R16 (the grant, 2p) and R17 (verify, 2r) were the first refusals and are fixed (DEC-970), and R18 (the working order's lookup, 2m) is the first now. Before DEC-969, R14 (2m, 2s) and R15 (2l) were the first; what lies behind them
+On the rehearsal's clock (DEC-962) R12 to R14 are passed and R15 holds by design on a Monday (DEC-969); on a Tuesday clock R16 (the grant, 2p) and R17 (verify, 2r) were the first refusals and are fixed (DEC-970), R18 (the working order's lookup, 2m) is fixed (DEC-1150), and R19 to R22 (the fill, the stop's submission and recognition, and the offset, 2m) are fixed (DEC-1151): every step passes through B3's resting stop. Before DEC-969, R14 (2m, 2s) and R15 (2l) were the first; what lies behind them
 (the `ask` opening and the grant, R6's lane, DEC-940; the fill and R8's ticker mapping, DEC-956;
 the restart, R7's lane, DEC-941) is on `main` but not yet observed. Before DEC-962: the rehearsal
 could pass only after R8 lands (R9 by DEC-957, R10 by DEC-958, R11 by DEC-959), with R1 and R1b fixed on `main` and R2 to R4 by #1390, in addition to items

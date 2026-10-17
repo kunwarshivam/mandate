@@ -29,7 +29,14 @@ export function StateChip({ children, className }: { children: string; className
 }
 
 /** "as of 14:02:11, 3 min ago". A stale value keeps its figure and says how old it is. */
-export function AsOf({ at, now, stale, className }: { at: string; now: string; stale?: boolean; className?: string }) {
+export function AsOf({ at, now, stale, className }: { at: string | null; now: string; stale?: boolean; className?: string }) {
+  if (at === null) {
+    return (
+      <span data-stale="true" className={cn("inline-flex flex-wrap items-center gap-1.5 text-caption font-medium text-foreground", className)}>
+        <StateChip>Not reported</StateChip>
+      </span>
+    );
+  }
   return (
     <span data-stale={stale ? "true" : undefined} className={cn("inline-flex flex-wrap items-center gap-1.5 text-caption text-muted-foreground", stale && "font-medium text-foreground", className)}>
       {stale ? (
