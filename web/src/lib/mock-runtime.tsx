@@ -1,11 +1,12 @@
 "use client";
 
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ActiveRestriction, Agent, AgentMode, Approval, CancelReason, ContentRef, Environment, Iso, Workspace } from "@/fixtures/types";
+import type { ActiveRestriction, Agent, AgentMode, Approval, CancelReason, ContentRef, Iso, ShownEnvironment, Workspace } from "@/fixtures/types";
 import { type NewAgent, addMs, agentIdFor, checkDeploy, deployAgent, fillApproved, firstProposal, mandateVersion, noteSkip, submitApproved } from "./fixture-journey";
 import { clock } from "./format";
 import { type Origin, type Proposal, type Recorded, reachSafePoint, recordChange } from "./mandate-change";
 import { RESTRICTIONS } from "./restrictions";
+import type { ApiView } from "@/api/read-models";
 
 /**
  * A stand-in for the workspace deployment. Commands and approval responses are held in memory
@@ -22,7 +23,7 @@ export type CommandKind = "pause" | "resume" | "stop" | "kill" | "release" | "pa
  */
 export interface CommandRecord {
   screen: "D10" | "D11";
-  environment: Environment;
+  environment: ShownEnvironment;
   title: string;
   shown: string[];
   modes: Array<{ agent: string; badge: string }>;
@@ -46,7 +47,7 @@ export interface Command {
  */
 export interface ApprovalRecord {
   screen: "D6";
-  environment: Environment;
+  environment: ShownEnvironment;
   shown: string[];
   modelOutputExpanded: boolean;
 }
@@ -65,7 +66,7 @@ export interface ApprovalResponse {
 /** What A5 showed when the owner confirmed (brief §4.1): every line of the record screen, in order. */
 export interface DeployRecord {
   screen: "A5";
-  environment: Environment;
+  environment: ShownEnvironment;
   shown: string[];
 }
 
@@ -89,7 +90,7 @@ export interface Deployment {
 /** What the change review showed when the owner confirmed (brief §4.1): every line, in order. */
 export interface ChangeRecord {
   screen: "A6";
-  environment: Environment;
+  environment: ShownEnvironment;
   shown: string[];
 }
 
@@ -115,6 +116,8 @@ export interface MandateChangeRequest {
 export interface Runtime {
   /** Where the workspace comes from (DEC-975): the recorded fixtures, or a workspace deployment's API. */
   source: "fixtures" | "api";
+  /** The workspace API's read models as served (DEC-1096); `null` over the fixtures, and until the reads answer. */
+  view: ApiView | null;
   ws: Workspace;
   now: Iso;
   reachable: boolean;
@@ -449,7 +452,7 @@ export function RuntimeProvider({
   );
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
+    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
     [ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

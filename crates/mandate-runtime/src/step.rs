@@ -551,8 +551,10 @@ fn decide(
 
 /// The dry run of one proposal at `now`. An opening or increase the connection's checks do not
 /// cover is denied `account_restricted` before the gate is asked, as trading spec §7.3 row 5
-/// denies one on a connection that is not usable; every other proposal, and every exit whatever
-/// the checks say, is the gate's to judge (`AGENTS.md` rule 13, DEC-969 item 4).
+/// denies one on a connection that is not usable, and one in an instrument where an opening this
+/// runtime proposed still works is denied `working_order_limit` (trading spec §5.3 rule 6,
+/// DEC-1150 item 5); every other proposal, and every exit whatever either says, is the gate's to
+/// judge (`AGENTS.md` rule 13, DEC-969 item 4).
 pub(crate) fn dry_run(
     state: &RuntimeState,
     ports: &Ports<'_>,
@@ -562,6 +564,11 @@ pub(crate) fn dry_run(
     if proposal.purpose.adds_risk() && !state.connection_admits_openings(now) {
         return DryRunVerdict::Deny {
             reason_code: payload::ACCOUNT_RESTRICTED.to_owned(),
+        };
+    }
+    if proposal.purpose.adds_risk() && state.opening_works_in(&proposal.instrument) {
+        return DryRunVerdict::Deny {
+            reason_code: payload::WORKING_ORDER_LIMIT.to_owned(),
         };
     }
     ports.gate.check(proposal)

@@ -6,7 +6,7 @@ import { motion } from "motion/react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
-import type { Environment } from "@/fixtures/types";
+import type { ShownEnvironment } from "@/fixtures/types";
 
 /**
  * Kumo's PageHeader block (`kumo add PageHeader`), calm. Route tabs are links in a `nav`, not a
@@ -23,7 +23,7 @@ export interface PageHeaderProps {
   title: string;
   description?: ReactNode;
   /** Record screens pass the workspace environment; the badge sits beside the title. */
-  environment?: Environment;
+  environment?: ShownEnvironment;
   tabs?: readonly PageTab[];
   tabsLabel?: string;
   /** Beside the title, after the environment badge, such as an agent's mode. */
