@@ -52,12 +52,23 @@ fn command(args: &[&str], extra: &[(&str, &str)]) -> Command {
 
 const LOCAL: [&str; 4] = ["--bind", "127.0.0.1:0", "--probe-bind", "127.0.0.1:0"];
 
-/// Runs to its exit and returns its status code and both outputs.
+/// Runs to its exit, at most ten seconds, and returns its status code and both outputs. A process
+/// still running then is killed and fails the test, so a refusal that never comes fails fast.
 fn refused(mut command: Command) -> (Option<i32>, String) {
-    let output = command.output().expect("the binary runs");
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-    (output.status.code(), text)
+    let mut child = command.spawn().expect("the binary runs");
+    let code = wait(&mut child, Duration::from_secs(10));
+    let mut text = String::new();
+    for out in [
+        child.stdout.take().map(|o| Box::new(o) as Box<dyn Read>),
+        child.stderr.take().map(|e| Box::new(e) as Box<dyn Read>),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let mut out = out;
+        out.read_to_string(&mut text).expect("its output");
+    }
+    (code, text)
 }
 
 #[test]
@@ -180,6 +191,8 @@ fn wait(child: &mut Child, bound: Duration) -> Option<i32> {
         }
         std::thread::sleep(poll);
     }
+    let _ = child.kill();
+    let _ = child.wait();
     panic!("still running after {bound:?}");
 }
 
