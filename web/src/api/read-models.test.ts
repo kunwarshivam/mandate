@@ -90,7 +90,9 @@ describe("the read models as the API serves them (#1446, #1499; DEC-1096)", () =
 });
 
 /** The mock API over a fixture scenario, with `status` free to answer a route itself. */
-function served(scenario: Scenario, status?: (route: string) => number | null) {
+type Body = Record<string, unknown>;
+
+function served(scenario: Scenario, status?: (route: string) => number | null, rewrite?: (body: Body, route: string) => Body) {
   const server = createMockServer({ workspaceId: WS, scenario });
   const routes: string[] = [];
   const fetch: Fetch = async (input, init) => {
@@ -99,7 +101,9 @@ function served(scenario: Scenario, status?: (route: string) => number | null) {
     routes.push(`${init.method} ${route}${url.search}`);
     const forced = status?.(route);
     if (forced) return new Response(JSON.stringify({ type: "about:blank", status: forced, title: "Refused", code: forced === 404 ? "not_found" : "membership_unavailable", effect: "none", retryable: forced !== 404 }), { status: forced });
-    return server.fetch(input, init);
+    const answer = await server.fetch(input, init);
+    if (!rewrite) return answer;
+    return new Response(JSON.stringify(rewrite((await answer.json()) as Body, route)), { status: answer.status, headers: answer.headers });
   };
   return { client: createWorkspaceClient({ workspaceId: WS, fetch }), routes };
 }
@@ -143,8 +147,34 @@ describe("the workspace from the API's read models (DEC-1096)", () => {
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
     expect(loaded.ws.connection.connection_id).toBe("");
-    for (const name of ["market_data", "broker", "deployment", "relay"] as const) expect(loaded.ws.health[name].state).toBe("stale");
+    for (const name of ["market_data", "broker", "deployment", "relay"] as const) {
+      expect(loaded.ws.health[name].state).toBe("stale");
+      expect(loaded.ws.health[name].as_of, `${name} carries no client-clock time`).toBeNull();
+    }
     expect(loaded.view.agents.length).toBeGreaterThan(0);
+    expect(loaded.ws.environment, "every agent the API serves names paper").toBe("paper");
+  });
+
+  it("names the environment only when something served names it, never defaulting to paper", async () => {
+    const unserved = (route: string) => (route === "/health" || route === "/connections" ? 404 : null);
+    const second = `/agents/${buildWorkspace("approvals").agents[1].agent_id}`;
+    const live = (body: Body, route: string) => (route === second ? { ...body, agent: { ...(body.agent as object), environment: "live" } } : body);
+
+    const disagree = await loadApi(served("approvals", unserved, live).client);
+    expect(disagree.ok).toBe(true);
+    if (disagree.ok) {
+      expect(new Set(disagree.view.agents.map((a) => a.environment))).toEqual(new Set(["paper", "live"]));
+      expect(disagree.ws.environment, "agents that disagree name no environment").toBe("unknown");
+    }
+
+    const empty = (body: Body, route: string) => (route === "/agents" ? { ...body, agents: [] } : route === "/approvals" ? { ...body, approvals: [] } : body);
+    const none = await loadApi(served("approvals", unserved, empty).client);
+    expect(none.ok ? null : none.error).toBeNull();
+    if (none.ok) expect(none.ws.environment, "no agent and no connection name none").toBe("unknown");
+
+    const connected = await loadApi(served("approvals", (route) => (route === "/health" ? 404 : null), live).client);
+    expect(connected.ok).toBe(true);
+    if (connected.ok) expect(connected.ws.environment, "the connection's environment wins over agents that disagree").toBe("paper");
   });
 
   it("reads only the documented GET routes, both halves of the inbox, and each id's detail once", async () => {

@@ -123,7 +123,7 @@ export function ApiRuntimeProvider({
     if (!loaded.ok && loaded.error.code === "unauthenticated" && session) {
       wsRef.current = emptyWorkspace("signed_out", nowRef.current);
     } else if (!loaded.ok && loaded.error.code === "membership_unavailable") {
-      wsRef.current = { ...emptyWorkspace("membership_unavailable", nowRef.current), environment: lastRead.current?.ws.environment ?? "paper" };
+      wsRef.current = { ...emptyWorkspace("membership_unavailable", nowRef.current), environment: lastRead.current?.ws.environment ?? "unknown" };
     } else if (loaded.ok) {
       served.current = { at: loaded.ws.now, local: Date.now() };
       lastRead.current = { ws: loaded.ws, view: loaded.view };

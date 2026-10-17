@@ -303,11 +303,13 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     expect(current().view).toBeNull();
     expect(screen.queryByTestId("gated")).toBeNull();
     expect(screen.getByRole("heading", { name: "Your membership could not be read" })).toBeTruthy();
+    expect(current().ws.environment, "nothing served named the environment, so it is not paper").toBe("unknown");
     act(() => {
       current().send("stop_all", null);
     });
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(new URL(posts()[0].url).pathname).toBe(`/v1/workspaces/${WS}/kill-switch`);
+    expect(JSON.parse(posts()[0].body ?? "{}").environment_shown, "Stop says it showed no environment").toBeNull();
   });
 
   it("tries to open the session again on the next read after a refusal or no answer, and shows the workspace once it opens", async () => {

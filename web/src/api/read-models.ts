@@ -219,6 +219,12 @@ function newest(marks: Watermark[]): Watermark[] {
   return [...by.values()];
 }
 
+/** The agents' one environment when they all name the same; otherwise none, so the badge says "unknown" rather than guess. */
+function agreedEnvironment(agents: AgentDetail[]): Environment | null {
+  const named = new Set(agents.map((a) => a.environment));
+  return named.size === 1 ? [...named][0] : null;
+}
+
 export async function loadApi(client: WorkspaceClient): Promise<LoadedApi> {
   const [agents, pending, resolved, served, held] = await Promise.all([
     client.read("/agents", agentsRead),
@@ -253,13 +259,13 @@ export async function loadApi(client: WorkspaceClient): Promise<LoadedApi> {
   }
 
   const now = served.value?.served_at ?? new Date().toISOString();
-  const unreported = { state: "stale" as const, as_of: now };
+  const unreported = { state: "stale" as const, as_of: null };
   const at = (c: ServedComponent | undefined) => (c ? { state: c.state === "ok" && c.freshness.stale ? ("stale" as const) : c.state, as_of: c.freshness.observed_at } : unreported);
   const connection = held.value?.connections[0] ?? null;
   const base = emptyWorkspace("ready", now);
   const ws: Workspace = {
     ...base,
-    environment: connection?.environment ?? view.agents[0]?.environment ?? base.environment,
+    environment: connection?.environment ?? agreedEnvironment(view.agents) ?? base.environment,
     connection: { ...base.connection, connection_id: connection?.connection_id ?? "" },
     health: { market_data: at(served.value?.market_data), broker: at(served.value?.broker), deployment: at(served.value?.deployment), relay: at(served.value?.relay) },
   };

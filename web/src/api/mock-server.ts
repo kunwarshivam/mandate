@@ -61,11 +61,11 @@ function problem(status: number, code: string, effect: "none" | "recorded", retr
   return respond(status, { type: "about:blank", status, title: "Request refused", code, effect, event_id: null, retryable }, "application/problem+json");
 }
 
-/** `read-models/health.schema.json`: each component's state and freshness, aged against `servedAt`. An `ok` component is never stale. */
+/** `read-models/health.schema.json`: each component's state and freshness, aged against `servedAt`. An `ok` component is never stale; every fixture feed carries its time. */
 function healthBody(health: Health, servedAt: string) {
   const component = (name: keyof Health) => {
     const { state, as_of } = health[name];
-    const observed = canonical(as_of);
+    const observed = canonical(as_of ?? servedAt);
     const age = Math.max(0, Math.floor((Date.parse(servedAt) - Date.parse(observed)) / 1000));
     return { state, freshness: { observed_at: observed, stale: state !== "ok", age_seconds: age, limit_source: `health.${name}` } };
   };

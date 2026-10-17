@@ -96,7 +96,9 @@ describe("bars", () => {
   it("stop at the market data's as-of time when it is stale", () => {
     const stale = buildWorkspace("stale");
     const m = buildMarket(stale);
-    expect(m.end).toBe(minuteOf(stale.health.market_data.as_of));
+    const asOf = stale.health.market_data.as_of;
+    expect(asOf, "the stale fixture reports its last mark").not.toBeNull();
+    expect(m.end).toBe(minuteOf(asOf ?? ""));
     for (const s of Object.values(m.symbols)) expect(s.minute[s.minute.length - 1].time).toBeLessThanOrEqual(m.end);
   });
 

@@ -4,19 +4,19 @@
  */
 import type { Workspace } from "@/fixtures/types";
 
-/** The workspace the screens show before the first read answers, or when none can: no agent, no request, no figure. */
+/** The workspace the screens show before the first read answers, or when none can: no agent, no request, no figure, no feed time, and no environment. */
 export function emptyWorkspace(status: Workspace["status"], now: string): Workspace {
-  const feed = { state: "stale" as const, as_of: now };
+  const feed = { state: "stale" as const, as_of: null };
   return {
     scenario: "normal",
     status,
     journal: "answers",
     now,
-    environment: "paper",
+    environment: "unknown",
     connection: { connection_id: "", broker: "Alpaca paper", account_equity: "0", day_trading_regime: "intraday_margin" },
     approver_users: 0,
     independent_approval_required: null,
-    health: { market_data: feed, broker: feed, deployment: status === "unreachable" ? { state: "down", as_of: now } : feed, relay: feed },
+    health: { market_data: feed, broker: feed, deployment: status === "unreachable" ? { state: "down", as_of: null } : feed, relay: feed },
     agents: [],
     approvals: [],
     decisions: [],

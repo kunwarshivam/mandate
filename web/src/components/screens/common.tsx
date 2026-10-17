@@ -112,7 +112,7 @@ export function UnreachableNotice() {
       <h1 className="text-h1">Cannot reach your deployment</h1>
       <div className="grid max-w-measure gap-3 text-base">
         <p>
-          It last answered at {clock(ws.health.deployment.as_of)}. No agent data is shown, and none is kept on this device, so nothing here can be out of date.
+          {ws.health.deployment.as_of === null ? "It has not answered." : `It last answered at ${clock(ws.health.deployment.as_of)}.`} No agent data is shown, and none is kept on this device, so nothing here can be out of date.
         </p>
         <p className="text-muted-foreground">
           Agents keep running on the deployment, and protective orders rest at the broker. The Stop control still opens; from here it cannot deliver a request, so it tells

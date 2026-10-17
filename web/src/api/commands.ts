@@ -11,7 +11,7 @@
  */
 import type { WorkspaceClient } from "./client";
 import type { JsonObject, PreparedCommand } from "./types";
-import type { AgentMode, ContentRef, Environment } from "@/fixtures/types";
+import type { AgentMode, ContentRef, ShownEnvironment } from "@/fixtures/types";
 import type { ApprovalRecord, CommandKind, CommandRecord } from "@/lib/mock-runtime";
 import { sha256Hex } from "@/lib/sha256";
 
@@ -22,7 +22,7 @@ export interface CommandScope {
   agents: ReadonlyArray<{ agent_id: string; mode: AgentMode | null }>;
   /** `""` when no connection has been read. */
   connectionId: string;
-  environment: Environment;
+  environment: ShownEnvironment;
 }
 
 /** Names the web app's build in every record it sends (spec §5, mandate spec §10). */
@@ -52,7 +52,7 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, k
       return agentCommand("stop", { release: true, warning_shown: ref(JSON.stringify(record.shown)), record: null, step_up: null });
     case "kill":
       if (!agentId) return { ok: false, reason: "no_agent" };
-      return one(client.prepareKillSwitch({ scope: { kind: "agent", id: agentId }, environment_shown: ws.environment, owner_exit: null, record: null, step_up: null }));
+      return one(client.prepareKillSwitch({ scope: { kind: "agent", id: agentId }, environment_shown: ws.environment === "unknown" ? null : ws.environment, owner_exit: null, record: null, step_up: null }));
     case "pause_all": {
       const live = ws.agents.filter((a) => a.mode !== "stopped");
       if (live.length === 0) return { ok: false, reason: "no_agents" };
@@ -61,7 +61,7 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, k
     case "stop_all":
     case "close_all": {
       const scope = ws.connectionId ? { kind: "connection" as const, id: ws.connectionId } : { kind: "workspace" as const, id: null };
-      return one(client.prepareKillSwitch({ scope, environment_shown: ws.environment, owner_exit: null, record: null, step_up: null }));
+      return one(client.prepareKillSwitch({ scope, environment_shown: ws.environment === "unknown" ? null : ws.environment, owner_exit: null, record: null, step_up: null }));
     }
     default: {
       const unhandled: never = kind;
