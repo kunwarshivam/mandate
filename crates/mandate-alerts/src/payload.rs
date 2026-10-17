@@ -23,8 +23,8 @@ impl Alert {
     /// [`AlertError::Entropy`] when the source cannot fill an id; no alert is raised under a
     /// predictable one.
     pub fn raise(kind: AlertKind, random: &mut dyn SecureRandom) -> Result<Self, AlertError> {
-        let _ = (kind, random, NoticeId::mint);
-        Err(AlertError::Unimplemented { story: "E21-4" })
+        let id = NoticeId::mint(random).map_err(|_| AlertError::Entropy)?;
+        Ok(Self { id, kind })
     }
 
     pub fn kind(&self) -> AlertKind {
@@ -45,8 +45,19 @@ impl Alert {
 /// # Errors
 /// [`AlertError::Unrepresentable`] never in practice: every key is fixed and valid.
 pub fn payload(alert: &Alert) -> Result<Value, AlertError> {
-    let _ = (alert, Key::new, Object::new);
-    Err(AlertError::Unimplemented { story: "E21-4" })
+    let kind = alert.kind;
+    let mut members = Object::new();
+    for (key, value) in [
+        ("alert", alert.id()?),
+        ("reason", kind.reason().to_owned()),
+        ("runbook", kind.runbook().to_owned()),
+        ("severity", kind.severity().key().to_owned()),
+        ("text", kind.text().to_owned()),
+    ] {
+        let key = Key::new(key).map_err(|_| AlertError::Unrepresentable)?;
+        members.insert(key, Value::Str(value));
+    }
+    Ok(Value::Object(members))
 }
 
 /// The payload's canonical bytes: everything a sink is handed.
@@ -54,8 +65,7 @@ pub fn payload(alert: &Alert) -> Result<Value, AlertError> {
 /// # Errors
 /// As [`payload`].
 pub fn rendered(alert: &Alert) -> Result<Vec<u8>, AlertError> {
-    let _ = (alert, to_canonical);
-    Err(AlertError::Unimplemented { story: "E21-4" })
+    payload(alert).map(|value| to_canonical(&value))
 }
 
 /// Where alerts go. No paging vendor is chosen (DEC-434 item 20, H6), so the only sink here is
@@ -91,6 +101,7 @@ pub fn send(
     random: &mut dyn SecureRandom,
     sink: &mut dyn Sink,
 ) -> Result<Alert, AlertError> {
-    let _ = (kind, random, sink);
-    Err(AlertError::Unimplemented { story: "E21-4" })
+    let alert = Alert::raise(kind, random)?;
+    sink.page(&rendered(&alert)?)?;
+    Ok(alert)
 }

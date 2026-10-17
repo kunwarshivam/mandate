@@ -60,6 +60,48 @@ pub enum Signal {
 /// The alert a signal raises, if any. Where §8.2 names no threshold, any nonzero count alerts:
 /// the conservative reading until O3's rules are tuned (DEC-981 item 4).
 pub fn from_signal(signal: Signal) -> Option<AlertKind> {
-    let _ = (signal, AlertKind::AnchorGap);
-    None
+    let raised = |fires: bool, kind: AlertKind| fires.then_some(kind);
+    match signal {
+        Signal::GlobalKillSwitch => Some(AlertKind::GlobalKillSwitch),
+        Signal::OrderUnknownPastLookup => Some(AlertKind::OrderUnknownPastLookup),
+        Signal::DuplicateOrder => Some(AlertKind::DuplicateOrder),
+        Signal::MarketDataStale => Some(AlertKind::MarketDataStale),
+        Signal::ModelGateway {
+            errors,
+            deadline_misses,
+            meter_unavailable,
+        } => raised(
+            errors > 0 || deadline_misses > 0 || meter_unavailable > 0,
+            AlertKind::ModelGatewayDegraded,
+        ),
+        Signal::JournalAppend {
+            unavailable,
+            ambiguous,
+            p99_us,
+        } => raised(
+            unavailable > 0 || ambiguous > 0 || p99_us > APPEND_P99_LIMIT_US,
+            AlertKind::JournalAppendDegraded,
+        ),
+        Signal::StandbyLost => Some(AlertKind::StandbyLost),
+        Signal::UnexpectedFenced => Some(AlertKind::UnexpectedFenced),
+        Signal::DdlOutsideRelease => Some(AlertKind::DdlOutsideRelease),
+        Signal::ColdExportLag { seconds } => {
+            raised(seconds > COLD_EXPORT_LAG_LIMIT_S, AlertKind::ColdExportLag)
+        }
+        Signal::VaultLeaseRenewal { failures } => {
+            raised(failures > 0, AlertKind::VaultLeaseRenewalFailing)
+        }
+        Signal::Broker {
+            errors,
+            rate_limited,
+            outage,
+        } => raised(
+            errors > 0 || rate_limited > 0 || outage,
+            AlertKind::BrokerDegraded,
+        ),
+        Signal::CrashLoop => Some(AlertKind::CrashLoop),
+        Signal::ApprovalNotDelivered => Some(AlertKind::ApprovalNotDelivered),
+        Signal::BackupFailed => Some(AlertKind::BackupFailed),
+        Signal::DrillOverdueOrFailed => Some(AlertKind::DrillOverdueOrFailed),
+    }
 }

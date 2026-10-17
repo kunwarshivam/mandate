@@ -24,6 +24,49 @@ use crate::{AlertError, AlertKind};
 /// [`AlertError::Unreadable`] for a body that does not parse or holds no payload object. The
 /// caller treats that as the journal's own integrity question, not as no alert.
 pub fn from_event(row: &StoredEvent) -> Result<Option<AlertKind>, AlertError> {
-    let _ = (row, Value::Null, AlertKind::AnchorGap, mandate_canon::parse);
-    Err(AlertError::Unimplemented { story: "E21-4" })
+    let body = mandate_canon::parse(&row.body).map_err(|_| AlertError::Unreadable)?;
+    let payload = body
+        .get("payload")
+        .filter(|p| p.as_object().is_some())
+        .ok_or(AlertError::Unreadable)?;
+    let text = |member: &str| payload.get(member).and_then(Value::as_str);
+    let kind = match row.event_type.as_str() {
+        "ReconciliationRun" => {
+            (text("result") == Some("mismatch")).then_some(AlertKind::ReconciliationMismatch)
+        }
+        "ProtectionChanged" => match text("action") {
+            Some("interval_limit") => Some(AlertKind::UnprotectedIntervalLimit),
+            Some("watchdog") => Some(AlertKind::WatchdogFired),
+            _ => None,
+        },
+        "GateDecided" => (text("reason_code") == Some("protection_unattributed"))
+            .then_some(AlertKind::ProtectionUnattributed),
+        "KillSwitchActivated" => {
+            let automated = text("initiator") != Some("owner");
+            if automated && text("scope") == Some("workspace") {
+                Some(AlertKind::KillSwitchAutomatedWorkspace)
+            } else {
+                Some(AlertKind::KillSwitchActivated)
+            }
+        }
+        "VerificationRun" => match text("result") {
+            Some("fail") => Some(AlertKind::VerificationFailed),
+            Some("incomplete") => Some(AlertKind::VerificationIncomplete),
+            _ => None,
+        },
+        "AnchorComputed" => {
+            matches!(payload.get("token"), None | Some(Value::Null)).then_some(AlertKind::AnchorGap)
+        }
+        "ClockToleranceExceeded" => Some(AlertKind::ClockOutOfTolerance),
+        "ApprovalDelivered" => {
+            (text("status") == Some("failed")).then_some(AlertKind::ApprovalNotDelivered)
+        }
+        "OwnerAlertSent" => match text("kind") {
+            Some("data_feed_down") => Some(AlertKind::MarketDataStale),
+            Some("spend_cap") => Some(AlertKind::ModelSpendCap),
+            _ => None,
+        },
+        _ => None,
+    };
+    Ok(kind)
 }
