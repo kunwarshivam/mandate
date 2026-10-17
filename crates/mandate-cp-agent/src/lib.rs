@@ -43,5 +43,6 @@ pub use instruction::{
 };
 pub use port::{HandOver, InstructionSink, receive};
 pub use verify::{
-    KeyKind, MessageKind, PinnedKeys, Refusal, RefusalReason, Site, Verified, signed_bytes,
+    KeyKind, MAX_MESSAGE_BYTES, MessageKind, PinnedKeys, Refusal, RefusalReason, Site, Verified,
+    signed_bytes,
 };

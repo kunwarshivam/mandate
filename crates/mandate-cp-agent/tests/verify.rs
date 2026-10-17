@@ -30,21 +30,28 @@ fn keys() -> PinnedKeys {
             KeyKind::License,
             pair(1).public_key().as_ref(),
         )
-        .pin(
-            &id("release_key_1"),
-            KeyKind::Release,
-            pair(2).public_key().as_ref(),
-        )
-        .pin(
-            &id("registry_key_1"),
-            KeyKind::Registry,
-            pair(3).public_key().as_ref(),
-        )
-        .pin(
-            &id("data_key_1"),
-            KeyKind::Data,
-            pair(4).public_key().as_ref(),
-        )
+        .and_then(|k| {
+            k.pin(
+                &id("release_key_1"),
+                KeyKind::Release,
+                pair(2).public_key().as_ref(),
+            )
+        })
+        .and_then(|k| {
+            k.pin(
+                &id("registry_key_1"),
+                KeyKind::Registry,
+                pair(3).public_key().as_ref(),
+            )
+        })
+        .and_then(|k| {
+            k.pin(
+                &id("data_key_1"),
+                KeyKind::Data,
+                pair(4).public_key().as_ref(),
+            )
+        })
+        .unwrap()
 }
 
 fn site() -> Site {
@@ -72,9 +79,8 @@ const BUNDLE: &str = r#"{"dataset":"sec_filings",
     "bundle_digest":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","sequence":101}"#;
 
 /// One message: `body` signed as `kind` by `signer` under `key_id`.
-fn message(kind: &str, key_id: &str, body: &str, signer: &Ed25519KeyPair) -> Vec<u8> {
-    let body = parse(body.as_bytes()).unwrap();
-    let claimed = [
+fn claimed(kind: &str) -> MessageKind {
+    [
         MessageKind::License,
         MessageKind::ReleaseManifest,
         MessageKind::ReleaseWithdrawn,
@@ -83,14 +89,35 @@ fn message(kind: &str, key_id: &str, body: &str, signer: &Ed25519KeyPair) -> Vec
     ]
     .into_iter()
     .find(|k| k.as_str() == kind)
-    .unwrap_or(MessageKind::Unknown);
-    let signature = signer.sign(&signed_bytes(claimed, key_id, &body));
-    format!(
-        r#"{{"kind":"{kind}","key_id":"{key_id}","body":{},"signature":"{}"}}"#,
-        String::from_utf8(to_canonical(&body)).unwrap(),
-        hex(signature.as_ref())
-    )
-    .into_bytes()
+    .unwrap_or(MessageKind::Unknown)
+}
+
+/// The canonical envelope of `members`, each `(name, JSON)`.
+fn envelope(members: &[(&str, &str)]) -> Vec<u8> {
+    let mut object = mandate_canon::Object::new();
+    for (name, json) in members {
+        object.insert(
+            mandate_canon::Key::new(name).unwrap(),
+            parse(json.as_bytes()).unwrap(),
+        );
+    }
+    to_canonical(&Value::Object(object))
+}
+
+fn quoted(text: &str) -> String {
+    format!("\"{text}\"")
+}
+
+/// One message: `body` signed as `kind` by `signer` under `key_id`, in canonical form.
+fn message(kind: &str, key_id: &str, body: &str, signer: &Ed25519KeyPair) -> Vec<u8> {
+    let parsed = parse(body.as_bytes()).unwrap();
+    let signature = signer.sign(&signed_bytes(claimed(kind), key_id, &parsed));
+    envelope(&[
+        ("kind", &quoted(kind)),
+        ("key_id", &quoted(key_id)),
+        ("body", body),
+        ("signature", &quoted(&hex(signature.as_ref()))),
+    ])
 }
 
 /// Every valid instruction: its kind, signing key ID, body, and signer.
@@ -198,17 +225,24 @@ fn a_license_carries_its_members_and_sequence() {
 
 #[test]
 fn an_unsigned_instruction_is_refused_unsigned_with_its_claimed_sequence() {
-    let bytes = format!(r#"{{"kind":"license","key_id":"license_key_1","body":{LICENSE}}}"#);
-    let r = refusal(bytes.as_bytes());
+    let bytes = envelope(&[
+        ("kind", r#""license""#),
+        ("key_id", r#""license_key_1""#),
+        ("body", LICENSE),
+    ]);
+    let r = refusal(&bytes);
     assert_eq!(
         (r.message, r.reason, r.sequence),
         (MessageKind::License, RefusalReason::Unsigned, Some(3))
     );
-    assert_eq!(r.document_digest, Digest::of(bytes.as_bytes()));
-    let null = format!(
-        r#"{{"kind":"license","key_id":"license_key_1","body":{LICENSE},"signature":null}}"#
-    );
-    assert_eq!(refusal(null.as_bytes()).reason, RefusalReason::Unsigned);
+    assert_eq!(r.document_digest, Digest::of(&bytes));
+    let null = envelope(&[
+        ("kind", r#""license""#),
+        ("key_id", r#""license_key_1""#),
+        ("body", LICENSE),
+        ("signature", "null"),
+    ]);
+    assert_eq!(refusal(&null).reason, RefusalReason::Unsigned);
 }
 
 #[test]
@@ -253,14 +287,13 @@ fn a_signature_for_one_kind_does_not_verify_as_another() {
         "release_key_1",
         &body,
     ));
-    let relabeled = format!(
-        r#"{{"kind":"release_manifest","key_id":"release_key_1","body":{WITHDRAWN},"signature":"{}"}}"#,
-        hex(signature.as_ref())
-    );
-    assert_eq!(
-        refusal(relabeled.as_bytes()).reason,
-        RefusalReason::BadSignature
-    );
+    let relabeled = envelope(&[
+        ("kind", r#""release_manifest""#),
+        ("key_id", r#""release_key_1""#),
+        ("body", WITHDRAWN),
+        ("signature", &quoted(&hex(signature.as_ref()))),
+    ]);
+    assert_eq!(refusal(&relabeled).reason, RefusalReason::BadSignature);
 }
 
 #[test]
@@ -301,10 +334,16 @@ fn bytes_that_are_not_a_message_are_refused_malformed() {
             String::from_utf8_lossy(bytes)
         );
     }
-    let extra = String::from_utf8(message("license", "license_key_1", LICENSE, &pair(1)))
-        .unwrap()
-        .replacen('{', r#"{"note":"x","#, 1);
-    assert_eq!(refusal(extra.as_bytes()).reason, RefusalReason::Malformed);
+    let body = parse(LICENSE.as_bytes()).unwrap();
+    let signature = pair(1).sign(&signed_bytes(MessageKind::License, "license_key_1", &body));
+    let extra = envelope(&[
+        ("kind", r#""license""#),
+        ("key_id", r#""license_key_1""#),
+        ("body", LICENSE),
+        ("note", r#""x""#),
+        ("signature", &quoted(&hex(signature.as_ref()))),
+    ]);
+    assert_eq!(refusal(&extra).reason, RefusalReason::Malformed);
 }
 
 #[test]
@@ -431,4 +470,147 @@ proptest! {
         let sink = received(&message(kind, key_id, &body, &pair(seed)));
         prop_assert!(sink.verified.is_empty());
     }
+}
+
+/// Review of #1467: one document has one digest. A genuine message re-spaced, with its members
+/// reordered, or with its body reordered still carries a valid signature over the canonical body,
+/// so only its form tells it apart; it is refused, so a replay in another form can neither dodge
+/// the de-duplication of journal spec §9.17 nor take the genuine message's sequence.
+#[test]
+fn only_the_canonical_form_of_a_message_is_verified() {
+    let genuine = message("license", "license_key_1", LICENSE, &pair(1));
+    assert_eq!(received(&genuine).verified.len(), 1);
+    let text = String::from_utf8(genuine.clone()).unwrap();
+    let variants = [
+        text.replacen(':', ": ", 1),
+        format!(" {text}"),
+        format!("{text}\n"),
+        text.replacen(r#""body":{"#, r#""body":{ "#, 1),
+        text.replace("lic_0001", "lic_\\u0030001"),
+    ];
+    for variant in variants {
+        let r = refusal(variant.as_bytes());
+        assert_eq!(
+            (r.message, r.reason),
+            (MessageKind::License, RefusalReason::Malformed),
+            "{variant}"
+        );
+    }
+}
+
+#[test]
+fn a_message_over_the_cap_is_refused_before_it_is_parsed() {
+    let mut big = message("license", "license_key_1", LICENSE, &pair(1));
+    big.resize(mandate_cp_agent::MAX_MESSAGE_BYTES + 1, b' ');
+    let r = refusal(&big);
+    assert_eq!(
+        (r.message, r.reason),
+        (MessageKind::Unknown, RefusalReason::Malformed)
+    );
+}
+
+#[test]
+fn a_tampered_body_or_a_substituted_key_is_refused_bad_signature() {
+    let body = parse(LICENSE.as_bytes()).unwrap();
+    let signature = hex(pair(1)
+        .sign(&signed_bytes(MessageKind::License, "license_key_1", &body))
+        .as_ref());
+    let tampered = envelope(&[
+        ("kind", r#""license""#),
+        ("key_id", r#""license_key_1""#),
+        (
+            "body",
+            &edited(LICENSE, "max_agents_deployed", Some("2000")),
+        ),
+        ("signature", &quoted(&signature)),
+    ]);
+    assert_eq!(refusal(&tampered).reason, RefusalReason::BadSignature);
+    let keys = keys()
+        .pin(
+            &id("license_key_2"),
+            KeyKind::License,
+            pair(1).public_key().as_ref(),
+        )
+        .unwrap();
+    let substituted = envelope(&[
+        ("kind", r#""license""#),
+        ("key_id", r#""license_key_2""#),
+        ("body", LICENSE),
+        ("signature", &quoted(&signature)),
+    ]);
+    let mut sink = Recorder::default();
+    receive(&substituted, &keys, &site(), &mut sink);
+    assert_eq!(
+        sink.refused[0].reason,
+        RefusalReason::BadSignature,
+        "the key ID is signed"
+    );
+    for wrong in [
+        signature.to_uppercase(),
+        signature[..126].to_owned(),
+        String::new(),
+    ] {
+        let bytes = envelope(&[
+            ("kind", r#""license""#),
+            ("key_id", r#""license_key_1""#),
+            ("body", LICENSE),
+            ("signature", &quoted(&wrong)),
+        ]);
+        assert_eq!(
+            refusal(&bytes).reason,
+            RefusalReason::BadSignature,
+            "{wrong}"
+        );
+    }
+}
+
+/// A known answer for the signed bytes, written out by hand: the domain tag, the kind, the key ID
+/// and the canonical body, separated by zero bytes (DEC-982 item 2).
+#[test]
+fn the_signed_bytes_are_the_tag_kind_key_and_canonical_body() {
+    let body = parse(br#"{"reason":"defect", "release_id":"r1"}"#).unwrap();
+    let want = b"mandate-cp/1\0release_withdrawn\0release_key_1\0{\"reason\":\"defect\",\"release_id\":\"r1\"}";
+    assert_eq!(
+        signed_bytes(MessageKind::ReleaseWithdrawn, "release_key_1", &body),
+        want.to_vec()
+    );
+}
+
+#[test]
+fn a_claimed_sequence_is_recorded_only_when_it_is_a_sequence() {
+    for (sequence, recorded) in [
+        ("0", None),
+        ("9007199254740991", Some(9_007_199_254_740_991)),
+        ("\"3\"", None),
+    ] {
+        let body = edited(LICENSE, "sequence", Some(sequence));
+        let bytes = envelope(&[
+            ("kind", r#""license""#),
+            ("key_id", r#""license_key_1""#),
+            ("body", &body),
+        ]);
+        assert_eq!(refusal(&bytes).sequence, recorded, "{sequence}");
+    }
+}
+
+#[test]
+fn a_release_pins_each_key_once_and_only_a_32_byte_key() {
+    let key = pair(1);
+    let one = PinnedKeys::new().pin(&id("k"), KeyKind::License, key.public_key().as_ref());
+    assert!(
+        one.clone()
+            .and_then(|k| k.pin(&id("k"), KeyKind::Release, key.public_key().as_ref()))
+            .is_none()
+    );
+    assert!(
+        PinnedKeys::new()
+            .pin(&id("k"), KeyKind::License, &[0; 31])
+            .is_none()
+    );
+    assert!(
+        PinnedKeys::new()
+            .pin(&id("k"), KeyKind::License, &[0; 33])
+            .is_none()
+    );
+    assert!(one.is_some());
 }

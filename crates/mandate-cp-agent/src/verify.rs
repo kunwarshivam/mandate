@@ -95,11 +95,15 @@ impl PinnedKeys {
         Self::default()
     }
 
-    /// Pins `public_key`, an Ed25519 public key, as `kind` under `key_id`.
-    pub fn pin(mut self, key_id: &Ident, kind: KeyKind, public_key: &[u8]) -> Self {
+    /// Pins `public_key`, a 32-byte Ed25519 public key, as `kind` under `key_id`; `None` when the
+    /// key is not 32 bytes or `key_id` is already pinned, so a release can never pin one ID twice.
+    pub fn pin(mut self, key_id: &Ident, kind: KeyKind, public_key: &[u8]) -> Option<Self> {
+        if public_key.len() != ED25519_PUBLIC_KEY_LEN || self.0.contains_key(key_id.as_str()) {
+            return None;
+        }
         self.0
             .insert(key_id.as_str().to_owned(), (kind, public_key.to_vec()));
-        self
+        Some(self)
     }
 }
 
@@ -169,6 +173,13 @@ pub fn signed_bytes(kind: MessageKind, key_id: &str, body: &Value) -> Vec<u8> {
     out
 }
 
+/// The largest message `cp-agent` parses. Every instruction of design §3.8 is a few hundred bytes;
+/// anything larger is refused before it is parsed, so the link cannot choose the parse's cost.
+pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+
+/// An Ed25519 public key's length.
+const ED25519_PUBLIC_KEY_LEN: usize = 32;
+
 /// Which key kinds may sign each instruction (design §3.8's "Signed by" column, with a catalog
 /// entry's kind choosing between the release and registry keys).
 fn signer(kind: MessageKind, body: &Value) -> Option<KeyKind> {
@@ -193,6 +204,9 @@ pub(crate) fn check(bytes: &[u8], keys: &PinnedKeys, site: &Site) -> Result<Veri
         sequence,
         document_digest,
     };
+    if bytes.len() > MAX_MESSAGE_BYTES {
+        return Err(refuse(MessageKind::Unknown, RefusalReason::Malformed, None));
+    }
     let Ok(message) = parse(bytes) else {
         return Err(refuse(MessageKind::Unknown, RefusalReason::Malformed, None));
     };
@@ -210,6 +224,9 @@ pub(crate) fn check(bytes: &[u8], keys: &PinnedKeys, site: &Site) -> Result<Veri
         .and_then(Value::as_int)
         .filter(|s| *s >= 1);
     let refuse = |reason| refuse(kind, reason, sequence);
+    if to_canonical(&message) != bytes {
+        return Err(refuse(RefusalReason::Malformed));
+    }
     let shaped = message.as_object().is_some_and(|o| {
         o.keys()
             .all(|k| ["kind", "key_id", "body", "signature"].contains(&k.as_str()))
