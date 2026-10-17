@@ -598,3 +598,51 @@ fn a_stream_not_opened_first_is_refused() {
     assert!(matches!(got, Err(ControlError::Journal(_))), "{got:?}");
     assert!(grants(&journal).is_empty());
 }
+
+/// A journal that answers every append `Committed` with no stored event, as a faulty adapter might.
+struct EmptyAnswers(Journal);
+
+impl ControlJournal for EmptyAnswers {
+    fn rows(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, ControlError> {
+        self.0.rows(stream)
+    }
+
+    fn head(&self, stream: &StreamId) -> Result<mandate_journal::Head, ControlError> {
+        self.0.head(stream)
+    }
+
+    fn take_ownership(&mut self, stream: &StreamId) -> Result<u64, ControlError> {
+        self.0.take_ownership(stream)
+    }
+
+    fn append(
+        &mut self,
+        _: &StreamId,
+        _: u64,
+        _: u64,
+        _: UtcNanos,
+        _: &[&[u8]],
+    ) -> Result<AppendOutcome, ControlError> {
+        Ok(AppendOutcome::Committed(Vec::new()))
+    }
+
+    fn wait(&mut self, delay: std::time::Duration) {
+        self.0.wait(delay);
+    }
+}
+
+/// An answer of `Committed` that does not hold the grant's event is an error, never a grant.
+#[test]
+fn a_commit_answer_without_the_grant_is_not_a_grant() {
+    let mut inner = Journal::default();
+    open(&mut inner, "paper");
+    let mut journal = EmptyAnswers(inner);
+    let ulid = member(1);
+    let founding = Founding {
+        workspace: "ws1",
+        member: &ulid,
+        method: "oidc",
+    };
+    let got = found_in(&mut journal, founding, &mut ticking(), &mut Vec::new());
+    assert!(matches!(got, Err(ControlError::Journal(_))), "{got:?}");
+}
