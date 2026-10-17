@@ -264,6 +264,20 @@ describe("the backtest report over the workspace API (DEC-2400)", () => {
     expect(screen.getByText("/backtest/report/strategy/net_pnl")).toBeInTheDocument();
     expect(screen.getByRole("alert").textContent).not.toContain("42.18");
   });
+
+  it.each(["gate_reasons", "hold_reasons"])("masks a malformed %s key in what failed, so the served key never reaches the screen", async (map) => {
+    const KEY = "Served Key/With~Text";
+    apiMount(<BacktestReportScreen backtestId={BACKTEST_IDS.lmnCompleted} />, (route, body) => {
+      if (!route.startsWith("/backtests/")) return body;
+      const copy = structuredClone(body) as { backtest: { report: { decisions: Record<string, Record<string, number>> } } };
+      copy.backtest.report.decisions[map][KEY] = 1;
+      return copy;
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "Backtest could not be read" })).toBeInTheDocument();
+    expect(screen.getByText(`/backtest/report/decisions/${map}/*`)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("Served Key");
+    expect(document.body.textContent).not.toContain("With~");
+  });
 });
 
 describe("an agent's Backtests section (DEC-2400 item 4)", () => {

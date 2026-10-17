@@ -4,6 +4,7 @@
  * through (DEC-2400). Fixture values, not a record: each report is a simulated run of a mandate
  * version, and none is a performance record.
  */
+import { servedBacktest } from "@/api/backtest";
 import { AGENT_IDS } from "./workspace";
 import { INSTRUMENTS } from "./mandates";
 import { VERSION } from "./versions";
@@ -288,4 +289,18 @@ export const BACKTEST_FIXTURES: Readonly<Record<string, unknown>> = {
 /** A served body by id, or `undefined`; a copy, so nothing that reads it can change the fixture. */
 export function servedBacktestFixture(backtestId: string): unknown {
   return Object.hasOwn(BACKTEST_FIXTURES, backtestId) ? structuredClone(BACKTEST_FIXTURES[backtestId]) : undefined;
+}
+
+/**
+ * The backtest the deploy step shows for a version (B3): the fixtures' completed run of exactly that
+ * version, or `null`. A research-agent run is never offered (PX-9 (a)).
+ */
+export function backtestOfVersion(version: string): string | null {
+  for (const [id, body] of Object.entries(BACKTEST_FIXTURES)) {
+    const read = servedBacktest(body, id);
+    if (!read.ok) continue;
+    const { backtest } = read;
+    if (backtest.mandate_version === version && backtest.state === "completed" && !backtest.report.research_agent) return id;
+  }
+  return null;
 }

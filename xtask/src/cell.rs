@@ -23,6 +23,8 @@ use serde_json::{Value, json};
 
 use crate::{output, sh};
 
+pub mod scenario;
+
 pub const CLUSTER: &str = "mandate-cell";
 const NODE: &str = "k3d-mandate-cell-server-0";
 /// The workspace the drills deploy, and its namespace: one release per workspace (§3.2).

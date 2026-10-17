@@ -48,11 +48,7 @@
 #   3  mandate-alerts, the §8.2 operator alerts (E21-4, DEC-1070): above mandate-journal, whose
 #      stored record it reads, and mandate-notify, whose minted id and canary scan it reuses; kept
 #      off every crate that writes a stream or reaches a broker, so an alert can never act (OPS-10)
-#   4  mandate-dispatcher, the notification process (E8-10, E8-14, DEC-701 item 2): above
-#      mandate-journal, whose notice stream it alone appends to, and above mandate-push-relay, whose
-#      request it builds (raised from layer 3 by DEC-713); its forbidden_internal list names every
-#      crate that writes an agent, account, or control stream (NT-3 at rung 1, DEC-701 item 3);
-#      mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
+#   4  mandate-risk, and mandate-api (E10-10, DEC-681): the workspace API's pure contract, above
 #      mandate-spec; it holds L5's audit wire types, and mandate-audit sits beside it, so the
 #      conversion into them sits above both; its server sits higher (DEC-680); and mandate-audit
 #      (read-only audit reads over the journal, scoped to one workspace; E12-6), raised from layer
@@ -72,7 +68,10 @@
 #   8  mandate-shell, the process shell (E7-7, DEC-138; the shell's dependency on backtest is
 #      deleted with the tracer's signal path, DEC-475 item 6): the lowest layer that sees the
 #      order path (`mandate-runtime`, `mandate-executor`, `mandate-alpaca`) and no model at all; and
-#      mandate-modelhost, the
+#      mandate-dataservice, the workspace data service (E2-6, DEC-1200): above mandate-alpaca, whose
+#      stream messages it normalizes in a later slice, and above mandate-risk, whose `SaneQuote` it
+#      hands the gate; runtimes and executors are to read it over the host-local channel (E21-44),
+#      not link it; and mandate-modelhost, the
 #      quant model host (E15-13, DEC-503 item 2), beside the shell so that neither can depend on
 #      the other: the shell cannot run a model, and the host cannot reach sizing, the gate, the
 #      journal, the executor or the connector
@@ -84,7 +83,11 @@
 #      both the host and the shell, and mandate-cli (DEC-525): above the model host, so `model register` takes the content object and
 #      its hash from `mandate_modelhost::content()` and no caller supplies a hash; its
 #      `forbidden_internal` list keeps it from ever reaching mandate-alpaca, mandate-shell or
-#      mandate-paper, so the founder's CLI cannot place an order
+#      mandate-paper, so the founder's CLI cannot place an order; and mandate-dispatcher, the
+#      notification process (E8-10, E8-14, DEC-701 item 2), raised from layer 4 by DEC-2500 item 2
+#      to sit above mandate-journal-pg, whose notice stream it alone appends to; its
+#      forbidden_internal list names every crate that writes an agent, account, or control stream
+#      (NT-3 at rung 1, DEC-701 item 3), and nothing may depend on it (NT-9)
 #   10 mandate-rh-sim, the simulated Robinhood broker (E7-25, DEC-124): above every product crate,
 #      so none can take it as a normal dependency and it stays out of every production graph,
 #      while the Robinhood connector's tests (C1) reach it as a dev-dependency
@@ -126,6 +129,7 @@ workspace_services = [
 agent_process = [
     "mandate-agentd",
     "mandate-alpaca",
+    "mandate-daemon",
     "mandate-executor",
     "mandate-mcp",
     "mandate-paper",
@@ -236,16 +240,21 @@ safety_critical = true
 pure = true
 allowed_external = []
 
-# The notification dispatcher (E8-10, E8-14, DEC-701): a process crate, above mandate-journal. It
-# may never reach a crate that writes an agent, account, or control stream: the runtime, the
-# executor, the MCP server, the shell, the CLI, the paper binary, and the broker connectors
-# (DEC-701 item 3, NT-3). `pure` until the change that gives it I/O.
+# The notification dispatcher (E8-10, E8-14, DEC-701): a process crate at layer 9, above the
+# Postgres journal it reads and appends to (DEC-2500 item 2). It may never reach a crate that
+# writes an agent, account, or control stream: the runtime, the executor, the MCP server, the
+# shell, the CLI, the paper binary, the broker connectors (DEC-701 item 3, NT-3), the agent
+# process, and the workspace API (DEC-2500 item 2). Nothing may depend on it, so no trading crate
+# can wait on it (NT-9 at rung 1). `pure = false` since slice D10a: the operating system's random
+# source (through `ring`) and the Postgres journal (through `tokio`). Its other externals
+# (DEC-2500 item 2) are listed by the slice that first uses each.
 [crates.mandate-dispatcher]
-layer = 4
+layer = 9
 safety_critical = true
-pure = true
-allowed_external = ["thiserror"]
-forbidden_internal = ["mandate-runtime", "mandate-executor", "mandate-mcp", "mandate-shell", "mandate-cli", "mandate-paper", "mandate-alpaca", "mandate-robinhood"]
+pure = false
+allowed_external = ["ring", "thiserror", "tokio"]
+forbidden_internal = ["mandate-runtime", "mandate-executor", "mandate-mcp", "mandate-shell", "mandate-cli", "mandate-paper", "mandate-alpaca", "mandate-robinhood", "mandate-agentd", "mandate-api"]
+allowed_dependents = []
 
 # The seal: only the workspace store and test support build memberships and identity sessions
 # (DEC-642 items 4 and 7). `mandate-api-server` is that store for a workspace deployment: it folds
@@ -494,6 +503,18 @@ layer = 7
 safety_critical = false
 pure = false
 
+# The model gateway's HTTPS transport (E15-6, E15-10, DEC-2200): one attempt to the host the
+# gateway's egress allowlist permitted, over TLS, inside its deadline, with the provider key as a
+# sensitive header. Safety-critical because it carries the key. Layer 7, above mandate-gateway;
+# nothing in the trading path depends on it, and nothing wires it to a live endpoint until DEC-998
+# item 8 and DEC-997 allow one. It may never reach the order path or a mandate or policy writer.
+[crates.mandate-gateway-http]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["reqwest", "rustls", "thiserror", "tokio"]
+forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-connections", "mandate-vault-local"]
+
 [crates.mandate-marketdata]
 layer = 6
 safety_critical = false
@@ -561,6 +582,15 @@ layer = 7
 safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "secrecy", "serde", "serde_json", "thiserror", "tokio"]
+
+# The workspace data service (E2-6, DEC-1200): normalized quotes with receive times and the bounded
+# hot cache. Pure in its first slice; its Alpaca stream normalization (slice 4) reads
+# mandate-alpaca's wire forms.
+[crates.mandate-dataservice]
+layer = 8
+safety_critical = true
+pure = true
+allowed_external = []
 
 # The Robinhood connector (E7-6): beside mandate-alpaca; pure, behind its tool seam (DEC-860).
 [crates.mandate-robinhood]
@@ -632,6 +662,28 @@ pure = false
 allowed_external = ["tokio"]
 forbidden_internal = ["mandate-cli", "mandate-paper"]
 
+# The journal port a long-running process writes and follows through (E21-29, E21-30, DEC-1012):
+# the in-memory journal and Postgres, with tokio driving the Postgres client. Below every process
+# crate that uses it, and above mandate-journal-pg.
+[crates.mandate-store]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["tokio"]
+
+# The agent runtime as a long-running process (E21-30, DEC-1012): one deployment's runtime core
+# over mandate-store, with mandate-process's lifecycle and probes; tokio for the SIGTERM listener.
+# Its forbidden_internal list is what makes "the runtime has no route to a broker" hold by
+# construction: it can never reach the shell, the executor, a connector, the runner, or the CLI.
+[crates.mandate-daemon]
+layer = 8
+safety_critical = true
+pure = false
+allowed_external = ["tokio"]
+forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-paper", "mandate-cli", "mandate-rh-sim"]
+
+# The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over
+# mandate-store, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
 # The workspace API server (E21-31, DEC-978): the one door into a workspace deployment for people
 # and their tools. It records owner input on the control stream and serves reads from the journal;
 # it never places, cancels, or sizes an order and never calls a broker or a runtime (workspace API
@@ -657,7 +709,7 @@ forbidden_internal = [
 # and the SIGTERM listener. It may never reach the runner, the shell, the CLI, or any broker
 # connector: it holds nothing secret and places nothing.
 [crates.mandate-scheduler]
-layer = 7
+layer = 8
 safety_critical = true
 pure = false
 allowed_external = ["tokio"]

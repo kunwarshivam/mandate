@@ -9,8 +9,9 @@ use mandate_canon::{Value, parse};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_process::{Exit, State};
 use mandate_scheduler::scheduler::exit;
-use mandate_scheduler::store::MemoryStore;
-use mandate_scheduler::{ClockStore, Config, Sample, Scheduler, TimeServers};
+use mandate_scheduler::{Config, Sample, Scheduler, TimeServers};
+use mandate_store::MemoryStore;
+use mandate_store::Store;
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
 const WORKSPACE: &str = "ws_1";
@@ -57,7 +58,7 @@ trait StepNext {
     fn step_next(&mut self, host: UtcNanos, servers: &mut dyn TimeServers);
 }
 
-impl<S: ClockStore> StepNext for Scheduler<S> {
+impl<S: Store> StepNext for Scheduler<S> {
     fn step_next(&mut self, host: UtcNanos, servers: &mut dyn TimeServers) {
         SECOND.with(|second| {
             let next = second.get() + 1;
@@ -292,7 +293,7 @@ struct Flaky {
     failures: std::rc::Rc<std::cell::Cell<u32>>,
 }
 
-impl ClockStore for Flaky {
+impl Store for Flaky {
     fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
         self.inner.take_ownership(stream)
     }

@@ -2,9 +2,11 @@
 //! §3 and deterministic event ids: a retried batch re-derives the same ids, so the journal answers
 //! `AlreadyCommitted` rather than writing it twice.
 
-use mandate_canon::{Digest, Int, Key, Object, Value, to_canonical};
+use mandate_canon::{Object, Value};
 use mandate_journal::Environment;
 use mandate_time::{Date, UtcNanos};
+
+use mandate_store::envelope::{Envelope, Fields, draft_bytes, int, object, text};
 
 use crate::measure::{Measurement, seconds, tolerance_seconds};
 
@@ -52,6 +54,15 @@ impl Writer {
     /// `None` only for an integer the canonical form cannot hold, which nothing here writes.
     pub fn drafts(&self, head: u64, at: UtcNanos, records: &[Record]) -> Option<Vec<Vec<u8>>> {
         let stream = self.stream();
+        let envelope = Envelope {
+            stream: &stream,
+            environment: self.environment,
+            actor_kind: "system",
+            actor_id: "scheduler",
+            build: concat!("mandate-scheduler/", env!("CARGO_PKG_VERSION")),
+            version: VERSION,
+            event_time: at,
+        };
         records
             .iter()
             .enumerate()
@@ -59,28 +70,21 @@ impl Writer {
                 let cause = match record {
                     Record::Exceeded { .. } => ordinal
                         .checked_sub(1)
-                        .map(|before| Value::Str(self.event_id(head, before))),
+                        .map(|before| self.event_id(head, before)),
                     _ => None,
                 };
                 let (event_type, payload) = payload(&self.workspace, record)?;
-                let envelope = object(vec![
-                    ("actor", actor()?),
-                    ("artifact_refs", Value::Array(Vec::new())),
-                    ("causation_id", cause.unwrap_or(Value::Null)),
-                    ("clock_source", text("scheduler")),
-                    ("config_refs", Value::Object(Object::new())),
-                    ("correlation_id", Value::Null),
-                    ("environment", text(self.environment.as_str())),
-                    ("envelope_version", int(1)?),
-                    ("event_id", Value::Str(self.event_id(head, ordinal))),
-                    ("event_time", Value::Str(at.to_string())),
-                    ("event_type", text(event_type)),
-                    ("payload", payload),
-                    ("pii_refs", Value::Array(Vec::new())),
-                    ("schema_version", int(1)?),
-                    ("stream_id", Value::Str(stream.clone())),
-                ])?;
-                Some(to_canonical(&envelope))
+                draft_bytes(
+                    &envelope,
+                    &Fields {
+                        event_id: &self.event_id(head, ordinal),
+                        event_type,
+                        schema_version: 1,
+                        causation_id: cause.as_deref(),
+                        config_refs: &Object::new(),
+                        payload: &payload,
+                    },
+                )
             })
             .collect()
     }
@@ -140,34 +144,6 @@ fn payload(workspace: &str, record: &Record) -> Option<(&'static str, Value)> {
     })
 }
 
-/// The actor: a `system` writer named `scheduler`, whose build names the crate and its version.
-/// It is not a reproducible-build digest, which is M9's (ES-01).
-fn actor() -> Option<Value> {
-    let digest = Digest::of(concat!("mandate-scheduler/", env!("CARGO_PKG_VERSION")).as_bytes());
-    object(vec![
-        ("build", Value::Str(format!("sha256:{}", digest.to_hex()))),
-        ("id", text("scheduler")),
-        ("kind", text("system")),
-        ("version", text(VERSION)),
-    ])
-}
-
 fn decimal(nanos: Option<i64>) -> Value {
     nanos.map_or(Value::Null, |n| Value::Str(seconds(n)))
-}
-
-fn text(s: &str) -> Value {
-    Value::Str(s.to_owned())
-}
-
-fn int(n: u64) -> Option<Value> {
-    Int::new(n).map(Value::Int)
-}
-
-fn object(members: Vec<(&'static str, Value)>) -> Option<Value> {
-    let mut map = Object::new();
-    for (name, value) in members {
-        map.insert(Key::new(name).ok()?, value);
-    }
-    Some(Value::Object(map))
 }

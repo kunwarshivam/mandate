@@ -8,6 +8,7 @@ use super::{
     A1, AUDIENCE, BUILD, Checked, Counter, NTF, Shared, Stepped, T, Watching, alerts, draft, id,
     now, payloads, provider, text, world, writer,
 };
+use crate::DispatchError;
 use crate::step::{Config, Journal, NoticeWriter, step};
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::{AppendOutcome, Environment, InvalidReason, StoredEvent, StreamId};
@@ -159,7 +160,7 @@ fn after(secs: i64) -> Result<UtcNanos, Box<dyn Error>> {
 
 /// The notice stream's committed rows.
 fn notice_rows(journal: &Shared) -> Result<Vec<StoredEvent>, Box<dyn Error>> {
-    Ok(journal.committed(&StreamId::parse(NTF).ok_or(NTF)?))
+    Ok(journal.rows(&StreamId::parse(NTF).ok_or(NTF)?))
 }
 
 /// The `NoticeIssued` payloads that name `cause`.
@@ -687,15 +688,15 @@ struct Forged {
 }
 
 impl Journal for Forged {
-    fn committed(&self, stream: &StreamId) -> Vec<StoredEvent> {
-        let mut rows = self.journal.committed(stream);
+    fn committed(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
+        let mut rows = self.journal.committed(stream)?;
         if stream.as_str() == A1 {
             let mut row = self.row.clone();
             row.stream_id = A1.to_owned();
             row.seq = rows.last().map_or(1, |r| r.seq.wrapping_add(1));
             rows.push(row);
         }
-        rows
+        Ok(rows)
     }
     fn append_notices(
         &mut self,
@@ -719,7 +720,7 @@ fn an_approval_request_off_an_agent_stream_is_no_cause_and_holds_no_alert_back()
     alerts(&journal, A1, 1, &[(1, "risk_limit"), (2, "agent_held")])?;
     let ag = StreamId::parse(AG).ok_or(AG)?;
     let row = journal
-        .committed(&ag)
+        .rows(&ag)
         .into_iter()
         .find(|r| r.event_type == "ApprovalRequested")
         .ok_or("the request")?;

@@ -2,13 +2,14 @@
 
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ActiveRestriction, Agent, AgentMode, Approval, CancelReason, ContentRef, Iso, ShownEnvironment, Workspace } from "@/fixtures/types";
-import { type NewAgent, addMs, agentIdFor, checkDeploy, deployAgent, fillApproved, firstProposal, mandateVersion, noteSkip, submitApproved } from "./fixture-journey";
+import { FIRST_VERSION_CLASSIFICATION, type NewAgent, addMs, agentIdFor, checkDeploy, deployAgent, fillApproved, firstProposal, mandateVersion, noteSkip, submitApproved } from "./fixture-journey";
 import { clock } from "./format";
 import { type Origin, type Proposal, type Recorded, reachSafePoint, recordChange } from "./mandate-change";
 import { RESTRICTIONS } from "./restrictions";
 import { type BacktestRead, backtestNotFound, servedBacktest } from "@/api/backtest";
-import { servedBacktestFixture } from "@/fixtures/backtests";
+import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView } from "@/api/read-models";
+import type { Applies, Classification } from "@/api/confirm";
 
 /**
  * A stand-in for the workspace deployment. Commands and approval responses are held in memory
@@ -65,28 +66,76 @@ export interface ApprovalResponse {
   record: ApprovalRecord;
 }
 
-/** What A5 showed when the owner confirmed (brief §4.1): every line of the record screen, in order. */
-export interface DeployRecord {
+/**
+ * One step of setting up an agent, as its own record (DEC-2401). `recorded` once the journal has it;
+ * `rejected`: refused, and `reason` says why in words (`rule` names the rule for the record, never the
+ * sentence, C-6); `undelivered`: nothing was recorded, for `reason` (`not_sent` when the deployment
+ * does not take this step from here yet); `unknown`: taken, with no journal entry back.
+ */
+export type StepPhase = "sent" | "recorded" | "rejected" | "undelivered" | "unknown";
+
+export interface SetUpStep {
+  phase: StepPhase;
+  sentAt: Iso;
+  recordedAt?: Iso;
+  reason?: string;
+  rule?: string;
+}
+
+/** Step 1, `MandateVersionCreated` (spec §4.1): the version, its base, its classification against it, and its validation. */
+export interface VersionStep extends SetUpStep {
+  /** The version it is classified against; a new agent's first version has none. */
+  base: ContentRef | null;
+  /** Set once recorded. */
+  classification: Classification | null;
+  /** True once recorded: a version is created only from a passing validation. */
+  validated: boolean;
+}
+
+/**
+ * What A5 showed when the owner confirmed (brief §4.1, mandate spec §10): every line of the record
+ * screen in order, every path it confirmed (journal rule 18), and the classification it showed.
+ */
+export interface ConfirmRecord {
   screen: "A5";
   environment: ShownEnvironment;
   shown: string[];
+  paths: string[];
+  classification: Classification;
 }
 
-export interface Deployment {
+/** Step 2, `MandateConfirmed` (spec §5.1). */
+export interface ConfirmStep extends SetUpStep {
+  record: ConfirmRecord;
+  /** The digest the passkey check was bound to, or `null` when none ran. */
+  stepUp: ContentRef | null;
+  /** The server's classification and when the version applies, once the API answers (§5.1). */
+  classification?: Classification;
+  applies?: Applies;
+}
+
+/** What B3 showed when the owner deployed: every line, and the backtest it showed, if any. Paper only. */
+export interface DeployToPaperRecord {
+  screen: "B3";
+  environment: "paper";
+  shown: string[];
+  backtestId: string | null;
+}
+
+/** Step 3, `AgentDeployed` or `DeploymentRejected` (spec §4.2). */
+export interface DeployStep extends SetUpStep {
+  record: DeployToPaperRecord;
+}
+
+/** One agent's set-up: its version and the three steps, each shown only once the one before it is recorded. */
+export interface SetUp {
   id: string;
-  /**
-   * `rejected`: the checks repeated when it applied failed (V-047, V-002, V-006), and `reason` says which.
-   * `unknown`: the deployment took it but no journal entry came back.
-   */
-  phase: "sent" | "recorded" | "rejected" | "undelivered" | "unknown";
-  sentAt: Iso;
-  recordedAt?: Iso;
+  /** The agent's id once deployed; `""` where the deployment assigns it. */
   agentId: string;
   version: ContentRef;
-  reason?: string;
-  /** The rule a rejection falls under, for the record and never the sentence (C-6); set for V-047 only. */
-  rule?: string;
-  record: DeployRecord;
+  created: VersionStep;
+  confirmed: ConfirmStep | null;
+  deployed: DeployStep | null;
 }
 
 /** What the change review showed when the owner confirmed (brief §4.1): every line, in order. */
@@ -125,11 +174,18 @@ export interface Runtime {
   reachable: boolean;
   commands: Command[];
   responses: Record<string, ApprovalResponse>;
-  deployments: Deployment[];
   mandateChanges: MandateChangeRequest[];
   send: (kind: CommandKind, agentId: string | null, record?: CommandRecord) => Command;
   respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => void;
-  deploy: (request: NewAgent, record: DeployRecord) => Deployment;
+  setUps: SetUp[];
+  /** Step 1: `POST /mandate-drafts/{id}/versions`. */
+  createVersion: (request: NewAgent) => SetUp;
+  /** Step 2: `POST /mandate-versions/{hash}/confirm`, with the digest the passkey check was bound to. */
+  confirmVersion: (setUpId: string, record: ConfirmRecord, stepUp: ContentRef | null) => void;
+  /** Step 3: `POST /agents`, to paper only. */
+  deployVersion: (setUpId: string, record: DeployToPaperRecord) => void;
+  /** The completed backtest of a version the screen shows at deployment, or `null`. */
+  backtestFor: (version: ContentRef) => string | null;
   changeMandate: (proposal: Proposal, origin: Origin, record: ChangeRecord) => MandateChangeRequest;
   /** One backtest (`GET /backtests/{id}`, DEC-2400): the fixture's served body or the API's answer, through the same decoder. */
   readBacktest: (backtestId: string) => Promise<BacktestRead>;
@@ -284,7 +340,6 @@ export function RuntimeProvider({
   const [now, setNow] = useState(initial.now);
   const [commands, setCommands] = useState<Command[]>([]);
   const [responses, setResponses] = useState<Record<string, ApprovalResponse>>({});
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [mandateChanges, setMandateChanges] = useState<MandateChangeRequest[]>([]);
   const nowRef = useRef(initial.now);
   const wsRef = useRef(initial);
@@ -374,35 +429,6 @@ export function RuntimeProvider({
     [silent, recordAfterMs, change],
   );
 
-  const deploy = useCallback(
-    (request: NewAgent, record: DeployRecord): Deployment => {
-      counter.current += 1;
-      const seed = `${initial.scenario}:${counter.current}`;
-      const deployment: Deployment = {
-        id: `dep-${counter.current}`,
-        phase: "sent",
-        sentAt: nowRef.current,
-        agentId: agentIdFor(request.mandate, seed),
-        version: mandateVersion(request.mandate),
-        record,
-      };
-      setDeployments((list) => [...list, deployment]);
-      const update = (patch: Partial<Deployment>) => setDeployments((list) => list.map((d) => (d.id === deployment.id ? { ...d, ...patch } : d)));
-      window.setTimeout(() => {
-        const at = nowRef.current;
-        if (!reachable) return update({ phase: "undelivered" });
-        if (silent) return update({ phase: "unknown" });
-        const check = checkDeploy(wsRef.current, request.mandate);
-        if (!check.ok) return update({ phase: "rejected", recordedAt: at, reason: check.reason, ...(check.rule ? { rule: check.rule } : {}) });
-        change((current) => deployAgent(current, request, at, seed).ws);
-        update({ phase: "recorded", recordedAt: at });
-        window.setTimeout(() => change((current) => firstProposal(current, deployment.agentId, nowRef.current, seed)), recordAfterMs * 2);
-      }, recordAfterMs);
-      return deployment;
-    },
-    [initial.scenario, reachable, silent, recordAfterMs, change],
-  );
-
   const changeMandate = useCallback(
     (proposal: Proposal, origin: Origin, record: ChangeRecord): MandateChangeRequest => {
       counter.current += 1;
@@ -455,6 +481,101 @@ export function RuntimeProvider({
     [reachable, silent, recordAfterMs, recorded],
   );
 
+  const [setUps, setSetUps] = useState<SetUp[]>([]);
+  /** The set-ups as last written, and each one's mandate and seed, so a step reads the step before it as recorded. */
+  const setUpsRef = useRef<SetUp[]>([]);
+  const drafts = useRef(new Map<string, { request: NewAgent; seed: string }>());
+  const patchSetUp = useCallback((id: string, patch: (s: SetUp) => SetUp) => {
+    setUpsRef.current = setUpsRef.current.map((s) => (s.id === id ? patch(s) : s));
+    setSetUps(setUpsRef.current);
+  }, []);
+
+  /**
+   * Step 1: the version is created only from a passing validation, which repeats V-047, V-002 and
+   * V-006 against the workspace as it stands; a first version has no base, and is classified as
+   * `FIRST_VERSION_CLASSIFICATION`.
+   */
+  const createVersion = useCallback(
+    (request: NewAgent): SetUp => {
+      counter.current += 1;
+      const seed = `${initial.scenario}:${counter.current}`;
+      const setUp: SetUp = {
+        id: `set-${counter.current}`,
+        agentId: agentIdFor(request.mandate, seed),
+        version: mandateVersion(request.mandate),
+        created: { phase: "sent", sentAt: nowRef.current, base: null, classification: null, validated: false },
+        confirmed: null,
+        deployed: null,
+      };
+      drafts.current.set(setUp.id, { request, seed });
+      setUpsRef.current = [...setUpsRef.current, setUp];
+      setSetUps(setUpsRef.current);
+      const created = (patch: Partial<VersionStep>) => patchSetUp(setUp.id, (s) => ({ ...s, created: { ...s.created, ...patch } }));
+      window.setTimeout(() => {
+        const at = nowRef.current;
+        if (!reachable) return created({ phase: "undelivered", reason: "unreachable" });
+        if (silent) return created({ phase: "unknown" });
+        const check = checkDeploy(wsRef.current, request.mandate);
+        if (!check.ok) return created({ phase: "rejected", recordedAt: at, reason: check.reason, ...(check.rule ? { rule: check.rule } : {}) });
+        created({ phase: "recorded", recordedAt: at, classification: FIRST_VERSION_CLASSIFICATION, validated: true });
+      }, recordAfterMs);
+      return setUp;
+    },
+    [initial.scenario, reachable, silent, recordAfterMs, patchSetUp],
+  );
+
+  /**
+   * Step 2, as the API judges it (§5.1): a version not created is refused first, and a risk-increasing
+   * one needs the step-up, which the in-memory journal takes from the passkey check (DEC-2401 item 3).
+   */
+  const confirmVersion = useCallback(
+    (setUpId: string, record: ConfirmRecord, stepUp: ContentRef | null) => {
+      const setUp = setUpsRef.current.find((s) => s.id === setUpId);
+      if (!setUp) return;
+      const confirmed = (patch: Partial<ConfirmStep>) => patchSetUp(setUpId, (s) => ({ ...s, confirmed: s.confirmed ? { ...s.confirmed, ...patch } : null }));
+      /** What the journal holds when the confirm arrives: a version not yet recorded was not created. */
+      const created = setUp.created;
+      patchSetUp(setUpId, (s) => ({ ...s, confirmed: { phase: "sent", sentAt: nowRef.current, record, stepUp } }));
+      window.setTimeout(() => {
+        const at = nowRef.current;
+        if (created.phase !== "recorded") return confirmed({ phase: "undelivered", reason: "not_created" });
+        if (!reachable) return confirmed({ phase: "undelivered", reason: "unreachable" });
+        if (silent) return confirmed({ phase: "unknown" });
+        if (created.classification === "risk_increasing" && stepUp === null) return confirmed({ phase: "undelivered", reason: "step_up_required" });
+        confirmed({ phase: "recorded", recordedAt: at });
+      }, recordAfterMs);
+    },
+    [reachable, silent, recordAfterMs, patchSetUp],
+  );
+
+  /** Step 3: only a confirmed version deploys, and V-047, V-002 and V-006 are checked again as it applies. */
+  const deployVersion = useCallback(
+    (setUpId: string, record: DeployToPaperRecord) => {
+      const setUp = setUpsRef.current.find((s) => s.id === setUpId);
+      const draft = drafts.current.get(setUpId);
+      if (!setUp || !draft) return;
+      const deployed = (patch: Partial<DeployStep>) => patchSetUp(setUpId, (s) => ({ ...s, deployed: s.deployed ? { ...s.deployed, ...patch } : null }));
+      /** What the journal holds when the deployment arrives: only a recorded confirmation deploys. */
+      const confirmedAtSend = setUp.confirmed?.phase === "recorded";
+      patchSetUp(setUpId, (s) => ({ ...s, deployed: { phase: "sent", sentAt: nowRef.current, record } }));
+      window.setTimeout(() => {
+        const at = nowRef.current;
+        if (!confirmedAtSend) return deployed({ phase: "undelivered", reason: "not_confirmed" });
+        if (!reachable) return deployed({ phase: "undelivered", reason: "unreachable" });
+        if (silent) return deployed({ phase: "unknown" });
+        const check = checkDeploy(wsRef.current, draft.request.mandate);
+        if (!check.ok) return deployed({ phase: "rejected", recordedAt: at, reason: check.reason, ...(check.rule ? { rule: check.rule } : {}) });
+        change((current) => deployAgent(current, draft.request, at, draft.seed).ws);
+        deployed({ phase: "recorded", recordedAt: at });
+        window.setTimeout(() => change((current) => firstProposal(current, setUp.agentId, nowRef.current, draft.seed)), recordAfterMs * 2);
+      }, recordAfterMs);
+    },
+    [reachable, silent, recordAfterMs, patchSetUp, change],
+  );
+
+  /** The fixtures' completed run of exactly this version, if they hold one. */
+  const backtestFor = useCallback((version: ContentRef): string | null => backtestOfVersion(version), []);
+
   /** A fixture backtest in its served shape, through the API's own decoder; an id no fixture holds is the API's 404. */
   const readBacktest = useCallback(async (backtestId: string): Promise<BacktestRead> => {
     const body = servedBacktestFixture(backtestId);
@@ -462,8 +583,8 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest }),
-    [ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest],
+    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
