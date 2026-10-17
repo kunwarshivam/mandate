@@ -165,7 +165,7 @@ function PositionRecord({ agent, assetId }: { agent: Agent; assetId: string }) {
         </Facts>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="flex flex-wrap items-center gap-2">
-            <FixtureTag />
+            <FixtureTag scope="workspace" />
             <Placeholder name="performance" />
           </span>
           {canClose ? (

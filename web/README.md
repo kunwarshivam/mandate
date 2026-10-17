@@ -30,6 +30,7 @@ npm run shots      # every screen as PNG files with a contact sheet in .shots/, 
 npx playwright install --with-deps --only-shell chromium   # once
 npm run test:e2e
 npm run test:e2e:auth   # sign-in on, against a stub Supabase
+npm run test:e2e:api    # the workspace API as the data source (DEC-975); npm run test:e2e runs it too
 ```
 
 The e2e suite (`e2e/`, Playwright, Chromium only, in light and dark) builds the app into `.next-e2e/`
@@ -133,9 +134,39 @@ A repeat address counts as stored, so the form never says whether someone is alr
 `/v1/workspaces/{ws}`, one `Idempotency-Key` per gesture kept across retries, every failure as
 `{code, effect}` with an unanswered command reported as `effect: "unknown"`, decimals refused as
 JSON numbers, `as_of` watermarks on every read, and no order-placing method (DEC-528).
-`src/api/mock-server.ts` is a fixture-backed `fetch` for tests and `npm run dev`. The typed
-per-route layer comes once `schemas/workspace-api/` lands; until then the screens still read
-`src/fixtures/` directly.
+`src/api/mock-server.ts` is a fixture-backed `fetch` for tests, `npm run dev` and the e2e build.
+
+### Where the screens read from (DEC-975)
+
+The fixtures, unless the server's environment names a workspace deployment's API. It is read when a
+request is served, never at build, and nothing of it is a `NEXT_PUBLIC_` variable:
+
+| Variable | What it is |
+|---|---|
+| `OWLHEAD_DATA_SOURCE` | `fixtures` (the default when unset) or `api`. Anything else shows the deployment unreachable |
+| `OWLHEAD_API_ORIGIN` | The API's origin, `https://api.owlhead.ai` for the demo; `http` only on a loopback host |
+| `OWLHEAD_WORKSPACE_ID` | The workspace the app reads, until `GET /v1/me/workspaces` is wired |
+
+Over the API (`src/lib/api-runtime.tsx`) the browser reads the workspace with its own session
+cookie from the documented reads (`src/api/reads.ts`), polls them every five seconds, and sends
+each command and answer through the API's idempotent write routes (`src/api/commands.ts`),
+following it through `GET /commands/{id}`. A misconfigured or silent API shows the deployment
+unreachable, never the fixtures. `src/api/operations.ts` lists every operation the app calls, and
+`src/api/contract.test.ts` fails a call the spec does not document (E21-45). Setting up an agent and
+changing a mandate are not sent yet, step-up is not sent until E9-4 gives the browser its ceremony,
+and the charts and sample headlines are not drawn over the API: DEC-975 has the detail, including the
+provisional read bodies the API server serves until `schemas/workspace-api/read-models/` lands.
+`/demo` always reads the fixtures.
+
+To try it locally against the mock API the dev server serves at `/v1`:
+
+```sh
+OWLHEAD_DATA_SOURCE=api OWLHEAD_API_ORIGIN=http://127.0.0.1:4317 OWLHEAD_WORKSPACE_ID=ws_dev npm run dev
+npm run test:e2e:api   # the e2e build with the API as its source, on port 4319
+```
+
+The scenario switcher's cookie picks what the mock API serves. A production build answers 404 at
+`/v1` (`scripts/no-scenarios.mjs`).
 
 ## The mock-data rule
 
