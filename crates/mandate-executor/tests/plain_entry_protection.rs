@@ -265,19 +265,22 @@ fn a_part_filled_entry_is_cancelled_at_the_timeout_and_its_fill_gets_the_stop() 
         .client_order_id
         .as_str()
         .to_owned();
-    fill(&mut shell, &ports, "f-1", &id, "4");
-    report(
+    let filled = fill(&mut shell, &ports, "f-1", &id, "4");
+    let reported = report(
         &mut shell,
         &ports,
         entry_state(&id, "10", "4", "partially_filled"),
     );
     let early = shell.run(Input::Tick(clock(20)), &ports);
-    assert!(
-        !early
-            .requests
-            .iter()
-            .any(|r| matches!(r, BrokerRequest::Cancel { .. }))
-    );
+    for ran in [&filled, &reported, &early] {
+        assert!(
+            !ran.requests
+                .iter()
+                .any(|r| matches!(r, BrokerRequest::Cancel { .. })),
+            "nothing is cancelled before the timeout: {:?}",
+            ran.requests
+        );
+    }
     let due = shell.run(Input::Tick(clock(31)), &ports);
     assert!(
         due.requests
@@ -368,6 +371,202 @@ fn a_stop_that_never_rests_is_flattened_at_the_bound() {
         );
     };
     assert_eq!(exit.qty, qty("10"), "the whole position is exited");
+}
+
+/// Whether `ran` handed the executor its own `risk_exit` (`w-<record>`) of `quantity`.
+fn flattens(ran: &Ran, quantity: &str) -> bool {
+    ran.drafts.iter().any(|draft| {
+        draft.event_type == "IntentReceived"
+            && matches!(draft.payload.get("intent_id"), Some(Value::Str(intent)) if intent.starts_with("w-"))
+            && matches!(draft.payload.get("purpose"), Some(Value::Str(purpose)) if purpose == "risk_exit")
+            && matches!(draft.payload.get("qty"), Some(Value::Str(shares)) if qty(shares) == qty(quantity))
+    })
+}
+
+/// DEC-966 item 4: an entry still part filled at the bound is alerted and its remainder cancelled,
+/// with nothing exited yet; when the cancel is confirmed after the bound, the 4 it filled are
+/// exited whole as the executor's own `risk_exit`, and no stop is placed for them.
+#[test]
+fn an_entry_ending_after_its_bound_is_exited_whole_with_no_stop() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 0)), &ports);
+    let id = entry(&mut shell, &ports, "10", None)
+        .client_order_id
+        .as_str()
+        .to_owned();
+    fill(&mut shell, &ports, "f-1", &id, "4");
+    report(
+        &mut shell,
+        &ports,
+        entry_state(&id, "10", "4", "partially_filled"),
+    );
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
+    let bound = shell.run(Input::Tick(clock(61)), &ports);
+    assert!(bound.notifications.contains(&"unprotected_interval_limit"));
+    assert!(
+        bound
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == id)),
+        "the working entry is cancelled at the bound: {:?}",
+        bound.requests
+    );
+    assert!(
+        !flattens(&bound, "4"),
+        "nothing is exited while the entry may still fill"
+    );
+    let ended = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: id.clone(),
+        })),
+        &ports,
+    );
+    assert!(
+        stops(&ended).is_empty(),
+        "past its bound, no stop is placed"
+    );
+    assert!(
+        flattens(&ended, "4"),
+        "the 4 it filled are exited whole: {:?}",
+        ended.draft_types()
+    );
+}
+
+/// The review's case (DEC-966 item 7): entry A's stop is rejected, then entry B fills and its stop
+/// is accepted. B's start never ends A's interval, so at A's bound the owner is alerted and the
+/// whole position is exited, B's resting stop cancelled first (§5.4's marketable sequence).
+#[test]
+fn a_second_entry_never_ends_the_first_entrys_interval() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 0)), &ports);
+    let first = entry(&mut shell, &ports, "5", None)
+        .client_order_id
+        .as_str()
+        .to_owned();
+    let filled = fill(&mut shell, &ports, "f-1", &first, "5");
+    let [first_stop] = stops(&filled).try_into().expect("the first entry's stop");
+    report(
+        &mut shell,
+        &ports,
+        broker_order(
+            "s-1",
+            Some(first_stop.client_order_id.as_str()),
+            AAPL,
+            Side::Sell,
+            "5",
+            "0",
+            "rejected",
+        ),
+    );
+    let second = shell.run(
+        handoff(
+            "01JABCDEFGHJKMNPQRSTVWXYZ1",
+            common::AGENT,
+            protected_opening(AAPL, "5", "150", "140", None),
+        ),
+        &ports,
+    );
+    let second = second
+        .submissions()
+        .first()
+        .map(|order| order.client_order_id.as_str().to_owned())
+        .expect("the second entry is sent");
+    let filled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-2",
+            Some(&second),
+            "5",
+            "150",
+        ))),
+        &ports,
+    );
+    let [second_stop] = stops(&filled).try_into().expect("the second entry's stop");
+    report(
+        &mut shell,
+        &ports,
+        broker_order(
+            "s-2",
+            Some(second_stop.client_order_id.as_str()),
+            AAPL,
+            Side::Sell,
+            "5",
+            "0",
+            "accepted",
+        ),
+    );
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
+    let bound = shell.run(Input::Tick(clock(61)), &ports);
+    assert!(
+        bound.notifications.contains(&"unprotected_interval_limit"),
+        "the first entry's interval reaches its bound: {:?}",
+        bound.notifications
+    );
+    assert!(
+        flattens(&bound, "10"),
+        "the whole position is exited: {:?}",
+        bound.draft_types()
+    );
+    assert!(
+        bound
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::Cancel { client_order_id }
+            if client_order_id == &second_stop.client_order_id)),
+        "the resting stop is cancelled before the exit sells: {:?}",
+        bound.requests
+    );
+}
+
+/// LT-14: on Alpaca's profile a part-filled bracket's interval reaching the bound is alerted as
+/// before and never flattened; the bound cancels nothing of its own.
+#[test]
+fn a_bracket_at_the_bound_is_alerted_and_never_flattened() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&stream_opened()).expect("the stream opens");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 0)), &ports);
+    let sent = entry(&mut shell, &ports, "10", Some("170"));
+    assert!(
+        sent.bracket.is_some(),
+        "Alpaca's profile offers the bracket"
+    );
+    let id = sent.client_order_id.as_str().to_owned();
+    fill(&mut shell, &ports, "f-1", &id, "4");
+    let ended = report(&mut shell, &ports, entry_state(&id, "10", "4", "canceled"));
+    assert!(ended.submissions().iter().any(|order| order.oco.is_some()));
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 59)), &ports);
+    let bound = shell.run(Input::Tick(clock(61)), &ports);
+    assert!(bound.notifications.contains(&"unprotected_interval_limit"));
+    assert!(
+        !flattens(&bound, "4"),
+        "a bracket is never flattened at the bound"
+    );
+    assert!(
+        !bound.draft_types().contains(&"IntentReceived"),
+        "{:?}",
+        bound.draft_types()
+    );
 }
 
 /// One thing the broker or the clock does next, as the property draws it.

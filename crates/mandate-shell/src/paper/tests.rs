@@ -34,6 +34,7 @@ use std::collections::BTreeMap;
 use super::artifacts::reference;
 use super::context::{
     GateQuote, PaperClock, ReconcilingPaperContext, TrustedPaperContext, protection_prices,
+    stop_limit_offset,
 };
 use super::gate::{gate_mandate, gate_template};
 use super::{
@@ -1259,6 +1260,59 @@ fn protection_derives_from_the_entry_and_rounds_each_sell_price_up() -> Result<(
     assert!(
         protection_prices(&without_stop, price("255.2")?).is_err(),
         "enabled protection without a stop distance refuses"
+    );
+    Ok(())
+}
+
+/// DEC-966 item 5: the stop-limit's offset is the mandate's when protection is on, and none when
+/// it is off or unset; the executor's view hands it to the reviewed agent alone.
+#[test]
+fn the_stop_limit_offset_is_the_mandates_and_only_the_reviewed_agents() -> Result<(), String> {
+    let loaded = artifacts()?;
+    let mut protection = loaded.mandate.protection.clone();
+    protection.enabled = true;
+    protection.crypto_stop_limit_offset = Some(
+        mandate_spec::SchemaDec::parse("0.005", mandate_spec::DecGrammar::OpenFraction)
+            .map_err(|e| format!("{e:?}"))?,
+    );
+    let offset = Fraction::parse("0.005").map_err(text)?;
+    assert_eq!(stop_limit_offset(&protection).map_err(text)?, Some(offset));
+    let mut disabled = protection.clone();
+    disabled.enabled = false;
+    assert_eq!(stop_limit_offset(&disabled).map_err(text)?, None);
+    let mut unset = protection;
+    unset.crypto_stop_limit_offset = None;
+    assert_eq!(stop_limit_offset(&unset).map_err(text)?, None);
+
+    let snapshot = facts_at(NOW, NOW)?;
+    let template = gate_template(
+        &loaded,
+        &snapshot,
+        at(NOW)?,
+        loaded
+            .production_configuration()
+            .map_err(text)?
+            .gate
+            .clone(),
+    )
+    .map_err(text)?;
+    let trusted = TrustedPaperContext {
+        template,
+        agent: AGENT.to_owned(),
+        increment: loaded.instrument.increment,
+        fees: loaded.fees.clone(),
+        quote: GateQuote::of(&snapshot.broker.quote),
+        quote_max_age: loaded.quote_max_age,
+        clock: Rc::new(TestClock(Rc::new(Cell::new(at(NOW)?)))),
+        stop_limit_offset: Some(offset),
+    };
+    assert_eq!(
+        trusted.crypto_stop_limit_offset(&ExecutorAgentId(AGENT.to_owned())),
+        Some(offset)
+    );
+    assert_eq!(
+        trusted.crypto_stop_limit_offset(&ExecutorAgentId("another-agent".to_owned())),
+        None
     );
     Ok(())
 }

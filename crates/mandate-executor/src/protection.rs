@@ -2369,7 +2369,18 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         let Some(entry) = entry.filter(|_| !exiting) else {
             continue;
         };
-        let state = batch.view.orders.get(&entry).map(|order| order.state);
+        let plain = batch
+            .view
+            .details
+            .get(&entry)
+            .and_then(|detail| detail.request.as_ref())
+            .is_some_and(|request| request.bracket.is_none());
+        let state = batch
+            .view
+            .orders
+            .get(&entry)
+            .filter(|_| plain)
+            .map(|order| order.state);
         let working = matches!(
             state,
             Some(OrderState::Accepted | OrderState::PartiallyFilled)
@@ -2388,8 +2399,8 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
 
 /// §5.4's bound on a profile with no OCO or bracket: "if it is not resting by then, the executor
 /// exits the held quantity as a `risk_exit` through §5.6 and alerts the owner" (DEC-966 item 4).
-/// For an interval naming a plain entry (one sent with no bracket, whose intent carried a stop), the
-/// executor hands itself an intent like the watchdog's, `w-<record>` from the `interval_limit`
+/// For an interval naming a plain entry (one sent with no bracket, whose intent carried a stop; both
+/// callers, [`bound`] and [`stop_after`], name only such an entry), the executor hands itself an intent like the watchdog's, `w-<record>` from the `interval_limit`
 /// record, or the `unprotected_end` that ends a late entry's interval (§2.3), for the long position less what exits already sell: a `risk_exit`, so it takes
 /// the marketable sequence, which cancels any stop still awaited before it sells (§5.4), and is
 /// never refused (rule 13). Its limit, the fallback when nothing prices it, is the lowest sane
@@ -2403,13 +2414,6 @@ fn flatten_unprotected(
     let Some(order) = batch.view.orders.get(entry).cloned() else {
         return Ok(());
     };
-    let plain = batch
-        .view
-        .details
-        .get(entry)
-        .and_then(|detail| detail.request.as_ref())
-        .is_some_and(|request| request.bracket.is_none());
-    let crypto = batch.ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto);
     let stop = order
         .intent_id
         .as_ref()
@@ -2418,7 +2422,7 @@ fn flatten_unprotected(
             IntentBody::Order { protection, .. } => protection.map(|prices| prices.stop),
             IntentBody::Flatten(_) => None,
         });
-    let (true, false, Some(stop)) = (plain && order.purpose.adds_risk(), crypto, stop) else {
+    let Some(stop) = stop else {
         return Ok(());
     };
     let held = long(&batch.view, instrument)?
