@@ -317,8 +317,10 @@ missing: no new buys and no forced sells. That fails safe, so no extra rule is n
 rule whole rather than reading around it:
 
 - **An invalidation can be journaled** (E19-5). Mandate spec §8.6 removes an instrument at once when
-  its thesis is invalidated, and a removal needs a journaled cause. Until E19-5 adds the record, no
-  run starts, so no thesis exists that could need one (§6.7, HI-19).
+  its thesis is invalidated, and a removal needs a journaled cause. Journal spec v0.48 §9.21 adds
+  that cause, `ThesisInvalidated` ([DEC-2202](../project/decisions/DEC-2202.md)); this
+  precondition holds once `mandate-journal` registers it. Until then no run starts, so no thesis
+  exists that could need one (§6.7, HI-19).
 - **A harness verdict can be journaled** (E15-8). `ModelInvocationRecorded` must be closed with a
   member for the candidates' verdicts, or a verdict event must exist, so that no candidate is
   refused in silence (§6.5, HI-22). Journal spec v0.46 §9.19 closes it with a `verdicts` member
@@ -478,7 +480,7 @@ corroboration, the lineage cap, and a full universe.
 | `ThesisProposed`, `ThesisRevised` | agent | Every thesis admission judged | Closed in [journal spec §9.4](journal.md#94-research-agent-thesis-records-dec-413) |
 | `ModelOutputRecorded` | agent | Each judged thesis, `ignored` null only when admitted | Closed in [journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177) |
 | `UniverseChanged` | account | The executor's copy of an admission or removal | Closed in journal spec §9.3 |
-| Invalidation verdict | agent | Each accepted invalidation (§6.7) | **Missing.** E19-5 adds it to the journal spec first. Until then no research run starts (§6.2 preconditions) |
+| `ThesisInvalidated` | agent | Each accepted invalidation (§6.7), in its call's judging batch | Closed in [journal spec §9.21](journal.md#921-thesis-invalidation-records-dec-2202) (DEC-2202): one record per judged invalidation verdict (rule 167), of a thesis the stream admitted and that still holds its instrument, once (rule 168). Until `mandate-journal` registers it, no research run starts (§6.2 preconditions) |
 | `OwnerAlertSent` | control | A guard hit on the description, a lineage retirement, a construction failure | In journal spec §9 |
 
 **What is kept, and for how long** (DEC-431 item 17, the founder's: keep only what a thesis cited).
@@ -513,11 +515,26 @@ caller (DEC-132 item 13). The harness supplies it like this:
   model's word, with no corroboration and no approval (rule 2).
 - In `exits_only`, a run is review-only: its theses are discarded unjudged and only its
   invalidations count.
-- **The record does not exist yet, so research does not run yet.** No agent-stream event carries an
-  invalidation verdict for `UniverseChanged` to name as its cause. E19-5 adds one to the journal
-  spec first. Until it lands, no research run starts (§6.2 preconditions): with no thesis, there is
-  nothing to invalidate, and §8.6 holds unchanged. The same record serves the founder's DEC-433
-  item 19, under which revoking a source invalidates every live thesis that cites it.
+- **The judging order.** The harness judges a response's invalidations first, against the run's
+  active theses, and then its theses, against the active theses left after those invalidations. So
+  a thesis on an instrument whose thesis the same response invalidates is a new thesis in a new
+  lineage, judged by admission (mandate spec §8.5), never a renewal of the invalidated one. This is
+  the judging order only: the call record's `verdicts` keep rule 151's index order, theses first and
+  then invalidations.
+- Invalidations are judged in response order against the active theses, and an accepted one ends
+  its thesis at once. So a second invalidation of the same thesis in one response names no active
+  thesis and is `unknown_thesis`. Each thesis has one record (journal spec §9.21 rule 168).
+- **The record.** An accepted invalidation is journaled as `ThesisInvalidated` (journal spec §9.21,
+  DEC-2202) in its call's judging batch, after the call record whose verdict it carries and before
+  the batch's thesis records (`ThesisProposed`, `ThesisRevised`, and their `ModelOutputRecorded`),
+  and the executor's `UniverseChanged` names it as its cause. If `append` refuses a judging batch,
+  that is a writer defect: nothing in the batch is used, the runtime raises an operator alert, and
+  the thesis stays active until a later run invalidates it again. It is a disclosed residual, never
+  a silent drop. Until `mandate-journal` registers it, no
+  research run starts (§6.2 preconditions): with no thesis, there is nothing to invalidate, and
+  §8.6 holds unchanged. The same record serves the founder's DEC-433 item 19, under which revoking
+  a source invalidates every live thesis that cites it (`cause` `source_revoked`); no writer emits
+  that case until the founder decides the item.
 
 ### 6.8 Fast decision models
 
@@ -733,11 +750,12 @@ the identical weights) and item 10 (a reported identity that differs from the pi
   `Input::ModelOutput` stays the path for quant models and becomes the path for fast-tier outputs
   (§6.8).
 - **New core effects:** start a run; cancel a run.
-- **The executor** copies `UniverseChanged` from thesis records, and later from invalidation
-  verdicts (E19-5). It is unchanged otherwise.
+- **The executor** copies `UniverseChanged` from thesis records, and from `ThesisInvalidated`
+  (journal spec §9.21, E19-5). It is unchanged otherwise.
 - **The journal** gains the closed `ModelInvocationRecorded` and the meter stream (E15-8, closed in
-  journal spec v0.46 §9.19, registration in `mandate-journal` pending) and an
-  invalidation verdict (E19-5). `ObservationRecorded` exists and is closed (journal spec §9.1); it
+  journal spec v0.46 §9.19, registration in `mandate-journal` pending) and the
+  invalidation verdict `ThesisInvalidated` (E19-5, closed in journal spec v0.48 §9.21, registration
+  pending). `ObservationRecorded` exists and is closed (journal spec §9.1); it
   needs no new member, because the drift detector's typed observation is the artifact it names
   (§6.3).
 
@@ -799,9 +817,10 @@ Provider and vendor choice, and provider data terms, are DEC-432 items 14 and 15
 3. **How corroboration is derived.** `mandate-research` takes it as a platform fact; no document
    says how the platform derives it from retrieved items and market data (E17-7). The harness
    supplies the inputs; the rule is E17-7's.
-4. **The invalidation record** (§6.7, E19-5): its event type, its members, and whether the executor
-   copies `UniverseChanged` from it directly. It must also carry DEC-433 item 19's case, a revoked
-   source.
+4. **The invalidation record** (§6.7, E19-5). Answered by journal spec v0.48 §9.21
+   ([DEC-2202](../project/decisions/DEC-2202.md)): `ThesisInvalidated` on the agent stream, which
+   the executor's `UniverseChanged` (`thesis_invalidated`) names as its cause, and which carries
+   DEC-433 item 19's revoked source as `cause` `source_revoked`.
 5. **Drift escalation** is DEC-266 item 4, the founder's. Until then the detector computes and
    reports, and every thin-slice admission is `ask` under the internal research profile.
 6. **Multi-call runs.** Whether a run may make a second call with reads the first call's output
