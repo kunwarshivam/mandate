@@ -439,8 +439,46 @@ fn granted_after(delay_s: i64, after_grant: Quoted) -> Granted {
     granted_with_owner(Some(FOUNDER), delay_s, after_grant)
 }
 
+/// [`granted_with_owner`] by the founder, its journal putting each request's content object in
+/// `content`, as the placing run's does (DEC-970 item 4).
+fn granted_storing(content: &Contents) -> Granted {
+    granted_into(Some(FOUNDER), 30, PREFLIGHT_QUOTE, Some(content.clone()))
+}
+
 /// [`granted_after`] on a stream whose mandate connection was recorded by `owner`, or by no one.
 fn granted_with_owner(owner: Option<&str>, delay_s: i64, after_grant: Quoted) -> Granted {
+    granted_into(owner, delay_s, after_grant, None)
+}
+
+/// A content store the test keeps a handle on after the journal takes its own (DEC-970 item 4).
+#[derive(Clone, Default)]
+struct Contents(Arc<std::sync::Mutex<BTreeMap<Digest, Vec<u8>>>>);
+
+impl ArtifactSource for Contents {
+    fn read_artifact(
+        &self,
+        reference: &mandate_journal::ArtifactRef,
+    ) -> Result<Vec<u8>, mandate_journal::ArtifactError> {
+        self.0.lock().unwrap().read_artifact(reference)
+    }
+}
+
+impl mandate_journal::ArtifactStore for Contents {
+    fn put_artifact(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<mandate_journal::ArtifactRef, mandate_journal::ArtifactError> {
+        self.0.lock().unwrap().put_artifact(bytes)
+    }
+}
+
+/// [`granted_with_owner`], with the journal's content store `content`, or none.
+fn granted_into(
+    owner: Option<&str>,
+    delay_s: i64,
+    after_grant: Quoted,
+    content: Option<Contents>,
+) -> Granted {
     let now = at(PREFLIGHT);
     let mut stream = Stream::of(
         &mandate(),
@@ -464,7 +502,12 @@ fn granted_with_owner(owner: Option<&str>, delay_s: i64, after_grant: Quoted) ->
     let (observation, output, store) = observed(now);
     let store: Arc<dyn ArtifactSource + Send + Sync> = Arc::new(store);
     let journal = Shared(Rc::new(RefCell::new(
-        StoreJournal::from_dsn(None, now).with_artifacts(Some(Arc::clone(&store))),
+        StoreJournal::from_dsn(None, now)
+            .with_artifacts(Some(Arc::clone(&store)))
+            .with_content_store(content.map(|c| {
+                let boxed: Box<dyn mandate_journal::ArtifactStore + Send> = Box::new(c);
+                boxed
+            })),
     )));
     let nanos = Rc::new(Cell::new(now.secs() * NANOS_PER_S));
     let quote = Rc::new(RefCell::new(PREFLIGHT_QUOTE));
@@ -510,6 +553,7 @@ fn granted_with_owner(owner: Option<&str>, delay_s: i64, after_grant: Quoted) ->
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: Some(store),
+        content_store: None,
         symbols: BrokerSymbols::registered([(
             mandate_accounting::InstrumentId::new("SPY").unwrap(),
             mandate_accounting::InstrumentId::new(SPY).unwrap(),
@@ -740,4 +784,33 @@ proptest! {
         prop_assert!(stale.outcome.is_err());
         prop_assert_eq!(stale.broker.openings(), 0);
     }
+}
+
+/// Journal spec §3 and §11 check 6 (R0's R17, DEC-970 item 4): the `ApprovalRequested` lists its
+/// `content_hash` in `artifact_refs`, so the placing run's journal puts the canonical `content` in
+/// the store first, under exactly that reference, and `verify` finds it (before, nothing put it, and
+/// the rehearsal's verify failed `artifact_missing`).
+#[test]
+fn the_requests_content_object_is_stored_under_its_content_hash() {
+    let content = Contents::default();
+    let run = granted_storing(&content);
+    assert!(run.placed_once(), "{:?}", run.outcome.as_ref().err());
+    let requests = run.journal.payloads(AGENT_STREAM, "ApprovalRequested");
+    assert!(!requests.is_empty(), "the run asked");
+    for request in &requests {
+        let hash = request.get("content_hash").and_then(Value::as_str).unwrap();
+        let reference = mandate_journal::ArtifactRef::parse(hash).unwrap();
+        let stored = mandate_journal::get_artifact(&content, &reference)
+            .unwrap_or_else(|e| panic!("the request's content object is stored: {e:?}"));
+        assert_eq!(
+            stored,
+            to_canonical(request.get("content").unwrap()),
+            "the object is the request's canonical content, which re-hashes to its content_hash"
+        );
+    }
+    assert_eq!(
+        content.0.lock().unwrap().len(),
+        requests.len(),
+        "one object per request and nothing else: no other record of the run carries inline content"
+    );
 }
