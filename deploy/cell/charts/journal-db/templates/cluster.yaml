@@ -57,8 +57,11 @@ spec:
       secret:
         name: journal-role-mandate-migrator
       # roles.sql revokes CONNECT on `postgres` from PUBLIC; pg_rewind connects there as
-      # CloudNativePG's replication role when a former primary rejoins after a failover.
+      # CloudNativePG's replication role when a former primary rejoins after a failover. The
+      # operator makes that role only when the primary first starts, after this, and takes one
+      # that exists (it ensures LOGIN REPLICATION), so it is made here first.
       postInitSQL:
+        - DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'streaming_replica') THEN CREATE ROLE streaming_replica WITH LOGIN REPLICATION; END IF; END $$
         - GRANT CONNECT ON DATABASE postgres TO streaming_replica
       postInitApplicationSQLRefs:
         configMapRefs:

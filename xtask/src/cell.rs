@@ -541,7 +541,8 @@ pub fn up() -> Result<()> {
         "--for=condition=Ready",
         "cluster.postgresql.cnpg.io/journal",
         "--timeout=300s",
-    ])?;
+    ])
+    .with_context(|| format!("the journal cluster was not Ready: {}", cluster_state()))?;
     let domain = kubectl(&[
         "get",
         "cluster.postgresql.cnpg.io/journal",
