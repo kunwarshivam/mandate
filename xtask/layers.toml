@@ -495,6 +495,18 @@ layer = 7
 safety_critical = false
 pure = false
 
+# The model gateway's HTTPS transport (E15-6, E15-10, DEC-2200): one attempt to the host the
+# gateway's egress allowlist permitted, over TLS, inside its deadline, with the provider key as a
+# sensitive header. Safety-critical because it carries the key. Layer 7, above mandate-gateway;
+# nothing in the trading path depends on it, and nothing wires it to a live endpoint until DEC-998
+# item 8 and DEC-997 allow one. It may never reach the order path or a mandate or policy writer.
+[crates.mandate-gateway-http]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["reqwest", "rustls", "thiserror", "tokio"]
+forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-connections", "mandate-vault-local"]
+
 [crates.mandate-marketdata]
 layer = 6
 safety_critical = false

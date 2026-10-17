@@ -12,7 +12,9 @@
   prompt guard), `src/schema.rs` (the output schema language), `src/openrouter.rs` (the routing
   lock), `src/fake.rs` (the recorded-response transport), `src/money.rs` (`Usd6`, prices),
   `src/provider.rs` (the clock, transport, adapter, secret-source and id seams), `src/record.rs`
-  (the journal payload).
+  (the journal payload). The HTTPS transport is `mandate-gateway-http`,
+  `crates/mandate-gateway-http/` (layer 7, safety-critical, impure; DEC-2200): `src/lib.rs`
+  (`HttpsTransport`, `url_for`, `budget`, `retry_after_ms`, `SystemClock`).
 - **Tests:** `crates/mandate-gateway/tests/call.rs` (every outcome of §3.3, the request body's
   routing lock and absent capabilities, late responses, retries, the cache, withdrawal),
   `tests/registry.rs` (the hash over every pinned member and not routing or status, aliases,
@@ -23,11 +25,18 @@
   `tests/deadline_and_egress.rs` (an output validated past its deadline, a rogue adapter's host,
   unreadable costs at the maximum), and `tests/properties.rs` (caps, deadline, identity, and every
   record against journal spec §9.19's rules over random sequences, each oracle shown to catch a
-  seeded bug), with fixtures in `tests/common/mod.rs`.
+  seeded bug), with fixtures in `tests/common/mod.rs`. The transport's tests run against a local
+  TLS server whose authority they generate: `crates/mandate-gateway-http/tests/https.rs` (the
+  request on the wire, the key header, statuses and `Retry-After`, no redirect, the body cap, the
+  deadline, untrusted servers, cut connections, refused hosts and paths, a caller inside tokio),
+  `tests/rules.rs` (the host, path, budget and `Retry-After` rules, the system clock), and
+  `tests/gateway.rs` (a pinned reply `ok` and a substituted model `identity_mismatch`, end to end
+  over HTTPS), with the server in `tests/common/server.rs`.
 - **Not yet:** the workspace's per-risk-day model-spend quota (inference spec §7.3; only the
-  monthly cap and the per-agent caps are enforced), the HTTPS transport, and a journal-backed
-  `MeterStore`. The guard's unprefixed-secret rule lets a slash end a run, so filing paths pass, and
+  monthly cap and the per-agent caps are enforced), and a journal-backed `MeterStore`. The HTTPS
+  transport exists but nothing wires it to a live endpoint until the meter is journaled and DEC-997
+  is Accepted (DEC-998 item 8, DEC-2200 item 2). The guard's unprefixed-secret rule lets a slash end a run, so filing paths pass, and
   an AWS secret key containing `/` can pass with it; prefixed and key-id forms are caught. The
   email rule counts only ASCII before the `@`, and the fold does no Unicode normalization, so a
   listed name in decomposed form, or `İ`, does not match its composed or folded spelling.
-- **Run:** `cargo nextest run -p mandate-gateway`.
+- **Run:** `cargo nextest run -p mandate-gateway -p mandate-gateway-http`.
