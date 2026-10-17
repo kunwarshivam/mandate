@@ -11,7 +11,9 @@
   `crates/mandate-objectstore/src/check.rs` (the start-up probe with the writer's own key, the
   `LockCertificate` only a passed check issues, and the `LockedWriter` only a certificate builds),
   `crates/mandate-objectstore/src/r2.rs` (R2's rules through Cloudflare's API), and
-  `crates/mandate-objectstore/examples/lockcheck.rs` (the run against a real provider).
+  `crates/mandate-objectstore/examples/lockcheck.rs` (the run against any provider), and
+  `crates/mandate-objectstore/examples/r2_finding.rs` with `.github/workflows/r2-lockcheck.yml`
+  (the run against R2 on a scratch bucket, from `main` in the `production` environment).
 - **Tests:** `crates/mandate-objectstore/tests/lock.rs` (one test per refusal, the six-year
   boundaries, R2's rules, and a property test whose oracle derives the expected refusals from the
   weakenings it applied), `crates/mandate-objectstore/tests/sigv4.rs` (Amazon's four worked S3

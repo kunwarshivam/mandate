@@ -248,6 +248,33 @@ async fn a_writer_that_cannot_read_the_settings_is_refused() {
 }
 
 #[tokio::test]
+async fn a_plain_delete_removes_an_unlocked_object_and_only_marks_a_locked_one() {
+    let Some(plain) = common::root("plaindelete") else {
+        return;
+    };
+    common::create(&plain, None).await;
+    assert!(matches!(plain.put_object("k", b"v", None).await, Ok(Ok(_))));
+    assert_eq!(plain.delete_object("k").await, Ok(Outcome::Done));
+    assert_eq!(plain.get_object("k", None).await, Ok(None));
+
+    let Some(locked) = common::root("lockeddelete") else {
+        return;
+    };
+    common::create(&locked, Some(SIX_YEARS)).await;
+    let put = locked.put_object("k", b"v", None).await;
+    let Ok(Ok(Some(version))) = put else {
+        panic!("a versioned put: {put:?}");
+    };
+    assert_eq!(locked.delete_object("k").await, Ok(Outcome::Done));
+    assert_eq!(locked.get_object("k", None).await, Ok(None));
+    assert_eq!(
+        locked.get_object("k", Some(&version)).await,
+        Ok(Some(b"v".to_vec())),
+        "the delete marker hides the version and removes nothing"
+    );
+}
+
+#[tokio::test]
 async fn a_certificate_writes_only_to_its_own_store() {
     let Some(first) = common::root("certa") else {
         return;

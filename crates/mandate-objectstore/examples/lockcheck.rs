@@ -1,6 +1,5 @@
-//! The lock check against a real provider, from the command line: the run E21-40 asks for against
-//! Cloudflare R2 the day the founder buys it (DEC-969, DEC-973 item 5), and against Backblaze B2
-//! if DEC-974 is taken. It runs [`check_s3`] with the writer's key, and with an R2 account also
+//! The lock check against any S3-compatible provider, from the command line: Backblaze B2 if
+//! DEC-974 is taken, or any other candidate (R2's own run is `r2_finding`, DEC-973 item 5). It runs [`check_s3`] with the writer's key, and with an R2 account also
 //! [`check_r2`] over the bucket's lock rules, and prints the verdicts as refusal codes only: never
 //! a key, a token, or an object's content. Exits 0 only when the S3 check passes.
 //!

@@ -5,7 +5,7 @@
 # while it skips (the DEC-519 rule, as for PostgreSQL). The root key is a fixed test value for this
 # throwaway container, never a real credential; `MANDATE_S3_URL` and the two `MANDATE_S3_*_KEY*`
 # names in `ci.yml` carry the same values. MinIO publishes no community images any more, so the
-# image is Chainguard's build, test-only (D-5, DEC-969; `docs/dependencies.md`).
+# image is Chainguard's build, test-only (D-5, DEC-990; `docs/dependencies.md`).
 set -euo pipefail
 
 digest="sha256:c93745c56fccdaf0e5dcb88999a96a65a136428beb045ef5d546255a80d747a7"

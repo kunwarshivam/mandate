@@ -23,33 +23,43 @@ cargo nextest run -p mandate-objectstore
 cargo xtask ci objectstore         # the same run CI's `full` job makes
 ```
 
-## The run against a real provider (R2 on the day H3 is bought; B2 if DEC-974 is taken)
+## The run against Cloudflare R2
 
-The founder runs this once, before anything is stored at the provider (the plan's local-cell gate,
-DEC-969). It writes one small probe object under the prefix, locked for six years if the store
-locks it. Keys are read from files and never printed; the output is the verdict and refusal codes.
+`.github/workflows/r2-lockcheck.yml` tests DEC-973 item 5's finding against R2 itself. It runs on
+demand from `main` only, in the `production` environment, which is restricted to `main` and holds
+`R2_SECRET_ACCESS_KEY` and `CLOUDFLARE_API_TOKEN` as secrets and `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`
+and `CLOUDFLARE_ACCOUNT_ID` as variables; no pull-request job sees them (ES-12). Start it from the
+Actions tab (`r2-lockcheck`, Run workflow, branch `main`).
 
-1. Create the bucket. For R2: in the dashboard, location hint eastern North America, and add the
-   strongest bucket lock rule R2 offers (no prefix, indefinite), so the run judges R2 at its best.
-   For B2: Object Lock enabled at creation, and a default rule in compliance mode of at least six
-   years.
-2. Make the writer's key: for R2, an R2 API token with Object Read & Write on that bucket only;
-   for B2, an application key for that bucket without `bypassGovernance` and without
-   `writeBucketRetentions`. Save its access key ID and secret into two files, mode 0600.
-3. For R2 only, a Cloudflare API token that can read the bucket's configuration, saved to a third
-   file.
-4. Run:
+`examples/r2_finding.rs` never touches the cell's buckets. It creates a scratch bucket
+(`mandate-lockcheck-<time>`, location hint ENAM), runs the lock check against R2's S3 API, sets R2's
+strongest bucket lock rule (indefinite, the whole bucket), reads it back through Cloudflare's API,
+writes an object and tries to delete it while the rule holds, removes the rule with the
+bucket-configuration token, deletes the object again, and then deletes the scratch bucket whatever
+happened. It prints outcomes and refusal codes only. It exits 0 when R2 behaves as DEC-973 found:
+every check refused, the delete refused under the rule and done once the token removed it. Any
+other result exits 1 and reopens DEC-973 rather than being acted on. Record the run's link in the
+E21-40 claim issue.
+
+## The run against another provider (B2, if DEC-974 is taken)
+
+`examples/lockcheck.rs` runs the check against any S3-compatible bucket with a writer key read from
+files, and prints the verdict. It writes one small probe object under the prefix, locked for six
+years if the store locks it.
+
+1. Create the bucket with Object Lock enabled at creation and a default rule in compliance mode of
+   at least six years.
+2. Make the writer's key for that bucket only, without `bypassGovernance` and without
+   `writeBucketRetentions`; save its key ID and secret into two files, mode 0600.
+3. Run:
 
 ```bash
-export MANDATE_OBJECTSTORE_URL=https://<account_id>.r2.cloudflarestorage.com   # B2: https://s3.<region>.backblazeb2.com
-export MANDATE_OBJECTSTORE_REGION=auto                                          # B2: the bucket's region
-export MANDATE_OBJECTSTORE_BUCKET=<bucket> MANDATE_OBJECTSTORE_PREFIX=cold/
+export MANDATE_OBJECTSTORE_URL=https://s3.<region>.backblazeb2.com
+export MANDATE_OBJECTSTORE_REGION=<region> MANDATE_OBJECTSTORE_BUCKET=<bucket>
+export MANDATE_OBJECTSTORE_PREFIX=cold/
 export MANDATE_OBJECTSTORE_KEY_ID_FILE=~/keys/id MANDATE_OBJECTSTORE_SECRET_FILE=~/keys/secret
-export MANDATE_R2_ACCOUNT_ID=<account_id> MANDATE_R2_TOKEN_FILE=~/keys/cf-token          # R2 only
 cargo run -p mandate-objectstore --example lockcheck
 ```
 
-Expected for R2, per DEC-973 item 5: the S3 check refused (R2's S3 API has no Object Lock, so at
-least `objectstore_no_lock`), and the rules refused with `objectstore_governance_only`. Record the
-output in the E21-40 claim issue. An R2 result that is accepted, or differs from the expectation,
-reopens DEC-973 rather than being acted on. Expected for B2 under DEC-974: `accepted`.
+Expected: `accepted`. With `MANDATE_R2_ACCOUNT_ID` and `MANDATE_R2_TOKEN_FILE` set as well, it also
+reads an R2 bucket's lock rules and prints their verdict.

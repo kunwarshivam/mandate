@@ -2659,10 +2659,13 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// so `BASH_ENV`, `ENV`, `PATH`, `LD_PRELOAD`, `RUSTUP_TOOLCHAIN` and `NODE_OPTIONS`, in any
 /// case, cannot be read. `ci.yml` and `nightly.yml` set the tool versions and checksums and the
 /// `MANDATE_*` and `*_RESULT` names, `merge.yml` the merge inputs, `web.yml` and `web-e2e.yml`
-/// the telemetry switches, and `nightly.yml`'s service `POSTGRES_PASSWORD`.
+/// the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and `r2-lockcheck.yml` the
+/// `production` environment's R2 and Cloudflare names (E21-40, DEC-973).
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_TOKEN",
     "DOCS_ONLY",
     "DO_NOT_TRACK",
     "EVENT",
@@ -2678,11 +2681,11 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_PG_REQUIRED",
     "MANDATE_PG_URL",
     "MANDATE_PR_BODY",
+    "MANDATE_PR_NUMBER",
     "MANDATE_S3_ACCESS_KEY_ID",
     "MANDATE_S3_REQUIRED",
     "MANDATE_S3_SECRET_ACCESS_KEY",
     "MANDATE_S3_URL",
-    "MANDATE_PR_NUMBER",
     "MANDATE_SCHEMA_SHARD",
     "MANDATE_TEST_PARTITION",
     "MERGE_APPROVERS",
@@ -2694,6 +2697,9 @@ const READ_ENV_NAMES: &[&str] = &[
     "PORTABLE_RESULT",
     "POSTGRES_PASSWORD",
     "PYTHON_RESULT",
+    "R2_ACCESS_KEY_ID",
+    "R2_ENDPOINT",
+    "R2_SECRET_ACCESS_KEY",
     "RH_SIM_LIVE_RESULT",
     "RUN_PRS",
     "SCHEMA_MUTANTS_RESULT",

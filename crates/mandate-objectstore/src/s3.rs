@@ -382,6 +382,14 @@ impl S3 {
         outcome(answer)
     }
 
+    /// `DeleteObject` of `key` with no version: on a versioned bucket it adds a delete marker and
+    /// removes nothing; on an unversioned one, such as R2's, it removes the object unless a lock
+    /// holds it.
+    pub async fn delete_object(&self, key: &str) -> Result<Outcome, S3Error> {
+        let answer = self.send(Method::DELETE, Some(key), &[], &[], &[]).await?;
+        outcome(answer)
+    }
+
     /// `GetBucketVersioning`: whether versioning is `Enabled`. A provider that does not implement
     /// the call has none.
     pub async fn bucket_versioning(&self) -> Result<bool, S3Error> {
