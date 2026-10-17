@@ -301,8 +301,8 @@ fn day(d: u8) -> Date {
 }
 
 #[test]
-fn the_demo_cap_is_fifty_dollars_a_month_per_workspace() {
-    let caps = common::caps();
+fn a_configured_monthly_budget_admits_up_to_itself() {
+    let caps = Caps::new(Usd6::dollars(50).unwrap());
     assert_eq!(caps.workspace_monthly(), Usd6::dollars(50).unwrap());
     let mut meter = Meter::new(MemoryMeter::new(), caps, common::deployment());
     assert!(
@@ -535,7 +535,8 @@ fn a_meter_that_cannot_be_read_or_appended_refuses() {
     let mut meter = Meter::new(store, common::caps(), common::deployment());
     assert_eq!(
         meter.reserve(reservation(1, Some("a"), Purpose::Research, "0.1", day(8))),
-        Err(MeterRefusal::Unavailable)
+        Err(MeterRefusal::Orphaned),
+        "a workspace append that fails after the copy leaves an orphan (DEC-2204 item 4)"
     );
     assert!(meter.store().records().is_empty());
     assert_eq!(

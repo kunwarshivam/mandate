@@ -138,6 +138,7 @@ pub struct Gateway<T, S, C> {
     ids: Box<dyn IdSource>,
     cache: BTreeMap<CacheKey, Cached>,
     admitted: Vec<(UtcNanos, Option<String>)>,
+    orphans: u64,
 }
 
 /// What a call has gathered so far, turned into its record at the end.
@@ -196,6 +197,7 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
             ids,
             cache: BTreeMap::new(),
             admitted: Vec::new(),
+            orphans: 0,
         }
     }
 
@@ -209,6 +211,12 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
 
     pub fn meter_mut(&mut self) -> &mut Meter<S> {
         &mut self.meter
+    }
+
+    /// The calls refused `meter_unavailable` that left an orphan open on the deployment's meter
+    /// stream (DEC-2204 item 4): the count the operator's alert reads.
+    pub fn orphans(&self) -> u64 {
+        self.orphans
     }
 
     pub fn transport(&self) -> &T {
@@ -389,6 +397,18 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
                     .iter()
                     .flat_map(|turn| &turn.results)
                     .try_for_each(|result| guard::check(result, &self.settings.guard))
+            })
+            .and_then(|()| {
+                prompt
+                    .transcript
+                    .iter()
+                    .flat_map(|turn| &turn.calls)
+                    .try_for_each(|call| {
+                        guard::check(
+                            &tools::canonical_text(&call.arguments),
+                            &self.settings.guard,
+                        )
+                    })
             });
         if let Err(rule) = verdict {
             draft.record.guard_rule = Some(rule);
@@ -426,8 +446,9 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
         if !self.within_rate(request.agent_id.as_deref(), start) {
             return draft.finish(Outcome::RateLimitedLocal, start);
         }
+        let input_bound = prompt_bytes.len().max(http.body.len());
         let Ok(max_cost) = endpoint.prices.max_cost(
-            u64::try_from(prompt_bytes.len()).unwrap_or(u64::MAX),
+            u64::try_from(input_bound).unwrap_or(u64::MAX),
             content.max_output_tokens,
         ) else {
             return draft.finish(Outcome::BudgetExhausted, start);
@@ -454,6 +475,10 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
             Ok(r) => r,
             Err(MeterRefusal::BudgetExhausted) => {
                 return draft.finish(Outcome::BudgetExhausted, start);
+            }
+            Err(MeterRefusal::Orphaned) => {
+                self.orphans = self.orphans.saturating_add(1);
+                return draft.finish(Outcome::MeterUnavailable, start);
             }
             Err(MeterRefusal::Unavailable) => {
                 return draft.finish(Outcome::MeterUnavailable, start);

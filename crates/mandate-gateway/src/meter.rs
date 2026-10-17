@@ -406,11 +406,13 @@ impl Caps {
 }
 
 /// Why the meter refused a reservation; either way nothing is sent and nothing is recorded on the
-/// meter stream.
+/// workspace's meter stream. `Orphaned` is `meter_unavailable` that left a copy open on the
+/// deployment's stream (DEC-2204 item 4), so its caller alerts the operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeterRefusal {
     BudgetExhausted,
     Unavailable,
+    Orphaned,
 }
 
 /// The deployment's meter writer, as a workspace's writer reaches it: the deployment meter stream
@@ -555,7 +557,7 @@ impl<S: MeterStore> Meter<S> {
         self.deployment.reserve(&reservation)?;
         self.store
             .append(MeterRecord::Reserved(reservation.clone()))
-            .map_err(|_| MeterRefusal::Unavailable)?;
+            .map_err(|_| MeterRefusal::Orphaned)?;
         Ok(reservation)
     }
 

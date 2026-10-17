@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use mandate_canon::{Value, parse, to_canonical};
+use mandate_canon::{Key, Value, parse, to_canonical};
 use serde_json::{Map, Value as Json, json};
 
 use crate::registry::{int, object};
@@ -193,7 +193,7 @@ impl Agentic {
             && self
                 .output_schemas
                 .iter()
-                .all(|(kind, s)| !kind.is_empty() && schema::well_formed(s))
+                .all(|(kind, s)| Key::new(kind).is_ok() && schema::well_formed(s))
             && sorted
             && self.tools.iter().all(|t| {
                 t.well_formed() && t.menu.iter().all(|k| self.output_schemas.contains_key(k))

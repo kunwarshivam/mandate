@@ -172,6 +172,19 @@ fn the_registry_refuses_a_loop_it_could_not_pin() {
         ("an unsorted menu", Box::new(|a| a.tools[0].menu.reverse())),
         ("no run kind", Box::new(|a| a.output_schemas.clear())),
         (
+            "a run kind that is not a key",
+            Box::new(|a| {
+                a.output_schemas
+                    .insert("Ideate".to_owned(), output_schema());
+            }),
+        ),
+        (
+            "a run kind past 64 bytes",
+            Box::new(|a| {
+                a.output_schemas.insert("k".repeat(65), output_schema());
+            }),
+        ),
+        (
             "a kind's schema outside the language",
             Box::new(|a| {
                 a.output_schemas
@@ -508,6 +521,31 @@ fn raw_name(wire: &str) -> Vec<u8> {
 }
 
 #[test]
+fn a_reply_with_an_output_and_valid_calls_is_a_tool_call_reply() {
+    let (mut gateway, model) = agentic_gateway();
+    scripted(
+        &mut gateway,
+        mandate_gateway::fake::openrouter_reply(
+            Some(GOOD_OUTPUT),
+            &[NOTE_CALL],
+            &reported(),
+            usage(),
+        ),
+    );
+    let record = call(
+        &mut gateway,
+        &turn_request(&model, 1, "ideate", &["note"], vec![]),
+    );
+    assert_eq!(record.outcome, Outcome::Ok);
+    assert_eq!(
+        record.output, None,
+        "the text beside a call is never an output (inference §3.2)"
+    );
+    assert_eq!(record.tool_calls.len(), 1);
+    assert_eq!(record.tool_calls[0].name, "note");
+}
+
+#[test]
 fn malformed_tool_calls_are_schema_invalid() {
     for calls in [
         serde_json::json!("not a list"),
@@ -732,6 +770,22 @@ fn a_result_that_breaks_its_section_or_the_guard_sends_nothing() {
         ),
         ("see ws_01J8Z9's book", GuardRule::ForeignWorkspace),
     ];
+    let (mut gateway, model) = agentic_gateway();
+    let turn = Turn {
+        response: calls_body(&[("note", r#"{"text":"ACCT-778812"}"#)]),
+        results: vec!["{}".to_owned()],
+    };
+    let record = call(
+        &mut gateway,
+        &turn_request(&model, 1, "ideate", &["note"], vec![turn]),
+    );
+    assert_eq!(
+        record.outcome,
+        Outcome::InputRejected,
+        "the model's own earlier arguments are guarded too"
+    );
+    assert_eq!(record.guard_rule, Some(GuardRule::AccountIdentifier));
+    assert!(gateway.transport().sent().is_empty());
     for (result, rule) in cases {
         let (mut gateway, model) = agentic_gateway();
         let turn = Turn {
@@ -828,6 +882,13 @@ fn the_reservation_bounds_the_tools_and_transcript_the_turn_sends() {
         maxima[1] > maxima[0],
         "the tools and transcript raise the maximum: {maxima:?}"
     );
+    for (sent, max) in gateway.transport().sent().iter().zip(&maxima) {
+        let prompt_bound = u64::try_from(sent.body.len()).unwrap();
+        assert!(
+            *max >= prices().max_cost(prompt_bound, 1_000).unwrap(),
+            "each maximum covers every byte the turn sent, one token per byte"
+        );
+    }
 }
 
 #[test]

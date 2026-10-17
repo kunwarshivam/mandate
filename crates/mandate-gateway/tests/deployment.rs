@@ -530,3 +530,78 @@ fn the_deployment_meter_shows_its_cap_and_never_its_store() {
     assert!(shown.starts_with("DeploymentMeter"), "{shown}");
     assert!(shown.contains("monthly"), "{shown}");
 }
+
+#[test]
+fn the_deployment_cap_counts_its_month_alone_and_every_key_owner() {
+    let shared = SharedMeter::new();
+    let mut a = workspace_meter(&shared, "1", 1 << 100);
+    let mut september = reservation(1, 1, "0.9");
+    september.risk_day = Date::new(2026, 9, 30).unwrap();
+    assert!(a.reserve(september).is_ok());
+    let mut customer = reservation(1, 2, "0.6");
+    customer.key_owner = KeyOwner::Customer;
+    assert!(
+        a.reserve(customer).is_ok(),
+        "September's spend does not count in October"
+    );
+    assert_eq!(
+        a.reserve(reservation(1, 3, "0.5")),
+        Err(MeterRefusal::BudgetExhausted),
+        "a customer's own key counts toward the deployment's cap too (DEC-2204 item 3)"
+    );
+    assert!(a.reserve(reservation(1, 4, "0.4")).is_ok());
+}
+
+#[test]
+fn an_orphan_is_counted_for_the_operator() {
+    let shared = SharedMeter::new();
+    let (registry, model) = registry();
+    let mut store = MemoryMeter::new();
+    store.limit_appends(Some(0));
+    let mut gateway = mandate_gateway::Gateway::new(
+        settings(hosted_policy()),
+        registry,
+        Box::new(mandate_gateway::openrouter::OpenRouter),
+        mandate_gateway::fake::RecordedTransport::new(),
+        Box::new(TestKey),
+        Meter::new(
+            store,
+            caps(),
+            DeploymentMeter::new(
+                Box::new(shared.clone()),
+                usd("50"),
+                Box::new(SequentialIds::starting_at(1 << 100)),
+            ),
+        ),
+        mandate_gateway::provider::ManualClock::at(at(START)),
+        Box::new(SequentialIds::starting_at(1 << 80)),
+    );
+    gateway.transport_mut().script(vec![ok_reply(10)]);
+    let record = gateway.call(&request(&model, 1)).unwrap();
+    assert_eq!(record.outcome, Outcome::MeterUnavailable);
+    assert_eq!(record.reservation, None);
+    assert!(gateway.transport().sent().is_empty(), "nothing is sent");
+    assert_eq!(
+        gateway.orphans(),
+        1,
+        "the orphan is counted, for the operator's alert"
+    );
+    assert_eq!(
+        shared.records().len(),
+        1,
+        "and stays open on the deployment's stream"
+    );
+    let mut clean = workspace_meter(&SharedMeter::new(), "1", 1 << 101);
+    clean.store_mut().fail_with(Some(StoreError::Unavailable));
+    assert_eq!(
+        clean.reserve(reservation(2, 1, "0.1")),
+        Err(MeterRefusal::Unavailable),
+        "a workspace that cannot be read leaves no orphan"
+    );
+    let mut orphaning = workspace_meter(&SharedMeter::new(), "1", 1 << 102);
+    orphaning.store_mut().limit_appends(Some(0));
+    assert_eq!(
+        orphaning.reserve(reservation(3, 1, "0.1")),
+        Err(MeterRefusal::Orphaned)
+    );
+}
