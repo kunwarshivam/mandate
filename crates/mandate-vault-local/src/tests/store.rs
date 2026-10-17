@@ -422,3 +422,22 @@ fn a_delete_that_fails_for_another_reason_than_absence_is_an_io_error() {
     assert_eq!(executor.delete(&t), Err(VaultError::Io));
     assert_eq!(api.delete(&t), Err(VaultError::Io));
 }
+
+#[test]
+fn each_vault_prints_only_its_name() {
+    let layout = Layout::new();
+    let (api, executor) = layout.both();
+    assert_eq!(format!("{api:?}"), "ApiVault(redacted)");
+    assert_eq!(format!("{executor:?}"), "ExecutorVault(redacted)");
+}
+
+#[test]
+fn a_name_that_cannot_be_stated_is_an_io_error_not_an_absence() {
+    let layout = Layout::new();
+    let (_, executor) = layout.both();
+    let t = token("ws/c1", "c1");
+    let tokens = layout.vault.join("tokens");
+    fs::remove_dir(&tokens).unwrap();
+    fs::write(&tokens, b"").unwrap();
+    assert_eq!(executor.read(&t).map(|s| s.is_some()), Err(VaultError::Io));
+}

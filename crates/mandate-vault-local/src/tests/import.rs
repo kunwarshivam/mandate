@@ -73,7 +73,9 @@ fn anything_but_one_printable_line_is_refused_and_nothing_is_stored() {
         );
         assert!(layout.names("tokens").is_empty());
     }
-    for ok in [max, max_nl] {
+    let mut max_crlf = max.clone();
+    max_crlf.extend_from_slice(b"\r\n");
+    for ok in [max, max_nl, max_crlf] {
         let layout = Layout::new();
         let (_, executor) = layout.both();
         import_client_secret(&executor, &mut &ok[..]).unwrap();
@@ -212,6 +214,12 @@ fn a_missing_or_unreadable_user_or_group_is_refused() {
     assert_eq!(
         resolve_ids(&bad_uid, GROUP),
         Err(VaultError::UnknownUser { name: API_USER })
+    );
+    let signed = PASSWD.replace("owlhead_api:x:998:", "owlhead_api:x:+998:");
+    assert_eq!(
+        resolve_ids(&signed, GROUP),
+        Err(VaultError::UnknownUser { name: API_USER }),
+        "only decimal digits"
     );
     let bad_gid = GROUP.replace("owlhead_exec:x:996:", "owlhead_exec:x::");
     assert_eq!(

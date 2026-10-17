@@ -246,7 +246,9 @@ pub(crate) fn check_open_file(
 }
 
 /// Reads an entry's file through [`check_open_file`]; `None` when the name is absent. Only a
-/// regular file is opened, so a FIFO or device under the name is refused without blocking.
+/// regular file is opened, so a FIFO or device under the name is refused without blocking. A
+/// name deleted between the check and the open is an [`VaultError::Io`] refusal, which a caller
+/// retries.
 fn read_checked(path: &Path, kind: Kind, ids: &Ids) -> Result<Option<Vec<u8>>, VaultError> {
     let mismatch = VaultError::FileMismatch { dir: kind.dir() };
     let named = match fs::symlink_metadata(path) {
@@ -257,11 +259,7 @@ fn read_checked(path: &Path, kind: Kind, ids: &Ids) -> Result<Option<Vec<u8>>, V
     if !named.file_type().is_file() {
         return Err(mismatch);
     }
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(VaultError::Io),
-    };
+    let file = File::open(path).map_err(|_| VaultError::Io)?;
     let opened = file.metadata().map_err(|_| VaultError::Io)?;
     check_open_file(kind, ids, &named, &opened)?;
     let too_long = u64::try_from(MAX_FILE_LEN).map_or(true, |max| opened.len() > max);

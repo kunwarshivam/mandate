@@ -46,36 +46,27 @@ pub fn import_client_secret(
 /// input is seen as longer without reading all of it.
 const MAX_INPUT_LEN: usize = MAX_SECRET_LEN + 2;
 
-/// Reads one line of at most [`MAX_SECRET_LEN`] printable bytes, its one line ending dropped.
+/// Reads one line of printable bytes, its one line ending dropped, from at most one byte more
+/// than [`MAX_INPUT_LEN`]. The buffer holds that much from the start, so reading never moves the
+/// secret, and it is zeroed whatever the outcome. Its length is left to [`ExecutorVault::put`],
+/// which refuses an empty or too-long secret before it writes anything.
 fn read_line(source: &mut impl Read) -> Result<SecretSlice<u8>, VaultError> {
-    let mut buffer = vec![0_u8; MAX_INPUT_LEN.saturating_add(1)];
-    let mut filled = 0_usize;
-    let result = loop {
-        let Some(rest) = buffer.get_mut(filled..) else {
-            break Err(VaultError::SecretSize);
-        };
-        if rest.is_empty() {
-            break Err(VaultError::SecretSize);
-        }
-        match source.read(rest) {
-            Ok(0) => break Ok(()),
-            Ok(n) => filled = filled.saturating_add(n),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(_) => break Err(VaultError::Io),
-        }
-    };
-    let line = result.and_then(|()| {
-        let input = buffer.get(..filled).unwrap_or_default();
-        let line = input
+    let limit = MAX_INPUT_LEN.saturating_add(1);
+    let mut buffer = Vec::with_capacity(limit);
+    let read = source
+        .take(u64::try_from(limit).unwrap_or(u64::MAX))
+        .read_to_end(&mut buffer);
+    let line = read.map_err(|_| VaultError::Io).and_then(|_| {
+        let line = buffer
             .strip_suffix(b"\r\n")
-            .or_else(|| input.strip_suffix(b"\n"))
-            .unwrap_or(input);
-        if line.is_empty() || line.len() > MAX_SECRET_LEN {
+            .or_else(|| buffer.strip_suffix(b"\n"))
+            .unwrap_or(&buffer);
+        if buffer.len() > MAX_INPUT_LEN {
             Err(VaultError::SecretSize)
-        } else if !line.iter().all(|b| (0x21..=0x7E).contains(b)) {
-            Err(VaultError::SecretNotPrintable)
-        } else {
+        } else if line.iter().all(|b| (0x21..=0x7E).contains(b)) {
             Ok(SecretSlice::from(line.to_vec()))
+        } else {
+            Err(VaultError::SecretNotPrintable)
         }
     });
     buffer.zeroize();
@@ -108,7 +99,7 @@ fn id_of(database: &str, name: &'static str) -> Result<u32, VaultError> {
             (fields.next() == Some(name)).then(|| fields.nth(1))
         })
         .flatten()
-        .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
+        .filter(|id| id.bytes().all(|b| b.is_ascii_digit()))
         .and_then(|id| id.parse().ok())
         .ok_or(VaultError::UnknownUser { name })
 }
