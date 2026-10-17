@@ -108,7 +108,9 @@ or prints the `kubectl port-forward` command when there is none, and checks that
 the one 401. The forward outlives the demo until its pod goes or it is stopped; a later demo
 reuses one that still answers. Sign-in waits on lane SI's stub issuer (DEC-2100) and on subject links: until both are
 in the cell, every sign-in is refused. The session signing key is made in the pod's memory at each
-start. A cell that pulls its `mandate` image (`MANDATE_CELL_IMAGE`) has no API image yet, so it
+start. The interim `api` image carries the building host's CA bundle, without which the server
+refuses to start; when `cell up` cannot install the workspace release, it prints the API pod's
+state, logs and the namespace's events. A cell that pulls its `mandate` image (`MANDATE_CELL_IMAGE`) has no API image yet, so it
 skips the API's parts.
 
 A part whose lane is not on `main` is named as skipped, never faked. `web/` needs Node.js at the

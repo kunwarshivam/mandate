@@ -46,6 +46,9 @@ pub const COMPOSE_FILE: &str = "deploy/cell/compose/compose.json";
 const IMAGE_DOCKERFILE: &str = "deploy/cell/images/mandate.Dockerfile";
 /// The workspace API server's image, built beside `mandate` from the same static build.
 const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
+/// The host's CA bundle, copied into the `api` image: on an empty base the server finds no roots,
+/// cannot build its key-set client, and refuses to start (`MANDATE_API_JWKS_URL`).
+const HOST_CA_BUNDLE: &str = "/etc/ssl/certs/ca-certificates.crt";
 /// Where the cell keeps what it derives: the kubeconfig, the downloaded operator chart, and the
 /// image build context. Under `target/`, so nothing derived is ever committed.
 const STATE: &str = "target/cell";
@@ -421,10 +424,15 @@ pub fn up() -> Result<()> {
     let image = image_tag()?;
     let api = api_image_tag()?;
     if source == ImageSource::Build {
-        build_image(&image, IMAGE_DOCKERFILE, "mandate")?;
+        build_image(&image, IMAGE_DOCKERFILE, "mandate", &[])?;
     }
     if let Some(api) = &api {
-        build_image(api, API_DOCKERFILE, "mandate-api-server")?;
+        build_image(
+            api,
+            API_DOCKERFILE,
+            "mandate-api-server",
+            &[(HOST_CA_BUNDLE, "ca-certificates.crt")],
+        )?;
     }
     if !cluster_exists()? {
         create_cluster()?;
@@ -486,8 +494,8 @@ pub fn up() -> Result<()> {
         "--timeout=300s",
     ])?;
     let image_value = format!("images.mandate={image}");
-    let api_value = format!("images.api={}", api.unwrap_or_default());
-    helm(&[
+    let api_value = format!("images.api={}", api.clone().unwrap_or_default());
+    let installed = helm(&[
         "upgrade",
         "--install",
         "workspace",
@@ -504,9 +512,62 @@ pub fn up() -> Result<()> {
         "--wait-for-jobs",
         "--timeout",
         "5m",
-    ])?;
+    ]);
+    if installed.is_err() && api.is_some() {
+        api_diagnosis();
+    }
+    installed?;
     eprintln!("    cell: up; `cargo xtask cell drill` runs the drills");
     Ok(())
+}
+
+/// What the API's pod says when the workspace release does not become ready: its pods, its
+/// containers' last logs, current and from the run before a restart, and the namespace's recent
+/// events, so a server that refused to start
+/// names its refusal in the run's own output.
+fn api_diagnosis() {
+    let selector = format!("mandate.dev/workspace={WORKSPACE},mandate.dev/process={API_PROCESS}");
+    let logs = |previous: &'static str| {
+        [
+            "logs",
+            "--namespace",
+            NAMESPACE,
+            "--selector",
+            selector.as_str(),
+            "--all-containers",
+            "--prefix",
+            previous,
+            "--tail",
+            "40",
+        ]
+    };
+    let pods = [
+        "get",
+        "pods",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        selector.as_str(),
+        "-o",
+        "wide",
+    ];
+    let current = logs("--previous=false");
+    let previous = logs("--previous=true");
+    let events = [
+        "get",
+        "events",
+        "--namespace",
+        NAMESPACE,
+        "--sort-by",
+        ".lastTimestamp",
+    ];
+    let shown: [&[&str]; 4] = [&pods, &current, &previous, &events];
+    for args in shown {
+        match kubectl(args) {
+            Ok(text) => eprintln!("    api diagnosis `kubectl {}`:\n{text}", args.join(" ")),
+            Err(e) => eprintln!("    api diagnosis `kubectl {}`: {e:#}", args.join(" ")),
+        }
+    }
 }
 
 /// `cargo xtask cell down`: delete the cluster and everything in it.
@@ -553,8 +614,9 @@ fn build_binary() -> Result<()> {
     Ok(())
 }
 
-/// The image `image` from `dockerfile`, over a context holding only `binary`.
-fn build_image(image: &str, dockerfile: &str, binary: &str) -> Result<()> {
+/// The image `image` from `dockerfile`, over a context holding only `binary` and each of `files`,
+/// copied from its host path under its context name.
+fn build_image(image: &str, dockerfile: &str, binary: &str, files: &[(&str, &str)]) -> Result<()> {
     let context = state()?.join("image");
     if context.exists() {
         fs::remove_dir_all(&context).context("clearing the image context")?;
@@ -563,6 +625,11 @@ fn build_image(image: &str, dockerfile: &str, binary: &str) -> Result<()> {
     let built = static_binary(binary);
     fs::copy(&built, context.join(binary))
         .with_context(|| format!("copying {built} into the image context"))?;
+    for (source, name) in files {
+        fs::copy(source, context.join(name)).with_context(|| {
+            format!("copying {source} into the image context; the {image} image needs it")
+        })?;
+    }
     let context = context.display().to_string();
     sh(
         "docker",
