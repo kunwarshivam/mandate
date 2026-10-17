@@ -30,7 +30,7 @@ is not built (§11).
     a month is the demo and dev deployment's own cap, a deployment setting (the founder's
     clarification of 2026-10-17), and a workspace's monthly budget is its own setting. Who pays for a
     customer's calls, a plan or the customer's own key, is the founder's pricing decision (DEC-2203
-    item 15, Proposed); `key_owner` (§7.1) serves either.
+    item 16, Proposed); `key_owner` (§7.1) serves either.
 - **v0.3 ([DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)):**
   - §3.6: the agent stream's `ModelInvocationRecorded` and the meter stream are closed in
     [journal spec §9.19](journal.md#919-model-gateway-records-dec-998) (E15-8). A refusal and a cache
@@ -180,8 +180,17 @@ Each oracle must catch a seeded bug before it is trusted (`AGENTS.md`, "Independ
 
 The **canonical request** is the canonical JSON (journal spec §4) of the model identity, the rendered
 prompt (the transcript included), the tool declarations offered, sampling parameters (temperature,
-seed where supported), the output schema, and `max_output_tokens`. Its SHA-256 is the
-`request_digest`.
+`top_p`, seed where supported, and the reasoning mode and effort), the output schema, and
+`max_output_tokens`. Its SHA-256 is the `request_digest`. The tool declarations, and the reasoning
+and `top_p` members where the entry pins none, are **left out when there are none**, so a
+`single_call` entry's canonical request, its `request_digest`, and every recorded fake keyed by it
+(DEC-1120) are what they were before v0.4.
+
+**The prompt's order is stable** ([agent harness spec §6.12](agent-harness.md#612-context-and-memory)):
+the pinned system prompt, then the tool schemas offered, then the owner's brief, then memory, then the
+trigger and the seed, then the transcript. Everything before the transcript is the same for every
+turn of a run, so a provider's prompt cache can serve it; the gateway records the cached prompt
+tokens the provider reports in `tokens.cached` (§7.1). A test pins the order.
 
 ### 3.2 Response
 
@@ -283,7 +292,8 @@ existing ones. So:
   148), since a guard-refused prompt would otherwise be stored (DEC-998 item 2).
 - A call with `outcome: ok` is followed by its output event (`ModelOutputRecorded` or
   `ThesisProposed`), which carries the content hash the call used, or, for a tool-call reply, by
-  one `ToolCallRecorded` per tool call ([journal spec §9.22](journal.md#922-tool-call-and-run-records-dec-2203)).
+  one `ToolCallRecorded` per tool call and, later, its `ToolResultRecorded` ([journal spec
+  §9.22](journal.md#922-run-records-dec-2203)).
 - A call with any other outcome writes `ModelInvocationRecorded` and no output event. The model
   simply has no fresh output.
 - **The agent-stream record is closed** in [journal spec §9.19](journal.md#919-model-gateway-records-dec-998)
@@ -333,7 +343,7 @@ entries ([HLD §4](../HLD.md#global-control-plane-thin)). An entry has two parts
 | `mode`, `tools`, `loop_bounds` | For the research agent: `single_call` or `agentic`; for `agentic`, the tool declarations, reads and proposals (each a name from the harness's closed set, a description, an argument schema, and result caps) and the loop's bounds (agent harness spec §6.10, §6.11). Inside the hash, so the pin covers what the model may call and how far the loop may go (rule 11, DEC-2203). Every other entry is `single_call` with no tools. **For a `single_call` entry the three members are left out of the canonical object**, so its hash, and every pin of it, is the hash it had before v0.4 |
 | `output_schema` | JSON Schema of the output (mandate spec §8.2, or §8.4's thesis) |
 | `params_schema` | The user-set parameters; no defaults (DEC-52) |
-| `deadline_ms`, `max_output_tokens`, sampling parameters | Pinned with the model |
+| `deadline_ms`, `max_output_tokens`, sampling parameters | Pinned with the model. The sampling parameters are temperature, `top_p`, the seed, and the **reasoning mode and effort** (for OpenRouter, `reasoning.effort`, or `reasoning.enabled: false`), since a model's behaviour changes with its reasoning setting as with its quantization (DEC-2203 item 22). `top_p` and reasoning are left out of the canonical object where the entry pins none, so no existing hash changes. The call record holds them through `model.content_hash` and `request_digest`, which both cover them, so journal spec §9.19's `sampling` member is unchanged |
 | `endpoints` | Outside the hash. Endpoints attested to serve exactly `identity`, each with region and locality (`hosted` or `local`) |
 | `methodology` | Documentation of method only; no performance claims (§8.1) |
 | `authorship` | `platform` in v1 |
@@ -513,7 +523,7 @@ a settlement only for the calls that could cost money, and spend for caps folds 
 | Workspace monthly cap | Workspace configuration: each workspace's own monthly model budget, from its setting; per-agent monthly caps under it, each at most the workspace's. No figure is a product limit, and none is hardcoded (DEC-2203 item 9) | All calls of the workspace per calendar month of risk days |
 | Deployment monthly cap | A deployment setting, separate from every workspace's: the platform's own provider spend for that deployment. **$50 a month** today, for the demo and dev deployment ([DEC-997](../project/decisions/DEC-997.md) item 3, Proposed; until accepted, no live call runs at all). The founder clarified on 2026-10-17 that it is the platform's demo cap, not a customer limit (DEC-2203 item 9) | All calls of the deployment per calendar month of risk days |
 | Workspace cycle allotment | The license's `model_spend_usd_per_cycle`, from the plan ([billing design](../design/billing.md) §3.4, DEC-442 item 4) | All calls of the workspace per billing cycle; enforced alongside the per-risk-day caps, never instead of them |
-| Run ceiling | The request's `spend_ceiling_usd`: the workspace's configured `research_run_cost_cap_usd`, less the cost of the run's earlier turns as the caller folds them from its own records ([agent harness spec §6.11](agent-harness.md#611-loop-bounds), DEC-2203 item 9) | One call: its reservation must fit under the ceiling. It only refuses, and never lifts another cap |
+| Run ceiling | The request's `spend_ceiling_usd`: the workspace's configured `research_run_cost_cap_usd`, less the cost of the run's earlier turns as the caller folds them from its own records ([agent harness spec §6.11](agent-harness.md#611-bounds-and-budgets), DEC-2203 item 9) | One call: its reservation must fit under the ceiling. It only refuses, and never lifts another cap |
 | Rate caps | Per agent: research runs only in proposal rounds no more often than `behavior.research.interval_s`, an agentic run's turns inside its one round; per workspace: a token bucket set by the plan | Calls per second |
 
 - **Reservation.** Before the first attempt, the workspace's meter writer appends a reservation of
@@ -593,7 +603,7 @@ layer; mandate spec §8.4 and §8.5 list the others.
   happens in deterministic code, from allowlisted sources only (DEC-101): before the call, and for an
   agentic entry also between turns, when the harness runs a tool call the gateway returned as data.
   The harness sets every such read's scope; the model's arguments only narrow it, and no argument
-  leaves the deployment (agent harness spec §6.10, HI-26).
+  leaves the deployment (agent harness spec §6.10, HI-28).
 - **After the response:** schema validation, the output limits of §8.1, and the §8.5 checks. Then the
   order builder, autonomy, and the risk gate, none of which read model text.
 
@@ -647,7 +657,7 @@ No case ends in the gateway choosing another model, holding an exit, or adding e
 | Bad model | Returns huge output to run up cost | `max_output_tokens` bounds each call; reservation bounds the day |
 | Bad model | Calls tools turn after turn to run up cost | The run ceiling (`spend_ceiling_usd`) bounds each run and the daily and monthly caps bound the rest; the harness's `max_turns` and the last turn's empty `tools` end the loop |
 | Bad model | Names a tool it was not offered, or arguments outside the schema | `schema_invalid`; no tool call is returned (INF-5) |
-| Injected filing or news item | Tells the model to name an instrument, read more, or leak data | No egress, and only pinned tools the harness scopes and caps (INF-5; agent harness spec §6.10, §6.11, HI-26); allowlist, corroboration, eligibility floor, `max_instruments`, autonomy (§8.5); the model has no secrets to leak (INF-8) |
+| Injected filing or news item | Tells the model to name an instrument, read more, or leak data | No egress, and only pinned tools the harness scopes and caps (INF-5; agent harness spec §6.10, §6.11, HI-28); allowlist, corroboration, eligibility floor, `max_instruments`, autonomy (§8.5); the model has no secrets to leak (INF-8) |
 | Malicious insider | Points a registry id at a different model | An entry's pinned content is immutable and signed; the content hash includes identity; the mandate pins the hash (V-007) |
 | Malicious insider | Edits a cached response | Cache entries are artifacts addressed by hash; a mismatch is a miss and an alert |
 | Malicious insider | Changes the price table to exhaust a cap or inflate a bill | Price tables are versioned configuration, journaled; each call names the version it used |
@@ -701,7 +711,7 @@ the date only; it does not suggest a replacement.
   lock, and the $50 a month cap, which DEC-2203 item 9 records as the demo deployment's own setting.
 - **[DEC-2203](../project/decisions/DEC-2203.md):** item 1, the founder's (2026-10-17): the research
   run is an agentic loop. Agent readings: pinned tools returned as data, the turn shape, the run
-  ceiling, budgets as configuration, and no fallback to a single call. Items 14 and 15 are Proposed
+  ceiling, budgets as configuration, pinned reasoning, the stable prompt order, and no fallback to a single call. Items 14 to 16, 19, and 20 are Proposed
   for the founder. It supersedes item 7 for the research purpose.
 - **Items 13 to 16, decided by the founder on 2026-10-03** (DEC-432, "Founder decisions"): a hosted
   fast model (§5), an aggregator for every call with routing locked per pinned model (§6), provider

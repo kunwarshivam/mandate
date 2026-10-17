@@ -1563,6 +1563,18 @@ agent acts on them; prompt injection through news and filings is the top technic
 and the allowlist, corroboration, the eligibility floor, `max_instruments`, and `autonomy.admission`
 are the defenses.
 
+**Agentic runs** ([ADR-0005](../adr/0005-agentic-harness.md), [DEC-2203](../project/decisions/DEC-2203.md);
+[agent harness spec §6.9](agent-harness.md#69-the-agentic-loop)). A research entry may pin `mode:
+agentic`: the model then chooses further reads, during a bounded run, from tools its entry pins,
+over the same allowlisted sources and the eligible universe, at one cut-off. That widens what the
+model may read, never what it may do: a thesis it gives is judged by §8.5 exactly as before, the
+order builder sizes it (§8.3), and its first order is decided by §6.2 with the admission ceiling.
+**Corroboration is the platform's**: it is computed from the platform's own reads, never from the
+reads the model chose (MI-16). The tools, the run's bounds, and the mode are inside the content
+hash (§8.1), so moving to an agentic entry is a new version the owner confirms. Budgets are
+configuration: `behavior.research.cost_cap_usd_per_day` still caps each risk day, and a workspace
+setting caps each run.
+
 **A thesis** names one instrument and carries:
 
 | Field | Rule |

@@ -338,7 +338,7 @@ interface in the workspace data service. The agent harness spec defines the tool
 | `as_of` | Required; the agent's decision time. Only records with knowledge time at or before it are returned (DP-1) |
 | `allowlist_version` | The version in effect; items from other sources are never returned (DP-9) |
 | `instruments`, `kinds`, `window`, `limit` | Filters; instruments by `asset_id` |
-| `terms` | Optional, at most five words of 1 to 32 bytes (letters, digits, spaces, hyphens, periods). Matched case-folded as whole words against the stored headline and summary of a news item, or the form and excerpt of a filing, inside the data service. A term only narrows, and is never sent to a source or any other host ([agent harness spec §6.10](agent-harness.md#610-tools), HI-26) |
+| `terms` | Optional, at most five words of 1 to 32 bytes (letters, digits, spaces, hyphens, periods). Matched case-folded as whole words against the stored headline and summary of a news item, or the form and excerpt of a filing, inside the data service. A term only narrows, and is never sent to a source or any other host ([agent harness spec §6.10](agent-harness.md#610-tools), HI-28) |
 | `items` | Optional: item ids the caller already received. With `range`, returns that byte range of one stored filing's text, cut on UTF-8 boundaries; where the store holds only an excerpt, the read fails |
 
 **A query reads the store and never fetches.** It answers from what ingestion (§4.2) has already

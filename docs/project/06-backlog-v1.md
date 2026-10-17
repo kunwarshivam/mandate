@@ -2285,35 +2285,37 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
     sequences;
   - a run still produces opinions only (rule 4) and never sizes or places an order.
 - **E19-13 (Must, M5, before the 2026-10-26 demo runs the loop; SC; spec first)** As the founder, I
-  want the research run to be a bounded agent loop over pinned read and proposal tools, "like Claude
-  Code for trading", so that the product is an agent harness for trading
-  ([DEC-2203](decisions/DEC-2203.md); agent harness spec v0.2 §6.9 to §6.11, inference spec v0.4,
+  want the research run to be a bounded agent loop, "like Claude Code for trading", so that the
+  product is an agent harness for trading ([ADR-0005](../adr/0005-agentic-harness.md),
+  [DEC-2203](decisions/DEC-2203.md); agent harness spec v0.2 §6.9 to §6.13, inference spec v0.4,
   journal spec v0.49 §9.22; claim [#1534](https://github.com/kunwarshivam/mandate/issues/1534)).
   *Accepted when:*
-  - `mandate-gateway` takes `turns`, the offered `tools`, and `spend_ceiling_usd`, sends only the
-    pinned declarations, keeps a `single_call` entry's hash unchanged, and returns a final output or
-    validated tool calls, refusing anything else `schema_invalid` (INF-5's new test), with the
-    reported identity read before any tool call is parsed;
-  - `mandate-research-run` holds the loop's state as a pure fold of the run's records, the five read
-    tools over read-only ports with §6.10's scope, item keys, and caps, and §6.11's bounds, each
-    ending the run except result size;
-  - the runtime core (lane I2's E19-3 side) mediates the five proposal tools on the paths §6.10
-    names, `propose_entry` as a dry run that submits nothing;
-  - `mandate-journal` registers `ToolCallRecorded` and `ResearchRunEnded` with a draft for every
-    rule 171 to 177;
-  - HI-2, HI-3, HI-4, HI-8, HI-24, HI-25, HI-26, and HI-27 hold as property tests with independent
-    oracles, each shown to catch a seeded bug, against a compromised model and random crashes, and
-    INF-7's fuzz covers the run ceiling;
-  - recorded multi-turn fixtures run the loop in CI and the demo with no network (HI-25);
-  - the `single_call` mode is unchanged, and no agent pins an agentic entry before E19-6's bench and
-    a §8.3 regression evaluation pass on it (DEC-2203 item 13).
-- **E19-14 (Should; SC; spec first)** As an owner, I want the agentic loop's follow-ups, so that it
-  can ask me and keep watch on its own schedule ([DEC-2203](decisions/DEC-2203.md) items 12, 14, 16,
-  and 18). *Accepted when:* `ask_owner` has its journaled question, opaque in-app delivery, and
-  control-stream answer (journal and notifications spec changes first); `propose_mandate_change` is
-  declared only after the founder accepts DEC-2203 item 14; a monitoring interval exists as an
-  envelope field (mandate spec change); and a journaled turn start lets a restart resume a run
-  within its deadline without losing a reservation from the ceiling's fold.
+  - `mandate-gateway` takes `turns`, the run's menu as `tools`, and `spend_ceiling_usd`, sends only
+    the pinned declarations, keeps every `single_call` hash and request digest unchanged, pins the
+    reasoning mode and effort and `top_p`, keeps the stable prompt order, and returns a final output
+    or validated tool calls, refusing anything else `schema_invalid`, with the reported identity read
+    before any tool call is parsed (INF-5's new test; lane I1's slice 2);
+  - `mandate-research-run` holds the loop's state as a pure fold of the run's records, the declared
+    read and think tools over read-only ports with §6.10's scope, item keys, and caps, the menus per
+    run kind, and §6.11's bounds, each ending the run except result size;
+  - the `final_output` path runs end to end: the runtime core (lane I2's E19-3 side) judges the final
+    output once, as a single call's; `action_tools` (`propose_thesis`, `invalidate` with verdict
+    feedback) follows in its own slice;
+  - `mandate-journal` registers the five §9.22 records with a draft for every rule 171 to 183;
+  - HI-1, HI-2, HI-3, HI-4, HI-8, HI-10, HI-11, HI-22, HI-23, and HI-24 to HI-28 hold as property
+    tests with independent oracles, each shown to catch a seeded bug, against an adaptive
+    compromised model at pass^k and random crashes, and INF-7's fuzz covers the run ceiling;
+  - recorded multi-turn fixtures run the loop in CI and the demo with no network (HI-3);
+  - no agent pins an agentic entry before E19-6's bench and a §8.3 regression evaluation pass on it
+    (DEC-2203 item 13).
+- **E19-14 (Should; SC; spec first)** As an owner, I want the agentic loop's follow-ups
+  ([DEC-2203](decisions/DEC-2203.md) items 12, 14, 15, 17, 19, 20). *Accepted when:* `propose_exit`
+  is declared once the founder accepts item 14's mandate spec change; `ask_owner` has its journaled
+  question, opaque delivery, and answer record, with wording the founder accepted; event triggers and
+  a monitoring interval exist as envelope fields with their debounce and rate limit (mandate spec
+  change); the longer strategy brief exists, with the validator's warning where it contradicts the
+  envelope; and a journaled turn start lets a restart resume a run within its deadline without losing
+  a reservation from the ceiling's fold.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 
