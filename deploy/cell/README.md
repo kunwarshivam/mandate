@@ -48,11 +48,11 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
 ## The local cell
 
 Needs docker, plus k3d, helm and kubeconform at the versions in `.github/workflows/ci.yml`
-(`bash .cursor/install.sh` installs them on x86_64 Linux).
+(`bash .cursor/install.sh` installs them on x86_64 Linux; on a Mac, see "On a laptop").
 
 ```bash
 cargo xtask cell up               # build the image, start k3d, install the operator, journal-db, workspace
-cargo xtask cell drill            # boot, journal, egress, compose
+cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch
 cargo xtask cell drill --seeded   # each drill with its bug planted; fails if one still holds
 cargo xtask cell down
 cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills
@@ -62,6 +62,26 @@ cargo xtask ci cell               # what CI runs: chart checks, up, drills, seed
 in the k3s node: `docker exec k3d-mandate-cell-server-0 kubectl get pods -n ws-ws1`. Behind a
 TLS-inspecting proxy, set `MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle so the node can pull.
 These are local-cell results, never staging's (DEC-967 item 5).
+
+### On a laptop
+
+Only linux/x86_64 can build the static `mandate` binary the cell runs, since no cross toolchain is
+a dependency kind (DEC-1040). On any other host, `cell up` and `cell demo` pull lane R2's signed
+image instead, named by digest in `MANDATE_CELL_IMAGE` (`<registry>/mandate@sha256:<64 hex>`), and
+skip the build. Until R2 (E21-35) publishes linux/arm64 and amd64 images there is nothing to pull,
+and both commands stop and say so. A pinned image is used on linux/x86_64 too.
+
+On an Apple-silicon Mac: Docker Desktop with at least 6 GB of memory for its VM, and the darwin-arm64
+builds of the tools, each checked against its SHA-256:
+
+| Tool | Download | SHA-256 |
+|---|---|---|
+| k3d 5.9.0 | `github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-darwin-arm64` | `fe106541d5d0a3f18debcd4d432a16f8c0ce3e6ddc06f8fbb6f696a122313e00` |
+| helm 4.3.0 | `get.helm.sh/helm-v4.3.0-darwin-arm64.tar.gz` | `d3870437e1e95b67f8edbde964156c84a26503f560821d40c542441658934fba` |
+| kubeconform 0.8.0 | `github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-darwin-arm64.tar.gz` | `f84f4dfbebf4a6b0b230385fa065a39ea35e02608c2b50d025dcf64775a69d67` |
+
+The `compose` drill and `cell demo`'s web part run the same way there; `web/` needs Node.js as
+below.
 
 ### The demo
 
@@ -91,15 +111,18 @@ release in `web/.nvmrc` and npm; the first run does `npm ci`.
 | `boot` | The migration hook succeeded, and every object of the release, each network policy included, is in the cell | The default-deny policy deleted |
 | `journal` | The CLI opens a control stream in the cell's journal, and a Job exports it and verifies it by journal spec §11 | One byte of the segment changed before it is verified |
 | `compose` | The Compose file on the host's docker: Postgres initializes the roles, the migration applies, the CLI opens a control stream, and its export verifies | The first event's hash changed before it is verified |
+| `restart` | A control stream written before the journal's Postgres primary pod is deleted still exports and verifies by journal spec §11 once CloudNativePG has the cluster Ready again | A stream id the restart never held is verified, which must read as lost (`export_stream_empty`) |
+| `kill-switch` | Skipped, by name, until P1's runtime and executor images and O4's `mandate agent kill` are on `main` (OPS-4) | None until it runs |
 | `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
 
 A seeded run counts as caught only when its report names the planted bug's own symptom
-(`rehash_mismatch`, a live host reached, the deleted policy missing), never any failure. In the
+(`rehash_mismatch`, a live host reached, the deleted policy missing, `export_stream_empty`), never
+any failure. A skipped drill is reported as skipped, never as held. In the
 seeded egress run, with the workspace's policies deleted, the probes open TCP connections to the
 live trading hosts from the runner, to prove the drill can see a leak; they send no byte, so no
 request reaches a broker (AGENTS.md rule 8).
 
-The kill switch with the exporter, API and deployment manager down (OPS-4), kills at each step of
+The kill switch run with the exporter, API and deployment manager down (OPS-4), kills at each step of
 submission, two executors for one account (OPS-3), the upgrade drill (OPS-7) and the restore drill
 (OPS-8) join as their processes land.
 
