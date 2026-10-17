@@ -329,6 +329,232 @@ Step 4 is the first time real Robinhood answers are read: the response shapes ar
 then. A refusal there for an unexpected shape is a finding for the connector, not something to
 work around.
 
+### The R0 runbook: every command, in order
+
+The founder runs this in person, on their own laptop, in one terminal for the run and a second
+for the approvals. No agent runs any step or reads its output (`AGENTS.md` rule 8). Nothing here
+is a credential:
+
+- `<TICKER>`, `<ASSET_ID>`, `<EXCHANGE>` and the account number are the founder's to type;
+- the Alpaca market-data keys and the Robinhood login never appear in a command line, a file the
+  repository holds, or this page.
+
+Each `mandate` gesture that commits shows a code first and commits only when it is run again with
+`--code`. Every command that takes an environment states `--environment live`; the
+download, `inspect`, the preflight and the run read it from the workspace and the mandate.
+
+**A. Before the day (laptop prerequisites).**
+
+1. A checkout of `main` at the commit to be run, and `bash .cursor/install.sh` (Rust from
+   `rust-toolchain.toml`, PostgreSQL 18 if the package manager has it).
+2. Build both binaries:
+
+   ```bash
+   cargo build --release --bins -p mandate-cli
+   cargo build --release --bins -p mandate-paper --features live
+   export PATH="$PWD/target/release:$PATH"
+   ```
+
+   The `live` build dials Robinhood's published MCP endpoint only. It never reads
+   `MANDATE_RH_SIM_*`, and refuses a loopback endpoint (DEC-922).
+3. Robinhood: an agentic account that is a cash account, or has margin disabled. It holds about
+   100 USD of settled cash, and no position or open order (DEC-529 items 3 and 11). Keep the
+   Robinhood app signed in on the phone, because the login in step D1 may ask for approval there.
+4. An Alpaca account whose paper market-data keys the founder exports in their own shell, as
+   `MANDATE_ALPACA_PAPER_KEY_ID` and `MANDATE_ALPACA_PAPER_SECRET`. They are read for the daily
+   bars and the IEX quote only (DEC-529 item 12). They are never written to a file here.
+5. A local journal and store, migrated once:
+
+   ```bash
+   createdb mandate_r0
+   mandate db migrate --journal "postgres://$USER@127.0.0.1:5432/mandate_r0"
+   export DSN="postgres://$USER@127.0.0.1:5432/mandate_r0?options=-c%20search_path%3Djournal%20-c%20role%3Dmandate_journal_app"
+   export STORE="$HOME/mandate-r0/store" MARKET="$HOME/mandate-r0/market"
+   mkdir -p "$STORE" "$MARKET"
+   J=(--journal "$DSN" --store "$STORE")
+   O=(--workspace ws_live --user founder --environment live)
+   ```
+
+**B. The workspace and its configuration (once).**
+
+1. `mandate workspace open --workspace ws_live --environment live "${J[@]}"` prints `opened ctl:ws_live`.
+2. The bars, downloaded on the run day itself so they end on the last completed session. Pick a
+   cheap broad ETF priced under about 90 USD a share (DEC-529 item 2) as `<TICKER>`.
+
+   ```bash
+   mandate download --symbols <TICKER> --asset-class us-equity --kind bars --timeframe 1Day \
+     --feed iex --start <a date 60 sessions back> --end <the last completed session> --out "$MARKET"
+   mandate inspect "$MARKET/alpaca/iex/bars-1Day/<TICKER>"
+   ```
+
+3. The instrument snapshot, `$HOME/mandate-r0/instrument.json`, with today's date and the ETP
+   classification read today from Nasdaq Trader's symbol directory:
+
+   ```json
+   {"asset_class":"us_equity","etp":"plain","etp_classified_at":"<YYYY-MM-DD>T00:00:00Z","etp_source":"nasdaq_trader_symbol_directory","exchange":"<EXCHANGE>","increment":"whole","instrument_id":"<ASSET_ID>","symbol":"<TICKER>"}
+   ```
+
+   Register it, then the live fee schedule, the calendar, the rule set and the model:
+
+   ```bash
+   mandate config register --kind instrument_snapshot "$HOME/mandate-r0/instrument.json" "${O[@]}" "${J[@]}"
+   mandate config register --kind fee_config config/fees/robinhood-live-2026-10-16.json "${O[@]}" "${J[@]}"
+   mandate config register --kind trading_calendar crates/mandate-shell/tests/fixtures/tracer/config/trading-calendar.json "${O[@]}" "${J[@]}"
+   mandate config register --kind rule_set crates/mandate-shell/tests/fixtures/tracer/config/rule-set.json "${O[@]}" "${J[@]}"
+   mandate model register quant.ma_crossover 1.0.0 "${O[@]}" "${J[@]}"
+   ```
+
+   Each prints `registered as event … at seq …`.
+
+**C. The connection (once, in market hours or out).**
+
+1. Choose an account reference: any 26-character ULID, written down, never the account number.
+   Export it as `REF`. Then type the agentic account's number only into the variable, in the same
+   command:
+
+   ```bash
+   MANDATE_RH_ACCOUNT_NUMBER=<typed by hand> mandate-paper --connect-check --workspace ws_live \
+     --account-ref "$REF" --connection conn_rh_live_01 --journal "$DSN" --confirm-live
+   ```
+
+   It prints a Robinhood login address. Open it in the browser and log in at Robinhood, approving
+   on the phone if Robinhood asks. The command then prints `checked <EVENT>`. A failed check
+   records the failure and stops; fix the account, then run it again.
+2. Record the connection, attesting a cash account:
+
+   ```bash
+   REC=(connection record --workspace ws_live --user founder --environment live \
+     --connection conn_rh_live_01 --broker robinhood --account-ref "$REF" --checked <EVENT> \
+     --margin-attestation cash_account --scope get_accounts --scope get_equity_orders \
+     --scope get_equity_positions --scope get_portfolio --scope get_equity_quotes \
+     --scope get_equity_tradability --scope review_equity_order --scope place_equity_order \
+     --scope cancel_equity_order "${J[@]}")
+   mandate "${REC[@]}"                  # prints: code <CODE>
+   mandate "${REC[@]}" --code <CODE>    # prints: recorded conn_rh_live_01
+   ```
+
+**D. The mandate (once).**
+
+1. Write `$HOME/mandate-r0/mandate.json` from the CLI's SPY fixture with the live values:
+
+   ```bash
+   MODEL_HASH=$(grep -rl '"kind":"quant_model_content"' "$STORE" | head -n 1 | xargs basename)
+   python3 -I - crates/mandate-cli/tests/fixtures/spy_mandate.json "$HOME/mandate-r0/mandate.json" \
+     "$MODEL_HASH" <TICKER> <ASSET_ID> <<'PY'
+   import json, sys
+   source, target, model_hash, symbol, asset_id = sys.argv[1:]
+   m = json.load(open(source))
+   m["name"] = "r0-live"
+   m["environment"] = "live"
+   m["connection_id"] = "conn_rh_live_01"
+   m["behavior"]["description"] = "R0: one ETF, ask for every opening."
+   m["behavior"]["signal_models"][0]["content_hash"] = "sha256:" + model_hash
+   m["autonomy"]["rules"] = []
+   m["autonomy"]["default"] = "ask"
+   m["capital"]["allocation_usd"] = "100"
+   for limit in ("max_order_usd", "max_position_usd", "max_gross_exposure_usd"):
+       m["risk"][limit] = "100"
+   m["protection"]["crypto_stop_limit_offset"] = "0.01"
+   m["universe"]["pinned_instruments"] = [
+       {"asset_class": "us_equity", "asset_id": asset_id, "symbol": symbol}]
+   open(target, "w").write(json.dumps(m, sort_keys=True, separators=(",", ":")))
+   PY
+   ```
+
+   The cap is DEC-529's 100 USD, the one pinned ETF is the founder's, every opening asks, and the
+   stop-limit offset is required on Robinhood (V-008, DEC-1152). Without it, `version confirm`
+   refuses `version_invalid`.
+2. Create, confirm and deploy. Read the warnings each shows; W-002 is expected, because one share
+   at its stop can exceed the 2% daily-loss budget of 100 USD:
+
+   ```bash
+   mandate version create "$HOME/mandate-r0/mandate.json" "${O[@]}" "${J[@]}"   # sha256:<VERSION>
+   mandate version confirm sha256:<VERSION> "${O[@]}" "${J[@]}"                   # code <CODE>
+   mandate version confirm sha256:<VERSION> --code <CODE> "${O[@]}" "${J[@]}"     # confirmed …
+   mandate agent deploy agent_r0 sha256:<VERSION> "${O[@]}" "${J[@]}"             # code <CODE>
+   mandate agent deploy agent_r0 sha256:<VERSION> --code <CODE> "${O[@]}" "${J[@]}"  # deployed …
+   ```
+
+**E. The day: between 09:30 and 15:50 New York, on a trading day after one with a close.**
+
+1. **Preflight, nothing sent.** In the run terminal, with the Alpaca data keys exported:
+
+   ```bash
+   RUN=(mandate-paper --workspace ws_live --agent agent_r0 --account-ref "$REF" --journal "$DSN" \
+     --store "$STORE" --bars "$MARKET/alpaca/iex/bars-1Day/<TICKER>" --confirm-live)
+   MANDATE_RH_ACCOUNT_NUMBER=<typed by hand> "${RUN[@]}"
+   ```
+
+   Log in at Robinhood again when it prints the address; no token is kept between runs. Expect
+   `the tracer stopped at Classify: the proposal classified ask, and the tracer acts only on
+   auto`, with nothing sent. A model `Flat`, a gate denial, a stale output (a Monday, DEC-969
+   item 7) or any refusal ends the day here; do not work around it.
+2. **The run.** The same command with `--place-one-order`:
+   `MANDATE_RH_ACCOUNT_NUMBER=<typed by hand> "${RUN[@]}" --place-one-order`. Log in when
+   asked, then leave it running.
+3. **Approve.** There is no phone approval in R0; the platform's approval is `cli_confirm` on the
+   laptop (DEC-923). In the second terminal:
+
+   ```bash
+   mandate approvals list --agent agent_r0 "${O[@]}" "${J[@]}"      # <APPROVAL> pending
+   mandate approvals show <APPROVAL> --agent agent_r0 "${O[@]}" "${J[@]}"   # read it; code <CODE>
+   mandate approvals approve <APPROVAL> --agent agent_r0 --code <CODE> "${O[@]}" "${J[@]}"
+   ```
+
+   Read the shown request before approving: one share of `<TICKER>`, a limit at most the cap.
+   Doing nothing skips it at its deadline. The approve answers `Admitted and sent to the
+   executor; the gate still decides.`
+4. **Let it finish.** The run places one `place_equity_order` and watches it. Once the entry
+   fills, it books the fill and sends B3's protective GTC stop-limit sell of the share, at stop =
+   entry stop and limit = stop × (1 − 0.01) (DEC-1151). It prints `submitted <ENTRY>` and
+   `submitted <ENTRY>-p…`, and exits 0. If the entry does not fill before 15:50, it cancels it
+   and exits; nothing else is sent.
+
+**F. Check, at Robinhood and in the journal.**
+
+1. **In the Robinhood app or website, agentic account.**
+   - History shows one buy of one share of `<TICKER>`, filled.
+   - Orders shows one working GTC stop-limit sell of one share, with the stop and limit the run
+     printed in its journal (`OrderSubmitted` of the protective order).
+   - Positions shows one share.
+   - Note the fill price; do not record the account number.
+2. **The journal.** Export and verify each stream; each must answer `verified`:
+
+   ```bash
+   for s in ctl:ws_live agent:ws_live:agent_r0 "acct:ws_live:$REF"; do
+     mandate journal export --journal "$DSN" "$s" "$HOME/mandate-r0/${s%%:*}.jsonl"
+     mandate journal verify "$HOME/mandate-r0/${s%%:*}.jsonl" --store "$STORE"
+   done
+   ```
+
+3. **Reconcile.** In the account export, find:
+   - `LateFillApplied` or `FillApplied` with `fill_id` `record:<ENTRY>:1`, and price equal to
+     Robinhood's average cost;
+   - `ReconciliationRun` `adopted` or `clean`, and no `BrokerPositionObserved` with
+     `"mismatch": true`;
+   - `ProtectionChanged` `unprotected_end` naming the stop.
+
+   Compare them with Robinhood's history. A difference is a finding to record, never to edit.
+4. **The restart sends nothing.** `MANDATE_RH_ACCOUNT_NUMBER=<typed by hand> "${RUN[@]}"
+   --place-one-order` is refused before any place call. Either refusal passes: `the account the
+   connection binds is not flat` (DEC-470 item 1) or `the connection record is spent` (DEC-910 item
+   3). A sold-out position that Robinhood still lists as a zero row reads not flat (R23).
+5. Record the evidence (no account number) in R0's docs PR.
+
+**G. While the share is held, and the kill switch.**
+
+- The stop rests at Robinhood with no process running. Its GTC expiry is not published, so check
+  it in the app periodically, and re-place it by hand if it lapsed (DEC-529 item 7).
+- **Kill switch.** The shipping CLI has no `mandate agent kill`, `stop` or `exit`. They are in the
+  library, but no command reaches them (DEC-1152, not closed). So the kill switch for R0 is the
+  broker's:
+  1. press Ctrl-C in the run terminal; the run sends nothing after it stops;
+  2. in the Robinhood app, cancel the open order and, to flatten, sell the share;
+  3. remove the MCP connection's access in Robinhood's settings.
+- After a stop fill or a manual sale, the platform cannot book the sale: Robinhood publishes no
+  sale price (DEC-1152). Do not run the agent again on this record. A second entry needs a fresh
+  connect check, connection record, version and deployment (DEC-529 item 13, DEC-910 item 3).
+
 ## Decisions
 
 ### Founder-reserved (DEC-79), in DEC-529
