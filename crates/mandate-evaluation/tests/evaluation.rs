@@ -247,6 +247,53 @@ fn a_horizon_the_closes_have_not_reached_is_open() {
     assert_eq!((report.groups[0].closed, report.groups[0].open), (0, 1));
 }
 
+/// DEC-1002 item 3: a horizon resolves on the baselines' closes too, each of them, so a basket
+/// member or the index whose closes stop short of it leaves the thesis open.
+#[test]
+fn a_baseline_short_of_the_horizon_leaves_the_thesis_open() {
+    let stored = stored_research();
+    let records = records(stored.0, &[thesis("th_1", AS_OF, HORIZON)]);
+    for baseline in [BASKET_ASSET, INDEX_ASSET] {
+        let mut closes = closes();
+        closes
+            .get_mut(&asset(baseline))
+            .unwrap_or_else(|| panic!("the baseline has closes"))
+            .retain(|close| close.at < at(HORIZON));
+        let report = evaluate_with(&records, &stored, &decision(0), AFTER, &closes)
+            .unwrap_or_else(|e| panic!("{}", e.code()));
+        assert_eq!(
+            (report.groups[0].closed, report.groups[0].open),
+            (0, 1),
+            "{baseline} stops short"
+        );
+    }
+}
+
+/// DEC-1002 item 3: a thesis on an instrument with no close series at all never waits on one: it is
+/// closed at its horizon and the scorer counts it unscoreable, `no_series`, beside a scored one.
+#[test]
+fn a_thesis_without_a_series_is_closed_and_unscoreable() {
+    let stored = stored_research();
+    let unseen = Thesis {
+        instrument: "7b4a1c2e-8888-4a2b-9c3d-000000000008",
+        ..thesis("th_2", AS_OF, HORIZON)
+    };
+    let theses = [thesis("th_1", AS_OF, HORIZON), unseen];
+    let report = evaluate(&records(stored.0, &theses), &stored, &decision(0), AFTER)
+        .unwrap_or_else(|e| panic!("{}", e.code()));
+    let group = &report.groups[0];
+    assert_eq!((group.closed, group.open), (2, 0));
+    let scorecard = group
+        .outcome
+        .as_ref()
+        .unwrap_or_else(|code| panic!("{code}"));
+    assert_eq!(scorecard.unscoreable.len(), 1);
+    assert_eq!(
+        scorecard.unscoreable[0].reason,
+        mandate_research::score::UnscoreableReason::NoSeries
+    );
+}
+
 /// The record's stream ranges come from the records' own positions, whatever order they arrive in.
 #[test]
 fn the_record_ranges_each_stream_by_its_lowest_and_highest_seq() {

@@ -178,6 +178,48 @@ fn a_record_received_before_its_data_refuses_the_run() {
         )),
         "record_before_its_data"
     );
+    let ahead_of_receipt = vec![mandate_backtest::RecordedThesis {
+        as_of: at("2026-09-02T12:00:01Z"),
+        ..thesis(at("2026-09-02T12:00:00Z"), at("2026-10-30T12:00:00Z"), true)
+    }];
+    assert_eq!(
+        refusal(run(
+            &research(),
+            &flat_bars(DAYS),
+            &daily_outputs(&days, "0.5"),
+            &ahead_of_receipt
+        )),
+        "record_before_its_data"
+    );
+}
+
+/// The receipt check's edges: a thesis made from earlier data, and one invalidated at the instant
+/// it was received, are records that can exist, so the run completes.
+#[test]
+fn a_thesis_from_earlier_data_or_invalidated_on_receipt_is_accepted() {
+    let days = trading_days(DAYS);
+    let received = at("2026-09-02T12:00:00Z");
+    let expires = at("2026-10-30T12:00:00Z");
+    let from_earlier_data = mandate_backtest::RecordedThesis {
+        as_of: at("2026-09-01T20:00:00Z"),
+        ..thesis(received, expires, true)
+    };
+    let invalidated_on_receipt = mandate_backtest::RecordedThesis {
+        thesis_id: "th_02".to_owned(),
+        invalidated_at: Some(received),
+        ..thesis(received, expires, true)
+    };
+    for theses in [[from_earlier_data], [invalidated_on_receipt]] {
+        assert!(
+            run(
+                &research(),
+                &flat_bars(DAYS),
+                &daily_outputs(&days, "0.5"),
+                &theses
+            )
+            .is_ok()
+        );
+    }
 }
 
 /// DEC-1000 item 6: an output from a model version the mandate does not pin refuses the run, as

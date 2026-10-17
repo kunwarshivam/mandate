@@ -246,9 +246,19 @@ pub fn evaluate(
     decision: &EvaluationDecision,
     cut_off: &str,
 ) -> Result<EvaluationReport, mandate_evaluation::EvaluationError> {
+    evaluate_with(records, stored, decision, cut_off, &closes())
+}
+
+/// [`evaluate`] over the given closes.
+pub fn evaluate_with(
+    records: &[ThesisRecord],
+    stored: &(Digest, Value),
+    decision: &EvaluationDecision,
+    cut_off: &str,
+    closes: &Closes,
+) -> Result<EvaluationReport, mandate_evaluation::EvaluationError> {
     let (version, document) = stored.clone();
     let documents = move |digest: &Digest| (*digest == version).then(|| document.clone());
-    let closes = closes();
     let basket = [asset(BASKET_ASSET)];
     let index = asset(INDEX_ASSET);
     let cost = cost();
@@ -258,7 +268,7 @@ pub fn evaluate(
         cut_off: at(cut_off),
         records,
         documents: &documents,
-        closes: &closes,
+        closes,
         baselines: Baselines {
             basket: &basket,
             index: &index,

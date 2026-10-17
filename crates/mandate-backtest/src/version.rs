@@ -557,8 +557,9 @@ impl<'a, 'c> Run<'a, 'c> {
         Ok(())
     }
 
-    /// The instant a bar closes: the earlier of the next bar's start and its regular session's
-    /// end on the committed calendar (DEC-1000 item 3).
+    /// The instant a bar closes: the earlier of the next bar's start and the end of the session
+    /// that holds its start on the committed calendar, its regular session, since slice 1 takes
+    /// regular-session bars only (DEC-1000 items 3 and 8).
     fn close_instant(&self, index: usize, bar: &SimBar) -> Result<UtcNanos, BacktestError> {
         let next = index
             .checked_add(1)
@@ -568,9 +569,7 @@ impl<'a, 'c> Run<'a, 'c> {
             .calendar
             .sessions(bar.trade_date)?
             .into_iter()
-            .find(|span| {
-                span.session() == mandate_time::Session::Regular && span.contains(bar.start)
-            })
+            .find(|span| span.contains(bar.start))
             .map(|span| span.end());
         match (next, session_end) {
             (Some(next), Some(end)) => Ok(next.min(end)),

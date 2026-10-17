@@ -24,20 +24,21 @@ pub struct EvaluationRecord<'a> {
 /// per agent stream read, in stream order (rule 145): the first and the last record's
 /// `stream_id:seq`, and the last record's hash.
 pub fn evaluation_run_recorded(record: &EvaluationRecord<'_>) -> Result<Value, EvaluationError> {
-    let mut ranges: BTreeMap<&str, (&ThesisRecord, &ThesisRecord)> = BTreeMap::new();
+    let mut streams: BTreeMap<&str, Vec<&ThesisRecord>> = BTreeMap::new();
     for thesis in record.records {
-        ranges
+        streams
             .entry(thesis.stream_id.as_str())
-            .and_modify(|(first, last)| {
-                if thesis.seq < first.seq {
-                    *first = thesis;
-                }
-                if thesis.seq > last.seq {
-                    *last = thesis;
-                }
-            })
-            .or_insert((thesis, thesis));
+            .or_default()
+            .push(thesis);
     }
+    let ranges: Vec<(&ThesisRecord, &ThesisRecord)> = streams
+        .values()
+        .filter_map(|read| {
+            let first = read.iter().copied().min_by_key(|thesis| thesis.seq)?;
+            let last = read.iter().copied().max_by_key(|thesis| thesis.seq)?;
+            Some((first, last))
+        })
+        .collect();
     let position = |thesis: &ThesisRecord| text(&format!("{}:{}", thesis.stream_id, thesis.seq));
     let report = record.report;
     object(vec![
@@ -47,17 +48,17 @@ pub fn evaluation_run_recorded(record: &EvaluationRecord<'_>) -> Result<Value, E
         ("theses", reference(&report.inputs.theses)),
         (
             "theses_from",
-            Value::Array(ranges.values().map(|(first, _)| position(first)).collect()),
+            Value::Array(ranges.iter().map(|(first, _)| position(first)).collect()),
         ),
         (
             "theses_to",
-            Value::Array(ranges.values().map(|(_, last)| position(last)).collect()),
+            Value::Array(ranges.iter().map(|(_, last)| position(last)).collect()),
         ),
         (
             "theses_head",
             Value::Array(
                 ranges
-                    .values()
+                    .iter()
                     .map(|(_, last)| reference(&last.hash))
                     .collect(),
             ),
