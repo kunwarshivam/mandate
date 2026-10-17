@@ -25,10 +25,12 @@
 mod directory;
 mod fleet;
 mod request;
+mod wire;
 
 pub use directory::{
     ControlPlane, Deployment, DeploymentMode, Endpoint, Enrolled, Ident, Member, MemberState,
     MemoryStore, Refused, Route, Store, Workspace,
 };
 pub use fleet::{Component, FleetRow, Health, Heartbeat, Reachability, UNREACHABLE_AFTER_SECS};
-pub use request::{MAX_SKEW_SECS, Signed, signed_request_bytes};
+pub use request::{MAX_SKEW_SECS, Operation, Signed, signed_request_bytes};
+pub use wire::{MAX_COMPONENTS, MAX_MEMBERS, role_name};

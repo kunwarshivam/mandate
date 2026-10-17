@@ -8,7 +8,8 @@ use mandate_identity::Role;
 use mandate_time::UtcNanos;
 
 use crate::fleet::{FleetRow, Heartbeat, fleet_row};
-use crate::request::{Signed, verify};
+use crate::request::{Operation, Signed, verify};
+use crate::wire;
 
 /// An opaque identifier, `[A-Za-z0-9_-]`, 1 to 64 bytes: the only form an ID takes here.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -128,8 +129,16 @@ pub enum Refused {
     BadKey,
     UnknownDeployment,
     NotEnrolled,
+    /// The deployment already holds a key; a key is replaced only after a revocation.
+    AlreadyEnrolled,
+    /// The deployment or workspace ID is already registered.
+    Exists,
+    /// The call's time is outside the skew, or not after the deployment's last accepted call.
     Stale,
     BadSignature,
+    /// The call is not the operation it was sent to, or its body is not that operation's closed
+    /// canonical shape.
+    Malformed,
     /// The call names a deployment, workspace or member that is not the caller's (CP-11).
     NotYours,
 }
@@ -142,16 +151,15 @@ pub trait Store {
     fn token(&self, deployment_id: &Ident, secret_hash: &Digest) -> Option<Token>;
     fn put_token(&mut self, deployment_id: &Ident, secret_hash: Digest, token: Token);
     fn workspaces(&self) -> Vec<Workspace>;
+    fn put_workspace(&mut self, workspace: Workspace);
     fn members(&self) -> Vec<Member>;
-    /// Replaces every workspace and membership of `deployment_id`, and nothing else.
-    fn replace_directory(
-        &mut self,
-        deployment_id: &Ident,
-        workspaces: Vec<Workspace>,
-        members: Vec<Member>,
-    );
+    /// Replaces every membership of the workspaces of `deployment_id`, and nothing else.
+    fn replace_members(&mut self, deployment_id: &Ident, members: Vec<Member>);
     fn heartbeat(&self, deployment_id: &Ident) -> Option<(UtcNanos, Heartbeat)>;
     fn put_heartbeat(&mut self, deployment_id: &Ident, at: UtcNanos, heartbeat: Heartbeat);
+    /// The time of the deployment's last accepted call.
+    fn last_call(&self, deployment_id: &Ident) -> Option<UtcNanos>;
+    fn put_last_call(&mut self, deployment_id: &Ident, at: UtcNanos);
 }
 
 /// The control plane's behaviour over a [`Store`].
@@ -167,29 +175,87 @@ impl<S: Store> ControlPlane<S> {
             .find(|d| d.deployment_id == *id)
     }
 
-    /// An org admin creates `deployment` and receives its single-use enrollment token: the hex of
-    /// `secret`, 32 random bytes the caller drew, valid until `expires_at` (E13-1, design §3.1).
+    /// An org admin creates `deployment`, unenrolled, and receives its first enrollment token
+    /// ([`Self::issue_token`]). An ID already registered is refused, so no creation can take over
+    /// or un-enroll another deployment.
     pub fn create_deployment(
         &mut self,
         deployment: Deployment,
         secret: [u8; 32],
         expires_at: UtcNanos,
-    ) -> String {
+    ) -> Result<String, Refused> {
+        if self.deployment(&deployment.deployment_id).is_some() {
+            return Err(Refused::Exists);
+        }
         let id = deployment.deployment_id.clone();
         self.store.put_deployment(Deployment {
             public_key: None,
             ..deployment
         });
+        self.issue_token(&id, secret, expires_at)
+    }
+
+    /// A single-use enrollment token for an unenrolled deployment: the hex of `secret`, 32 random
+    /// bytes the caller drew, kept only as its SHA-256 and valid until `expires_at` (E13-1, design
+    /// §3.1).
+    pub fn issue_token(
+        &mut self,
+        deployment_id: &Ident,
+        secret: [u8; 32],
+        expires_at: UtcNanos,
+    ) -> Result<String, Refused> {
+        let deployment = self
+            .deployment(deployment_id)
+            .ok_or(Refused::UnknownDeployment)?;
+        if deployment.public_key.is_some() {
+            return Err(Refused::AlreadyEnrolled);
+        }
         let token = Token {
             expires_at,
             used: false,
         };
-        self.store.put_token(&id, Digest::of(&secret), token);
-        Digest::from_bytes(secret).to_hex()
+        self.store
+            .put_token(deployment_id, Digest::of(&secret), token);
+        Ok(Digest::from_bytes(secret).to_hex())
+    }
+
+    /// Revokes a deployment's key: the site sees an outage (design §4), never a trading stop. A
+    /// new token can then enroll a new key.
+    pub fn revoke(&mut self, deployment_id: &Ident) -> Result<(), Refused> {
+        let deployment = self
+            .deployment(deployment_id)
+            .ok_or(Refused::UnknownDeployment)?;
+        self.store.put_deployment(Deployment {
+            public_key: None,
+            ..deployment
+        });
+        Ok(())
+    }
+
+    /// An org admin places a workspace on a deployment. Only a registered workspace can be named
+    /// by the deployment's directory sync, and a hybrid site hosts only its own organization's
+    /// workspaces (CP-11).
+    pub fn register_workspace(&mut self, workspace: Workspace) -> Result<(), Refused> {
+        let deployment = self
+            .deployment(&workspace.deployment_id)
+            .ok_or(Refused::UnknownDeployment)?;
+        if deployment.mode == DeploymentMode::Hybrid && workspace.org_id != deployment.owner_org {
+            return Err(Refused::NotYours);
+        }
+        let held = self
+            .store
+            .workspaces()
+            .iter()
+            .any(|w| w.workspace_id == workspace.workspace_id);
+        if held {
+            return Err(Refused::Exists);
+        }
+        self.store.put_workspace(workspace);
+        Ok(())
     }
 
     /// Enrollment (design §3.1, E20-2): a known, unused, unexpired token binds `public_key`, the
-    /// key generated on site, to its deployment, and is spent.
+    /// key generated on site, to its unenrolled deployment, and is spent.
     pub fn enroll(
         &mut self,
         deployment_id: &Ident,
@@ -213,6 +279,17 @@ impl<S: Store> ControlPlane<S> {
         let deployment = self
             .deployment(deployment_id)
             .ok_or(Refused::UnknownDeployment)?;
+        if deployment.public_key.is_some() {
+            return Err(Refused::AlreadyEnrolled);
+        }
+        let reused = self
+            .store
+            .deployments()
+            .iter()
+            .any(|d| d.public_key == Some(key));
+        if reused {
+            return Err(Refused::BadKey);
+        }
         self.store.put_token(
             deployment_id,
             hash,
@@ -234,25 +311,40 @@ impl<S: Store> ControlPlane<S> {
         Ok(enrolled)
     }
 
-    /// The deployment a signed call comes from, if its key is enrolled, its time is within the
-    /// skew, and its signature verifies.
-    pub fn authenticate(&self, signed: &Signed, now: UtcNanos) -> Result<Ident, Refused> {
+    /// The deployment a signed call to `operation` comes from: its key is enrolled, the call is
+    /// that operation, its time is within the skew and after the deployment's last accepted call,
+    /// and its signature verifies. The call's time is then recorded, so no call is accepted twice
+    /// and no older call after a newer one.
+    pub fn authenticate(
+        &mut self,
+        signed: &Signed,
+        operation: Operation,
+        now: UtcNanos,
+    ) -> Result<Ident, Refused> {
+        if (signed.method.as_str(), signed.path.as_str()) != operation.route() {
+            return Err(Refused::Malformed);
+        }
         let deployment = self
             .deployment(&signed.deployment_id)
             .ok_or(Refused::UnknownDeployment)?;
         let key = deployment.public_key.ok_or(Refused::NotEnrolled)?;
         verify(signed, &key, now)?;
-        Ok(deployment.deployment_id)
+        let id = deployment.deployment_id;
+        if self
+            .store
+            .last_call(&id)
+            .is_some_and(|last| signed.at <= last)
+        {
+            return Err(Refused::Stale);
+        }
+        self.store.put_last_call(&id, signed.at);
+        Ok(id)
     }
 
     /// A heartbeat (design §3.4, E20-5): versions and health only, from its own deployment.
-    pub fn heartbeat(
-        &mut self,
-        signed: &Signed,
-        heartbeat: Heartbeat,
-        now: UtcNanos,
-    ) -> Result<(), Refused> {
-        let caller = self.authenticate(signed, now)?;
+    pub fn heartbeat(&mut self, signed: &Signed, now: UtcNanos) -> Result<(), Refused> {
+        let caller = self.authenticate(signed, Operation::Heartbeat, now)?;
+        let heartbeat = wire::heartbeat(&signed.body).ok_or(Refused::Malformed)?;
         self.store.put_heartbeat(&caller, now, heartbeat);
         Ok(())
     }
@@ -267,47 +359,48 @@ impl<S: Store> ControlPlane<S> {
             .collect()
     }
 
-    /// Directory sync (design §3.2): a deployment replaces its own workspaces and their
-    /// memberships. Any workspace on another deployment, or member of a workspace not in the call,
-    /// refuses the whole call (CP-11).
-    pub fn sync_directory(
-        &mut self,
-        signed: &Signed,
-        workspaces: Vec<Workspace>,
-        members: Vec<Member>,
-        now: UtcNanos,
-    ) -> Result<(), Refused> {
-        let caller = self.authenticate(signed, now)?;
-        let elsewhere: BTreeSet<Ident> = self
-            .store
-            .workspaces()
-            .into_iter()
-            .filter(|w| w.deployment_id != caller)
-            .map(|w| w.workspace_id)
-            .collect();
-        let mine: BTreeSet<&Ident> = workspaces.iter().map(|w| &w.workspace_id).collect();
-        let owned = workspaces
-            .iter()
-            .all(|w| w.deployment_id == caller && !elsewhere.contains(&w.workspace_id));
-        let scoped = members.iter().all(|m| mine.contains(&m.workspace_id));
-        if !(owned && scoped) {
+    /// Directory sync (design §3.2): a deployment replaces the memberships of the workspaces
+    /// registered on it. A member of any other workspace refuses the whole call (CP-11).
+    pub fn sync_directory(&mut self, signed: &Signed, now: UtcNanos) -> Result<(), Refused> {
+        let caller = self.authenticate(signed, Operation::Directory, now)?;
+        let members = wire::members(&signed.body).ok_or(Refused::Malformed)?;
+        let hosted = self.hosted(&caller);
+        if !members.iter().all(|m| hosted.contains_key(&m.workspace_id)) {
             return Err(Refused::NotYours);
         }
-        self.store.replace_directory(&caller, workspaces, members);
+        self.store.replace_members(&caller, members);
         Ok(())
     }
 
-    /// The routes of `user_id`: each workspace where they hold an active membership, with its
-    /// deployment's endpoint. The call is signed by a deployment that vouches for the user, so
-    /// the plane learns nothing it did not already hold.
-    pub fn routes(
-        &self,
-        signed: &Signed,
-        user_id: &Ident,
-        now: UtcNanos,
-    ) -> Result<Vec<Route>, Refused> {
-        self.authenticate(signed, now)?;
-        if signed.body != user_id.as_str().as_bytes() {
+    /// The workspaces registered on `deployment_id`, with their organizations.
+    fn hosted(&self, deployment_id: &Ident) -> BTreeMap<Ident, Ident> {
+        self.store
+            .workspaces()
+            .into_iter()
+            .filter(|w| w.deployment_id == *deployment_id)
+            .map(|w| (w.workspace_id, w.org_id))
+            .collect()
+    }
+
+    /// The routes of a user the calling deployment hosts: each workspace, in an organization where
+    /// the user is an active member on the caller, where they hold an active membership, with its
+    /// deployment's endpoint. A user the caller does not host is refused, so no deployment learns
+    /// another's users or another organization's workspaces (CP-11).
+    pub fn routes(&mut self, signed: &Signed, now: UtcNanos) -> Result<Vec<Route>, Refused> {
+        let caller = self.authenticate(signed, Operation::Routes, now)?;
+        let user = wire::user(&signed.body).ok_or(Refused::Malformed)?;
+        let active: Vec<Member> = self
+            .store
+            .members()
+            .into_iter()
+            .filter(|m| m.user_id == user && m.state == MemberState::Active)
+            .collect();
+        let hosted = self.hosted(&caller);
+        let orgs: BTreeSet<&Ident> = active
+            .iter()
+            .filter_map(|m| hosted.get(&m.workspace_id))
+            .collect();
+        if orgs.is_empty() {
             return Err(Refused::NotYours);
         }
         let endpoints: BTreeMap<Ident, Endpoint> = self
@@ -316,22 +409,22 @@ impl<S: Store> ControlPlane<S> {
             .into_iter()
             .map(|d| (d.deployment_id, d.endpoint))
             .collect();
-        let hosts: BTreeMap<Ident, Ident> = self
+        let workspaces: BTreeMap<Ident, Workspace> = self
             .store
             .workspaces()
             .into_iter()
-            .map(|w| (w.workspace_id, w.deployment_id))
+            .map(|w| (w.workspace_id.clone(), w))
             .collect();
-        let routes: BTreeSet<Route> = self
-            .store
-            .members()
-            .into_iter()
-            .filter(|m| m.user_id == *user_id && m.state == MemberState::Active)
+        let routes: BTreeSet<Route> = active
+            .iter()
             .filter_map(|m| {
-                let endpoint = endpoints.get(hosts.get(&m.workspace_id)?)?;
+                let workspace = workspaces.get(&m.workspace_id)?;
+                if !orgs.contains(&workspace.org_id) {
+                    return None;
+                }
                 Some(Route {
-                    workspace_id: m.workspace_id,
-                    endpoint: endpoint.clone(),
+                    workspace_id: m.workspace_id.clone(),
+                    endpoint: endpoints.get(&workspace.deployment_id)?.clone(),
                 })
             })
             .collect();
@@ -344,9 +437,10 @@ impl<S: Store> ControlPlane<S> {
 pub struct MemoryStore {
     deployments: BTreeMap<Ident, Deployment>,
     tokens: BTreeMap<(Ident, Digest), Token>,
-    workspaces: Vec<Workspace>,
+    workspaces: BTreeMap<Ident, Workspace>,
     members: Vec<Member>,
     heartbeats: BTreeMap<Ident, (UtcNanos, Heartbeat)>,
+    calls: BTreeMap<Ident, UtcNanos>,
 }
 
 impl Store for MemoryStore {
@@ -371,29 +465,26 @@ impl Store for MemoryStore {
     }
 
     fn workspaces(&self) -> Vec<Workspace> {
-        self.workspaces.clone()
+        self.workspaces.values().cloned().collect()
+    }
+
+    fn put_workspace(&mut self, workspace: Workspace) {
+        self.workspaces
+            .insert(workspace.workspace_id.clone(), workspace);
     }
 
     fn members(&self) -> Vec<Member> {
         self.members.clone()
     }
 
-    fn replace_directory(
-        &mut self,
-        deployment_id: &Ident,
-        workspaces: Vec<Workspace>,
-        members: Vec<Member>,
-    ) {
-        let gone: BTreeSet<Ident> = self
+    fn replace_members(&mut self, deployment_id: &Ident, members: Vec<Member>) {
+        let hosted: BTreeSet<Ident> = self
             .workspaces
-            .iter()
+            .values()
             .filter(|w| w.deployment_id == *deployment_id)
             .map(|w| w.workspace_id.clone())
             .collect();
-        self.workspaces
-            .retain(|w| w.deployment_id != *deployment_id);
-        self.members.retain(|m| !gone.contains(&m.workspace_id));
-        self.workspaces.extend(workspaces);
+        self.members.retain(|m| !hosted.contains(&m.workspace_id));
         self.members.extend(members);
     }
 
@@ -404,5 +495,13 @@ impl Store for MemoryStore {
     fn put_heartbeat(&mut self, deployment_id: &Ident, at: UtcNanos, heartbeat: Heartbeat) {
         self.heartbeats
             .insert(deployment_id.clone(), (at, heartbeat));
+    }
+
+    fn last_call(&self, deployment_id: &Ident) -> Option<UtcNanos> {
+        self.calls.get(deployment_id).copied()
+    }
+
+    fn put_last_call(&mut self, deployment_id: &Ident, at: UtcNanos) {
+        self.calls.insert(deployment_id.clone(), at);
     }
 }

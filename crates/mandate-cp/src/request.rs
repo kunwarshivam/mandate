@@ -11,13 +11,33 @@ use crate::directory::{Ident, Refused};
 /// How far a call's time may be from the plane's, either way.
 pub const MAX_SKEW_SECS: i64 = 300;
 
+/// The calls a deployment makes, each on its one route. A call's method and path are checked
+/// against its operation, and both are fixed text, so the signed bytes are never ambiguous.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operation {
+    Heartbeat,
+    Directory,
+    Routes,
+}
+
+impl Operation {
+    /// The method and path the call is sent to.
+    pub fn route(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Heartbeat => ("POST", "/v1/heartbeat"),
+            Self::Directory => ("POST", "/v1/directory"),
+            Self::Routes => ("POST", "/v1/routes"),
+        }
+    }
+}
+
 /// One signed call, as the server extracts it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signed {
     pub deployment_id: Ident,
     pub method: String,
     pub path: String,
-    /// The deployment's clock when it signed, in whole seconds.
+    /// The deployment's clock when it signed; each call's time is after the last one's.
     pub at: UtcNanos,
     pub body: Vec<u8>,
     pub signature: Vec<u8>,
