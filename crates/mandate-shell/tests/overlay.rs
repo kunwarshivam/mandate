@@ -377,6 +377,7 @@ fn run(mandate: &str, governed: Option<&Governed>, proposing: Proposing) -> Ran 
         executor: Some(contexts.executor),
         run: Some(context.clone()),
         artifacts: Some(Arc::new(store) as Arc<dyn ArtifactSource + Send + Sync>),
+        content_store: None,
         symbols: BrokerSymbols::default(),
         transport: broker,
     };
