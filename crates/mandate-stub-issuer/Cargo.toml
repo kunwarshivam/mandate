@@ -18,6 +18,7 @@ tokio = { workspace = true, features = ["rt", "net", "signal"] }
 
 [dev-dependencies]
 axum.workspace = true
+base64.workspace = true
 mandate-api-server.workspace = true
 mandate-authn.workspace = true
 mandate-identity.workspace = true

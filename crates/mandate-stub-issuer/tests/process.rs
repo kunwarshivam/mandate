@@ -20,6 +20,29 @@ fn stub(tier: Option<&str>, bind: &str) -> Command {
     command
 }
 
+/// Runs `command` to its exit, at most five seconds: a stub that starts serving instead of
+/// refusing is killed, and the test fails rather than hangs.
+fn output(mut command: Command) -> Output {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("started");
+    let exited = (0..250).find_map(|_| {
+        std::thread::sleep(Duration::from_millis(20));
+        child.try_wait().expect("a status")
+    });
+    if exited.is_none() {
+        let _ = child.kill();
+    }
+    let output = child.wait_with_output().expect("its output");
+    assert!(
+        exited.is_some(),
+        "the stub kept running instead of refusing: {output:?}"
+    );
+    output
+}
+
 fn refused(output: &Output, code: &str) {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(stderr, format!("{code}\n"), "stderr was {stderr:?}");
@@ -31,10 +54,7 @@ fn refused(output: &Output, code: &str) {
 #[ignore = "pending E21-52"]
 fn outside_dev_and_ci_it_writes_its_refusal_alone() {
     for tier in [None, Some("staging"), Some("production"), Some("Dev")] {
-        refused(
-            &stub(tier, "127.0.0.1:8899").output().expect("ran"),
-            "stub_issuer_tier",
-        );
+        refused(&output(stub(tier, "127.0.0.1:8899")), "stub_issuer_tier");
     }
 }
 
@@ -42,10 +62,7 @@ fn outside_dev_and_ci_it_writes_its_refusal_alone() {
 #[ignore = "pending E21-52"]
 fn a_bind_that_is_not_a_loopback_ip_literal_is_refused() {
     for bind in ["0.0.0.0:8899", "localhost:8899", "127.0.0.1:0"] {
-        refused(
-            &stub(Some("dev"), bind).output().expect("ran"),
-            "stub_issuer_bind",
-        );
+        refused(&output(stub(Some("dev"), bind)), "stub_issuer_bind");
     }
 }
 
@@ -54,10 +71,7 @@ fn a_bind_that_is_not_a_loopback_ip_literal_is_refused() {
 fn a_port_in_use_is_refused() {
     let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
     let bind = taken.local_addr().expect("its address").to_string();
-    refused(
-        &stub(Some("ci"), &bind).output().expect("ran"),
-        "stub_issuer_bind",
-    );
+    refused(&output(stub(Some("ci"), &bind)), "stub_issuer_bind");
 }
 
 /// A started stub, killed if a test fails before it stops.

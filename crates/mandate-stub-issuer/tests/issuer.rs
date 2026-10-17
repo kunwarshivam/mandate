@@ -181,3 +181,17 @@ fn a_subject_that_is_empty_has_a_control_character_or_is_too_long_is_refused() {
         assert!(issuer.token(subject, now).is_ok(), "{subject:?}");
     }
 }
+
+#[test]
+#[ignore = "pending E21-52"]
+fn the_debug_form_names_the_issuer_and_never_the_key() {
+    let issuer = issuer();
+    let shown = format!("{issuer:?}");
+    assert!(
+        shown.contains(&issuer.kid) && shown.contains(&issuer.issuer),
+        "{shown}"
+    );
+    for hidden in ["key:", "random", "pkcs8", "\"d\""] {
+        assert!(!shown.contains(hidden), "{shown} shows {hidden}");
+    }
+}
