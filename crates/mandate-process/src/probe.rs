@@ -24,6 +24,9 @@ use crate::lifecycle::{Snapshot, State, nanos};
 const LINE_BOUND: usize = 64;
 const SILENCE_BOUND: Duration = Duration::from_secs(1);
 const CONNECTION_BOUND: usize = 8;
+/// How long the listener waits after a failed accept, so a persistent error (no file
+/// descriptors left) does not spin.
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 
 /// Every word an answer can carry.
 const WORDS: [&str; 5] = ["live", "stopped", "stalled", "ready", "not_ready"];
@@ -113,10 +116,12 @@ impl Status {
 /// `readyz`) from `status`, judged at `clock()`, on a thread of its own until the process exits.
 /// The reply is one line, `ok <word>` or `fail <word>`; an unknown request is `fail not_found`.
 /// A socket left at `path` by an earlier process is replaced; any other file there is refused.
-/// The new socket is readable and writable by its owner only.
+/// The new socket is readable and writable by its owner only; put it in a directory only the
+/// process's user can enter (a pod-local `emptyDir`), since it is bound before its mode is set.
 ///
 /// # Errors
-/// `AlreadyExists` for a file at `path` that is not a socket, or the bind's own.
+/// `AlreadyExists` for a file at `path` that is not a socket, or the bind's or the listener
+/// thread's own. A connection whose thread cannot be started is closed unanswered.
 pub fn serve<C>(path: &Path, status: Status, clock: C) -> io::Result<()>
 where
     C: Fn() -> UtcNanos + Send + Sync + 'static,
@@ -136,19 +141,26 @@ where
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     let clock = Arc::new(clock);
     let open = Arc::new(AtomicUsize::new(0));
-    thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
+    thread::Builder::new().spawn(move || {
+        for accepted in listener.incoming() {
+            let Ok(stream) = accepted else {
+                thread::sleep(ACCEPT_BACKOFF);
+                continue;
+            };
             if open.fetch_add(1, Ordering::SeqCst) >= CONNECTION_BOUND {
                 open.fetch_sub(1, Ordering::SeqCst);
                 continue;
             }
-            let (status, clock, open) = (status.clone(), Arc::clone(&clock), Arc::clone(&open));
-            thread::spawn(move || {
+            let (status, clock, done) = (status.clone(), Arc::clone(&clock), Arc::clone(&open));
+            let spawned = thread::Builder::new().spawn(move || {
                 let _answered = respond(&stream, &status, &*clock);
-                open.fetch_sub(1, Ordering::SeqCst);
+                done.fetch_sub(1, Ordering::SeqCst);
             });
+            if spawned.is_err() {
+                open.fetch_sub(1, Ordering::SeqCst);
+            }
         }
-    });
+    })?;
     Ok(())
 }
 
