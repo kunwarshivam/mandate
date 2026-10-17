@@ -1,7 +1,7 @@
 //! The runtime as a long-running process (E21-30 slice 1, DEC-1012): the agent stream on the real
 //! in-memory journal, which validates every draft the process writes, and the control and clock
-//! streams as rows a test lays down, as their writers (the workspace services and the scheduler)
-//! would have committed them.
+//! streams, and the account stream (DEC-1014), as rows a test lays down, as their writers (the
+//! workspace services, the scheduler, and the account's executor) would have committed them.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -14,7 +14,7 @@ use mandate_process::{Exit, State};
 use mandate_runtime::{
     AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment, DryRunVerdict,
     EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun, IdGen,
-    MandateView, OrderPlan, Proposal, Seq, SignalInputs, WorkspaceId, WriterEpoch,
+    MandateView, Mode, OrderPlan, Proposal, Seq, SignalInputs, WorkspaceId, WriterEpoch,
 };
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
@@ -25,6 +25,11 @@ const AGENT: &str = "agent-a";
 const AGENT_STREAM: &str = "agent:ws1:agent-a";
 const CONTROL: &str = "ctl:ws1";
 const CLOCK: &str = "clock:ws1";
+const CONNECTION: &str = "conn-1";
+const ACCOUNT_REF: &str = "01J8Z3MACCOUNTREF000000001";
+const ACCOUNT: &str = "acct:ws1:01J8Z3MACCOUNTREF000000001";
+const OTHER_REF: &str = "01J8Z3MACCOUNTREF000000002";
+const OTHER_ACCOUNT: &str = "acct:ws1:01J8Z3MACCOUNTREF000000002";
 const NOW: i64 = 1_792_155_600;
 
 fn at(secs: i64) -> UtcNanos {
@@ -109,7 +114,7 @@ fn config() -> Config {
     Config {
         deployment: Deployment {
             agent: AgentId(AGENT.into()),
-            connection: ConnectionId("conn-1".into()),
+            connection: ConnectionId(CONNECTION.into()),
             workspace: WorkspaceId(WORKSPACE.into()),
         },
         environment: Environment::Paper,
@@ -117,15 +122,19 @@ fn config() -> Config {
     }
 }
 
-/// The agent stream on the in-memory journal; the control and clock streams as laid-down rows; a
-/// log of which stream each read was of; and a count of appends to answer `Unavailable` after
-/// committing them, as a connection lost after the commit would.
+/// The agent stream on the in-memory journal; the control, clock, and account streams as laid-down
+/// rows, any of them able to be unreadable; a log of which stream each read was of; and a count of
+/// appends to answer `Unavailable` after committing them, as a connection lost after the commit
+/// would.
 #[derive(Clone, Default)]
 struct Rig {
     journal: MemoryStore,
     control: Rc<RefCell<Vec<StoredEvent>>>,
+    control_down: Rc<Cell<bool>>,
     clock: Rc<RefCell<Vec<StoredEvent>>>,
     clock_down: Rc<Cell<bool>>,
+    accounts: Rc<RefCell<Vec<StoredEvent>>>,
+    account_down: Rc<Cell<bool>>,
     reads: Rc<RefCell<Vec<String>>>,
     lose_answers: Rc<Cell<u32>>,
 }
@@ -137,9 +146,19 @@ impl Store for Rig {
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
         self.reads.borrow_mut().push(stream.as_str().to_owned());
         match stream.as_str() {
+            CONTROL if self.control_down.get() => None,
             CONTROL => Some(self.control.borrow().clone()),
             CLOCK if self.clock_down.get() => None,
             CLOCK => Some(self.clock.borrow().clone()),
+            id if id.starts_with("acct:") && self.account_down.get() => None,
+            id if id.starts_with("acct:") => Some(
+                self.accounts
+                    .borrow()
+                    .iter()
+                    .filter(|r| r.stream_id == id)
+                    .cloned()
+                    .collect(),
+            ),
             _ => self.journal.rows(stream),
         }
     }
@@ -163,17 +182,33 @@ impl Store for Rig {
 }
 
 fn row(stream: &str, seq: u64, event_type: &str, actor: &str, payload: &str) -> StoredEvent {
-    let space = if stream == CONTROL { 'C' } else { 'K' };
+    versioned(stream, seq, event_type, 1, actor, payload)
+}
+
+fn versioned(
+    stream: &str,
+    seq: u64,
+    event_type: &str,
+    schema_version: u64,
+    actor: &str,
+    payload: &str,
+) -> StoredEvent {
+    let space = match stream {
+        CONTROL => 'C',
+        ACCOUNT => 'A',
+        OTHER_ACCOUNT => 'B',
+        _ => 'K',
+    };
     let event_id = format!("01J8Z3M{space}{seq:018}");
     let body = format!(
-        r#"{{"envelope_version":1,"environment":"paper","event_id":"{event_id}","stream_id":"{stream}","event_type":"{event_type}","schema_version":1,"event_time":"2026-10-16T13:00:00.000000000Z","clock_source":"scheduler","causation_id":null,"correlation_id":null,"actor":{{"kind":"{actor}","id":"x","version":"1","build":null}},"config_refs":{{}},"payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#
+        r#"{{"envelope_version":1,"environment":"paper","event_id":"{event_id}","stream_id":"{stream}","event_type":"{event_type}","schema_version":{schema_version},"event_time":"2026-10-16T13:00:00.000000000Z","clock_source":"scheduler","causation_id":null,"correlation_id":null,"actor":{{"kind":"{actor}","id":"x","version":"1","build":null}},"config_refs":{{}},"payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#
     );
     StoredEvent {
         stream_id: stream.into(),
         seq,
         event_id,
         event_type: event_type.into(),
-        schema_version: 1,
+        schema_version,
         environment: "paper".into(),
         recorded_at: "2026-10-16T13:00:00.000000000Z".into(),
         prev_hash: Digest::of(b"prev"),
@@ -575,4 +610,222 @@ proptest! {
             prop_assert!(switched.contains(&first), "{:?} misses {}", switched, first);
         }
     }
+}
+
+/// The control stream's `ConnectionEstablished` of `connection` at `schema_version`, naming
+/// `reference` as its account (journal spec §9.8: version 2 carries `account_ref`).
+fn established(rig: &Rig, connection: &str, reference: &str, schema_version: u64) {
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let payload = format!(
+        r#"{{"connection_id":"{connection}","broker":"alpaca","environment":"paper","scopes":[],"account_ref":"{reference}"}}"#
+    );
+    rig.control.borrow_mut().push(versioned(
+        CONTROL,
+        seq,
+        "ConnectionEstablished",
+        schema_version,
+        "system",
+        &payload,
+    ));
+}
+
+/// A record the account's executor committed on `stream`.
+fn on_account(rig: &Rig, stream: &str, event_type: &str, payload: &str) {
+    let seq = rig
+        .accounts
+        .borrow()
+        .iter()
+        .filter(|r| r.stream_id == stream)
+        .count();
+    let seq = u64::try_from(seq).unwrap() + 1;
+    rig.accounts
+        .borrow_mut()
+        .push(row(stream, seq, event_type, "system", payload));
+}
+
+fn reconciled(rig: &Rig, stream: &str) {
+    on_account(rig, stream, "ReconciliationRun", r#"{"result":"clean"}"#);
+}
+
+fn mode(process: &RuntimeProcess<Rig>) -> Mode {
+    process.state().effective_mode()
+}
+
+/// A runtime starts held until its account's executor reconciles (trading spec §11, DEC-131 item
+/// 13), and the reconciliation reaches it from the account stream its connection's establishment
+/// names, so the hold lifts (DEC-1014 item 1).
+#[test]
+fn the_startup_hold_lifts_once_the_executor_reconciles_the_account() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = start(&rig, NOW);
+    assert_eq!(mode(&process), Mode::Paused);
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(mode(&process), Mode::Paused, "nothing reconciled yet");
+    reconciled(&rig, ACCOUNT);
+    tick(&rig, NOW + 2);
+    process.step(at(NOW + 2));
+    assert_eq!(mode(&process), Mode::Normal, "{:?}", kinds(&rig));
+    for second in 3..6 {
+        tick(&rig, NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(process.lifecycle().state(), State::Ready, "each row is folded once");
+    assert_eq!(mode(&process), Mode::Normal);
+}
+
+/// The account stream is folded before `Input::Started`, as the shell's open replays it, so the
+/// start takes the hold on the whole fold (DEC-1014 item 2).
+#[test]
+fn an_account_reconciled_before_the_start_is_folded_before_the_hold_is_taken() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    let process = start(&rig, NOW);
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    assert_eq!(mode(&process), Mode::Normal);
+}
+
+/// The latest establishment names the account: a reconnect to a new account is followed from the
+/// restart, and the old account's reconciliation is not this connection's.
+#[test]
+fn the_latest_establishment_names_the_account_followed() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, OTHER_REF, 2);
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    let process = start(&rig, NOW);
+    assert_eq!(mode(&process), Mode::Normal);
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    established(&rig, CONNECTION, OTHER_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    let process = start(&rig, NOW);
+    assert_eq!(mode(&process), Mode::Paused);
+}
+
+/// Only this deployment's connection, at version 2, names its account: another connection's
+/// account, or a version-1 record, lifts nothing (`AGENTS.md` rule 3).
+#[test]
+fn another_connection_s_account_never_lifts_the_hold() {
+    let rig = Rig::default();
+    established(&rig, "conn-2", OTHER_REF, 2);
+    established(&rig, CONNECTION, ACCOUNT_REF, 1);
+    reconciled(&rig, OTHER_ACCOUNT);
+    reconciled(&rig, ACCOUNT);
+    let mut process = start(&rig, NOW);
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    assert_eq!(mode(&process), Mode::Paused);
+}
+
+/// A connection established after the start is followed from then on.
+#[test]
+fn a_connection_established_after_the_start_is_followed() {
+    let rig = Rig::default();
+    let mut process = start(&rig, NOW);
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(mode(&process), Mode::Normal);
+}
+
+/// The executor's `AgentModeApplied` for this agent tightens the runtime on the next pass.
+#[test]
+fn an_agent_paused_on_the_account_stream_is_paused() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    let mut process = start(&rig, NOW);
+    assert_eq!(mode(&process), Mode::Normal);
+    on_account(
+        &rig,
+        ACCOUNT,
+        "AgentModeApplied",
+        &format!(r#"{{"agent":"{AGENT}","to":"paused"}}"#),
+    );
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(mode(&process), Mode::Paused);
+}
+
+#[test]
+fn each_pass_reads_the_control_then_the_account_then_the_clock_stream() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = start(&rig, NOW);
+    kill_switch(&rig);
+    tick(&rig, NOW + 1);
+    rig.reads.borrow_mut().clear();
+    process.step(at(NOW + 1));
+    let reads = rig.reads.borrow().clone();
+    let first = |stream: &str| reads.iter().position(|s| s == stream).unwrap();
+    assert!(first(CONTROL) < first(ACCOUNT), "{reads:?}");
+    assert!(first(ACCOUNT) < first(CLOCK), "{reads:?}");
+}
+
+/// An account stream that cannot be read hands no tick, so nothing is decided on a mode that may be
+/// stale, and never holds the owner's kill switch (ES-06).
+#[test]
+fn an_account_stream_that_cannot_be_read_hands_no_tick_and_never_holds_the_kill_switch() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    reconciled(&rig, ACCOUNT);
+    let mut process = start(&rig, NOW);
+    rig.account_down.set(true);
+    kill_switch(&rig);
+    tick(&rig, NOW + 1);
+    process.step(at(NOW + 1));
+    assert_eq!(count(&rig, "KillSwitchActivated"), 1, "{:?}", kinds(&rig));
+    assert_eq!(risk_clock(&process), None);
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    rig.account_down.set(false);
+    process.step(at(NOW + 2));
+    assert_eq!(risk_clock(&process), Some(NOW + 1));
+}
+
+/// What the start cannot read, it does not guess: an unreadable control or account stream refuses
+/// the start, and the next process starts on the whole fold.
+#[test]
+fn a_start_that_cannot_read_the_control_or_account_stream_refuses() {
+    let rig = Rig::default();
+    rig.control_down.set(true);
+    let process = start(&rig, NOW);
+    assert_eq!(process.lifecycle().state(), State::Exited(Exit::Refused));
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    rig.account_down.set(true);
+    let process = start(&rig, NOW);
+    assert_eq!(process.lifecycle().state(), State::Exited(Exit::Refused));
+}
+
+/// A record the core cannot fold stops the process rather than being skipped (DEC-85).
+#[test]
+fn an_account_record_the_core_cannot_fold_stops_the_process() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = start(&rig, NOW);
+    on_account(&rig, ACCOUNT, "NoSuchRecord", "{}");
+    process.step(at(NOW + 1));
+    assert_eq!(process.lifecycle().state(), State::Exited(Exit::CycleFailed));
+    let restarted = start(&rig, NOW + 2);
+    assert_eq!(restarted.lifecycle().state(), State::Exited(Exit::Refused));
+}
+
+/// The account a running process follows never changes under it: a later establishment naming
+/// another account stops it, and the next process follows the new account from its start.
+#[test]
+fn an_establishment_naming_another_account_stops_the_process() {
+    let rig = Rig::default();
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    let mut process = start(&rig, NOW);
+    established(&rig, CONNECTION, ACCOUNT_REF, 2);
+    process.step(at(NOW + 1));
+    assert_eq!(process.lifecycle().state(), State::Ready, "the same account again");
+    established(&rig, CONNECTION, OTHER_REF, 2);
+    process.step(at(NOW + 2));
+    assert_eq!(process.lifecycle().state(), State::Exited(Exit::CycleFailed));
 }
