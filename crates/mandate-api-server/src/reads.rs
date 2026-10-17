@@ -71,48 +71,162 @@ pub enum Filter {
 
 /// A row's envelope, parsed; `None` for a body that is not canonical JSON.
 pub fn envelope(row: &StoredEvent) -> Option<Value> {
-    let _ = row;
-    None
+    mandate_canon::parse(&row.body).ok()
 }
 
-/// The agents the control stream deploys, in deployment order, each once: `(agent_id,
-/// environment, mandate_version, deployed_at, stopped)`.
-pub fn deployed(control: &[StoredEvent]) -> Vec<(String, String, String, String, bool)> {
-    let _ = control;
-    Vec::new()
+/// The text at `path` (dot-separated) in `value`.
+fn text<'v>(value: &'v Value, path: &str) -> Option<&'v str> {
+    path.split('.')
+        .try_fold(value, |v, key| v.get(key))
+        .and_then(Value::as_str)
+}
+
+/// A deployed agent: `(agent_id, environment, mandate_version, deployed_at, stopped)`.
+pub type Deployment = (String, String, String, String, bool);
+
+/// The agents the control stream deploys, in first-deployment order, each once, with its latest
+/// deployment; `stopped` once `AgentStopped` names it after that deployment.
+pub fn deployed(control: &[StoredEvent]) -> Vec<Deployment> {
+    let mut agents: Vec<Deployment> = Vec::new();
+    for row in control {
+        let Some(event) = envelope(row) else {
+            continue;
+        };
+        match row.event_type.as_str() {
+            "AgentDeployed" => {
+                let (Some(agent), Some(version)) = (
+                    text(&event, "payload.agent_id"),
+                    text(&event, "payload.mandate_version"),
+                ) else {
+                    continue;
+                };
+                let deployment = (
+                    agent.to_owned(),
+                    row.environment.clone(),
+                    version.to_owned(),
+                    row.recorded_at.clone(),
+                    false,
+                );
+                match agents.iter_mut().find(|known| known.0 == agent) {
+                    Some(known) => *known = deployment,
+                    None => agents.push(deployment),
+                }
+            }
+            "AgentStopped" => {
+                let agent = text(&event, "payload.agent_id");
+                if let Some(known) = agents
+                    .iter_mut()
+                    .find(|known| Some(known.0.as_str()) == agent)
+                {
+                    known.4 = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    agents
 }
 
 /// The agent's mode from its agent stream's rows: the last `AgentModeChanged`'s `to`.
 pub fn mode(agent_rows: &[StoredEvent]) -> Option<String> {
-    let _ = agent_rows;
-    None
+    agent_rows
+        .iter()
+        .rev()
+        .filter(|row| row.event_type == "AgentModeChanged")
+        .find_map(|row| envelope(row).and_then(|e| text(&e, "payload.to").map(str::to_owned)))
 }
 
-/// Every approval on `agent_id`'s stream, in request order, with its folded state.
+/// Every approval on `agent_id`'s stream, in request order, with its folded state. A request
+/// without a deadline, a content hash, or a content object is not served.
 pub fn approvals(agent_id: &str, agent_rows: &[StoredEvent]) -> Vec<ApprovalView> {
-    let _ = (agent_id, agent_rows);
-    Vec::new()
+    let mut views: Vec<ApprovalView> = Vec::new();
+    for row in agent_rows {
+        let Some(event) = envelope(row) else {
+            continue;
+        };
+        if row.event_type == "ApprovalRequested" {
+            let deadline = event
+                .get("payload")
+                .and_then(|p| p.get("deadline"))
+                .and_then(Value::as_int)
+                .and_then(|d| i64::try_from(d).ok());
+            let hash = text(&event, "payload.content_hash");
+            let content = event
+                .get("payload")
+                .and_then(|p| p.get("content"))
+                .filter(|c| c.as_object().is_some());
+            if let (Some(deadline), Some(hash), Some(content)) = (deadline, hash, content) {
+                views.push(ApprovalView {
+                    approval_id: row.event_id.clone(),
+                    agent_id: agent_id.to_owned(),
+                    state: ApprovalState::Pending,
+                    requested_at: row.recorded_at.clone(),
+                    deadline,
+                    content_hash: hash.to_owned(),
+                    content: content.clone(),
+                });
+            }
+            continue;
+        }
+        let ended = match row.event_type.as_str() {
+            "ApprovalTimedOut" => Some(ApprovalState::TimedOut),
+            "ApprovalCanceled" => Some(ApprovalState::Canceled),
+            "ApprovalRevalidated" => Some(match text(&event, "payload.result") {
+                Some("act") => ApprovalState::Acted,
+                _ => ApprovalState::Skipped,
+            }),
+            "ApprovalResponded"
+                if text(&event, "payload.result") == Some("admitted")
+                    && text(&event, "payload.verdict") == Some("skipped") =>
+            {
+                Some(ApprovalState::Skipped)
+            }
+            _ => None,
+        };
+        let approval = text(&event, "payload.approval");
+        if let Some(state) = ended
+            && let Some(view) = views.iter_mut().find(|view| {
+                Some(view.approval_id.as_str()) == approval && view.state == ApprovalState::Pending
+            })
+        {
+            view.state = state;
+        }
+    }
+    views
 }
 
 /// The inbox order: pending by deadline (then request order), then the [`RESOLVED_LISTED`] most
 /// recently requested resolved ones, narrowed by `filter`.
 pub fn inbox(approvals: Vec<ApprovalView>, filter: Filter) -> Vec<ApprovalView> {
-    let _ = (approvals, filter);
-    Vec::new()
+    let (mut pending, resolved): (Vec<_>, Vec<_>) = approvals
+        .into_iter()
+        .partition(|view| view.state == ApprovalState::Pending);
+    pending.sort_by_key(|view| view.deadline);
+    let resolved = resolved.into_iter().rev().take(RESOLVED_LISTED);
+    match filter {
+        Filter::All => pending.into_iter().chain(resolved).collect(),
+        Filter::Pending => pending,
+        Filter::Resolved => resolved.collect(),
+    }
 }
 
 /// One agent's view from its deployment and its stream's rows.
-pub fn agent(
-    deployment: &(String, String, String, String, bool),
-    agent_rows: &[StoredEvent],
-) -> AgentView {
-    let _ = (deployment, agent_rows);
+pub fn agent(deployment: &Deployment, agent_rows: &[StoredEvent]) -> AgentView {
+    let (agent_id, environment, mandate_version, deployed_at, stopped) = deployment;
+    let pending = approvals(agent_id, agent_rows)
+        .iter()
+        .filter(|view| view.state == ApprovalState::Pending)
+        .count();
     AgentView {
-        agent_id: String::new(),
-        environment: String::new(),
-        mandate_version: String::new(),
-        deployed_at: String::new(),
-        mode: None,
-        pending_approvals: 0,
+        agent_id: agent_id.clone(),
+        environment: environment.clone(),
+        mandate_version: mandate_version.clone(),
+        deployed_at: deployed_at.clone(),
+        mode: if *stopped {
+            Some("stopped".to_owned())
+        } else {
+            mode(agent_rows)
+        },
+        pending_approvals: u64::try_from(pending).unwrap_or(u64::MAX),
     }
 }
