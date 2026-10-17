@@ -37,6 +37,16 @@ function ResponseStatus({ approval, response }: { approval: Approval; response: 
       </p>
     );
   }
+  if (response.phase === "undelivered") {
+    return (
+      <p className="text-sm" data-phase="undelivered" role="alert">
+        {response.reason === "step_up_required"
+          ? "Not recorded: approving needs a passkey check your deployment did not receive, so nothing was approved."
+          : "Not recorded: your deployment answered that nothing was recorded."}{" "}
+        If no answer is recorded before {clock(approval.deadline)}, the action is skipped.
+      </p>
+    );
+  }
   if (response.phase === "unknown") {
     return (
       <p className="text-sm" data-phase="unknown">

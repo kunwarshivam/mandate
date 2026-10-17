@@ -185,7 +185,9 @@ function Progress({ deployment }: { deployment: Deployment }) {
     case "undelivered":
       return (
         <p data-phase="undelivered" role="alert" className="text-pretty">
-          Not delivered: your deployment did not answer, so nothing was confirmed and no agent exists. Try again once it is reachable.
+          {deployment.reason === "not_sent"
+            ? "Not sent: setting up an agent on your deployment from here comes in a later release, so nothing was confirmed and no agent exists."
+            : "Not delivered: your deployment did not answer, so nothing was confirmed and no agent exists. Try again once it is reachable."}
         </p>
       );
     case "unknown":

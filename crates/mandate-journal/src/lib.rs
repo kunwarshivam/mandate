@@ -29,6 +29,7 @@ mod control;
 mod control_plane;
 mod control_verify;
 mod draft;
+mod membership;
 mod merkle;
 mod notices;
 mod records;

@@ -123,6 +123,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "ClientConnected"
         | "ClientRevoked"
         | "OwnerCommandIssued"
+        | "MemberActivated"
         | "ControlPlaneEnrolled"
         | "LicenseApplied"
         | "LicenseStateChanged"
