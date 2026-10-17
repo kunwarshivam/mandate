@@ -292,6 +292,7 @@ fn admitted_approvers(stream: &Stream) -> BTreeSet<String> {
         executor: Some(contexts.executor),
         run: Some(contexts.run),
         artifacts: None,
+        content_store: None,
         symbols: BrokerSymbols::default(),
         transport: Unreached,
     });

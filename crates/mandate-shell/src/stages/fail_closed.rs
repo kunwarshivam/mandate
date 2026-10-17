@@ -363,6 +363,7 @@ fn the_production_stages_refuse_without_their_inputs() -> Result<(), String> {
         executor: None,
         run: None,
         artifacts: None,
+        content_store: None,
         symbols: BrokerSymbols::default(),
         transport: Box::new(Disconnected),
     });
