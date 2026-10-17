@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/confirmation.schema.json",
+  "description": "GET /mandate-versions/{mandate_version}/confirmation (\u00a73.11 item 11, DEC-2100 item 4), for a new mandate: what the confirmation screen renders and the screen_digest the confirm binds. screen_digest is the SHA-256 of the canonical object of mandate_version, agent_id, base_version, classification, required_paths, warnings, and step_up_required. Worst-case figures, the unasked dollars, provenance badges, and the crypto gap disclosure arrive as optional members (\u00a73.2).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "mandate_version",
+    "document",
+    "agent_id",
+    "base_version",
+    "classification",
+    "required_paths",
+    "warnings",
+    "step_up_required",
+    "screen_digest"
+  ],
+  "properties": {
+    "mandate_version": {
+      "$ref": "../common.schema.json#/$defs/ContentRef"
+    },
+    "document": {
+      "$ref": "https://mandate.dev/schemas/mandate/1"
+    },
+    "agent_id": {
+      "type": "null"
+    },
+    "base_version": {
+      "type": "null"
+    },
+    "classification": {
+      "enum": [
+        "risk_increasing",
+        "risk_reducing",
+        "neutral"
+      ]
+    },
+    "required_paths": {
+      "description": "The envelope paths V-020 requires the owner to confirm, ascending.",
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^(/([^/~\\u0000-\\u001f]|~[01])*)+$"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^W-[0-9]{3}$"
+      }
+    },
+    "step_up_required": {
+      "type": "boolean"
+    },
+    "screen_digest": {
+      "$ref": "../common.schema.json#/$defs/ContentRef"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false
+}

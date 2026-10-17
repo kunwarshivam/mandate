@@ -1507,6 +1507,15 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   a kill switch without step-up is recorded and stops (DEC-158 (c)); go-live returns
   `live_unavailable`; status moves `recorded` → `taken` → `applied` or `refused` from the owning
   streams' events only.
+  **Specified for the server (lane A2, [DEC-2100](decisions/DEC-2100.md), [DEC-2101](decisions/DEC-2101.md)):**
+  versions from a document, a new mandate's confirmation screen and confirm, deploy, go-live,
+  resume, Stop, owner exit, acknowledgment, and command status (workspace API spec §3.11 items 11
+  and 12), with step-up through a port that refuses until E9-4 binds it. **Still owed:** drafts,
+  compile, validate, diffs, and an agent's later versions (with `MandateConfirmed` version 2,
+  E10-15); the confirmation screen's worst-case figures, unasked dollars, and provenance badges;
+  `DeploymentRejected`; the hold and its lift (after the runtime folds them, DEC-1007 item 1); and
+  the deploy request's schema with its `mandate-api` type, which must land together (DEC-2100
+  item 6).
 - **E10-13 (Must, M8, with the connections spec; SC)** As a workspace admin, I want to connect and
   revoke broker accounts through the API without any credential ever coming back (spec §4.5).
   *Accepted when:* responses match a schema with no secret-shaped member and canary-secret scans of

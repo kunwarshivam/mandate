@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2100](../project/decisions/DEC-2100.md), [DEC-2101](../project/decisions/DEC-2101.md), agent readings) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -498,7 +498,7 @@ per workspace deployment (item 6).
    workspace this deployment hosts and its organization, as ULIDs. Every other workspace in a path
    is absent (API-9's 404), and the organization is what `authorize` checks the pair against;
    journal spec §9.12's records name neither. `MANDATE_API_ARTIFACTS`, optional, is the
-   content-addressed store's directory, read only, from which the agent reads take the mandate
+   content-addressed store's directory, read, and written only by item 11's routes, from which the agent reads take the mandate
    document the journal names by digest ([DEC-1020](../project/decisions/DEC-1020.md)). As a guard against a secret placed in the environment (DEC-822
    item 4), a variable whose name contains `SECRET`, `PASSWORD`, `TOKEN`, or `KEY` (ASCII
    case-insensitive) refuses the start, and so does a database URL that carries a password: the
@@ -599,6 +599,102 @@ per workspace deployment (item 6).
       with `step_up: null`; the runtime judges the deadline, the state, the content hash, and the
       approvers. An `approved` is refused `step_up_required` or `step_up_missing` until step-up
       is bound (DEC-1007 item 10).
+11. **Versions, confirmation, and deployment** ([DEC-2100](../project/decisions/DEC-2100.md),
+    E10-11, E10-12). The server serves five routes of §4.1 and §4.2, with these operation names for
+    §3.4: `POST /mandate-versions` (`create_version`), `GET
+    /mandate-versions/{mandate_version}/confirmation`, `POST
+    /mandate-versions/{mandate_version}/confirm` (`confirm_version`), `POST /agents` (`deploy`),
+    and `POST /agents/{agent_id}/go-live` (`go_live`). Each mutating route is checked in item 10's
+    order (the session, the CSRF mark, `Idempotency-Key`, then the body, decoded strictly), then
+    authorized by its matrix row, and commits its one control-stream event, as the CLI writes it
+    (`mandate version create`, `version confirm`, `agent deploy`), before its answer.
+    - **The step-up port.** The server judges step-up through one port, bound to an action's kind
+      and digest (§3.6). Until E9-4 binds it, the port verifies nothing: a call that needs step-up
+      and carries none is refused `step_up_required`, and one that carries evidence is refused
+      `step_up_missing`, with nothing committed. So through the API, every confirmation that
+      §9.2 classifies as risk-increasing, and every deployment, is refused until E9-4; the CLI
+      stays the path for both.
+    - **Creating a version.** Drafts and the compiler are not served yet. The body is the mandate
+      document itself, as `mandate version create` reads it from a file. It must parse as a
+      mandate (mandate spec §3) in the control stream's environment: `paper`. A `live` document is
+      refused `live_unavailable`, and any other environment, or one unlike the stream's,
+      `invalid`. It must pass every V-rule but V-002 as if every envelope path were confirmed
+      (the confirmation's own check), and every pinned instrument must be registered, as the CLI
+      checks at confirmation; a failure is `invalid` with each V-code in `violations`. The server
+      stores the canonical document under its version (mandate spec §9.1) and the CLI's record,
+      then commits `MandateVersionCreated` version 1 with every envelope path's provenance
+      `user_entered`. Answer: `202` `commands/version-created`, with the version and the
+      warnings' codes; a version the control stream already records answers `200` with that event
+      and commits nothing.
+    - **The confirmation screen.** The read the confirm binds (§5.1's `screen_digest`), for a new
+      mandate only: the stored document, `agent_id` and `base_version` both `null`, the server's
+      classification (a first version is `risk_increasing`: no earlier version bounds it, mandate
+      spec §9.2), the envelope paths V-020 requires, the warnings' codes, whether step-up is
+      required, and `screen_digest`, the SHA-256 of the canonical object of those members but the
+      document (`read-models/confirmation`). Worst-case figures, the unasked dollars, provenance
+      badges, and the crypto gap disclosure are not served yet.
+    - **Confirm** (§5.1), for a new mandate only. `MandateConfirmed` version 1 has no agent link
+      (version 2 is E10-15's), so a confirmation naming an `agent_id` is refused `invalid` at
+      `/agent_id`, and a `base_version` with no agent `invalid` at `/base_version`. Then, in
+      order: the version is recorded and stored, else `not_found`; `classification_shown` is the
+      server's, else `classification_changed`; `confirmed_paths` is exactly the envelope paths,
+      and the version passes the V-rules as if confirmed, else `invalid` (V-020 among them);
+      `warnings_acknowledged` holds every warning the screen showed, else `invalid`; the
+      `screen_digest` is the screen's now, else `classification_changed`; and step-up is bound to
+      §5.1's digest. A version the control stream's last `MandateConfirmed` already names answers
+      `200` with that event and commits nothing. The record keeps the CLI's members, the verified
+      step-up, and the request's `record`, `screen_digest`, and `warnings_acknowledged`. The
+      journal has no freeze yet (journal spec §11), so `control_stream_frozen` is not sent.
+    - **Deploy** (§4.2). The body, decoded strictly, is `agent_id`, `mandate_version`,
+      `backtest_id` (an id or `null`: backtests are not served, and the id is recorded, never
+      read), `record`, and `step_up`; its request schema lands with its `mandate-api` type. The checks are the CLI's, in its order: an agent id that
+      names no agent stream is `invalid`; a version not recorded or not stored `not_found`; one
+      never confirmed `invalid` at `/mandate_version`; one the control stream has confirmed a
+      later version over `stale_base`, naming the latest; an agent already deployed with the same
+      version answers `200` with its `AgentDeployed`, and with another version `invalid` at
+      `/agent_id`; every V-rule for the agent (V-002, V-006, and V-032 included) and the pinned
+      instruments, else `invalid` with the V-codes; then step-up, bound to the SHA-256 of the
+      canonical `{agent_id, mandate_version}`, kind `deploy`. It commits `AgentDeployed` version 1
+      with `config_refs.mandate_version`. A refusal commits nothing: `DeploymentRejected` is not
+      written until the deployment manager journals its own refusals.
+    - **Go live** answers `409` `live_unavailable` to every principal the deploy row authorizes,
+      after item 10's checks and before the body is read (B5, rule 8).
+    - The content-addressed store (item 2) is written only by these routes, and only by adding an
+      object under its own digest. Without `MANDATE_API_ARTIFACTS`, they answer
+      `journal_unavailable`.
+12. **Resume, Stop, owner exit, acknowledgment, and command status**
+    ([DEC-2101](../project/decisions/DEC-2101.md), E10-12). `POST /agents/{agent_id}/resume`
+    (`resume`), `…/stop` (`stop`), `…/exits` (`owner_exit`), `…/acknowledgments`
+    (`acknowledge`), and `GET /commands/{event_id}`. Each command is checked as item 10 orders, the
+    agent found as item 10 finds it, and recorded as the CLI records it (`mandate agent resume`,
+    `stop`, `exit`, `acknowledge`).
+    - **Resume and Stop** commit `OwnerCommandIssued` with §9.11's members. A Stop with `release`
+      must name, as `warning_shown`, the content reference of the CLI's release warning text, else
+      `invalid` at `/warning_shown`, so the journal names only a warning the platform defines.
+    - **An owner exit** is an API-7 operation, decoded leniently (§5): `instrument` is kept
+      strictly, and the bid confirmation all or nothing. It commits `OwnerCommandIssued`
+      (`owner_exit`) with scope `instrument`, the asset as `subject`, and the confirmed `bid`,
+      `bid_size`, and `floor`; `quoted_at`, `record`, and `step_up` are kept but not journaled, as
+      item 10's are.
+    - **An acknowledgment** commits `OwnerAcknowledged` with `agent`, the acknowledged `event`,
+      `user`, `risk_clock` and `submitted_at` at receipt, and `step_up`. The executor judges the
+      event, the step-up, and independence (mandate spec §5.8).
+    - **Step-up is forwarded only once verified.** Resume, Stop, and acknowledgment carry the port's
+      verified evidence as `step_up`, or `null`. Until E9-4 binds the port that is always `null`,
+      so the runtime or executor refuses each with `OwnerCommandRefused` `step_up_missing`, the
+      refusal journaled where the specs put it (§5.4). An owner exit forwards `null` too, so it
+      loses only the owner-exit privilege (mandate spec §6.1).
+    - **Command status** (§5.5) finds the event by equality with a control-stream event id, else
+      `not_found`. Its steps are the events on each deployed agent's stream and each account
+      stream the control stream names whose `causation_id` is the command, in stream then `seq`
+      order, with the payload's `reason`, or `null`. The phase is `refused` for an
+      `OwnerCommandRefused`, an `ApprovalResponded` `refused`, or a `MandateVersionApplied`
+      `rejected`; else `applied` for an `AgentModeChanged`, an `AgentModeApplied`, a
+      `KillSwitchActivated`, a `MandateVersionApplied` `applied`, or an `ApprovalRevalidated`
+      `act`; else `ended` for an `ApprovalRevalidated` `skip`, an `ApprovalTimedOut`, or an
+      `ApprovalCanceled`; else `taken` for any step; and `recorded` with none. Only direct
+      causation counts: an order a kill switch canceled names its own cause.
+    - The hold and its lift wait for the runtime, as item 10 says.
 
 ---
 
@@ -1788,8 +1884,8 @@ risk-reducing call never consults one (API-7, API-8).
 | Mandate validation and classification (`mandate-spec`) | **Exists**; §4.1 calls it |
 | The web app's screens on recorded fixtures (`web/`) | **Exists**; §4.9 maps fixtures to resources |
 | The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, the first reads of §4.3 and §4.7, pause and the kill switch, and an approval's Skip by E21-31 (§3.11) |
-| Drafts, compile, versions, confirm endpoints | **Planned** (E10-11) |
-| Deployment manager endpoints and the reserved kill-switch path | **Planned** (E10-12) |
+| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2100); drafts, compile, validate, diffs, and an agent's later versions are planned |
+| Deployment manager endpoints and the reserved kill-switch path | **Partly served** (E10-12): pause, the kill switch, and Skip (§3.11 item 10); deploy and go-live (item 11, DEC-2100); resume, Stop, owner exit, acknowledgment, and command status (item 12, DEC-2101); the hold, its lift, and backtests are planned |
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
@@ -1843,6 +1939,13 @@ the workspace and `compromised`, an ordinary revoke is refused from the journal'
 when they cannot answer, and its refusals come in one fixed order, step-up first (§4.5).
 `fold_unavailable` is `retryable: false`: [DEC-681](../project/decisions/DEC-681.md) item 9 names
 the only retryable codes, and the owner's retry is a new request.
+
+[DEC-2100](../project/decisions/DEC-2100.md) and [DEC-2101](../project/decisions/DEC-2101.md)
+(agent-accepted under DEC-79 and DEC-176, each the reading that adds no risk) settle how the server
+serves versions, confirmation, deployment, and the remaining owner commands (§3.11 items 11 and 12):
+step-up through one port that verifies nothing until E9-4, a version created from the document
+itself until drafts land, confirmation for a new mandate only until `MandateConfirmed` carries its
+agent, and evidence forwarded to the stream owners only once verified.
 
 ---
 
