@@ -11546,6 +11546,113 @@ mod tests {
         assert!(!stub(17, 19), "nor is an implemented function");
     }
 
+    /// Each case's signature written with array types, then with `;`-free aliases standing for
+    /// them, over the same body: the stub verdict may depend only on the body, never on how the
+    /// signature spells its types.
+    const ARRAY_SIGNATURES: [(&str, &str, &str); 13] = [
+        (
+            "pub fn less() -> Foo<{ A < B }>",
+            "pub fn less() -> Foo<Lt>",
+            "{\n    if c > 0 { todo!() }\n    real()\n}",
+        ),
+        (
+            "pub fn more() -> Foo<{ A > 1 }, { M }>",
+            "pub fn more() -> Foo<Gt, Em>",
+            "{ todo!() }",
+        ),
+        (
+            "pub fn sized<const N: usize>() -> Buffer<{ N }>",
+            "pub fn sized<const N: usize>() -> Buffer<Size>",
+            "{ todo!() }",
+        ),
+        (
+            "pub fn wrap() -> Wrap<Box<dyn Fn() -> u8>, { 2 }>",
+            "pub fn wrap() -> Wrapped",
+            "{ Err(WrapError::Unimplemented) }",
+        ),
+        (
+            "pub fn sign() -> [u8; 65]",
+            "pub fn sign() -> Sig",
+            "{ todo!() }",
+        ),
+        (
+            "pub fn key() -> Result<[u8; 64], KeyError>",
+            "pub fn key() -> Result<Key, KeyError>",
+            "{ Err(KeyError::Unimplemented) }",
+        ),
+        (
+            "pub fn digest(input: [u8; 4]) -> u8",
+            "pub fn digest(input: Word) -> u8",
+            "{\n    let _ = input;\n    todo!()\n}",
+        ),
+        (
+            "pub fn widen<const N: usize>(x: [u8; N]) -> Option<[u8; N]>",
+            "pub fn widen<const N: usize>(x: Bytes) -> Option<Bytes>",
+            "{\n    let _ = x;\n    Err(Missing::Unimplemented)\n}",
+        ),
+        (
+            "pub fn apply<F: Fn([u8; 2]) -> [u8; 3]>(f: F) -> [[u8; 3]; 2]",
+            "pub fn apply<F: Fn(Pair) -> Triple>(f: F) -> Grid",
+            "{\n    let _ = f;\n    todo!()\n}",
+        ),
+        (
+            "pub fn split(x: u8) -> Vec<Vec<[u8; 2]>>",
+            "pub fn split(x: u8) -> Vec<Vec<Pair>>",
+            "{\n    let _ = x;\n    Err(SplitError::Unimplemented(\"split\", \"E1-8\"))\n}",
+        ),
+        (
+            "pub fn convert<T>(t: T) -> [u8; 2]\nwhere\n    T: Into<[u8; 2]>,",
+            "pub fn convert<T>(t: T) -> Pair\nwhere\n    T: Into<Pair>,",
+            "{\n    let _ = t;\n    todo!()\n}",
+        ),
+        (
+            "pub fn checksum(x: [u8; 8]) -> [u8; 4]",
+            "pub fn checksum(x: Block) -> Word",
+            "{\n    let _ = x;\n    Err(SumError::Overflow)\n}",
+        ),
+        (
+            "pub fn first(x: [u8; 8]) -> u8",
+            "pub fn first(x: Block) -> u8",
+            "{\n    x[0]\n}",
+        ),
+    ];
+
+    #[test]
+    fn an_array_in_the_signature_never_hides_the_body() {
+        let verdict = |signature: &str, body: &str| {
+            let src = format!("{signature} {body}\n");
+            is_stub_function(&src, 1, src.lines().count())
+        };
+        for (arrays, aliases, body) in ARRAY_SIGNATURES {
+            assert_eq!(
+                verdict(arrays, body),
+                verdict(aliases, body),
+                "`{arrays}` must be judged by its body alone, as `{aliases}` is"
+            );
+        }
+        let stubs = ARRAY_SIGNATURES
+            .iter()
+            .filter(|(arrays, _, body)| verdict(arrays, body))
+            .count();
+        assert_eq!(
+            stubs, 10,
+            "the ten todo!() and Unimplemented bodies are stubs; another error and a real body, even one \
+             holding a todo!() block, are not"
+        );
+        assert!(
+            !is_stub_function(
+                "pub fn answer() -> u8 { todo!() }\npub fn next() -> u8 { 1 }\n",
+                1,
+                2
+            ),
+            "a body counts only when its closing brace ends the span, so a block inside a stub-like body is never taken for it"
+        );
+        assert!(
+            !is_stub_function("fn sign(&self) -> [u8; 65];\n", 1, 1),
+            "a trait method's signature without a body is not a stub"
+        );
+    }
+
     /// A git repository in a temporary directory holding a one-crate workspace laid out like this
     /// one, removed on drop.
     struct Fixture(PathBuf);
