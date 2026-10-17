@@ -42,6 +42,7 @@ import control
 import holds
 import membership
 import membership_fold
+import requests
 import research
 import risk_state
 import segment_rows
@@ -3828,6 +3829,7 @@ def render(
     shape_section: dict,
     approval_section: dict,
     timeout_section: dict,
+    requests_section: dict,
     cancel_section: dict,
     broker_profile: dict,
     connections_section: dict,
@@ -3857,6 +3859,7 @@ def render(
             "protection_shapes": shape_section,
             "approval_answers": approval_section,
             "approval_timeouts": timeout_section,
+            "approval_requests": requests_section,
             "approval_cancellations": cancel_section,
             "broker_profile": broker_profile,
             "connections": connections_section,
@@ -3917,6 +3920,7 @@ def main(argv: list[str] | None = None) -> int:
     shape_section = account.build_shape_section()
     approval_section = approval.build_section()
     timeout_section = timeouts.build_section()
+    requests_section = requests.build_section()
     cancel_section = canceled.build_section()
     broker_profile = build_broker_profile_section(control_section)
     connections_section = connections.build_section()
@@ -3953,6 +3957,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += approval.run_mutants(approval_section)
     problems += timeouts.check_section(timeout_section)
     problems += timeouts.run_mutants(timeout_section)
+    problems += requests.check_section(requests_section)
+    problems += requests.run_mutants(requests_section)
     problems += canceled.check_section(cancel_section)
     problems += canceled.run_mutants(cancel_section)
     problems += check_broker_profile(broker_profile)
@@ -4000,6 +4006,7 @@ def main(argv: list[str] | None = None) -> int:
         shape_section,
         approval_section,
         timeout_section,
+        requests_section,
         cancel_section,
         broker_profile,
         connections_section,
@@ -4029,6 +4036,7 @@ def main(argv: list[str] | None = None) -> int:
         or approval.check_section(reread["approval_answers"])
         or timeouts.check_section(reread["approval_timeouts"])
         or canceled.check_section(reread["approval_cancellations"])
+        or requests.check_section(reread["approval_requests"])
         or check_broker_profile(reread["broker_profile"])
         or connections.check_section(reread["connections"])
         or connections.check_section(reread["connection_requests"])
@@ -4092,6 +4100,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(timeout_section['invalid_drafts'])} invalid and {len(timeout_section['valid_drafts'])} valid "
         f"approval-timeout drafts, {len(timeouts.VALIDATOR_MUTANTS)} validator and "
         f"{len(timeouts.vector_mutants(timeout_section))} vector mutants caught; "
+        f"{len(requests_section['invalid_drafts'])} invalid and {len(requests_section['valid_drafts'])} valid "
+        f"approval-request drafts, {len(requests.VALIDATOR_MUTANTS)} validator and "
+        f"{len(requests.vector_mutants(requests_section))} vector mutants caught; "
         f"{len(cancel_section['invalid_drafts'])} invalid and {len(cancel_section['valid_drafts'])} valid "
         f"approval-cancel drafts, {len(canceled.VALIDATOR_MUTANTS)} validator and "
         f"{len(canceled.vector_mutants(cancel_section))} vector mutants caught; "

@@ -20,6 +20,14 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.7, amended ([DEC-942](../project/decisions/DEC-942.md), Accepted by the founder on
+  2026-10-17):** §6.4's content object gains one key, `execution`, present only when the
+  order builder produced an execution plan for the asked order. It holds that plan (asset class,
+  time in force, whether protection is required, and the protective stop and take-profit), so the
+  content hash the owner's grant repeats covers the protective prices as well as the size and
+  limit, and the grant releases that plan and no other. A request with no plan has exactly the
+  keys it had, so no reference case or content hash changes. Journal spec v0.42 records it as
+  `ApprovalRequested` version 2.
 - **v0.7, amended ([DEC-695](../project/decisions/DEC-695.md), Accepted by the founder on
   2026-10-09):** §4.2 states the unasked-dollars figure of [DEC-189](../project/04-decision-log.md#decisions)
   as a formula: its inputs, an unknown that is never shown as 0, its zero cases, and each `auto`
@@ -1011,7 +1019,8 @@ Silence, lateness, a failed check, a restart, a version change, and a tightening
 
 **Content.** The request carries a canonical **content object**; the SHA-256 of its canonical form
 (journal spec §4), written `sha256:` and 64 lowercase hex digits, is the **content hash**. The object
-has exactly these keys, and everything an approver is shown comes from it:
+has exactly these keys, and `execution` when the order builder produced a plan
+([DEC-942](../project/decisions/DEC-942.md)); everything an approver is shown comes from it:
 
 | Key | Content |
 |---|---|
@@ -1024,6 +1033,7 @@ has exactly these keys, and everything an approver is shown comes from it:
 | `default` | "If you do nothing, this action is skipped" |
 | `choices` | `approve` and `skip`, with equal weight and neither preselected (PX-10); then, when delegation scopes are offered (below), the names of the §6.5 shapes offered, none preselected (PX-15). These are the only "alternatives" an approval shows; it never shows a platform-authored alternative trade |
 | `approvers` | `required`: 2 when `two_approver_above_usd` is set and `order_usd` exceeds it, else 1; `independent`: `independent_approval_required`, the workspace policy's maker-checker requirement (a §4.3 policy key, not a mandate field). Both are the values at the request; check 7 can only raise them |
+| `execution` | Only when the order builder produced an execution plan: `asset_class`, `tif`, `protection_required`, and `protection` as `{stop, take_profit}` (`take_profit` `null` without one), or `null` when the mandate disables protection. A grant releases exactly this plan; re-validation never re-plans it (journal spec §9.6 version 2) |
 
 Decimals are canonical strings (journal spec §4). The owner-written `trigger.rule` is the owner's
 own text, shown as theirs and never as the platform's.
