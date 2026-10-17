@@ -19,7 +19,7 @@ use mandate_research_run::agentic::{
     Bound, Code, EndReason, OutputMode, ReplyInput, RunKind, RunStart, RunState, Tool, ToolCall,
     ToolCallId, ToolClass, ToolOutcome, ToolResult,
 };
-use mandate_research_run::{CallPlan, ItemId};
+use mandate_research_run::{CallPlan, ItemId, ItemKind};
 use mandate_time::UtcNanos;
 
 use super::{
@@ -237,6 +237,12 @@ pub(super) fn seeded(
         });
     }
     observe(agentic, items, batch)?;
+    let received: Vec<(ItemKind, ItemId)> = items
+        .iter()
+        .filter(|item| matches!(item.item.kind, ItemKind::News | ItemKind::Filing))
+        .map(|item| (item.item.kind, item.item.item_id.clone()))
+        .collect();
+    agentic.state.on_seed(&received).map_err(loop_error)?;
     let now = state
         .risk_clock()
         .map_or(run.cut_off, |at| at.max(run.cut_off));
