@@ -35,13 +35,18 @@ pub enum Probe {
 impl Probe {
     /// The request word: `livez` or `readyz`.
     pub fn word(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Live => "livez",
+            Self::Ready => "readyz",
+        }
     }
 
     pub fn parse(word: &str) -> Option<Self> {
-
-        todo!()
-
+        match word {
+            "livez" => Some(Self::Live),
+            "readyz" => Some(Self::Ready),
+            _ => None,
+        }
     }
 }
 
@@ -55,7 +60,7 @@ pub struct Answer {
 impl Answer {
     /// The `exec` probe's exit status: 0 when it passed, 1 otherwise.
     pub fn exit_status(self) -> u8 {
-        todo!()
+        if self.ok { 0 } else { 1 }
     }
 }
 
@@ -65,7 +70,21 @@ impl Answer {
 ///   bound (`stalled`);
 /// - ready: `ready` only while the state is `Ready` and the process is live, else `not_ready`.
 pub fn answer(probe: Probe, snapshot: Snapshot, now: UtcNanos) -> Answer {
-    todo!()
+    let stalled = snapshot.live_until.is_some_and(|until| nanos(now) > until);
+    let live = match snapshot.state {
+        State::Exited(_) => Err("stopped"),
+        _ if stalled => Err("stalled"),
+        _ => Ok("live"),
+    };
+    let (ok, word) = match probe {
+        Probe::Live => match live {
+            Ok(word) => (true, word),
+            Err(word) => (false, word),
+        },
+        Probe::Ready if live.is_ok() && snapshot.state == State::Ready => (true, "ready"),
+        Probe::Ready => (false, "not_ready"),
+    };
+    Answer { ok, word }
 }
 
 /// The latest snapshot a process published, shared with the probe socket's thread.
@@ -74,19 +93,15 @@ pub struct Status(Arc<Mutex<Snapshot>>);
 
 impl Status {
     pub fn new(snapshot: Snapshot) -> Self {
-        todo!()
+        Self(Arc::new(Mutex::new(snapshot)))
     }
 
     pub fn publish(&self, snapshot: Snapshot) {
-
-        todo!()
-
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = snapshot;
     }
 
     pub fn snapshot(&self) -> Snapshot {
-
-        todo!()
-
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -101,13 +116,39 @@ pub fn serve<C>(path: &Path, status: Status, clock: C) -> io::Result<()>
 where
     C: Fn() -> UtcNanos + Send + 'static,
 {
-    todo!()
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_socket() => fs::remove_file(path)?,
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "probe path is not a socket",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let listener = UnixListener::bind(path)?;
+    thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let _answered = respond(&stream, &status, &clock);
+        }
+    });
+    Ok(())
 }
 
 fn respond<C: Fn() -> UtcNanos>(stream: &UnixStream, status: &Status, clock: &C) -> io::Result<()> {
-
-    todo!()
-
+    stream.set_read_timeout(Some(SILENCE_BOUND))?;
+    stream.set_write_timeout(Some(SILENCE_BOUND))?;
+    let line = read_line(stream)?;
+    let reply = match Probe::parse(line.trim_end()) {
+        Some(probe) => answer(probe, status.snapshot(), clock()),
+        None => Answer {
+            ok: false,
+            word: NOT_FOUND,
+        },
+    };
+    let verdict = if reply.ok { "ok" } else { "fail" };
+    writeln!(&mut &*stream, "{verdict} {}", reply.word)
 }
 
 /// Asks the socket at `path` for `probe`: what a process's `exec` probe subcommand runs.
@@ -116,11 +157,26 @@ fn respond<C: Fn() -> UtcNanos>(stream: &UnixStream, status: &Status, clock: &C)
 /// The connection's own, a silent server, or a reply that is not one of the fixed answers
 /// (`InvalidData`). A probe that cannot be asked counts as failed.
 pub fn query(path: &Path, probe: Probe) -> io::Result<Answer> {
-    todo!()
+    let stream = UnixStream::connect(path)?;
+    stream.set_read_timeout(Some(SILENCE_BOUND))?;
+    stream.set_write_timeout(Some(SILENCE_BOUND))?;
+    writeln!(&mut &stream, "{}", probe.word())?;
+    let line = read_line(&stream)?;
+    let invalid = || io::Error::new(io::ErrorKind::InvalidData, "unexpected probe reply");
+    let (verdict, word) = line.trim_end().split_once(' ').ok_or_else(invalid)?;
+    let word = WORDS
+        .into_iter()
+        .find(|known| *known == word)
+        .ok_or_else(invalid)?;
+    match verdict {
+        "ok" => Ok(Answer { ok: true, word }),
+        "fail" => Ok(Answer { ok: false, word }),
+        _ => Err(invalid()),
+    }
 }
 
 fn read_line(stream: &UnixStream) -> io::Result<String> {
-
-    todo!()
-
+    let mut line = String::new();
+    BufReader::new(stream.take(LINE_BOUND)).read_line(&mut line)?;
+    Ok(line)
 }

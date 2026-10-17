@@ -33,13 +33,11 @@ pub enum Kind {
 
 impl Kind {
     fn holds_epoch(self) -> bool {
-        todo!()
+        !matches!(self, Self::Service)
     }
 
     fn reconciles(self) -> bool {
-
-        todo!()
-
+        matches!(self, Self::Executor | Self::Runtime)
     }
 }
 
@@ -71,7 +69,7 @@ pub enum Input {
 impl Input {
     /// The input an append's outcome reports, if any: only `Fenced` changes the lifecycle.
     pub fn from_append(outcome: &AppendOutcome) -> Option<Self> {
-        todo!()
+        matches!(outcome, AppendOutcome::Fenced { .. }).then_some(Self::Fenced)
     }
 }
 
@@ -93,13 +91,23 @@ pub enum Exit {
 
 impl Exit {
     pub fn code(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Drained => "drained",
+            Self::Fenced => "fenced",
+            Self::Refused => "refused",
+            Self::CycleFailed => "cycle_failed",
+            Self::DrainIncomplete => "drain_incomplete",
+        }
     }
 
     pub fn exit_status(self) -> u8 {
-
-        todo!()
-
+        match self {
+            Self::Drained => 0,
+            Self::Refused => 2,
+            Self::Fenced => 3,
+            Self::CycleFailed => 4,
+            Self::DrainIncomplete => 5,
+        }
     }
 }
 
@@ -146,41 +154,121 @@ impl Lifecycle {
     /// A process of `kind` starting at `at`, live while it handles an input at least every
     /// `liveness`.
     pub fn new(kind: Kind, liveness: Duration, at: UtcNanos) -> Self {
-        todo!()
+        Self {
+            kind,
+            liveness: span(liveness),
+            now: nanos(at),
+            started: false,
+            epoch: false,
+            replayed: false,
+            at_head: false,
+            reconciled: false,
+            drain_from: None,
+            exit: None,
+        }
     }
 
     /// Folds `input`, observed at `at`, and returns the new state. The fold's time is the latest
     /// `at` it has seen, so an earlier one never moves it back. A drain past its bound is
     /// abandoned before the input is applied, and an exited process ignores every input.
     pub fn observe(&mut self, at: UtcNanos, input: Input) -> State {
-        todo!()
+        self.now = self.now.max(nanos(at));
+        if self.exit.is_some() {
+            return self.state();
+        }
+        if self
+            .drain_from
+            .is_some_and(|from| self.now.saturating_sub(from) > span(DRAIN_BOUND))
+        {
+            self.exit = Some(Exit::DrainIncomplete);
+            return self.state();
+        }
+        match input {
+            Input::Heartbeat => {}
+            Input::StartupPassed => self.started = true,
+            Input::EpochTaken => {
+                if !self.epoch {
+                    self.epoch = true;
+                    self.replayed = false;
+                    self.at_head = false;
+                    self.reconciled = false;
+                }
+            }
+            Input::Replayed { position, head } => {
+                self.at_head = position >= head;
+                self.replayed |= self.at_head;
+            }
+            Input::Reconciled { passed } => self.reconciled = passed,
+            Input::Fenced => self.exit = Some(Exit::Fenced),
+            Input::DrainRequested => {
+                self.drain_from.get_or_insert(self.now);
+            }
+            Input::Settled => {
+                if self.drain_from.is_some() {
+                    self.exit = Some(Exit::Drained);
+                }
+            }
+            Input::Failed => {
+                self.exit = Some(match self.state() {
+                    State::Starting | State::Replaying => Exit::Refused,
+                    State::Ready | State::NotReady => Exit::CycleFailed,
+                    State::Draining => Exit::DrainIncomplete,
+                    State::Exited(exit) => exit,
+                });
+            }
+        }
+        self.state()
     }
 
     pub fn state(&self) -> State {
-
-        todo!()
-
+        if let Some(exit) = self.exit {
+            return State::Exited(exit);
+        }
+        if self.drain_from.is_some() {
+            return State::Draining;
+        }
+        if !self.started {
+            return State::Starting;
+        }
+        if !self.replayed_under_epoch() {
+            return State::Replaying;
+        }
+        let at_head = self.at_head || !self.kind.holds_epoch();
+        let reconciled = self.reconciled || !self.kind.reconciles();
+        if at_head && reconciled {
+            State::Ready
+        } else {
+            State::NotReady
+        }
     }
 
     /// Whether the process may take `action` now. Nothing is permitted once it has exited.
     pub fn permits(&self, action: Action) -> bool {
-        todo!()
+        if self.exit.is_some() {
+            return false;
+        }
+        match action {
+            Action::Open => self.state() == State::Ready,
+            Action::RiskExit => self.started && self.replayed_under_epoch(),
+            Action::KillSwitch => true,
+        }
     }
 
     /// Liveness at `now`: the process has not exited, and its last input was within its bound.
     pub fn live(&self, now: UtcNanos) -> bool {
-        todo!()
+        self.exit.is_none() && nanos(now).saturating_sub(self.now) <= self.liveness
     }
 
     /// What the probes read, as of the fold's time.
     pub fn snapshot(&self) -> Snapshot {
-        todo!()
+        Snapshot {
+            state: self.state(),
+            live_until: Some(self.now.saturating_add(self.liveness)),
+        }
     }
 
     fn replayed_under_epoch(&self) -> bool {
-
-        todo!()
-
+        !self.kind.holds_epoch() || (self.epoch && self.replayed)
     }
 }
 
@@ -195,13 +283,14 @@ impl Snapshot {
     /// A snapshot with no heartbeat bound: live until it exits. For a process whose loop does not
     /// yet report heartbeats (`mandate-agentd`'s first slice, DEC-968 item 7).
     pub fn unbounded(state: State) -> Self {
-        todo!()
+        Self {
+            state,
+            live_until: None,
+        }
     }
 
     pub fn state(self) -> State {
-
-        todo!()
-
+        self.state
     }
 }
 
@@ -210,17 +299,20 @@ impl Snapshot {
 /// included. A restart later than `now` counts too, so a clock behind the journal never hides a
 /// loop. The caller reads the restarts from the journal, never from the orchestrator.
 pub fn crash_loop<I: IntoIterator<Item = UtcNanos>>(restarts: I, now: UtcNanos) -> bool {
-    todo!()
+    let since = nanos(now).saturating_sub(span(CRASH_LOOP_WINDOW));
+    restarts
+        .into_iter()
+        .filter(|restart| nanos(*restart) >= since)
+        .count()
+        >= CRASH_LOOP_RESTARTS
 }
 
 pub(crate) fn nanos(at: UtcNanos) -> i128 {
-
-    todo!()
-
+    i128::from(at.secs())
+        .saturating_mul(NANOS_PER_SEC)
+        .saturating_add(i128::from(at.nanos()))
 }
 
 fn span(duration: Duration) -> i128 {
-
-    todo!()
-
+    i128::try_from(duration.as_nanos()).unwrap_or(i128::MAX)
 }
