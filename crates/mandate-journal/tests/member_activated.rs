@@ -11,6 +11,7 @@
 //! registers them.
 
 use std::path::Path;
+use std::sync::OnceLock;
 
 use mandate_canon::{Key, Object, Value, parse, to_canonical};
 use mandate_journal::Draft;
@@ -152,11 +153,14 @@ fn every_member_activated_draft_parses_or_is_refused_as_its_case_says() {
     );
 }
 
+/// The `membership` section, read once for the property test's many cases.
+fn membership() -> &'static Value {
+    static SECTION: OnceLock<Value> = OnceLock::new();
+    SECTION.get_or_init(|| section(MEMBERSHIP))
+}
+
 fn base_object(name: &str) -> Object {
-    base(&section(MEMBERSHIP), name)
-        .as_object()
-        .cloned()
-        .unwrap()
+    base(membership(), name).as_object().cloned().unwrap()
 }
 
 fn set(draft: &mut Object, path: &str, value: Value) {

@@ -6,11 +6,17 @@
 //!
 //! A membership record whose members do not map is never skipped: it is an [`UnreadableRecord`],
 //! and the caller commits nothing on it and grants nothing from it (identity spec ID-7, `AGENTS.md`
-//! rule 3).
+//! rule 3). The mapping reads only the members the fold and the writer read; the journal's own
+//! rules 96 to 106 are `append`'s, and a record this crate reads was admitted by them.
 
-use mandate_canon::Value;
+use std::collections::{BTreeMap, BTreeSet};
+
+use mandate_canon::{Value, decode_ulid};
+use mandate_identity_seal::Seal;
+use mandate_time::UtcNanos;
 
 use crate::writer::ControlEntry;
+use crate::{InvitationId, MembershipEvent, MembershipRecord, PrincipalId, Role};
 
 /// The seven `Member*` event types of journal spec §9.12, the only records of a membership.
 pub const MEMBERSHIP_TYPES: [&str; 7] = [
@@ -39,9 +45,172 @@ pub struct UnreadableRecord {
 /// [`UnreadableRecord`] for an envelope with no `event_time` or `event_type`, or a `Member*`
 /// record whose payload does not map.
 pub fn control_entry(seq: u64, envelope: &Value) -> Result<ControlEntry, UnreadableRecord> {
-    let _ = envelope;
-    Err(UnreadableRecord {
+    let fault = |member| UnreadableRecord { seq, member };
+    let event_type = envelope
+        .get("event_type")
+        .and_then(Value::as_str)
+        .ok_or(fault("event_type"))?;
+    let event_time = envelope
+        .get("event_time")
+        .and_then(Value::as_str)
+        .and_then(|t| UtcNanos::parse(t).ok())
+        .ok_or(fault("event_time"))?;
+    if !MEMBERSHIP_TYPES.contains(&event_type) {
+        return Ok(ControlEntry::Other { seq, event_time });
+    }
+    let payload = Payload {
+        value: envelope.get("payload").ok_or(fault("payload"))?,
         seq,
-        member: "unimplemented",
-    })
+    };
+    let event = match event_type {
+        "MemberInvited" => MembershipEvent::Invited {
+            invitation: payload.invitation("payload.invitation")?,
+            roles: payload.roles("roles", "payload.roles")?,
+            expires_at: payload.instant("expires_at", "payload.expires_at")?,
+        },
+        "MemberInvitationRevoked" => MembershipEvent::InvitationRevoked {
+            invitation: payload.invitation("payload.invitation")?,
+        },
+        "MemberActivated" => {
+            let founding = match payload.text("reason") {
+                Some("founding") => true,
+                Some("invitation_accepted") => false,
+                _ => return Err(fault("payload.reason")),
+            };
+            let invitation = match payload.value.get("invitation") {
+                Some(Value::Null) if founding => None,
+                Some(_) if !founding => Some(payload.invitation("payload.invitation")?),
+                _ => return Err(fault("payload.invitation")),
+            };
+            MembershipEvent::Activated {
+                member: payload.member()?,
+                invitation,
+                roles: payload.roles("roles", "payload.roles")?,
+                independent_approval_required: payload.independence()?,
+                cool_off_ends_at: payload
+                    .instant("cool_off_ends_at", "payload.cool_off_ends_at")?,
+            }
+        }
+        "MemberRoleChanged" => MembershipEvent::RoleChanged {
+            member: payload.member()?,
+            added: payload.added()?,
+            removed: payload.roles("removed", "payload.removed")?,
+            independent_approval_required: payload.independence()?,
+        },
+        "MemberDeactivated" => MembershipEvent::Deactivated {
+            member: payload.member()?,
+        },
+        "MemberReactivated" => MembershipEvent::Reactivated {
+            member: payload.member()?,
+            roles: payload.roles("roles", "payload.roles")?,
+            independent_approval_required: payload.independence()?,
+            cool_off_ends_at: payload.instant("cool_off_ends_at", "payload.cool_off_ends_at")?,
+        },
+        _ => MembershipEvent::Removed {
+            member: payload.member()?,
+        },
+    };
+    Ok(ControlEntry::Membership(MembershipRecord::new(
+        Seal::grant(),
+        seq,
+        event_time,
+        event,
+    )))
+}
+
+/// A membership record's payload, read member by member.
+struct Payload<'a> {
+    value: &'a Value,
+    seq: u64,
+}
+
+impl Payload<'_> {
+    fn fault(&self, member: &'static str) -> UnreadableRecord {
+        UnreadableRecord {
+            seq: self.seq,
+            member,
+        }
+    }
+
+    fn text(&self, member: &str) -> Option<&str> {
+        self.value.get(member).and_then(Value::as_str)
+    }
+
+    fn ulid(&self, member: &str, path: &'static str) -> Result<u128, UnreadableRecord> {
+        self.text(member)
+            .and_then(|t| decode_ulid(t).ok())
+            .ok_or_else(|| self.fault(path))
+    }
+
+    fn member(&self) -> Result<PrincipalId, UnreadableRecord> {
+        self.ulid("member", "payload.member").map(PrincipalId)
+    }
+
+    fn invitation(&self, path: &'static str) -> Result<InvitationId, UnreadableRecord> {
+        self.ulid("invitation", path).map(InvitationId)
+    }
+
+    fn instant(&self, member: &str, path: &'static str) -> Result<UtcNanos, UnreadableRecord> {
+        self.text(member)
+            .and_then(|t| UtcNanos::parse(t).ok())
+            .ok_or_else(|| self.fault(path))
+    }
+
+    fn independence(&self) -> Result<bool, UnreadableRecord> {
+        match self.value.get("independent_approval_required") {
+            Some(Value::Bool(required)) => Ok(*required),
+            _ => Err(self.fault("payload.independent_approval_required")),
+        }
+    }
+
+    /// A role list, strictly ascending by its codes' bytes as rule 96 writes it, each a workspace
+    /// role; anything else does not map.
+    fn roles(&self, member: &str, path: &'static str) -> Result<BTreeSet<Role>, UnreadableRecord> {
+        let codes: Vec<&str> = self
+            .value
+            .get(member)
+            .and_then(Value::as_array)
+            .ok_or_else(|| self.fault(path))?
+            .iter()
+            .map(|code| code.as_str().ok_or_else(|| self.fault(path)))
+            .collect::<Result<_, _>>()?;
+        if !codes.windows(2).all(|w| matches!(w, [a, b] if a < b)) {
+            return Err(self.fault(path));
+        }
+        codes
+            .into_iter()
+            .map(|code| Role::from_code(code).ok_or_else(|| self.fault(path)))
+            .collect()
+    }
+
+    /// `MemberRoleChanged.added`: each granted role, ascending by code with none repeated, and the
+    /// end of its cool-off.
+    fn added(&self) -> Result<BTreeMap<Role, UtcNanos>, UnreadableRecord> {
+        let path = "payload.added";
+        let entries = self
+            .value
+            .get("added")
+            .and_then(Value::as_array)
+            .ok_or_else(|| self.fault(path))?;
+        let mut codes = Vec::new();
+        let mut added = BTreeMap::new();
+        for entry in entries {
+            let code = entry
+                .get("role")
+                .and_then(Value::as_str)
+                .ok_or_else(|| self.fault(path))?;
+            let role = Role::from_code(code).ok_or_else(|| self.fault(path))?;
+            let ends = entry
+                .get("cool_off_ends_at")
+                .and_then(Value::as_str)
+                .and_then(|t| UtcNanos::parse(t).ok())
+                .ok_or_else(|| self.fault(path))?;
+            codes.push(code);
+            added.insert(role, ends);
+        }
+        if !codes.windows(2).all(|w| matches!(w, [a, b] if a < b)) {
+            return Err(self.fault(path));
+        }
+        Ok(added)
+    }
 }

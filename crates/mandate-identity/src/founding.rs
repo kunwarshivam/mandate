@@ -6,11 +6,11 @@
 //! records that attempt read and appends at, so two bootstraps racing on one stream never both
 //! grant: the second's append finds the head moved, re-reads, and finds the first's grant.
 
-use std::collections::BTreeSet;
-
 use mandate_time::UtcNanos;
 
-use crate::writer::{ControlStream, ControlView, WriteError};
+use crate::writer::{
+    ControlEntry, ControlStream, ControlView, Halt, Step, WriteError, write_decided,
+};
 use crate::{MembershipEvent, MembershipRecord, PrincipalId, Role};
 
 /// The owner bundle (identity spec §4.3): workspace admin, operator, and approver, and no other
@@ -68,15 +68,16 @@ pub fn founding_grant(member: PrincipalId, at: UtcNanos) -> MembershipEvent {
     MembershipEvent::Activated {
         member,
         invitation: None,
-        roles: BTreeSet::new(),
-        independent_approval_required: true,
+        roles: OWNER_BUNDLE.into_iter().collect(),
+        independent_approval_required: false,
         cool_off_ends_at: at,
     }
 }
 
 /// What `view` says of founding the workspace for `member`: `Ok(None)` when the grant may be
 /// committed, `Ok(Some(record))` when the stream's first membership record is already `member`'s
-/// founding grant.
+/// founding grant. The view must hold every record from the stream's first, as the founding
+/// bootstrap's adapter reads it; a view that starts later can only refuse, never grant twice.
 ///
 /// # Errors
 /// [`FoundingRefusal`] as its variants say.
@@ -84,11 +85,26 @@ pub fn founding_decision(
     view: &ControlView,
     member: PrincipalId,
 ) -> Result<Option<MembershipRecord>, FoundingRefusal> {
-    let _ = (view, member);
-    Err(FoundingRefusal::NotOpen)
+    let first = view.tail.iter().find_map(|entry| match entry {
+        ControlEntry::Membership(record) => Some(record),
+        ControlEntry::Other { .. } => None,
+    });
+    match first {
+        Some(record) if is_founding_of(record, member) => Ok(Some(record.clone())),
+        Some(_) => Err(FoundingRefusal::MembersExist),
+        None if view.head == 0 => Err(FoundingRefusal::NotOpen),
+        None if view.head > 1 => Err(FoundingRefusal::NotNew),
+        None => Ok(None),
+    }
 }
 
-/// Commits `member`'s founding grant through the one membership writer, or finds it committed.
+/// Whether `record` is `member`'s founding grant as [`founding_grant`] writes it.
+fn is_founding_of(record: &MembershipRecord, member: PrincipalId) -> bool {
+    *record.event() == founding_grant(member, record.event_time())
+}
+
+/// Commits `member`'s founding grant through the one membership writer, deciding inside each
+/// attempt from the view it appends at, or finds it committed.
 ///
 /// # Errors
 /// [`FoundingError`] as its variants say.
@@ -97,6 +113,16 @@ pub fn found_workspace<S: ControlStream>(
     now: impl FnMut() -> UtcNanos,
     member: PrincipalId,
 ) -> Result<Founded, FoundingError<S::Error>> {
-    let _ = (stream, now, member);
-    Err(FoundingError::Refused(FoundingRefusal::NotOpen))
+    let decide = |view: &ControlView, at: UtcNanos| {
+        Ok(match founding_decision(view, member)? {
+            None => Step::Commit(founding_grant(member, at)),
+            Some(granted) => Step::Stop(granted),
+        })
+    };
+    match write_decided(stream, now, decide) {
+        Ok(Ok(granted)) => Ok(Founded::Granted(granted)),
+        Ok(Err(found)) => Ok(Founded::AlreadyFounded(found)),
+        Err(Halt::Declined(refusal)) => Err(FoundingError::Refused(refusal)),
+        Err(Halt::Write(error)) => Err(FoundingError::Write(error)),
+    }
 }

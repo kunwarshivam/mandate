@@ -14,11 +14,18 @@ use std::io::Write;
 
 use clap::{Args, Subcommand};
 
-use mandate_journal::Environment;
+use mandate_canon::Value;
+use mandate_identity::{
+    Appended, ControlStream, ControlView, Founded as IdentityFounded, FoundingError,
+    FoundingRefusal, MembershipEvent, MembershipRecord, PrincipalId, WriteError, control_entry,
+    found_workspace,
+};
+use mandate_journal::{AppendOutcome, Environment, StreamId};
 use mandate_time::UtcNanos;
 
 use crate::control::{
-    ControlError, ControlJournal, Now, Owner, Submitted, control_stream, open_control_stream,
+    ControlError, ControlJournal, Now, Owner, Submitted, backoff, control_stream, envelope,
+    founding_draft, object, open_control_stream, text,
 };
 use crate::postgres::{JournalArgs, PgControlJournal, read_stream};
 
@@ -122,24 +129,229 @@ pub fn found(
     clock: &mut dyn FnMut() -> UtcNanos,
     report: &mut impl Write,
 ) -> anyhow::Result<Founded> {
-    let _ = (args, clock, report);
-    Err(ControlError::Unimplemented { story: "ID1" }.into())
+    let founding = Founding {
+        workspace: &args.workspace,
+        member: &args.member,
+        method: &args.method,
+    };
+    checked(founding)?;
+    let mut journal = PgControlJournal::open(&args.target)?;
+    Ok(found_in(&mut journal, founding, clock, report)?)
 }
 
 /// Writes `founding`'s grant on `journal`, reading the clock with `clock` inside each attempt, and
-/// prints what it did.
+/// prints what it did. A grant found already committed, by an earlier run or by this one's lost
+/// answer, is reported with `granted: false`, and nothing is committed.
 ///
 /// # Errors
 /// [`ControlError::Refused`] with `method_invalid`, `member_invalid`, or
 /// `owner_workspace_invalid` before the journal is read; then `workspace_not_open`,
-/// `workspace_not_new`, or `members_exist`, committing nothing; [`ControlError::Journal`] when the
-/// journal fails or does not settle.
+/// `workspace_not_new`, or `members_exist`, committing nothing, or `membership_out_of_order` when
+/// the writer's order rule refuses (journal spec §9.12 **Order**); [`ControlError::Journal`] when
+/// the journal fails or does not settle.
 pub fn found_in(
     journal: &mut dyn ControlJournal,
     founding: Founding<'_>,
     clock: &mut dyn FnMut() -> UtcNanos,
     report: &mut dyn Write,
 ) -> Result<Founded, ControlError> {
-    let _ = (journal, founding, clock, report);
-    Err(ControlError::Unimplemented { story: "ID1" })
+    let (method, member) = checked(founding)?;
+    let mut owner = Owner {
+        workspace: founding.workspace.to_owned(),
+        user: String::new(),
+        environment: Environment::Paper,
+    };
+    let stream = control_stream(&owner)?;
+    let rows = journal.rows(&stream)?;
+    let Some(opening) = rows.first() else {
+        return Err(refused(FoundingRefusal::NotOpen.code()));
+    };
+    owner.environment = Environment::parse(&opening.environment)
+        .ok_or_else(|| ControlError::Journal("the stream's environment".to_owned()))?;
+    let mut writer = FoundingStream {
+        journal,
+        owner: &owner,
+        stream: &stream,
+        member: founding.member,
+        method,
+        retries: 0,
+    };
+    let (record, granted) = match found_workspace(&mut writer, clock, member) {
+        Ok(IdentityFounded::Granted(record)) => (record, true),
+        Ok(IdentityFounded::AlreadyFounded(record)) => (record, false),
+        Err(FoundingError::Refused(why)) => return Err(refused(why.code())),
+        Err(FoundingError::Write(WriteError::Refused(_))) => {
+            return Err(refused("membership_out_of_order"));
+        }
+        Err(FoundingError::Write(WriteError::Store(error))) => return Err(error),
+        Err(FoundingError::Write(WriteError::Contended | WriteError::StreamFull)) => {
+            return Err(ControlError::Journal(
+                "the control stream did not settle; running it again finds the grant if it \
+                 was committed"
+                    .to_owned(),
+            ));
+        }
+    };
+    let seq = record.seq();
+    let line = if granted {
+        format!(
+            "founded {} for member {} at seq {seq}",
+            stream.as_str(),
+            founding.member
+        )
+    } else {
+        format!(
+            "{} is already founded for member {} at seq {seq}; nothing was committed",
+            stream.as_str(),
+            founding.member
+        )
+    };
+    writeln!(report, "{line}").map_err(|e| ControlError::Journal(format!("the report: {e}")))?;
+    Ok(Founded { seq, granted })
+}
+
+const METHODS: [&str; 3] = ["passkey", "oidc", "email_link"];
+
+fn refused(reason: &'static str) -> ControlError {
+    ControlError::Refused { reason }
+}
+
+/// The method and member `founding` names, and its workspace's control stream, checked before
+/// any journal is opened.
+fn checked(founding: Founding<'_>) -> Result<(&'static str, PrincipalId), ControlError> {
+    let method = METHODS
+        .into_iter()
+        .find(|m| *m == founding.method)
+        .ok_or_else(|| refused("method_invalid"))?;
+    let member =
+        PrincipalId::from_ulid_text(founding.member).map_err(|_| refused("member_invalid"))?;
+    let owner = Owner {
+        workspace: founding.workspace.to_owned(),
+        user: String::new(),
+        environment: Environment::Paper,
+    };
+    control_stream(&owner).map_err(|_| refused("owner_workspace_invalid"))?;
+    Ok((method, member))
+}
+
+/// The control stream as the one membership writer's port (DEC-646), over the CLI's journal: it
+/// reads every row, so the founding decision sees the stream from its opening, and appends the
+/// founding grant's draft at the head the attempt read. A fence, an unavailable journal, or a lost
+/// answer reads as a moved head after a [`backoff`], so the writer re-reads and decides again: a
+/// grant that did commit is then found, never written twice.
+struct FoundingStream<'a> {
+    journal: &'a mut dyn ControlJournal,
+    owner: &'a Owner,
+    stream: &'a StreamId,
+    member: &'a str,
+    method: &'static str,
+    retries: u32,
+}
+
+impl ControlStream for FoundingStream<'_> {
+    type Error = ControlError;
+
+    fn read(&mut self) -> Result<ControlView, ControlError> {
+        let rows = self.journal.rows(self.stream)?;
+        let head = rows.last().map_or(0, |row| row.seq);
+        let tail = rows
+            .iter()
+            .map(|row| {
+                let value = envelope(row)?;
+                control_entry(row.seq, &value).map_err(|e| ControlError::Journal(e.to_string()))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(ControlView { head, tail })
+    }
+
+    fn append(
+        &mut self,
+        expected_head: u64,
+        record: &MembershipRecord,
+    ) -> Result<Appended, ControlError> {
+        let payload = founding_payload(record, self.member, self.method)?;
+        let at = record.event_time();
+        let (event_id, bytes) =
+            founding_draft(self.owner, self.member, payload, at, expected_head)?;
+        let epoch = self.journal.take_ownership(self.stream)?;
+        match self
+            .journal
+            .append(self.stream, expected_head, epoch, at, &[&bytes])?
+        {
+            AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows)
+                if rows.iter().any(|row| row.event_id == event_id) =>
+            {
+                Ok(Appended::Committed)
+            }
+            AppendOutcome::Committed(_) | AppendOutcome::AlreadyCommitted(_) => Err(
+                ControlError::Journal("the stored event is missing".to_owned()),
+            ),
+            AppendOutcome::HeadMismatch { .. }
+            | AppendOutcome::Fenced { .. }
+            | AppendOutcome::Ambiguous
+            | AppendOutcome::Unavailable => {
+                self.retries = self.retries.saturating_add(1);
+                self.journal.wait(backoff(self.retries, &event_id)?);
+                Ok(Appended::HeadMoved)
+            }
+            AppendOutcome::IdempotencyConflict { stored_seq } => Err(ControlError::Journal(
+                format!("another event is stored under this id at seq {stored_seq}"),
+            )),
+            AppendOutcome::Invalid { error, .. } => {
+                Err(ControlError::Journal(format!("refused: {error:?}")))
+            }
+        }
+    }
+}
+
+/// The founding grant's §9.12 payload: `record`'s activation, which must be `member`'s founding
+/// grant, with the given sign-in method, no invitation, and no session (rules 99 and 105).
+///
+/// # Errors
+/// [`ControlError::Journal`] for any other record, which this writer never writes.
+fn founding_payload(
+    record: &MembershipRecord,
+    member: &str,
+    method: &str,
+) -> Result<Value, ControlError> {
+    let named = PrincipalId::from_ulid_text(member).map_err(|_| refused("member_invalid"))?;
+    let MembershipEvent::Activated {
+        member: activated,
+        invitation: None,
+        roles,
+        independent_approval_required,
+        cool_off_ends_at,
+    } = record.event()
+    else {
+        return Err(ControlError::Journal(
+            "the founding writer writes only a founding grant".to_owned(),
+        ));
+    };
+    if *activated != named {
+        return Err(ControlError::Journal(
+            "the founding grant names another member".to_owned(),
+        ));
+    }
+    let mut codes = roles
+        .iter()
+        .map(|role| {
+            role.code()
+                .ok_or_else(|| ControlError::Journal("an org role".to_owned()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    codes.sort_unstable();
+    object(vec![
+        ("member", text(member)),
+        ("invitation", Value::Null),
+        ("reason", text("founding")),
+        ("roles", Value::Array(codes.into_iter().map(text).collect())),
+        ("method", text(method)),
+        ("activated_at", text(&record.event_time().to_string())),
+        (
+            "independent_approval_required",
+            Value::Bool(*independent_approval_required),
+        ),
+        ("cool_off_ends_at", text(&cool_off_ends_at.to_string())),
+        ("session_ref", Value::Null),
+    ])
 }
