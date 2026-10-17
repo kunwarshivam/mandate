@@ -1205,8 +1205,57 @@ fn process_group_problems(
     names: &BTreeSet<&str>,
     closure: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<String> {
-    let _ = (policy, names, closure);
-    Vec::new()
+    let groups = &policy.process_groups;
+    let services = ("workspace services", &groups.workspace_services);
+    let agents = ("agent process", &groups.agent_process);
+    let mut problems = Vec::new();
+    for (key, own) in [
+        ("workspace_services", services.1),
+        ("agent_process", agents.1),
+    ] {
+        problems.extend(
+            own.iter()
+                .filter(|name| !names.contains(name.as_str()) && !policy.planned.contains(name))
+                .map(|name| {
+                    format!(
+                        "`{name}` is in process group `{key}` but is neither a workspace member \
+                         nor in `planned` (DEC-980)"
+                    )
+                }),
+        );
+    }
+    problems.extend(
+        groups
+            .workspace_services
+            .iter()
+            .filter(|name| groups.agent_process.contains(name))
+            .map(|name| {
+                format!(
+                    "`{name}` is in both process groups, so it would sit on both sides of the \
+                     boundary (DEC-980)"
+                )
+            }),
+    );
+    for ((own_label, own), (other_label, other)) in [(services, agents), (agents, services)] {
+        for name in own {
+            let Some(reached) = closure.get(name) else {
+                continue;
+            };
+            problems.extend(
+                other
+                    .iter()
+                    .filter(|crossed| *crossed != name && reached.contains(*crossed))
+                    .map(|crossed| {
+                        format!(
+                            "`{name}` ({own_label}) reaches `{crossed}` ({other_label}); \
+                             workspace services and agent processes meet only in the journal \
+                             (E21-42, DEC-980)"
+                        )
+                    }),
+            );
+        }
+    }
+    problems
 }
 
 /// Rows of `docs/dependencies.md` shaped `| `name` | ecosystem | ...`.
@@ -8548,6 +8597,7 @@ mod tests {
                 "mandate-audit",
                 "mandate-cli",
                 "mandate-cp-agent",
+                "mandate-cp-site",
                 "mandate-dispatcher"
             ]
         );
