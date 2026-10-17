@@ -562,7 +562,7 @@ range's `cause` `token_unverifiable`; any `anchor_unstamped` fails the drill (DE
    (rustls only, ES-17), container images pinned by digest, and from M6 a reproducible build
    (`SOURCE_DATE_EPOCH`, a double-build diff) with an SBOM and cargo-auditable metadata (ES-14,
    ES-17). Built by `cargo xtask release build` and proved by `release.yml`'s two builds of each
-   `main` commit on two runners ([DEC-970](../project/decisions/DEC-970.md)); the build digest is
+   `main` commit on two runners ([DEC-972](../project/decisions/DEC-972.md)); the build digest is
    the binary's SHA-256, as `SHA256SUMS` lists it.
 3. **Sign.** From M11 or the first external install, images and bundles are signed with cosign
    under the founder's hardware key, with build provenance (ES-17). Every process checks its own
@@ -746,7 +746,7 @@ are authoritative; a few come from metrics.
   commit SHA with `permissions: {}` and no secrets in PR jobs (ES-12, ES-14).
 - **Supply chain, deferred with triggers:** cargo-vet at M6; signing and provenance at M11 (ES-14,
   ES-17). The SBOM and cargo-auditable metadata are in the release build
-  ([DEC-970](../project/decisions/DEC-970.md)).
+  ([DEC-972](../project/decisions/DEC-972.md)).
 - **Host hardening:** distroless images, a read-only root filesystem, no shell in production images,
   and non-root users (ES-17 at M11).
 - **Threat model ([draft v0.1](../security/threat-model.md), E21-10, DEC-439):** per process type and per deployment mode, with the

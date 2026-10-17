@@ -3,7 +3,7 @@
 - **Spec:** [infrastructure design](../../../../docs/design/infrastructure.md) §7.1 step 2 (a
   `--locked` static build, `SOURCE_DATE_EPOCH`, a double-build diff, an SBOM and cargo-auditable
   metadata), OPS-15 (the build digest as `actor.build`); [journal spec](../../../../docs/specs/journal.md)
-  §3 (the `actor.build` content reference); DEC-970.
+  §3 (the `actor.build` content reference); DEC-972.
 - **Code:** `mandate-release`, in `crates/mandate-release` (`BuildDigest`: the SHA-256 of an executable's bytes,
   `running()` from `/proc/self/exe`, the `sha256:<hex>` reference and its parser);
   `xtask/src/release.rs` (`cargo xtask release tools`, `release build <out>`, `release compare

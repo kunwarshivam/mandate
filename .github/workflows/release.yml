@@ -1,4 +1,4 @@
-# The release build (E21-8, DEC-970; infrastructure design §7.1 step 2, ES-14, ES-17). Two jobs
+# The release build (E21-8, DEC-972; infrastructure design §7.1 step 2, ES-14, ES-17). Two jobs
 # build the same commit with `cargo xtask release build`: on two runners, in two checkout paths,
 # with no cache, so nothing one build left behind can reach the other. `compare` fails unless both
 # printed the same digest of their SHA256SUMS, which lists every binary's SHA-256: one commit,

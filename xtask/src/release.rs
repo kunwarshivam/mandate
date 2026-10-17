@@ -1,4 +1,4 @@
-//! `cargo xtask release`: the reproducible release build (E21-8, DEC-970; infrastructure design
+//! `cargo xtask release`: the reproducible release build (E21-8, DEC-972; infrastructure design
 //! §7.1 step 2, ES-14, ES-17).
 //!
 //! `release build` builds the release's binaries from the checked-out commit with `--locked`, as
