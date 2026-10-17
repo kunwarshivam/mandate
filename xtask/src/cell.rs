@@ -2280,7 +2280,12 @@ fn read_archive(id: &str, path: &str, url: &str, segment: &str) -> Result<(bool,
             "name": name,
             "image": image,
             "command": args,
-            "env": [key("AWS_ACCESS_KEY_ID", "ACCESS_KEY_ID"), key("AWS_SECRET_ACCESS_KEY", "ACCESS_SECRET_KEY")],
+            "env": [
+                key("AWS_ACCESS_KEY_ID", "ACCESS_KEY_ID"),
+                key("AWS_SECRET_ACCESS_KEY", "ACCESS_SECRET_KEY"),
+                {"name": "AWS_DEFAULT_REGION", "value": "us-east-1"},
+                {"name": "HOME", "value": "/tmp"}
+            ],
             "securityContext": {
                 "allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true,
                 "capabilities": {"drop": ["ALL"]}
