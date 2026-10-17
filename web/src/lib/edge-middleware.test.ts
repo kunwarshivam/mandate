@@ -222,6 +222,11 @@ describe("the mock workspace API at /v1 (DEC-975 item 10)", () => {
     for (const path of PATHS) expect((await middleware(request(path))).headers.get("x-middleware-next"), path).toBe("1");
   });
 
+  it("leaves a path that only begins with the letters alone, such as /v1x or /v10", async () => {
+    session.auth = false;
+    for (const path of ["/v1x", "/v10", "/v1x/workspaces"]) expect((await middleware(request(path))).status, path).not.toBe(404);
+  });
+
   it("is matched by the middleware, so no build serves /v1 around it", () => {
     for (const path of PATHS) expect(matched(path), path).toBe(true);
   });
