@@ -1718,12 +1718,16 @@ dependencies = [
  "base64ct",
  "mandate-canon",
  "mandate-journal",
+ "mandate-journal-pg",
  "mandate-notify",
  "mandate-push-relay",
  "mandate-time",
  "mandate-webpush",
  "proptest",
+ "ring",
+ "sqlx",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

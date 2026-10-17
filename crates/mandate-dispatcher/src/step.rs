@@ -67,7 +67,12 @@ impl NoticeWriter {
 /// What the dispatcher reads and writes: the committed rows of a stream in `seq` order, and one
 /// all-or-nothing append to a [`NoticeWriter`]'s stream at its epoch.
 pub trait Journal {
-    fn committed(&self, stream: &StreamId) -> Vec<StoredEvent>;
+    /// The committed rows of `stream` in `seq` order (DEC-2500 item 3).
+    ///
+    /// # Errors
+    /// [`DispatchError::JournalUnavailable`] when the store cannot answer. A failed read is never
+    /// an empty stream: read as one, it would re-open the notice stream and re-issue every cause.
+    fn committed(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError>;
     fn append_notices(
         &mut self,
         writer: &NoticeWriter,
@@ -150,7 +155,9 @@ pub(crate) struct Notices {
 /// # Errors
 /// [`DispatchError::Fenced`] when a newer dispatcher owns the notice stream and
 /// [`DispatchError::NotCommitted`] for any other append that does not commit, each before the
-/// next send; [`DispatchError::Notify`] when the random source fails.
+/// next send; [`DispatchError::Notify`] when the random source fails; and
+/// [`DispatchError::JournalUnavailable`] when a read fails, which ends the step before it issues,
+/// sends, or appends anything more (DEC-2500 item 3).
 pub fn step(
     config: &Config<'_>,
     journal: &mut dyn Journal,
@@ -159,8 +166,8 @@ pub fn step(
     now: UtcNanos,
 ) -> Result<(), DispatchError> {
     let stream = config.writer.stream()?;
-    let before = notices_of(&journal.committed(stream));
-    let alerts = causes(journal, config.subjects);
+    let before = notices_of(&read(journal, stream)?);
+    let alerts = causes(journal, config.subjects)?;
     let fresh = fresh(&alerts, &before.issued)?;
     if !fresh.is_empty() {
         let recipients: BTreeSet<&str> = config.audience.iter().map(|&(r, _)| r).collect();
@@ -197,7 +204,7 @@ pub fn step(
         }
         append(journal, config.writer, before.head, now, &drafts)?;
     }
-    let rows = journal.committed(stream);
+    let rows = read(journal, stream)?;
     let mut head = notices_of(&rows).head;
     for pending in pending(&rows, config.audience, now)? {
         let due = &pending.due;
@@ -298,11 +305,11 @@ impl Record {
 
 /// The committed `OwnerAlertSent` of the subject streams, the streams in the order given and each
 /// in `seq` order. A batch the journal refused, a fenced one included, has no row, so it is no
-/// cause (spec §5.1 step 1, NT-8).
-fn causes(journal: &dyn Journal, subjects: &[StreamId]) -> Vec<Cause> {
+/// cause (spec §5.1 step 1, NT-8). A subject stream that cannot be read ends the step.
+fn causes(journal: &dyn Journal, subjects: &[StreamId]) -> Result<Vec<Cause>, DispatchError> {
     let mut alerts = Vec::new();
     for stream in subjects {
-        for row in journal.committed(stream) {
+        for row in read(journal, stream)? {
             let alert = payload(&row).filter(|_| row.event_type == "OwnerAlertSent");
             let Some(alert) = alert else { continue };
             alerts.push(Cause {
@@ -317,7 +324,18 @@ fn causes(journal: &dyn Journal, subjects: &[StreamId]) -> Vec<Cause> {
             });
         }
     }
-    alerts
+    Ok(alerts)
+}
+
+/// One read of `stream`'s committed rows; a read that fails ends the step (DEC-2500 item 3).
+///
+/// The tests PR's stub (DEC-77, E8-10 slice D10a): a failed read already ends the step, so nothing
+/// more is issued, sent, or appended, but it answers [`DispatchError::Unimplemented`] where the
+/// pending tests expect the closed [`DispatchError::JournalUnavailable`].
+fn read(journal: &dyn Journal, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
+    journal
+        .committed(stream)
+        .map_err(|_| DispatchError::Unimplemented { story: "E8-10" })
 }
 
 /// One cause per notice key that has no `NoticeIssued` yet, in first-read order: the key's
