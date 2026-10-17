@@ -63,6 +63,27 @@ in the k3s node: `docker exec k3d-mandate-cell-server-0 kubectl get pods -n ws-w
 TLS-inspecting proxy, set `MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle so the node can pull.
 These are local-cell results, never staging's (DEC-967 item 5).
 
+### The demo
+
+`cargo xtask cell demo` is the whole local cell on a laptop, with paper and demo data only and no
+credential. It runs `cell up`, opens the `demo` workspace and verifies its control stream in the
+cell, and prints each part as `ready` or `skipped` with the lane it waits on. Then it runs `web/`
+at http://127.0.0.1:4317 in the foreground (Ctrl-C stops it; the cell keeps running). With
+`--no-web` it stops after the summary; CI runs it that way at the end of the `cell` job, which also
+upgrades every release in place.
+
+| Part | Ready when |
+|---|---|
+| The cell: k3d, CloudNativePG, the migration Job | Always |
+| The demo workspace, its control stream verified | Always |
+| The workspace API server, through a port-forward | Lane A1 (E21-31) marks `api` built in `processes.json` |
+| A paper agent on rh-sim and recorded Alpaca fixtures | Lane P1 (#1451) marks `runtime` and `executor` built |
+| The founding membership | Lane ID1's `mandate membership` gesture is in the CLI |
+| `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
+
+A part whose lane is not on `main` is named as skipped, never faked. `web/` needs Node.js at the
+release in `web/.nvmrc` and npm; the first run does `npm ci`.
+
 ### The drills
 
 | Drill | What holds | Its seeded bug |
