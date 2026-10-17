@@ -150,11 +150,6 @@ function buildProblems(tree) {
 const WEB_WORKFLOW = "../.github/workflows/web.yml";
 const DEPLOY_WORKFLOW = "../.github/workflows/web-deploy.yml";
 const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".github", "workflows");
-/** A Wrangler or OpenNext command and its arguments, up to the end of its shell command. */
-const CLI = /\b(wrangler|opennextjs-cloudflare)(?:@[\w.^~-]+)?((?:\s+[^\s;&|]+)*)/g;
-/** The subcommands that upload or publish a Worker, a Pages project or a version. */
-const UPLOADS = { wrangler: ["deploy", "publish", "pages", "versions", "triggers"], "opennextjs-cloudflare": ["deploy", "upload"] };
-
 /** The deploy workflow's triggers, exactly: a push to `main` touching the app, or a dispatch (DEC-986 item 1). */
 const DEPLOY_TRIGGERS = ["on:", "  push:", "    branches: [main]", "    paths:", '      - "web/**"', '      - ".github/workflows/web-deploy.yml"', "  workflow_dispatch:"].join("\n");
 /** The one step that deploys, and the only secret and variables it may read (DEC-986 items 2 and 3). */
@@ -164,38 +159,30 @@ const TOP_LEVEL = ["name", "on", "permissions", "concurrency", "jobs"];
 /** The variables the build may read: public values only, which Next inlines into the bundle (DEC-823 item 5). */
 const PUBLIC_VARS = /^NEXT_PUBLIC_[A-Z0-9_]+$/;
 
-/** `text`'s shell lines, with continuations joined and trailing comments left out. */
-const shellLines = (text) =>
-  text
-    .replace(/\\\n\s*/g, " ")
-    .split("\n")
-    .map((line) => line.replace(/(^|\s)#.*$/, ""));
+/**
+ * What names a Cloudflare tool: Wrangler, the OpenNext adapter, or a Cloudflare action. The build's
+ * own dry-run directory and Wrangler's metrics switch are the two names that run nothing.
+ */
+const CLOUDFLARE_TOOL = /wrangler|opennext|cloudflare\//i;
+const HARMLESS = /\.wrangler\/dry-run\b|\bWRANGLER_SEND_METRICS\b/g;
+/** The only commands that may name a Cloudflare tool, exactly as written: the dry run and the Worker's build and preview scripts. */
+const ALLOWED_COMMANDS = ["npx wrangler deploy --dry-run --outdir .wrangler/dry-run", "opennextjs-cloudflare build", "opennextjs-cloudflare build && opennextjs-cloudflare preview"];
 
 /**
- * The first command in `text` that uploads to Cloudflare, or null. Only `wrangler deploy` with an
- * argument that is exactly `--dry-run` writes nothing, and only it passes.
+ * One line for the first line of `lines` that names a Cloudflare tool and is not an allowed command
+ * exactly, or none. It is an allowlist, so a deploy hidden by flags, quotes, a path or a comment
+ * fails rather than passes; it checks for drift, and the environment, not this check, holds the token.
  */
-function firstUpload(text) {
-  for (const line of shellLines(text)) {
-    if (/^\s*(?:-\s+)?uses:\s*["']?(?:cloudflare\/|[^\s]*wrangler-action)/i.test(line)) return line.trim();
-    for (const match of line.matchAll(CLI)) {
-      const args = match[2].trim().split(/\s+/).filter(Boolean);
-      const uploads = args.filter((arg) => UPLOADS[match[1]].includes(arg));
-      if (uploads.length === 0) continue;
-      const dryRun = match[1] === "wrangler" && uploads.every((arg) => arg === "deploy") && args.includes("--dry-run");
-      if (!dryRun) return match[0].trim();
+function deployProblems(path, lines) {
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#") || !CLOUDFLARE_TOOL.test(trimmed.replace(HARMLESS, ""))) continue;
+    const command = trimmed.replace(/^(?:-\s+)?run:\s*/, "");
+    if (!ALLOWED_COMMANDS.includes(command)) {
+      return [`${path}: runs ${JSON.stringify(trimmed)}, a Cloudflare command other than the Worker's build and dry run; only the deploy job of ${DEPLOY_WORKFLOW} deploys (DEC-986 item 1)`];
     }
   }
-  return null;
-}
-
-/** One line naming the first upload or login in `text` that is not a dry run, or none. */
-function deployProblems(path, text) {
-  const problems = [];
-  const upload = firstUpload(text);
-  if (upload !== null) problems.push(`${path}: runs ${upload} (wrangler deploy without --dry-run); only the deploy job of ${DEPLOY_WORKFLOW} deploys (DEC-986 item 1)`);
-  if (shellLines(text).some((line) => /\bwrangler(?:@[\w.^~-]+)?(?:\s+\S+)*\s+login\b/.test(line))) problems.push(`${path}: runs wrangler login; the deploy job's environment token is the only Cloudflare credential (DEC-986 item 2)`);
-  return problems;
+  return [];
 }
 
 /** The workflow's lines with comments and blank lines left out. */
@@ -268,7 +255,7 @@ function deployWorkflowProblems(tree) {
   }
   const outsideSteps = [...[...blocks.entries()].filter(([key]) => key !== "jobs").flatMap(([, block]) => block), ...header, ...settings].join("\n");
   if (references(outsideSteps, "secrets").length > 0 || references(outsideSteps, "vars").length > 0) fail("only a step may read a secret or a variable, never the whole job (DEC-986 item 2)");
-  const sanctioned = deploying.length === 1 ? lines.filter((line) => !deploying[0].includes(line)).join("\n") : lines.join("\n");
+  const sanctioned = deploying.length === 1 ? lines.filter((line) => !deploying[0].includes(line)) : lines;
   problems.push(...deployProblems(DEPLOY_WORKFLOW, sanctioned));
   return [...new Set(problems)];
 }
@@ -279,12 +266,12 @@ function workflowProblems(tree) {
   for (const path of new Set([WEB_WORKFLOW, ...workflows])) {
     if (path === DEPLOY_WORKFLOW || !tree.exists(path)) continue;
     const text = tree.read(path);
-    problems.push(...deployProblems(path, text));
+    problems.push(...deployProblems(path, text.split("\n")));
     if (/^\s*environment:.*\bproduction\b|^\s*name:\s*production\b/m.test(text)) problems.push(`${path}: names the production environment; only the deploy job of ${DEPLOY_WORKFLOW} may (ES-12, DEC-986 item 2)`);
     if (/CLOUDFLARE_/.test(text)) problems.push(`${path}: holds a CLOUDFLARE_ value; only the deploy step of ${DEPLOY_WORKFLOW} reads the token and the account (DEC-986 item 2)`);
   }
   problems.push(...deployWorkflowProblems(tree));
-  problems.push(...deployProblems("package.json", JSON.stringify(JSON.parse(tree.read("package.json")).scripts ?? {})));
+  problems.push(...deployProblems("package.json", Object.values(JSON.parse(tree.read("package.json")).scripts ?? {}).map(String)));
   if (!tree.exists(WEB_WORKFLOW)) return [...problems, `${WEB_WORKFLOW}: missing`];
   const yml = tree.read(WEB_WORKFLOW);
   if (!/npm run cf:build/.test(yml)) problems.push(`${WEB_WORKFLOW}: must build the Worker with npm run cf:build`);

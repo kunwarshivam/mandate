@@ -115,12 +115,13 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     const workflow = "../.github/workflows/web.yml";
     const yml = real(workflow);
     expect(yml).toContain("wrangler deploy --dry-run");
-    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run --outdir dist\n` }))).toEqual([]);
-    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy\n` }))).toEqual(only("wrangler deploy"));
-    expect(hostingProblems(tree({ "../.github/workflows/ci.yml": `${real("../.github/workflows/ci.yml")}\n      - run: npx wrangler@4 deploy\n` }))).toEqual(only("ci.yml: runs wrangler"));
-    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --minify\n` }))).toEqual(only("wrangler deploy"));
-    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run && npx wrangler deploy\n` }))).toEqual(only("wrangler deploy"));
-    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler login\n` }))).toEqual(only("wrangler login"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run\n` }))).toEqual([]);
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run --outdir dist\n` }))).toEqual(only("Cloudflare command"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy\n` }))).toEqual(only("Cloudflare command"));
+    expect(hostingProblems(tree({ "../.github/workflows/ci.yml": `${real("../.github/workflows/ci.yml")}\n      - run: npx wrangler@4 deploy\n` }))).toEqual(only("Cloudflare command"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --minify\n` }))).toEqual(only("Cloudflare command"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run && npx wrangler deploy\n` }))).toEqual(only("Cloudflare command"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler login\n` }))).toEqual(only("Cloudflare command"));
     expect(yml).not.toMatch(/wrangler login/);
   });
 
@@ -190,7 +191,7 @@ describe("only the deploy job deploys, from main, through the production environ
   });
 
   it("pending E21-38: lets only the last step deploy, after the build, reading the token and the account alone", () => {
-    expect(deployWith((y) => y.replace("      - run: npx wrangler deploy\n", "      - run: npx wrangler deploy --env preview\n"))).toEqual([expect.stringContaining("must end with"), expect.stringContaining("only the deploy step may read a secret"), expect.stringContaining("the build may read only"), expect.stringContaining("runs wrangler deploy")]);
+    expect(deployWith((y) => y.replace("      - run: npx wrangler deploy\n", "      - run: npx wrangler deploy --env preview\n"))).toEqual([expect.stringContaining("must end with"), expect.stringContaining("only the deploy step may read a secret"), expect.stringContaining("the build may read only"), expect.stringContaining("Cloudflare command")]);
     expect(deployWith((y) => `${y}      - run: node scripts/workers.mjs size .wrangler/dry-run\n`)).toEqual(only("must end with"));
     expect(deployWith((y) => y.replace("      - run: npm run cf:build\n", "      - run: npm run build\n"))).toEqual(only("cf:build before"));
     expect(deployWith((y) => y.replace(BUILD_ENV, `${BUILD_ENV}          LEAK: \${{ secrets.CLOUDFLARE_API_TOKEN }}\n`))).toEqual(only("only the deploy step may read a secret"));
@@ -199,8 +200,8 @@ describe("only the deploy job deploys, from main, through the production environ
     expect(deployWith((y) => y.replace(DEPLOY_ENV, `${DEPLOY_ENV}          ALL: \${{ toJSON(secrets) }}\n`))).toEqual(only("only the deploy step may read a secret"));
     expect(deployWith((y) => y.replace(DEPLOY_ENV, `${DEPLOY_ENV}          KEY: \${{ vars.R2_ACCESS_KEY_ID }}\n`))).toEqual(only("the build may read only"));
     expect(deployWith((y) => y.replace('      WRANGLER_SEND_METRICS: "false"\n', '      WRANGLER_SEND_METRICS: "false"\n      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n'))).toEqual(only("never the whole job"));
-    expect(deployWith((y) => y.replace("      - run: npm ci\n", "      - run: npm ci\n      - run: npx wrangler deploy --minify\n"))).toEqual(only("runs wrangler deploy"));
-    expect(deployWith((y) => `${y}      - run: npx wrangler login\n`)).toEqual([expect.stringContaining("must end with"), expect.stringContaining("wrangler login")]);
+    expect(deployWith((y) => y.replace("      - run: npm ci\n", "      - run: npm ci\n      - run: npx wrangler deploy --minify\n"))).toEqual(only("Cloudflare command"));
+    expect(deployWith((y) => `${y}      - run: npx wrangler login\n`)).toEqual([expect.stringContaining("must end with"), expect.stringContaining("Cloudflare command")]);
   });
 
   it("pending E21-38: flags a secret or a variable read outside a step, a top-level env or defaults, and any other Cloudflare upload", () => {
@@ -219,14 +220,26 @@ describe("only the deploy job deploys, from main, through the production environ
       "npx wrangler deploy --dry-run && npx wrangler deploy",
       "npx opennextjs-cloudflare deploy",
       "npx wrangler \\\n          deploy",
+      "npx wrangler deploy --dry-run false",
+      "npx wrangler deploy --dry-run --no-dry-run",
+      "npx wrangler deploy --dry-run=false --dry-run",
+      'bash -c "npx wrangler deploy"',
+      'npx wrangler "deploy"',
+      "node node_modules/wrangler/bin/wrangler.js deploy",
+      'echo "build #1" && npx wrangler deploy',
+      "npx wrangler deploy --dry-run --outdir .wrangler/dry-run # and then deploy",
     ]) {
-      expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: ${step}\n` })), step).toEqual(only("wrangler deploy without --dry-run"));
+      expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: ${step}\n` })), step).toEqual(only("Cloudflare command"));
     }
     for (const step of ["uses: cloudflare/wrangler-action@v3", 'uses: "cloudflare/pages-action@v1"', "uses: someone/wrangler-action@v1"]) {
-      expect(hostingProblems(tree({ [workflow]: `${yml}\n      - ${step}\n` })), step).toEqual(only("only the deploy job"));
+      expect(hostingProblems(tree({ [workflow]: `${yml}\n      - ${step}\n` })), step).toEqual(only("Cloudflare command"));
     }
-    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler -c wrangler.jsonc login\n` }))).toEqual(only("wrangler login"));
-    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run --outdir dist # a dry run\n` }))).toEqual([]);
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler -c wrangler.jsonc login\n` }))).toEqual(only("Cloudflare command"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      # npx wrangler deploy, in a comment\n` }))).toEqual([]);
+    const pkg = JSON.parse(real("package.json"));
+    for (const script of ["wrangler deploy", "node node_modules/wrangler/bin/wrangler.js deploy", "opennextjs-cloudflare build && opennextjs-cloudflare deploy"]) {
+      expect(hostingProblems(tree({ "package.json": JSON.stringify({ ...pkg, scripts: { ...pkg.scripts, ship: script } }) })), script).toEqual(only("package.json: runs"));
+    }
   });
 
   it("pending E21-38: flags any other workflow that names the production environment or a Cloudflare value", () => {
