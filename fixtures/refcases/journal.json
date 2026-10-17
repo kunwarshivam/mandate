@@ -79513,7 +79513,7 @@
   }
  },
  "backtest_records": {
-  "spec": "docs/specs/journal.md v0.51 §9.18 (DEC-1001, DEC-1002; writer DEC-1141; theses_head DEC-1142)",
+  "spec": "docs/specs/journal.md v0.52 §9.18 (DEC-1001, DEC-1002; writer DEC-1141; theses_head DEC-1142)",
   "artifacts": [
    {
     "name": "mandate_version",

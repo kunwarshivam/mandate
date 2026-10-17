@@ -1695,6 +1695,7 @@ dependencies = [
  "mandate-identity-seal",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-release",
  "mandate-spec",
  "mandate-time",
  "reqwest",
@@ -1885,6 +1886,21 @@ dependencies = [
  "mandate-risk",
  "mandate-time",
  "proptest",
+]
+
+[[package]]
+name = "mandate-deploy-manager"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-process",
+ "mandate-time",
+ "proptest",
+ "reqwest",
+ "rustls",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
