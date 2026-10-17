@@ -2128,6 +2128,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-canon",
  "mandate-domain",
+ "mandate-gateway",
  "mandate-num",
  "mandate-time",
  "proptest",
@@ -2189,6 +2190,7 @@ dependencies = [
  "mandate-builder",
  "mandate-canon",
  "mandate-domain",
+ "mandate-gateway",
  "mandate-journal",
  "mandate-num",
  "mandate-research",

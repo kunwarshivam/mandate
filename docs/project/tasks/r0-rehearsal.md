@@ -244,6 +244,53 @@ Saturday 2026-10-17, with `--sim-clock 2026-10-20T15:00:00Z`:**
 
 **The rehearsal passes through B3's resting stop.**
 
+**Re-run on `claude/r0-runtime-connection-checked` (R22's V-008 code fixed and the stop's trigger
+scripted, [DEC-1152](../decisions/DEC-1152.md), claim #1428), with no Alpaca key in the
+environment, on Saturday 2026-10-17, with `--sim-clock 2026-10-20T15:00:00Z`:**
+
+- **1a to 2s pass as before.** 2h and 2i confirm the rehearsal mandate: it sets the stop-limit
+  offset that V-008 now requires on the Robinhood connection 2f records. 2m books the entry's
+  fill from its record and sends B3's stop.
+- **2t passes.** The simulator's market moves `RHETF` to 80.5, through the stop of 80.76. The
+  script's sell fill takes the stop at 80.5, inside its limit of 79.9524. The simulator answers
+  the stop `filled`, and its position is zero.
+- **Stopped at R23.** 2u, the same placing command on the account the stop left flat, is refused
+  before any place call with `the account the connection binds is not flat`
+  ([R23](#the-blocker-chain-beyond-step-2l)).
+  - The simulator lists the sold-out position as a row of quantity zero, and the lapse counts
+    rows.
+  - The designed answer is `the connection record is spent`: the entry's fill spends the record
+    (DEC-910 item 3).
+  - Either refusal is the safe stop, and nothing was sent.
+- **Not reached, and not scripted:** the owner's flatten of a second entry.
+  - DEC-529 item 13 and DEC-910 item 3 refuse a second entry on a spent record by design.
+  - The shipping CLI offers no owner exit or kill command.
+  - Robinhood publishes no sale price to book the stop's fill with (DEC-1152, not closed).
+
+**The rehearsal stops here, at R23.**
+
+R23 stays Proposed (DEC-1152 item 4), so the stricter refusal stands. The script's 2u now
+expects today's refusal, `the account the connection binds is not flat`, and passes; the runbook
+(first live trade, F.4) tells the founder a spent record refuses as `not flat` until R23 is
+decided. When R23 is decided for a zero row read as flat, 2u's expectation moves back to `the
+connection record is spent`. Re-run on 2026-10-17 with `--sim-clock 2026-10-20T15:00:00Z`: every
+step passes and the script exits 0; 2u reads `the account the connection binds is not flat`
+before any place call, and verify reads ctl 1 to 11, agent 1 to 12, acct 1 to 31 as before.
+
+## The step table (R22's code fixed and the stop's trigger scripted, run on 2026-10-17 with `--sim-clock 2026-10-20T15:00:00Z`)
+
+| Step | R0 | Result | Output (last line) |
+|---|---|---|---|
+| 1a, 1b, 1c | 1 | PASS | `Finished` |
+| 2a0 to 2k | 2, 3 | PASS | `deployed as event … at seq 10` |
+| 2l | 2, 4 | PASS | `the tracer stopped at Classify: the proposal classified ask, and the tracer acts only on auto` |
+| 2n, 2o, 2p | 2, 5 | PASS | `Admitted and sent to the executor; the gate still decides.` |
+| 2m | 2, 5 | PASS | `submitted` the entry, then the stop; exit 0. `LateFillApplied` `record:<entry>:1` at 85, `ReconciliationRun` `adopted` then `clean` |
+| 2q, 2r ctl, agent, acct | 2, 6 | PASS | `verified`: seq 1 to 11, 1 to 12, 1 to 31 |
+| 2s | 2, 7 | PASS | refused before any place call: `the account the connection binds is not flat` |
+| 2t | 2 (the stop) | PASS | the market at 80.5: the stop `rh-sim-000002` reads `sell`, `filled`, 1 of 1 |
+| 2u | 2, 7 | **FAIL** (R23) | refused before any place call, but `the account the connection binds is not flat`, not `the connection record is spent` |
+
 ## The step table (R19 to R22 fixed, run on 2026-10-17 with `--sim-clock 2026-10-20T15:00:00Z`)
 
 | Step | R0 | Result | Output (last line) |
@@ -452,7 +499,8 @@ once the one before is fixed.
 | R19 | `the startup reconciliation found a mismatch; the agent stays paused`, **observed at 2m** on Tuesday's clock after R18's fix, the entry adopted `filled` from the listing; **fixed** (DEC-1151 items 1 to 4) | The executor booked a fill only from a fill report, and on Robinhood's path none reaches it: the connector serves no activities read (`ListActivities` is among the requests `RobinhoodConnector::call` refuses unsent), and the order record carries the filled quantity alone. The reconciliation then read the broker's position against an empty ledger (`BrokerPositionObserved` `mismatch`) and paused the agent | The fill was real at the broker and absent from the journal, so the agent paused, which was correct and safe, and B3's protective stop was never sized | **Fixed** in `claude/r0-runtime-connection-checked` (DEC-1151): 2m books the fill and reconciles clean | As built: `mandate_executor::recorded_fills` reads the fill from the order record's filled quantity and the position's average price, only on a ledger flat in the instrument with no other unbooked fill and a position of exactly that quantity, under the id `record:<key>:<qty>`; Robinhood's reconciler hands it to the reconciliation, which books it before positions are compared. Anything else derives nothing |
 | R20 | `the tracer places one order per run, and the executor asked for another`, **observed at 2m** on Tuesday's clock with R19 and R22 fixed, after the fill and before the stop was sent; **fixed** (DEC-1151 item 5) | `crates/mandate-shell/src/tracer.rs` (`broker`: every submission after the first was `SecondSubmission`) | On a profile with no bracket, B3's stop-limit is a second submission after the entry's fill, and the tracer's one-order rule counted it, against DEC-940 item 2's "a protective order … always passes" and `AGENTS.md` rule 13 | **Fixed** in `claude/r0-runtime-connection-checked`: the rule counts only a submission that adds risk, and the watch watches the run's opening | — |
 | R21 | `the startup reconciliation found a mismatch; the agent stays paused` and `Append { outcome: "Invalid" }`, **observed in** the rh-sim watched test (`crates/mandate-shell-rh-sim/tests/restart.rs`) with R19 and R20 fixed; **fixed** (DEC-1151 items 6 and 7) | `crates/mandate-robinhood/src/preflight.rs` (`account_snapshot` named no order ours) and `crates/mandate-rh-sim/src/lib.rs` (`fill` moved no cash) | The snapshot's working stop, whose record echoes no `ref_id`, read as the broker's own order (`ExternalActivityIngested`, which the journal refuses); and the simulator's cash stayed at 750.25 after a 655.20 buy, so the booked fill fell out of the cash band | **Fixed** in `claude/r0-runtime-connection-checked`: the snapshot names a record as DEC-1150 item 7 names a listed one; the simulator spends a buy's cost from cash and buying power and adds a sale's proceeds to neither | — |
-| R22 | `ProtectionChanged expiry_unreplaceable`, then `unprotected_end` `uncovered`, **observed at 2m** with R19 fixed; **fixed** in the rehearsal mandate (DEC-1151 item 8); the code gap is open | `crates/mandate-spec/src/validate.rs` (`document_rules`: V-008 requires the offset only for crypto) | Robinhood protects US equities with a stop-limit only, and the rehearsal mandate set no `stop_limit_offset`, which V-008 requires for that profile and, without the profile, for every class; `version create` accepted it | **Mandate fixed** (`scripts/r0-rehearsal.sh` sets `0.01`); V-008's code is not changed here | V-008 as the spec reads it, in `mandate-spec` with its reference cases: refuses more, for its own PR. Until then the founder's live mandate must set the offset |
+| R22 | `ProtectionChanged expiry_unreplaceable`, then `unprotected_end` `uncovered`, **observed at 2m** with R19 fixed; **fixed** in the rehearsal mandate (DEC-1151 item 8) and in V-008's code (DEC-1152 items 1 and 2) | `crates/mandate-spec/src/validate.rs` (`document_rules`: V-008 required the offset only for crypto) | Robinhood protects US equities with a stop-limit only, and the rehearsal mandate set no `stop_limit_offset`, which V-008 requires for that profile and, without the profile, for every class; `version confirm` accepted it | **Fixed**: V-008 and W-002 read the classes the connection's broker protects with a stop-limit (DEC-539 item 2's table) and fail closed without one; a live Robinhood mandate with no offset is refused `version_invalid` at `version confirm` | — |
+| R23 | `the account the connection binds is not flat`, **observed at 2u** after the stop filled at the simulator (2t) and the account was flat there | `crates/mandate-paper/src/connection.rs` (`lapse`: `held.positions` counts position rows, a sold-out row of quantity zero included) | The simulator lists a sold-out position as a zero row (DEC-902 item 3), and the lapse counts it; the designed refusal is `the connection record is spent` (DEC-910 item 3: the entry's fill spends the record) | **None**; the refusal is safe either way (DEC-1152 item 4) | Count a zero row as flat: refuses less, so the founder's, tests first. Behind it, by design: no second entry on a spent record (DEC-529 item 13); no owner exit or kill command in the shipping CLI (`mandate agent` offers `deploy` alone); no sale price on Robinhood to book the stop's fill (DEC-1152, not closed) |
 | R6 | the `ask` opening denied at its deadline | `crates/mandate-paper/src/wiring.rs:296` (`wait_for_the_grant`) | Until item 9 lands, the runtime is never handed the founder's grant, so the opening is skipped at `timeout_s` (`on_timeout: skip`, rule 3) even after `mandate approvals approve` commits it | **Item 9**, [#1367](https://github.com/kunwarshivam/mandate/pull/1367) (`claude/live-grant-cycle-answers`, DEC-940) | — |
 | R7 | the restart (R0 step 7) | the startup reconciliation | A restart after a lost place answer must adopt exactly one matching order or keep it `Unknown` (DEC-529 item 4) | **Item 10** (`claude/unknown-adoption-run-path`) | — |
 
@@ -462,7 +510,7 @@ once the one before is fixed.
 | R10b | none at run time: a live sell's fees can be booked under two cents below Robinhood's own figure | `crates/mandate-accounting/src/account.rs` (`equity_fees`, `charge`) | Robinhood rounds each fee of a trade to cents separately (SEC up, TAF and CAT to the nearest cent), and §6.2 rounds the day's total once (DEC-958 item 4). R0's one order is a buy, which is never understated | **Fixed** by [DEC-960](../decisions/DEC-960.md) (claim #1409): §6.2's `fee_rounding: per_fee_per_fill` and RC-26 (spec PR #1410), then the fold on `claude/fee-rounding-code`: `ROBINHOOD_LIVE` rounds each fee of each fill up to the cent, so a live sell is never booked below Robinhood's figure; paper and Alpaca stay `daily_total` | A per-fill, per-fee ceiling for the Robinhood schedule: a trading-domain spec PR first (§6.2 and a reference case, ES-22), then the fold; the same spec PR changes §6.2's "transcribed from Alpaca's fee schedule" to the broker's |
 | R11 | `the tracer stopped at Reconcile: the agentic account's snapshot`, **observed at 2l** before the fix | `crates/mandate-shell/src/robinhood.rs` (`RobinhoodBridge::preflight_facts`), reached from `crates/mandate-paper/src/robinhood.rs` (`Linked::preflight`); the refusal was `mandate-mcp`'s `Throttled` on the preflight's first `get_portfolio` | The live start read the account snapshot (three scoped reads, six calls) for the lapse, and the preflight then read it again at once, together with tradability and the quote. After the connect's own calls, the ordinary bucket (`crates/mandate-mcp/src/transport.rs`: 10 tokens, one a second) had no token left, and a throttled read was a refusal, never a wait | **Fixed** in `claude/r0-mcp-read-budget` ([DEC-959](../decisions/DEC-959.md), claim #1408): 2l's Robinhood reads all answer | The fix as built: the live start keeps the lapse's snapshot with the run clock read before it was sent, and the same session's preflight stands on it while it is at most the rule set's quote age bound old (reading only the tradability and the quote), and reads the account again otherwise; every broker read is `CallClass::Read`, which on an empty ordinary bucket waits for its next token when it is due within `read_wait` (2 s) and is refused at once otherwise. Openings and exits never wait |
 
-On the rehearsal's clock (DEC-962) R12 to R14 are passed and R15 holds by design on a Monday (DEC-969); on a Tuesday clock R16 (the grant, 2p) and R17 (verify, 2r) were the first refusals and are fixed (DEC-970), R18 (the working order's lookup, 2m) is fixed (DEC-1150), and R19 to R22 (the fill, the stop's submission and recognition, and the offset, 2m) are fixed (DEC-1151): every step passes through B3's resting stop. Before DEC-969, R14 (2m, 2s) and R15 (2l) were the first; what lies behind them
+On the rehearsal's clock (DEC-962) R12 to R14 are passed and R15 holds by design on a Monday (DEC-969); on a Tuesday clock R16 (the grant, 2p) and R17 (verify, 2r) were the first refusals and are fixed (DEC-970), R18 (the working order's lookup, 2m) is fixed (DEC-1150), R19 to R22 (the fill, the stop's submission and recognition, and the offset, 2m) are fixed (DEC-1151, DEC-1152), and R23 (the run after the stop's fill, 2u) is the first now. Before DEC-969, R14 (2m, 2s) and R15 (2l) were the first; what lies behind them
 (the `ask` opening and the grant, R6's lane, DEC-940; the fill and R8's ticker mapping, DEC-956;
 the restart, R7's lane, DEC-941) is on `main` but not yet observed. Before DEC-962: the rehearsal
 could pass only after R8 lands (R9 by DEC-957, R10 by DEC-958, R11 by DEC-959), with R1 and R1b fixed on `main` and R2 to R4 by #1390, in addition to items

@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value};
-use mandate_domain::{AssetId, Environment};
+use mandate_domain::{AssetClass, AssetId, Environment};
 use mandate_num::{NumError, Usd};
 use mandate_time::Date;
 use proptest::prelude::*;
@@ -186,6 +186,7 @@ pub(crate) fn context() -> Result<ValidationContext, String> {
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
         current_mandate_version: None,
+        stop_limit_asset_classes: Some(BTreeSet::from([AssetClass::Crypto])),
     })
 }
 
@@ -1768,10 +1769,100 @@ fn w006_warns_of_auto_admission_only_with_a_research_agent() -> Checked {
     Ok(())
 }
 
-/// The stop a worst case uses: the stop, the offset added only with crypto, none without protection,
-/// and a distance a `Ratio` cannot hold named by its field.
+/// V-008 and W-002 read the classes the connection's profile protects with a stop-limit (DEC-539
+/// items 2 and 3, mandate spec §4.1 V-008): on Alpaca's ({crypto}) an equity mandate needs no offset
+/// and its worst case adds none; on Robinhood's ({crypto, us_equity}) it needs one and the worst
+/// case adds it; with the profile absent every allowed class counts, so it fails closed the same way.
+/// A disabled protection with an offset is still V-008 whatever the profile.
+#[test]
+fn v008_and_the_worst_case_read_the_classes_a_stop_limit_protects() -> Checked {
+    let alpaca = Some(BTreeSet::from([AssetClass::Crypto]));
+    let robinhood = Some(BTreeSet::from([AssetClass::Crypto, AssetClass::UsEquity]));
+    let offset = ("/protection/crypto_stop_limit_offset", r#""0.01""#);
+    let wide = ("/protection/crypto_stop_limit_offset", r#""0.9""#);
+    type Row<'a> = (
+        &'a str,
+        Option<BTreeSet<AssetClass>>,
+        Vec<(&'a str, &'a str)>,
+        bool,
+        &'a str,
+    );
+    let rows: Vec<Row<'_>> = vec![
+        ("alpaca, no offset", alpaca.clone(), vec![], false, "0.05"),
+        (
+            "robinhood, no offset",
+            robinhood.clone(),
+            vec![],
+            true,
+            "0.05",
+        ),
+        ("profile absent, no offset", None, vec![], true, "0.05"),
+        (
+            "alpaca, an offset",
+            alpaca.clone(),
+            vec![offset],
+            false,
+            "0.05",
+        ),
+        (
+            "robinhood, an offset",
+            robinhood.clone(),
+            vec![offset],
+            false,
+            "0.06",
+        ),
+        (
+            "profile absent, an offset",
+            None,
+            vec![offset],
+            false,
+            "0.06",
+        ),
+    ];
+    for (name, classes, patches, v008, stop) in rows {
+        let mut ctx = context()?;
+        ctx.stop_limit_asset_classes = classes.clone();
+        let violated = codes(&patches, &ctx)?.contains(&Violation::V008);
+        if violated != v008 {
+            return Err(format!("{name}: V-008 expected {v008}, got {violated}"));
+        }
+        let distance = super::worst_case_stop_distance(&mandate(&patches)?, classes.as_ref())
+            .map_err(|e| format!("{name}: {e}"))?;
+        if distance.as_ref().map(crate::SchemaDec::as_str) != Some(stop) {
+            return Err(format!("{name}: stop {stop} expected, got {distance:?}"));
+        }
+    }
+    for (name, classes, w002) in [
+        ("alpaca leaves a wide offset out", alpaca, false),
+        ("robinhood adds it", robinhood.clone(), true),
+        ("the profile absent adds it", None, true),
+    ] {
+        let mut ctx = context()?;
+        ctx.stop_limit_asset_classes = classes;
+        let warned = report(&[wide], &ctx)?.warnings.contains(&Warning::W002);
+        if warned != w002 {
+            return Err(format!("{name}: W-002 expected {w002}, got {warned}"));
+        }
+    }
+    let mut ctx = context()?;
+    ctx.stop_limit_asset_classes = robinhood;
+    let disabled = [
+        ("/protection/enabled", "false"),
+        ("/protection/stop_distance", "null"),
+        ("/protection/take_profit_distance", "null"),
+        offset,
+    ];
+    if !codes(&disabled, &ctx)?.contains(&Violation::V008) {
+        return Err("disabled protection with an offset is V-008 on any profile".to_owned());
+    }
+    Ok(())
+}
+
+/// The stop a worst case uses on Alpaca's profile: the stop, the offset added only with crypto, none
+/// without protection, and a distance a `Ratio` cannot hold named by its field.
 #[test]
 fn the_worst_case_stop_distance_adds_the_offset_only_with_crypto() -> Checked {
+    let alpaca = BTreeSet::from([AssetClass::Crypto]);
     let crypto = ("/universe/asset_classes", r#"["crypto", "us_equity"]"#);
     let offset = ("/protection/crypto_stop_limit_offset", r#""0.005""#);
     let disabled = [
@@ -1807,7 +1898,7 @@ fn the_worst_case_stop_distance_adds_the_offset_only_with_crypto() -> Checked {
         ),
     ];
     for (name, patches, expected) in rows {
-        let got = super::worst_case_stop_distance(&mandate(&patches)?)
+        let got = super::worst_case_stop_distance(&mandate(&patches)?, Some(&alpaca))
             .map_err(|e| format!("{name}: {e}"))?;
         if got.as_ref().map(crate::SchemaDec::as_str) != expected {
             return Err(format!("{name}: expected {expected:?}, got {got:?}"));
@@ -1831,7 +1922,7 @@ fn the_worst_case_stop_distance_adds_the_offset_only_with_crypto() -> Checked {
             ],
         ),
     ] {
-        match super::worst_case_stop_distance(&mandate(&patches)?) {
+        match super::worst_case_stop_distance(&mandate(&patches)?, Some(&alpaca)) {
             Err(SpecError::OutOfRange { path: at, .. }) if at.as_str() == path => {}
             other => {
                 return Err(format!(
