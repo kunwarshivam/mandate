@@ -1,11 +1,12 @@
 //! The subject link (§3.11 item 7, DEC-978 item 7): which user principal an identity-provider
-//! subject signs in as, read from a root-owned file of digests at each sign-in and refresh.
+//! subject signs in as, read from the root-owned file [`SUBJECT_LINKS`] at each sign-in and refresh
+//! (DEC-1023).
 //!
 //! Each line is `sha256:<64 lowercase hex> <principal ULID>`. The digest is SHA-256 over the
 //! canonical JSON of `{"issuer", "subject"}`, so no raw subject is stored and a subject of another
-//! issuer never maps. A file that is not a regular file, is writable by group or others, is owned
-//! by neither the process's user nor root, holds a malformed line, or names one digest twice is
-//! refused whole: no line of it is read.
+//! issuer never maps. A file that is not a regular file, is not itself at the path (a symlink
+//! there included), is writable by group or others, is owned by neither the process's user nor
+//! root, holds a malformed line, or names one digest twice is refused whole: no line of it is read.
 
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -31,7 +32,8 @@ const DIGEST_HEX: usize = 64;
 pub enum LinkRefusal {
     /// The file is absent, unreadable, or not a regular file.
     Unreadable,
-    /// The file is writable by group or others, or owned by another user.
+    /// The path does not itself name the file opened (a symlink there included), or the file is
+    /// writable by group or others, or owned by another user.
     Exposed,
     /// A line is not `sha256:<hex> <ULID>`.
     Malformed,
@@ -55,7 +57,12 @@ pub fn digest(issuer: &str, subject: &str) -> String {
     )
 }
 
+/// The one file the server reads subject links from (DEC-1023): fixed, never a setting.
+pub const SUBJECT_LINKS: &str = "/etc/mandate/subject-links";
+
 /// The principal `issuer`'s `subject` signs in as, read from the file at `path` now.
+/// A path that does not itself name the file opened, a symlink included, is refused as exposed
+/// (DEC-1023), so only the file at the path is ever read.
 ///
 /// # Errors
 /// [`LinkRefusal`], in the order its variants are listed.
@@ -81,6 +88,10 @@ pub fn principal_owned(
     let opened = file.metadata().map_err(|_| LinkRefusal::Unreadable)?;
     if !opened.is_file() {
         return Err(LinkRefusal::Unreadable);
+    }
+    let at_path = fs::symlink_metadata(path).map_err(|_| LinkRefusal::Unreadable)?;
+    if (at_path.dev(), at_path.ino()) != (opened.dev(), opened.ino()) {
+        return Err(LinkRefusal::Exposed);
     }
     if opened.permissions().mode() & GROUP_OR_OTHERS_WRITE != 0 || !owners.contains(&opened.uid()) {
         return Err(LinkRefusal::Exposed);

@@ -205,3 +205,48 @@ fn the_file_is_read_again_at_each_call() {
     assert_eq!(principal(&path, ISSUER, BOB), Err(LinkRefusal::NotLinked));
     assert_eq!(mine(&path)[1], 0);
 }
+
+/// DEC-1023: a symlink at the link path is refused before it is opened, even when it points at a
+/// file every other check accepts, so the server reads links only from the file at the path itself.
+#[test]
+fn a_symlink_at_the_link_path_is_refused() {
+    let target = links(&two(), 0o644);
+    assert_eq!(principal(&target, ISSUER, ALICE), Ok(id(ALICE_ID)));
+    let link = target.with_file_name("linked");
+    std::os::unix::fs::symlink(&target, &link).expect("a symlink");
+    assert_eq!(
+        principal(&link, ISSUER, ALICE),
+        Err(LinkRefusal::Exposed),
+        "a symlink to an acceptable file is still refused"
+    );
+    let dangling = target.with_file_name("dangling");
+    std::os::unix::fs::symlink(target.with_file_name("absent"), &dangling).expect("a symlink");
+    assert_eq!(
+        principal(&dangling, ISSUER, ALICE),
+        Err(LinkRefusal::Unreadable)
+    );
+}
+
+/// A hard link at the path is the same file, so the checks on that file are the ones that apply.
+#[test]
+fn a_hard_link_at_the_path_is_the_file_it_names() {
+    let target = links(&two(), 0o644);
+    let hard = target.with_file_name("hard");
+    fs::hard_link(&target, &hard).expect("a hard link");
+    assert_eq!(principal(&hard, ISSUER, ALICE), Ok(id(ALICE_ID)));
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o666)).expect("its mode");
+    assert_eq!(
+        principal(&hard, ISSUER, ALICE),
+        Err(LinkRefusal::Exposed),
+        "the file's own mode still refuses it"
+    );
+}
+
+/// DEC-1023: the server reads one fixed path, no setting.
+#[test]
+fn the_link_file_is_the_one_fixed_path() {
+    assert_eq!(
+        mandate_api_server::subject::SUBJECT_LINKS,
+        "/etc/mandate/subject-links"
+    );
+}
