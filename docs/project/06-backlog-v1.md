@@ -2439,10 +2439,10 @@ items 13 to 20); no story here buys a service or touches live money.
   (ES-14, ES-17, OPS-15). *Accepted when:* two builds of one commit are byte-identical; each process
   journals its build digest; and outside dev and CI an unsigned binary refuses to start.
   *Status:* the reproducible build, its SBOMs, the CI double build and `mandate-release`'s
-  `BuildDigest` land with DEC-970. **After R0:** `crates/mandate-shell/src/envelope.rs` and
+  `BuildDigest` land with DEC-972. **After R0:** `crates/mandate-shell/src/envelope.rs` and
   `crates/mandate-cli/src/control.rs` still name a placeholder `build` (a digest of the crate's
   name and version); switching both to `BuildDigest::running()` is this row's last slice, blocked
-  on R0 closing (DEC-967 item 2, DEC-970 item 7). Signing and the start-up check are E21-35's.
+  on R0 closing (DEC-967 item 2, DEC-972 item 7). Signing and the start-up check are E21-35's.
 - **E21-9 (Proposed, M8; SC)** As an owner, I want my broker credential held in the workspace vault,
   leased only to the executor for my connection, and checked for scope, environment, and account at
   every start, so that no other process can use it (design §5). *Accepted when:* a runtime's
@@ -2666,7 +2666,7 @@ enables `live` (ES-23, OPS-5).
   role before processes roll, never at start (OPS-13); secrets arrive only as mounted files, never
   environment variables (DEC-822 item 4); `helm lint`, a schema check and a test that renders the
   chart and asserts each of these pass in CI; `environment` accepts only `paper` or `backtest`, except the `live` Robinhood connection of E21-48 (DEC-967 item 15); and
-  no template or crate uses a k3s-only, Hetzner-only or cloud-only API, the storage class, the node
+  no template or crate uses a k3s-only, DigitalOcean-only or other provider-only API, the storage class, the node
   count and the ingress (a `cloudflared` pod) being values, shown by rendering the same chart for
   k3d, k3s and a managed Kubernetes values file (DEC-967 item 6).
 - **E21-37 (Proposed, M8; lane C1; its drills test SC paths)** As the founder, I want a local and
@@ -2723,8 +2723,9 @@ enables `live` (ES-23, OPS-5).
   the database's; a local-cell drill restores to a point in time and passes journal spec §11 over
   every stream (OPS-8); a failover drill with intents in flight shows zero duplicates and zero lost
   acknowledged appends, and that the old primary is fenced before the standby is promoted
-  (DEC-434 item 15); the two instances run on different VMs in a spread placement group, and that
-  two VMs in one Hetzner location are one site, not two regions, is disclosed; and while the cell has one node the standby's shared failure domain is
+  (DEC-434 item 15); the two instances run on different droplets, and that two droplets in one
+  DigitalOcean region are one site, not two regions, and are not guaranteed separate hosts, is
+  disclosed (DEC-995 item 6); and while the cell has one node the standby's shared failure domain is
   disclosed in the cell's own status, not hidden.
 - **E21-42 (Proposed, M8; SC; lane M1)** As an owner, I want workspace services and my agent's
   processes to meet only in the journal, so that the API, the deployment manager or the approval

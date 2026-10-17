@@ -1,4 +1,4 @@
-//! The build digest: the SHA-256 of an executable's bytes (DEC-970 item 4).
+//! The build digest: the SHA-256 of an executable's bytes (DEC-972 item 4).
 
 use std::fs;
 use std::io;

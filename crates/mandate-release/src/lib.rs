@@ -8,7 +8,7 @@
     clippy::float_cmp,
     clippy::as_conversions
 )]
-//! The release a process runs (E21-8, DEC-970; infrastructure design §7.1, OPS-15).
+//! The release a process runs (E21-8, DEC-972; infrastructure design §7.1, OPS-15).
 //!
 //! A [`BuildDigest`] is the SHA-256 of an executable's bytes: the digest the release build's
 //! `SHA256SUMS` lists for the same binary, so the `actor.build` a process journals names exactly

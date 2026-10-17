@@ -1,4 +1,4 @@
-//! The build digest a process journals as `actor.build` (E21-8, DEC-970 item 4): the SHA-256 of
+//! The build digest a process journals as `actor.build` (E21-8, DEC-972 item 4): the SHA-256 of
 //! the executable's bytes, the same digest the release's `SHA256SUMS` lists. The oracle is the
 //! `sha2` crate over the file's bytes, read here, not the crate's own hashing.
 
@@ -109,7 +109,7 @@ fn child_reports_its_running_digest_once_replaced() -> Result<(), Box<dyn std::e
 
 /// A release installed over a running process, by renaming a new file onto its path as an
 /// install does, leaves the process journaling the digest of the file it started from, not the
-/// new one (DEC-970 item 4). `current_exe()` would read the new file; `/proc/self/exe` does not.
+/// new one (DEC-972 item 4). `current_exe()` would read the new file; `/proc/self/exe` does not.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_release_installed_over_a_running_process_does_not_change_its_digest()
