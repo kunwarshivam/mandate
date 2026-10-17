@@ -88,7 +88,6 @@ impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"
 
 # Crates planned but not yet created that a `forbidden_internal` list may already name (DEC-525).
 planned = [
-    "mandate-cp-agent",
     "mandate-cp-site",
     "mandate-identity-seal",
     "mandate-identity-testkit",
