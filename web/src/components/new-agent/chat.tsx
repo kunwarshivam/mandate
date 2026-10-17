@@ -7,11 +7,12 @@ import { Markdown } from "@/components/chat/markdown";
 import { OwnerSaid } from "@/components/chat/record-reply";
 import { KEY } from "@/components/kumo/key";
 import type { NewAgent } from "@/lib/fixture-journey";
-import type { Deployment } from "@/lib/mock-runtime";
+import type { SetUp } from "@/lib/mock-runtime";
 import { type Conversation, type Entry, currentSummary, nextStep } from "./conversation";
 import { type Draft, MODELS, type ModelId } from "./draft";
 import { StepHeading } from "./steps";
-import { Summary, isConfirmed } from "./summary";
+import { SetUpSteps, isBound } from "./set-up-steps";
+import { Summary } from "./summary";
 
 /** The sticky header's height plus a margin, matching the page's `scroll-padding-top` of 5rem. */
 const HEADER_CLEARANCE_PX = 80;
@@ -46,16 +47,24 @@ export interface ChatActions {
   onChoose: (id: ModelId) => void;
   onRetry: (messageId: string) => void;
   onWithoutModel: (messageId: string) => void;
-  onSent: (deploymentId: string, revision: number) => void;
+  onCreated: (setUpId: string, revision: number) => void;
   onStartOver: () => void;
 }
 
-/** What the summary shown at a revision needs: the draft and request as they stand, while that revision is current or was sent. */
+/** What the summary shown at a revision needs: the draft and request as they stand, and each revision's latest set-up. */
 export interface Creation {
   draft: Draft | null;
   request: NewAgent | null;
   blocked: string | null;
-  sent: { deployment: Deployment; revision: number } | null;
+  setUps: Readonly<Record<number, SetUp>>;
+}
+
+/** What an earlier summary's set-up recorded before a change replaced it. */
+function replacedNote(setUp: SetUp | null): string {
+  const replaced = "An earlier version of your agent, replaced after you changed it.";
+  if (setUp?.created.phase !== "recorded") return replaced;
+  if (setUp.confirmed?.phase !== "recorded") return `${replaced} Its version 1 was created and not confirmed; no agent exists for it.`;
+  return `${replaced} Its version 1 was created and confirmed, and not deployed; no agent exists for it.`;
 }
 
 function Failed({ entry, last, busy, actions }: { entry: Extract<Entry, { kind: "failed" }>; last: boolean; busy: boolean; actions: ChatActions }) {
@@ -91,24 +100,27 @@ function EntryView({ entry, c, last, busy, creation, actions }: { entry: Entry; 
       );
     case "summary": {
       const current = currentSummary(c)?.id === entry.id;
-      const sent = creation.sent?.revision === entry.revision ? creation.sent.deployment : null;
-      if ((!current && !sent) || !creation.draft || !creation.request) {
+      const setUp = creation.setUps[entry.revision] ?? null;
+      if ((!current && !isBound(setUp)) || !creation.draft || !creation.request) {
         return (
           <Platform slot="replaced">
-            <p className="text-sm text-muted-foreground">An earlier version of your agent, replaced after you changed it.</p>
+            <p className="text-sm text-muted-foreground">{replacedNote(setUp)}</p>
           </Platform>
         );
       }
       return (
-        <Summary
-          draft={creation.draft}
-          request={creation.request}
-          current={current}
-          blocked={creation.blocked}
-          deployment={sent}
-          onSent={(id) => actions.onSent(id, entry.revision)}
-          onStartOver={actions.onStartOver}
-        />
+        <div className="grid gap-4">
+          <Summary draft={creation.draft} request={creation.request} setUp={setUp} />
+          <SetUpSteps
+            draft={creation.draft}
+            request={creation.request}
+            current={current}
+            blocked={creation.blocked}
+            setUp={setUp}
+            onCreated={(id) => actions.onCreated(id, entry.revision)}
+            onStartOver={actions.onStartOver}
+          />
+        </div>
       );
     }
     case "failed":
@@ -145,7 +157,7 @@ export function Chat({
   const log = useRef<HTMLDivElement>(null);
   const { entries } = conversation;
   const seen = useRef(entries.length);
-  const done = isConfirmed(creation.sent?.deployment ?? null);
+  const done = Object.values(creation.setUps).some(isBound);
 
   useEffect(() => {
     const added = entries.length - seen.current;

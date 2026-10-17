@@ -291,7 +291,7 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     }
     const accepted = decodeAccepted(body);
     if (!accepted.ok) return { ok: false, error: invalidResponse(response.status, "unknown", accepted.issue, eventIdOf(body)), command };
-    return { ok: true, effect: "recorded", accepted: accepted.value };
+    return { ok: true, effect: "recorded", accepted: accepted.value, body };
   }
 
   const commandStatus = (eventId: string) => read(fillRoute("/commands/{event}", { event: eventId }), commandStatusOf);
