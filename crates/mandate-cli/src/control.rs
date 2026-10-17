@@ -228,8 +228,8 @@ pub(crate) struct Shape {
     pub(crate) config_refs: Vec<(&'static str, Value)>,
 }
 
-/// Who writes a control-stream draft. Private to this module, so no other module can name the
-/// system writer, and [`draft`] refuses it for anything but the stream's opening (#725 review).
+/// Who writes a control-stream draft. Private to this module, so no other module can name a
+/// system writer, and [`draft`] refuses each for anything but its one event type (#725 review).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Writer {
     /// The owner, as a `user` (EI-10).
@@ -240,6 +240,10 @@ enum Writer {
     /// The same `control_services` system, for the founding grant's `MemberActivated` alone
     /// (journal spec §9.12 rule 98, ID-13; DEC-991 item 2).
     Founder,
+    /// The `backtest_runner` system, for `BacktestRunRecorded` alone: the record of a run the
+    /// runner stored, which `mandate backtest record` re-checks (journal spec §9.18; DEC-1141,
+    /// DEC-1144).
+    Runner,
 }
 
 /// DEC-952: paper and live never share a stream. An owner's event is appended only to a control
@@ -269,6 +273,10 @@ pub(crate) fn same_environment(
 }
 
 const OPENER_ID: &str = "control_services";
+
+/// The backtest runner's system id and its one event type (DEC-1144 item 5).
+const RUNNER_ID: &str = "backtest_runner";
+pub(crate) const BACKTEST_TYPE: &str = "BacktestRunRecorded";
 
 /// The founding grant's event type (journal spec §9.12).
 const FOUNDING_TYPE: &str = "MemberActivated";
@@ -408,10 +416,16 @@ fn draft_caused(
         Writer::Owner => ("user", owner.user.as_str()),
         Writer::Opener if event_type == "StreamOpened" => ("system", OPENER_ID),
         Writer::Founder if event_type == FOUNDING_TYPE => ("system", OPENER_ID),
+        Writer::Runner if event_type == BACKTEST_TYPE => ("system", RUNNER_ID),
         Writer::Opener | Writer::Founder => {
             return Err(ControlError::Journal(format!(
                 "only the stream's opening and its founding grant are written as {OPENER_ID}, \
                  not {event_type}"
+            )));
+        }
+        Writer::Runner => {
+            return Err(ControlError::Journal(format!(
+                "only {BACKTEST_TYPE} is written as {RUNNER_ID}, not {event_type}"
             )));
         }
     };
@@ -859,6 +873,32 @@ pub(crate) fn commit_choice(
     shape: Shape,
     now: Now,
 ) -> Result<Submitted, ControlError> {
+    commit_as(Writer::Owner, journal, owner, decided, shape, now)
+}
+
+/// [`commit_choice`] for a `BacktestRunRecorded` whose payload is exactly the runner's, written by
+/// the `backtest_runner` system (DEC-1141, DEC-1144 item 5).
+///
+/// # Errors
+/// As [`commit`]; [`ControlError::Journal`] for any other event type.
+pub(crate) fn commit_backtest(
+    journal: &mut dyn ControlJournal,
+    owner: &Owner,
+    decided: Decided,
+    shape: Shape,
+    now: Now,
+) -> Result<Submitted, ControlError> {
+    commit_as(Writer::Runner, journal, owner, decided, shape, now)
+}
+
+fn commit_as(
+    writer: Writer,
+    journal: &mut dyn ControlJournal,
+    owner: &Owner,
+    decided: Decided,
+    shape: Shape,
+    now: Now,
+) -> Result<Submitted, ControlError> {
     let Decided {
         stream,
         event_type,
@@ -869,14 +909,7 @@ pub(crate) fn commit_choice(
     } = decided;
     let payload = object(key)?;
     let bytes = draft(
-        Writer::Owner,
-        owner,
-        &stream,
-        &event_id,
-        event_type,
-        shape,
-        payload,
-        now,
+        writer, owner, &stream, &event_id, event_type, shape, payload, now,
     )?;
     settle(journal, &stream, event_id, repeat, &bytes, now)
 }
@@ -995,10 +1028,23 @@ mod tests {
             actor(Writer::Founder, "MemberActivated")?,
             pair("system", "control_services")
         );
+        assert_eq!(
+            actor(Writer::Runner, "BacktestRunRecorded")?,
+            pair("system", "backtest_runner")
+        );
+        assert_eq!(
+            actor(Writer::Owner, "BacktestRunRecorded")?,
+            pair("user", "u1")
+        );
         for (writer, other) in [
             (Writer::Founder, "StreamOpened"),
             (Writer::Founder, "MemberRoleChanged"),
             (Writer::Opener, "MemberActivated"),
+            (Writer::Runner, "EvaluationRunRecorded"),
+            (Writer::Runner, "StreamOpened"),
+            (Writer::Runner, "MemberActivated"),
+            (Writer::Opener, "BacktestRunRecorded"),
+            (Writer::Founder, "BacktestRunRecorded"),
         ] {
             assert!(
                 matches!(actor(writer, other), Err(ControlError::Journal(_))),

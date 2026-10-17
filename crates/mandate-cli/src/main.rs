@@ -4,6 +4,7 @@ use std::time::SystemTime;
 use anyhow::{Context, bail};
 use clap::Parser;
 use mandate_cli::artifact::ArtifactCommand;
+use mandate_cli::backtest::BacktestCommand;
 use mandate_cli::connection::ConnectionCommand;
 use mandate_cli::control::Now;
 use mandate_cli::db::DbCommand;
@@ -16,8 +17,8 @@ use mandate_cli::register::{ConfigCommand, ModelCommand};
 use mandate_cli::sim_clock::from_env;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
-    Cli, Command, artifact, connection, db, download, gestures, identity, inbox, inspect, journal,
-    register, workspace,
+    Cli, Command, artifact, backtest, connection, db, download, gestures, identity, inbox, inspect,
+    journal, register, workspace,
 };
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
@@ -143,6 +144,9 @@ fn main() -> anyhow::Result<()> {
         Command::Db(DbCommand::Migrate(args)) => {
             db::migrate(&args, &mut io::stdout().lock())?;
             Ok(())
+        }
+        Command::Backtest(BacktestCommand::Record(args)) => {
+            backtest::run_record(&args, now()?, &mut io::stdout().lock()).map(drop)
         }
     }
 }
