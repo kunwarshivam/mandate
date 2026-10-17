@@ -38,10 +38,12 @@
 /crates/mandate-cli/        @kunwarshivam
 /crates/mandate-connections/ @kunwarshivam
 /crates/mandate-cp-agent/   @kunwarshivam
+/crates/mandate-cp-site/    @kunwarshivam
 /crates/mandate-cp/         @kunwarshivam
 /crates/mandate-dispatcher/ @kunwarshivam
 /crates/mandate-domain/     @kunwarshivam
 /crates/mandate-executor/   @kunwarshivam
+/crates/mandate-gateway/    @kunwarshivam
 /crates/mandate-identity-seal/ @kunwarshivam
 /crates/mandate-identity-system/ @kunwarshivam
 /crates/mandate-identity-testkit/ @kunwarshivam
@@ -54,6 +56,7 @@
 /crates/mandate-modelhost/  @kunwarshivam
 /crates/mandate-notify/     @kunwarshivam
 /crates/mandate-num/        @kunwarshivam
+/crates/mandate-objectstore/ @kunwarshivam
 /crates/mandate-paper/      @kunwarshivam
 /crates/mandate-passkey/    @kunwarshivam
 /crates/mandate-process/    @kunwarshivam
@@ -68,6 +71,7 @@
 /crates/mandate-shell-rh-sim/ @kunwarshivam
 /crates/mandate-shell/      @kunwarshivam
 /crates/mandate-sim/        @kunwarshivam
+/crates/mandate-sources/    @kunwarshivam
 /crates/mandate-spec/       @kunwarshivam
 /crates/mandate-tenant/     @kunwarshivam
 /crates/mandate-time/       @kunwarshivam

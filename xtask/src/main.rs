@@ -22,11 +22,11 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | openbao | mutants | schema-mutants | cell | sweep; or one part
-                        of test: test-nextest | test-doc | test-rh-sim | test-python. Tests,
-                        pending tests, doctests, the rehearsal, Postgres and OpenBao runs and
-                        `portable` run over the crates the diff selects (DEC-1190); with no diff
-                        base, all of them
+                        postgres | openbao | objectstore | mutants | schema-mutants | cell |
+                        sweep; or one part of test: test-nextest | test-doc | test-rh-sim |
+                        test-python. Tests, pending tests, doctests, the rehearsal, Postgres,
+                        OpenBao and object-store runs and `portable` run over the crates the diff
+                        selects (DEC-1190); with no diff base, all of them
   ci select             print which scoped jobs this diff runs, as GITHUB_OUTPUT lines
   ci sweep --plan       print tonight's share of the whole-crate mutation sweep (DEC-1190)
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
@@ -77,6 +77,7 @@ const FULL_JOB: &[&str] = &[
     "supply-chain",
     "postgres",
     "openbao",
+    "objectstore",
 ];
 const PR_JOBS: &[&str] = &[
     "lint",
@@ -90,6 +91,7 @@ const PR_JOBS: &[&str] = &[
     "spec-guard",
     "postgres",
     "openbao",
+    "objectstore",
     "mutants",
     "schema-mutants",
     "cell",
@@ -109,6 +111,11 @@ const PG_REQUIRED: &str = "MANDATE_PG_REQUIRED";
 /// server with `.github/scripts/start-openbao.sh` and sets both.
 const OPENBAO_ADDR: &str = "MANDATE_OPENBAO_ADDR";
 const OPENBAO_REQUIRED: &str = "MANDATE_OPENBAO_REQUIRED";
+/// The S3-compatible test store `mandate-objectstore`'s conformance suite uses, and the switch that
+/// makes its absence a failure rather than a skip (E21-40, DEC-973). CI's `full` and mutants jobs
+/// set both, with the store `.github/scripts/start-minio.sh` starts.
+const S3_URL: &str = "MANDATE_S3_URL";
+const S3_REQUIRED: &str = "MANDATE_S3_REQUIRED";
 const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
 /// The `K/N` shard CI's `schema-mutants` matrix passes to `cargo xtask ci schema-mutants`, through
 /// the environment because the live-feature check refuses cargo words the shell expands (DEC-688).
@@ -328,6 +335,7 @@ fn ci(job: &str) -> Result<()> {
         }
         "postgres" => postgres(),
         "openbao" => openbao(),
+        "objectstore" => objectstore(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "sweep" => sweep(Path::new(".")),
         "fast" => {
@@ -628,6 +636,45 @@ fn openbao() -> Result<()> {
     }
     Ok(())
 }
+
+/// The object store's conformance suite against a real S3-compatible store (E21-40, DEC-973),
+/// run only when the selection holds `mandate-objectstore` (DEC-1190). `test` runs it too, but it
+/// skips there unless `MANDATE_S3_URL` is set; here it must run.
+fn objectstore() -> Result<()> {
+    if env::var_os(S3_URL).is_none() {
+        if env::var_os(S3_REQUIRED).is_some() {
+            bail!("{S3_REQUIRED} is set but {S3_URL} is not");
+        }
+        eprintln!(
+            "    objectstore: {S3_URL} is unset; skipping (see crates/mandate-objectstore/README.md)"
+        );
+        return Ok(());
+    }
+    let tested = selection()?.among(&S3_TESTED);
+    if tested.is_empty() {
+        eprintln!("    objectstore: no crate with object-store tests is affected (DEC-1190)");
+        return Ok(());
+    }
+    let mut args = vec!["nextest", "run"];
+    for package in &tested {
+        args.extend(["--package", package]);
+    }
+    args.extend(["--locked", "--no-tests=pass"]);
+    eprintln!("    $ {S3_REQUIRED}=1 cargo {}", args.join(" "));
+    let status = Command::new("cargo")
+        .args(args)
+        .env(S3_REQUIRED, "1")
+        .status()
+        .context("starting `cargo nextest`")?;
+    if !status.success() {
+        bail!("the object store conformance suite failed with {status}");
+    }
+    Ok(())
+}
+
+/// The packages whose tests need the S3 test store (E21-40): `cargo xtask ci objectstore` runs
+/// those of them the selection holds.
+const S3_TESTED: [&str; 1] = ["mandate-objectstore"];
 
 /// The paths whose change selects every crate and every job (DEC-1190 item 3): the workspace's
 /// build inputs, its tool configuration, CI itself, and xtask, which runs every check. Every
@@ -1360,7 +1407,8 @@ struct Finding {
 /// exception (the `lapis` token names contain "api"): the ramp row is allowed in the design-source
 /// file alone, the same row in a stray file is reported, and a real key pasted into that file is
 /// reported too. The fingerprint rows prove the "Pinned GPG key fingerprints" exception: allowed in
-/// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone.
+/// a deploy script in the `NAME_FINGERPRINT=<hex>` shape alone. The signer rows prove the
+/// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -1381,7 +1429,17 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let fingerprint = format!("CLOUDFLARE_FINGERPRINT={hex}");
     let not_fingerprint = format!("CLOUDFLARE_KEY={hex}");
     let cloudflare = Some("cloudflare-api-key");
+    let signer = "crates/mandate-objectstore/tests/sigv4.rs";
+    let example = format!("        \"AK{}\".to_owned(),", "IAIOSFODNN7EXAMPLE");
+    let near_example = format!("        \"AK{}\".to_owned(),", "ZZIOSFODNN7EXAMPLE");
     vec![
+        (signer.to_owned(), example.clone(), None),
+        (signer.to_owned(), near_example, Some("alpaca-key-id")),
+        (
+            "crates/mandate-objectstore/tests/s3.rs".to_owned(),
+            example,
+            Some("alpaca-key-id"),
+        ),
         (fixture("page-1.json"), json.clone(), None),
         (fixture("requests.txt"), query.clone(), None),
         (
@@ -3533,6 +3591,7 @@ const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-checks.sh",
     ".github/scripts/start-postgres.sh",
     ".github/scripts/start-openbao.sh",
+    ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
     CREDENTIAL_GUARD,
 ];
@@ -3598,6 +3657,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_PG_URL",
     "MANDATE_PR_BODY",
     "MANDATE_PR_NUMBER",
+    "MANDATE_S3_ACCESS_KEY_ID",
+    "MANDATE_S3_REQUIRED",
+    "MANDATE_S3_SECRET_ACCESS_KEY",
+    "MANDATE_S3_URL",
     "MANDATE_SCHEMA_SHARD",
     "MANDATE_SWEEP_CLOCK",
     "MANDATE_TEST_PARTITION",
@@ -3626,6 +3689,9 @@ const READ_ENV_NAMES: &[&str] = &[
     "TEST_RESULT",
     "VERDICTS",
     "WRANGLER_SEND_METRICS",
+    "R2_ACCESS_KEY_ID",
+    "R2_ENDPOINT",
+    "R2_SECRET_ACCESS_KEY",
 ];
 
 /// Whether `name` may be an `env:` key or a command-prefix assignment: exactly one of
@@ -10081,6 +10147,44 @@ mod tests {
                 started.is_some() && gated.is_some() && started < gated,
                 "`{job}` starts the shared, digest-pinned PostgreSQL before `{gate}` (DEC-519): \
                  start at {started:?}, gate at {gated:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The DEC-519 rule for the object store (E21-40, DEC-973): `mandate-objectstore`'s
+    /// conformance suite skips without `MANDATE_S3_URL`, so each job that judges its code starts
+    /// the digest-pinned S3 test store before its gate and requires it.
+    #[test]
+    fn every_mutation_shard_has_the_store_the_objectstore_tests_need() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        for (job, gate) in [
+            ("full-checks", "run: cargo xtask ci full"),
+            ("mutants", "run: cargo xtask ci mutants"),
+        ] {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            let trimmed: Vec<&str> = lines
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- "))
+                .collect();
+            for setting in [
+                "MANDATE_S3_URL: http://127.0.0.1:9000",
+                "MANDATE_S3_REQUIRED: \"1\"",
+            ] {
+                assert!(
+                    trimmed.contains(&setting),
+                    "`{job}` sets `{setting}`, so the conformance suite runs and cannot skip"
+                );
+            }
+            let started = trimmed
+                .iter()
+                .position(|line| *line == "run: .github/scripts/start-minio.sh");
+            let gated = trimmed.iter().position(|line| *line == gate);
+            assert!(
+                started.is_some() && gated.is_some() && started < gated,
+                "`{job}` starts the S3 test store before `{gate}`: start at {started:?}, gate at \
+                 {gated:?}"
             );
         }
         Ok(())
