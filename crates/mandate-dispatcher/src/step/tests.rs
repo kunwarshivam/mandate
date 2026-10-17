@@ -17,6 +17,7 @@ use std::error::Error;
 use std::rc::Rc;
 
 mod crash;
+mod retry;
 mod verdict;
 
 type Checked = Result<(), Box<dyn Error>>;
