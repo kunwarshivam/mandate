@@ -13,7 +13,13 @@ const AGENT: &str = "agent-a";
 const MANDATE: &str = include_str!("fixtures/mandate.json");
 
 /// A control-stream row as the workspace services commit it, by `actor` (kind and id).
-fn row(seq: u64, event_type: &str, environment: &str, actor: (&str, &str), payload: &str) -> StoredEvent {
+fn row(
+    seq: u64,
+    event_type: &str,
+    environment: &str,
+    actor: (&str, &str),
+    payload: &str,
+) -> StoredEvent {
     let (kind, id) = actor;
     let event_id = format!("01J8Z3MC{seq:018}");
     let body = format!(
@@ -46,7 +52,11 @@ impl World {
     }
 
     /// Stores the fixture mandate changed by `edit`, and journals its creation by `author`.
-    fn version(&mut self, author: (&str, &str), edit: impl FnOnce(&mut serde_json::Value)) -> String {
+    fn version(
+        &mut self,
+        author: (&str, &str),
+        edit: impl FnOnce(&mut serde_json::Value),
+    ) -> String {
         let mut document: serde_json::Value = serde_json::from_str(MANDATE).unwrap();
         edit(&mut document);
         let mandate = Mandate::parse(&parse(document.to_string().as_bytes()).unwrap()).unwrap();
@@ -67,8 +77,13 @@ impl World {
             r#"{{"agent_id":"{agent}","mandate_version":"{version}","record_ref":"{version}"}}"#
         );
         let seq = self.next();
-        self.control
-            .push(row(seq, "AgentDeployed", environment, ("user", "user-owner"), &payload));
+        self.control.push(row(
+            seq,
+            "AgentDeployed",
+            environment,
+            ("user", "user-owner"),
+            &payload,
+        ));
     }
 
     fn stopped(&mut self, agent: &str) {
@@ -76,8 +91,13 @@ impl World {
             r#"{{"agent_id":"{agent}","connection_id":"conn_alpaca_paper_01","reason":"owner_stop","retired_on":"2026-10-16","loss_added":"0"}}"#
         );
         let seq = self.next();
-        self.control
-            .push(row(seq, "AgentStopped", "paper", ("user", "user-owner"), &payload));
+        self.control.push(row(
+            seq,
+            "AgentStopped",
+            "paper",
+            ("user", "user-owner"),
+            &payload,
+        ));
     }
 
     fn resolved(&self) -> Result<Resolved, &'static str> {
@@ -197,7 +217,9 @@ fn a_version_with_no_user_who_created_it_is_refused() {
 
     let mut unrecorded = World::default();
     let version = unrecorded.version(("user", "user-author"), |_| {});
-    unrecorded.control.retain(|r| r.event_type != "MandateVersionCreated");
+    unrecorded
+        .control
+        .retain(|r| r.event_type != "MandateVersionCreated");
     unrecorded.deployed(AGENT, &version, "paper");
     assert_eq!(unrecorded.resolved(), Err("mandate_author_unknown"));
 }

@@ -50,6 +50,7 @@ impl Guard {
                 .env_remove("MANDATE_PROCESS")
                 .env_remove("MANDATE_WORKSPACE")
                 .env_remove("MANDATE_SUBJECT")
+                .env_remove("MANDATE_ARTIFACTS")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -118,6 +119,7 @@ fn a_manager_launch_refuses_until_its_deployment_is_resolved() {
             .env("MANDATE_PROCESS", process)
             .env("MANDATE_SUBJECT", "agent-a")
             .env("MANDATE_GENERATION", "1")
+            .env_remove("MANDATE_ARTIFACTS")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -158,6 +160,58 @@ fn a_manager_launch_refuses_until_its_deployment_is_resolved() {
         "an unreadable value is not taken as unset"
     );
     assert!(!path.exists(), "a refused process serves no probe");
+}
+
+/// A launch that leaves its connection and owner to be resolved reads them from the journal and
+/// the artifact store `MANDATE_ARTIFACTS` names (DEC-1016). A root that is not a store, a store with
+/// no journal, a fixture run with nothing to read them from, and a launch naming only one of the two
+/// each refuse before the process is ready.
+#[test]
+fn a_launch_that_cannot_resolve_its_deployment_refuses() {
+    let path = socket("resolve");
+    let store = std::env::temp_dir().join(format!("daemon-{}-store", std::process::id()));
+    std::fs::create_dir_all(store.join("sha256")).unwrap();
+    let not_a_store = std::env::temp_dir().join(format!("daemon-{}-empty", std::process::id()));
+    std::fs::create_dir_all(&not_a_store).unwrap();
+    let launch = |args: &[&str], root: &PathBuf| {
+        let out = Command::new(BIN)
+            .args(args)
+            .arg("--probe")
+            .arg(&path)
+            .env_remove("MANDATE_JOURNAL_DSN")
+            .env("MANDATE_WORKSPACE", "ws1")
+            .env("MANDATE_PROCESS", "runtime")
+            .env("MANDATE_SUBJECT", "agent-a")
+            .env("MANDATE_ARTIFACTS", root)
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        (out.status.code(), String::from_utf8(out.stderr).unwrap())
+    };
+    let refused = |code: &str| (Some(2), format!("{code}\n"));
+    assert_eq!(
+        launch(&["run"], &not_a_store),
+        refused("runtime_start_failed: artifact_store_unavailable")
+    );
+    assert!(
+        !not_a_store.join("sha256").exists(),
+        "a runtime never creates a store"
+    );
+    assert_eq!(
+        launch(&["run"], &store),
+        refused("runtime_start_failed: journal_dsn_missing")
+    );
+    assert_eq!(
+        launch(&["run", "--fixture"], &store),
+        refused("deployment_unresolved")
+    );
+    assert_eq!(
+        launch(&["run", "--connection", "conn-1"], &store),
+        refused("deployment_missing")
+    );
+    assert!(!path.exists(), "a refused process serves no probe");
+    std::fs::remove_dir_all(&store).ok();
+    std::fs::remove_dir_all(&not_a_store).ok();
 }
 
 #[test]
