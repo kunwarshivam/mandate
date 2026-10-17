@@ -3,7 +3,8 @@ The plugin's server certificate (for its Service, `barman-cloud`) and the operat
 certificate, each self-signed as the plugin's own cert-manager Issuer makes them, with `ca.crt`
 the certificate itself: the operator trusts the server's, and the plugin trusts the client's. Read
 back on upgrade, so an upgrade keeps them, until one is within 30 days of its end (the Secret's
-`mandate.dev/not-after`, in seconds since the epoch) or its Secret is gone; then it is remade, and
+`mandate.dev/not-after`, in seconds since the epoch) or its Secret is gone or lacks its pair; then
+it is remade, and
 `cargo xtask cell up` restarts the plugin, which reads its files only at start.
 */ -}}
 {{- define "tls.secret" -}}
@@ -12,7 +13,7 @@ back on upgrade, so an upgrade keeps them, until one is within 30 days of its en
 {{- $key := "" -}}
 {{- $notAfter := 0 -}}
 {{- $now := now | unixEpoch | int64 -}}
-{{- if and $existing $existing.data $existing.metadata.annotations -}}
+{{- if and $existing $existing.data $existing.metadata.annotations (get $existing.data "tls.crt") (get $existing.data "tls.key") -}}
 {{- $notAfter = get $existing.metadata.annotations "mandate.dev/not-after" | int64 -}}
 {{- end -}}
 {{- if gt (sub $notAfter $now) (mul 30 86400) -}}

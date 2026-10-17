@@ -178,7 +178,7 @@ impl Drill {
             Self::Restart => "export_stream_empty",
             Self::KillSwitch => "",
             Self::StandbyDown => "committed with the standby fenced",
-            Self::Archive => "not in the archive",
+            Self::Archive => "is not in the archive",
         }
     }
 }
@@ -773,21 +773,25 @@ fn backup_plugin() -> Result<()> {
     Ok(())
 }
 
-/// When the plugin's server certificate ends, as the TLS chart records it; empty before the first
-/// install.
+/// When each of the plugin's two certificates ends, as the TLS chart records it; empty before the
+/// first install. Either changing means the plugin must restart.
 fn plugin_certificate_end() -> Result<String> {
-    Ok(kubectl(&[
-        "get",
-        "secret",
-        "barman-cloud-server-tls",
-        "--namespace",
-        CNPG_NAMESPACE,
-        "--ignore-not-found",
-        "-o",
-        "jsonpath={.metadata.annotations.mandate\\.dev/not-after}",
-    ])?
-    .trim()
-    .to_string())
+    let mut ends = String::new();
+    for secret in ["barman-cloud-server-tls", "barman-cloud-client-tls"] {
+        let end = kubectl(&[
+            "get",
+            "secret",
+            secret,
+            "--namespace",
+            CNPG_NAMESPACE,
+            "--ignore-not-found",
+            "-o",
+            "jsonpath={.metadata.annotations.mandate\\.dev/not-after}",
+        ])?;
+        ends.push_str(end.trim());
+        ends.push('/');
+    }
+    Ok(if ends == "//" { String::new() } else { ends })
 }
 
 /// The test store the journal archives to in the local cell, and the workspace's namespace, where
@@ -1124,6 +1128,15 @@ fn tamper_segment(jobs: &mut [Value]) -> Result<()> {
 
 /// Applies a rendered Job and waits until it succeeds or fails; returns which, with its logs.
 fn run_job(objects: Vec<Value>) -> Result<(bool, String)> {
+    run_job_watching(objects, || Ok(()))
+}
+
+/// [`run_job`], calling `watch` at each poll while the Job runs, as a drill that must see what the
+/// database does during the Job.
+fn run_job_watching(
+    objects: Vec<Value>,
+    mut watch: impl FnMut() -> Result<()>,
+) -> Result<(bool, String)> {
     let job = objects
         .iter()
         .find(|o| o["kind"] == "Job")
@@ -1147,6 +1160,7 @@ fn run_job(objects: Vec<Value>) -> Result<(bool, String)> {
         if succeeded == "1" || failed == "1" {
             return Ok((succeeded == "1", job_logs(&name, job)));
         }
+        watch()?;
         sleep(Duration::from_secs(2));
     }
     bail!("Job {name} neither succeeded nor failed in time")
@@ -1972,7 +1986,7 @@ fn synchronous_standbys() -> Result<String> {
 /// The journal's events stored for `stream`, as the primary sees them.
 fn stored_events(stream: &str) -> Result<String> {
     on_primary(&format!(
-        "SELECT count(*) FROM events WHERE stream_id = '{stream}'"
+        "SELECT count(*) FROM journal.events WHERE stream_id = '{stream}'"
     ))
 }
 
@@ -2017,39 +2031,31 @@ fn verify_streams(id: &str, streams: &[String]) -> Result<(bool, String)> {
 const FENCED_APPEND_SECS: u32 = 40;
 
 /// OPS-2 with the synchronous standby down: the standby is fenced (CloudNativePG stops its
-/// Postgres), an append is tried, and it must not commit: the CLI never reports it, and the
-/// primary shows none of its events. The standby is unfenced, the cluster must take a new append,
-/// and every stream written verifies. Seeded, the cluster's durability is `preferred` first, so the
-/// primary drops the standby and commits alone, which the drill must report.
+/// Postgres), an append is tried, and it must wait on the standby rather than commit: the primary
+/// shows a backend waiting for synchronous replication, the CLI never reports the commit, the
+/// primary shows none of its events, and the Job ends on its deadline. Whatever happened, the
+/// standby is then unfenced, the durability put back, and the cluster waited for until a
+/// synchronous standby streams again; then it must take a new append, and every stream written
+/// verifies. Seeded, the cluster's durability is `preferred` first, so the primary drops the
+/// standby and commits alone, which the drill must report.
 fn standby_down(seeded: bool) -> Result<Verdict> {
-    if seeded {
-        set_durability("preferred")?;
+    if !until(|| Ok(synchronous_standbys()? == "1"))? {
+        return Ok(Verdict::Broken(
+            "before the drill, no synchronous standby streams to the primary".into(),
+        ));
     }
-    let fenced = fenced_append(seeded);
-    let unfenced = kubectl(&[
-        "annotate",
-        "cluster.postgresql.cnpg.io/journal",
-        "--namespace",
-        NAMESPACE,
-        "cnpg.io/fencedInstances-",
-    ]);
-    if seeded {
-        set_durability("required")?;
-    }
-    unfenced?;
+    let fenced = if seeded {
+        set_durability("preferred").and_then(|()| fenced_append(seeded))
+    } else {
+        fenced_append(seeded)
+    };
+    let restored = restore_standby(seeded);
     let (verdict, fenced) = fenced?;
+    let streaming = restored?;
     if verdict != Verdict::Held {
         return Ok(verdict);
     }
-    kubectl(&[
-        "wait",
-        "--namespace",
-        NAMESPACE,
-        "--for=condition=Ready",
-        "cluster.postgresql.cnpg.io/journal",
-        "--timeout=300s",
-    ])?;
-    if !until(|| Ok(synchronous_standbys()? == "1"))? {
+    if !streaming {
         return Ok(Verdict::Broken(
             "the standby never streamed synchronously again after it was unfenced".into(),
         ));
@@ -2076,8 +2082,45 @@ fn standby_down(seeded: bool) -> Result<Verdict> {
     }
 }
 
-/// Fences the standby, waits until the primary has no synchronous standby, and tries one append;
-/// the verdict, and the stream the append was for, which the drill checks once the standby is back.
+/// Unfences the standby, puts `required` back after a seeded run, and waits for the cluster to be
+/// Ready with a synchronous standby streaming, so the next drill starts from a whole cluster;
+/// whether one streams again. Every step runs even when an earlier one failed.
+fn restore_standby(seeded: bool) -> Result<bool> {
+    let unfenced = kubectl(&[
+        "annotate",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "cnpg.io/fencedInstances-",
+    ]);
+    let durable = if seeded {
+        set_durability("required")
+    } else {
+        Ok(())
+    };
+    let ready = kubectl(&[
+        "wait",
+        "--namespace",
+        NAMESPACE,
+        "--for=condition=Ready",
+        "cluster.postgresql.cnpg.io/journal",
+        "--timeout=300s",
+    ]);
+    let streaming = until(|| Ok(synchronous_standbys()? == "1"));
+    unfenced?;
+    durable?;
+    ready?;
+    streaming
+}
+
+/// Backends on the primary waiting for a standby to confirm their commit.
+fn waiting_on_standby() -> Result<String> {
+    on_primary("SELECT count(*) FROM pg_stat_activity WHERE wait_event = 'SyncRep'")
+}
+
+/// Fences the standby, waits until the primary has no synchronous standby, and tries one append,
+/// watching the primary for the commit that waits on the standby; the verdict, and the stream the
+/// append was for, which the drill checks once the standby is back.
 fn fenced_append(seeded: bool) -> Result<(Verdict, String)> {
     let standby = journal_pod("replica")?;
     let fence = format!("cnpg.io/fencedInstances=[\"{standby}\"]");
@@ -2098,7 +2141,13 @@ fn fenced_append(seeded: bool) -> Result<(Verdict, String)> {
     }
     let workspace = format!("fenced{id}");
     let deadline = if seeded { 120 } else { FENCED_APPEND_SECS };
-    let (opened, logs) = run_job(open_job(&id, &workspace, deadline)?)?;
+    let mut waited = false;
+    let (opened, logs) = run_job_watching(open_job(&id, &workspace, deadline)?, || {
+        if !waited {
+            waited = waiting_on_standby()? != "0";
+        }
+        Ok(())
+    })?;
     let stored = stored_events(&stream)?;
     let verdict = if opened {
         Verdict::Broken(format!(
@@ -2111,6 +2160,10 @@ fn fenced_append(seeded: bool) -> Result<(Verdict, String)> {
     } else if job_end(&format!("control-{id}"))? != "DeadlineExceeded" {
         Verdict::Broken(format!(
             "the append with the standby fenced failed rather than waited:\n{logs}"
+        ))
+    } else if !waited {
+        Verdict::Broken(format!(
+            "the append's Job ran out its deadline, but no commit ever waited on the standby, so the drill did not see what stopped it:\n{logs}"
         ))
     } else {
         Verdict::Held
@@ -2185,17 +2238,25 @@ fn set_destination(path: &str) -> Result<()> {
 
 /// Writes a stream, closes the WAL segment that holds it, takes a base backup, and reads both back
 /// from the store with Barman's own tools. Seeded, the archive goes to another bucket of the same
-/// store first, which Postgres cannot tell, so only the read from the store can catch it.
+/// store first, which Postgres cannot tell, so only the read from the store can catch it; the
+/// destination is put back whatever happened. A seeded run leaves its segment and base backup under
+/// that other path, so the archive at the real one has a gap: a later restore takes its own base
+/// backup first.
 fn archive(seeded: bool) -> Result<Verdict> {
     let (path, url) = archive_destination()?;
-    if seeded {
-        set_destination(&format!("{path}-elsewhere"))?;
-    }
-    let verdict = archived(&path, &url);
-    if seeded {
-        set_destination(&path)?;
-    }
-    verdict
+    let verdict = if seeded {
+        set_destination(&format!("{path}-elsewhere")).and_then(|()| archived(&path, &url))
+    } else {
+        archived(&path, &url)
+    };
+    let restored = if seeded {
+        set_destination(&path)
+    } else {
+        Ok(())
+    };
+    let verdict = verdict?;
+    restored?;
+    Ok(verdict)
 }
 
 fn archived(path: &str, url: &str) -> Result<Verdict> {
@@ -2220,6 +2281,71 @@ fn archived(path: &str, url: &str) -> Result<Verdict> {
         )));
     }
     let backup = format!("journal-drill-{id}");
+    let backup_id = base_backup(&backup);
+    let _ = kubectl(&[
+        "delete",
+        "backup",
+        &backup,
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "--wait=false",
+    ]);
+    let backup_id = match backup_id? {
+        Ok(backup_id) => backup_id,
+        Err(phase) => {
+            return Ok(Verdict::Broken(format!(
+                "the base backup {backup} did not complete (phase `{phase}`)"
+            )));
+        }
+    };
+    let read = read_archive(&id, path, url, &segment);
+    let _ = kubectl(&[
+        "delete",
+        "pod",
+        &format!("archive-check-{id}"),
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "--wait=false",
+    ]);
+    let _ = kubectl(&[
+        "delete",
+        "networkpolicy",
+        "archive-check",
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+    ]);
+    let read = read?;
+    if !read.listed {
+        return Ok(Verdict::Broken(format!(
+            "Barman could not list the store at {path}, so the drill read nothing:\n{}",
+            read.logs
+        )));
+    }
+    if !read.fetched {
+        return Ok(Verdict::Broken(if read.logs.contains("does not exist") {
+            format!("{segment} is not in the archive at {path}:\n{}", read.logs)
+        } else {
+            format!(
+                "Barman failed to fetch {segment} from {path} for another reason than its absence:\n{}",
+                read.logs
+            )
+        }));
+    }
+    if !read.logs.contains(&backup_id) {
+        return Ok(Verdict::Broken(format!(
+            "the base backup {backup_id} is not in the archive at {path}:\n{}",
+            read.logs
+        )));
+    }
+    Ok(Verdict::Held)
+}
+
+/// Takes a base backup through the plugin: its Barman id once it completes, or the phase it ended
+/// in when it did not.
+fn base_backup(backup: &str) -> Result<std::result::Result<String, String>> {
     apply(&[json!({
         "apiVersion": "postgresql.cnpg.io/v1",
         "kind": "Backup",
@@ -2231,11 +2357,11 @@ fn archived(path: &str, url: &str) -> Result<Verdict> {
         }
     })])?;
     let mut phase = String::new();
-    let finished = until(|| {
+    until(|| {
         phase = kubectl(&[
             "get",
             "backup",
-            &backup,
+            backup,
             "--namespace",
             NAMESPACE,
             "-o",
@@ -2245,33 +2371,24 @@ fn archived(path: &str, url: &str) -> Result<Verdict> {
         .to_string();
         Ok(phase.starts_with("completed/") || phase.starts_with("failed/"))
     })?;
-    let backup_id = phase
-        .strip_prefix("completed/")
-        .unwrap_or_default()
-        .to_string();
-    if !finished || backup_id.is_empty() {
-        return Ok(Verdict::Broken(format!(
-            "the base backup {backup} did not complete (phase `{phase}`)"
-        )));
-    }
-    let (read, logs) = read_archive(&id, path, url, &segment)?;
-    if !read {
-        return Ok(Verdict::Broken(format!(
-            "{segment} or the base backup {backup_id} is not in the archive at {path}:\n{logs}"
-        )));
-    }
-    if !logs.contains(&backup_id) {
-        return Ok(Verdict::Broken(format!(
-            "the base backup {backup_id} is not in the archive at {path}:\n{logs}"
-        )));
-    }
-    Ok(Verdict::Held)
+    Ok(match phase.strip_prefix("completed/") {
+        Some(id) if !id.is_empty() => Ok(id.to_string()),
+        _ => Err(phase),
+    })
+}
+
+/// What the check pod read from the store: whether Barman listed it, whether it fetched the
+/// segment, and both tools' logs.
+struct ArchiveRead {
+    listed: bool,
+    fetched: bool,
+    logs: String,
 }
 
 /// A pod with the plugin's own sidecar image and the archive's key that lists the base backups and
 /// fetches `segment` back from `path`, as a restore would, under a network policy of its own that
-/// reaches the store and nothing else.
-fn read_archive(id: &str, path: &str, url: &str, segment: &str) -> Result<(bool, String)> {
+/// reaches the store and nothing else. The caller removes the pod and the policy.
+fn read_archive(id: &str, path: &str, url: &str, segment: &str) -> Result<ArchiveRead> {
     let image = format!("ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:{PLUGIN_SIDECAR_TAG}");
     let name = format!("archive-check-{id}");
     let key = |env: &str, key: &str| json!({"name": env, "valueFrom": {"secretKeyRef": {"name": "journal-archive-key", "key": key}}});
@@ -2357,6 +2474,15 @@ fn read_archive(id: &str, path: &str, url: &str, segment: &str) -> Result<(bool,
         .to_string();
         Ok(phase == "Succeeded" || phase == "Failed")
     })?;
+    let listed = kubectl(&[
+        "get",
+        "pod",
+        &name,
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.status.initContainerStatuses[0].state.terminated.exitCode}",
+    ])?;
     let mut logs = String::new();
     for container in ["list", "fetch"] {
         if let Ok(out) = kubectl(&["logs", &name, "--namespace", NAMESPACE, "-c", container]) {
@@ -2365,22 +2491,11 @@ fn read_archive(id: &str, path: &str, url: &str, segment: &str) -> Result<(bool,
             }
         }
     }
-    let _ = kubectl(&[
-        "delete",
-        "pod",
-        &name,
-        "--namespace",
-        NAMESPACE,
-        "--wait=false",
-    ]);
-    let _ = kubectl(&[
-        "delete",
-        "networkpolicy",
-        "archive-check",
-        "--namespace",
-        NAMESPACE,
-    ]);
-    Ok((phase == "Succeeded", logs))
+    Ok(ArchiveRead {
+        listed: listed.trim() == "0",
+        fetched: phase == "Succeeded",
+        logs,
+    })
 }
 
 const COMPOSE_DIR: &str = "deploy/cell/compose";

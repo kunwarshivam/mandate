@@ -25,6 +25,19 @@ PLUGIN = "barman-cloud.cloudnative-pg.io"
 # down, so a commit waits rather than lands on the primary alone (OPS-2).
 SYNCHRONOUS = {"method": "any", "number": 1, "dataDurability": "required"}
 PEER_PORTS = {5432, 8000}
+# An archive outside the cluster, reached by CIDR over HTTPS, as cell #1's is; the CIDRs are added.
+BY_CIDR = (
+    "--set",
+    "archive.endpointURL=https://abc.r2.cloudflarestorage.com",
+    "--set",
+    "archive.egress.namespace=",
+    "--set-json",
+    "archive.egress.podSelector={}",
+    "--set",
+    "archive.egress.port=443",
+)
+# The Kubernetes API's ports in the test rendering (KUBE_API).
+API_PORTS = {443}
 
 if shutil.which("helm") is None:
     if os.environ.get("MANDATE_CELL_HELM_REQUIRED"):
@@ -159,6 +172,8 @@ def egress_narrow(docs: list[dict]) -> list[str]:
             seen.add(label)
             if label == "cidr" and not peer["ipBlock"]["cidr"].endswith("/32"):
                 problems.append(f"a CIDR wider than one address: {peer['ipBlock']['cidr']}")
+            if label == "cidr" and numbers != API_PORTS:
+                problems.append(f"the Kubernetes API on ports {numbers}")
             if label == "dns" and numbers != {53}:
                 problems.append(f"DNS on ports {numbers}")
             if label == "peers" and numbers != PEER_PORTS:
@@ -306,8 +321,14 @@ def test_values_cannot_weaken_the_journal():
         "--set-json",
         'archive.egress.cidrs=["203.0.113.0/24"]',
     )
-    assert journal_refused("--set-json", 'archive.egress.cidrs=["0.0.0.0/0"]')
-    assert journal_refused("--set-json", 'archive.egress.cidrs=["203.0.113.0/24"]')
+    assert journal_refused("--set", "archive.endpointURL=http://other.elsewhere.svc:9000")
+    assert journal_refused("--set-json", 'archive.egress.cidrs=["203.0.113.0/24"]'), "CIDRs and a namespace"
+    assert not journal_refused(*BY_CIDR, "--set-json", 'archive.egress.cidrs=["203.0.113.0/24"]')
+    for wide in ("0.0.0.0/0", "10.0.0.0/8", "203.0.0.0/16", "203.0.113.0/23"):
+        assert journal_refused(*BY_CIDR, "--set-json", f'archive.egress.cidrs=["{wide}"]'), wide
+    assert journal_refused(
+        *BY_CIDR, "--set", "archive.endpointURL=http://archive-store.archive-store.svc:9000"
+    )
     assert journal_refused("--set", "failureDomain=maybe")
     assert helm(JOURNAL_CHART, "ws-ws1", "-f", str(K3D_VALUES)).returncode != 0, (
         "a rendering with no cluster and no Kubernetes API address must fail, not open the API's port to all"
@@ -315,18 +336,7 @@ def test_values_cannot_weaken_the_journal():
 
 
 def test_an_https_archive_by_cidr_renders():
-    docs = journal(
-        "--set",
-        "archive.endpointURL=https://abc.r2.cloudflarestorage.com",
-        "--set",
-        "archive.egress.namespace=",
-        "--set-json",
-        "archive.egress.podSelector={}",
-        "--set-json",
-        'archive.egress.cidrs=["203.0.113.0/24"]',
-        "--set",
-        "archive.egress.port=443",
-    )
+    docs = journal(*BY_CIDR, "--set-json", 'archive.egress.cidrs=["203.0.113.0/24"]')
     rules = one(docs, "NetworkPolicy", "journal")["spec"]["egress"]
     assert {
         "to": [{"ipBlock": {"cidr": "203.0.113.0/24"}}],
@@ -392,6 +402,15 @@ JOURNAL_SEEDED = [
         ),
     ),
     (egress_narrow, lambda d: mutate(d, "NetworkPolicy", "journal", lambda p: journal_egress(p).pop())),
+    (
+        egress_narrow,
+        lambda d: mutate(
+            d,
+            "NetworkPolicy",
+            "journal",
+            lambda p: journal_egress(p)[1]["ports"].append({"protocol": "TCP", "port": 22}),
+        ),
+    ),
     (
         egress_narrow,
         lambda d: mutate(d, "NetworkPolicy", "journal", lambda p: p["spec"].update(policyTypes=["Ingress"])),

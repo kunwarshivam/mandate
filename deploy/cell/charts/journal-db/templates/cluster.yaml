@@ -209,8 +209,11 @@ spec:
 {{- if and $egress.namespace (empty $egress.podSelector) -}}
 {{- fail "archive.egress.podSelector is required with archive.egress.namespace" -}}
 {{- end -}}
-{{- if and (hasPrefix "http://" .Values.archive.endpointURL) (not $egress.namespace) -}}
-{{- fail "a plain-HTTP archive endpoint must be a Service in this cluster, named by archive.egress.namespace" -}}
+{{- if hasPrefix "http://" .Values.archive.endpointURL -}}
+{{- $host := trimPrefix "http://" .Values.archive.endpointURL | splitList ":" | first -}}
+{{- if not (and $egress.namespace (eq (index (splitList "." $host) 1) $egress.namespace)) -}}
+{{- fail "a plain-HTTP archive endpoint must be a Service in this cluster, in the namespace archive.egress.namespace names" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- include "journal.archiveCheck" . -}}
