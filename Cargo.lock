@@ -1695,6 +1695,7 @@ dependencies = [
  "mandate-identity-seal",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-release",
  "mandate-spec",
  "mandate-time",
  "reqwest",
@@ -1889,10 +1890,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-deploy-manager"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-process",
+ "mandate-time",
+ "proptest",
+ "reqwest",
+ "rustls",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-dispatcher"
 version = "0.0.0"
 dependencies = [
+ "aes-gcm",
  "base64ct",
+ "hkdf",
  "mandate-canon",
  "mandate-journal",
  "mandate-journal-pg",
@@ -1900,8 +1918,11 @@ dependencies = [
  "mandate-push-relay",
  "mandate-time",
  "mandate-webpush",
+ "p256",
  "proptest",
  "ring",
+ "secrecy",
+ "sha2 0.11.0",
  "sqlx",
  "thiserror",
  "tokio",

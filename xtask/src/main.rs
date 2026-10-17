@@ -9844,6 +9844,7 @@ mod tests {
                 "mandate-cli",
                 "mandate-cp-agent",
                 "mandate-cp-site",
+                "mandate-deploy-manager",
                 "mandate-dispatcher"
             ]
         );
