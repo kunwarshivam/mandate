@@ -96,8 +96,8 @@ pub use harden::disable_core_dumps;
 pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check, fresh_ask};
 pub use robinhood::{
-    Build, Dial, EndpointRefusal, Linked, LoggedIn, REHEARSAL_ENDPOINT_VAR, REHEARSAL_HOST,
-    RobinhoodEndpoint, dial, endpoint, pinned_host, robinhood_reads,
+    Build, Dial, EndpointRefusal, Linked, LoggedIn, Market, MarketUnread, REHEARSAL_ENDPOINT_VAR,
+    REHEARSAL_HOST, RobinhoodEndpoint, SessionMarket, dial, endpoint, pinned_host, robinhood_reads,
 };
 pub use snapshot::LapseSnapshot;
 pub use wiring::{

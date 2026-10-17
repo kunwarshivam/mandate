@@ -40,10 +40,10 @@ fn at(text: &str) -> UtcNanos {
 
 /// `at(MONDAY)` moved by `millis`.
 fn monday_plus(millis: i64) -> UtcNanos {
-    let base = at(MONDAY);
-    let nanos = i128::from(base.secs()) * 1_000_000_000 + i128::from(millis) * 1_000_000;
-    let secs = i64::try_from(nanos.div_euclid(1_000_000_000)).unwrap();
-    let rest = u32::try_from(nanos.rem_euclid(1_000_000_000)).unwrap();
+    let base = i128::from(at(MONDAY).secs()).checked_mul(1_000).unwrap();
+    let total = base.checked_add(i128::from(millis)).unwrap();
+    let secs = i64::try_from(total.div_euclid(1_000)).unwrap();
+    let rest = u32::try_from(total.rem_euclid(1_000).checked_mul(1_000_000).unwrap()).unwrap();
     UtcNanos::from_parts(secs, rest).unwrap()
 }
 
@@ -127,6 +127,7 @@ fn another_symbols_quote_is_refused_with_nothing_answered() {
     assert!(block(client.latest_quote(&instrument("SPY"), MAX_AGE)).is_err());
 }
 
+/// At 14:00:30 a five-minute window's first whole minute is 13:56 and its last closed one 13:59.
 #[test]
 fn the_bars_are_every_complete_minute_of_the_window() {
     let clock = Fixed(at(MONDAY));
@@ -135,7 +136,7 @@ fn the_bars_are_every_complete_minute_of_the_window() {
     let bars = block(client.recent_minute_bars(&instrument(SYMBOL), window)).unwrap();
     assert_eq!(bars.instrument, instrument(SYMBOL));
     let starts: Vec<UtcNanos> = bars.bars.iter().map(|bar| bar.start).collect();
-    let expected: Vec<UtcNanos> = ["55", "56", "57", "58", "59"]
+    let expected: Vec<UtcNanos> = ["56", "57", "58", "59"]
         .iter()
         .map(|minute| at(&format!("2026-10-19T13:{minute}:00.000000000Z")))
         .collect();

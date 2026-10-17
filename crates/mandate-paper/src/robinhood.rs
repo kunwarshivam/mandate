@@ -13,6 +13,7 @@
 //!   [`REHEARSAL_HOST`], never [`MCP_HOST`], which it does not compile (DEC-947 item 3).
 
 use std::net::Ipv4Addr;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -33,7 +34,11 @@ use mandate_time::UtcNanos;
 use tokio::runtime::Runtime;
 
 use crate::connect_check::{ACCOUNT_NUMBER_VAR, Observed, SeenContract, observe};
+#[cfg(any(test, feature = "rh-sim"))]
+use crate::sim_market::{MARKET_FIXTURE_VAR, SimMarket};
 use crate::{BrokerAsk, LapseSnapshot, PaperError, Session};
+#[cfg(any(test, feature = "rh-sim"))]
+use mandate_alpaca::TokioPause;
 
 /// Robinhood's published MCP host (DEC-924 item 3, connections spec §13's CN-3): the one place
 /// a Robinhood host is written, and only the runner's `live` feature without `rh-sim` compiles
@@ -79,6 +84,9 @@ pub fn pinned_host(build: Build) -> Option<&'static str> {
 pub struct Dial {
     pub endpoint: RobinhoodEndpoint,
     pub(crate) account_number: String,
+    /// The fixture directory this build's [`Market`] reads, named by its
+    /// [`SessionMarket::FIXTURE_VAR`]: only the `rh-sim` build names one (DEC-961 item 1).
+    pub(crate) market: Option<PathBuf>,
 }
 
 impl Dial {
@@ -96,7 +104,8 @@ impl std::fmt::Debug for Dial {
 
 /// The dial `build` makes, read from the process environment `vars` the run was handed
 /// (DEC-947 item 5): [`endpoint`] over [`REHEARSAL_ENDPOINT_VAR`], then the founder's account
-/// number from [`ACCOUNT_NUMBER_VAR`]. Nothing is sent.
+/// number from [`ACCOUNT_NUMBER_VAR`], and in the `rh-sim` build the market fixture's directory
+/// (DEC-961 item 1). Nothing is sent.
 ///
 /// # Errors
 /// Any [`EndpointRefusal`] of [`endpoint`], then [`EndpointRefusal::AccountUnset`] for a number
@@ -111,9 +120,11 @@ pub fn dial(build: Build, vars: &[(String, String)]) -> Result<Dial, EndpointRef
     let account_number = read(ACCOUNT_NUMBER_VAR)
         .filter(|number| !number.is_empty())
         .ok_or(EndpointRefusal::AccountUnset)?;
+    let market = Market::FIXTURE_VAR.and_then(read).map(PathBuf::from);
     Ok(Dial {
         endpoint,
         account_number: account_number.to_owned(),
+        market,
     })
 }
 
@@ -274,7 +285,7 @@ fn logged_in(endpoint: RobinhoodEndpoint) -> Result<LoggedIn, PaperError> {
 /// [`PaperError::Credentials`] when the login or the session's handshake fails; no error names
 /// a token.
 pub(crate) fn connect(dial: &Dial) -> Result<Linked, PaperError> {
-    logged_in(dial.endpoint.clone())?.session(&dial.account_number)
+    logged_in(dial.endpoint.clone())?.session(&dial.account_number, dial.market.as_deref())
 }
 
 /// O1b's login at `endpoint`, its host the one authorization host: discovery, registration of
@@ -298,11 +309,62 @@ async fn login(
     server.exchange(code, &config).await
 }
 
+/// Where a Robinhood session's market reads (DEC-933 item 2) go, by build (DEC-961 item 1):
+/// Alpaca's data and trading hosts, through [`AlpacaPaperHttp`], in every build but the
+/// rehearsal's, and in the `rh-sim` build the fixture directory its [`Dial`] names, never Alpaca.
+pub trait SessionMarket: Sized {
+    /// The variable naming the fixture directory, read by [`dial`]; [`None`] for a source that
+    /// reads no fixture, so no build but the rehearsal's holds the variable's name.
+    const FIXTURE_VAR: Option<&'static str>;
+
+    /// The source a session's market reads go through, built with no request, or why there is
+    /// none, in which case the session's preflight refuses [`MARKET_UNREAD`].
+    ///
+    /// # Errors
+    /// [`MarketUnread`] when the source cannot be built.
+    fn open(fixture: Option<&Path>) -> Result<Self, MarketUnread>;
+}
+
+/// A session's market source could not be built; nothing was read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarketUnread;
+
+impl SessionMarket for AlpacaPaperHttp {
+    const FIXTURE_VAR: Option<&'static str> = None;
+
+    /// The Alpaca paper client over the environment's paper keys (DEC-947 item 5); a fixture is
+    /// never read.
+    fn open(_fixture: Option<&Path>) -> Result<Self, MarketUnread> {
+        let keys = Credentials::from_env().map_err(|_| MarketUnread)?;
+        Self::new(keys).map_err(|_| MarketUnread)
+    }
+}
+
+#[cfg(any(test, feature = "rh-sim"))]
+impl SessionMarket for SimMarket {
+    const FIXTURE_VAR: Option<&'static str> = Some(MARKET_FIXTURE_VAR);
+
+    /// The fixture directory's market on the system clock; no key is read and no host dialed.
+    fn open(fixture: Option<&Path>) -> Result<Self, MarketUnread> {
+        let dir = fixture.ok_or(MarketUnread)?;
+        Self::load(dir, TokioPause).map_err(|_| MarketUnread)
+    }
+}
+
+/// This build's market source (DEC-961 item 1): the fixture in the `rh-sim` build.
+#[cfg(feature = "rh-sim")]
+pub type Market = SimMarket;
+
+/// This build's market source (DEC-961 item 1): Alpaca in every build without `rh-sim`, the
+/// `live` one included.
+#[cfg(not(feature = "rh-sim"))]
+pub type Market = AlpacaPaperHttp;
+
 /// A logged-in Robinhood session (DEC-947 item 4): the bridge over the one Robinhood connector,
 /// its MCP client connected with the login's token on the bridge's runtime (DEC-928 item 2),
-/// and the Alpaca client for the market reads, if the environment held its paper keys. The
-/// token lives inside the client's transport, in memory only (LT-9).
-pub struct Linked<T = McpClient, M = AlpacaPaperHttp> {
+/// and this build's [`Market`] for the market reads, if it could be built. The token lives
+/// inside the client's transport, in memory only (LT-9).
+pub struct Linked<T = McpClient, M = Market> {
     bridge: Rc<RobinhoodBridge<T>>,
     market: Option<M>,
 }
@@ -361,14 +423,19 @@ impl LoggedIn {
     /// login's endpoint carrying the token as its bearer, the client whose tool contract is
     /// checked as a first connection's (a fund-movement tool or a missing allowlisted one gives no
     /// client, connections spec §8.1), and the one Robinhood connector scoped to
-    /// `account_number` (CN-8), in the shell's bridge on the login's runtime. The Alpaca paper
-    /// client for the market reads is built from the environment's paper keys when they are
-    /// there, with no request; without them the session's preflight refuses (DEC-947 item 5).
+    /// `account_number` (CN-8), in the shell's bridge on the login's runtime. This build's
+    /// [`Market`] for the market reads is opened with no request, over `fixture` in the `rh-sim`
+    /// build (DEC-961) and the environment's Alpaca paper keys in every other; without it the
+    /// session's preflight refuses (DEC-947 item 5).
     ///
     /// # Errors
     /// [`PaperError::Credentials`] when the transport or the handshake fails; no error names a
     /// token.
-    pub(crate) fn session(self, account_number: &str) -> Result<Linked, PaperError> {
+    pub(crate) fn session(
+        self,
+        account_number: &str,
+        fixture: Option<&Path>,
+    ) -> Result<Linked, PaperError> {
         let Self {
             runtime,
             token,
@@ -385,9 +452,7 @@ impl LoggedIn {
             .map_err(|_| PaperError::Credentials)?;
         let connector =
             RobinhoodConnector::new(client, account_number.to_owned(), Tickers::default());
-        let market = Credentials::from_env()
-            .ok()
-            .and_then(|keys| AlpacaPaperHttp::new(keys).ok());
+        let market = Market::open(fixture).ok();
         Ok(Linked::new(
             RobinhoodBridge::new(runtime, connector),
             market,
@@ -402,8 +467,9 @@ impl<T: Tools, M> Linked<T, M> {
     }
 }
 
-/// What a Robinhood preflight waits for when the environment held no Alpaca paper keys: the
-/// market reads DEC-933 item 2 takes from Alpaca's data API (the rehearsal's R5).
+/// What a Robinhood preflight waits for when the session holds no [`Market`]: the market reads
+/// DEC-933 item 2 takes from Alpaca's data API (the rehearsal's R5), which the `rh-sim` build
+/// takes from its fixture (DEC-961).
 pub const MARKET_UNREAD: &str = "the Alpaca market reads a Robinhood preflight takes (DEC-933)";
 
 impl<T: Tools + 'static, M: TradingTransport + DataTransport + Clone> Session for Linked<T, M> {
