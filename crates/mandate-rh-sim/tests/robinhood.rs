@@ -1034,7 +1034,7 @@ fn an_unknown_order_is_listed_by_symbol_agent_and_time_and_never_placed_again() 
     assert_eq!(args, &expected);
     assert_eq!(
         classes(&probe).last(),
-        Some(&(CallClass::Ordinary, "get_equity_orders"))
+        Some(&(CallClass::Read, "get_equity_orders"))
     );
 }
 

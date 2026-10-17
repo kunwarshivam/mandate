@@ -192,7 +192,7 @@ fn robinhoods_ask_is_read_at_the_check_and_compared_within_the_collar() {
     assert_eq!(
         *broker.seen.borrow(),
         [(
-            CallClass::Ordinary,
+            CallClass::Read,
             "get_equity_quotes",
             json!({"symbols": ["SPY"]})
         )]

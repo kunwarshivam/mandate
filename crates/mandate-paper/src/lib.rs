@@ -33,6 +33,7 @@ mod harden;
 mod lt10;
 mod quote;
 mod robinhood;
+mod snapshot;
 mod wiring;
 
 use std::ffi::OsString;
@@ -94,8 +95,9 @@ pub use lt10::{Lt10Refusal, Watched, lt10};
 pub use quote::{QuoteRefusal, cross_check, fresh_ask};
 pub use robinhood::{
     Build, Dial, EndpointRefusal, Linked, LoggedIn, REHEARSAL_ENDPOINT_VAR, REHEARSAL_HOST,
-    RobinhoodEndpoint, dial, endpoint, pinned_host,
+    RobinhoodEndpoint, dial, endpoint, pinned_host, robinhood_reads,
 };
+pub use snapshot::LapseSnapshot;
 pub use wiring::{
     CollarMembers, WakeRead, answers, asked, broker_cross_check, collar_x, cross_check_the_opening,
     granted_opening, lt10_end, reported, robinhood_cross_check, session_cap, wait_for_the_grant,
@@ -157,6 +159,9 @@ pub trait Ports {
 /// [`TradingTransport`] and [`DataTransport`] is the Alpaca paper session it always was.
 pub trait Session {
     /// The broker facts the run reads before any cycle, or the [`Cause`] it stopped at.
+    /// `earlier` is the account snapshot this run's live start already read through this session
+    /// for the lapse, if any (DEC-959 item 1): the session stands on it while it is fresh and
+    /// reads the account again otherwise.
     ///
     /// # Errors
     /// [`Cause::Absent`] when a read is not answered with the fact it asked for.
@@ -164,6 +169,7 @@ pub trait Session {
         &self,
         artifacts: &Artifacts,
         pause: P,
+        earlier: Option<&LapseSnapshot>,
     ) -> Result<BrokerFacts, Cause>;
 
     /// The production cycle over `sources` with this session's connector.
@@ -197,10 +203,12 @@ pub trait Session {
 }
 
 impl<T: TradingTransport + DataTransport + Clone + 'static> Session for T {
+    /// An Alpaca paper session reads its own account: no live start reads one before it.
     fn preflight<P: Pause + Clone>(
         &self,
         artifacts: &Artifacts,
         pause: P,
+        _earlier: Option<&LapseSnapshot>,
     ) -> Result<BrokerFacts, Cause> {
         preflight(artifacts, self.clone(), self.clone(), pause)
     }
@@ -561,15 +569,15 @@ pub fn run<P: Ports>(
         THIS_BUILD,
         ports,
     )?;
-    let (confirmed, early) = match live {
-        Some((confirmed, session)) => (confirmed, Some(session)),
+    let (confirmed, early, lapse) = match live {
+        Some(started) => (started.confirmed, Some(started.session), started.lapse),
         None => {
             if let Some((connection, stream)) = &door {
                 lapse_read(connection, args.journal.as_deref(), stream, None)?;
             }
             let confirmed =
                 confirmed_version(&records, &store, &facts).map_err(PaperError::Deployment)?;
-            (confirmed, None)
+            (confirmed, None, None)
         }
     };
     let mandate = confirmed.mandate();
@@ -632,7 +640,7 @@ pub fn run<P: Ports>(
         }));
     }
     let broker = session
-        .preflight(&artifacts, clock.clone())
+        .preflight(&artifacts, clock.clone(), lapse.as_ref())
         .map_err(refused(Stage::Reconcile))?;
     let now = clock.now();
     let input = confirmed
@@ -861,7 +869,7 @@ fn live_started<P: Ports>(
     vars: &[(String, String)],
     built: Built,
     ports: &mut P,
-) -> Result<Option<(ConfirmedVersion, P::Session)>, PaperError> {
+) -> Result<Option<Started<P::Session>>, PaperError> {
     let Some((connection, stream)) = door else {
         return Ok(None);
     };
@@ -915,7 +923,9 @@ pub fn live_admission(
 /// 1. the shell's fold before credentials ([`checked_before_credentials`]): the walk, the
 ///    document, every V-rule but V-002, and the admission's build, `--confirm-live` and host;
 /// 2. the one [`Ports::connect`], with the run's `dial`: the login and the MCP session;
-/// 3. the agentic account's snapshot ([`Session::account_snapshot`]), the account reads alone;
+/// 3. the agentic account's snapshot ([`Session::account_snapshot`]), the account reads alone,
+///    with the run clock read just before it is sent, kept for the run's preflight (DEC-959
+///    item 1);
 /// 4. the door's lapse on that snapshot and the account stream's rows ([`lapse_read`]);
 /// 5. the shell's full fold, with the door's condition now held (`DoorChecks::Passed`).
 ///
@@ -939,9 +949,10 @@ fn live_start<P: Ports>(
     journal: Option<&str>,
     dial: &Dial,
     ports: &mut P,
-) -> Result<(ConfirmedVersion, P::Session), PaperError> {
+) -> Result<Started<P::Session>, PaperError> {
     checked_before_credentials(records, store, facts).map_err(PaperError::Deployment)?;
     let session = ports.connect(connection, Some(dial))?;
+    let sent = ports.pause().now();
     let snapshot = session
         .account_snapshot()
         .map_err(refused(Stage::Reconcile))?;
@@ -954,7 +965,21 @@ fn live_start<P: Ports>(
         ..facts.clone()
     };
     let confirmed = confirmed_version(records, store, &admitted).map_err(PaperError::Deployment)?;
-    Ok((confirmed, session))
+    Ok(Started {
+        confirmed,
+        session,
+        lapse: snapshot.map(|account| LapseSnapshot { account, sent }),
+    })
+}
+
+/// What a live start hands the run (DEC-947 item 2, DEC-959 item 1): the version confirmed with
+/// the door passed, the one session, and the account snapshot the lapse counted, read through
+/// that session, with the run clock read just before it was sent, which the run hands to that
+/// session's preflight and nowhere else.
+pub(crate) struct Started<S> {
+    pub(crate) confirmed: ConfirmedVersion,
+    pub(crate) session: S,
+    pub(crate) lapse: Option<LapseSnapshot>,
 }
 
 /// The live door the run calls ahead of its own answers (E7-26, DEC-918 items 1 to 4; DEC-910
@@ -1155,10 +1180,11 @@ impl<T: Tools + 'static> Session for Connected<T> {
         &self,
         artifacts: &Artifacts,
         pause: P,
+        earlier: Option<&LapseSnapshot>,
     ) -> Result<BrokerFacts, Cause> {
         match self {
-            Self::Alpaca(transport) => transport.preflight(artifacts, pause),
-            Self::Robinhood(linked) => linked.preflight(artifacts, pause),
+            Self::Alpaca(transport) => transport.preflight(artifacts, pause, earlier),
+            Self::Robinhood(linked) => linked.preflight(artifacts, pause, earlier),
         }
     }
 

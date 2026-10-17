@@ -13,8 +13,8 @@
 //!   [`REHEARSAL_HOST`], never [`MCP_HOST`], which it does not compile (DEC-947 item 3).
 
 use std::net::Ipv4Addr;
-
 use std::rc::Rc;
+use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
@@ -24,15 +24,16 @@ use mandate_mcp::{
     AccessToken, AuthServer, CallbackListener, LOGIN_LIFETIME, McpClient, McpError, McpTransport,
     PinnedEndpoint, SystemMonotonic, Tools, TransportConfig,
 };
-use mandate_robinhood::{AccountSnapshot, RobinhoodConnector, Tickers};
+use mandate_robinhood::{AccountSnapshot, PreflightFacts, RobinhoodConnector, Tickers};
 use mandate_shell::adapters::Sources;
 use mandate_shell::paper::{Artifacts, BrokerFacts, fresh_quote, market_facts, robinhood_facts};
 use mandate_shell::robinhood::RobinhoodBridge;
 use mandate_shell::{Cause, ProductionCycle, Setup, robinhood_production_cycle};
+use mandate_time::UtcNanos;
 use tokio::runtime::Runtime;
 
 use crate::connect_check::{ACCOUNT_NUMBER_VAR, Observed, SeenContract, observe};
-use crate::{BrokerAsk, PaperError, Session};
+use crate::{BrokerAsk, LapseSnapshot, PaperError, Session};
 
 /// Robinhood's published MCP host (DEC-924 item 3, connections spec §13's CN-3): the one place
 /// a Robinhood host is written, and only the runner's `live` feature without `rh-sim` compiles
@@ -408,12 +409,15 @@ pub const MARKET_UNREAD: &str = "the Alpaca market reads a Robinhood preflight t
 impl<T: Tools + 'static, M: TradingTransport + DataTransport + Clone> Session for Linked<T, M> {
     /// DEC-933 item 2: the pinned instrument's `(asset id, symbol)` registered with the
     /// connector (DEC-956 item 1), the agentic account and the instrument's Robinhood quote
-    /// through the bridge, then Alpaca's asset record, IEX quote and minute bars, joined by
+    /// through the bridge ([`robinhood_reads`], which stands on the lapse's snapshot `earlier`
+    /// while it is fresh, DEC-959 item 1), then Alpaca's asset record, IEX quote and minute bars,
+    /// joined by
     /// `robinhood_facts`. No Alpaca client, no read at all.
     fn preflight<P: Pause + Clone>(
         &self,
         artifacts: &Artifacts,
         pause: P,
+        earlier: Option<&LapseSnapshot>,
     ) -> Result<BrokerFacts, Cause> {
         let market = self.market.as_ref().ok_or(Cause::Absent {
             what: MARKET_UNREAD,
@@ -429,7 +433,13 @@ impl<T: Tools + 'static, M: TradingTransport + DataTransport + Clone> Session fo
                 }
             })?;
         self.bridge.register(tickers)?;
-        let robinhood = self.bridge.preflight_facts(identity.symbol)?;
+        let robinhood = robinhood_reads(
+            &self.bridge,
+            identity.symbol,
+            earlier,
+            pause.now(),
+            artifacts.quote_max_age(),
+        )?;
         let market = market_facts(artifacts, market.clone(), market.clone(), pause)?;
         robinhood_facts(market, &robinhood)
     }
@@ -460,6 +470,27 @@ impl<T: Tools + 'static, M: TradingTransport + DataTransport + Clone> Session fo
     /// The bridge's read of the agentic account (DEC-947 item 1).
     fn account_snapshot(&self) -> Result<Option<AccountSnapshot>, Cause> {
         self.bridge.account_snapshot().map(Some)
+    }
+}
+
+/// The preflight's Robinhood reads (DEC-933 item 2, DEC-959 item 1): when the same run's lapse
+/// snapshot `earlier` is still fresh at `now` by `max_age`, the bound every other preflight read
+/// is held to (the rule set's `iex_quote_max_age_s`), only the tradability and the quote are
+/// read, on that snapshot; otherwise, a stale snapshot, a clock that ran back, or none, the
+/// whole account is read again. Nothing is sent.
+///
+/// # Errors
+/// [`Cause::Absent`] naming the account's unread refusal, as the bridge's reads refuse.
+pub fn robinhood_reads<T: Tools>(
+    bridge: &RobinhoodBridge<T>,
+    symbol: &InstrumentId,
+    earlier: Option<&LapseSnapshot>,
+    now: UtcNanos,
+    max_age: Duration,
+) -> Result<PreflightFacts, Cause> {
+    match earlier.and_then(|kept| kept.fresh(now, max_age)) {
+        Some(account) => bridge.preflight_facts_on(account.clone(), symbol),
+        None => bridge.preflight_facts(symbol),
     }
 }
 
