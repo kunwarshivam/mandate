@@ -77,6 +77,19 @@ capabilities:
 {{- end -}}
 
 {{/* The journal DSN carries no password: libpq and sqlx read it from PGPASSFILE (DEC-822 item 4). */}}
+{{/*
+The workspace's shared artifact store (mandate documents, backtest reports): one claim, at one
+fixed path. Who may write it is fixed here, by process type, not a value, so no value widens it:
+the API server and the control runs write, the runtime and the deployment manager read, and every
+other process has no store at all. Empty for a process that has none.
+*/}}
+{{- define "mandate.artifactsAccess" -}}
+{{- $access := dict "api" "rw" "control" "rw" "runtime" "ro" "deploy-manager" "ro" -}}
+{{- get $access .p.name -}}
+{{- end -}}
+
+{{- define "mandate.artifactsPath" -}}/var/lib/mandate/artifacts{{- end -}}
+
 {{- define "mandate.env" -}}
 {{- $j := .root.Values.journal -}}
 {{- if .p.db_role }}
@@ -87,6 +100,10 @@ capabilities:
 {{- end }}
 - name: HOME
   value: /tmp
+{{- if include "mandate.artifactsAccess" . }}
+- name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
+  value: {{ include "mandate.artifactsPath" . | quote }}
+{{- end }}
 {{- end -}}
 
 {{- define "mandate.mounts" -}}
@@ -99,6 +116,11 @@ capabilities:
 - name: journal-ca
   mountPath: /run/secrets/journal-ca
   readOnly: true
+{{- end }}
+{{- with include "mandate.artifactsAccess" . }}
+- name: artifacts
+  mountPath: {{ include "mandate.artifactsPath" $ | quote }}
+  readOnly: {{ eq . "ro" }}
 {{- end }}
 {{- end -}}
 
@@ -219,6 +241,12 @@ spec:
         items:
           - key: ca.crt
             path: ca.crt
+    {{- end }}
+    {{- if include "mandate.artifactsAccess" . }}
+    - name: artifacts
+      persistentVolumeClaim:
+        claimName: artifacts
+        readOnly: {{ eq (include "mandate.artifactsAccess" .) "ro" }}
     {{- end }}
     {{- with .volumes }}
     {{- . | nindent 4 }}

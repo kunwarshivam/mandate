@@ -1,0 +1,42 @@
+{{- /*
+The workspace's shared artifact store (mandate documents, backtest reports), which the API server
+and the control runs write and the runtime and the deployment manager read (see
+"mandate.artifactsAccess"). One claim, kept when the release is uninstalled, so a document survives
+both a pod's restart and a reinstall. ReadWriteOnce, as the local cell's local-path class offers:
+every pod that mounts it then runs on the claim's one node. A hosted cell names a class that can
+(or moves the store to the object store of E21-40) in `artifacts.storageClass`.
+*/ -}}
+{{- define "mandate.artifactsClaim" -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: artifacts
+  labels:
+    mandate.dev/workspace: {{ .Values.workspace | quote }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ .Values.artifacts.accessMode | quote }}]
+  {{- with .Values.artifacts.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.artifacts.size | quote }}
+{{- end -}}
+{{- /*
+Rendered when a long-running process that mounts it does, since a claim on a class that binds on
+first use (local-path does) binds only when a pod uses it, and `helm --wait` waits for it to. A
+control run alone mounts it only once an install with the API server has made it.
+*/ -}}
+{{- $root := . -}}
+{{- $mounted := false -}}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) -}}
+{{- if include "mandate.artifactsAccess" (dict "root" $root "p" .) -}}
+{{- $mounted = true -}}
+{{- end -}}
+{{- end -}}
+{{- if $mounted }}
+---
+{{ include "mandate.emit" (include "mandate.artifactsClaim" .) }}
+{{- end }}

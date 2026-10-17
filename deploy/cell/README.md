@@ -15,6 +15,7 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 | `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ |
 | `images/mandate.Dockerfile` | The interim `mandate` image the cell builds from the change; lane R2 (E21-35) replaces it |
 | `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
+| `../tests/test_artifacts.py` | The shared artifact store: each process mounts it as it may, or not at all, each shown failing on a seeded bug |
 
 ## What the chart guarantees
 
@@ -44,6 +45,14 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   local cell: no Service, NodePort, LoadBalancer or Ingress, and the tunnel token a mounted file;
 - no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and
   k3d's differs only by the tunnel.
+- one shared artifact store (mandate documents, backtest reports), the claim `artifacts` at
+  `/var/lib/mandate/artifacts`, kept when the release is uninstalled: the API server
+  (`MANDATE_API_ARTIFACTS`) and the control runs (`MANDATE_ARTIFACTS`) mount it read-write, the
+  runtime and the deployment manager read-only, and no other process, nor any init container,
+  mounts it. The modes are fixed in the chart by process type, never values; size, class and
+  access mode are values (`artifacts`). It is ReadWriteOnce on the local cell's local-path class,
+  so every pod that mounts it runs on one node; a hosted cell names a class that can, or the
+  store moves to E21-40's object store. The Compose file has no store yet (`deploy/tests/test_artifacts.py`).
 
 ## The local cell
 

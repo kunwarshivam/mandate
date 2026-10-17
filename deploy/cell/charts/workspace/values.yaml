@@ -49,6 +49,15 @@ api:
   # The ConfigMap holding the `subject-links` key; empty mounts none, so every sign-in is refused.
   subjectLinks: ""
 
+# The workspace's shared artifact store (mandate documents, backtest reports), mounted at
+# /var/lib/mandate/artifacts. Which process may write it is fixed by the chart, never a value.
+artifacts:
+  size: 1Gi
+  # Empty takes the cluster's default class (local-path in the local cell).
+  storageClass: ""
+  # ReadWriteOnce keeps every mounting pod on one node; ReadWriteMany needs a class that offers it.
+  accessMode: ReadWriteOnce
+
 # Where the workspace journal's Postgres is. The journal-db chart's defaults match these.
 journal:
   host: journal-rw

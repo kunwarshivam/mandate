@@ -70,7 +70,7 @@ def artifact_modes(docs: list[dict]) -> list[str]:
             read_only = mounts[0].get("readOnly", False) is True
             if read_only != (want == "ro"):
                 problems.append(
-                    f"{name}'s {c['name']} mounts the store {'read-only' if read_only else 'read-write'}, want {want}"
+                    f"{name}'s {c['name']} mounts the store {'ro' if read_only else 'rw'}, want {want}"
                 )
             env = {e["name"]: e.get("value") for e in c.get("env", [])}
             variable = ENV.get(name, DEFAULT_ENV)
@@ -80,7 +80,7 @@ def artifact_modes(docs: list[dict]) -> list[str]:
             if other in env:
                 problems.append(f"{name}'s {c['name']} also names {other}")
     for name in ("api", "control", "runtime"):
-        if name not in seen:
+        if name not in seen and claims:
             problems.append(f"{name} did not render with the store")
     return problems
 
@@ -96,6 +96,13 @@ def test_the_store_size_and_class_are_values_not_its_access():
     assert claim["spec"]["resources"]["requests"]["storage"] == "5Gi"
     assert claim["spec"]["storageClassName"] == "fast"
     assert artifact_modes(docs) == []
+
+
+def test_no_claim_without_a_long_running_process_to_bind_it():
+    """With only the control run rendered, a claim on a class that binds on first use would never
+    bind and `helm --wait` would wait out its timeout."""
+    docs = render_all("--set", "images.api=", "--set", "images.runtime=")
+    assert not [d for d in docs if d["kind"] == "PersistentVolumeClaim"]
 
 
 def workload(docs: list[dict], name: str) -> dict:
