@@ -185,12 +185,76 @@ fn signer(kind: MessageKind, body: &Value) -> Option<KeyKind> {
 }
 
 /// Checks `bytes`, one message as received, for `site` against `keys`.
-pub(crate) fn check(bytes: &[u8], _keys: &PinnedKeys, _site: &Site) -> Result<Verified, Refusal> {
-    Err(Refusal {
-        message: MessageKind::Unknown,
-        reason: RefusalReason::Malformed,
-        sequence: None,
-        document_digest: Digest::of(bytes),
+pub(crate) fn check(bytes: &[u8], keys: &PinnedKeys, site: &Site) -> Result<Verified, Refusal> {
+    let document_digest = Digest::of(bytes);
+    let refuse = |message, reason, sequence| Refusal {
+        message,
+        reason,
+        sequence,
+        document_digest,
+    };
+    let Ok(message) = parse(bytes) else {
+        return Err(refuse(MessageKind::Unknown, RefusalReason::Malformed, None));
+    };
+    let kind = message
+        .get("kind")
+        .and_then(Value::as_str)
+        .map_or(MessageKind::Unknown, MessageKind::parse);
+    if kind == MessageKind::Unknown {
+        return Err(refuse(kind, RefusalReason::OutOfList, None));
+    }
+    let empty = Value::Null;
+    let body = message.get("body").unwrap_or(&empty);
+    let sequence = body
+        .get("sequence")
+        .and_then(Value::as_int)
+        .filter(|s| *s >= 1);
+    let refuse = |reason| refuse(kind, reason, sequence);
+    let shaped = message.as_object().is_some_and(|o| {
+        o.keys()
+            .all(|k| ["kind", "key_id", "body", "signature"].contains(&k.as_str()))
+    });
+    if !shaped {
+        return Err(refuse(RefusalReason::Malformed));
+    }
+    let Some(signature) = message.get("signature").and_then(Value::as_str) else {
+        return Err(refuse(RefusalReason::Unsigned));
+    };
+    let key_id = message
+        .get("key_id")
+        .and_then(Value::as_str)
+        .and_then(Ident::parse)
+        .ok_or(refuse(RefusalReason::UnknownKey))?;
+    let (pinned_kind, public_key) = keys
+        .0
+        .get(key_id.as_str())
+        .ok_or(refuse(RefusalReason::UnknownKey))?;
+    if signer(kind, body) != Some(*pinned_kind) {
+        return Err(refuse(RefusalReason::UnknownKey));
+    }
+    let signature = hex(signature).ok_or(refuse(RefusalReason::BadSignature))?;
+    UnparsedPublicKey::new(&ED25519, public_key)
+        .verify(&signed_bytes(kind, key_id.as_str(), body), &signature)
+        .map_err(|_| refuse(RefusalReason::BadSignature))?;
+    let b = Body::new(body).ok_or(refuse(RefusalReason::Malformed))?;
+    let instruction = match kind {
+        MessageKind::License => instruction::license(b),
+        MessageKind::ReleaseManifest => instruction::release_manifest(b),
+        MessageKind::ReleaseWithdrawn => instruction::release_withdrawn(b),
+        MessageKind::CatalogEntry => instruction::catalog_entry(b),
+        MessageKind::DataBundle => instruction::data_bundle(b),
+        MessageKind::Unknown => None,
+    }
+    .ok_or(refuse(RefusalReason::Malformed))?;
+    if let Instruction::License(license) = &instruction
+        && !license.deployment_ids.contains(&site.deployment_id)
+    {
+        return Err(refuse(RefusalReason::NotAddressed));
+    }
+    Ok(Verified {
+        instruction,
+        key_id,
+        document_digest,
     })
 }
 
