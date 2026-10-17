@@ -22,6 +22,10 @@
 //! - [`writes`] and [`commands`]: pause, the kill switch, and an approval's Skip, recorded as the
 //!   CLI records them on the workspace's control stream before the `202`, and replayed by key
 //!   (DEC-1007).
+//! - [`versions`] and [`version_routes`]: creating a version from its document, the confirmation
+//!   screen, a new mandate's confirm, deploy, and go-live, judged and recorded as the CLI records
+//!   them (DEC-2100). [`stepup`] is the port every step-up goes through, which counts no evidence
+//!   until E9-4 binds it; [`objects`] is the content-addressed store those routes add records to.
 //!
 //! It never places, cancels, or sizes an order, and never calls a broker or a runtime (§1.4):
 //! `xtask/layers.toml` keeps it from every crate that could.
@@ -42,4 +46,6 @@ pub mod session;
 pub mod stepup;
 pub mod subject;
 pub mod token;
+pub mod version_routes;
+pub mod versions;
 pub mod writes;

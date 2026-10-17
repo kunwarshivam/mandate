@@ -29,6 +29,7 @@ use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
 use crate::stepup::StepUp;
 use crate::subject::{self, LinkRefusal};
 use crate::token::{Checked, TokenCheck};
+use crate::version_routes;
 use crate::writes;
 
 /// The methods a preflight from the app origin allows (§3.3 item 5).
@@ -105,7 +106,9 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         )
         .route(
             "/v1/workspaces/{workspace}/agents",
-            get(routes::list_agents).fallback(otherwise.clone()),
+            get(routes::list_agents)
+                .post(version_routes::deploy)
+                .fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}",
@@ -130,6 +133,22 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/kill-switch",
             post(writes::kill_switch).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/mandate-versions",
+            post(version_routes::create_version).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/mandate-versions/{version}/confirmation",
+            get(version_routes::confirmation).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/mandate-versions/{version}/confirm",
+            post(version_routes::confirm).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/go-live",
+            post(version_routes::go_live).fallback(otherwise.clone()),
         )
         .fallback(otherwise)
         .with_state(Arc::new(app))
