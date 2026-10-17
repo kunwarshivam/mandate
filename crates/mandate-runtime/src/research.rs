@@ -37,11 +37,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
 use mandate_canon::{Digest, Value};
+use mandate_gateway::money::Usd6;
 use mandate_gateway::{CallRecord, Outcome, Purpose, RequestError, Verdict};
 use mandate_research::drift::{DriftState, InputClass, InputObservation};
 use mandate_research::{
     AdmissionFacts, ContentHash, LineageState, PolicyOverlay, SourceId as ResearchSource,
     ValidatedMandate, WorkingUniverse, next_proposal_at,
+};
+use mandate_research_run::agentic::{
+    Code, LoopBounds, OutputMode, Tool, ToolCall, ToolCallId, ToolOutcome, TurnPlan,
 };
 use mandate_research_run::{
     CallPlan, InstrumentFact, ItemId, ItemKind, ModelPin, OutputBounds, RetrievalPlan,
@@ -74,6 +78,21 @@ pub struct ResearchConfig {
     /// Whether §8.6 item 5 allows revisions. `false` in v0.1, so every revision is refused
     /// `revisions_not_enabled` (§6.5).
     pub revisions_enabled: bool,
+    /// An agentic entry's loop (§6.9, DEC-2206 item 1); `None` for a `single_call` entry.
+    pub agentic: Option<AgenticConfig>,
+}
+
+/// An agentic entry's pinned loop and the workspace's run ceiling (§6.9 to §6.11, DEC-2206 item 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgenticConfig {
+    pub output: OutputMode,
+    pub bounds: LoopBounds,
+    /// The tools an `ideate` run may call.
+    pub ideate_menu: BTreeSet<Tool>,
+    /// The tools a `monitor` run may call: never one that adds risk (§6.9).
+    pub monitor_menu: BTreeSet<Tool>,
+    /// The workspace's `research_run_cost_cap_usd` (§6.11).
+    pub cost_ceiling: Usd6,
 }
 
 /// A record spec §6.2's preconditions need the journal to hold.
@@ -282,6 +301,58 @@ pub enum ResearchInput {
     /// The worker's acknowledgment of a cancellation: `dispatched` says whether a call had left,
     /// whose late answer is still journaled (§5.3).
     Cancelled { run_id: String, dispatched: bool },
+    /// An agentic run's dispatched reads and thinks, in reply order, each result's content
+    /// artifact already stored (§6.9 step 5, DEC-2206 item 6).
+    Dispatched {
+        run_id: String,
+        at: RiskClock,
+        results: Vec<DispatchedResult>,
+    },
+}
+
+/// One dispatched read's or think's result, as the worker ran it (§6.9 step 5, §6.10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchedResult {
+    pub call: ToolCallId,
+    pub outcome: ToolOutcome,
+    pub code: Option<Code>,
+    /// The result as the model is given it, stored as an artifact (`content_ref`).
+    pub content: Digest,
+    pub bytes: u32,
+    pub truncated: bool,
+    pub untrusted: bool,
+    /// Every item the result holds, the run's earlier ones included, each with its observation.
+    pub items: Vec<RetrievedObservation>,
+}
+
+/// An agentic turn's call (§6.9 step 3, DEC-2206 item 5): the call, the loop's plan for it, and the
+/// transcript as artifact references the worker loads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnRequest {
+    pub call: CallPlan,
+    pub plan: TurnPlan,
+    pub transcript: Vec<TurnRef>,
+}
+
+/// One earlier turn of the transcript: its reply's response artifact and each tool result's
+/// content artifact, by the call's index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnRef {
+    pub response: Digest,
+    pub results: Vec<Digest>,
+}
+
+/// A reply's read and think calls for the worker, in reply order (§6.9 step 5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchRequest {
+    pub run_id: String,
+    pub turn: u32,
+    pub calls: Vec<ToolCall>,
+    /// The run's result bytes left, which the worker lowers read by read.
+    pub result_bytes_left: u32,
+    /// The run's frozen read scope (§6.9 step 1).
+    pub cut_off: RiskClock,
+    pub allowlist_version: u32,
 }
 
 /// What the core asks the worker to do.
@@ -293,6 +364,10 @@ pub enum ResearchRequest {
     Call(CallPlan),
     /// Stop the run; a call already sent is never used.
     Cancel { run_id: String },
+    /// Send an agentic run's next turn.
+    Turn(Box<TurnRequest>),
+    /// Run a reply's reads and thinks.
+    Dispatch(DispatchRequest),
 }
 
 /// One research step's answer: the effects to run in order, then the requests for the worker.
@@ -300,6 +375,13 @@ pub enum ResearchRequest {
 pub struct ResearchStep {
     pub effects: Vec<Effect>,
     pub requests: Vec<ResearchRequest>,
+    /// The bytes of every artifact a draft of the step names that the core made itself, which the
+    /// shell stores before it appends the batch (DEC-2206 item 4).
+    pub artifacts: Vec<Vec<u8>>,
+    /// The run every draft of the step belongs to, which the shell writes as each draft's
+    /// `correlation_id` (journal spec §9.22 rule 171, DEC-1120 item 9, DEC-2206 item 8); `None` for a
+    /// step that journals nothing of a run.
+    pub correlation_id: Option<String>,
 }
 
 /// Where a run in flight is (§5.3's states between `Due` and `Idle`).
@@ -460,6 +542,13 @@ pub fn handle_research(
         };
     }
     research.doubted = None;
+    if context
+        .config
+        .is_some_and(|config| config.agentic.is_some())
+        || matches!(input, ResearchInput::Dispatched { .. })
+    {
+        return Err(RuntimeError::Unimplemented { story: "E19-13" });
+    }
     let epoch = state.epoch().ok_or(RuntimeError::NotStarted)?;
     let mut batch = Batch::new(ports.ids, epoch, state.agent_head());
     let mut requests = Vec::new();
@@ -486,10 +575,13 @@ pub fn handle_research(
         ResearchInput::Cancelled { run_id, dispatched } => {
             acknowledged(research, run_id, *dispatched);
         }
+        ResearchInput::Dispatched { .. } => {}
     }
     let step = ResearchStep {
         effects: batch.effects.clone(),
         requests,
+        artifacts: Vec::new(),
+        correlation_id: None,
     };
     if !batch.drafts.is_empty() {
         state.remember(UnresolvedAppend {

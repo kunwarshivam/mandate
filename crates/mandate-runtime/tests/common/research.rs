@@ -556,6 +556,7 @@ pub fn config() -> ResearchConfig {
         bounds: OutputBounds::v0_1(),
         description: "Long-only US large caps, on public news and filings.".to_owned(),
         revisions_enabled: false,
+        agentic: None,
     }
 }
 
