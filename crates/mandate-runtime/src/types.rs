@@ -290,6 +290,9 @@ pub enum Input {
     Observation(Observation),
     ModelOutput(ModelOutput),
     Command(Command),
+    /// A research worker's result, handled only by [`crate::handle_research`] (agent harness spec
+    /// §10.3). [`crate::handle`] refuses it, so the trading loop never waits on research (HI-7).
+    Research(crate::research::ResearchInput),
 }
 
 /// A draft for the agent stream. The shell wraps it in the journal envelope; the core never

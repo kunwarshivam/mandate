@@ -5,6 +5,7 @@ import { headlinesFor } from "@/fixtures/news";
 import type { Agent, Workspace } from "@/fixtures/types";
 import { ago } from "@/lib/format";
 import { type SliceTone, assetTones } from "@/lib/holdings";
+import { useRuntime } from "@/lib/mock-runtime";
 import { cn } from "@/lib/utils";
 import { Section } from "./common";
 
@@ -28,8 +29,10 @@ function symbolsOf(agent: Agent): Set<string> {
  * text until a news source is connected: labelled so, and never a link.
  */
 export function NewsSection({ ws, agent, now, className }: { ws: Workspace; agent: Agent; now: string; className?: string }) {
+  const { source } = useRuntime();
   const tones = assetTones(ws);
   const items = headlinesFor(symbolsOf(agent));
+  if (source === "api") return null;
   return (
     <Section title="News" action={<FixtureTag />} className={className}>
       {items.length === 0 ? (

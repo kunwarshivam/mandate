@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { buildWorkspace, isScenario } from "@/fixtures/workspace";
 import type { Scenario, Workspace } from "@/fixtures/types";
 import { CVD_COOKIE, colourBlindEnabled } from "./colour-pref";
+import { readDataSource } from "./data-source";
 import { SCENARIO_COOKIE, scenariosEnabled } from "./scenario";
 import { THEME_COOKIE, type ThemePref, isThemePref } from "./theme";
 
@@ -23,4 +24,14 @@ export async function getThemePref(): Promise<ThemePref> {
 
 export async function getWorkspace(): Promise<Workspace> {
   return buildWorkspace(await getScenario());
+}
+
+/**
+ * A record screen's title names its environment (brief §4.2). Over the workspace API the server has not
+ * read the workspace (the browser does, with its own session), so it names none rather than guess. The
+ * route is dynamic, so the environment is read when the request is served.
+ */
+export async function recordTitle(name: string): Promise<string> {
+  if (readDataSource(process.env).kind !== "fixtures") return name;
+  return `${name} (${(await getWorkspace()).environment})`;
 }
