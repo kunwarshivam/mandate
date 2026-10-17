@@ -507,6 +507,13 @@ impl RuntimeState {
         self.unresolved = Some(batch);
     }
 
+    /// Forgets a remembered batch the journal refused and so stored none of (journal spec §5.1: a
+    /// refused batch writes nothing), so the single writer is not held on a batch that can never
+    /// commit. Only [`crate::abandon_refused_research`] calls it, for a research batch.
+    pub(crate) fn forget_refused(&mut self) {
+        self.unresolved = None;
+    }
+
     /// Clears a remembered batch once its last draft has been folded back, which is how a single
     /// writer learns that its own append committed (journal spec §5.1).
     fn resolve(&mut self, appended: &EventId) {

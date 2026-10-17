@@ -3,7 +3,7 @@
 //! a change to any of them is a new pin (DEC-431 item 5).
 
 use mandate_canon::{Int, Key, Object, Value};
-use mandate_gateway::registry::{Identity, PinnedContent, Template};
+use mandate_gateway::registry::{Identity, Mode, PinnedContent, Template};
 
 use crate::output::OutputBounds;
 use crate::plan::RetrievalPlan;
@@ -71,6 +71,9 @@ impl ResearchEntry {
             deadline_ms: self.deadline_ms,
             max_output_tokens: self.max_output_tokens,
             seed: self.seed,
+            top_p: None,
+            reasoning: None,
+            mode: Mode::SingleCall,
             methodology: METHODOLOGY.to_owned(),
             authorship: AUTHORSHIP.to_owned(),
         }

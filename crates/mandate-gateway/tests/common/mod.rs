@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_canon::{Digest, Value, parse};
 use mandate_gateway::fake::{Recorded, RecordedTransport};
 use mandate_gateway::guard::GuardContext;
-use mandate_gateway::meter::{Caps, MemoryMeter, Meter};
+use mandate_gateway::meter::{Caps, DeploymentMeter, MemoryMeter, Meter};
 use mandate_gateway::money::{PriceTable, TokenPrice, Usd6};
 use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::policy::EndpointPolicy;
@@ -20,9 +20,10 @@ use mandate_gateway::provider::{
     Delivery, ManualClock, ProviderKey, SecretError, SecretSource, SequentialIds,
 };
 use mandate_gateway::registry::{
-    Endpoint, Identity, Locality, ModelRef, PinnedContent, Registry, Reported, Route, Snapshot,
-    Template,
+    Effort, Endpoint, Identity, Locality, Mode, ModelRef, PinnedContent, Reasoning, Registry,
+    Reported, Route, Snapshot, Template, TopP,
 };
+use mandate_gateway::tools::{Agentic, LoopBounds, OutputKind, ToolClass, ToolDeclaration, Turn};
 use mandate_gateway::{CallRequest, Gateway, KeyOwner, Purpose, RateCaps, Settings};
 use mandate_time::UtcNanos;
 
@@ -73,6 +74,9 @@ pub fn content() -> PinnedContent {
         deadline_ms: 60_000,
         max_output_tokens: 1_000,
         seed: Some(7),
+        top_p: None,
+        reasoning: None,
+        mode: Mode::SingleCall,
         methodology: "Reads bars and filings; proposes theses with evidence.".to_owned(),
         authorship: "platform".to_owned(),
     }
@@ -174,6 +178,21 @@ impl SecretSource for TestKey {
     }
 }
 
+/// A workspace's monthly budget for the tests: a setting, here $50.
+pub fn caps() -> Caps {
+    Caps::new(Usd6::parse("50").unwrap())
+}
+
+/// A deployment meter of its own, with a cap far above any workspace's, so a test of the workspace's
+/// caps meets only them.
+pub fn deployment() -> DeploymentMeter {
+    DeploymentMeter::new(
+        Box::new(MemoryMeter::new()),
+        Usd6::parse("1000000").unwrap(),
+        Box::new(SequentialIds::starting_at(1 << 100)),
+    )
+}
+
 pub fn gateway_with(policy: EndpointPolicy, caps: Caps, registry: Registry) -> TestGateway {
     Gateway::new(
         settings(policy),
@@ -181,7 +200,7 @@ pub fn gateway_with(policy: EndpointPolicy, caps: Caps, registry: Registry) -> T
         Box::new(OpenRouter),
         RecordedTransport::new(),
         Box::new(TestKey),
-        Meter::new(MemoryMeter::new(), caps),
+        Meter::new(MemoryMeter::new(), caps, deployment()),
         ManualClock::at(at(START)),
         Box::new(SequentialIds::starting_at(1 << 80)),
     )
@@ -189,7 +208,7 @@ pub fn gateway_with(policy: EndpointPolicy, caps: Caps, registry: Registry) -> T
 
 pub fn gateway() -> (TestGateway, ModelRef) {
     let (registry, model) = registry();
-    (gateway_with(hosted_policy(), Caps::demo(), registry), model)
+    (gateway_with(hosted_policy(), caps(), registry), model)
 }
 
 pub fn inputs() -> BTreeMap<String, String> {
@@ -218,6 +237,10 @@ pub fn request(model: &ModelRef, n: u128) -> CallRequest {
         deadline: at("2026-10-16T14:01:00.000000000Z"),
         observations: vec![],
         key_owner: KeyOwner::Platform,
+        run_kind: None,
+        turns: vec![],
+        tools: vec![],
+        spend_ceiling: None,
     }
 }
 
@@ -265,3 +288,121 @@ pub fn delivered(status: u16, body: Vec<u8>, latency_ms: u64) -> Recorded {
 pub fn ok_reply(latency_ms: u64) -> Recorded {
     delivered(200, ok_body(), latency_ms)
 }
+
+/// The monitoring run's output schema: invalidations only, so a thesis from it is `schema_invalid`.
+pub fn monitor_schema() -> Value {
+    json(
+        r#"{"type":"object","properties":{"invalidations":{"type":"array","max_items":3,"items":{"type":"object","properties":{"thesis_id":{"type":"string","max_length":26}}}}}}"#,
+    )
+}
+
+pub fn tool(name: &str, class: ToolClass, arguments: &str, menu: &[&str]) -> ToolDeclaration {
+    ToolDeclaration {
+        name: name.to_owned(),
+        class,
+        description: format!("The {name} tool."),
+        arguments: json(arguments),
+        result_cap_bytes: 24_000,
+        menu: menu.iter().map(|k| (*k).to_owned()).collect(),
+    }
+}
+
+pub const BARS_ARGS: &str = r#"{"type":"object","properties":{"symbol":{"type":"string","max_length":12},"count":{"type":"integer","minimum":1,"maximum":260}}}"#;
+pub const NEWS_ARGS: &str = r#"{"type":"object","properties":{"symbols":{"type":"array","max_items":5,"items":{"type":"string","max_length":12}},"window_h":{"type":"integer","minimum":1,"maximum":168},"with_text":{"type":"boolean"}}}"#;
+pub const NOTE_ARGS: &str =
+    r#"{"type":"object","properties":{"text":{"type":"string","max_length":2000}}}"#;
+
+pub fn loop_bounds() -> LoopBounds {
+    LoopBounds {
+        max_turns: 8,
+        max_tool_calls: 24,
+        max_tool_calls_per_turn: 4,
+        max_theses: 3,
+        max_result_bytes: 24_000,
+        max_run_result_bytes: 96_000,
+        max_repeat_denials: 2,
+        max_run_s: 900,
+        tool_timeout_s: 10,
+    }
+}
+
+/// The research agent as an agentic entry: three tools (one read only an ideation run may call),
+/// pinned bounds, and a final output schema for each of its two run kinds.
+pub fn agentic_content() -> PinnedContent {
+    PinnedContent {
+        model_version: "0.2.0".to_owned(),
+        top_p: TopP::from_millionths(900_000),
+        reasoning: Some(Reasoning::On(Effort::Low)),
+        mode: Mode::Agentic(Agentic {
+            output: OutputKind::FinalOutput,
+            tools: vec![
+                tool(
+                    "market.bars",
+                    ToolClass::Read,
+                    BARS_ARGS,
+                    &["ideate", "monitor"],
+                ),
+                tool("news.search", ToolClass::Read, NEWS_ARGS, &["ideate"]),
+                tool("note", ToolClass::Think, NOTE_ARGS, &["ideate", "monitor"]),
+            ],
+            loop_bounds: loop_bounds(),
+            output_schemas: BTreeMap::from([
+                ("ideate".to_owned(), output_schema()),
+                ("monitor".to_owned(), monitor_schema()),
+            ]),
+        }),
+        ..content()
+    }
+}
+
+/// The registry with both research entries, the single-call one and the agentic one, offered.
+pub fn agentic_registry() -> (Registry, ModelRef) {
+    let (mut registry, _) = registry();
+    let pinned = agentic_content();
+    let model = pinned.model_ref();
+    registry.register(pinned).unwrap();
+    registry
+        .add_endpoint(&model, endpoint(), &[reported()])
+        .unwrap();
+    registry
+        .set_status(&model, mandate_gateway::registry::Status::Offered)
+        .unwrap();
+    (registry, model)
+}
+
+pub fn agentic_gateway() -> (TestGateway, ModelRef) {
+    let (registry, model) = agentic_registry();
+    (gateway_with(hosted_policy(), caps(), registry), model)
+}
+
+/// Turn `turns.len() + 1` of an ideation run, offering `tools`.
+pub fn turn_request(
+    model: &ModelRef,
+    n: u128,
+    kind: &str,
+    tools: &[&str],
+    turns: Vec<Turn>,
+) -> CallRequest {
+    CallRequest {
+        run_kind: Some(kind.to_owned()),
+        tools: tools.iter().map(|t| (*t).to_owned()).collect(),
+        turns,
+        ..request(model, n)
+    }
+}
+
+pub fn usage() -> mandate_gateway::money::Usage {
+    mandate_gateway::money::Usage {
+        input: 400,
+        output: 60,
+        cached: 300,
+    }
+}
+
+/// A reply with these tool calls (declared names), from the pinned model.
+pub fn calls_body(calls: &[(&str, &str)]) -> Vec<u8> {
+    mandate_gateway::fake::openrouter_reply(None, calls, &reported(), usage())
+}
+
+pub const BARS_CALL: (&str, &str) = ("market.bars", r#"{"count":30,"symbol":"AAPL"}"#);
+pub const NOTE_CALL: (&str, &str) = ("note", r#"{"text":"check the 10-Q"}"#);

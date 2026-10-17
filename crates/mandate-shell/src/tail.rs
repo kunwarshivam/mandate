@@ -45,9 +45,8 @@
 //! Nothing here reads a journal, a clock, a host or an order (`AGENTS.md` rules 7 and 8): `rows`
 //! arrive as the journal's own `ORDER BY seq` read handed in.
 
-use mandate_canon::Value;
 use mandate_journal::StoredEvent;
-use mandate_runtime::{ActorKind, EventId, FoldedEvent, Seq};
+use mandate_runtime::FoldedEvent;
 
 use crate::error::ShellError;
 
@@ -67,7 +66,8 @@ use crate::error::ShellError;
 /// handed: never a guess (`AGENTS.md` rule 3; the same `Envelope` refusals the agent and account
 /// folds give).
 ///
-/// The actor mapping is total and fail-closed (the [`FoldedEvent`] contract: "Admission admits a
+/// The mapping is `mandate_runtime::tailed`'s, which every process that hosts a runtime shares
+/// (E21-30, DEC-1012). The actor mapping is total and fail-closed (the [`FoldedEvent`] contract: "Admission admits a
 /// response only from a `user` (check 3, EI-10), so a reader that cannot tell gives anything but
 /// `User`"): `user` folds `ActorKind::User`; `system`, `agent`, `broker` and `platform_operator`
 /// fold their own kinds; and the `client` of journal spec v0.22 — "A client is never a `user`, so
@@ -82,58 +82,7 @@ use crate::error::ShellError;
 /// payload member (`payload`) — each a stop with nothing handed, the whole read refused rather
 /// than a partial fold handed on.
 pub fn tailed(rows: &[StoredEvent]) -> Result<Vec<FoldedEvent>, ShellError> {
-    let mut handed = Vec::new();
-    for row in rows {
-        let body = mandate_canon::parse(&row.body).map_err(|_| ShellError::Envelope {
-            field: "stored body",
-        })?;
-        let payload = body
-            .get("payload")
-            .cloned()
-            .ok_or(ShellError::Envelope { field: "payload" })?;
-        let causation = body
-            .get("causation_id")
-            .and_then(Value::as_str)
-            .map(|id| EventId(id.to_owned()));
-        handed.push(FoldedEvent {
-            stream: row.stream_id.clone(),
-            seq: Seq(row.seq),
-            event_id: EventId(row.event_id.clone()),
-            event_type: row.event_type.clone(),
-            causation_id: causation,
-            actor: folded_actor(&body),
-            payload,
-        });
-    }
-    Ok(handed)
-}
-
-/// The envelope's own `actor.kind`, folded per journal spec §3: `user` — the only kind admission
-/// ever admits a response from (check 3, EI-10) — folds [`ActorKind::User`], and `system`, `agent`,
-/// `broker` and `platform_operator` fold their own kinds. The last arm is the fail-closed fold of
-/// everything else: the `client` of journal spec v0.22 — "A client is never a `user`, so a rule
-/// that requires a user actor" refuses — and every kind the tail cannot read, from an actor that
-/// is not an object to a kind spelled amiss, fold [`ActorKind::System`], what admission never
-/// admits, so no reading of this map can carry a grant the envelope's writer did not stand behind
-/// (DEC-176: the refusing reading). The chain names every kind §3 lists in its own arm and no
-/// defaulting combinator, and its last arm is the fail-closed fold rather than a permitting
-/// fallback, so the crate's fail-closed fence (`stages::fail_closed`) keeps it total.
-fn folded_actor(body: &Value) -> ActorKind {
-    let kind = body
-        .get("actor")
-        .and_then(|actor| actor.get("kind"))
-        .and_then(Value::as_str);
-    if kind == Some("user") {
-        ActorKind::User
-    } else if kind == Some("system") {
-        ActorKind::System
-    } else if kind == Some("agent") {
-        ActorKind::Agent
-    } else if kind == Some("broker") {
-        ActorKind::Broker
-    } else if kind == Some("platform_operator") {
-        ActorKind::PlatformOperator
-    } else {
-        ActorKind::System
-    }
+    mandate_runtime::tailed(rows).map_err(|refused| ShellError::Envelope {
+        field: refused.field(),
+    })
 }

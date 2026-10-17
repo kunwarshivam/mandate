@@ -27,8 +27,9 @@ use mandate_journal::Environment;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_scheduler::scheduler::exit;
 use mandate_scheduler::sntp::Servers;
-use mandate_scheduler::store::{MemoryStore, PgStore};
-use mandate_scheduler::{ClockStore, Config, Scheduler, measure};
+use mandate_scheduler::{Config, Scheduler, measure};
+use mandate_store::Store;
+use mandate_store::{MemoryStore, PgStore};
 use mandate_time::{ExchangeCalendar, UtcNanos};
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -125,7 +126,7 @@ fn run(
     clippy::disallowed_methods,
     reason = "the binary's edge reads a monotonic clock only to pace one tick per second (ES-05)"
 )]
-fn serve<S: ClockStore>(
+fn serve<S: Store>(
     mut scheduler: Scheduler<S>,
     mut servers: Servers<fn() -> UtcNanos>,
     socket: &Path,

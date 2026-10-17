@@ -105,6 +105,31 @@ upgrades every release in place.
 A part whose lane is not on `main` is named as skipped, never faked. `web/` needs Node.js at the
 release in `web/.nvmrc` and npm; the first run does `npm ci`.
 
+### The demo's scenario
+
+`cargo xtask cell demo --scenario demo` (E21-54, DEC-2002) runs the demo's story on the cell, its
+six steps in order, with paper and demo data only and no credential. Each gesture whose pieces are
+on `main` runs in the cell, in one Job of the `control` process, and passes only when it printed
+what its success prints. Each missing link prints as `gap` with the PR or story that closes it; a
+gap never fails the run and is never faked. The run ends, in the same pod, by exporting the
+workspace's control stream and verifying it by journal spec §11 against the artifact store its
+gestures wrote, so every artifact a record names is checked. Each run uses a fresh workspace,
+`demo<run id>`.
+
+| Step | Runs today | Gaps, and what closes each |
+|---|---|---|
+| 1. Sign in, see the workspace | `workspace open` (paper), `workspace found` | Sign-in and the workspace read through the API: the API server (#1457) and `mandate identity link` (#1529) are on `main`; still needed are the API's cell image (lane A1) and E21-52's stub token issuer (spec #1535, crate not built; lane SI) |
+| 2. Deploy under a confirmed envelope | `config register`, `model register`, `version create`, `version confirm` shown then typed, `agent deploy` shown then typed | The same from `web/`: E10-11, E10-12 (lane A2); the agent's processes started from `AgentDeployed`: E21-33 (lane D1) |
+| 3. Research, through the gateway's recorded fake | Nothing yet | The runtime process is on `main` (#1521); still needed are its image (lane P), the shell's research driver (DEC-996 item 2, lane I2), E15-8, and E19-5 (spec on `main`, #1543) |
+| 4. Sized, gated, asked, approved, filled, protected | `approvals list` (empty until the runtime asks) | The runtime's image (#1521 is on `main`; lane P); approval from `web/`: E9-4 (lane SU); the fill and the stop on a fixture broker: E21-30's executor slice (lane X) |
+| 5. A backtest of the same version | Nothing yet | The backtest (#1482) and `web/`'s report screen (#1549) are on `main`; still needed are a way to run it in the cell and its API read (E4-4, lane I4) |
+| 6. The kill switch from `web/` | Nothing yet | The API's cell image (lane A1; #1457's route is on `main`); the processes stopping on it: the runtime's image (#1521 is on `main`), E21-30's executor slice, E21-34 (lane O4, #1537) |
+
+The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
+every opening asked, protection on. CI's `cell-demo` job, which no required check depends on, runs
+the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecting proxy, set
+`MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle first.
+
 ### The drills
 
 | Drill | What holds | Its seeded bug |

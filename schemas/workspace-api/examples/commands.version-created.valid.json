@@ -1,0 +1,17 @@
+[
+  {
+    "label": "no warnings",
+    "set": {
+      "/warnings": []
+    }
+  },
+  {
+    "label": "two warnings",
+    "set": {
+      "/warnings": [
+        "W-001",
+        "W-005"
+      ]
+    }
+  }
+]
