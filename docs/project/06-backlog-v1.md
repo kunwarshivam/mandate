@@ -2740,11 +2740,27 @@ enables `live` (ES-23, OPS-5).
   pause is journaled and an opaque alert raised; it holds no broker credential and sends no order;
   and its own outage stops no running process and no kill switch (OPS-4). *Slice 1* ([DEC-1170](decisions/DEC-1170.md)): journal spec v0.48 §9.21's records, the
   crate's fold, driver, fake and Kubernetes adapter, with the property test. *Left:* the process
-  binary (loop, probes, Postgres journal port, the resolver over stored mandates), the chart's
+  binary (loop, probes, Postgres journal port, and a deployment's account read from `AgentDeployed`
+  version 2's connection and that connection's establishment, journal spec v0.52,
+  [DEC-1171](decisions/DEC-1171.md), in place of a resolver over stored mandates, with the CLI and
+  the workspace API writing version 2), the chart's
   templates, RBAC and Deployment, the Compose adapter, the restart drill through `cargo xtask cell
   drill`; the owner's resume lifting a crash-loop pause once the runtime copies the pause (E21-30);
   an alert for an instance stuck `Pending` or `Unknown`; deleting exited pods; a check that the
-  pod templates mount no service-account token.
+  pod templates mount no service-account token; the writers' checks of rules 200 and 201 (the CLI's
+  paper `agent deploy` then needs `connection record` first). Follow-ups from DEC-1171's review
+  (minors, freeze rule):
+  - m1: the CLI lets a stopped agent's id be deployed again, while §9.21 reads `AgentStopped` as
+    final; decide whether agent ids are reused.
+  - m2: add a vector for a version-1 deployment, a stop, then a version-2 deployment of the same
+    agent; the Rust manager must treat that stop as final (code change).
+  - m3: a manager must not ship into a workspace holding version-1 deployments; say how an existing
+    one is retired or redeployed at version 2.
+  - m4: the `agent_deployed` oracle's case of a revocation after the deployment cannot fail a
+    mutant; and no vector shows an account-stream copy against rule 201.
+  - m5: the §9 catalogue row for `AgentDeployed` does not mention version 2.
+  - m6: `docs/specs/workspace-api.md` (near line 673) and `docs/design/infrastructure.md` (near line
+    277) still describe version 1; the code change updates them.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*

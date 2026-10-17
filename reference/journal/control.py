@@ -1025,6 +1025,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("agent", "AgentModeChanged"): (1, 2),
     ("agent", "OwnerCommandRefused"): (1, 2),
     ("ctl", "VerificationRun"): (1, 2),
+    ("ctl", "AgentDeployed"): (1, 2),
 }
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "StreamOpened", 1): rec(
@@ -1054,6 +1055,8 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("agent", "AgentModeChanged", 2): MODE_CHANGED_V2,
     ("agent", "OwnerCommandRefused", 2): REFUSAL_V2,
     ("ctl", "VerificationRun", 2): VERIFICATION_RUN_V2,
+    # v0.51 §9.24 (DEC-1171): version 1's members, then the stored document's connection.
+    ("ctl", "AgentDeployed", 2): rec(*SCHEMAS[("ctl", "AgentDeployed")].fields, ("connection_id", IDENT_T)),
 }
 
 # §9.6 (DEC-460) and v0.42 (DEC-942): the runtime's approval request. Version 2 is version 1 with
@@ -2671,12 +2674,15 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
             Violation("config_refs.required", "missing_config_ref", f"config_refs.{k}") for k in missing[:1]
         ]
     versions = VERSIONED_VERSIONS.get((stream[0], event_type), (1,))
+    if event_type == "AgentDeployed" and "versions.agent_deployed_v2" in skip:
+        versions = (1,)
     if draft["schema_version"] not in versions:
         return [*out, Violation("catalogue", "unknown_schema", "payload")]
     command = draft["payload"].get("command") if isinstance(draft["payload"], dict) else None
     if event_type == "OwnerCommandIssued" and command not in HOLD_COMMANDS and "closed.owner_commands" not in skip:
         return out + open_command_violations(draft, skip)
-    if (stream[0], event_type) in SCHEMAS and draft["schema_version"] == 1:
+    v1_read = event_type == "AgentDeployed" and "versions.agent_deployed_v1_schema" in skip
+    if (stream[0], event_type) in SCHEMAS and (draft["schema_version"] == 1 or v1_read):
         schema = SCHEMAS[(stream[0], event_type)]
     else:
         schema = VERSIONED_SCHEMAS[(stream[0], event_type, draft["schema_version"])]
