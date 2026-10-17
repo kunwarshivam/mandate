@@ -1263,6 +1263,10 @@ fn drift_folds_each_text_item_once() {
         .unwrap_or_else(|e| panic!("{e:?}"));
     assert_eq!(first, 2, "two allowlisted text sources were read");
     let once = lp.research.drift().clone();
+    let mut plane = plane;
+    plane
+        .news
+        .retain(|item| item.item_id.as_str() != "nw-20261017-aapl-late");
     full_run(
         &mut lp,
         clock(CUT_OFF + i64::from(INTERVAL_S) + 100),
@@ -1274,7 +1278,8 @@ fn drift_folds_each_text_item_once() {
     assert_eq!(
         lp.research.drift(),
         &once,
-        "re-reading the same items cannot fake DuplicateContent"
+        "re-reading the same items cannot fake DuplicateContent; the item known only after the \
+         first cut-off is left out so the second run reads exactly the first run's items"
     );
 }
 

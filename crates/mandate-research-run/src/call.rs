@@ -1,7 +1,7 @@
 //! The one gateway call a run makes (§6.2 step 3, §10.1; inference spec §3), and how the harness
 //! treats each way it can fail (§7.3).
 
-use mandate_canon::{Digest, Value};
+use mandate_canon::{Digest, Value, parse};
 use mandate_domain::AssetClass;
 use mandate_num::Usd;
 use mandate_time::UtcNanos;
@@ -109,12 +109,55 @@ impl ResearchCall {
     /// [`ResearchRunError::ObservationsMismatch`] when the counts differ, and
     /// [`ResearchRunError::TimeOutOfRange`] for a deadline past the representable range.
     pub fn build(
-        _plan: &CallPlan,
-        _retrieval: &Retrieval,
-        _context: CallContext,
-        _dispatched_at: UtcNanos,
+        plan: &CallPlan,
+        retrieval: &Retrieval,
+        context: CallContext,
+        dispatched_at: UtcNanos,
     ) -> Result<Self, ResearchRunError> {
-        Err(ResearchRunError::Unimplemented { story: "E19-3" })
+        if plan.observations.len() != retrieval.items.len() {
+            return Err(ResearchRunError::ObservationsMismatch {
+                items: retrieval.items.len(),
+                observations: plan.observations.len(),
+            });
+        }
+        let items = retrieval
+            .items
+            .iter()
+            .zip(&plan.observations)
+            .map(|(item, observation)| {
+                let record = item.record()?;
+                let body =
+                    parse(&record).map_err(|_| ResearchRunError::InvalidId { what: "record" })?;
+                Ok(UntrustedItem {
+                    item_id: item.item_id()?,
+                    source: item.source()?,
+                    kind: item.kind(),
+                    observation: observation.clone(),
+                    body,
+                })
+            })
+            .collect::<Result<Vec<_>, ResearchRunError>>()?;
+        Ok(Self {
+            call_id: plan.call_id.clone(),
+            run_id: plan.run_id.clone(),
+            workspace_id: plan.workspace_id.clone(),
+            agent_id: plan.agent_id.clone(),
+            model: plan.model.clone(),
+            inputs: CallInputs {
+                items,
+                description: context.description,
+                cut_off: plan.as_of,
+                data_universe: context.data_universe,
+                asset_classes: context.asset_classes,
+                max_instruments: context.max_instruments,
+                working_universe: context.working_universe,
+                held: context.held,
+                theses: context.theses,
+            },
+            as_of: plan.as_of,
+            deadline: after_ms(dispatched_at, plan.deadline_ms)?,
+            max_output_tokens: plan.max_output_tokens,
+        })
     }
 }
 
@@ -185,9 +228,15 @@ impl ErrorKind {
     /// it may, and sampling again until something parses would select outputs (DEC-432 item 3).
     pub fn treatment(self) -> Treatment {
         Treatment {
-            alert_operator: false,
-            disable_research: false,
-            deadline_streak: false,
+            alert_operator: matches!(
+                self,
+                Self::PolicyDenied
+                    | Self::CredentialInvalid
+                    | Self::MeterUnavailable
+                    | Self::InputRejected
+            ),
+            disable_research: self == Self::ModelWithdrawn,
+            deadline_streak: self == Self::DeadlineExceeded,
         }
     }
 }
@@ -206,6 +255,37 @@ pub type CallOutcome = Result<GatewayReply, CallFailure>;
 /// The gateway's answer re-checked against the request: a reply for another call, from another
 /// identity, or completed after the deadline is a failure here whatever the gateway said
 /// (INF-2, INF-3, caller side). A failure is passed through with the request's call id.
-pub fn settle(_request: &ResearchCall, outcome: CallOutcome) -> CallOutcome {
-    outcome
+pub fn settle(request: &ResearchCall, outcome: CallOutcome) -> CallOutcome {
+    let failure = |kind, completed_at| CallFailure {
+        call_id: request.call_id.clone(),
+        kind,
+        completed_at,
+    };
+    match outcome {
+        Ok(reply) if reply.call_id != request.call_id || reply.reported != request.model => {
+            Err(failure(ErrorKind::IdentityMismatch, reply.completed_at))
+        }
+        Ok(reply) if reply.completed_at > request.deadline => {
+            Err(failure(ErrorKind::DeadlineExceeded, reply.completed_at))
+        }
+        Ok(reply) => Ok(reply),
+        Err(failed) => Err(failure(failed.kind, failed.completed_at)),
+    }
+}
+
+/// `at` plus `ms` milliseconds, exactly.
+fn after_ms(at: UtcNanos, ms: u32) -> Result<UtcNanos, ResearchRunError> {
+    let nanos = u64::from(at.nanos())
+        .checked_add(u64::from(ms % 1_000).saturating_mul(1_000_000))
+        .ok_or(ResearchRunError::TimeOutOfRange)?;
+    let carry =
+        i64::try_from(nanos / 1_000_000_000).map_err(|_| ResearchRunError::TimeOutOfRange)?;
+    let secs = at
+        .secs()
+        .checked_add(i64::from(ms / 1_000))
+        .and_then(|secs| secs.checked_add(carry))
+        .ok_or(ResearchRunError::TimeOutOfRange)?;
+    let nanos =
+        u32::try_from(nanos % 1_000_000_000).map_err(|_| ResearchRunError::TimeOutOfRange)?;
+    UtcNanos::from_parts(secs, nanos).map_err(|_| ResearchRunError::TimeOutOfRange)
 }

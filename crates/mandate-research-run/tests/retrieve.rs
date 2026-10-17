@@ -1,6 +1,11 @@
 //! Spec §6.3's reads at a cut-off: caps, the oldest-first drop, knowledge-time filters (HI-13,
 //! DP-1), the allowlist, licensed text (HI-23), scope, and the capture record (HI-2).
 
+#![allow(
+    clippy::field_reassign_with_default,
+    reason = "each case starts from the empty fixture and states only the reads it is about"
+)]
+
 mod common;
 
 use common::{

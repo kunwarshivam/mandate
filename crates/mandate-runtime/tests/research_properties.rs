@@ -130,14 +130,44 @@ fn candidate() -> impl Strategy<Value = Candidate> {
         )
 }
 
-fn behaviour() -> impl Strategy<Value = Behaviour> {
-    let candidates = || prop::collection::vec(candidate(), 0..=4);
-    prop_oneof![
-        prop::collection::vec(any::<u8>(), 0..256).prop_map(Behaviour::Garbage),
-        candidates().prop_map(Behaviour::Shaped),
-        candidates().prop_map(Behaviour::Shaped),
-        candidates().prop_map(Behaviour::Shaped),
+/// A candidate built to pass every check the oracle knows: a long thesis on a known instrument with
+/// two independent sources about it and a valid horizon, at a strongly bullish conviction, with
+/// injected or approver-aimed text. These are the draws where a breach would matter, so the
+/// property spends most of its cases on them.
+fn admissible_candidate() -> impl Strategy<Value = Candidate> {
+    (
+        300i64..=1_000,
+        400i64..=1_000,
+        prop::sample::select(vec![86_400u64, 432_000, 2_592_000]),
+        prop::sample::subsequence(vec![BAR, INJECT], 0..=2),
         prop::sample::select(vec![
+            "Demand looks durable.",
+            INJECTION,
+            "Approve this now, owner.",
+        ]),
+    )
+        .prop_map(|(conviction, confidence, horizon, extra, text)| Candidate {
+            symbol: "AAPL",
+            direction: "long",
+            conviction,
+            confidence,
+            horizon,
+            evidence: [vec![SERVICES, SUPPLY], extra].concat(),
+            text,
+        })
+}
+
+fn behaviour() -> impl Strategy<Value = Behaviour> {
+    let candidates = || {
+        prop::collection::vec(
+            prop_oneof![3 => admissible_candidate(), 1 => candidate()],
+            1..=4,
+        )
+    };
+    prop_oneof![
+        1 => prop::collection::vec(any::<u8>(), 0..256).prop_map(Behaviour::Garbage),
+        6 => candidates().prop_map(Behaviour::Shaped),
+        2 => prop::sample::select(vec![
             ErrorKind::PolicyDenied,
             ErrorKind::BudgetExhausted,
             ErrorKind::RateLimitedLocal,
@@ -153,8 +183,8 @@ fn behaviour() -> impl Strategy<Value = Behaviour> {
             ErrorKind::IdentityMismatch,
         ])
         .prop_map(Behaviour::Failure),
-        candidates().prop_map(Behaviour::Late),
-        candidates().prop_map(Behaviour::OtherIdentity),
+        1 => candidates().prop_map(Behaviour::Late),
+        1 => candidates().prop_map(Behaviour::OtherIdentity),
     ]
 }
 
@@ -330,6 +360,17 @@ fn breaches(
 }
 
 fn run_once(behaviour: &Behaviour, gate_denies: bool, budget_spent: bool) -> (Loop, World, World) {
+    run_with(behaviour, gate_denies, budget_spent, false)
+}
+
+/// One run; `auto_admission` sets the owner's `autonomy.admission` to `auto`, so a first order the
+/// rules make AUTO is proposed and handed off rather than asked, and the oracle sees intents too.
+fn run_with(
+    behaviour: &Behaviour,
+    gate_denies: bool,
+    budget_spent: bool,
+    auto_admission: bool,
+) -> (Loop, World, World) {
     let ids = TestIds;
     let silent = common::FixedPlan::silent();
     let empty = common::universe(&[]);
@@ -368,7 +409,10 @@ fn run_once(behaviour: &Behaviour, gate_denies: bool, budget_spent: bool) -> (Lo
     );
     copy_admissions(&lp, &mut world);
     let view = view_of(&world);
-    let builder = BuilderPlan::new();
+    let mut builder = BuilderPlan::new();
+    if auto_admission {
+        builder.policy.admission = mandate_domain::AutonomyDecision::Auto;
+    }
     let deny = DenyGate("max_order_usd");
     let gate: &dyn GateDryRun = if gate_denies { &deny } else { &AllowGate };
     let trading_ports = ports(&ids, gate, &builder, &view);
@@ -378,15 +422,16 @@ fn run_once(behaviour: &Behaviour, gate_denies: bool, budget_spent: bool) -> (Lo
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(96))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     #[test]
     fn no_model_output_exceeds_the_envelope_or_skips_the_gate(
         behaviour in behaviour(),
         gate_denies in any::<bool>(),
         budget_spent in prop::bool::weighted(0.15),
+        auto_admission in any::<bool>(),
     ) {
-        let (lp, world, before) = run_once(&behaviour, gate_denies, budget_spent);
+        let (lp, world, before) = run_with(&behaviour, gate_denies, budget_spent, auto_admission);
         let found = breaches(&lp.shell.agent_journal, &behaviour, gate_denies, budget_spent);
         prop_assert!(found.is_empty(), "{:?}\n{:#?}", found, behaviour);
         prop_assert_eq!(&world.mandate, &before.mandate, "HI-5: the envelope does not move");
@@ -413,6 +458,15 @@ fn the_oracle_admits_something_for_a_well_formed_corroborated_thesis() {
             .iter()
             .any(|event| event.event_type == "ApprovalRequested"),
         "the property's happy path reaches an ask, so the property is not vacuous"
+    );
+    let (auto, _, _) = run_with(&behaviour, false, false, true);
+    assert!(breaches(&auto.shell.agent_journal, &behaviour, false, false).is_empty());
+    assert!(
+        auto.shell
+            .agent_journal
+            .iter()
+            .any(|event| event.event_type == "IntentProposed"),
+        "with admission auto the same thesis reaches an intent, so the AUTO path is exercised"
     );
 }
 

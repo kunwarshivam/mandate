@@ -2,6 +2,11 @@
 //! dispatch instant, and a reply re-checked against the request (INF-2, INF-3, caller side), and
 //! §7.3's treatment of each failure kind.
 
+#![allow(
+    clippy::field_reassign_with_default,
+    reason = "each case starts from the empty fixture and states only the reads it is about"
+)]
+
 mod common;
 
 use common::{

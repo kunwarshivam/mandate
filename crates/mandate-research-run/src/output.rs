@@ -2,6 +2,9 @@
 //! read with the canonical parser, so a float, a duplicate key, an unknown member, or trailing data
 //! is a rejection rather than a guess.
 
+use std::collections::BTreeSet;
+
+use mandate_canon::{Object, Value, parse};
 use mandate_num::{Conviction, Unit};
 
 /// The output schema's bounds, inside the research entry's content hash (§6.5, §7.1).
@@ -78,8 +81,6 @@ pub enum OutputRejection {
     TooMany { at: &'static str },
     #[error("two invalidations name the same thesis")]
     DuplicateInvalidation,
-    #[error("the parser has not been implemented yet")]
-    Unimplemented,
 }
 
 impl OutputRejection {
@@ -91,7 +92,6 @@ impl OutputRejection {
             Self::Range { .. } => "range",
             Self::TooMany { .. } => "too_many",
             Self::DuplicateInvalidation => "duplicate_invalidation",
-            Self::Unimplemented => "unimplemented",
         }
     }
 }
@@ -101,8 +101,163 @@ impl OutputRejection {
 /// # Errors
 /// [`OutputRejection`] for anything but an exact schema-valid output within its bounds.
 pub fn parse_output(
-    _bytes: &[u8],
-    _bounds: &OutputBounds,
+    bytes: &[u8],
+    bounds: &OutputBounds,
 ) -> Result<CandidateOutput, OutputRejection> {
-    Err(OutputRejection::Unimplemented)
+    if bytes.len() > usize::try_from(bounds.max_output_bytes).unwrap_or(usize::MAX) {
+        return Err(OutputRejection::TooLong);
+    }
+    let value = parse(bytes).map_err(|_| OutputRejection::NotJson)?;
+    let top = exact(&value, &["invalidations", "theses"], &[], "output")?;
+    let theses = list(top, "theses", bounds.max_theses)?
+        .iter()
+        .map(|thesis| candidate_thesis(thesis, bounds))
+        .collect::<Result<Vec<_>, _>>()?;
+    let invalidations = list(top, "invalidations", bounds.max_invalidations)?
+        .iter()
+        .map(|invalidation| candidate_invalidation(invalidation, bounds))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut named = BTreeSet::new();
+    if !invalidations
+        .iter()
+        .all(|invalidation| named.insert(invalidation.thesis_id.as_str()))
+    {
+        return Err(OutputRejection::DuplicateInvalidation);
+    }
+    Ok(CandidateOutput {
+        theses,
+        invalidations,
+    })
+}
+
+/// The longest id the parser accepts, as the worker's own id grammar bounds it.
+const MAX_ID_BYTES: usize = 128;
+/// The longest symbol or direction, which the snapshot and §8.2 bound far below this.
+const MAX_WORD_BYTES: usize = 32;
+
+/// `value` as an object whose members are exactly `required` plus any of `optional`.
+fn exact<'a>(
+    value: &'a Value,
+    required: &[&str],
+    optional: &[&str],
+    at: &'static str,
+) -> Result<&'a Object, OutputRejection> {
+    let object = value.as_object().ok_or(OutputRejection::Shape { at })?;
+    let known = object
+        .keys()
+        .all(|key| required.contains(&key.as_str()) || optional.contains(&key.as_str()));
+    let complete = required.iter().all(|name| object.contains_key(*name));
+    if known && complete {
+        Ok(object)
+    } else {
+        Err(OutputRejection::Shape { at })
+    }
+}
+
+fn list<'a>(
+    object: &'a Object,
+    name: &'static str,
+    max: u32,
+) -> Result<&'a [Value], OutputRejection> {
+    let items = object
+        .get(name)
+        .and_then(Value::as_array)
+        .ok_or(OutputRejection::Shape { at: name })?;
+    if items.len() > usize::try_from(max).unwrap_or(usize::MAX) {
+        return Err(OutputRejection::TooMany { at: name });
+    }
+    Ok(items)
+}
+
+/// A non-empty string member of at most `max` bytes.
+fn bounded(object: &Object, name: &'static str, max: usize) -> Result<String, OutputRejection> {
+    let text = object
+        .get(name)
+        .and_then(Value::as_str)
+        .ok_or(OutputRejection::Shape { at: name })?;
+    if text.is_empty() || text.len() > max {
+        return Err(OutputRejection::Range { at: name });
+    }
+    Ok(text.to_owned())
+}
+
+fn evidence(object: &Object, bounds: &OutputBounds) -> Result<Vec<String>, OutputRejection> {
+    list(object, "evidence", bounds.max_evidence)?
+        .iter()
+        .map(|id| {
+            let id = id
+                .as_str()
+                .ok_or(OutputRejection::Shape { at: "evidence" })?;
+            if id.is_empty() || id.len() > MAX_ID_BYTES {
+                return Err(OutputRejection::Range { at: "evidence" });
+            }
+            Ok(id.to_owned())
+        })
+        .collect()
+}
+
+fn candidate_thesis(
+    value: &Value,
+    bounds: &OutputBounds,
+) -> Result<CandidateThesis, OutputRejection> {
+    let object = exact(
+        value,
+        &[
+            "confidence",
+            "conviction",
+            "direction",
+            "evidence",
+            "horizon_s",
+            "instrument",
+            "invalidation",
+            "thesis",
+        ],
+        &["predecessor_thesis_id"],
+        "thesis",
+    )?;
+    let text_bytes = usize::try_from(bounds.max_text_bytes).unwrap_or(usize::MAX);
+    let conviction = object
+        .get("conviction")
+        .and_then(Value::as_str)
+        .ok_or(OutputRejection::Shape { at: "conviction" })?;
+    let confidence = object
+        .get("confidence")
+        .and_then(Value::as_str)
+        .ok_or(OutputRejection::Shape { at: "confidence" })?;
+    let horizon_s = object
+        .get("horizon_s")
+        .and_then(Value::as_int)
+        .ok_or(OutputRejection::Shape { at: "horizon_s" })?;
+    let horizon_s = u32::try_from(horizon_s)
+        .ok()
+        .filter(|h| (bounds.min_horizon_s..=bounds.max_horizon_s).contains(h))
+        .ok_or(OutputRejection::Range { at: "horizon_s" })?;
+    let predecessor_thesis_id = match object.get("predecessor_thesis_id") {
+        None => None,
+        Some(_) => Some(bounded(object, "predecessor_thesis_id", MAX_ID_BYTES)?),
+    };
+    Ok(CandidateThesis {
+        instrument: bounded(object, "instrument", MAX_WORD_BYTES)?,
+        direction: bounded(object, "direction", MAX_WORD_BYTES)?,
+        conviction: Conviction::parse(conviction)
+            .map_err(|_| OutputRejection::Range { at: "conviction" })?,
+        confidence: Unit::parse(confidence)
+            .map_err(|_| OutputRejection::Range { at: "confidence" })?,
+        horizon_s,
+        thesis: bounded(object, "thesis", text_bytes)?,
+        invalidation: bounded(object, "invalidation", text_bytes)?,
+        evidence: evidence(object, bounds)?,
+        predecessor_thesis_id,
+    })
+}
+
+fn candidate_invalidation(
+    value: &Value,
+    bounds: &OutputBounds,
+) -> Result<CandidateInvalidation, OutputRejection> {
+    let object = exact(value, &["evidence", "thesis_id"], &[], "invalidation")?;
+    Ok(CandidateInvalidation {
+        thesis_id: bounded(object, "thesis_id", MAX_ID_BYTES)?,
+        evidence: evidence(object, bounds)?,
+    })
 }
