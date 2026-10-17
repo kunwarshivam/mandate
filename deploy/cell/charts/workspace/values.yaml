@@ -73,6 +73,14 @@ verify:
   id: ""
   streams: []
 
+# The agent deployment the runtime process runs (DEC-1013): its agent, the connection it trades
+# through, and the owner whose kill switch it acts on. Required once `images.runtime` is named;
+# ids only, never a secret.
+runtime:
+  agent: ""
+  connection: ""
+  owner: ""
+
 # The cell's one ingress: cloudflared dialing out to Cloudflare's tunnel edge, so the cluster
 # exposes no port (DEC-967 item 6). Off in the local cell, which has no tunnel.
 ingress:

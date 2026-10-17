@@ -1,5 +1,5 @@
 {
-  "about": "The processes of a workspace deployment (infrastructure design §3.1), the one list the Helm chart and the Compose file are both rendered from (E21-36). A process renders only when values.images names its image, so a lane adds its process by building the image; nothing else changes. `built` says whether the process's image exists yet: the Compose file holds exactly the built processes. Edit this file, then run `cargo xtask cell generate --write`, which writes the Compose file and the journal's roles file from it.",
+  "about": "The processes of a workspace deployment (infrastructure design §3.1), the one list the Helm chart and the Compose file are both rendered from (E21-36). A process renders only when values.images names its image, so a lane adds its process by building the image; nothing else changes. `built` says whether the process's image exists yet: the Compose file holds exactly the built processes. A service's `args` start it and its `probe` asks it `livez` or `readyz` over its socket on the pod's `/tmp` (DEC-994 item 5); `{workspace}` and the `runtime` values' `{agent}`, `{connection}` and `{owner}` fill them (DEC-1013). Edit this file, then run `cargo xtask cell generate --write`, which writes the Compose file and the journal's roles file from it.",
   "processes": [
     {
       "name": "migrate",
@@ -48,10 +48,12 @@
     },
     {
       "name": "runtime",
-      "row": "Agent runtime, one per agent deployment: no broker credential and no route to a broker (rule 12)",
+      "row": "Agent runtime, one per agent deployment: no broker credential and no route to a broker (rule 12); on the deny-all wiring until the post-R0 hook (DEC-1013)",
       "kind": "service",
       "image": "runtime",
-      "built": false,
+      "built": true,
+      "args": ["run", "--workspace", "{workspace}", "--agent", "{agent}", "--connection", "{connection}", "--owner", "{owner}", "--probe", "/tmp/process.sock"],
+      "probe": ["/usr/local/bin/mandate-daemon", "probe", "{probe}", "--probe", "/tmp/process.sock"],
       "db_role": "mandate_runtime",
       "guaranteed": false,
       "colocate": true,

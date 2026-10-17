@@ -98,6 +98,7 @@ upgrades every release in place.
 | The cell: k3d, CloudNativePG, the migration Job | Always |
 | The demo workspace, its control stream verified | Always |
 | The workspace API server, through a port-forward | Lane A1 (E21-31) marks `api` built in `processes.json` |
+| The agent runtime, on the deny-all wiring until the post-R0 hook | `runtime` is built in `processes.json` and `cell up` built its image (DEC-1013) |
 | A paper agent on rh-sim and recorded Alpaca fixtures | Lane P1 (#1451) marks `runtime` and `executor` built |
 | The founding membership | Lane ID1's `mandate membership` gesture is in the CLI |
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
