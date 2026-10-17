@@ -103,6 +103,9 @@ pub struct CallRecord {
     pub reservation: Option<String>,
     pub observations: Vec<String>,
     pub output: Option<Value>,
+    /// For an `ok` tool-call reply, its validated tool calls in reply order, and no `output`
+    /// (inference spec §3.2); empty otherwise. The caller journals one `ToolCallRecorded` for each.
+    pub tool_calls: Vec<crate::tools::ToolCall>,
     /// The bytes `prompt_ref` names, for the caller to store as an artifact before it journals the
     /// record; `None` exactly when the guard refused the prompt (journal spec rule 148).
     pub prompt: Option<Vec<u8>>,

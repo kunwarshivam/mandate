@@ -395,8 +395,10 @@ exists.
   until confirmed. **Not enforced** constraints listed apart, with the note that they reach models
   only as description text. For a new agent (DEC-477), A2 and A5 are one summary card in the
   conversation: every value in compact form, each drafted one marked *proposed* or *default*.
-- *Primary action:* Create agent, once, with a passkey (DEC-477). Saying a change shows a new card,
-  and the earlier one can no longer be created.
+- *Primary action:* Under the card, three steps, each recorded on its own and each offered only once
+  the one before it is recorded (DEC-477, [DEC-2401](../project/decisions/DEC-2401.md)): create the
+  version, confirm it with a passkey (A5), and deploy it to paper with a passkey (B3). Saying a change
+  before the confirmation shows a new card, and the earlier one can no longer be set up.
 - *States:* Loading (the compiler is a model call): "Reading your message…", and no second message
   until it answers; never partial fields shown as final. Error (compiler output fails the schema):
   the reply says none of it was used. Degraded (the model does not answer): the owner's words are
@@ -427,7 +429,8 @@ never as values (mandate §4.3).
   the agent stops; when `universe.asset_classes` includes crypto, the disclosure that a stop-limit may
   not fill on a gap (trading §5.4). For a new agent, the summary card at the end of the
   conversation (DEC-477), with the marks *proposed* and *default*.
-- *Primary action:* Confirm (step-up); Create agent for a new agent.
+- *Primary action:* Confirm (step-up); for a new agent, Confirm version 1, the second of its three
+  set-up steps (DEC-2401).
 - *States:* Error after step-up: nothing was confirmed; the version does not exist yet.
 - *Governs:* mandate §2.1, §4.2, §10 (`MandateConfirmed` stores the rendered screen and UI build);
   compliance questions 23 and 24; PX-1, PX-2.
@@ -455,7 +458,9 @@ never as values (mandate §4.3).
 - *Governs:* FR-4.1, FR-4.2, FR-4.5; DEC-99; compliance questions 10 and 35.
 
 **B3 Deploy to paper** ⚠: the version, the backtest shown, step-up. Rejection states: loss carry
-(V-032), a claimed instrument group (V-006), allocation above account equity (V-002).
+(V-032), a claimed instrument group (V-006), allocation above account equity (V-002). For a new
+agent it is the third set-up step under the summary card, offered once its confirmation is recorded
+(DEC-2401); paper only, with no go-live action.
 
 **B4 Paper run and readiness**: the paper agent's live view (as D2) plus the readiness report
 (backtest, paper, and estimated live costs; simulated fees and dividends from the shadow ledger
