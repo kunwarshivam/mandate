@@ -2046,6 +2046,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-research-driver"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-approval",
+ "mandate-builder",
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-gateway",
+ "mandate-journal",
+ "mandate-num",
+ "mandate-research",
+ "mandate-research-run",
+ "mandate-runtime",
+ "mandate-spec",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-research-run"
 version = "0.0.0"
 dependencies = [

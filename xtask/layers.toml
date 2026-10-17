@@ -556,6 +556,16 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The shell's research driver (DEC-996 item 2, DEC-2204): the trigger queue and the step machine
+# around the core's handle_research, pure, with the journal and the worker handed in. Above
+# mandate-runtime, whose research loop it drives, and below mandate-shell, which wires it into its
+# run path after R0.
+[crates.mandate-research-driver]
+layer = 7
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-shell]
 layer = 8
 safety_critical = true
