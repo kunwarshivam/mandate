@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use mandate_num::Price;
 use mandate_time::UtcNanos;
 use serde_json::{Map, Value, json};
 
@@ -355,6 +356,9 @@ impl Shared {
     /// The session and revision rules of [DEC-849] item 3, then the method; `None` is a lost
     /// answer.
     fn handle(&mut self, head: &str, body: &[u8]) -> Option<String> {
+        if self.oauth.is_some() && head.starts_with(MARKET_ROUTE) {
+            return Some(self.market(body));
+        }
         if let Some(oauth) = self.oauth.as_mut() {
             match oauth.route(head, body) {
                 Routed::Answer(answer) => return Some(answer),
@@ -561,7 +565,21 @@ impl Shared {
     }
 }
 
+/// The rehearsal's market (DEC-1152 item 3): a rehearsal server alone answers it.
+const MARKET_ROUTE: &str = "POST /rehearsal/market ";
+
 impl Shared {
+    /// R0's step 2t (DEC-1152 item 3): the market moves as the founder's rehearsal scripts it.
+    /// `body` is exactly `{"quotes": {symbol: decimal text}}`; each quote is applied, which
+    /// triggers every stop it reaches, and the script's unused fills are then offered to every
+    /// working order, as a place offers them to the order it creates, so a triggered stop fills at
+    /// the scripted price. The answer is every order's record. Any other body is `400` with
+    /// nothing changed.
+    fn market(&mut self, body: &[u8]) -> String {
+        let _ = (body, market_quotes);
+        reply(404, None, "")
+    }
+
     /// The first unused scripted fill of the order's symbol and side, applied after the place
     /// has answered, and used up only if the core takes it: a fill of a queued, terminal or
     /// re-sent order is refused by the core and stays for the next match.
@@ -581,6 +599,24 @@ impl Shared {
             self.fills.remove(at);
         }
     }
+}
+
+/// A market move's quotes: `body` exactly `{"quotes": {symbol: decimal text}}`, at least one, or
+/// `None`.
+fn market_quotes(body: &[u8]) -> Option<Vec<(String, Price)>> {
+    let value: Value = serde_json::from_slice(body).ok()?;
+    let top = value.as_object()?;
+    if top.len() != 1 {
+        return None;
+    }
+    let quotes = top.get("quotes")?.as_object()?;
+    if quotes.is_empty() {
+        return None;
+    }
+    quotes
+        .iter()
+        .map(|(symbol, price)| Some((symbol.clone(), Price::parse(price.as_str()?).ok()?)))
+        .collect()
 }
 
 /// The arguments `get_equity_orders` takes: the account, the filters the core models (DEC-941

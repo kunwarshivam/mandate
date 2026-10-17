@@ -220,6 +220,12 @@ pub struct ValidationContext {
     /// have advanced past it: a version whose validated-against predecessor no longer equals this
     /// is refused by V-047, not classified against the newer one (DEC-444 item 3's fifth bullet).
     pub current_mandate_version: Option<MandateVersion>,
+    /// The asset classes the connection's capability profile protects with a stop-limit, which
+    /// V-008 and W-002 read (DEC-539 items 2 and 3): a class in it needs the stop-limit offset, and
+    /// its worst case adds the offset. `None` is the profile absent, an unknown broker or no
+    /// connection, under which every allowed class counts as protected by a stop-limit (fail
+    /// closed, mandate spec §4).
+    pub stop_limit_asset_classes: Option<BTreeSet<AssetClass>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -300,10 +306,11 @@ pub fn validate(
     context: &ValidationContext,
 ) -> Result<ValidationReport, SpecError> {
     let document = mandate.canonical()?;
-    let worst_case = worst_case(mandate)?;
+    let protected = context.stop_limit_asset_classes.as_ref();
+    let worst_case = worst_case(mandate, protected)?;
     let mut violations = BTreeSet::new();
     account_rules(mandate, context, &worst_case, &mut violations)?;
-    document_rules(mandate, &document, &mut violations);
+    document_rules(mandate, &document, protected, &mut violations);
     condition_rules(mandate, &mut violations);
     delegation_rules(mandate, context, &mut violations)?;
     flag(&mut violations, !tripwire_rules(mandate), Violation::V044);
@@ -473,8 +480,12 @@ fn times(amount: Usd, fraction: &SchemaDec, path: &str) -> Result<Usd, SpecError
         .map_err(|cause| out_of_range(path, cause))
 }
 
-/// §4.2's four figures, exact.
-fn worst_case(mandate: &Mandate) -> Result<WorstCase, SpecError> {
+/// §4.2's four figures, exact, the one position at its stop with the stop-limit offset added where a
+/// stop-limit protects one of the mandate's classes (`protected`, DEC-539 item 3).
+fn worst_case(
+    mandate: &Mandate,
+    protected: Option<&BTreeSet<AssetClass>>,
+) -> Result<WorstCase, SpecError> {
     let allocation = usd(&mandate.capital.allocation_usd, "/capital/allocation_usd")?;
     let risk = &mandate.risk;
     let position = usd(&risk.max_position_usd, "/risk/max_position_usd")?.min(times(
@@ -486,7 +497,7 @@ fn worst_case(mandate: &Mandate) -> Result<WorstCase, SpecError> {
     let one_position_at_stop_usd = match (protection.enabled, &protection.stop_distance) {
         (true, Some(stop)) => {
             let at_stop = times(position, stop, "/protection/stop_distance")?;
-            Some(match crypto_offset(mandate) {
+            Some(match stop_limit_offset(mandate, protected) {
                 Some(offset) => {
                     let path = "/protection/crypto_stop_limit_offset";
                     at_stop
@@ -510,13 +521,25 @@ fn worst_case(mandate: &Mandate) -> Result<WorstCase, SpecError> {
     })
 }
 
-/// The crypto stop-limit offset a worst case adds: set, and the universe admits crypto (§4.2 W-002).
-fn crypto_offset(mandate: &Mandate) -> Option<&SchemaDec> {
+/// The stop-limit offset a worst case adds: set, and a stop-limit protects one of the classes the
+/// universe allows (§4.2 W-002, DEC-539 item 3). Version 1's `crypto_stop_limit_offset` is the
+/// offset.
+fn stop_limit_offset<'m>(
+    mandate: &'m Mandate,
+    protected: Option<&BTreeSet<AssetClass>>,
+) -> Option<&'m SchemaDec> {
     mandate
         .protection
         .crypto_stop_limit_offset
         .as_ref()
-        .filter(|_| mandate.universe.asset_classes.contains(&AssetClass::Crypto))
+        .filter(|_| stop_limit_protected(mandate, protected))
+}
+
+/// Whether a stop-limit protects any class the universe allows (V-008, W-002; DEC-539 item 2): one
+/// in `protected`, or, with the profile absent, any class at all.
+fn stop_limit_protected(mandate: &Mandate, protected: Option<&BTreeSet<AssetClass>>) -> bool {
+    let _ = protected;
+    mandate.universe.asset_classes.contains(&AssetClass::Crypto)
 }
 
 fn flag(violations: &mut BTreeSet<Violation>, broken: bool, violation: Violation) {
@@ -662,14 +685,19 @@ fn written<'a>(document: &'a Value, path: &str) -> Vec<&'a str> {
         .collect()
 }
 
-/// The rules on the document's own shape: V-008 to V-016 and V-033.
-fn document_rules(m: &Mandate, document: &Value, out: &mut BTreeSet<Violation>) {
+/// The rules on the document's own shape: V-008 to V-016 and V-033. V-008 reads the classes the
+/// connection's profile protects with a stop-limit (`protected`, DEC-539 item 2).
+fn document_rules(
+    m: &Mandate,
+    document: &Value,
+    protected: Option<&BTreeSet<AssetClass>>,
+    out: &mut BTreeSet<Violation>,
+) {
     let protection = &m.protection;
     flag(
         out,
         if protection.enabled {
-            m.universe.asset_classes.contains(&AssetClass::Crypto)
-                && protection.crypto_stop_limit_offset.is_none()
+            stop_limit_protected(m, protected) && protection.crypto_stop_limit_offset.is_none()
         } else {
             protection.stop_distance.is_some()
                 || protection.take_profit_distance.is_some()
@@ -1202,8 +1230,9 @@ pub fn class_allowed(class: AssetClass, allowed: &BTreeSet<AssetClass>) -> bool 
     allowed.contains(&class)
 }
 
-/// The stop distance a worst-case figure uses: the stop, plus the crypto stop-limit offset when the
-/// universe admits crypto (§4.2 W-002).
+/// The stop distance a worst-case figure uses: the stop, plus the stop-limit offset when a stop-limit
+/// protects a class the universe allows under `protected`, the classes the connection's profile
+/// protects so, or every class with the profile absent (§4.2 W-002, DEC-539 item 3).
 ///
 /// `None` exactly when there is no stop: protection is disabled, or its stop is null. The sum is exact
 /// (a [`Ratio`](mandate_num::Ratio) holds both operands' places), and a value it cannot hold is
@@ -1211,13 +1240,16 @@ pub fn class_allowed(class: AssetClass, allowed: &BTreeSet<AssetClass>) -> bool 
 ///
 /// Without the offset the result is the document's own stop, in its `open_fraction` grammar; with it,
 /// the sum, in the `positive_decimal` grammar, because two open fractions can sum past one.
-pub fn worst_case_stop_distance(mandate: &Mandate) -> Result<Option<SchemaDec>, SpecError> {
+pub fn worst_case_stop_distance(
+    mandate: &Mandate,
+    protected: Option<&BTreeSet<AssetClass>>,
+) -> Result<Option<SchemaDec>, SpecError> {
     let protection = &mandate.protection;
     let stop = match (protection.enabled, &protection.stop_distance) {
         (true, Some(stop)) => stop,
         _ => return Ok(None),
     };
-    let Some(offset) = crypto_offset(mandate) else {
+    let Some(offset) = stop_limit_offset(mandate, protected) else {
         return Ok(Some(stop.clone()));
     };
     let stop_path = "/protection/stop_distance";

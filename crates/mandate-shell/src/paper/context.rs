@@ -27,6 +27,7 @@ use mandate_num::{
 use mandate_risk::SaneQuote;
 use mandate_runtime::{AgentId, OrderExecution, ProtectionPrices, TimeInForce};
 use mandate_spec::ValidationContext;
+use mandate_spec::context::stop_limit_asset_classes;
 use mandate_spec::document::{Protection, ProvenanceMap};
 use mandate_time::{Date, UtcNanos};
 
@@ -305,6 +306,18 @@ pub(super) fn protection_prices(
     }))
 }
 
+/// The classes a stop-limit protects that the run's own validation reads (V-008, W-002; DEC-539
+/// item 2, DEC-1152 item 2). A paper connection is Alpaca's, the only paper broker the default
+/// build compiles (LT-14), so it reads Alpaca's row of the table. A live connection reads none: the
+/// profile absent counts every class, which fails closed and is Robinhood's row for the classes v1
+/// trades.
+fn run_stop_limit_classes(connection: Environment) -> Option<BTreeSet<DomainAssetClass>> {
+    match connection {
+        Environment::Paper => stop_limit_asset_classes("alpaca"),
+        Environment::Live => None,
+    }
+}
+
 /// The mandate's stop-limit offset when its protection is on and sets one; an offset that does
 /// not read as a fraction refuses the run rather than leaving a stop-limit without its limit.
 pub(super) fn stop_limit_offset(protection: &Protection) -> Result<Option<Fraction>, Cause> {
@@ -402,6 +415,7 @@ fn run_context(
             eligibility_failures: BTreeSet::new(),
             previous_version: None,
             current_mandate_version: None,
+            stop_limit_asset_classes: run_stop_limit_classes(connection),
         },
         policies: Vec::new(),
         author: "founder".to_owned(),

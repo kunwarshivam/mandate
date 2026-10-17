@@ -273,7 +273,12 @@ fn every_v_rule_the_stream_decides_refuses() {
     assert_eq!(mismatched.refused(), v007, "another hash");
     let revoked = format!(r#"{{"connection_id":"{CONNECTION}"}}"#);
     let revoked = Stream::deployed().then("ConnectionRevoked", &revoked);
-    assert_eq!(revoked.refused(), violations(&[Violation::V001]));
+    assert_eq!(
+        revoked.refused(),
+        violations(&[Violation::V001, Violation::V008]),
+        "a revoked connection's environment and profile are both unknown, and V-008 fails closed \
+         on the profile (DEC-1152 item 1)"
+    );
     let live = format!(
         r#"{{"broker":"alpaca","connection_id":"{CONNECTION}","environment":"live","scopes":["trading"]}}"#
     );
@@ -286,7 +291,7 @@ fn every_v_rule_the_stream_decides_refuses() {
 fn a_live_mandate_is_refused() {
     let paper = Stream::deployed();
     assert_eq!(paper.refused(), None, "the paper document");
-    let live = json(&MANDATE.replace(r#""environment": "paper""#, r#""environment": "live""#));
+    let live = json(&live_document());
     let stream = Stream::of(&live, &envelope());
     assert_ne!(stream.version, paper.version, "the edit changed it");
     assert_eq!(stream.refused(), Some(Refusal::Live));
@@ -341,10 +346,21 @@ fn admitted() -> LiveAdmission {
     }
 }
 
+/// The E7-7 mandate made `live`, with the stop-limit offset V-008 asks for on the Robinhood profile
+/// its live connection records (DEC-539 item 2, DEC-1152 item 1).
+fn live_document() -> String {
+    MANDATE
+        .replace(r#""environment": "paper""#, r#""environment": "live""#)
+        .replace(
+            r#""crypto_stop_limit_offset": null"#,
+            r#""crypto_stop_limit_offset": "0.01""#,
+        )
+}
+
 /// The E7-7 mandate deployed as `live`, its connection established as a live Robinhood one, so
 /// V-001 agrees and the live refusal is the only one the stream can draw.
 fn live_deployment() -> Stream {
-    let live = json(&MANDATE.replace(r#""environment": "paper""#, r#""environment": "live""#));
+    let live = json(&live_document());
     let established = format!(
         r#"{{"broker":"robinhood","connection_id":"{CONNECTION}","environment":"live","scopes":["trading"]}}"#
     );
@@ -593,7 +609,7 @@ fn before_credentials_the_fold_refuses_every_v_rule_and_the_walk() {
         door: DoorChecks::NotPassed,
         ..admitted()
     };
-    let live = json(&MANDATE.replace(r#""environment": "paper""#, r#""environment": "live""#));
+    let live = json(&live_document());
     let but_name: Vec<&str> = envelope().into_iter().filter(|p| *p != "name").collect();
     let established = format!(
         r#"{{"broker":"robinhood","connection_id":"{CONNECTION}","environment":"live","scopes":["trading"]}}"#

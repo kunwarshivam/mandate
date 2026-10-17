@@ -50,6 +50,7 @@ fn validated_value(value: &Value) -> ValidatedMandate {
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
         current_mandate_version: None,
+        stop_limit_asset_classes: mandate_spec::context::stop_limit_asset_classes("alpaca"),
     };
     ValidatedMandate::new(mandate, &context, &[])
         .unwrap_or_else(|e| panic!("the fixture mandate validates: {e}"))

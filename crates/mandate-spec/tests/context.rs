@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use common::{b, base, s, with, with_all};
 use mandate_canon::Digest;
-use mandate_domain::{AssetId, Environment};
+use mandate_domain::{AssetClass, AssetId, Environment};
 use mandate_num::{NumError, Usd};
 use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, LOSS_CARRY_DAYS, Membership};
 use mandate_spec::document::{ConnectionId, ModelId, Pointer, Provenance, Source};
@@ -134,9 +134,15 @@ fn snapshot(connection: &str, equity: &str) -> JournaledFact {
 }
 
 fn established(connection: &str, environment: Environment) -> JournaledFact {
+    on_broker(connection, environment, Some("alpaca"))
+}
+
+/// The connection's `ConnectionEstablished` naming `broker`, or none.
+fn on_broker(connection: &str, environment: Environment, broker: Option<&str>) -> JournaledFact {
     JournaledFact::ConnectionEstablished {
         connection_id: conn(connection),
         environment,
+        broker: broker.map(str::to_owned),
     }
 }
 
@@ -218,6 +224,51 @@ fn the_environment_is_the_connections_own_and_live_when_unknown_or_revoked() {
             Some(expected),
             "{name}"
         );
+    }
+}
+
+/// DEC-539 item 2's fixed table, which V-008 and W-002 read until validation is given the profile:
+/// Alpaca protects crypto with a stop-limit and equities with OCO or bracket legs; Robinhood
+/// protects equities with a stop-limit (DEC-529 item 7). Any other broker, a connection that names
+/// none, no connection, another connection's record, and a revoked one leave the profile absent,
+/// which counts every class as protected by a stop-limit (fail closed, mandate spec §4).
+#[test]
+fn the_connections_broker_names_the_classes_a_stop_limit_protects() {
+    let revoked = JournaledFact::ConnectionRevoked {
+        connection_id: conn(OURS),
+    };
+    let paper = Environment::Paper;
+    let live = Environment::Live;
+    let alpaca = Some(BTreeSet::from([AssetClass::Crypto]));
+    let robinhood = Some(BTreeSet::from([AssetClass::Crypto, AssetClass::UsEquity]));
+    let cases: [(&str, Vec<JournaledFact>, Option<BTreeSet<AssetClass>>); 8] = [
+        ("alpaca", vec![on_broker(OURS, paper, Some("alpaca"))], alpaca.clone()),
+        ("robinhood", vec![on_broker(OURS, live, Some("robinhood"))], robinhood.clone()),
+        ("another broker", vec![on_broker(OURS, live, Some("ibkr"))], None),
+        ("no broker named", vec![on_broker(OURS, live, None)], None),
+        ("nothing known", vec![], None),
+        (
+            "another connection's",
+            vec![on_broker(THEIRS, paper, Some("alpaca"))],
+            None,
+        ),
+        (
+            "established, then revoked",
+            vec![on_broker(OURS, paper, Some("alpaca")), revoked.clone()],
+            None,
+        ),
+        (
+            "re-established on another broker",
+            vec![
+                on_broker(OURS, paper, Some("alpaca")),
+                revoked,
+                on_broker(OURS, live, Some("robinhood")),
+            ],
+            robinhood,
+        ),
+    ];
+    for (name, facts, expected) in cases {
+        assert_eq!(fold(&facts).stop_limit_asset_classes, expected, "{name}");
     }
 }
 

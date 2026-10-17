@@ -280,8 +280,12 @@ fn the_spec_fold_reads_the_deployment_as_the_agents_version() {
     };
     let context = ValidationContext::from_journal(&mandate, args, &facts).unwrap();
     let violations = validate(&mandate, &context).unwrap().violations;
-    let supplied = BTreeSet::from([Violation::V001, Violation::V002]);
-    assert_eq!(violations, supplied, "the run's two facts");
+    let supplied = BTreeSet::from([Violation::V001, Violation::V002, Violation::V008]);
+    assert_eq!(
+        violations, supplied,
+        "the run's three facts: the bare fold knows no connection, so neither its environment \
+         (V-001) nor its profile (V-008, which fails closed, DEC-1152 item 1)"
+    );
 }
 
 /// After a stop the agent can be deployed again, and a version confirmed again after another's
