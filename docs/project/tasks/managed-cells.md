@@ -4,26 +4,27 @@ A **path brief** in the sense of the [first live trade brief](first-live-trade.m
 stories, in lanes, that take the product from today's binaries to one managed cell. Each slice is
 one story's tests PR or implementation PR under DEC-77. Docs only: it writes no code.
 
-**Status.** This plan rests on [DEC-967](../decisions/DEC-967.md), which records the founder's
-answers as the coordinator relayed them and is **Proposed until the founder confirms it**. Until
-then lanes take only work that spends nothing and touches no R0 file (DEC-967 "Until the founder
-confirms"), which is everything in Waves 0 to 2 below.
+**Status.** This plan rests on [DEC-967](../decisions/DEC-967.md), Accepted by the founder on
+2026-10-17. Lanes start now; nothing is bought until the local-cell gate passes, and no lane
+touches an R0 file until R0 closes.
 
-## What the founder decided (DEC-967, as relayed)
+## What the founder decided (DEC-967)
 
 - **After R0, straight to managed cells** (infrastructure §1.1, §3.2), not one always-on VM.
 - **Build the service pieces now, in parallel, in crates R0 does not touch.**
-- **The only spend approved so far is Cloudflare Workers for `web/`.** No VM, cluster, managed
-  database, object store, key management service, registry, paging tool or paid CI runner. So
-  every piece is built and tested on a **local and CI cell** (kind or k3d) before any hosting is
-  bought, and every hosting cost is a founder decision listed
-  [below](#hosting-spend-for-the-founder-to-approve-later).
+- **Spend:** Cloudflare Workers for `web/` now; the two Hetzner VMs, Cloudflare R2 and the
+  second-region cold-store copy are approved **effective when the local-cell gate passes** (item
+  16). Until then every piece is built and tested on a **local and CI cell** (k3d or kind), and the
+  remaining hosting costs stay founder decisions, listed
+  [below](#hosting-spend-what-is-approved-and-what-is-still-to-decide).
 - **One architecture, small first** (DEC-967 item 6): "dont over engineer, but dont under
   engineer." See [One architecture](#one-architecture-from-one-node-to-many-cells).
 - **Cell #1: k3s on one or two Hetzner VMs in Ashburn, VA** (item 7); **the journal's Postgres in
   the cell under the CloudNativePG operator** (item 8); **object storage on Cloudflare R2**, off the
   VMs, behind a plain S3 endpoint and a lock check (item 9); **MinIO only as an optional cache**
-  (item 10). The VMs and R2 still need the founder's spend approval (H1, H3).
+  (item 10). The VMs and R2 are approved, effective at the local-cell gate (item 16).
+- **Real orders through the founder's own Robinhood account from cell #1** (item 15), and **users
+  reach the API from their own code and their own agents** (items 13 and 17).
 
 ## One architecture, from one node to many cells
 
@@ -205,6 +206,7 @@ protection), then the runtime.
 | A1 | **E21-31** (SC) | The API server process: HTTP transport over `mandate-api`'s contract, the session and authorization stack, tenant-scoped reads, probes, drain, a loopback or pod-local bind behind the cell's one ingress (§9), and no secret in its environment (DEC-822 item 4). It serves each E10-10 route as that route's story lands; it adds no route of its own | `mandate-api`, `mandate-authn`, `mandate-identity`, `mandate-identity-seal`, `mandate-identity-system`, `mandate-passkey`, `mandate-tenant`, `mandate-audit`, `mandate-approval`, `mandate-connections`, `mandate-journal-pg`, `mandate-process` | `mandate-api-server` (SC) |
 | A2 | E10-10 to E10-14 (exist) | The routes themselves, in their lanes (L1, L2) | as their rows say | — |
 | A3 | **E21-45** | The API as the public interface: user tokens, the published OpenAPI per version, a generated SDK, rate limits, and a contract test that the web app uses only documented operations | A1, `mandate-identity`, `mandate-authn` | — |
+| A4 | **E21-49** (SC), with E10-6, E10-8 and E10-14 (exist) | Owner-connected agents as a first-class caller (DEC-967 item 17): the MCP server as a thin adapter over the published API, the client token's closed scope, served from the cell | A1, A3, `mandate-identity`, `mandate-authn` | the MCP server's crate, named by E10-6 |
 
 A1 needs an HTTP server dependency, which no crate has today: the founder's row D-1.
 
@@ -362,7 +364,7 @@ flowchart LR
     G0 --> G1
     P3 --> B1 --> C1b
     B1 & A1 & V2 --> B2
-    A1 --> A3
+    A1 --> A3 --> A4["A4 E21-49 owners' agents over MCP"]
     K1 --> G1
     P3 --> P4
     D1 --> P4
@@ -375,7 +377,7 @@ flowchart LR
   and its CI half, M1's check over what exists, G0's journal spec change. None needs another lane.
 - **Wave 1**: P2 and P3 after P1; A1 once the HTTP dependency (D-1) is approved and E10-10's first
   routes are on `main`; V2 after V1; D1 after P1 and K1; O2 after O1; R2 after R1; S2 after S1 and K1; M2 now (it needs no other lane); G1 after G0 and K1; B1 after P3.
-- **Wave 2** also: B2 after B1, A1 and V2; A3 after A1.
+- **Wave 2** also: B2 after B1, A1 and V2; A3 after A1; A4 after A3.
 - **Wave 3:** B3 once B1, B2, R2, S1 and S2 are green and H1 (both VMs) and H3 are approved.
 - **Wave 2**: P4 after P3 and D1; V3 after V2 and P3; O3 after O2 and K1; O4 after P3; C1's drills
   as each process image lands.
@@ -389,9 +391,10 @@ What the lanes need from each other is small on purpose: `mandate-process` (P1) 
 four lanes import, so it lands first and its interface is reviewed before P3, A1, V2 and D1 build
 on it.
 
-## Hosting spend for the founder to approve later
+## Hosting spend: what is approved and what is still to decide
 
-None of these is approved (DEC-967 item 3). Each is asked only when its row's trigger is reached.
+H1, H3 and L-2 are approved, effective when the local-cell gate passes (DEC-967 item 16); the
+founder orders them. The rest are not approved, and each is asked only when its trigger comes.
 Costs are **rough monthly list prices in USD at the smallest useful size, as the recording agent
 knows them; re-check each at decision time**. They are not quotes. The infrastructure design's
 cost model (§10) is the formula; these are its first inputs.
@@ -399,9 +402,9 @@ cost model (§10) is the formula; these are its first inputs.
 | ID | Decision | Trigger | Options, rough cost per month |
 |---|---|---|---|
 | H0 | Does the demo host (DEC-822, a Hetzner CX22) keep running after the 2026-10-26 demo? It is a dev and demo convenience now (DEC-967 item 6) | The demo ends | Keep it, about $5 to $7; or retire it once cell #1 runs |
-| H1 | **Cell #1's VMs: k3s on one or two Hetzner Cloud VMs in Ashburn, VA** (DEC-967 item 7; DEC-434 items 13 and 19) | The local-cell gate | Confirm at order time which server types Ashburn offers: as the recording agent knows it, Hetzner's US locations offer the shared AMD (CPX) and dedicated (CCX) lines, and the cheapest shared Intel line (CX, the demo host's CX22) is EU-only. One CPX31 (4 vCPU, 8 GB): about $15 to $20; two: about $30 to $40. Two CPX21 (3 vCPU, 4 GB) are cheaper, about $18 to $25, but tight for Postgres, OpenBao, Prometheus and the processes. Plus volumes, about $0.05 per GB (40 GB per node: about $2 each), and one primary IPv4 per VM, under $1 each. US locations include less traffic than the EU's; the cell's traffic is small |
+| H1 | **Approved at the gate (item 16): cell #1's VMs, k3s on two Hetzner Cloud VMs in Ashburn, VA** (DEC-967 item 7; DEC-434 items 13 and 19) | The local-cell gate | Confirm at order time which server types Ashburn offers: as the recording agent knows it, Hetzner's US locations offer the shared AMD (CPX) and dedicated (CCX) lines, and the cheapest shared Intel line (CX, the demo host's CX22) is EU-only. One CPX31 (4 vCPU, 8 GB): about $15 to $20; two: about $30 to $40. Two CPX21 (3 vCPU, 4 GB) are cheaper, about $18 to $25, but tight for Postgres, OpenBao, Prometheus and the processes. Plus volumes, about $0.05 per GB (40 GB per node: about $2 each), and one primary IPv4 per VM, under $1 each. US locations include less traffic than the EU's; the cell's traffic is small |
 | H2 | The journal's Postgres (DEC-434 item 15) | — | **Decided as relayed** (DEC-967 item 8): in the cell under CloudNativePG, so no separate spend; it runs on H1's VMs and archives to H3 |
-| H3 | **Object storage: Cloudflare R2**, location hint eastern North America (DEC-967 item 9) | The local-cell gate, and S1's check against R2 passing | Storage about $0.015 per GB-month after a 10 GB free tier, no egress fee, operations about $4.50 per million writes and $0.36 per million reads after their free tiers: about **$0 to $2** at cell #1's scale (a few GB of WAL, backups and artifacts). Grows with records kept six years (§4.5) |
+| H3 | **Approved at the gate (item 16): object storage on Cloudflare R2**, location hint eastern North America (DEC-967 item 9) | The local-cell gate, and S1's check against R2 passing | Storage about $0.015 per GB-month after a 10 GB free tier, no egress fee, operations about $4.50 per million writes and $0.36 per million reads after their free tiers: about **$0 to $2** at cell #1's scale (a few GB of WAL, backups and artifacts). Grows with records kept six years (§4.5) |
 | H3b | Fallback for the cold store only, if S1 finds R2's locks weaker than journal spec §6.2 needs: **Backblaze B2** with standard S3 Object Lock in compliance mode | S1's finding | About $6 per TB-month, first 10 GB free; at cell #1's scale about $0 to $1. Recorded as its own DEC when taken |
 | H4 | Key management for OpenBao's auto-unseal (DEC-434 item 14, §5.2) | H1 | Hetzner has no key service. Options: a cloud key service elsewhere, about $1 to $5; or a manual unseal by the founder after every vault restart, which costs nothing and adds a step after every node reboot |
 | H5 | Container registry for signed images | R2 reaches a hosted cell | Free for public images on the repository's host; a private registry about $0 to $20 |
@@ -409,7 +412,7 @@ cost model (§10) is the formula; these are its first inputs.
 | H7 | Larger CI runners, if the cell job cannot stay under ten minutes on standard runners by sharding (DEC-464) | C1 | About $0.01 to $0.05 per runner-minute: a few dollars to tens of dollars a month at today's PR rate |
 | H8 | A hardware signing key for ES-17, if the founder holds none | R2 reaches a hosted cell | One-off, about $50 to $90 |
 | L-1 | Live for anyone but the founder's own Robinhood account (other users; Alpaca live) | The Phase 2 gate, counsel and the penetration test | No hosting cost of its own. The founder's own account is decided (DEC-967 item 15) |
-| L-2 | The second-region copy of the cold store that journal §6.2 requires before live capital | Before B3 | At cell #1's scale about $0 to $1: a second R2 bucket in another location hint, or B2 |
+| L-2 | **Approved at the gate (item 16):** the second-region copy of the cold store that journal §6.2 requires before live capital | Before B3 | At cell #1's scale about $0 to $1: a second R2 bucket in another location hint, or B2 |
 | H10 | Where the control plane's first slice runs (DEC-440 item 16) | G1 reaches a hosted cell | On cell #1's VMs as a separate release, namespace, database and keys: no extra cost, but not the separate accounts item 16 recommends. On its own small VM: about $8 to $20 |
 | H9 | The production cells, a second region, a standby in a second failure domain, the global control plane | The Phase 2 gate, counsel and the penetration test | Not estimated here; roughly double H1 to H3 per region, plus the control plane (DEC-440 item 16) |
 

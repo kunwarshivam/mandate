@@ -2558,11 +2558,13 @@ v0.2 fixes ([DEC-434](decisions/DEC-434.md) items 21 to 24).
   executor implementation (#174); and §14 and DEC-434 item 12 say once whether E21 is in the epic
   overview.
 
-Rows E21-28 to E21-48 come from the [managed-cells plan](tasks/managed-cells.md)
-([DEC-967](decisions/DEC-967.md), Proposed until the founder confirms the relayed answers). Each
-names its lane. None buys hosting, and none edits `crates/mandate-paper/src/lib.rs` or
-`crates/mandate-shell/src/control.rs`, `adapters.rs` or `paper/` before R0 closes (DEC-967 item 2).
-Every environment they build is paper or a venue demo; no image enables `live` (ES-23, OPS-5).
+Rows E21-28 to E21-49 come from the [managed-cells plan](tasks/managed-cells.md)
+([DEC-967](decisions/DEC-967.md), Accepted by the founder). Each names its lane. None buys
+hosting (the founder orders it at the local-cell gate, item 16), and none edits
+`crates/mandate-paper/src/lib.rs` or `crates/mandate-shell/src/control.rs`, `adapters.rs` or
+`paper/` before R0 closes (item 2). Every environment they build is paper or a venue demo, except
+the founder's own Robinhood account in cell #1 (item 15, E21-48); only that executor's image
+enables `live` (ES-23, OPS-5).
 
 - **E21-28 (Proposed, M8; SC; lane P1)** As an operator, I want one process lifecycle every
   long-running process shares, so that liveness, readiness, drain and the crash-loop bound mean the
@@ -2594,7 +2596,7 @@ Every environment they build is paper or a venue demo; no image enables `live` (
   recovers it from the journal with zero duplicates; a process that is not ready takes no opening
   but still applies the kill switch and, once replayed, risk exits; the runtime has no broker
   credential and no route to a broker; the executor's broker in CI is a fixture, never a broker
-  host; and each image is built without the `live` feature.
+  host; and each image is built without the `live` feature, except the one E21-48 adds.
 - **E21-31 (Proposed, M8; SC; lane A1)** As a workspace member, I want the workspace API served by
   its own process in the cell, so that the web app and the CLI reach my deployment the same way
   (design §3.1, §9; the API server, "A2" in `deploy/README.md`). *Accepted when:* a new crate
@@ -2658,7 +2660,7 @@ Every environment they build is paper or a venue demo; no image enables `live` (
   the data plane accepts no inbound connection; migrations run as a Job under the migration-owner
   role before processes roll, never at start (OPS-13); secrets arrive only as mounted files, never
   environment variables (DEC-822 item 4); `helm lint`, a schema check and a test that renders the
-  chart and asserts each of these pass in CI; `environment` accepts only `paper` or `backtest`; and
+  chart and asserts each of these pass in CI; `environment` accepts only `paper` or `backtest`, except the `live` Robinhood connection of E21-48 (DEC-967 item 15); and
   no template or crate uses a k3s-only, Hetzner-only or cloud-only API, the storage class, the node
   count and the ingress (a `cloudflared` pod) being values, shown by rendering the same chart for
   k3d, k3s and a managed Kubernetes values file (DEC-967 item 6).
@@ -2799,6 +2801,16 @@ Every environment they build is paper or a venue demo; no image enables `live` (
   and the reverse (ES-23); no code differs from the drilled path; and the first real order is
   placed by the founder's confirmation, never by a test, a CI job or an agent (rule 8). Live for
   any other user stays blocked on the Phase 2 gate, counsel and the penetration test.
+- **E21-49 (Proposed, M8; SC; lane A4; after E21-45, with E10-6, E10-8 and E10-14)** As an owner, I
+  want my own agent to work my workspace through the cell's API over MCP, so that my agents are a
+  first-class caller beside my code and the web app (DEC-967 item 17; DEC-141; workspace API spec
+  §1.2, §3.8). *Accepted when:* the MCP server runs in the cell as its own process and maps each
+  tool to exactly one operation of the published API (E21-45) under the client's token, with no
+  path of its own; E10-14's closed client scope holds at the HTTP layer and in the MCP layer, shown
+  by one route × scope matrix test run through both; a client request passes the same builder,
+  gate and autonomy rules as the owner's own and never changes the envelope (`AGENTS.md` rule 11);
+  every client call, reads included, is journaled with the `client` actor kind; revoking the client
+  fails its next call; and the server holds no broker credential and has no egress but the API.
 
 ## Won't (v1)
 
