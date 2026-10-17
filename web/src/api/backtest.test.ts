@@ -88,6 +88,21 @@ function onlyAdds(variant: Variant): boolean {
   });
 }
 
+/**
+ * Where a refusal may name: at or under a pointer the variant changed, so the decoder refused the
+ * variant for its own change and not for something else. The one widening is the state's
+ * conditionals (DEC-1001 item 5), which tie sibling members of `/backtest`: a variant that changes one
+ * of `state`, `refusal`, `report_ref` or `report` may be refused at another of them.
+ */
+const CONDITIONAL = ["/backtest/state", "/backtest/refusal", "/backtest/report_ref", "/backtest/report"];
+const atOrUnder = (path: string, pointer: string) => path === pointer || path.startsWith(`${pointer}/`);
+
+function refusedWhereChanged(path: string, variant: Variant): boolean {
+  const changed = [...Object.keys(variant.set ?? {}), ...(variant.remove ?? [])];
+  if (changed.some((pointer) => atOrUnder(path, pointer))) return true;
+  return changed.some((p) => CONDITIONAL.includes(p)) && CONDITIONAL.some((member) => path === member);
+}
+
 const outcome = (body: unknown) => {
   const decoded = backtestRead(body, "");
   return decoded.ok ? "ok" : `${decoded.issue.problem} ${decoded.issue.path}`;
@@ -106,8 +121,11 @@ describe("read-models/backtest as the schema states it (DEC-1001, DEC-2400)", ()
     expect(outcome(apply(EXAMPLE, variant))).toBe("ok");
   });
 
-  it.each(INVALID.filter((v) => !UNKNOWN_MEMBER_ONLY.includes(v.label)).map((v) => [v.label, v] as const))("refuses the invalid variant: %s", (_, variant) => {
-    expect(outcome(apply(EXAMPLE, variant))).not.toBe("ok");
+  it.each(INVALID.filter((v) => !UNKNOWN_MEMBER_ONLY.includes(v.label)).map((v) => [v.label, v] as const))("refuses the invalid variant, at what it changed: %s", (_, variant) => {
+    const decoded = backtestRead(apply(EXAMPLE, variant), "");
+    expect(decoded.ok).toBe(false);
+    if (decoded.ok) return;
+    expect(refusedWhereChanged(decoded.issue.path, variant), `${decoded.issue.problem} ${decoded.issue.path}`).toBe(true);
   });
 
   it.each(INVALID.filter((v) => UNKNOWN_MEMBER_ONLY.includes(v.label)).map((v) => [v.label, v] as const))("ignores the unknown member of: %s (spec §3.2)", (_, variant) => {
@@ -126,7 +144,9 @@ describe("read-models/backtest as the schema states it (DEC-1001, DEC-2400)", ()
     expect(outcome(apply(EXAMPLE, { label: "", set: { "/backtest/report/strategy/net_pnl": "120.50" } }))).toBe("not_canonical /backtest/report/strategy/net_pnl");
     expect(outcome(apply(EXAMPLE, { label: "", set: { "/backtest/report/decisions/count": 9007199254740992 } }))).toBe("wrong_type /backtest/report/decisions/count");
     expect(outcome(apply(EXAMPLE, { label: "", set: { "/backtest/report/decisions/rows/0/outputs_used": 1.5 } }))).toBe("wrong_type /backtest/report/decisions/rows/0/outputs_used");
-    expect(outcome(apply(EXAMPLE, { label: "", set: { "/backtest/report": null } }))).toBe("wrong_type /backtest/report");
+    expect(outcome(apply(EXAMPLE, { label: "", set: { "/backtest/report": null } }))).toBe("not_canonical /backtest/report");
+    expect(outcome(apply(EXAMPLE, { label: "", set: { "/backtest/refusal": "no_bars" } }))).toBe("not_canonical /backtest/refusal");
+    expect(outcome(apply(EXAMPLE, { label: "", set: { "/backtest/report/strategy/periods_per_year": 367 } }))).toBe("not_canonical /backtest/report/strategy/periods_per_year");
     expect(outcome(apply(EXAMPLE, { label: "", set: { "/backtest/report/instrument": "8CCAE427-5DD0-45B3-B5FE-7C0C3A8EE5C4" } }))).toBe("not_canonical /backtest/report/instrument");
     expect(outcome(apply(EXAMPLE, { label: "", set: { "/backtest/report/research_agent": "true" } }))).toBe("wrong_type /backtest/report/research_agent");
     expect(outcome(apply(EXAMPLE, { label: "", set: { "/backtest/report/decisions/rows/0/at": "2026-09-02T13:30:00Z" } }))).toBe("not_canonical /backtest/report/decisions/rows/0/at");

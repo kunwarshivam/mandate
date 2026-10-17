@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { AgentBacktests, BacktestReport, BacktestReportScreen } from "./backtest-report";
+import { AgentBacktests, BacktestReport, BacktestReportScreen, exactNumber, exactPercent, exactUsd } from "./backtest-report";
 import { type Backtest, backtestRead } from "@/api/backtest";
 import { type Fetch } from "@/api/client";
 import { createMockServer } from "@/api/mock-server";
@@ -140,8 +140,9 @@ describe("the backtest report (B2; DEC-1001, DEC-1003, DEC-2400)", () => {
     expect(within(rows).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Date", "Purpose", "Outcome", "Reason", "Decided by", "Quantity", "Limit", "Outputs used"]);
     const body = within(rows).getAllByRole("row").slice(1);
     expect(body).toHaveLength(9);
-    expect(cellsOf(body[0])).toEqual(["2026-09-01", "open", "submitted", "None", "rule:small_opening", "20", "$250.05", "1"]);
-    expect(cellsOf(body[1])).toEqual(["2026-09-02", "hold", "builder_hold", "at_or_above_target", "None", "None", "None", "1"]);
+    expect(body.map((r) => within(r).getByRole("rowheader").textContent)).toEqual(["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07", "2026-09-08", "2026-09-09"]);
+    expect(cellsOf(body[0])).toEqual(["open", "submitted", "None", "rule:small_opening", "20", "$250.05", "1"]);
+    expect(cellsOf(body[1])).toEqual(["hold", "builder_hold", "at_or_above_target", "None", "None", "None", "1"]);
     for (const code of ["open", "submitted", "rule:small_opening", "at_or_above_target"]) expect(within(rows).getAllByText(code)[0].tagName).toBe("CODE");
   });
 
@@ -156,12 +157,46 @@ describe("the backtest report (B2; DEC-1001, DEC-1003, DEC-2400)", () => {
     expect(placeholders()).toEqual(["[[LEGEND-HYPOTHETICAL]]", "[[NOTE-BACKTEST-MECHANICS]]", "[[NOTE-BACKTEST-LIMITS]]"]);
   });
 
-  it("shows only the disclosures a report names, the legend always first", () => {
+  it.each([
+    ["a research-agent report served with only the legend shows all three", true, ["[[LEGEND-HYPOTHETICAL]]", "[[NOTE-BACKTEST-MECHANICS]]", "[[NOTE-BACKTEST-LIMITS]]"]],
+    ["a pinned-universe report served with only the legend shows the legend and the limits note", false, ["[[LEGEND-HYPOTHETICAL]]", "[[NOTE-BACKTEST-LIMITS]]"]],
+  ] as const)("never shows fewer disclosures than DEC-1003 item 1 requires: %s", (_, research, shown) => {
     const body = structuredClone(EXAMPLE) as { backtest: { report: { disclosures: string[]; research_agent: boolean } } };
-    body.backtest.report.disclosures = ["NOTE-BACKTEST-LIMITS"];
-    body.backtest.report.research_agent = false;
+    body.backtest.report.disclosures = ["LEGEND-HYPOTHETICAL"];
+    body.backtest.report.research_agent = research;
     render(<BacktestReport backtest={decoded(body)} />);
-    expect(placeholders()).toEqual(["[[LEGEND-HYPOTHETICAL]]", "[[NOTE-BACKTEST-LIMITS]]"]);
+    expect(placeholders()).toEqual(shown);
+  });
+
+  it("shows a running or refused run with the legend alone: there is no report to note", () => {
+    const body = structuredClone(BACKTEST_FIXTURES[BACKTEST_IDS.btcRefused]);
+    render(<BacktestReport backtest={decoded(body)} />);
+    expect(placeholders()).toEqual(["[[LEGEND-HYPOTHETICAL]]"]);
+  });
+
+  it.each([
+    ["a loss", "-12.3", "loss", "\u2212$12.30 loss"],
+    ["no change", "0", "flat", "$0.00 no change"],
+    ["a gain", "42.18", "gain", "+$42.18 gain"],
+  ])("shows net P&L of %s with its direction, its word and the disclosure in its region", (_, pnl, direction, text) => {
+    render(<BacktestReport backtest={withStrategy({ net_pnl: pnl, total_return: "-0.00001" })} />);
+    const metrics = table("This version and buy and hold");
+    const row = rowNamed(metrics, /^Net P&L/);
+    const figure = row.querySelector("[data-direction]")!;
+    expect(figure).toHaveAttribute("data-direction", direction);
+    expect(figure.textContent).toBe(text);
+    const region = row.closest("section")!;
+    expect(region.contains(figure)).toBe(true);
+    expect(region.querySelector('[data-placeholder="performance"]')).toHaveTextContent("[[DISCLOSURE-PERFORMANCE]]");
+    expect(within(region).getByRole("button", { name: "Performance disclosure" })).toHaveAccessibleDescription("[[DISCLOSURE-PERFORMANCE]]");
+    expect(cellsOf(rowNamed(metrics, /^Total return/))[0]).toBe("\u22120.001%");
+  });
+
+  it("lets the decisions table scroll sideways as a named, focusable region", () => {
+    render(<BacktestReport backtest={decoded(EXAMPLE)} />);
+    const scroller = screen.getByRole("region", { name: "Each decision, scrolls sideways" });
+    expect(scroller).toHaveAttribute("tabindex", "0");
+    expect(within(scroller).getByRole("table", { name: "Each decision" })).toBeInTheDocument();
   });
 
   it("holds no thesis-quality figure, adjective, projection or expected figure, even when the served report carries one", () => {
@@ -213,6 +248,7 @@ describe("the backtest report over the workspace API (DEC-2400)", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "Backtest could not be read" })).toBeInTheDocument();
     expect(screen.getByText("/backtest/backtest_id")).toBeInTheDocument();
+    expect(screen.getByRole("alert").textContent, "the served id is not shown").not.toContain(BACKTEST_IDS.lmnRunning);
     expect(screen.queryByRole("table")).toBeNull();
   });
 
@@ -226,6 +262,7 @@ describe("the backtest report over the workspace API (DEC-2400)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Backtest could not be read" })).toBeInTheDocument();
     expect(screen.getByText("decimal_number")).toBeInTheDocument();
     expect(screen.getByText("/backtest/report/strategy/net_pnl")).toBeInTheDocument();
+    expect(screen.getByRole("alert").textContent).not.toContain("42.18");
   });
 });
 
@@ -267,3 +304,41 @@ describe("the backtest route (DEC-2400 item 3)", () => {
     for (const bad of ["/backtests", "/backtests/bt.1", `${href}/x`]) expect(demoScreen(bad), bad).toBeNull();
   });
 });
+
+describe("the exact formatters: a served decimal written out with no rounding (DEC-2400 item 6)", () => {
+  const PLACES_28 = "0.1234567890123456789012345678";
+  const WHOLE_29 = "78999999999999999999999999999";
+
+  it("keeps all 28 fractional places a decimal may have", () => {
+    expect(backtestDecimalAccepted(PLACES_28)).toBe(true);
+    expect(exactNumber(PLACES_28)).toBe(PLACES_28);
+    expect(exactUsd(PLACES_28)).toBe("$0.1234567890123456789012345678");
+    expect(exactPercent(PLACES_28)).toBe("12.34567890123456789012345678%");
+    expect(exactPercent(`-${PLACES_28}`)).toBe("\u221212.34567890123456789012345678%");
+  });
+
+  it("keeps a 29-digit whole part, grouped", () => {
+    expect(backtestDecimalAccepted(WHOLE_29)).toBe(true);
+    expect(exactNumber(WHOLE_29)).toBe("78,999,999,999,999,999,999,999,999,999");
+    expect(exactUsd(`-${WHOLE_29}.5`)).toBe("\u2212$78,999,999,999,999,999,999,999,999,999.50");
+    expect(exactPercent(`${WHOLE_29}.1234567890123456789012345678`)).toBe("7899999999999999999999999999912.34567890123456789012345678%");
+  });
+
+  it("moves the point exactly at the small end, with the true minus sign and no negative zero", () => {
+    expect(exactPercent("-0.0001")).toBe("\u22120.01%");
+    expect(exactPercent("-0.00001")).toBe("\u22120.001%");
+    expect(exactPercent("0")).toBe("0%");
+    expect(exactPercent("0.5")).toBe("50%");
+    expect(exactPercent("2")).toBe("200%");
+    expect(exactUsd("0.01")).toBe("$0.01");
+    expect(exactUsd("1234")).toBe("$1,234.00");
+    expect(exactNumber("-0.5")).toBe("\u22120.5");
+  });
+});
+
+/** The decoder takes the value as a metric, so the formatters are tested at the precision the API may serve. */
+function backtestDecimalAccepted(value: string): boolean {
+  const body = structuredClone(EXAMPLE) as { backtest: { report: { strategy: Record<string, unknown> } } };
+  body.backtest.report.strategy.turnover = value;
+  return backtestRead(body, "").ok;
+}

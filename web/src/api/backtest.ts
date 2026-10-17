@@ -184,7 +184,7 @@ const count = integer;
 const periodsPerYear: Decoder<number> = (value, path) => {
   const read = integer(value, path);
   if (!read.ok) return read;
-  return read.value >= 1 && read.value <= 366 ? read : fail(path, "wrong_type", String(read.value));
+  return read.value >= 1 && read.value <= 366 ? read : fail(path, "not_canonical", String(read.value));
 };
 
 /** JSON Pointer escaping (RFC 6901). */
@@ -293,7 +293,10 @@ const served = object<Served>({
   report: nullable(report),
 });
 
-/** The schema's three conditionals: the state decides which of the three members are present. */
+/**
+ * The schema's three conditionals: the state decides which of the three members are present. A member
+ * present or absent against its state is `not_canonical` at that member: well typed, wrong for the state.
+ */
 const backtest: Decoder<Backtest> = (value, path) => {
   const read = served(value, path);
   if (!read.ok) return read;
@@ -302,15 +305,15 @@ const backtest: Decoder<Backtest> = (value, path) => {
   const present = (member: "refusal" | "report_ref" | "report", want: boolean) => (b[member] === null) === want;
   for (const member of ["refusal", "report_ref", "report"] as const) {
     const want = b.state === "completed" ? member !== "refusal" : b.state === "refused" && member === "refusal";
-    if (present(member, want)) return fail(`${path}/${member}`, "wrong_type");
+    if (present(member, want)) return fail(`${path}/${member}`, "not_canonical");
   }
   switch (b.state) {
     case "running":
       return { ok: true, value: { ...base, state: "running", refusal: null, report_ref: null, report: null } };
     case "refused":
-      return b.refusal === null ? fail(`${path}/refusal`, "wrong_type") : { ok: true, value: { ...base, state: "refused", refusal: b.refusal, report_ref: null, report: null } };
+      return b.refusal === null ? fail(`${path}/refusal`, "not_canonical") : { ok: true, value: { ...base, state: "refused", refusal: b.refusal, report_ref: null, report: null } };
     case "completed":
-      return b.report_ref === null || b.report === null ? fail(`${path}/report`, "wrong_type") : { ok: true, value: { ...base, state: "completed", refusal: null, report_ref: b.report_ref, report: b.report } };
+      return b.report_ref === null || b.report === null ? fail(`${path}/report`, "not_canonical") : { ok: true, value: { ...base, state: "completed", refusal: null, report_ref: b.report_ref, report: b.report } };
     default: {
       const unhandled: never = b.state;
       throw new Error(`unhandled state ${String(unhandled)}`);
@@ -335,7 +338,7 @@ function invalid(issue: DecodeIssue): BacktestRead {
 /** The answer is for the id asked, or it is refused: a screen never shows another backtest's report as this one. */
 function forId(read: { backtest: Backtest }, backtestId: string): BacktestRead {
   const answered = read.backtest.backtest_id;
-  return answered === backtestId ? { ok: true, backtest: read.backtest } : invalid({ path: "/backtest/backtest_id", problem: "wrong_type", value: answered, allowed: null });
+  return answered === backtestId ? { ok: true, backtest: read.backtest } : invalid({ path: "/backtest/backtest_id", problem: "not_canonical", value: answered, allowed: null });
 }
 
 /** Reads one backtest over the API; an answer for another id is refused. */
