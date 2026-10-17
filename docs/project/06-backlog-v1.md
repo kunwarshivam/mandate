@@ -113,6 +113,13 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `xtask/src`, as a shard within DEC-464's ten-minute budget, and fails on any missed mutant; the
   mutants of `xtask` code that predates the job are either caught or listed, each with its reason,
   in a follow-up story, so the job starts green.
+- **E1-8 (Should)** As an engineer, I want parallel PRs not to collide on DEC numbers or on shared
+  lists, so that about twenty lanes can land at once without a merge conflict or an extra CI cycle
+  each ([DEC-2600](decisions/DEC-2600.md), claim #1494).
+  *Accepted when:* DEC numbers come from per-category ranges of 100 from DEC-2000; a check run by
+  both CI paths refuses two decision files with one number; the registry's cargo "Used by" lists
+  are derived from `cargo metadata`; CODEOWNERS' crate lines are checked sorted; and no check is
+  weaker.
 
 ### E2 Market data
 
