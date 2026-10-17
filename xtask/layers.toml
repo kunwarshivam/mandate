@@ -204,6 +204,30 @@ safety_critical = true
 pure = true
 allowed_external = ["base64", "ring", "serde", "serde_json", "thiserror"]
 
+# The cell's control-plane agent (E20-3, DEC-981; control-plane design §3, CP-4, CP-5): the closed
+# inbound message set and its signature checks, handed to workspace control services through a port
+# this crate declares and they implement. It reaches no journal, runtime, executor, mandate registry
+# or vault crate, directly or through any chain, so it can never append, hold a writer epoch, place
+# an order, or read a credential.
+[crates.mandate-cp-agent]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["ring"]
+forbidden_internal = [
+    "mandate-journal",
+    "mandate-journal-pg",
+    "mandate-journal-cold",
+    "mandate-spec",
+    "mandate-runtime",
+    "mandate-executor",
+    "mandate-connections",
+    "mandate-vault-local",
+    "mandate-shell",
+    "mandate-agentd",
+    "mandate-paper",
+]
+
 [crates.mandate-liquidity]
 layer = 1
 safety_critical = true
