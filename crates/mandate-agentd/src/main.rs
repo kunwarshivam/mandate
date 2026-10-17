@@ -10,6 +10,12 @@
 )]
 //! `mandate-agentd`: one deployment's long-running process (E21-2, DEC-968).
 //!
+//! Before anything else it runs the start-up signature check (E21-35, DEC-971, OPS-15): outside
+//! dev and CI it refuses unless its executable's signature verifies against a compiled-in release
+//! key, and it refuses a signature no trusted key verifies in every tier, printing only the
+//! refusal's generic code. The digest the check hands back is the `actor.build` its hosts journal
+//! once they journal (E21-30).
+//!
 //! Slice 1 hosts only [`IdleHost`] over an in-memory journal, behind `--fixture`; without it the
 //! process refuses, because no deployment's production cycle is wired in yet (DEC-968 item 6).
 //! It prints `health <addr>` once it is listening and SIGTERM is handled, then `metrics <addr>` for
@@ -38,6 +44,10 @@ const STREAMS: [&str; 2] = ["agent:fixture:agent_a", "acct:fixture:paper_a"];
 const TICK: Duration = Duration::from_millis(10);
 
 fn main() -> ExitCode {
+    if let Err(refused) = mandate_release::startup::check_running() {
+        eprintln!("{}", refused.code());
+        return ExitCode::from(2);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.iter().any(|arg| arg == "--fixture") {
         eprintln!("deployment_host_not_wired");
