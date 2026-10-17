@@ -98,9 +98,13 @@ function onlyAdds(variant: Variant): boolean {
 const CONDITIONAL = ["/backtest/state", "/backtest/refusal", "/backtest/report_ref", "/backtest/report"];
 const atOrUnder = (path: string, pointer: string) => path === pointer || path.startsWith(`${pointer}/`);
 
+/** A failure inside a reason map is named `…/*`, never by its served key (DEC-2400 item 1). */
+const masked = (pointer: string) => MAPS.find((map) => pointer.startsWith(`${map}/`)) ?? null;
+
 function refusedWhereChanged(path: string, variant: Variant): boolean {
   const changed = [...Object.keys(variant.set ?? {}), ...(variant.remove ?? [])];
   if (changed.some((pointer) => atOrUnder(path, pointer))) return true;
+  if (changed.some((pointer) => masked(pointer) !== null && path === `${masked(pointer)}/*`)) return true;
   return changed.some((p) => CONDITIONAL.includes(p)) && CONDITIONAL.some((member) => path === member);
 }
 

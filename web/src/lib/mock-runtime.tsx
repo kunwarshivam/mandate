@@ -524,20 +524,23 @@ export function RuntimeProvider({
     [initial.scenario, reachable, silent, recordAfterMs, patchSetUp],
   );
 
-  /** Step 2, as the API judges it (§5.1): the version must exist, and a risk-increasing one needs the step-up. */
+  /**
+   * Step 2, as the API judges it (§5.1): a version not created is refused first, and a risk-increasing
+   * one needs the step-up, which the in-memory journal takes from the passkey check (DEC-2401 item 3).
+   */
   const confirmVersion = useCallback(
     (setUpId: string, record: ConfirmRecord, stepUp: ContentRef | null) => {
       const setUp = setUpsRef.current.find((s) => s.id === setUpId);
       if (!setUp) return;
       const confirmed = (patch: Partial<ConfirmStep>) => patchSetUp(setUpId, (s) => ({ ...s, confirmed: s.confirmed ? { ...s.confirmed, ...patch } : null }));
-      /** What the journal holds when the confirm arrives: a version not yet recorded is not found. */
+      /** What the journal holds when the confirm arrives: a version not yet recorded was not created. */
       const created = setUp.created;
       patchSetUp(setUpId, (s) => ({ ...s, confirmed: { phase: "sent", sentAt: nowRef.current, record, stepUp } }));
       window.setTimeout(() => {
         const at = nowRef.current;
+        if (created.phase !== "recorded") return confirmed({ phase: "undelivered", reason: "not_created" });
         if (!reachable) return confirmed({ phase: "undelivered", reason: "unreachable" });
         if (silent) return confirmed({ phase: "unknown" });
-        if (created.phase !== "recorded") return confirmed({ phase: "undelivered", reason: "not_found" });
         if (created.classification === "risk_increasing" && stepUp === null) return confirmed({ phase: "undelivered", reason: "step_up_required" });
         confirmed({ phase: "recorded", recordedAt: at });
       }, recordAfterMs);
@@ -557,9 +560,9 @@ export function RuntimeProvider({
       patchSetUp(setUpId, (s) => ({ ...s, deployed: { phase: "sent", sentAt: nowRef.current, record } }));
       window.setTimeout(() => {
         const at = nowRef.current;
+        if (!confirmedAtSend) return deployed({ phase: "undelivered", reason: "not_confirmed" });
         if (!reachable) return deployed({ phase: "undelivered", reason: "unreachable" });
         if (silent) return deployed({ phase: "unknown" });
-        if (!confirmedAtSend) return deployed({ phase: "undelivered", reason: "not_confirmed" });
         const check = checkDeploy(wsRef.current, draft.request.mandate);
         if (!check.ok) return deployed({ phase: "rejected", recordedAt: at, reason: check.reason, ...(check.rule ? { rule: check.rule } : {}) });
         change((current) => deployAgent(current, draft.request, at, draft.seed).ws);

@@ -332,11 +332,24 @@ describe("the runtime's set-up: create the version, confirm it, deploy it (DEC-2
     });
     act(() => probed().confirmVersion(id, CONFIRM_RECORD, digest(only().version)));
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
-    expect(only().confirmed).toMatchObject({ phase: "undelivered", reason: "not_found" });
+    expect(only().confirmed).toMatchObject({ phase: "undelivered", reason: "not_created" });
     act(() => probed().deployVersion(id, DEPLOY_RECORD));
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
     expect(only().deployed).toMatchObject({ phase: "undelivered", reason: "not_confirmed" });
     expect(probed().ws.agents.some((a) => a.label === "Agent 4")).toBe(false);
+  });
+
+  it.each(["unreachable", "result-unknown"] as const)("refuses a confirm and a deployment whose step before is not recorded first, even in the %s scenario", (scenario) => {
+    mount(scenario);
+    let id = "";
+    act(() => {
+      id = probed().createVersion(newAgent(probed().ws)).id;
+    });
+    act(() => probed().confirmVersion(id, CONFIRM_RECORD, digest(only().version)));
+    act(() => probed().deployVersion(id, DEPLOY_RECORD));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(only().confirmed).toMatchObject({ phase: "undelivered", reason: "not_created" });
+    expect(only().deployed).toMatchObject({ phase: "undelivered", reason: "not_confirmed" });
   });
 
   it("refuses a risk-increasing confirm sent without a passkey check, as the API does (step_up_required)", () => {

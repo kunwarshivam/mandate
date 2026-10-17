@@ -3,8 +3,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
-import { prepareApprovalResponse, prepareConfirm, prepareOwnerCommand } from "@/api/commands";
-import { confirmAccepted } from "@/api/confirm";
+import { prepareApprovalResponse, prepareOwnerCommand } from "@/api/commands";
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
@@ -18,7 +17,6 @@ import {
   type Command,
   type CommandKind,
   type CommandRecord,
-  type ConfirmStep,
   type MandateChangeRequest,
   type Runtime,
   RuntimeContext,
@@ -31,8 +29,7 @@ const SENDS = 4;
 const STATUS_READS = 30;
 const SETTLED: ReadonlySet<CommandPhase> = new Set(["applied", "refused", "ended"]);
 
-/** `body` is the 2xx answer's, for a command whose 202 says more (§5.1); `null` when only a problem said it was recorded. */
-type Delivery = { phase: "recorded"; eventId: string; body: unknown } | { phase: "undelivered"; reason: string } | { phase: "unknown"; eventId: string | null };
+type Delivery = { phase: "recorded"; eventId: string } | { phase: "undelivered"; reason: string } | { phase: "unknown"; eventId: string | null };
 
 const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 const later = (ms: number, iso: Iso): Iso => new Date(Date.parse(iso) + ms).toISOString();
@@ -170,11 +167,11 @@ export function ApiRuntimeProvider({
       let eventId: string | null = null;
       for (let attempt = 0; attempt < SENDS; attempt += 1) {
         const outcome = await client.send(command);
-        if (outcome.ok) return { phase: "recorded", eventId: outcome.accepted.event_id, body: outcome.body };
+        if (outcome.ok) return { phase: "recorded", eventId: outcome.accepted.event_id };
         const { error } = outcome;
         if (error.effect === "none") return { phase: "undelivered", reason: error.code };
         eventId = error.event_id ?? eventId;
-        if (error.effect === "recorded" && eventId) return { phase: "recorded", eventId, body: null };
+        if (error.effect === "recorded" && eventId) return { phase: "recorded", eventId };
         if (!error.retryable) break;
         await wait(retryMs * 2 ** attempt);
       }
@@ -292,36 +289,21 @@ export function ApiRuntimeProvider({
   }, [patchSetUp]);
 
   /**
-   * Step 2, `POST /mandate-versions/{hash}/confirm` (§5.1), sent as its schema states it. The server
-   * judges the version, its base and the step-up; a 202 is recorded only once it decodes as
-   * `confirm-accepted`, and one that does not is unknown.
+   * Step 2, `POST /mandate-versions/{hash}/confirm` (§5.1), is not sent either: its `screen_digest` and
+   * `classification_shown` are the served `GET .../confirmation`'s, which this client does not read yet,
+   * and a digest computed here would claim a screen the server never served. A version not created is
+   * refused first; otherwise the step answers `not_sent`. No step-up is recorded, since none was sent
+   * (DEC-2401 item 4).
    */
   const confirmVersion = useCallback<Runtime["confirmVersion"]>(
-    (setUpId, record, stepUp) => {
+    (setUpId, record) => {
       const setUp = setUpsRef.current.find((s) => s.id === setUpId);
       if (!setUp) return;
-      const confirmed = (patch: Partial<ConfirmStep>) => patchSetUp(setUpId, (s) => ({ ...s, confirmed: s.confirmed ? { ...s.confirmed, ...patch } : null }));
-      patchSetUp(setUpId, (s) => ({ ...s, confirmed: { phase: "sent", sentAt: nowRef.current, record, stepUp } }));
-      const prepared = prepareConfirm(client, { version: setUp.version, agentId: null, base: setUp.created.base, record });
-      void (async () => {
-        const delivered = await deliver(prepared);
-        if (!mounted.current) return;
-        if (delivered.phase === "undelivered") return confirmed({ phase: "undelivered", reason: delivered.reason });
-        if (delivered.phase === "unknown") {
-          confirmed({ phase: "unknown" });
-          if (delivered.eventId) void follow(delivered.eventId);
-          return;
-        }
-        const accepted = confirmAccepted(delivered.body, "");
-        if (!accepted.ok) {
-          confirmed({ phase: "unknown" });
-          void follow(delivered.eventId);
-          return;
-        }
-        confirmed({ phase: "recorded", recordedAt: nowRef.current, classification: accepted.value.classification, applies: accepted.value.applies });
-      })();
+      const reason = setUp.created.phase === "recorded" ? "not_sent" : "not_created";
+      patchSetUp(setUpId, (s) => ({ ...s, confirmed: { phase: "sent", sentAt: nowRef.current, record, stepUp: null } }));
+      window.setTimeout(() => patchSetUp(setUpId, (s) => ({ ...s, confirmed: s.confirmed ? { ...s.confirmed, phase: "undelivered", reason } : null })), 0);
     },
-    [client, deliver, follow, patchSetUp],
+    [patchSetUp],
   );
 
   /** Step 3 (`POST /agents`) has no request schema yet either: not sent, and no agent exists. */

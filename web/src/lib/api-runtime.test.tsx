@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiRuntimeProvider } from "./api-runtime";
-import { type ConfirmRecord, type Runtime, useRuntime } from "./mock-runtime";
+import { type Runtime, useRuntime } from "./mock-runtime";
 import { type Fetch } from "@/api/client";
 import { createMockServer } from "@/api/mock-server";
 import type { SessionKeeper, SessionState } from "@/api/session";
@@ -256,41 +256,22 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     expect(current().backtestFor(agent.mandate_version)).toBeNull();
   });
 
-  /** A set-up whose version the test confirms directly: the screen never offers it over the API until step 1 can be sent. */
-  async function confirmOverApi(record: ConfirmRecord, wrap?: (fetch: Fetch) => Fetch) {
-    const mounted = mount("approvals", wrap);
+  it("sends no confirm until the served confirmation can be read: a version not created is refused first, and no step-up is recorded", async () => {
+    const { posts } = mount();
     await ready();
     const agent = buildWorkspace("approvals").agents[0];
     let id = "";
     act(() => {
       id = current().createVersion({ mandate: agent.mandate, provenance: agent.provenance }).id;
     });
-    const version = current().setUps.at(-1)!.version;
-    act(() => current().confirmVersion(id, record, confirmStepUpDigest(version, null, null)));
-    return { ...mounted, id, version, setUp: () => current().setUps.find((s) => s.id === id)! };
-  }
-
-  it("confirms per spec §5.1 with the schema's body, and a risk-increasing confirm the API answers step_up_required is not recorded", async () => {
-    const { posts, setUp, version } = await confirmOverApi(CONFIRM_RECORD);
-    expect(setUp().confirmed).toMatchObject({ phase: "sent", record: CONFIRM_RECORD });
-    await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "undelivered", reason: "step_up_required" }));
-    expect(posts()).toHaveLength(1);
-    expect(new URL(posts()[0].url).pathname).toBe(`/v1/workspaces/${WS}/mandate-versions/${encodeURIComponent(version)}/confirm`);
-    expect(JSON.parse(posts()[0].body ?? "{}")).toMatchObject({ agent_id: null, base_version: null, confirmed_paths: CONFIRM_RECORD.paths, classification_shown: "risk_increasing", step_up: null });
-  });
-
-  it("records a confirm the API accepts, with the server's classification and when it applies, decoded as confirm-accepted", async () => {
-    const { setUp } = await confirmOverApi({ ...CONFIRM_RECORD, classification: "neutral" });
-    await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "recorded", classification: "neutral", applies: "now" }));
-    expect(setUp().confirmed?.recordedAt).toBeDefined();
-  });
-
-  it("calls a confirm unknown, never recorded, when its 202 does not decode as confirm-accepted", async () => {
-    const generic: (fetch: Fetch) => Fetch = (fetch) => async (input, init) =>
-      init.method === "POST" && input.endsWith("/confirm") ? new Response(JSON.stringify({ command_id: "01JBH3BTZ8K2M4N6P8R0S2T4V6", phase: "recorded", step_up_status: null }), { status: 202 }) : fetch(input, init);
-    const { setUp } = await confirmOverApi({ ...CONFIRM_RECORD, classification: "neutral" }, generic);
-    await waitFor(() => expect(setUp().confirmed?.phase).toBe("unknown"));
-    expect(setUp().confirmed?.recordedAt).toBeUndefined();
+    const setUp = () => current().setUps.find((s) => s.id === id)!;
+    await waitFor(() => expect(setUp().created.phase).toBe("undelivered"));
+    act(() => current().confirmVersion(id, CONFIRM_RECORD, confirmStepUpDigest(setUp().version, null, null)));
+    expect(setUp().confirmed).toMatchObject({ phase: "sent", record: CONFIRM_RECORD, stepUp: null });
+    await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "undelivered", reason: "not_created", stepUp: null }));
+    act(() => current().confirmVersion("set-unknown", CONFIRM_RECORD, null));
+    expect(current().setUps.some((s) => s.id === "set-unknown")).toBe(false);
+    expect(posts()).toHaveLength(0);
   });
 
   it("writes nothing to browser storage", async () => {

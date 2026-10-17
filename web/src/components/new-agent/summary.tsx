@@ -84,9 +84,12 @@ export function summaryLines(draft: Draft, version: ContentRef): string[] {
   ];
 }
 
-/** Every path the summary shows, each one the owner confirms (journal rule 18), in order and once. */
+/**
+ * Every path the summary shows with a value, each one the owner confirms (journal rule 18), in order and
+ * once. A row with no provenance ("None chosen yet", "Not set yet") holds no value, so it is not confirmed.
+ */
 export function confirmedPaths(draft: Draft): string[] {
-  return [...new Set(draft.sections.flatMap((s) => s.fields.map((f) => f.path)))];
+  return [...new Set(draft.sections.flatMap((s) => s.fields.filter((f) => f.provenance !== null).map((f) => f.path)))];
 }
 
 /** The confirmation the first passkey check authorizes, in words. */

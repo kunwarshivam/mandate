@@ -7,9 +7,9 @@
  * does not answer, and `result-unknown` as commands recorded whose answer is lost, so a later status
  * poll finds them (spec §5.5). A status is `recorded` when first read and `applied` after; a recorded
  * pause pauses its agent and a recorded Skip skips its request, so a screen can follow a command to its
- * effect. It refuses an approve without step-up as `step_up_required`, as spec §5.2 does, and a
- * risk-increasing confirm without one, as §5.1 does; any other confirm is answered as `confirm-accepted`,
- * classified as the client showed it (the mock judges no version). A backtest
+ * effect. It refuses an approve without step-up as `step_up_required`, as spec §5.2 does, and every
+ * confirm as `not_found`: it creates no mandate version and serves no confirmation screen, so it has no
+ * version to confirm and no digest or classification to judge one against (DEC-2401). A backtest
  * is the fixture's served `backtest` member under the mock's own envelope (DEC-2400).
  */
 import { CSRF_HEADER, OPERATIONS, isIdempotencyKey, type Fetch } from "./client";
@@ -221,7 +221,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
     }
     const members = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
     if (match.operation === "approval_response" && members.verdict === "approved" && members.step_up == null) return problem(401, "step_up_required", "none");
-    if (match.operation === "confirm_version" && members.classification_shown === "risk_increasing" && members.step_up == null) return problem(401, "step_up_required", "none");
+    if (match.operation === "confirm_version") return problem(404, "not_found", "none");
     const path = prefix + route;
     let command = commands.find((c) => c.idempotency_key === key && c.path === path);
     if (command && command.body !== body) return problem(409, "idempotency_conflict", "none");
@@ -231,11 +231,6 @@ export function createMockServer(options: MockServerOptions): MockServer {
       apply(match.operation, path, members);
     }
     if (match.operation === "approval_response") return respond(202, { response_id: command.event_id, phase: "recorded" });
-    if (match.operation === "confirm_version") {
-      const classification = members.classification_shown;
-      const confirmed = { command_id: command.event_id, phase: "recorded", classification, applies: classification === "risk_increasing" ? "next_safe_point" : "now" };
-      return respond(202, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: canonical(workspace.now), as_of: asOf(), ...confirmed });
-    }
     return respond(202, { command_id: command.event_id, phase: "recorded", step_up_status: "missing" });
   }
 

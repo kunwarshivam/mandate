@@ -88,6 +88,13 @@ export function DeployDetails({ version, backtestId }: { version: ContentRef; ba
   );
 }
 
+/** A step refused because the one before it is not recorded stands where that step left things. */
+function standing(which: StepKey, reason: string | undefined): string {
+  if (reason === "not_created") return STANDING.version.failed;
+  if (reason === "not_confirmed") return STANDING.confirm.failed;
+  return STANDING[which].failed;
+}
+
 /** What exists after each step fails or is unknown: the owner always learns what was and was not recorded. */
 const STANDING: Record<StepKey, { failed: string; unknown: string }> = {
   version: {
@@ -113,6 +120,10 @@ function undeliveredWords(reason: string | undefined): string {
       return "Not delivered: your deployment did not answer.";
     case "step_up_required":
       return "Not recorded: your deployment needs a passkey check this browser can't send yet.";
+    case "not_created":
+      return "Not sent: version 1 was not created, so there is nothing to confirm.";
+    case "not_confirmed":
+      return "Not sent: version 1 is not confirmed, so there is nothing to deploy.";
     default:
       return "Not recorded: your deployment refused it.";
   }
@@ -237,7 +248,7 @@ export function StepStatus({ which, setUp }: { which: StepKey; setUp: SetUp }) {
     case "undelivered":
       return (
         <p role="alert" className="text-pretty" data-reason={step.reason}>
-          {undeliveredWords(step.reason)} {STANDING[which].failed}
+          {undeliveredWords(step.reason)} {standing(which, step.reason)}
           {step.reason === "unreachable" ? " Try again once it is reachable." : ""}
         </p>
       );
@@ -304,7 +315,12 @@ export function SetUpSteps({
   onCreated: (setUpId: string) => void;
   onStartOver: () => void;
 }) {
-  const { ws, createVersion, confirmVersion, deployVersion, backtestFor } = useRuntime();
+  const { source, ws, createVersion, confirmVersion, deployVersion, backtestFor } = useRuntime();
+  /**
+   * Only the fixtures' in-memory journal takes a step-up today; over the API a confirm or deployment is
+   * not sent (DEC-2401 item 4), so no passkey is asked for a step that will not be sent, and none is recorded.
+   */
+  const passkey = source === "fixtures";
   const mayDeploy = useCan("agents.deploy");
   const headingId = useId();
   const root = useRef<HTMLElement>(null);
@@ -341,12 +357,12 @@ export function SetUpSteps({
     setNotice(null);
     onCreated(createVersion(request).id);
   };
-  const confirm = () => {
+  const confirm = (verified: boolean) => {
     if (!setUp) return;
     focusNext.current = "confirm";
     setNotice(null);
     const classification = setUp.created.classification ?? "risk_increasing";
-    const stepUp = confirmStepUpDigest(setUp.version, null, setUp.created.base);
+    const stepUp = verified ? confirmStepUpDigest(setUp.version, null, setUp.created.base) : null;
     confirmVersion(setUp.id, { screen: "A5", environment: ws.environment, shown: summaryLines(draft, setUp.version), paths: confirmedPaths(draft), classification }, stepUp);
   };
   const deploy = () => {
@@ -356,6 +372,7 @@ export function SetUpSteps({
     deployVersion(setUp.id, { screen: "B3", environment: "paper", shown: deployLines(setUp.version, backtestId), backtestId });
   };
 
+  const stepHint = passkey ? "Uses your passkey." : "Your deployment does not take this step from here yet, so no passkey is asked.";
   const action = (which: StepKey): ReactNode => {
     if (offer !== which) return null;
     if (!mayDeploy) return <p className="text-sm">Only the workspace owner can create an agent.</p>;
@@ -375,8 +392,8 @@ export function SetUpSteps({
       which === "version"
         ? (["Create the version", "Records this agent as version 1. Nothing runs until you confirm it and deploy it.", create] as const)
         : which === "confirm"
-          ? (["Confirm version 1", "Uses your passkey.", () => ask("confirm")] as const)
-          : (["Deploy to paper", "Uses your passkey.", () => ask("deploy")] as const);
+          ? (["Confirm version 1", stepHint, () => (passkey ? ask("confirm") : confirm(false))] as const)
+          : (["Deploy to paper", stepHint, () => (passkey ? ask("deploy") : deploy())] as const);
     return (
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Button type="button" variant="secondary" size="lg" className={cn(KEY, "w-full sm:w-auto")} onClick={onClick}>
@@ -436,7 +453,7 @@ export function SetUpSteps({
           const which = asked;
           setAsking(false);
           if (which === "deploy") deploy();
-          else confirm();
+          else confirm(true);
         }}
         onCancel={() => {
           setAsking(false);

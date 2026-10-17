@@ -21,7 +21,7 @@ import { INTRO, READY } from "./conversation";
 import { MODELS, type Read, compile, mandateFrom, readAnswers, readLoss, readStrategy, unaskedUsd } from "./draft";
 import { NewAgentFlow } from "./new-agent-flow";
 import { DeployDetails, StepStatus, deployLines } from "./set-up-steps";
-import { GAP_NOTE, summaryLines } from "./summary";
+import { GAP_NOTE, confirmedPaths, summaryLines } from "./summary";
 
 const main = () => screen.getByRole("main");
 const heading = () => screen.getByRole("heading", { level: 1 });
@@ -745,6 +745,16 @@ describe("each step's words, over either data source", () => {
     expect(other).not.toContain("stale_base");
   });
 
+  it("says a step refused because the one before it is not recorded stands where that step left things", () => {
+    const base = confirmedSetUp();
+    const notCreated = { ...base.confirmed!, phase: "undelivered" as const, recordedAt: undefined, reason: "not_created", stepUp: null };
+    expect(words("confirm", { ...base, created: { ...base.created, phase: "undelivered", reason: "not_sent", classification: null, validated: false }, confirmed: notCreated })).toBe(
+      "Not sent: version 1 was not created, so there is nothing to confirm. No version was created, nothing was confirmed, and no agent exists.",
+    );
+    const notConfirmed = { phase: "undelivered" as const, sentAt: base.created.sentAt, reason: "not_confirmed", record: { screen: "B3" as const, environment: "paper" as const, shown: [], backtestId: null } };
+    expect(words("deploy", { ...base, deployed: notConfirmed })).toBe("Not sent: version 1 is not confirmed, so there is nothing to deploy. Version 1 was created and is not confirmed, and no agent exists.");
+  });
+
   it("never says to try again when a result is unknown", () => {
     const base = confirmedSetUp();
     const unknown = { phase: "unknown" as const, sentAt: AT };
@@ -924,6 +934,18 @@ describe("the fixture compiler's draft", () => {
     expect(lines).toContain("Where it runs: Paper: simulated funds, no real money. (Default)");
     expect(lines).toContain("Model: Momentum (quant.momentum 1.0.0)");
     expect(lines).toContain("Could buy without asking you: $0.00");
+  });
+
+  it("confirms only the paths that hold a value: a row with no provenance is not a confirmed path", () => {
+    const strategy = readStrategy({ model: "quant.momentum", params: { lookback_bars: "20" } });
+    if (!strategy.ok) throw new Error(strategy.error);
+    const empty = compile(readQuestions("$5,000", "up 10%", "$500"), []);
+    const unset = empty.sections.flatMap((s) => s.fields).filter((f) => f.provenance === null).map((f) => f.path);
+    expect(unset).toEqual(expect.arrayContaining(["/behavior/signal_models/0/id", "/behavior/signal_models/0/params", "/universe/pinned_instruments"]));
+    for (const path of unset) expect(confirmedPaths(empty), path).not.toContain(path);
+    const full = confirmedPaths(compile(readQuestions("$5,000", "up 10%", "$500"), ["MSFT"], strategy.value));
+    expect(full).toEqual(expect.arrayContaining(["/behavior/signal_models/0/id", "/behavior/signal_models/0/params", "/universe/pinned_instruments", "/capital/allocation_usd"]));
+    expect(new Set(full).size).toBe(full.length);
   });
 
   it("keeps one full position's loss at its stop inside the daily budget, so W-002 cannot fire", () => {

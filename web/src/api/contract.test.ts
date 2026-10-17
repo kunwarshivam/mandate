@@ -62,6 +62,8 @@ const SCHEMA_OF: Readonly<Record<Operation, string>> = {
 /** A new agent's A5 record, as the set-up's confirm sends it (DEC-2401). */
 const CONFIRM_RECORD: ConfirmRecord = { screen: "A5", environment: "paper", shown: ["Your agent", "Version 1"], paths: ["/capital/allocation_usd", "/environment"], classification: "risk_increasing" };
 const CONFIRM_VERSION = `sha256:${"1f".repeat(32)}` as const;
+/** What `GET .../confirmation` would serve; the client passes it through (DEC-2401 item 4). */
+const SERVED_DIGEST = `sha256:${"5d".repeat(32)}` as const;
 
 interface Schema {
   required?: string[];
@@ -140,7 +142,7 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
         const prepared = prepareApprovalResponse(client, approval, response, { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: false });
         if (prepared.ok) for (const command of prepared.commands) sent.push(await client.send(command));
       }
-    sent.push(await client.send(prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD })));
+    sent.push(await client.send(prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification: "risk_increasing" } })));
     for (const outcome of sent) if (outcome.ok) await client.commandStatus(outcome.accepted.event_id);
     expect(sent.length).toBeGreaterThan(KINDS.length);
     expect(calls.length).toBeGreaterThan(10);
@@ -165,7 +167,7 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
       if (prepared.ok) for (const c of prepared.commands) bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
     }
     for (const classification of ["risk_increasing", "risk_reducing", "neutral"] as const) {
-      const c = prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: { ...CONFIRM_RECORD, classification } });
+      const c = prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification } });
       bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
     }
     expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response", "confirm_version"]));
