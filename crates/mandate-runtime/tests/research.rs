@@ -1127,7 +1127,7 @@ fn an_answer_arriving_under_another_pin_is_recorded_and_judged_as_nothing() {
         ResearchInput::Called {
             run_id,
             at: clock(CUT_OFF + 30),
-            record,
+            record: Box::new(record),
         },
         &ports,
         &world,
@@ -1234,7 +1234,7 @@ fn a_late_answer_to_a_cancelled_run_is_journaled_and_never_used() {
         ResearchInput::Called {
             run_id: run_id.clone(),
             at: clock(CUT_OFF + 600),
-            record: other,
+            record: Box::new(other),
         },
         &ports,
         &world,
@@ -1247,7 +1247,7 @@ fn a_late_answer_to_a_cancelled_run_is_journaled_and_never_used() {
         ResearchInput::Called {
             run_id,
             at: clock(CUT_OFF + 600),
-            record,
+            record: Box::new(record),
         },
         &ports,
         &world,
@@ -1284,7 +1284,10 @@ fn a_cancellation_before_dispatch_forgets_the_run() {
         ResearchInput::Called {
             run_id: started[0].0.clone(),
             at: clock(CUT_OFF + 2),
-            record: common::research::stray_record(&mandate_canon::encode_ulid(1 << 98), &world),
+            record: Box::new(common::research::stray_record(
+                &mandate_canon::encode_ulid(1 << 98),
+                &world,
+            )),
         },
         &ports,
         &world,
@@ -1400,7 +1403,7 @@ fn a_run_lost_to_a_restart_never_takes_its_late_answer() {
         ResearchInput::Called {
             run_id,
             at: clock(CUT_OFF + 30),
-            record,
+            record: Box::new(record),
         },
         &ports,
         &world,
@@ -1739,7 +1742,7 @@ fn called_unfolded(
         ResearchInput::Called {
             run_id: run_id.clone(),
             at: clock(CUT_OFF + 30),
-            record,
+            record: Box::new(record),
         },
         ports,
         &world.context(),
@@ -1945,7 +1948,10 @@ fn worker_inputs_for_a_run_not_in_its_state_are_refused() {
         ResearchInput::Called {
             run_id: run_id.clone(),
             at: clock(CUT_OFF + 1),
-            record: common::research::stray_record(&mandate_canon::encode_ulid(1 << 98), &world),
+            record: Box::new(common::research::stray_record(
+                &mandate_canon::encode_ulid(1 << 98),
+                &world,
+            )),
         },
         &ports,
         &world,
@@ -2087,7 +2093,7 @@ fn an_acknowledgment_forgets_a_run_unless_its_planned_call_was_dispatched() {
             ResearchInput::Called {
                 run_id,
                 at: clock(CUT_OFF + 40),
-                record,
+                record: Box::new(record),
             },
             &ports,
             &world,

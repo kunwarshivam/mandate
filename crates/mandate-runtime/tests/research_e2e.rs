@@ -241,8 +241,10 @@ fn the_demo_runs_either_way_and_says_which_gateway_it_used() {
         boot(&mut lp, &research_ports);
         let world = World::open();
         let plane = RecordedPlane::load();
-        let mut hosted = HostedDouble::default();
-        hosted.inner = scripted(RESPONSE_AAPL);
+        let hosted = HostedDouble {
+            inner: scripted(RESPONSE_AAPL),
+            keys: Vec::new(),
+        };
         let (vault, recorded_reply): (Box<dyn mandate_gateway::provider::SecretSource>, _) =
             if vaulted {
                 (

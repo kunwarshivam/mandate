@@ -251,7 +251,7 @@ pub enum ResearchInput {
     Called {
         run_id: String,
         at: RiskClock,
-        record: CallRecord,
+        record: Box<CallRecord>,
     },
     /// A call the gateway could not make at all, which has no record (inference spec §3.1).
     Refused {

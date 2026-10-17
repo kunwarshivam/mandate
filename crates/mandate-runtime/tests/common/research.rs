@@ -836,7 +836,7 @@ pub fn worker_run_on<T: Transport, S: MeterStore, C: Clock>(
         Answer::Recorded(record) => ResearchInput::Called {
             run_id,
             at: answered_at,
-            record,
+            record: Box::new(record),
         },
         Answer::Refused(error) => ResearchInput::Refused {
             run_id,
