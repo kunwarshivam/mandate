@@ -27,6 +27,20 @@ def files() -> dict[str, str]:
     return texts
 
 
+def migrations_hand_over(f: dict[str, str]) -> list[str]:
+    """Once `mandate db migrate`'s ledger exists, the bootstrap applies no migration (E21-50)."""
+    text = f["bootstrap.sh"]
+    guard = "tablename = 'schema_migrations'\")\" ]; then\n"
+    head, _, rest = text.partition(guard)
+    applied_in_else = rest.partition("\nelse\n")[2].partition("\nfi\n")[0]
+    problems = []
+    if not head or "INSERT INTO deploy.migrations" in head:
+        problems.append("bootstrap.sh applies migrations before checking for journal.schema_migrations")
+    if "INSERT INTO deploy.migrations" not in applied_in_else:
+        problems.append("bootstrap.sh's migration loop is not inside the else of that check")
+    return problems
+
+
 def strict_mode(f: dict[str, str]) -> list[str]:
     """Every script stops on an error, an unset variable, or a failed pipe stage."""
     return [name for name, text in f.items() if name.endswith(".sh") and "\nset -euo pipefail\n" not in text]
@@ -468,6 +482,7 @@ CHECKS = (
     secrets_are_credentials,
     vault_layout,
     strict_mode,
+    migrations_hand_over,
     env_files_private,
     api_unit_hardened,
     postgres_local_only,
@@ -549,6 +564,8 @@ SEEDED = (
     ("set-secrets.sh", '| put_file "$CREDENTIALS/$key" 0600 root:root', '| put_file "$CREDENTIALS/$key" 0640 root:root', env_files_private),
     ("install-cloudflared.sh", '"$found" != "$CLOUDFLARE_FINGERPRINT"', '"$found" = "$found"', keys_pinned),
     ("backup.sh", "set -euo pipefail\n", "set -eu\n", strict_mode),
+    ("bootstrap.sh", "tablename = 'schema_migrations'\")\" ]; then", "tablename = 'schema_migrations'\")\" ] && false; then", migrations_hand_over),
+    ("bootstrap.sh", "\nelse\n  for file in", "\nelse\n  :\nfi\nfor file in", migrations_hand_over),
     ("bootstrap.sh", '"/etc/owlhead/$name.env" 0600 root:root', '"/etc/owlhead/$name.env" 0644 root:root', env_files_private),
     ("set-secrets.sh", "install -o root -g root -m 0600", "install -o root -g root -m 0644", env_files_private),
     ("systemd/owlhead-executor.service", "User=owlhead_exec", "User=owlhead_api", executor_unit_hardened),

@@ -12,7 +12,8 @@
 import { CSRF_HEADER, OPERATIONS, isIdempotencyKey, type Fetch } from "./client";
 import type { Watermark } from "./types";
 import { buildWorkspace } from "@/fixtures/workspace";
-import type { Agent, Approval, Health, Scenario } from "@/fixtures/types";
+import type { Agent, Approval, ApprovalStatus, Health, Scenario } from "@/fixtures/types";
+import { dec, mul, toDecimalString } from "@/lib/decimal";
 import { sha256Hex } from "@/lib/sha256";
 
 export interface MockServerOptions {
@@ -60,11 +61,11 @@ function problem(status: number, code: string, effect: "none" | "recorded", retr
   return respond(status, { type: "about:blank", status, title: "Request refused", code, effect, event_id: null, retryable }, "application/problem+json");
 }
 
-/** `read-models/health.schema.json`: each component's state and freshness, aged against `servedAt`. An `ok` component is never stale. */
+/** `read-models/health.schema.json`: each component's state and freshness, aged against `servedAt`. An `ok` component is never stale; every fixture feed carries its time. */
 function healthBody(health: Health, servedAt: string) {
   const component = (name: keyof Health) => {
     const { state, as_of } = health[name];
-    const observed = canonical(as_of);
+    const observed = canonical(as_of ?? servedAt);
     const age = Math.max(0, Math.floor((Date.parse(servedAt) - Date.parse(observed)) / 1000));
     return { state, freshness: { observed_at: observed, stale: state !== "ok", age_seconds: age, limit_source: `health.${name}` } };
   };
@@ -90,47 +91,84 @@ export function createMockServer(options: MockServerOptions): MockServer {
   const servedAt = canonical(workspace.now);
   const read = (body: object) => respond(200, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: asOf(), ...body });
 
-  /** An agent's read without what its positions and orders routes serve (DEC-975). */
-  function agentCore(agent: Agent) {
-    const served: Array<keyof Agent> = ["positions", "orders", "past_orders", "fills"];
-    return Object.fromEntries(Object.entries(agent).filter(([key]) => !served.includes(key as keyof Agent)));
-  }
-
   const approvalHash = (approval: Approval) => `sha256:${sha256Hex(`approval:${approval.approval_id}:${approval.requested_at}:${approval.bound.mandate_version}`)}`;
   const agentOf = (id: string) => workspace.agents.find((a) => a.agent_id === id);
   const statusReads = new Map<string, number>();
+  /** A fixture decimal in the journal's canonical form (journal spec §4.6), as the API serves it. */
+  const canon = (value: string) => toDecimalString(dec(value));
+
+  /** `read-models/agents`' row (#1499): the deployed agent with its mandate document's name and envelope. */
+  function agentRow(agent: Agent) {
+    const m = agent.mandate;
+    return {
+      agent_id: agent.agent_id,
+      environment: m.environment,
+      mandate_version: agent.mandate_version,
+      deployed_at: canonical(agent.deployed_at),
+      mode: agent.mode,
+      pending_approvals: workspace.approvals.filter((a) => a.agent_id === agent.agent_id && a.status === "delivered").length,
+      label: m.name,
+      mandate: {
+        allocation_usd: canon(m.capital.allocation_usd),
+        max_loss_from_allocation: canon(m.capital.max_loss_from_allocation),
+        goal: m.goal.type,
+        goal_end_date: m.goal.end_date,
+        asset_classes: m.universe.asset_classes,
+        max_position_usd: canon(m.risk.max_position_usd),
+        max_order_usd: canon(m.risk.max_order_usd),
+        max_orders_per_day: m.risk.max_orders_per_day,
+        max_daily_loss: canon(m.risk.max_daily_loss),
+        max_drawdown: canon(m.risk.max_drawdown),
+      },
+    };
+  }
+
+  /** `read-models/agent`: the row with the account's holdings at its last reconciliation (`account_positions`). */
+  function agentDetail(agent: Agent) {
+    const positions = agent.positions.map((p) => ({ instrument: p.instrument.symbol, qty: canon(p.qty), broker_qty: canon(p.broker_qty), mismatch: dec(p.qty) !== dec(p.broker_qty), observed_at: canonical(p.mark_as_of) }));
+    return { ...agentRow(agent), account_positions: positions };
+  }
+
+  /** The API names an approval by its `ApprovalRequested` event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
+  const servedId = (approval: Approval) => approval.approval_id.replace(/^apr_/, "");
+  const approvalBy = (id: string) => workspace.approvals.find((a) => servedId(a) === id);
+
+  const STATE: Record<ApprovalStatus, string> = { delivered: "pending", acted: "acted", gate_skipped: "canceled", rejected: "skipped", expired: "timed_out", superseded: "canceled" };
+
+  /** `read-models/approvals`' row: the approval and the order it binds (#1499). */
+  function approvalRow(approval: Approval) {
+    const b = approval.bound;
+    return {
+      approval_id: servedId(approval),
+      agent_id: approval.agent_id,
+      state: STATE[approval.status],
+      requested_at: canonical(approval.requested_at),
+      deadline: Math.floor(Date.parse(approval.deadline) / 1000),
+      content_hash: approvalHash(approval),
+      order: { instrument: b.symbol, asset_class: b.asset_class, side: b.side, qty: canon(b.qty), limit: canon(b.limit), order_usd: toDecimalString(mul(dec(b.qty), dec(b.limit))), purpose: b.purpose, tif: null, protection: null },
+    };
+  }
 
   function get(route: string, query: URLSearchParams): Response {
     if ([...query.keys()].some((name) => !(route === "/approvals" && name === "state"))) return problem(404, "not_found", "none");
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
-    if (route === "/dashboard") return read({ decisions: workspace.decisions, external_positions: workspace.external_positions });
-    if (route === "/agents") return read({ agents: workspace.agents.map((a) => ({ agent_id: a.agent_id })) });
-    if (route === "/connections") return read({ connections: [{ ...workspace.connection, environment: workspace.environment }] });
+    if (route === "/agents") return read({ agents: workspace.agents.map(agentRow) });
+    if (route === "/connections") return read({ connections: [{ connection_id: workspace.connection.connection_id, environment: workspace.environment }] });
     if (route === "/approvals") {
       const state = query.get("state");
       if (state !== "pending" && state !== "resolved") return problem(422, "invalid", "none");
       const listed = workspace.approvals.filter((a) => (a.status === "delivered") === (state === "pending"));
-      return read({ approvals: listed.map((a) => ({ approval_id: a.approval_id })) });
+      return read({ approvals: listed.map(approvalRow) });
     }
-    const agentRoute = route.match(/^\/agents\/([^/]+)(\/positions|\/orders|\/timeline)?$/);
+    const agentRoute = route.match(/^\/agents\/([^/]+)$/);
     if (agentRoute) {
       const agent = agentOf(decodeURIComponent(agentRoute[1]));
-      if (!agent) return problem(404, "not_found", "none");
-      switch (agentRoute[2]) {
-        case "/positions":
-          return read({ positions: agent.positions });
-        case "/orders":
-          return read({ orders: agent.orders, past_orders: agent.past_orders, fills: agent.fills });
-        case "/timeline":
-          return read({ events: workspace.timeline[agent.agent_id] ?? [] });
-        default:
-          return read({ agent: agentCore(agent) });
-      }
+      return agent ? read({ agent: agentDetail(agent) }) : problem(404, "not_found", "none");
     }
     const approvalRoute = route.match(/^\/approvals\/([^/]+)$/);
     if (approvalRoute) {
-      const approval = workspace.approvals.find((a) => a.approval_id === decodeURIComponent(approvalRoute[1]));
-      return approval ? read({ approval: { ...approval, content_hash: approvalHash(approval) } }) : problem(404, "not_found", "none");
+      const approval = approvalBy(decodeURIComponent(approvalRoute[1]));
+      return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } } } }) : problem(404, "not_found", "none");
     }
     const status = route.match(/^\/commands\/([0-9A-Z]{26})$/);
     const command = status ? commands.find((c) => c.event_id === status[1]) : undefined;
@@ -153,7 +191,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
       if (agent.mode === "normal" || agent.mode === "exits_only") agent.mode = "paused";
     }
     const answer = path.match(/\/approvals\/([^/]+)\/responses$/);
-    const approval = answer ? workspace.approvals.find((a) => a.approval_id === decodeURIComponent(answer[1])) : undefined;
+    const approval = answer ? approvalBy(decodeURIComponent(answer[1])) : undefined;
     if (operation === "approval_response" && approval && approval.status === "delivered" && body.verdict === "skipped") {
       approval.status = "rejected";
       approval.resolution = { at: workspace.now, text: "Skipped by you. Nothing was sent." };

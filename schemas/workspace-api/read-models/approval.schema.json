@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/approval.schema.json",
+  "description": "GET /approvals/{id} (\u00a74.3, DEC-979): the approval with its content object exactly as ApprovalRequested holds it (never a scorecard, profit estimate, or price target, DEC-126).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "approval"
+  ],
+  "properties": {
+    "approval": {
+      "$ref": "#/$defs/ApprovalDetail"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "$defs": {
+    "ApprovalMembers": {
+      "description": "The members every approval read carries (\u00a74.3, DEC-979). state is folded from the agent stream's approval events; deadline is ApprovalRequested.deadline as journaled, integer risk-clock seconds.",
+      "type": "object",
+      "required": [
+        "approval_id",
+        "agent_id",
+        "state",
+        "requested_at",
+        "deadline",
+        "content_hash",
+        "order"
+      ],
+      "properties": {
+        "approval_id": {
+          "$ref": "../common.schema.json#/$defs/EventId"
+        },
+        "agent_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "acted",
+            "skipped",
+            "timed_out",
+            "canceled"
+          ]
+        },
+        "requested_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "deadline": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "content_hash": {
+          "$ref": "../common.schema.json#/$defs/ContentRef"
+        },
+        "order": {
+          "$ref": "#/$defs/BoundOrder"
+        }
+      }
+    },
+    "Approval": {
+      "description": "One approval in the inbox: the members, no content.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/ApprovalMembers"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "ApprovalDetail": {
+      "description": "One approval with its content.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/ApprovalMembers"
+        }
+      ],
+      "required": [
+        "content"
+      ],
+      "properties": {
+        "content": {
+          "type": "object"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "BoundOrder": {
+      "description": "The order the approval binds, as ApprovalRequested journals it (DEC-1021): content.action's members, and content.execution's time in force and protection (version 2), null for a version-1 request.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument",
+        "asset_class",
+        "side",
+        "qty",
+        "limit",
+        "order_usd",
+        "purpose",
+        "tif",
+        "protection"
+      ],
+      "properties": {
+        "instrument": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "asset_class": {
+          "enum": [
+            "us_equity",
+            "crypto"
+          ]
+        },
+        "side": {
+          "enum": [
+            "buy"
+          ]
+        },
+        "qty": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "limit": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "order_usd": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "purpose": {
+          "enum": [
+            "open",
+            "increase"
+          ]
+        },
+        "tif": {
+          "oneOf": [
+            {
+              "enum": [
+                "day",
+                "gtc",
+                "ioc"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "protection": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "stop",
+                "take_profit"
+              ],
+              "properties": {
+                "stop": {
+                  "$ref": "../common.schema.json#/$defs/Decimal"
+                },
+                "take_profit": {
+                  "oneOf": [
+                    {
+                      "$ref": "../common.schema.json#/$defs/Decimal"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "unevaluatedProperties": false
+}

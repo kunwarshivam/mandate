@@ -26,8 +26,9 @@ use mandate_journal::{
     Anchor, AnchorLeaf, AppendOutcome, Draft, EventCheck, EventFailure, Head, StoredEvent,
     StreamId, TrustedStart, seal, verify_anchor, verify_events,
 };
-use mandate_journal_pg::{IntegrityError, PgError, PgJournal, migrator};
-use sqlx::migrate::{MigrateError, MigrationType};
+use mandate_journal_pg::{
+    IntegrityError, MigrateError, PgError, PgJournal, Recorded, migrate, migrations,
+};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{AssertSqlSafe, Executor, PgPool};
 use support::{PgBackend, TestDb};
@@ -124,61 +125,91 @@ fn migrations_are_embedded_in_order_with_no_down_migrations() {
         .collect();
     files.sort();
     assert!(!files.is_empty());
-    let m = migrator();
-    let embedded: Vec<_> = m.iter().collect();
+    let embedded = migrations();
     assert_eq!(
         embedded.len(),
         files.len(),
         "every file in migrations/ is embedded, and nothing else: {files:?}"
     );
-    for ((i, migration), file) in (1i64..).zip(&embedded).zip(&files) {
+    for ((i, migration), file) in (1i64..).zip(embedded).zip(&files) {
         assert_eq!(migration.version, i, "versions are 1, 2, 3, … in order");
-        assert_eq!(
-            migration.migration_type,
-            MigrationType::Simple,
-            "forward-only: no down migrations"
+        assert_eq!(migration.file, file, "embedded under its own file name");
+        assert!(
+            file.starts_with(&format!("{i:04}_")) && file.ends_with(".sql"),
+            "file names are NNNN_description.sql: {file}"
         );
-        assert_eq!(
-            file,
-            &format!("{:04}_{}.sql", migration.version, migration.description),
-            "file names are NNNN_description.sql"
+        assert!(
+            !file.contains("down") && !file.contains("revert"),
+            "forward-only: no down migrations: {file}"
         );
-        let text = std::fs::read_to_string(format!("{dir}/{file}")).unwrap();
+        let bytes = std::fs::read(format!("{dir}/{file}")).unwrap();
         assert_eq!(
-            migration.sql.as_str(),
-            text,
+            migration.sql.as_bytes(),
+            bytes,
             "{file} is embedded as written"
         );
+        assert_eq!(
+            migration.sha256(),
+            Digest::of(&bytes).to_hex(),
+            "{file}'s recorded digest is its bytes' SHA-256, as `sha256sum` prints it"
+        );
     }
+}
+
+/// Runs the migration command's runner on `db`'s schema as the superuser.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the test drives the migration command's runner directly"
+)]
+async fn migrate_again(db: &TestDb) -> Result<mandate_journal_pg::MigrationReport, MigrateError> {
+    migrate(&db.admin, &db.schema).await
+}
+
+async fn ledger(db: &TestDb) -> Vec<Recorded> {
+    let rows: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT version, file, sha256 FROM schema_migrations ORDER BY version")
+            .fetch_all(&db.admin)
+            .await
+            .unwrap();
+    rows.into_iter()
+        .map(|(version, file, sha256)| Recorded {
+            version,
+            file,
+            sha256,
+        })
+        .collect()
 }
 
 #[test]
 fn applied_migrations_are_checked_and_never_rerun() {
     let Some(db) = TestDb::new() else { return };
     db.block_on(async {
-        migrator()
-            .run(&db.owner)
+        let known: Vec<Recorded> = migrations().iter().map(|m| m.recorded()).collect();
+        assert_eq!(
+            ledger(&db).await,
+            known,
+            "the first run recorded every file"
+        );
+        let again = migrate_again(&db)
             .await
             .expect("running the migrations again is a no-op");
-        let applied: Vec<(i64, bool)> =
-            sqlx::query_as("SELECT version, success FROM _sqlx_migrations ORDER BY version")
-                .fetch_all(&db.admin)
-                .await
-                .unwrap();
-        let known: Vec<(i64, bool)> = migrator().iter().map(|m| (m.version, true)).collect();
-        assert_eq!(applied, known);
+        assert!(again.applied.is_empty(), "{again:?}");
+        assert_eq!(again.already.len(), known.len());
+        assert_eq!(ledger(&db).await, known);
 
         run(
             &db.admin,
-            "UPDATE _sqlx_migrations SET checksum = '\\x00' WHERE version = 1",
+            &format!(
+                "UPDATE schema_migrations SET sha256 = '{}' WHERE version = 1",
+                "0".repeat(64)
+            ),
         )
         .await
         .unwrap();
-        assert!(
-            matches!(
-                migrator().run(&db.owner).await,
-                Err(MigrateError::VersionMismatch(1))
-            ),
+        let changed = migrate_again(&db).await.err().map(|e| e.code());
+        assert_eq!(
+            changed,
+            Some("migration_changed"),
             "an applied migration that changed is refused"
         );
     });
@@ -187,17 +218,18 @@ fn applied_migrations_are_checked_and_never_rerun() {
     db.block_on(async {
         run(
             &db.admin,
-            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
-             VALUES (9999, 'from a newer binary', true, '\\x00', 0)",
+            &format!(
+                "INSERT INTO schema_migrations (version, file, sha256, source) \
+                 VALUES (9999, '9999_from_a_newer_binary.sql', '{}', 'test')",
+                "0".repeat(64)
+            ),
         )
         .await
         .unwrap();
+        let newer = migrate_again(&db).await.err();
         assert!(
-            matches!(
-                migrator().run(&db.owner).await,
-                Err(MigrateError::VersionMissing(9999))
-            ),
-            "a database migrated by a newer binary is refused, never rolled back"
+            matches!(newer, Some(MigrateError::SchemaNewer { version: 9999 })),
+            "a database migrated by a newer binary is refused, never rolled back: {newer:?}"
         );
     });
 }

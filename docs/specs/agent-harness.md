@@ -321,7 +321,9 @@ rule whole rather than reading around it:
   run starts, so no thesis exists that could need one (§6.7, HI-19).
 - **A harness verdict can be journaled** (E15-8). `ModelInvocationRecorded` must be closed with a
   member for the candidates' verdicts, or a verdict event must exist, so that no candidate is
-  refused in silence (§6.5, HI-22).
+  refused in silence (§6.5, HI-22). Journal spec v0.46 §9.19 closes it with a `verdicts` member
+  ([DEC-998](../project/decisions/DEC-998.md)); this precondition holds once `mandate-journal`
+  registers it.
 - **Licensed text can be sent without being kept.** Until the inference spec's prompt record keeps
   licensed text out of the artifact store (§10.1 ask 5), the retrieval plan reads only sources whose
   text may be kept in full: market data and public filings. Licensed news waits (§6.6, HI-23).
@@ -470,9 +472,9 @@ corroboration, the lineage cap, and a full universe.
 | Event | Stream | When | Status |
 |---|---|---|---|
 | `ObservationRecorded` | agent | Every retrieved item, before the call effect (§6.2 step 2) | Closed in [journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177). The duty is the [data-plane spec's §4.6](data-plane.md#46-the-research-query-interface) (DP-3) |
-| Meter reservation and settlement | `meter:{workspace_id}` (gateway) | Before the call leaves, and on completion | Proposed by the inference spec (§3.6), journal spec change in E15-8 |
-| `ModelInvocationRecorded` | agent | After every call, whatever the outcome, including a late one | In journal spec §9, not closed. E15-8 closes it with DEC-432 item 11's members. This spec adds two: the run id as `correlation_id`, and the retrieved context as the event ids of the run's `ObservationRecorded` |
-| Candidate verdicts | agent | With the judging batch | A member of the record that closes `ModelInvocationRecorded`, or its own event: decided in E15-8. Until one exists, no run is judged (§6.2 preconditions, HI-22) |
+| Meter reservation and settlement | `meter:{workspace_id}` (gateway) | Before the call leaves, and on completion | Closed in [journal spec §9.19](journal.md#919-model-gateway-records-dec-998) (`MeterReserved`, `MeterSettled`; DEC-998) |
+| `ModelInvocationRecorded` | agent | After every call, whatever the outcome, including a late one | Closed in [journal spec §9.19](journal.md#919-model-gateway-records-dec-998) with DEC-432 item 11's members and this spec's two: the run id as `correlation_id`, and the retrieved context as `observations`, the event ids of the run's `ObservationRecorded` |
+| Candidate verdicts | agent | With the judging batch | The `verdicts` member of `ModelInvocationRecorded` (journal spec §9.19 rule 151, DEC-998 item 1). Until `mandate-journal` registers it, no run is judged (§6.2 preconditions, HI-22) |
 | `ThesisProposed`, `ThesisRevised` | agent | Every thesis admission judged | Closed in [journal spec §9.4](journal.md#94-research-agent-thesis-records-dec-413) |
 | `ModelOutputRecorded` | agent | Each judged thesis, `ignored` null only when admitted | Closed in [journal spec §9.1](journal.md#91-agent-stream-payload-schemas-dec-177) |
 | `UniverseChanged` | account | The executor's copy of an admission or removal | Closed in journal spec §9.3 |
@@ -703,6 +705,7 @@ the identical weights) and item 10 (a reported identity that differs from the pi
    the last reservation (§5.3).
 3. **`ModelInvocationRecorded` gains two members** when E15-8 closes it: the retrieved-context list
    (§6.3) and room for the candidates' verdicts (§6.6). The run id rides in `correlation_id`.
+   Answered by journal spec v0.46 §9.19 (`observations`, `verdicts`; DEC-998).
 4. **The guard is callable without a call**, so construction can check the description (§5.1 step
    5) and spend nothing.
 5. **The prompt record keeps no licensed text** (DEC-431 item 17, §6.6). For a call whose inputs
@@ -732,7 +735,8 @@ the identical weights) and item 10 (a reported identity that differs from the pi
 - **New core effects:** start a run; cancel a run.
 - **The executor** copies `UniverseChanged` from thesis records, and later from invalidation
   verdicts (E19-5). It is unchanged otherwise.
-- **The journal** gains the closed `ModelInvocationRecorded` and the meter stream (E15-8) and an
+- **The journal** gains the closed `ModelInvocationRecorded` and the meter stream (E15-8, closed in
+  journal spec v0.46 §9.19, registration in `mandate-journal` pending) and an
   invalidation verdict (E19-5). `ObservationRecorded` exists and is closed (journal spec §9.1); it
   needs no new member, because the drift detector's typed observation is the artifact it names
   (§6.3).
@@ -747,7 +751,7 @@ As of 2026-10-03.
 | Process shell (`mandate-shell`) | **Partly built:** stage adapters, the fail-closed effect runner, the journal envelope, and the `mandate-paper` binary. Most adapters still answer `Unimplemented`, so the binary refuses at its first probe. No research worker |
 | Research contract (`mandate-research`) | **Built, pure:** §8.5's seventeen ordered checks (`checks`, `admit`), the lineage fold, expiry and removal, the stagger offset, `next_proposal_at`, the drift detector (E17-5), the flow monitor and operator halt (E17-6), and forward-paper scoring (E17-8). It never calls a model |
 | Thesis records | **Specified:** journal spec §9.4 is closed. The `mandate-journal` registration is in progress (DEC-414) |
-| `ModelInvocationRecorded` | **Named only:** in the journal catalogue, schema not closed (E15-8) |
+| `ModelInvocationRecorded` | **Specified:** journal spec v0.46 §9.19 closes it and the meter stream (DEC-998). The `mandate-journal` registration is pending (E15-8) |
 | Model gateway | **Specified as a draft:** [inference spec](inference.md) v0.1; no code (E15-6 to E15-10) |
 | LLM research loop | **Spike only:** `python/research_spike` (E17-0) gathers bars and news, makes one call per UTC day through an aggregator, parses strictly, sizes by a fixed rule, and keeps its own JSONL journal. It is not product code and has no gate; its paper runs await the founder's go |
 | Retrieval plan, readers, checks, run scheduler in Rust | **Planned** (E19-2, E19-3) |

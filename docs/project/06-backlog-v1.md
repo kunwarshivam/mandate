@@ -113,6 +113,13 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `xtask/src`, as a shard within DEC-464's ten-minute budget, and fails on any missed mutant; the
   mutants of `xtask` code that predates the job are either caught or listed, each with its reason,
   in a follow-up story, so the job starts green.
+- **E1-8 (Should)** As an engineer, I want parallel PRs not to collide on DEC numbers or on shared
+  lists, so that about twenty lanes can land at once without a merge conflict or an extra CI cycle
+  each ([DEC-2600](decisions/DEC-2600.md), claim #1494).
+  *Accepted when:* DEC numbers come from per-category ranges of 100 from DEC-2000; a check run by
+  both CI paths refuses two decision files with one number; the registry's cargo "Used by" lists
+  are derived from `cargo metadata`; CODEOWNERS' crate lines are checked sorted; and no check is
+  weaker.
 
 ### E2 Market data
 
@@ -5231,3 +5238,42 @@ From the Robinhood connector correctness follow-ups ([DEC-956](decisions/DEC-956
   refuses every order of an instrument with no registered ticker, exits included; the live wiring
   that builds `RobinhoodConnector` must pass the run's `(asset_id, symbol)` pairs, with a startup
   check that the pinned instrument has one.
+- **Journal the API's sign-ins (DEC-978 item 10, E9-7).** The workspace API server (E21-31) opens
+  and ends browser sessions without journaling them, because the journal registers neither
+  `SessionOpened` nor `SessionRevoked` (identity spec §12.1). Register both, with test vectors, in
+  a journal spec change, then journal each sign-in and end, with `first_seen_device`, so the
+  new-device notice (ID-14) is sent; workspace API spec §3.11 item 9.
+- **Sessions in Postgres (DEC-978 item 6).** The API holds session records in its process, so it
+  runs as one replica and a restart ends every session. Move them to a Postgres store with the
+  workspace's row-level security before a second replica is deployed.
+- **Read models as projections (DEC-979 item 7).** The API's agent and approval reads fold every
+  deployed agent's stream on each request, which is unbounded. Project them per stream with
+  watermarks, woken by `LISTEN`/`NOTIFY` (workspace API spec §6.1), before an agent's stream grows
+  past what one request can read.
+- **Limit usage in the API's agent read (DEC-1020 item 5).** The drawdown rung, the day-trade
+  count, and headroom are not journaled, so the agent read serves none. Once E6-4 journals
+  `RiskLimitTriggered` and `RiskLimitLifted`, and the gate journals its checks' inputs, add them as
+  members folded from those rows.
+- **Per-agent positions (DEC-1020 item 4).** The API's agent read shows the account's holdings at
+  reconciliation. A per-agent view needs the executor's attribution journaled, or a fold of
+  `FillApplied` joined through `OrderRequestRecorded.agent_id` that matches the executor's
+  accounting.
+- **The runtime folds the owner's hold, then the API serves it (DEC-191, DEC-1007 item 1).**
+  Journal spec §9.11 closes `hold_openings` and `lift_hold`, but the runtime's command fold refuses
+  any command it does not know, so a hold would stop it at that event. Fold both into
+  `AgentModeChanged` version 2 (`held`, rules 93 to 95), with tests, then mount the API's
+  `POST /agents/{id}/hold`.
+- **A roles snapshot on each API session (DEC-1007 item 8, before the demo).** The API refuses
+  pause and the kill switch with `membership_unavailable` when the membership read fails, because its
+  sessions keep no roles snapshot. Take the snapshot at sign-in and at each granted refresh, cleared
+  in the same step as a deactivation, so these calls are authorized from it as API-7 and identity
+  spec §4.5 require.
+- **Bind step-up on the API's owner commands and grants (DEC-1007 items 3 and 10).** The API
+  forwards no step-up, so a kill switch through it never carries the owner-exit privilege and an
+  `approved` is refused. Verify the passkey assertion locally (identity spec §3.3), forward it
+  bound, with `step_up_status: bound`, and serve `approved` after checking the mandate's
+  `approvers` (§5.2).
+- **Journal the API-7 members with no place (DEC-1007 item 4).** `record`, `environment_shown`, and
+  a kill switch's `owner_exit` are kept but not written. Close the remaining `OwnerCommandIssued`
+  commands in a journal spec change with these members, then write them and compare them on a
+  repeat.

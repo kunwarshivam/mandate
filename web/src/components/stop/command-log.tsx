@@ -43,7 +43,7 @@ export function UnreachableAlert() {
         Cannot reach your deployment
       </p>
       <div className="grid gap-2 text-sm">
-        <p>It has not answered since {clock(ws.health.deployment.as_of)}. A request from here cannot be delivered, and the screen will say so rather than show it as done.</p>
+        <p>{ws.health.deployment.as_of === null ? "It has not answered." : `It has not answered since ${clock(ws.health.deployment.as_of)}.`} A request from here cannot be delivered, and the screen will say so rather than show it as done.</p>
         <p>
           To stop trading now, go to the broker directly: sign in to your Alpaca paper dashboard, cancel open orders, and close positions there. Protective orders already
           resting at the broker stay in place until you cancel them.
