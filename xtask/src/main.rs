@@ -2749,7 +2749,13 @@ const READ_NPX: &[&[&str]] = &[
     ],
     &["playwright", "install-deps", "chromium"],
     &["--yes", "impeccable@4.1.0", "detect", "src/"],
-    &["wrangler", "deploy", "--dry-run", "--outdir", ".wrangler/dry-run"],
+    &[
+        "wrangler",
+        "deploy",
+        "--dry-run",
+        "--outdir",
+        ".wrangler/dry-run",
+    ],
     &["wrangler", "deploy"],
 ];
 
