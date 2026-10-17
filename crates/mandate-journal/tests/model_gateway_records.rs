@@ -164,7 +164,7 @@ fn every_model_gateway_stream_is_judged_from_its_start_as_its_vector_says() {
     for case in &streams {
         let name = text(case, "name");
         let records = parsed(list(case, "records"));
-        let want = expected(case).map(|(index, reason, path)| (index, reason, path));
+        let want = expected(case);
         let as_batch = check_stream(&[], &records)
             .err()
             .map(|(i, e)| (i, e.reason.code().to_owned(), e.path));
@@ -180,7 +180,11 @@ fn every_model_gateway_stream_is_judged_from_its_start_as_its_vector_says() {
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
-    assert_eq!(streams.len(), 11, "three agent streams and eight meter streams");
+    assert_eq!(
+        streams.len(),
+        11,
+        "three agent streams and eight meter streams"
+    );
     for rule in ["rule 153", "rule 158"] {
         assert!(
             streams
@@ -208,7 +212,10 @@ fn a_call_recorded_once_per_agent_stream_whatever_lies_between() {
     );
     let other_agent = elsewhere(&section, "call", "agent:ws_01J8Z2:agent_b", "agent_b");
     assert_eq!(
-        check_stream(std::slice::from_ref(&call), std::slice::from_ref(&other_agent)),
+        check_stream(
+            std::slice::from_ref(&call),
+            std::slice::from_ref(&other_agent)
+        ),
         Ok(()),
         "a stream rule reads one stream's records"
     );
@@ -287,7 +294,10 @@ fn renamed(section: &Value, name: &str, event_id: &str) -> Draft {
         .and_then(Value::as_object)
         .cloned()
         .unwrap();
-    body.insert(Key::new("event_id").unwrap(), Value::Str(event_id.to_owned()));
+    body.insert(
+        Key::new("event_id").unwrap(),
+        Value::Str(event_id.to_owned()),
+    );
     Draft::parse(&to_canonical(&Value::Object(body))).unwrap()
 }
 
@@ -299,7 +309,10 @@ fn elsewhere(section: &Value, name: &str, stream: &str, agent: &str) -> Draft {
         .and_then(Value::as_object)
         .cloned()
         .unwrap();
-    body.insert(Key::new("stream_id").unwrap(), Value::Str(stream.to_owned()));
+    body.insert(
+        Key::new("stream_id").unwrap(),
+        Value::Str(stream.to_owned()),
+    );
     apply(
         &mut body,
         &object(&[("path", "actor.id"), ("value", agent)]),

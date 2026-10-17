@@ -833,12 +833,12 @@ const APPENDS: &[(&str, &[&str], Drafts)] = &[
 /// Journal spec v0.46 §9.19's stream rules through `append` (rules 153 and 158, DEC-2200): each
 /// `model_gateway` stream vector appended to a fresh backend, one record per append and then as one
 /// batch, refuses at the vector's record with its reason and path and stores nothing from there on.
-/// The agent-stream vectors start after the stream's `StreamOpened`, which the chain fixture's
-/// first body supplies; the meter-stream vectors open their own stream.
+/// The agent-stream vectors start after the stream's `StreamOpened`, which the agent-stream chain
+/// fixture's first body supplies; the meter-stream vectors open their own stream.
 pub fn model_gateway_stream_vectors<B: Backend>(fresh: impl Fn() -> Option<B>) {
     let fx = fixture();
     let section = get(&fx, "model_gateway");
-    let opened = draft_of(get(&list(&fx, "chain")[0], "body"));
+    let opened = draft_of(get(&list(&fx, "agent_stream.chain")[0], "body"));
     let mut judged = 0;
     for case in list(section, "agent_streams")
         .iter()
@@ -882,7 +882,11 @@ pub fn model_gateway_stream_vectors<B: Backend>(fresh: impl Fn() -> Option<B>) {
         }
         assert_eq!(got, want, "{name}: one record per append");
         let stored = want.as_ref().map_or(all.len(), |(index, _, _)| *index);
-        assert_eq!(b.rows(&s).len(), stored, "{name}: nothing from the refusal on");
+        assert_eq!(
+            b.rows(&s).len(),
+            stored,
+            "{name}: nothing from the refusal on"
+        );
 
         let Some(mut b) = fresh() else { return };
         let epoch = b.take_ownership(&s);
