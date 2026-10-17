@@ -21,6 +21,7 @@ mandate-dispatcher = { path = "crates/mandate-dispatcher", version = "0.0.0" }
 mandate-domain = { path = "crates/mandate-domain", version = "0.0.0" }
 mandate-executor = { path = "crates/mandate-executor", version = "0.0.0" }
 mandate-gateway = { path = "crates/mandate-gateway", version = "0.0.0" }
+mandate-gateway-http = { path = "crates/mandate-gateway-http", version = "0.0.0" }
 mandate-identity = { path = "crates/mandate-identity", version = "0.0.0" }
 mandate-identity-seal = { path = "crates/mandate-identity-seal", version = "0.0.0" }
 mandate-identity-system = { path = "crates/mandate-identity-system", version = "0.0.0" }
@@ -73,6 +74,7 @@ p256 = { version = "0.14.0", default-features = false }
 parquet = { version = "60.0.0", default-features = false, features = ["arrow", "snap"] }
 proptest = "1.11.0"
 prometheus = { version = "=0.14.0", default-features = false }
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "ring"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
 ring = { version = "0.17.14", default-features = false, features = ["alloc"] }
 ruint = { version = "1.20.1", default-features = false }
