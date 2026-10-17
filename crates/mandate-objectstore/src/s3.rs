@@ -104,7 +104,7 @@ impl Endpoint {
     }
 }
 
-fn is_loopback(host: &str) -> bool {
+pub(crate) fn is_loopback(host: &str) -> bool {
     host == "localhost"
         || host
             .trim_start_matches('[')

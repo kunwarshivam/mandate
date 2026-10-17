@@ -228,3 +228,37 @@ fn a_session_token_is_kept_and_never_printed() {
             && !printed.contains("ASIATEMP")
     );
 }
+
+#[test]
+fn a_key_is_read_from_its_two_mounted_files() {
+    let dir = std::env::temp_dir().join(format!("mandate-objectstore-key-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap_or_else(|error| panic!("dir: {error}"));
+    let id = dir.join("access-key-id");
+    let secret = dir.join("secret-access-key");
+    std::fs::write(&id, "AKIAIOSFODNN7EXAMPLE\n").unwrap_or_else(|error| panic!("id: {error}"));
+    std::fs::write(&secret, "  wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n")
+        .unwrap_or_else(|error| panic!("secret: {error}"));
+    let key =
+        Credentials::from_files(&id, &secret).unwrap_or_else(|error| panic!("reads: {error}"));
+    assert_eq!(key.session_token(), None);
+    let headers = [
+        ("Host", HOST),
+        ("Range", "bytes=0-9"),
+        ("x-amz-content-sha256", EMPTY_SHA256),
+        ("x-amz-date", AMZ_DATE),
+    ];
+    let request = Request {
+        method: "GET",
+        path: "/test.txt",
+        query: &[],
+        headers: &headers,
+        payload_sha256: EMPTY_SHA256,
+    };
+    assert_eq!(
+        authorization(&key, &request, &scope()),
+        authorization(&example_key(), &request, &scope())
+    );
+    assert!(Credentials::from_files(&dir.join("missing"), &secret).is_err());
+    assert!(Credentials::from_files(&id, &dir.join("missing")).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}

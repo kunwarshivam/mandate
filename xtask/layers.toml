@@ -368,7 +368,7 @@ allowed_external = []
 layer = 6
 safety_critical = true
 pure = false
-allowed_external = ["serde", "serde_json", "thiserror"]
+allowed_external = ["base64", "jiff", "reqwest", "ring", "rustls", "secrecy", "serde", "serde_json", "thiserror", "tokio"]
 
 [crates.mandate-runtime]
 layer = 6

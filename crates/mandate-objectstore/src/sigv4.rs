@@ -5,7 +5,12 @@
 //! endpoint. The caller passes every header it will send, `host`, `x-amz-date` and
 //! `x-amz-content-sha256` among them, and all of them are signed.
 
+use std::fmt::Write as _;
+use std::path::Path;
+use std::{fs, io};
+
 use jiff::Timestamp;
+use ring::{digest, hmac};
 use secrecy::{ExposeSecret, SecretString};
 
 /// An access key: its public identifier, its secret, and the session token of a temporary key.
@@ -34,6 +39,18 @@ impl Credentials {
             secret_access_key,
             session_token,
         }
+    }
+
+    /// A long-lived key from two files, as the cell mounts secrets (DEC-822 item 4): the access
+    /// key identifier and the secret, each trimmed of surrounding whitespace.
+    pub fn from_files(access_key_id: &Path, secret_access_key: &Path) -> io::Result<Self> {
+        let id = fs::read_to_string(access_key_id)?;
+        let secret = fs::read_to_string(secret_access_key)?;
+        Ok(Self::new(
+            id.trim().to_owned(),
+            SecretString::from(secret.trim()),
+            None,
+        ))
     }
 
     /// The session token a temporary key sends as `x-amz-security-token`.
@@ -76,25 +93,94 @@ pub fn authorization(
     request: &Request<'_>,
     scope: &Scope<'_>,
 ) -> String {
-    let _ = (credentials, request, scope);
-    String::new()
+    let mut headers: Vec<(String, String)> = request
+        .headers
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), collapse(value)))
+        .collect();
+    headers.sort();
+    let signed_headers = headers
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>()
+        .join(";");
+    let mut query: Vec<(String, String)> = request
+        .query
+        .iter()
+        .map(|(name, value)| (uri_encode(name, false), uri_encode(value, false)))
+        .collect();
+    query.sort();
+    let canonical_query = query
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    let canonical_headers: String = headers
+        .iter()
+        .map(|(name, value)| format!("{name}:{value}\n"))
+        .collect();
+    let canonical_request = format!(
+        "{}\n{}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{}",
+        request.method, request.path, request.payload_sha256
+    );
+    let date_time = amz_date(scope.at);
+    let date = date_time.get(..8).unwrap_or_default();
+    let credential_scope = format!("{date}/{}/{}/aws4_request", scope.region, scope.service);
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{date_time}\n{credential_scope}\n{}",
+        sha256_hex(canonical_request.as_bytes())
+    );
+    let secret = format!("AWS4{}", credentials.secret_access_key.expose_secret());
+    let key = [date, scope.region, scope.service, "aws4_request"]
+        .iter()
+        .fold(secret.into_bytes(), |key, part| sign(&key, part.as_bytes()));
+    format!(
+        "AWS4-HMAC-SHA256 Credential={}/{credential_scope}, SignedHeaders={signed_headers}, Signature={}",
+        credentials.access_key_id,
+        hex(&sign(&key, string_to_sign.as_bytes()))
+    )
 }
 
 /// `20130524T000000Z`: the `x-amz-date` form of a time.
 pub fn amz_date(at: Timestamp) -> String {
-    let _ = at;
-    String::new()
+    at.strftime("%Y%m%dT%H%M%SZ").to_string()
 }
 
 /// The lower-case hex SHA-256 of `bytes`.
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    let _ = bytes;
-    String::new()
+    hex(digest::digest(&digest::SHA256, bytes).as_ref())
 }
 
 /// RFC 3986 percent-encoding as SigV4 defines it: unreserved characters stay, everything else is
 /// `%XX` in upper case, and `/` stays only when `keep_slash`.
 pub fn uri_encode(text: &str, keep_slash: bool) -> String {
-    let _ = (text, keep_slash);
-    String::new()
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        let unreserved = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~');
+        if unreserved || (keep_slash && byte == b'/') {
+            out.push(char::from(byte));
+        } else {
+            let _infallible = write!(out, "%{byte:02X}");
+        }
+    }
+    out
+}
+
+fn sign(key: &[u8], message: &[u8]) -> Vec<u8> {
+    hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, key), message)
+        .as_ref()
+        .to_vec()
+}
+
+fn hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        let _infallible = write!(out, "{byte:02x}");
+    }
+    out
+}
+
+/// A header value trimmed, with each run of spaces inside it made one space.
+fn collapse(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }

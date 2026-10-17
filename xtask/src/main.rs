@@ -20,7 +20,8 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | mutants | schema-mutants; or one part of test: test-nextest |
+                        postgres | objectstore | mutants | schema-mutants; or one part of test:
+                        test-nextest |
                         test-doc | test-rh-sim | test-python
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
                         MANDATE_TEST_PARTITION=K/N is set (CI's fast-test matrix)
@@ -50,14 +51,15 @@ const FAST_JOB: [&str; 5] = ["lint", "test", "pending", "spec-guard", "portable"
 /// its doctests, the `rh-sim` rehearsal build's tests (DEC-922), and the Python tests. CI runs
 /// them in separate jobs (DEC-871).
 const TEST_PARTS: [&str; 4] = ["test-nextest", "test-doc", "test-rh-sim", "test-python"];
-const FULL_JOB: [&str; 5] = [
+const FULL_JOB: [&str; 6] = [
     "refcases",
     "reference",
     "schemas",
     "supply-chain",
     "postgres",
+    "objectstore",
 ];
-const PR_JOBS: [&str; 12] = [
+const PR_JOBS: [&str; 13] = [
     "lint",
     "test",
     "pending",
@@ -68,6 +70,7 @@ const PR_JOBS: [&str; 12] = [
     "supply-chain",
     "spec-guard",
     "postgres",
+    "objectstore",
     "mutants",
     "schema-mutants",
 ];
@@ -81,6 +84,11 @@ const SCHEMA_DIR: &str = "schemas/workspace-api";
 /// rather than a skip (DEC-109). CI's `full` and nightly jobs set both.
 const PG_URL: &str = "MANDATE_PG_URL";
 const PG_REQUIRED: &str = "MANDATE_PG_REQUIRED";
+/// The S3-compatible test store `mandate-objectstore`'s conformance suite uses, and the switch that
+/// makes its absence a failure rather than a skip (E21-40, DEC-973). CI's `full` and mutants jobs
+/// set both, with the store `.github/scripts/start-minio.sh` starts.
+const S3_URL: &str = "MANDATE_S3_URL";
+const S3_REQUIRED: &str = "MANDATE_S3_REQUIRED";
 const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
 /// The `K/N` shard CI's `schema-mutants` matrix passes to `cargo xtask ci schema-mutants`, through
 /// the environment because the live-feature check refuses cargo words the shell expands (DEC-688).
@@ -262,6 +270,7 @@ fn ci(job: &str) -> Result<()> {
             spec_guard()
         }
         "postgres" => postgres(),
+        "objectstore" => objectstore(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "fast" => {
             for part in FAST_JOB {
@@ -475,6 +484,38 @@ fn postgres() -> Result<()> {
         .context("starting `cargo nextest`")?;
     if !status.success() {
         bail!("the Postgres journal tests failed with {status}");
+    }
+    Ok(())
+}
+
+/// The object store's conformance suite against a real S3-compatible store (E21-40, DEC-973).
+/// `test` runs it too, but it skips there unless `MANDATE_S3_URL` is set; here it must run.
+fn objectstore() -> Result<()> {
+    if env::var_os(S3_URL).is_none() {
+        if env::var_os(S3_REQUIRED).is_some() {
+            bail!("{S3_REQUIRED} is set but {S3_URL} is not");
+        }
+        eprintln!(
+            "    objectstore: {S3_URL} is unset; skipping (see crates/mandate-objectstore/README.md)"
+        );
+        return Ok(());
+    }
+    let args = [
+        "nextest",
+        "run",
+        "--package",
+        "mandate-objectstore",
+        "--locked",
+        "--no-tests=pass",
+    ];
+    eprintln!("    $ {S3_REQUIRED}=1 cargo {}", args.join(" "));
+    let status = Command::new("cargo")
+        .args(args)
+        .env(S3_REQUIRED, "1")
+        .status()
+        .context("starting `cargo nextest`")?;
+    if !status.success() {
+        bail!("the object store conformance suite failed with {status}");
     }
     Ok(())
 }
@@ -2586,12 +2627,13 @@ const READ_LINES: &[(&str, &str)] = &[
 
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
 /// while its whole text, comments included, holds no cargo word, no `.cargo` and no `CARGO_`
-/// (DEC-873 item 2). `ci.yml` runs the first three and the credential guard (DEC-964), `merge.yml`
-/// the fourth.
+/// (DEC-873 item 2). `ci.yml` runs the first four and the credential guard (DEC-964), `merge.yml`
+/// the fifth.
 const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
     ".github/scripts/start-postgres.sh",
+    ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
     CREDENTIAL_GUARD,
 ];
@@ -2636,6 +2678,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_PG_REQUIRED",
     "MANDATE_PG_URL",
     "MANDATE_PR_BODY",
+    "MANDATE_S3_ACCESS_KEY_ID",
+    "MANDATE_S3_REQUIRED",
+    "MANDATE_S3_SECRET_ACCESS_KEY",
+    "MANDATE_S3_URL",
     "MANDATE_PR_NUMBER",
     "MANDATE_SCHEMA_SHARD",
     "MANDATE_TEST_PARTITION",
@@ -8665,6 +8711,44 @@ mod tests {
                 started.is_some() && gated.is_some() && started < gated,
                 "`{job}` starts the shared, digest-pinned PostgreSQL before `{gate}` (DEC-519): \
                  start at {started:?}, gate at {gated:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The DEC-519 rule for the object store (E21-40, DEC-973): `mandate-objectstore`'s
+    /// conformance suite skips without `MANDATE_S3_URL`, so each job that judges its code starts
+    /// the digest-pinned S3 test store before its gate and requires it.
+    #[test]
+    fn every_mutation_shard_has_the_store_the_objectstore_tests_need() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        for (job, gate) in [
+            ("full-checks", "run: cargo xtask ci full"),
+            ("mutants", "run: cargo xtask ci mutants"),
+        ] {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            let trimmed: Vec<&str> = lines
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- "))
+                .collect();
+            for setting in [
+                "MANDATE_S3_URL: http://127.0.0.1:9000",
+                "MANDATE_S3_REQUIRED: \"1\"",
+            ] {
+                assert!(
+                    trimmed.contains(&setting),
+                    "`{job}` sets `{setting}`, so the conformance suite runs and cannot skip"
+                );
+            }
+            let started = trimmed
+                .iter()
+                .position(|line| *line == "run: .github/scripts/start-minio.sh");
+            let gated = trimmed.iter().position(|line| *line == gate);
+            assert!(
+                started.is_some() && gated.is_some() && started < gated,
+                "`{job}` starts the S3 test store before `{gate}`: start at {started:?}, gate at \
+                 {gated:?}"
             );
         }
         Ok(())

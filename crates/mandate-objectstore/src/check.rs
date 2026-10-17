@@ -9,13 +9,16 @@
 //! yields a [`LockCertificate`], and only a certificate builds a [`LockedWriter`], so the cold
 //! exporter and the artifact writer cannot write to a store the check has not passed.
 //!
-//! [`check_r2`] reads R2's bucket lock rules through Cloudflare's API and judges them with
+//! [`check_r2`](crate::r2::check_r2) reads R2's bucket lock rules through Cloudflare's API and judges them with
 //! [`crate::lock::judge_r2`], which refuses them for §6.2 (DEC-973).
 
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 
-use crate::lock::{LockMode, Refused, S3Evidence};
-use crate::s3::{Rejected, S3, S3Error};
+use crate::lock::{LockMode, ProbeEvidence, Refused, S3Evidence, judge_s3};
+use crate::s3::{Outcome, Rejected, S3, S3Error};
+
+const PROBE_BODY: &[u8] = b"mandate lock check probe\n";
+const DAY_HOURS: i64 = 24;
 
 /// The probe object's key, under the checked prefix.
 pub const PROBE_KEY: &str = "_mandate/lockcheck";
@@ -33,12 +36,6 @@ pub enum CheckError {
     /// The store gave no usable answer; nothing was judged, and nothing may start.
     #[error(transparent)]
     Store(#[from] S3Error),
-    /// Not built yet (E21-40).
-    #[error("not implemented: {story}")]
-    Unimplemented {
-        /// The story that builds it.
-        story: &'static str,
-    },
 }
 
 /// Proof that the lock check passed for one bucket and prefix. It has no public constructor.
@@ -64,15 +61,93 @@ impl LockCertificate {
 
 /// Gathers the evidence for objects under `prefix`, with `store`'s credential as the writer's.
 pub async fn gather_s3(store: &S3, prefix: &str) -> Result<S3Evidence, S3Error> {
-    let _ = (store, prefix);
-    Err(S3Error::Transport)
+    let (bucket, configuration) = store.bucket_lock().await?;
+    let key = format!("{prefix}{PROBE_KEY}");
+    let now = store.now();
+    let existing = store.head_object(&key, None).await?;
+    let head = match existing {
+        Some(head) if head.retention.is_some_and(|(_, until)| until > now) => head,
+        _ => {
+            write_probe(store, &key, now).await?;
+            store
+                .head_object(&key, None)
+                .await?
+                .ok_or(S3Error::Malformed { call: "HeadObject" })?
+        }
+    };
+    let version = head.version_id.as_deref().unwrap_or("null");
+    let retention = store.get_object_retention(&key, version).await?;
+    let retained_secs = retention.and_then(|(_, until)| {
+        u64::try_from(until.duration_since(head.last_modified).as_secs()).ok()
+    });
+    let earlier = now
+        .checked_add(SignedDuration::from_hours(DAY_HOURS))
+        .map_err(|_| S3Error::Malformed { call: "the clock" })?;
+    let shorten = store
+        .put_object_retention(&key, version, LockMode::Compliance, earlier)
+        .await?;
+    let delete = store.delete_object_version(&key, version, true).await?;
+    let rule_write = match &configuration {
+        Some(configuration) => store.put_lock_configuration(&configuration.xml).await?,
+        None => Outcome::Rejected(Rejected {
+            status: 0,
+            code: "no lock configuration to write back".to_owned(),
+        }),
+    };
+    Ok(S3Evidence {
+        bucket,
+        probe: ProbeEvidence {
+            mode: retention.map(|(mode, _)| mode),
+            retained_secs,
+            shorten_refused: shorten != Outcome::Done,
+            delete_refused: delete != Outcome::Done,
+            rule_write_refused: rule_write != Outcome::Done,
+        },
+    })
+}
+
+/// Writes a new probe version with compliance retention, or, on a store that refuses the lock
+/// headers, without them, so the rest of the probe still runs and reports what the store allows.
+async fn write_probe(store: &S3, key: &str, now: Timestamp) -> Result<(), S3Error> {
+    let until = retain_until(now)?;
+    let locked = store
+        .put_object(key, PROBE_BODY, Some((LockMode::Compliance, until)))
+        .await?;
+    if locked.is_err() {
+        store
+            .put_object(key, PROBE_BODY, None)
+            .await?
+            .map_err(|Rejected { status, code }| S3Error::Rejected {
+                call: "PutObject",
+                status,
+                code,
+            })?;
+    }
+    Ok(())
+}
+
+fn retain_until(now: Timestamp) -> Result<Timestamp, S3Error> {
+    now.checked_add(SignedDuration::from_hours(
+        i64::from(WRITE_RETENTION_DAYS).saturating_mul(DAY_HOURS),
+    ))
+    .map_err(|_| S3Error::Malformed { call: "the clock" })
 }
 
 /// Runs the check for objects under `prefix`; a certificate only when the store is at least as
 /// strong as §6.2.
 pub async fn check_s3(store: &S3, prefix: &str) -> Result<LockCertificate, CheckError> {
-    let _ = (store, prefix);
-    Err(CheckError::Unimplemented { story: "E21-40" })
+    let evidence = gather_s3(store, prefix).await?;
+    judge_s3(&evidence)?;
+    Ok(certify(store, prefix))
+}
+
+pub(crate) fn certify(store: &S3, prefix: &str) -> LockCertificate {
+    LockCertificate {
+        base: store.endpoint().base().to_owned(),
+        bucket: store.endpoint().bucket().to_owned(),
+        prefix: prefix.to_owned(),
+        checked_at: store.now(),
+    }
 }
 
 /// Why a locked write failed.
@@ -87,12 +162,6 @@ pub enum WriteError {
     /// The store gave no usable answer.
     #[error(transparent)]
     Store(#[from] S3Error),
-    /// Not built yet (E21-40).
-    #[error("not implemented: {story}")]
-    Unimplemented {
-        /// The story that builds it.
-        story: &'static str,
-    },
 }
 
 /// Writes objects under the certified prefix, each with its own compliance retention of
@@ -106,19 +175,20 @@ pub struct LockedWriter {
 impl LockedWriter {
     /// A writer for `store`, which must be the store `certificate` was issued for.
     pub fn new(store: S3, certificate: LockCertificate) -> Result<Self, WriteError> {
-        let _ = (store, certificate);
-        Err(WriteError::Unimplemented { story: "E21-40" })
+        let endpoint = store.endpoint();
+        if endpoint.base() != certificate.base || endpoint.bucket() != certificate.bucket {
+            return Err(WriteError::CertificateMismatch);
+        }
+        Ok(Self { store, certificate })
     }
 
     /// Writes `body` at the certified prefix followed by `key`; the new version's identifier.
     pub async fn put(&self, key: &str, body: &[u8]) -> Result<Option<String>, WriteError> {
-        let _ = (
-            key,
-            body,
-            &self.store,
-            &self.certificate,
-            LockMode::Compliance,
-        );
-        Err(WriteError::Unimplemented { story: "E21-40" })
+        let until = retain_until(self.store.now())?;
+        let full_key = format!("{}{key}", self.certificate.prefix);
+        self.store
+            .put_object(&full_key, body, Some((LockMode::Compliance, until)))
+            .await?
+            .map_err(WriteError::Rejected)
     }
 }
