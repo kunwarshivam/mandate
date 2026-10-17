@@ -281,6 +281,8 @@ pub enum SimError {
     AnswerLost,
     #[error("the ref_id was sent before with a different order")]
     ChangedResend,
+    #[error("the market has not reached the order's stop")]
+    NotTriggered,
 }
 
 /// One account's holding of a symbol: its quantity, and the average price it was bought at,
