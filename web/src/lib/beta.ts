@@ -29,3 +29,15 @@ export function parseBetaRequest(body: unknown): BetaParse {
   if (address.length > EMAIL_MAX || !EMAIL.test(address)) return { ok: false, reason: "email" };
   return { ok: true, request: { email: address, role: isRole(role) ? role : null } };
 }
+
+/**
+ * Whether the form takes requests (DEC-987): always in development, the tests and the e2e builds; in
+ * any other build only once Supabase's URL and publishable key are configured.
+ */
+export function betaOpen(nodeEnv: string | undefined, supabaseUrl: string, publishableKey: string, e2eFlag: string | undefined): boolean {
+  void nodeEnv;
+  void supabaseUrl;
+  void publishableKey;
+  void e2eFlag;
+  throw new Error("Unimplemented: E21-38");
+}

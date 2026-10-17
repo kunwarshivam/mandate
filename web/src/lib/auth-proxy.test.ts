@@ -3,7 +3,7 @@ import { readdirSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { config, proxy } from "@/proxy";
+import { config, middleware as proxy } from "@/middleware";
 import type * as AuthConfig from "./auth-config";
 import type * as SupabaseProxy from "./supabase/proxy";
 

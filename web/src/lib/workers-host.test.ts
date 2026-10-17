@@ -33,24 +33,27 @@ const wrangler = () => real("wrangler.jsonc");
 const only = (fragment: string) => [expect.stringContaining(fragment)];
 
 describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DEC-823)", () => {
-  it.skip("pending E11-9: finds nothing to fix in this tree", () => {
+  it("pending E11-9: finds nothing to fix in this tree", () => {
     expect(hostingProblems(tree())).toEqual([]);
-    expect(existsSync(join(WEB, "..", "vercel.json"))).toBe(false);
     expect(existsSync(join(WEB, "src", "proxy.ts"))).toBe(false);
     expect(nextConfig.images).toEqual({ unoptimized: true });
   });
 
-  it.skip("pending E11-9: flags a Vercel configuration left at the repository root", () => {
-    expect(hostingProblems(tree({ "../vercel.json": '{ "git": {} }' }))).toEqual(only("vercel.json"));
+  it("pending E11-9: keeps vercel.json only while it deploys main alone, until the founder moves the domains (DEC-986 item 4)", () => {
+    expect(hostingProblems(tree({ "../vercel.json": null }))).toEqual([]);
+    expect(hostingProblems(tree({ "../vercel.json": '{ "git": { "deploymentEnabled": { "**": false, "main": true } } }' }))).toEqual([]);
+    for (const text of ['{ "git": {} }', "{}", '{ "git": { "deploymentEnabled": { "**": true, "main": true } } }', '{ "git": { "deploymentEnabled": { "**": false, "main": true, "preview": true } } }']) {
+      expect(hostingProblems(tree({ "../vercel.json": text })), text).toEqual(only("vercel.json"));
+    }
   });
 
-  it.skip("pending E11-9: flags images that the Worker would have to optimise", () => {
+  it("pending E11-9: flags images that the Worker would have to optimise", () => {
     expect(hostingProblems(tree({}, {}))).toEqual(only("images.unoptimized"));
     expect(hostingProblems(tree({}, { images: {} }))).toEqual(only("images.unoptimized"));
     expect(hostingProblems(tree({}, { images: { unoptimized: false } }))).toEqual(only("images.unoptimized"));
   });
 
-  it.skip("pending E11-9: flags a Node proxy, a missing edge middleware, and a middleware that needs Node", () => {
+  it("pending E11-9: flags a Node proxy, a missing edge middleware, and a middleware that needs Node", () => {
     expect(hostingProblems(tree({ "src/proxy.ts": "export function proxy() {}" }))).toEqual(only("src/proxy.ts"));
     expect(hostingProblems(tree({ "src/middleware.ts": null }))).toEqual(only("src/middleware.ts"));
     const edge = real("src/middleware.ts");
@@ -58,7 +61,7 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(hostingProblems(tree({ "src/middleware.ts": `${edge}\nexport const runtime = "nodejs";\n` }))).toEqual(only("runtime"));
   });
 
-  it.skip("pending E11-9: flags a wrangler.jsonc without the Worker's name, entry, minification, flags, assets or self-reference, or with workers.dev on", () => {
+  it("pending E11-9: flags a wrangler.jsonc without the Worker's name, entry, minification, flags, assets or self-reference, or with workers.dev on", () => {
     expect(hostingProblems(tree({ "wrangler.jsonc": null }))).toEqual(only("wrangler.jsonc"));
     const config = JSON.parse(wrangler().replace(/^\s*\/\/.*$/gm, ""));
     const broken = (change: (c: Record<string, unknown>) => void) => {
@@ -81,7 +84,7 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(config).toMatchObject({ name: "owlhead-web", main: ".open-next/worker.js", minify: true, workers_dev: false });
   });
 
-  it.skip("pending E11-9: flags missing build scripts, ignores and adapter config", () => {
+  it("pending E11-9: flags missing build scripts, ignores and adapter config", () => {
     const pkg = JSON.parse(real("package.json"));
     const withScripts = (scripts: Record<string, string>) => JSON.stringify({ ...pkg, scripts }, null, 2);
     const without = (name: string) => Object.fromEntries(Object.entries<string>(pkg.scripts).filter(([key]) => key !== name));
@@ -93,32 +96,35 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     expect(hostingProblems(tree({ "open-next.config.ts": "export default {};\n" }))).toEqual(only("defineCloudflareConfig"));
   });
 
-  it.skip("pending E11-9: flags a web workflow that does not build the Worker and check its size, or that holds a Cloudflare token", () => {
+  it("pending E11-9: flags a web workflow that does not build the Worker and check its size, or that holds a Cloudflare token", () => {
     const workflow = "../.github/workflows/web.yml";
     const yml = real(workflow);
     expect(hostingProblems(tree({ [workflow]: yml.replace(/npm run cf:build/g, "true") }))).toEqual(only("cf:build"));
     expect(hostingProblems(tree({ [workflow]: yml.replace(/wrangler deploy --dry-run/g, "true") }))).toEqual(only("--dry-run"));
     expect(hostingProblems(tree({ [workflow]: yml.replace(/scripts\/workers\.mjs size/g, "true") }))).toEqual(only("workers.mjs size"));
-    expect(hostingProblems(tree({ [workflow]: `${yml}\n# \${{ secrets.CLOUDFLARE_API_TOKEN }}\n` }))).toEqual(only("CLOUDFLARE"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n# \${{ secrets.CLOUDFLARE_API_TOKEN }}\n` }))).toEqual([expect.stringContaining("CLOUDFLARE_"), expect.stringContaining("reads a secret")]);
     expect(hostingProblems(tree({ [workflow]: yml.replace("WRANGLER_SEND_METRICS:", "CLOUDFLARE_ACCOUNT_ID: abc123\n          WRANGLER_SEND_METRICS:") }))).toEqual(only("CLOUDFLARE"));
     expect(hostingProblems(tree({ [workflow]: yml.replace("WRANGLER_SEND_METRICS:", "SUPABASE_SECRET: ${{ secrets.SUPABASE_SECRET }}\n          WRANGLER_SEND_METRICS:") }))).toEqual(only("secret"));
+    expect(hostingProblems(tree({ [workflow]: yml.replace("WRANGLER_SEND_METRICS:", "SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}\n          WRANGLER_SEND_METRICS:") }))).toEqual(only("variable"));
+    expect(hostingProblems(tree({ [workflow]: yml.replace("on:\n", "on:\n  push:\n") }))).toEqual(only("never on a push"));
     expect(yml).not.toMatch(/CLOUDFLARE_(API_TOKEN|ACCOUNT_ID)|secrets\./);
   });
 
-  it.skip("pending E11-9: flags a workflow that runs wrangler deploy or wrangler login, and passes one that only dry-runs", () => {
+  it("pending E11-9: flags a workflow that runs wrangler deploy or wrangler login, and passes one that only dry-runs", () => {
     expect(hostingProblems(tree())).toEqual([]);
     const workflow = "../.github/workflows/web.yml";
     const yml = real(workflow);
     expect(yml).toContain("wrangler deploy --dry-run");
     expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run --outdir dist\n` }))).toEqual([]);
     expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy\n` }))).toEqual(only("wrangler deploy"));
+    expect(hostingProblems(tree({ "../.github/workflows/ci.yml": `${real("../.github/workflows/ci.yml")}\n      - run: npx wrangler@4 deploy\n` }))).toEqual(only("ci.yml: runs wrangler"));
     expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --minify\n` }))).toEqual(only("wrangler deploy"));
     expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run && npx wrangler deploy\n` }))).toEqual(only("wrangler deploy"));
     expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler login\n` }))).toEqual(only("wrangler login"));
     expect(yml).not.toMatch(/wrangler login/);
   });
 
-  it.skip("pending E11-9: flags an account ID, a secret-looking value or a vars token committed in wrangler.jsonc, and passes the clean one", () => {
+  it("pending E11-9: flags an account ID, a secret-looking value or a vars token committed in wrangler.jsonc, and passes the clean one", () => {
     expect(hostingProblems(tree())).toEqual([]);
     const text = wrangler();
     expect(hostingProblems(tree({ "wrangler.jsonc": text }))).toEqual([]);
@@ -137,6 +143,71 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
   });
 });
 
+const DEPLOY = "../.github/workflows/web-deploy.yml";
+const deployYml = () => real(DEPLOY);
+const deployWith = (change: (yml: string) => string) => hostingProblems(tree({ [DEPLOY]: change(deployYml()) }));
+const BUILD_ENV = "          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}\n";
+const DEPLOY_ENV = "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n";
+
+describe("only the deploy job deploys, from main, through the production environment (E21-38, DEC-986, ES-12)", () => {
+  it("pending E21-38: passes this tree's deploy workflow, and flags it missing", () => {
+    expect(hostingProblems(tree())).toEqual([]);
+    expect(hostingProblems(tree({ [DEPLOY]: null }))).toEqual(only("web-deploy.yml: missing"));
+    const yml = deployYml();
+    expect(yml).toContain("    environment: production\n");
+    expect(yml).toContain("    if: github.ref == 'refs/heads/main'\n");
+    expect(yml.match(/\bsecrets\.[A-Z_]+/g)).toEqual(["secrets.CLOUDFLARE_API_TOKEN"]);
+  });
+
+  it("pending E21-38: flags any trigger but a push to main or a dispatch", () => {
+    for (const change of [
+      (y: string) => y.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request:\n"),
+      (y: string) => y.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request_target:\n"),
+      (y: string) => y.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  workflow_run:\n    workflows: [web]\n"),
+      (y: string) => y.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  schedule:\n    - cron: \"0 0 * * *\"\n"),
+      (y: string) => y.replace("    branches: [main]\n", "    branches: [main, \"claude/**\"]\n"),
+      (y: string) => y.replace("    branches: [main]\n", ""),
+      (y: string) => y.replace("    branches: [main]\n", "    tags: [\"*\"]\n"),
+    ]) {
+      expect(deployWith(change)).toEqual(only("push to main"));
+    }
+  });
+
+  it("pending E21-38: flags a deploy job that may run off main, without the production environment, with more rights, or beside another job", () => {
+    expect(deployWith((y) => y.replace("    if: github.ref == 'refs/heads/main'\n", ""))).toEqual(only("refs/heads/main"));
+    expect(deployWith((y) => y.replace("    if: github.ref == 'refs/heads/main'\n", "    if: always()\n"))).toEqual(only("refs/heads/main"));
+    expect(deployWith((y) => y.replace("    environment: production\n", ""))).toEqual(only("production environment"));
+    expect(deployWith((y) => y.replace("    environment: production\n", "    environment: staging\n"))).toEqual(only("production environment"));
+    expect(deployWith((y) => y.replace("      contents: read\n", "      contents: write\n"))).toEqual(only("only read contents"));
+    expect(deployWith((y) => y.replace("permissions: {}\n", "permissions: write-all\n"))).toEqual(only("permissions: {}"));
+    expect(deployWith((y) => y.replace("          persist-credentials: false\n", ""))).toEqual(only("persist credentials"));
+    expect(deployWith((y) => `${y}  smoke:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: true\n`)).toEqual(only("one job"));
+    expect(deployWith((y) => y.replace("  deploy:\n", "  ship:\n"))).toEqual(only("one job"));
+  });
+
+  it("pending E21-38: lets only the last step deploy, after the build, reading the token and the account alone", () => {
+    expect(deployWith((y) => y.replace("      - run: npx wrangler deploy\n", "      - run: npx wrangler deploy --env preview\n"))).toEqual([expect.stringContaining("must end with"), expect.stringContaining("only the deploy step may read a secret"), expect.stringContaining("the build may read only"), expect.stringContaining("runs wrangler deploy")]);
+    expect(deployWith((y) => `${y}      - run: node scripts/workers.mjs size .wrangler/dry-run\n`)).toEqual(only("must end with"));
+    expect(deployWith((y) => y.replace("      - run: npm run cf:build\n", "      - run: npm run build\n"))).toEqual(only("cf:build before"));
+    expect(deployWith((y) => y.replace(BUILD_ENV, `${BUILD_ENV}          LEAK: \${{ secrets.CLOUDFLARE_API_TOKEN }}\n`))).toEqual(only("only the deploy step may read a secret"));
+    expect(deployWith((y) => y.replace(BUILD_ENV, `${BUILD_ENV}          ACCOUNT: \${{ vars.CLOUDFLARE_ACCOUNT_ID }}\n`))).toEqual(only("the build may read only"));
+    expect(deployWith((y) => y.replace(DEPLOY_ENV, `${DEPLOY_ENV}          R2: \${{ secrets.R2_SECRET_ACCESS_KEY }}\n`))).toEqual(only("only the deploy step may read a secret"));
+    expect(deployWith((y) => y.replace(DEPLOY_ENV, `${DEPLOY_ENV}          ALL: \${{ toJSON(secrets) }}\n`))).toEqual(only("only the deploy step may read a secret"));
+    expect(deployWith((y) => y.replace(DEPLOY_ENV, `${DEPLOY_ENV}          KEY: \${{ vars.R2_ACCESS_KEY_ID }}\n`))).toEqual(only("the build may read only"));
+    expect(deployWith((y) => y.replace('      WRANGLER_SEND_METRICS: "false"\n', '      WRANGLER_SEND_METRICS: "false"\n      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n'))).toEqual(only("never the whole job"));
+    expect(deployWith((y) => y.replace("      - run: npm ci\n", "      - run: npm ci\n      - run: npx wrangler deploy --minify\n"))).toEqual(only("runs wrangler deploy"));
+    expect(deployWith((y) => `${y}      - run: npx wrangler login\n`)).toEqual([expect.stringContaining("must end with"), expect.stringContaining("wrangler login")]);
+  });
+
+  it("pending E21-38: flags any other workflow that names the production environment or a Cloudflare value", () => {
+    const ci = "../.github/workflows/ci.yml";
+    const yml = real(ci);
+    expect(hostingProblems(tree({ [ci]: yml.replace(/^jobs:\n/m, "jobs:\n  leak:\n    environment: production\n    runs-on: ubuntu-24.04\n    steps:\n      - run: true\n") }))).toEqual(only("ci.yml: names the production environment"));
+    expect(hostingProblems(tree({ [ci]: yml.replace(/^jobs:\n/m, "jobs:\n  leak:\n    environment:\n      name: production\n    runs-on: ubuntu-24.04\n    steps:\n      - run: true\n") }))).toEqual(only("ci.yml: names the production environment"));
+    expect(hostingProblems(tree({ [ci]: `${yml}\n# \${{ secrets.CLOUDFLARE_API_TOKEN }}\n` }))).toEqual(only("ci.yml: holds a CLOUDFLARE_"));
+  });
+});
+
 /** A dry run's output directory holding `files`, removed after `check`. */
 function dryRun<T>(files: Record<string, string | Uint8Array>, check: (dir: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), "worker-dry-run-"));
@@ -152,14 +223,14 @@ const SMALL = { "worker.js": "export default {};\n", "README.md": "dry run", "wo
 const NO_MODULES = { "README.md": "dry run", "worker.js.map": "{}" };
 
 describe("the Worker's size budget (DEC-731)", () => {
-  it.skip("pending E11-9: refuses a dry run that left no directory, or no module in it, rather than measuring nothing", () => {
+  it("pending E11-9: refuses a dry run that left no directory, or no module in it, rather than measuring nothing", () => {
     expect(() => workerSize(join(tmpdir(), "owlhead-no-such-dry-run"))).toThrow(/no dry run output/);
     dryRun({}, (dir) => expect(() => workerSize(dir)).toThrow(/no Worker module/));
     dryRun(NO_MODULES, (dir) => expect(() => workerSize(dir)).toThrow(/no Worker module/));
     dryRun(SMALL, (dir) => expect(workerSize(dir).rawBytes).toBe(Buffer.byteLength(SMALL["worker.js"])));
   });
 
-  it.skip("pending E11-9: the size command passes a small Worker and fails one over budget, an empty dry run, and a bad command line", () => {
+  it("pending E11-9: the size command passes a small Worker and fails one over budget, an empty dry run, and a bad command line", () => {
     expect(dryRun(SMALL, (dir) => sizeCommand(["size", dir]).status)).toBe(0);
     const over = { "worker.js": randomBytes(WORKER_BUDGET.gzipBytes + 64 * 1024) };
     const overBudget = dryRun(over, (dir) => sizeCommand(["size", dir]));
@@ -173,7 +244,7 @@ describe("the Worker's size budget (DEC-731)", () => {
     expect(sizeCommand(["measure", "."]).status).toBe(2);
   });
 
-  it.skip("pending E11-9: node scripts/workers.mjs size exits with the size command's status", () => {
+  it("pending E11-9: node scripts/workers.mjs size exits with the size command's status", () => {
     expect(dryRun(SMALL, (dir) => sizeCommand(["size", dir]).status)).toBe(0);
     const cli = (...args: string[]) => spawnSync(process.execPath, [join(WEB, "scripts", "workers.mjs"), ...args], { encoding: "utf8" }).status;
     expect(dryRun(SMALL, (dir) => cli("size", dir))).toBe(0);
@@ -182,7 +253,7 @@ describe("the Worker's size budget (DEC-731)", () => {
     expect(cli()).toBe(2);
   });
 
-  it.skip("pending E11-9: measures every module the dry run wrote, raw and gzip, leaving out source maps and the README", () => {
+  it("pending E11-9: measures every module the dry run wrote, raw and gzip, leaving out source maps and the README", () => {
     const out = mkdtempSync(join(tmpdir(), "worker-size-"));
     try {
       const worker = "export default { fetch() { return new Response('owlhead'); } };\n".repeat(400);
@@ -202,7 +273,7 @@ describe("the Worker's size budget (DEC-731)", () => {
     }
   });
 
-  it.skip("pending E11-9: passes a Worker at its budget and fails one byte over, naming the budget it broke", () => {
+  it("pending E11-9: passes a Worker at its budget and fails one byte over, naming the budget it broke", () => {
     expect(WORKER_BUDGET).toEqual({ gzipBytes: 3 * MIB, rawBytes: 10 * MIB });
     expect(sizeProblems({ rawBytes: 10 * MIB, gzipBytes: 3 * MIB })).toEqual([]);
     expect(sizeProblems({ rawBytes: 7 * MIB, gzipBytes: 2 * MIB })).toEqual([]);
@@ -212,7 +283,7 @@ describe("the Worker's size budget (DEC-731)", () => {
     expect(sizeProblems({ rawBytes: 100, gzipBytes: 60 }, { rawBytes: 99, gzipBytes: 60 })).toEqual(only("raw"));
   });
 
-  it.skip("pending E11-9: records the budget in DEC-731", () => {
+  it("pending E11-9: records the budget in DEC-731", () => {
     expect(sizeProblems({ rawBytes: 0, gzipBytes: 0 })).toEqual([]);
     const decision = readFileSync(join(WEB, "..", "docs", "project", "decisions", "DEC-731.md"), "utf8");
     expect(decision).toContain("| **Status** | Accepted |");
