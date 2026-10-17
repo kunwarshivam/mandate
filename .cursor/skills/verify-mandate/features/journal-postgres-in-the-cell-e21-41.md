@@ -12,6 +12,6 @@
 - **Tests:** `deploy/tests/test_journal_db.py` (each invariant, each shown failing on a seeded bug,
   and the values that must be refused); the drills `standby-down` and `archive`, each also run with
   its bug planted (`cargo xtask cell drill --seeded standby-down archive`).
-- **Run:** `cargo xtask ci cell-journal` (needs docker, k3d, helm and kubeconform;
+- **Run:** `cargo xtask ci cell-journal`, and `cargo xtask ci cell-failover` for the `restart` drill, a failover and the old primary's rejoin (needs docker, k3d, helm and kubeconform;
   `deploy/cell/README.md`); the chart tests also run in `cargo xtask ci cell`'s chart checks and in
   the Python tests.

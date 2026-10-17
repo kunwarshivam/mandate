@@ -1818,7 +1818,8 @@ fn generate_in(root: &Path, write: bool) -> Result<()> {
 }
 
 /// What the journal cluster says of itself, each instance's role and readiness, and the last lines
-/// of every instance that is not Ready, for a drill's report.
+/// of every container of an instance that is not Ready (the init Job's too), for a drill's report.
+/// Only the local cell's paper journal is ever read, so a statement in those lines leaves nothing.
 fn cluster_state() -> String {
     let status = kubectl(&[
         "get",
@@ -2214,18 +2215,24 @@ fn fenced_append(seeded: bool) -> Result<(Verdict, String)> {
         Verdict::Broken(format!(
             "an append committed with the standby fenced: the primary holds {stored} events of {stream}, though the CLI never had its commit\n{logs}"
         ))
-    } else if let end = job_end(&format!("control-{id}"))?
-        && end != "DeadlineExceeded"
-    {
-        Verdict::Broken(format!(
-            "the append with the standby fenced failed (`{end}`) rather than waited:\n{logs}"
-        ))
-    } else if !waited {
-        Verdict::Broken(format!(
-            "the append's Job ran out its deadline, but no commit ever waited on the standby, so the drill did not see what stopped it:\n{logs}"
-        ))
     } else {
-        Verdict::Held
+        let end = job_end(&format!("control-{id}"))?;
+        if end != "DeadlineExceeded" {
+            let reason = if end.is_empty() {
+                "no terminal condition"
+            } else {
+                end.as_str()
+            };
+            Verdict::Broken(format!(
+                "the append with the standby fenced failed (`{reason}`) rather than waited:\n{logs}"
+            ))
+        } else if !waited {
+            Verdict::Broken(format!(
+                "the append's Job ran out its deadline, but no commit ever waited on the standby, so the drill did not see what stopped it:\n{logs}"
+            ))
+        } else {
+            Verdict::Held
+        }
     };
     Ok((verdict, stream))
 }
