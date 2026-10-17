@@ -24,6 +24,7 @@
 //! `xtask/layers.toml` keeps it from every crate that could.
 
 pub mod clock;
+pub mod commands;
 pub mod config;
 pub mod http;
 pub mod journal;
@@ -35,3 +36,4 @@ pub mod routes;
 pub mod session;
 pub mod subject;
 pub mod token;
+pub mod writes;

@@ -26,6 +26,7 @@ use crate::routes;
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
 use crate::subject::{self, LinkRefusal};
 use crate::token::{Checked, TokenCheck};
+use crate::writes;
 
 /// The methods a preflight from the app origin allows (§3.3 item 5).
 pub const ALLOW_METHODS: &str = "GET, POST, PUT, DELETE, PATCH";
@@ -106,6 +107,18 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/approvals/{approval}",
             get(routes::one_approval).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/pause",
+            post(writes::pause).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/hold",
+            post(writes::hold).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/kill-switch",
+            post(writes::kill_switch).fallback(otherwise.clone()),
         )
         .fallback(otherwise)
         .with_state(Arc::new(app))
