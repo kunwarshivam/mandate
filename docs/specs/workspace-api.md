@@ -494,7 +494,10 @@ per workspace deployment (item 6).
    listener; the probes are never on it.
 2. **Environment.** Settings come from named variables: `MANDATE_API_DATABASE_URL`,
    `MANDATE_API_ISSUER`, `MANDATE_API_AUDIENCE`, `MANDATE_API_JWKS_URL`, `MANDATE_API_APP_ORIGIN`,
-   and `MANDATE_API_SUBJECT_LINKS`. As a guard against a secret placed in the environment (DEC-822
+   `MANDATE_API_SUBJECT_LINKS`, and `MANDATE_API_WORKSPACE` and `MANDATE_API_ORG`: the one
+   workspace this deployment hosts and its organization, as ULIDs. Every other workspace in a path
+   is absent (API-9's 404), and the organization is what `authorize` checks the pair against;
+   journal spec §9.12's records name neither. As a guard against a secret placed in the environment (DEC-822
    item 4), a variable whose name contains `SECRET`, `PASSWORD`, `TOKEN`, or `KEY` (ASCII
    case-insensitive) refuses the start, and so does a database URL that carries a password: the
    API reaches Postgres over its local socket by peer authentication, or with a credential file.
