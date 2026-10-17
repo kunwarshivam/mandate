@@ -12,7 +12,7 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 | `charts/workspace/` | The Helm chart `mandate-workspace`: one Deployment or Job per process type whose image is named, the migration hook, and the network policies |
 | `charts/journal-db/` | The journal's Postgres under the CloudNativePG operator, its roles (`files/roles.sql`), and one credential Secret per process type. Installed before the workspace chart. Lane S2 (E21-41) grows it |
 | `compose/compose.json` | The same processes for one host (infrastructure §3.2, hybrid), generated: `cargo xtask cell generate --write` |
-| `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ |
+| `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ ; cell #1's own settings on top of `k3s.yaml`, and its bring-up, are in [`../hosted/`](../hosted/README.md) |
 | `images/mandate.Dockerfile` | The interim `mandate` image the cell builds from the change; lane R2 (E21-35) replaces it |
 | `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
 
@@ -40,6 +40,9 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   process's start (OPS-13);
 - `environment` is `paper` or `backtest` only, and every image is pinned by digest or is the
   cell's own `mandate.local/` build;
+- `MANDATE_DEPLOYMENT_TIER` on every process comes from the `deploymentTier` value alone:
+  `production` unless a values file says otherwise, `ci` in the local cell, `dev` on hosted cell #1
+  (DEC-971 item 2, [DEC-2000](../../docs/project/decisions/DEC-2000.md) item 6);
 - the cell's one ingress is a `cloudflared` pod dialing out to Cloudflare's tunnel edge, off in the
   local cell: no Service, NodePort, LoadBalancer or Ingress, and the tunnel token a mounted file;
 - no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and

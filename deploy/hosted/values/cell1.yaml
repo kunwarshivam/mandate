@@ -1,0 +1,7 @@
+# Cell #1 hosted (E21-51, DEC-2000), on top of deploy/cell/values/k3s.yaml. Settings only.
+# deploy/hosted/cell1.py sets the images, pinned by digest, from the release's PUBLISHED list.
+#
+# `dev` until release signing exists (DEC-971 item 7): the published images carry no binary
+# signature, so outside dev and CI nothing would start. Paper and demo data only; the hosted cell
+# has no live connection (E21-48 is after the demo). DEC-2000 item 6 says what waits on the founder.
+deploymentTier: dev

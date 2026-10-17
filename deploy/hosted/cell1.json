@@ -1,0 +1,78 @@
+{
+  "about": "Cell #1's settings for deploy/hosted/cell1.py (E21-51, DEC-2000). Settings only: no token, key, password or account id is ever a value here; those are the founder's, given as file paths or flags when the runbook runs.",
+  "tag": "mandate-cell1",
+  "region": "nyc3",
+  "image": "ubuntu-24-04-x64",
+  "size": "s-4vcpu-8gb",
+  "vpc": {
+    "name": "mandate-cell1",
+    "ip_range": "10.110.0.0/20"
+  },
+  "firewall": "mandate-cell1",
+  "ssh_key_name": "mandate-cell1-admin",
+  "admin_user": "cell1_admin",
+  "nodes": [
+    {
+      "name": "cell1-a",
+      "role": "server",
+      "volume": "cell1-a-data"
+    },
+    {
+      "name": "cell1-b",
+      "role": "agent",
+      "volume": "cell1-b-data"
+    }
+  ],
+  "volume_size": "40GiB",
+  "k3s": {
+    "version": "v1.35.5+k3s1",
+    "url": "https://github.com/k3s-io/k3s/releases/download/v1.35.5%2Bk3s1/k3s",
+    "sha256": "267d18da7b3c837d82283f0588fb9031a8a6ff3c0dac772c260c40852ce515f6"
+  },
+  "cloudflared": {
+    "version": "2026.9.3",
+    "url": "https://github.com/cloudflare/cloudflared/releases/download/2026.9.3/cloudflared-linux-amd64",
+    "sha256": "77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2"
+  },
+  "cnpg_chart": {
+    "url": "https://github.com/cloudnative-pg/charts/releases/download/cloudnative-pg-v0.29.1/cloudnative-pg-0.29.1.tgz",
+    "sha256": "b53d3991fe84bcf38767e7702cae78666265427a127a26fff168ab4207d2b1df",
+    "operator_tag": "1.30.1@sha256:923c267ec29636db3bee20f993d0ec4973fa22998e1adad37da79e4d32b5bc07"
+  },
+  "tunnels": {
+    "ops": {
+      "name": "cell1-ops",
+      "routes": {
+        "ssh-cell1": "ssh://localhost:22",
+        "kube-cell1": "tcp://localhost:6443"
+      }
+    },
+    "app": {
+      "name": "cell1-app",
+      "routes": {
+        "api": "http://api.ws-ws1.svc.cluster.local:8080"
+      }
+    }
+  },
+  "access": {
+    "ops_session": "1h",
+    "app_session": "24h",
+    "policy": "cell1-operators"
+  },
+  "kube_local_port": 16443,
+  "namespace": "ws-ws1",
+  "secrets": {
+    "pull": "ghcr-pull",
+    "tunnel": "cloudflared-tunnel",
+    "object_store": "object-store-r2"
+  },
+  "object_store": {
+    "bucket": "mandate-cell1-journal-cold",
+    "config_map": "object-store"
+  },
+  "k3d": {
+    "cluster": "mandate-hosted",
+    "agents": 1,
+    "image": "rancher/k3s:v1.35.5-k3s1@sha256:2074403abe1bded11ef3dde09d457e13be8e0b64c218b1c4f8269b4565cfbc65"
+  }
+}

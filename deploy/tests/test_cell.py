@@ -581,6 +581,28 @@ def test_environment_is_paper_or_backtest():
         assert helm(CHART, "--set", f"environment={refused}").returncode != 0, refused
 
 
+def tiers(docs: list[dict]) -> set[str]:
+    """MANDATE_DEPLOYMENT_TIER of every process container (each one that sets HOME, as every
+    process container does): the start-up check reads it (DEC-971 item 2)."""
+    found = set()
+    for w in workloads(docs):
+        for c in pod_spec(w)["containers"]:
+            env = {e["name"]: e.get("value") for e in c.get("env", [])}
+            if "HOME" in env and w["metadata"]["name"] != "cloudflared":
+                found.add(env.get("MANDATE_DEPLOYMENT_TIER", "unset"))
+    return found
+
+
+def test_deployment_tier_is_set_from_values():
+    hosted = CELL.parent / "hosted" / "values" / "cell1.yaml"
+    assert tiers(render(*every_image())) == {"production"}, "unset is production"
+    assert tiers(render_all()) == {"ci"}, "the local cell runs its own unsigned build as ci"
+    k3s = ("-f", str(CELL / "values" / "k3s.yaml"))
+    assert tiers(render(*k3s, "-f", str(hosted), *every_image())) == {"dev"}, "cell #1 is dev (DEC-2000)"
+    for refused in ("live", "prod", ""):
+        assert helm(CHART, "--set", f"deploymentTier={refused}").returncode != 0, refused
+
+
 def test_images_are_pinned():
     for image in ("registry.example/x:latest", "registry.example/x", "mandate.local/mandate:latest"):
         assert helm(CHART, "--set", f"images.mandate={image}").returncode != 0, image

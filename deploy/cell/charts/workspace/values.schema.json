@@ -14,7 +14,8 @@
     "run",
     "verify",
     "localImages",
-    "ingress"
+    "ingress",
+    "deploymentTier"
   ],
   "properties": {
     "workspace": {
@@ -26,6 +27,15 @@
       "enum": [
         "paper",
         "backtest"
+      ]
+    },
+    "deploymentTier": {
+      "description": "MANDATE_DEPLOYMENT_TIER for every process (DEC-971 item 2): the start-up check refuses an unsigned build outside dev and ci, and any value it does not know is production",
+      "enum": [
+        "dev",
+        "ci",
+        "staging",
+        "production"
       ]
     },
     "images": {

@@ -69,6 +69,8 @@ commands:
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
                         ready and what waits on its lane, then web/ at 127.0.0.1:4317
   cell down             delete the local cell
+  cell hosted           cell #1's bring-up (deploy/hosted/) against a two-node k3d cluster of
+                        its own, the tunnel off
   cell generate [--write]
                         the Compose file and the journal's roles file from processes.json
                         (drift check unless --write)
@@ -263,6 +265,7 @@ fn run() -> Result<()> {
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
         ["cell", "up"] => cell::up(),
         ["cell", "down"] => cell::down(),
+        ["cell", "hosted"] => cell::hosted(),
         ["cell", "demo"] => cell::demo(true),
         ["cell", "demo", "--no-web"] => cell::demo(false),
         ["cell", "generate"] => cell::generate(false),

@@ -1,0 +1,20 @@
+{
+  "about": "The cloud firewall of cell #1's two droplets, by tag (E21-51, DEC-2000 item 2). Nothing on the internet reaches either droplet: the only inbound sources are the cell's own droplets, for k3s, its WireGuard pod network and SSH from cell1-a to cell1-b. Ingress is the two Cloudflare tunnels, which dial out. Outbound is narrowed by port; each pod's own egress is narrowed again by the chart's network policies. `cell1.py` turns these rules into doctl's flags; tests/test_hosted.py checks them.",
+  "inbound": [
+    {"protocol": "tcp", "ports": "1-65535", "sources": {"tags": ["mandate-cell1"]}},
+    {"protocol": "udp", "ports": "1-65535", "sources": {"tags": ["mandate-cell1"]}},
+    {"protocol": "icmp", "sources": {"tags": ["mandate-cell1"]}}
+  ],
+  "outbound": [
+    {"why": "HTTPS: image pulls (GHCR, Docker Hub), the k3s and cloudflared downloads, R2, Cloudflare's API", "protocol": "tcp", "ports": "443", "destinations": {"addresses": ["0.0.0.0/0", "::/0"]}},
+    {"why": "Ubuntu's package mirrors for security updates, which serve plain HTTP and are signed", "protocol": "tcp", "ports": "80", "destinations": {"addresses": ["0.0.0.0/0", "::/0"]}},
+    {"why": "DNS", "protocol": "udp", "ports": "53", "destinations": {"addresses": ["0.0.0.0/0", "::/0"]}},
+    {"why": "DNS over TCP", "protocol": "tcp", "ports": "53", "destinations": {"addresses": ["0.0.0.0/0", "::/0"]}},
+    {"why": "NTP", "protocol": "udp", "ports": "123", "destinations": {"addresses": ["0.0.0.0/0", "::/0"]}},
+    {"why": "The Cloudflare Tunnel edge (QUIC, then HTTP/2)", "protocol": "udp", "ports": "7844", "destinations": {"addresses": ["0.0.0.0/0", "::/0"]}},
+    {"why": "The Cloudflare Tunnel edge (HTTP/2 fallback)", "protocol": "tcp", "ports": "7844", "destinations": {"addresses": ["0.0.0.0/0", "::/0"]}},
+    {"why": "The other cell node", "protocol": "tcp", "ports": "1-65535", "destinations": {"tags": ["mandate-cell1"]}},
+    {"why": "The other cell node", "protocol": "udp", "ports": "1-65535", "destinations": {"tags": ["mandate-cell1"]}},
+    {"why": "The other cell node", "protocol": "icmp", "destinations": {"tags": ["mandate-cell1"]}}
+  ]
+}

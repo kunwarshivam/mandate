@@ -9,6 +9,11 @@ workspace: ws1
 # this chart.
 environment: paper
 
+# MANDATE_DEPLOYMENT_TIER, which the chart sets on every process from this value and nothing else
+# (DEC-971 item 2): `dev`, `ci`, `staging` or `production`. Unsigned builds start only in `dev`
+# and `ci`; the release keys are not wired yet (DEC-971 item 7), so a signed tier starts nothing.
+deploymentTier: production
+
 # Whether `mandate.local/` images, built by `cargo xtask cell up` and imported into a local k3d
 # cell, may be named. Only the local cell's values set it; every other cluster takes digests only.
 localImages: false
