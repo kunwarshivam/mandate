@@ -535,12 +535,14 @@ per workspace deployment (item 6).
    the cookie, `Origin`, and `X-Mandate-Request`, takes `{access_token}` or `{access_token: null}`:
    - a token that verifies, for the session's subject: a granted refresh; the secret rotates and a
      new cookie is set;
-   - `null`, sent when the web app's sign-in client could not reach the provider, or the server
-     failing to fetch the issuer's keys: an outage (identity spec §6.4 route 1). The session keeps
+   - `null`, sent when the web app's sign-in client could not reach the provider; the server
+     holding no fetched key set, or none with the token's `kid` (a key rotation the next fetch
+     brings); or the subject-link file unreadable or exposed (an operator fault): an outage
+     (identity spec §6.4 route 1). The session keeps
      only pause and the kill switch until its absolute lifetime ends or a later refresh is granted.
      The caller can only narrow its own session this way;
-   - a token that does not verify, or names another subject: a failed refresh, which ends the
-     session (`refresh_failed`);
+   - a token that does not verify, names another subject, or whose subject the link file no longer
+     maps to the session's principal: a failed refresh, which ends the session (`refresh_failed`);
    - a rotated secret presented again ends the session (`refresh_reuse`).
 
    - A pause or a kill switch on a full session whose access has lapsed with no refresh is not
@@ -548,7 +550,8 @@ per workspace deployment (item 6).
      risk reduction never waits on the web app (API-7). Any other call on it gets the one 401.
 
    So a session's full reach never outlasts the last access token it was given by more than five
-   minutes. `DELETE /v1/sessions/current` ends it (`sign_out`) and clears the cookie. Records live
+   minutes. `DELETE /v1/sessions/current` ends it (`sign_out`) and clears the cookie; a cookie naming no live
+   session gets the one 401 with the cookie cleared too. Records live
    in the process until a Postgres store exists: a restart, a deploy included, ends every session.
    The user signs in again; with the identity provider down, pause and the kill switch remain
    through the host CLI (identity spec §6.4 route 3) until route 2's reduction-only sessions are
