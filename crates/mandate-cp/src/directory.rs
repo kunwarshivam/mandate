@@ -160,76 +160,182 @@ pub struct ControlPlane<S> {
 }
 
 impl<S: Store> ControlPlane<S> {
-    /// Stub: issues no token.
+    fn deployment(&self, id: &Ident) -> Option<Deployment> {
+        self.store
+            .deployments()
+            .into_iter()
+            .find(|d| d.deployment_id == *id)
+    }
+
+    /// An org admin creates `deployment` and receives its single-use enrollment token: the hex of
+    /// `secret`, 32 random bytes the caller drew, valid until `expires_at` (E13-1, design §3.1).
     pub fn create_deployment(
         &mut self,
-        _deployment: Deployment,
-        _secret: [u8; 32],
-        _expires_at: UtcNanos,
+        deployment: Deployment,
+        secret: [u8; 32],
+        expires_at: UtcNanos,
     ) -> String {
-        String::new()
+        let id = deployment.deployment_id.clone();
+        self.store.put_deployment(Deployment {
+            public_key: None,
+            ..deployment
+        });
+        let token = Token {
+            expires_at,
+            used: false,
+        };
+        self.store.put_token(&id, Digest::of(&secret), token);
+        Digest::from_bytes(secret).to_hex()
     }
 
-    /// Stub: enrolls nothing.
+    /// Enrollment (design §3.1, E20-2): a known, unused, unexpired token binds `public_key`, the
+    /// key generated on site, to its deployment, and is spent.
     pub fn enroll(
         &mut self,
-        _deployment_id: &Ident,
-        _token: &str,
-        _public_key: &[u8],
-        _now: UtcNanos,
+        deployment_id: &Ident,
+        token: &str,
+        public_key: &[u8],
+        now: UtcNanos,
     ) -> Result<Enrolled, Refused> {
-        Err(Refused::UnknownToken)
-    }
-
-    /// Stub: authenticates nothing.
-    pub fn authenticate(&self, signed: &Signed, now: UtcNanos) -> Result<Ident, Refused> {
-        let _ = (
-            signed,
-            now,
-            verify,
-            Digest::ZERO,
-            fleet_row,
-            MemberState::Active,
-            BTreeSet::<u8>::new(),
-            BTreeMap::<u8, u8>::new(),
+        let secret = Digest::from_hex(token).ok_or(Refused::UnknownToken)?;
+        let hash = Digest::of(secret.as_bytes());
+        let stored = self
+            .store
+            .token(deployment_id, &hash)
+            .ok_or(Refused::UnknownToken)?;
+        if stored.used {
+            return Err(Refused::TokenUsed);
+        }
+        if now >= stored.expires_at {
+            return Err(Refused::TokenExpired);
+        }
+        let key: [u8; 32] = public_key.try_into().map_err(|_| Refused::BadKey)?;
+        let deployment = self
+            .deployment(deployment_id)
+            .ok_or(Refused::UnknownDeployment)?;
+        self.store.put_token(
+            deployment_id,
+            hash,
+            Token {
+                used: true,
+                ..stored
+            },
         );
-        Err(Refused::NotEnrolled)
+        let enrolled = Enrolled {
+            deployment_id: deployment.deployment_id.clone(),
+            owner_org: deployment.owner_org.clone(),
+            mode: deployment.mode,
+            key_fingerprint: Digest::of(&key),
+        };
+        self.store.put_deployment(Deployment {
+            public_key: Some(key),
+            ..deployment
+        });
+        Ok(enrolled)
     }
 
-    /// Stub: records nothing.
+    /// The deployment a signed call comes from, if its key is enrolled, its time is within the
+    /// skew, and its signature verifies.
+    pub fn authenticate(&self, signed: &Signed, now: UtcNanos) -> Result<Ident, Refused> {
+        let deployment = self
+            .deployment(&signed.deployment_id)
+            .ok_or(Refused::UnknownDeployment)?;
+        let key = deployment.public_key.ok_or(Refused::NotEnrolled)?;
+        verify(signed, &key, now)?;
+        Ok(deployment.deployment_id)
+    }
+
+    /// A heartbeat (design §3.4, E20-5): versions and health only, from its own deployment.
     pub fn heartbeat(
         &mut self,
-        _signed: &Signed,
-        _heartbeat: Heartbeat,
-        _now: UtcNanos,
+        signed: &Signed,
+        heartbeat: Heartbeat,
+        now: UtcNanos,
     ) -> Result<(), Refused> {
-        Err(Refused::NotEnrolled)
+        let caller = self.authenticate(signed, now)?;
+        self.store.put_heartbeat(&caller, now, heartbeat);
+        Ok(())
     }
 
-    /// Stub: an empty fleet.
-    pub fn fleet(&self, _now: UtcNanos) -> Vec<FleetRow> {
-        Vec::new()
+    /// The fleet view: every deployment's last heartbeat and whether it is reachable. A silent
+    /// deployment is only marked `unreachable`; nothing about it is revoked (CP-8).
+    pub fn fleet(&self, now: UtcNanos) -> Vec<FleetRow> {
+        self.store
+            .deployments()
+            .into_iter()
+            .map(|d| fleet_row(&d, self.store.heartbeat(&d.deployment_id), now))
+            .collect()
     }
 
-    /// Stub: syncs nothing.
+    /// Directory sync (design §3.2): a deployment replaces its own workspaces and their
+    /// memberships. Any workspace on another deployment, or member of a workspace not in the call,
+    /// refuses the whole call (CP-11).
     pub fn sync_directory(
         &mut self,
-        _signed: &Signed,
-        _workspaces: Vec<Workspace>,
-        _members: Vec<Member>,
-        _now: UtcNanos,
+        signed: &Signed,
+        workspaces: Vec<Workspace>,
+        members: Vec<Member>,
+        now: UtcNanos,
     ) -> Result<(), Refused> {
-        Err(Refused::NotEnrolled)
+        let caller = self.authenticate(signed, now)?;
+        let elsewhere: BTreeSet<Ident> = self
+            .store
+            .workspaces()
+            .into_iter()
+            .filter(|w| w.deployment_id != caller)
+            .map(|w| w.workspace_id)
+            .collect();
+        let mine: BTreeSet<&Ident> = workspaces.iter().map(|w| &w.workspace_id).collect();
+        let owned = workspaces
+            .iter()
+            .all(|w| w.deployment_id == caller && !elsewhere.contains(&w.workspace_id));
+        let scoped = members.iter().all(|m| mine.contains(&m.workspace_id));
+        if !(owned && scoped) {
+            return Err(Refused::NotYours);
+        }
+        self.store.replace_directory(&caller, workspaces, members);
+        Ok(())
     }
 
-    /// Stub: routes nowhere.
+    /// The routes of `user_id`: each workspace where they hold an active membership, with its
+    /// deployment's endpoint. The call is signed by a deployment that vouches for the user, so
+    /// the plane learns nothing it did not already hold.
     pub fn routes(
         &self,
-        _signed: &Signed,
-        _user_id: &Ident,
-        _now: UtcNanos,
+        signed: &Signed,
+        user_id: &Ident,
+        now: UtcNanos,
     ) -> Result<Vec<Route>, Refused> {
-        Err(Refused::NotEnrolled)
+        self.authenticate(signed, now)?;
+        if signed.body != user_id.as_str().as_bytes() {
+            return Err(Refused::NotYours);
+        }
+        let endpoints: BTreeMap<Ident, Endpoint> = self
+            .store
+            .deployments()
+            .into_iter()
+            .map(|d| (d.deployment_id, d.endpoint))
+            .collect();
+        let hosts: BTreeMap<Ident, Ident> = self
+            .store
+            .workspaces()
+            .into_iter()
+            .map(|w| (w.workspace_id, w.deployment_id))
+            .collect();
+        let routes: BTreeSet<Route> = self
+            .store
+            .members()
+            .into_iter()
+            .filter(|m| m.user_id == *user_id && m.state == MemberState::Active)
+            .filter_map(|m| {
+                let endpoint = endpoints.get(hosts.get(&m.workspace_id)?)?;
+                Some(Route {
+                    workspace_id: m.workspace_id,
+                    endpoint: endpoint.clone(),
+                })
+            })
+            .collect();
+        Ok(routes.into_iter().collect())
     }
 }
 
