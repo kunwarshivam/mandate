@@ -46,7 +46,19 @@ impl Usd6 {
 
     /// Plain decimal text, `0` to six fractional digits (`50`, `0.0117`); no sign, no exponent.
     pub fn parse(text: &str) -> Result<Self, MoneyError> {
-        Err(MoneyError::NotUsd6)
+        let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        if !digits(whole) || (text.contains('.') && !digits(fraction)) || fraction.len() > PLACES {
+            return Err(MoneyError::NotUsd6);
+        }
+        let whole: u64 = whole.parse().map_err(|_| MoneyError::Overflow)?;
+        let padded = format!("{fraction:0<PLACES$}");
+        let fraction: u64 = padded.parse().map_err(|_| MoneyError::NotUsd6)?;
+        whole
+            .checked_mul(MICROS)
+            .and_then(|w| w.checked_add(fraction))
+            .map(Self)
+            .ok_or(MoneyError::Overflow)
     }
 
     pub fn checked_add(self, other: Self) -> Result<Self, MoneyError> {
@@ -135,13 +147,22 @@ impl PriceTable {
     /// tokenizer never makes more tokens than bytes) and `max_output_tokens` output tokens,
     /// rounded up to the micro-dollar.
     pub fn max_cost(&self, prompt_bytes: u64, max_output_tokens: u32) -> Result<Usd6, MoneyError> {
-        let _ = (prompt_bytes, max_output_tokens); Err(MoneyError::Overflow)
+        let sum = priced(prompt_bytes, self.input)?
+            .checked_add(priced(u64::from(max_output_tokens), self.output)?)
+            .ok_or(MoneyError::Overflow)?;
+        micros_of(sum, true)
     }
 
     /// The reported tokens at these prices, rounded half up to the micro-dollar (inference spec
     /// §7.1). Cached tokens beyond the input count are priced as fresh input.
     pub fn cost(&self, usage: Usage) -> Result<Usd6, MoneyError> {
-        let _ = usage; Err(MoneyError::Overflow)
+        let cached = usage.cached.min(usage.input);
+        let fresh = usage.input.saturating_sub(cached);
+        let sum = priced(fresh, self.input)?
+            .checked_add(priced(cached, self.cached)?)
+            .and_then(|s| s.checked_add(priced(usage.output, self.output).ok()?))
+            .ok_or(MoneyError::Overflow)?;
+        micros_of(sum, false)
     }
 }
 

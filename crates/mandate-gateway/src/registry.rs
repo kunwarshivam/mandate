@@ -258,7 +258,8 @@ impl Entry {
     /// INF-2: a response serves this entry only if its reported model and provider are both
     /// present and equal, byte for byte, to the pin's model name and the endpoint's provider.
     pub fn serves(&self, endpoint: &Endpoint, reported: &Reported) -> bool {
-        let _ = (endpoint, reported); false
+        reported.model.as_deref() == Some(self.content.identity.model_name.as_str())
+            && reported.provider.as_deref() == Some(endpoint.route.reported_provider.as_str())
     }
 }
 
@@ -432,8 +433,33 @@ impl Registry {
 }
 
 fn check_content(content: &PinnedContent) -> Result<(), RegistryError> {
-        let _ = content; Ok(())
+    if floating(&content.identity) {
+        return Err(RegistryError::FloatingAlias);
     }
+    if matches!(content.identity.snapshot, Snapshot::Weights(_))
+        && content.identity.quantization.is_none()
+    {
+        return Err(RegistryError::Quantization);
+    }
+    let bound = if content.model_id.starts_with(FAST_PREFIX) {
+        FAST_DEADLINE_MS
+    } else {
+        SLOW_DEADLINE_MS
+    };
+    if content.deadline_ms == 0 || content.deadline_ms > bound {
+        return Err(RegistryError::Deadline);
+    }
+    if content.max_output_tokens == 0 {
+        return Err(RegistryError::NoOutputBound);
+    }
+    if !schema::well_formed(&content.output_schema) {
+        return Err(RegistryError::OutputSchema);
+    }
+    if !template_matches(&content.template) {
+        return Err(RegistryError::Template);
+    }
+    Ok(())
+}
 
 /// INF-1 and DEC-997 item 2: an empty name, a variant suffix (`:nitro`, `:online`, …), a
 /// floating word as any segment of the name, or a dated snapshot with no date in it.

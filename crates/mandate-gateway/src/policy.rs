@@ -54,14 +54,38 @@ impl EndpointPolicy {
 
     /// Whether a call may go to `endpoint`.
     pub fn allows(&self, endpoint: &Endpoint) -> bool {
-        let _ = endpoint; false
+        self.localities.contains(&endpoint.locality)
+            && self
+                .providers
+                .as_ref()
+                .is_none_or(|p| p.contains(&endpoint.route.upstream))
+            && self
+                .regions
+                .as_ref()
+                .is_none_or(|r| r.contains(&endpoint.region))
     }
 
     /// `child` checked against this policy as its parent (mandate spec §4.3, sets: child ⊆ parent),
     /// and the policy in force: the child's, which can only be narrower. A child that leaves
     /// providers or regions unset inherits the parent's.
     pub fn narrowed(&self, child: &Self) -> Result<Self, PolicyError> {
-        let _ = child; Err(PolicyError::Widens)
+        let subset = |parent: &Option<BTreeSet<String>>, child: &Option<BTreeSet<String>>| match (
+            parent, child,
+        ) {
+            (Some(p), Some(c)) => c.is_subset(p),
+            (Some(_), None) | (None, _) => true,
+        };
+        if !child.localities.is_subset(&self.localities)
+            || !subset(&self.providers, &child.providers)
+            || !subset(&self.regions, &child.regions)
+        {
+            return Err(PolicyError::Widens);
+        }
+        Ok(Self {
+            localities: child.localities.clone(),
+            providers: child.providers.clone().or_else(|| self.providers.clone()),
+            regions: child.regions.clone().or_else(|| self.regions.clone()),
+        })
     }
 }
 

@@ -171,8 +171,38 @@ impl MeterStore for MemoryMeter {
 
 /// Journal spec rule 158 for `record` appended after `earlier`.
 pub fn rule_158(earlier: &[MeterRecord], record: &MeterRecord) -> Result<(), StoreError> {
-        let _ = (earlier, record); Ok(())
+    match record {
+        MeterRecord::Reserved(r) => {
+            let again = earlier
+                .iter()
+                .any(|e| matches!(e, MeterRecord::Reserved(x) if x.call_id == r.call_id));
+            if again {
+                return Err(StoreError::Rule158("the call is already reserved"));
+            }
+        }
+        MeterRecord::Settled(s) => {
+            let reserved = earlier.iter().find_map(|e| match e {
+                MeterRecord::Reserved(x) if x.event_id == s.reservation => Some(x),
+                _ => None,
+            });
+            let Some(reserved) = reserved else {
+                return Err(StoreError::Rule158(
+                    "no earlier reservation has this event id",
+                ));
+            };
+            if reserved.call_id != s.call_id {
+                return Err(StoreError::Rule158("the reservation is another call's"));
+            }
+            let settled = earlier
+                .iter()
+                .any(|e| matches!(e, MeterRecord::Settled(x) if x.reservation == s.reservation));
+            if settled {
+                return Err(StoreError::Rule158("the reservation is already settled"));
+            }
+        }
     }
+    Ok(())
+}
 
 /// Whose spend a cap bounds.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -207,8 +237,35 @@ impl Period {
 /// Journal spec §9.19's fold: for each reservation in the scope and period, its settlement's cost
 /// when settled and its maximum when open.
 pub fn spend(records: &[MeterRecord], scope: &Scope, period: Period) -> Result<Usd6, MoneyError> {
-        let _ = (records, scope, period); Ok(Usd6::ZERO)
+    let mut settled: BTreeMap<&str, Usd6> = BTreeMap::new();
+    for record in records {
+        if let MeterRecord::Settled(s) = record {
+            let cost = settled
+                .get(s.reservation.as_str())
+                .map_or(s.cost, |c| (*c).max(s.cost));
+            settled.insert(s.reservation.as_str(), cost);
+        }
     }
+    records
+        .iter()
+        .filter_map(|r| match r {
+            MeterRecord::Reserved(x) => Some(x),
+            MeterRecord::Settled(_) => None,
+        })
+        .filter(|x| match scope {
+            Scope::Workspace => true,
+            Scope::Agent(agent) => x.agent_id.as_deref() == Some(agent.as_str()),
+        })
+        .filter(|x| period.holds(x.risk_day))
+        .try_fold(Usd6::ZERO, |total, x| {
+            total.checked_add(
+                settled
+                    .get(x.event_id.as_str())
+                    .copied()
+                    .unwrap_or(x.max_cost),
+            )
+        })
+}
 
 /// The caps one workspace's calls are held to (inference spec §7.3, DEC-997 item 3).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -342,7 +399,26 @@ impl<S: MeterStore> Meter<S> {
     /// Appends `reservation` only if, for every cap that applies, spend plus its maximum is at
     /// most the cap (inference spec §7.3). A store that cannot be read or appended to refuses.
     pub fn reserve(&mut self, reservation: Reservation) -> Result<Reservation, MeterRefusal> {
-        let _ = reservation; Err(MeterRefusal::Unavailable)
+        let records = self.store.read().map_err(|_| MeterRefusal::Unavailable)?;
+        let caps = self.caps.applying(
+            reservation.agent_id.as_deref(),
+            reservation.purpose,
+            reservation.risk_day,
+        );
+        for (scope, period, cap) in caps {
+            let spent =
+                spend(&records, &scope, period).map_err(|_| MeterRefusal::BudgetExhausted)?;
+            let after = spent
+                .checked_add(reservation.max_cost)
+                .map_err(|_| MeterRefusal::BudgetExhausted)?;
+            if after > cap {
+                return Err(MeterRefusal::BudgetExhausted);
+            }
+        }
+        self.store
+            .append(MeterRecord::Reserved(reservation.clone()))
+            .map_err(|_| MeterRefusal::Unavailable)?;
+        Ok(reservation)
     }
 
     /// Appends the settlement. If it cannot be appended, the reservation stays open and counts at

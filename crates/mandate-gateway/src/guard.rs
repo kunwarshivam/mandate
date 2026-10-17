@@ -94,8 +94,20 @@ impl GuardRule {
 
 /// The guard's verdict on `prompt`: `Ok` or the first rule it breaks.
 pub fn check(prompt: &str, context: &GuardContext) -> Result<(), GuardRule> {
-        let _ = (prompt, context); Ok(())
+    if has_credential(prompt) {
+        return Err(GuardRule::Credential);
     }
+    if lists_any(prompt, &context.account_identifiers) {
+        return Err(GuardRule::AccountIdentifier);
+    }
+    if lists_any(prompt, &context.personal_data) || has_email(prompt) {
+        return Err(GuardRule::PersonalData);
+    }
+    if lists_any(prompt, &context.foreign_values) {
+        return Err(GuardRule::ForeignWorkspace);
+    }
+    Ok(())
+}
 
 /// Letters and digits of any script only, lower-cased: the form listed values are compared in.
 fn folded(text: &str) -> String {

@@ -67,6 +67,33 @@ impl ProviderAdapter for OpenRouter {
     }
 
     fn reply(&self, body: &[u8]) -> Option<Reply> {
-        let _ = body; None
+        let value: Json = serde_json::from_slice(body).ok()?;
+        let object = value.as_object()?;
+        let choice = object.get("choices")?.as_array()?.first()?;
+        let message = choice.get("message")?;
+        let text = |v: Option<&Json>| v.and_then(Json::as_str).map(str::to_owned);
+        let count = |path: &[&str]| -> Option<u64> {
+            let mut at = object.get("usage")?;
+            for name in path {
+                at = at.get(*name)?;
+            }
+            at.as_u64()
+        };
+        let refused = choice.get("finish_reason").and_then(Json::as_str) == Some("content_filter")
+            || message.get("refusal").is_some_and(|r| !r.is_null());
+        Some(Reply {
+            request_id: text(object.get("id")),
+            reported: Reported {
+                model: text(object.get("model")),
+                provider: text(object.get("provider")),
+            },
+            content: text(message.get("content")),
+            refused,
+            usage: Usage {
+                input: count(&["prompt_tokens"])?,
+                output: count(&["completion_tokens"])?,
+                cached: count(&["prompt_tokens_details", "cached_tokens"]).unwrap_or(0),
+            },
+        })
     }
 }

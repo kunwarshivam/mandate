@@ -226,7 +226,24 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
     /// so it could not be journaled under journal spec rule 148, and it sends, reserves, and costs
     /// nothing. Every other request gets exactly one [`CallRecord`].
     pub fn call(&mut self, request: &CallRequest) -> Result<CallRecord, RequestError> {
-        let _ = request; Err(RequestError::UnknownModel)
+        let start = self.clock.now();
+        if request.workspace_id != self.settings.workspace_id {
+            return Err(RequestError::ForeignWorkspace);
+        }
+        if request.agent_id.is_none() != (request.purpose == Purpose::Compiler) {
+            return Err(RequestError::AgentPurpose);
+        }
+        if !is_ulid(&request.call_id) {
+            return Err(RequestError::CallId);
+        }
+        let entry = match self.registry.entry(&request.model) {
+            Ok(entry) => entry.clone(),
+            Err(Unresolved::HashMismatch) => return Err(RequestError::HashMismatch),
+            Err(Unresolved::Unknown | Unresolved::Withdrawn) => {
+                return Err(RequestError::UnknownModel);
+            }
+        };
+        Ok(self.call_entry(request, entry, start))
     }
 
     fn call_entry(&mut self, request: &CallRequest, entry: Entry, start: UtcNanos) -> CallRecord {
