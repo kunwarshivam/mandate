@@ -141,8 +141,15 @@ impl<S: Store> RuntimeProcess<S> {
                 head,
             },
         );
-        if head == 0 && !matches!(this.open(now), Ran::Committed) {
-            return this;
+        if head == 0 {
+            match this.open(now) {
+                Ran::Committed => {}
+                Ran::InDoubt => {
+                    this.lifecycle.observe(now, Lifecycled::Failed);
+                    return this;
+                }
+                Ran::Stopped => return this,
+            }
         }
         this.hand(
             now,

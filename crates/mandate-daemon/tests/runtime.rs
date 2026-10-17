@@ -402,6 +402,19 @@ fn a_draft_the_wiring_has_no_references_for_stops_the_process_rather_than_being_
     assert_eq!(count(&rig, "KillSwitchActivated"), 0);
 }
 
+/// A `StreamOpened` whose answer was lost stops the process before the core starts, and the
+/// restart finds the stream opened and opens it no second time (DEC-1012 item 7).
+#[test]
+fn a_stream_opening_in_doubt_exits_and_the_restart_opens_it_once() {
+    let rig = Rig::default();
+    rig.lose_answers.set(1);
+    let first = start(&rig, NOW);
+    assert_eq!(first.lifecycle().state(), State::Exited(Exit::CycleFailed));
+    let restarted = start(&rig, NOW + 1);
+    assert_eq!(restarted.lifecycle().state(), State::Ready);
+    assert_eq!(count(&rig, "StreamOpened"), 1, "{:?}", kinds(&rig));
+}
+
 /// A row on the clock stream that is not a tick: the trading day the scheduler starts.
 fn day_started(rig: &Rig) {
     let seq = u64::try_from(rig.clock.borrow().len()).unwrap() + 1;
