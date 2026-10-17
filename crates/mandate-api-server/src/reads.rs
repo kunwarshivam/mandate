@@ -59,6 +59,8 @@ pub struct ApprovalView {
     pub deadline: i64,
     pub content_hash: String,
     pub content: Value,
+    /// The order the approval binds (DEC-1021).
+    pub order: Value,
 }
 
 /// Which approvals the inbox lists (`?state=`).
@@ -155,7 +157,10 @@ pub fn approvals(agent_id: &str, agent_rows: &[StoredEvent]) -> Vec<ApprovalView
                 .get("payload")
                 .and_then(|p| p.get("content"))
                 .filter(|c| c.as_object().is_some());
-            if let (Some(deadline), Some(hash), Some(content)) = (deadline, hash, content) {
+            let bound = event.get("payload").and_then(order);
+            if let (Some(deadline), Some(hash), Some(content), Some(bound)) =
+                (deadline, hash, content, bound)
+            {
                 views.push(ApprovalView {
                     approval_id: row.event_id.clone(),
                     agent_id: agent_id.to_owned(),
@@ -164,6 +169,7 @@ pub fn approvals(agent_id: &str, agent_rows: &[StoredEvent]) -> Vec<ApprovalView
                     deadline,
                     content_hash: hash.to_owned(),
                     content: content.clone(),
+                    order: bound,
                 });
             }
             continue;
@@ -233,4 +239,26 @@ pub fn agent(deployment: &Deployment, agent_rows: &[StoredEvent]) -> AgentView {
         },
         pending_approvals: u64::try_from(pending).unwrap_or(u64::MAX),
     }
+}
+
+/// The bound order of an `ApprovalRequested` payload (DEC-1021): `content.action`'s members, and
+/// version 2's `content.execution` time in force and protection, `null` without one.
+pub fn order(payload: &Value) -> Option<Value> {
+    let _ = payload;
+    Some(Value::Null)
+}
+
+/// The `account_ref` the control stream binds to `connection_id` (DEC-1020 item 3): the latest
+/// `ConnectionEstablished` at schema version 2 naming it, else its latest `ConnectionRequested`.
+pub fn account_ref(control: &[StoredEvent], connection_id: &str) -> Option<String> {
+    let _ = (control, connection_id);
+    None
+}
+
+/// The account's holdings at its last reconciliation (DEC-1020 item 3): the latest
+/// `BrokerPositionObserved` per instrument, in instrument order, leaving out an instrument whose
+/// model and broker quantities are both zero.
+pub fn account_positions(account_rows: &[StoredEvent]) -> Vec<Value> {
+    let _ = account_rows;
+    Vec::new()
 }

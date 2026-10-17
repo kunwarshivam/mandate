@@ -428,3 +428,183 @@ fn resolved_approvals_requested_together_list_by_approval_id() {
         "whatever order the agents are read in"
     );
 }
+
+fn payload(json: &str) -> mandate_canon::Value {
+    mandate_canon::parse(json.as_bytes()).expect("JSON")
+}
+
+const ACTION: &str = r#""action":{"instrument":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","asset_class":"us_equity","side":"buy","qty":"3","limit":"101.5","order_usd":"304.5","purpose":"open"}"#;
+
+#[test]
+fn a_version_one_request_binds_its_action_with_no_execution_plan() {
+    let bound =
+        mandate_api_server::reads::order(&payload(&format!(r#"{{"content":{{{ACTION}}}}}"#)))
+            .expect("an order");
+    assert_eq!(
+        bound,
+        payload(
+            r#"{"instrument":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","asset_class":"us_equity","side":"buy","qty":"3","limit":"101.5","order_usd":"304.5","purpose":"open","tif":null,"protection":null}"#
+        )
+    );
+}
+
+#[test]
+fn a_version_two_request_adds_its_time_in_force_and_protection() {
+    let with = |execution: &str| {
+        mandate_api_server::reads::order(&payload(&format!(
+            r#"{{"content":{{{ACTION},"execution":{execution}}}}}"#
+        )))
+        .expect("an order")
+    };
+    let protected = with(
+        r#"{"asset_class":"us_equity","tif":"day","protection_required":true,"protection":{"stop":"95","take_profit":"112"}}"#,
+    );
+    assert_eq!(protected.get("tif"), Some(&payload(r#""day""#)));
+    assert_eq!(
+        protected.get("protection"),
+        Some(&payload(r#"{"stop":"95","take_profit":"112"}"#))
+    );
+    let bare = with(
+        r#"{"asset_class":"crypto","tif":"ioc","protection_required":false,"protection":null}"#,
+    );
+    assert_eq!(bare.get("tif"), Some(&payload(r#""ioc""#)));
+    assert_eq!(bare.get("protection"), Some(&mandate_canon::Value::Null));
+}
+
+#[test]
+fn a_request_without_a_whole_action_binds_no_order() {
+    assert_eq!(
+        mandate_api_server::reads::order(&payload(r#"{"content":{}}"#)),
+        None
+    );
+    assert_eq!(mandate_api_server::reads::order(&payload(r#"{}"#)), None);
+    let partial = r#"{"content":{"action":{"instrument":"x","asset_class":"us_equity","side":"buy","qty":"3","limit":"1","order_usd":"3"}}}"#;
+    assert_eq!(
+        mandate_api_server::reads::order(&payload(partial)),
+        None,
+        "no purpose"
+    );
+}
+
+fn versioned(mut row: StoredEvent, schema_version: u64) -> StoredEvent {
+    row.schema_version = schema_version;
+    row
+}
+
+#[test]
+fn a_connection_binds_the_account_its_latest_version_two_establishment_names() {
+    let control = vec![
+        row(&ctl(), 1, "StreamOpened", "{}"),
+        row(
+            &ctl(),
+            2,
+            "ConnectionRequested",
+            r#"{"connection_id":"conn_1","account_ref":"acct_requested"}"#,
+        ),
+        versioned(
+            row(
+                &ctl(),
+                3,
+                "ConnectionEstablished",
+                r#"{"connection_id":"conn_1","account_ref":"acct_one"}"#,
+            ),
+            2,
+        ),
+        row(
+            &ctl(),
+            4,
+            "ConnectionEstablished",
+            r#"{"connection_id":"conn_1","account_ref":"acct_v1"}"#,
+        ),
+        versioned(
+            row(
+                &ctl(),
+                5,
+                "ConnectionEstablished",
+                r#"{"connection_id":"conn_1","account_ref":"acct_two"}"#,
+            ),
+            2,
+        ),
+        versioned(
+            row(
+                &ctl(),
+                6,
+                "ConnectionEstablished",
+                r#"{"connection_id":"conn_2","account_ref":"acct_other"}"#,
+            ),
+            2,
+        ),
+        row(
+            &ctl(),
+            7,
+            "ConnectionRequested",
+            r#"{"connection_id":"conn_3","account_ref":"acct_pending"}"#,
+        ),
+        row(
+            &ctl(),
+            8,
+            "ConnectionRequested",
+            r#"{"connection_id":"conn_3","account_ref":"acct_pending_2"}"#,
+        ),
+    ];
+    let bound = |id| mandate_api_server::reads::account_ref(&control, id);
+    assert_eq!(
+        bound("conn_1").as_deref(),
+        Some("acct_two"),
+        "the latest v2, never v1"
+    );
+    assert_eq!(bound("conn_2").as_deref(), Some("acct_other"));
+    assert_eq!(
+        bound("conn_3").as_deref(),
+        Some("acct_pending_2"),
+        "else the latest request"
+    );
+    assert_eq!(bound("conn_4"), None);
+}
+
+#[test]
+fn the_accounts_positions_are_its_latest_reconciliation_per_instrument() {
+    let acct = format!("acct:{WS}:acct_1");
+    let observed = |seq, instrument: &str, model: &str, broker: &str, mismatch: bool| {
+        row(
+            &acct,
+            seq,
+            "BrokerPositionObserved",
+            &format!(
+                r#"{{"instrument":"{instrument}","broker_qty":"{broker}","model_qty":"{model}","mismatch":{mismatch},"risk_clock":"2026-10-17T10:00:00Z"}}"#
+            ),
+        )
+    };
+    let rows = vec![
+        row(&acct, 1, "StreamOpened", "{}"),
+        observed(2, "zzz", "5", "5", false),
+        observed(3, "aaa", "2", "2", false),
+        observed(4, "zzz", "7", "6", true),
+        observed(5, "mmm", "0", "0", false),
+        row(&acct, 6, "FillApplied", r#"{"instrument_id":"aaa"}"#),
+        observed(7, "nnn", "0", "1", true),
+        observed(8, "aaa", "0", "0", false),
+    ];
+    let positions = mandate_api_server::reads::account_positions(&rows);
+    let expected: Vec<Value> = [
+        (r#""nnn""#, "0", "1", true, 7),
+        (r#""zzz""#, "7", "6", true, 4),
+    ]
+    .iter()
+    .map(|(instrument, qty, broker, mismatch, seq)| {
+        parse(
+            format!(
+                r#"{{"instrument":{instrument},"qty":"{qty}","broker_qty":"{broker}","mismatch":{mismatch},"observed_at":"{}"}}"#,
+                at(*seq)
+            )
+            .as_bytes(),
+        )
+        .expect("JSON")
+    })
+    .collect();
+    assert_eq!(
+        positions, expected,
+        "flat instruments are left out, the rest in instrument order"
+    );
+    assert!(mandate_api_server::reads::account_positions(&[]).is_empty());
+}

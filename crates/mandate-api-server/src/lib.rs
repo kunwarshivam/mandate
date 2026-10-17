@@ -29,6 +29,7 @@
 pub mod clock;
 pub mod commands;
 pub mod config;
+pub mod documents;
 pub mod http;
 pub mod journal;
 pub mod keys;

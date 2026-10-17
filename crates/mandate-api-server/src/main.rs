@@ -244,6 +244,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         )?)),
         members: Arc::new(members::until_parser),
         hosted: start.hosted,
+        artifacts: None,
     };
     let api = spawn_listener(
         serve(
