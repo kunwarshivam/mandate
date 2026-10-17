@@ -522,8 +522,18 @@ fn every_run_record_is_closed_member_by_member() {
         ),
         (
             "summary.instruments_read.item",
-            |s| put(s, SUMMARY, "payload.instruments_read", r#"["AAPL"]"#),
+            |s| put(s, SUMMARY, "payload.instruments_read", r#"["AA PL"]"#),
             Some((SUMMARY, "non_canonical", "payload.instruments_read[0]")),
+        ),
+        (
+            "summary.instruments_read.an_id",
+            |s| put(s, SUMMARY, "payload.instruments_read", r#"["BTCUSD"]"#),
+            None,
+        ),
+        (
+            "summary.watch.instrument.form",
+            |s| put(s, SUMMARY, "payload.watch[0].instrument_id", r#""AA PL""#),
+            Some((SUMMARY, "non_canonical", "payload.watch[0].instrument_id")),
         ),
         (
             "summary.watch.reason.form",
