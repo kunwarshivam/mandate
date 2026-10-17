@@ -14,7 +14,8 @@
 //! store, and `artifact put` and `get` supply and fetch those artifacts (E5-4); `journal
 //! verify-cold` runs the cold store's per-range checks over a directory of segments and
 //! manifests (E5-8). `db migrate` applies the journal's roles, schema and migrations as the
-//! deploy step before any process starts (E21-50). `approvals` and
+//! deploy step before any process starts (E21-50). `agent pause` and `agent kill` reach an
+//! agent, a connection or the workspace with nothing but the journal (E21-34). `approvals` and
 //! `agent` are M7's owner control: the inbox, the owner's answers, and the owner's commands, each
 //! committed to the workspace control stream (E8-1 to E8-3). Their `clap` commands land once
 //! `mandate-journal` registers the control stream's schemas, without which a real journal refuses
@@ -25,6 +26,7 @@ use clap::{Parser, Subcommand};
 pub mod agent;
 pub mod approvals;
 pub mod artifact;
+pub mod brake;
 pub mod config;
 pub mod connection;
 pub mod control;
@@ -83,9 +85,9 @@ pub enum Command {
     /// Create a mandate version, or show its confirmation code and confirm it, in paper.
     #[command(subcommand)]
     Version(gestures::VersionCommand),
-    /// Show an agent's deployment code, or deploy it with a confirmed version, in paper.
+    /// Deploy an agent, or pause it or commit a kill switch at agent, connection or workspace scope.
     #[command(subcommand)]
-    Agent(gestures::AgentCommand),
+    Agent(brake::AgentCommand),
     /// Apply the journal's roles, schema and migrations: the deploy step before any process starts.
     #[command(subcommand)]
     Db(db::DbCommand),
