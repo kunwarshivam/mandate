@@ -271,9 +271,14 @@ def test_pins_match_xtask():
         CONFIG["k3s"]["version"] = saved
 
 
+SECRET_SETTING = re.compile(r"(token|secret|password|key)\"?\s*[:=]\s*\"?[A-Za-z0-9+/_-]{20,}", re.IGNORECASE)
+
+
 def test_settings_hold_no_secret():
-    """cell1.json, firewall.json and the hosted values are settings: no token, key or account id."""
-    pattern = re.compile(r"(token|secret|password|key)\"?\s*[:=]\s*\"?[A-Za-z0-9+/_-]{20,}", re.IGNORECASE)
+    """cell1.json, firewall.json, the docs and the hosted values are settings: no token or key."""
+    pattern = SECRET_SETTING
+    assert pattern.search('{"api_token": "' + SECRETS["cf"] + '"}'), "the check sees a planted token"
+    assert pattern.search("secret_access_key = " + SECRETS["r2-key"])
     paths = [HOSTED / "cell1.json", HOSTED / "firewall.json", HOSTED / "RUNBOOK.md", HOSTED / "README.md"]
     for path in [*paths, *sorted((HOSTED / "values").iterdir())]:
         assert not pattern.search(path.read_text()), path
@@ -289,10 +294,16 @@ def recorders(tmp_path: Path, answers: dict[str, str] | None = None) -> Path:
         script = bin_dir / tool
         script.write_text(
             f"""#!{sys.executable}
-import json, sys
+import json, os, stat, sys
 data = "" if sys.stdin.isatty() else sys.stdin.read()
+args = sys.argv[1:]
+record = {{"argv": [{tool!r}, *args], "stdin": data, "env": dict(os.environ)}}
+if "--user-data-file" in args:
+    path = args[args.index("--user-data-file") + 1]
+    record["user_data"] = open(path).read()
+    record["user_data_mode"] = stat.S_IMODE(os.stat(path).st_mode)
 with open({str(log)!r}, "a") as log:
-    log.write(json.dumps({{"argv": [{tool!r}, *sys.argv[1:]], "stdin": data}}) + "\\n")
+    log.write(json.dumps(record) + "\\n")
 answers = {json.dumps(answers or {})}
 line = " ".join([{tool!r}, *sys.argv[1:]])
 for needle, answer in answers.items():
@@ -448,15 +459,22 @@ def test_recorded_cluster_puts_every_secret_on_stdin_only(isolated, monkeypatch)
     )
     out = io.StringIO()
     argv = ["cluster", *HOSTED_ARGS, *secret_files(tmp_path), "--published", str(published)]
+    assert cell1.main(argv, io.StringIO()) == 1, "cluster runs only with --accept-dev-tier"
+    assert calls(log) == []
+    argv.append("--accept-dev-tier")
     assert cell1.main(argv, out) == 0
     recorded = calls(log)
     planted = [*SECRETS.values(), APP_TOKEN]
     for call in recorded:
         for value in planted:
             assert value not in " ".join(call["argv"]), call["argv"]
+            assert value not in json.dumps(call["env"]), "a secret in a tool's environment"
     for value in planted:
         assert value not in out.getvalue()
-    manifests = [json.loads(c["stdin"]) for c in recorded if c["argv"][-3:] == ["apply", "-f", "-"]]
+    manifests = [
+        json.loads(c["stdin"]) for c in recorded if "apply" in c["argv"] and c["argv"][-2:] == ["-f", "-"]
+    ]
+    assert all("--server-side" in c["argv"] for c in recorded if "apply" in c["argv"]), "no last-applied copy"
     secrets_made = {m["metadata"]["name"]: m for m in manifests if m["kind"] == "Secret"}
     assert set(secrets_made) == {"ghcr-pull", "object-store-r2", "cloudflared-tunnel"}
 
@@ -520,3 +538,164 @@ def test_recorded_nodes_pass_the_join_token_on_stdin(isolated, monkeypatch):
     assert "ProxyCommand cloudflared access ssh --hostname %h" in config
     assert "HostName 10.110.0.3" in config and "ProxyJump cell1-a" in config
     assert config.count(f"IdentityFile {tmp_path / 'id'}\n") == 2
+
+
+def no_role_placeholder(document: dict) -> list[str]:
+    """Every node file is rendered for its role: no `__K3S_ROLE__` is left, and k3s runs that role."""
+    text = json.dumps(document)
+    problems = ["a role placeholder is left"] if "__K3S_ROLE__" in text else []
+    return problems
+
+
+@pytest.mark.parametrize("role", ["server", "agent"])
+def test_roles_rendered(role):
+    document = user_data(role)
+    assert no_role_placeholder(document) == []
+    assert (
+        f"ExecStart=/usr/local/bin/k3s {role}\n"
+        in files(document)["/etc/systemd/system/k3s.service"]["content"]
+    )
+    unit = files(document)["/etc/systemd/system/k3s.service"]["content"]
+    assert "RequiresMountsFor=/var/lib/rancher" in unit, "k3s never starts on the root disk"
+    seeded = copy.deepcopy(document)
+    files(seeded)["/etc/systemd/system/k3s.service"]["content"] = "ExecStart=/usr/local/bin/k3s __K3S_ROLE__"
+    assert no_role_placeholder(seeded)
+
+
+def test_the_ops_tunnel_starts_before_k3s():
+    """A first-boot failure after the tunnel still leaves the founder a way in to read it."""
+    script = files(user_data("server"))["/usr/local/sbin/cell1-firstboot"]["content"]
+    assert script.index("enable --now cloudflared-ops") < script.index("k3s/releases/download")
+
+
+def cloudflare_api(requests: list):
+    """A Cloudflare API that holds nothing yet: every listing is empty, every POST makes an id."""
+
+    def urlopen(request, timeout=0):
+        path = request.full_url.removeprefix(cell1.API)
+        body = json.loads(request.data) if request.data else None
+        requests.append((request.get_method(), path, body))
+        assert request.headers.get("Authorization") == f"Bearer {SECRETS['cf']}"
+        if path.endswith("/token"):
+            result = OPS_TOKEN
+        elif request.get_method() == "POST":
+            result = {"id": f"id-{len(requests)}"}
+        elif request.get_method() == "GET":
+            result = []
+        else:
+            result = {}
+        return FakeResponse(json.dumps({"success": True, "result": result}).encode())
+
+    return urlopen
+
+
+DOCTL_EMPTY = {
+    "vpcs create": "vpc-1",
+    "volume create cell1-a-data": "vol-a",
+    "volume create cell1-b-data": "vol-b",
+    "droplet create cell1-a": "10.110.0.2",
+    "droplet create cell1-b": "10.110.0.3",
+}
+
+
+def fresh_recorders(tmp_path: Path, answers: dict[str, str]) -> Path:
+    bin_dir = tmp_path / "bin"
+    if bin_dir.exists():
+        for f in bin_dir.iterdir():
+            f.unlink()
+        bin_dir.rmdir()
+    (tmp_path / "calls.jsonl").unlink(missing_ok=True)
+    return recorders(tmp_path, answers)
+
+
+def test_recorded_cloudflare_makes_access_before_each_name(isolated, monkeypatch):
+    tmp_path, _, _ = isolated
+    requests = []
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", cloudflare_api(requests))
+    out = io.StringIO()
+    assert cell1.main(["cloudflare", *HOSTED_ARGS, *secret_files(tmp_path)], out) == 0
+    tunnels = [b for m, p, b in requests if m == "POST" and p.endswith("/cfd_tunnel")]
+    assert [t["name"] for t in tunnels] == ["cell1-ops", "cell1-app"]
+    assert all(
+        t["config_src"] == "cloudflare" and len(base64.b64decode(t["tunnel_secret"])) == 32 for t in tunnels
+    )
+    for t in tunnels:
+        assert t["tunnel_secret"] not in out.getvalue(), "a tunnel secret was printed"
+    configs = [b for m, p, b in requests if m == "PUT" and p.endswith("/configurations")]
+    ops = configs[0]["config"]["ingress"]
+    assert ops == [
+        {"hostname": "ssh-cell1.owlhead.ai", "service": "ssh://localhost:22"},
+        {"hostname": "kube-cell1.owlhead.ai", "service": "tcp://localhost:6443"},
+        {"service": "http_status:404"},
+    ]
+    assert configs[1]["config"]["ingress"][0] == {
+        "hostname": "api.owlhead.ai",
+        "service": "http://api.ws-ws1.svc.cluster.local:8080",
+    }
+    policy = next(b for m, p, b in requests if m == "POST" and p.endswith("/access/policies"))
+    assert policy["decision"] == "allow" and policy["include"] == [
+        {"email": {"email": "founder@example.com"}}
+    ]
+    made = [
+        ("app" if p.endswith("/access/apps") else "dns", b["name"])
+        for m, p, b in requests
+        if m == "POST" and (p.endswith("/access/apps") or p.endswith("/dns_records"))
+    ]
+    for host in ("ssh-cell1.owlhead.ai", "kube-cell1.owlhead.ai", "api.owlhead.ai"):
+        assert made.index(("app", host)) < made.index(("dns", host)), f"{host} resolves before Access"
+    apps = [b for m, p, b in requests if m == "POST" and p.endswith("/access/apps")]
+    assert len(apps) == 3
+    assert all(a["policies"] == [{"id": policy_id(requests), "precedence": 1}] for a in apps)
+    cnames = [b for m, p, b in requests if m == "POST" and p.endswith("/dns_records")]
+    assert all(c["proxied"] and c["content"].endswith(".cfargotunnel.com") for c in cnames)
+
+
+def policy_id(requests) -> str:
+    index = next(i for i, (m, p, _) in enumerate(requests) if m == "POST" and p.endswith("/access/policies"))
+    return f"id-{index + 1}"
+
+
+def test_recorded_droplets_firewall_first_and_the_token_only_in_user_data(isolated, monkeypatch):
+    tmp_path, _, key = isolated
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", cloudflare_api([]))
+    log = fresh_recorders(tmp_path, DOCTL_EMPTY)
+    out = io.StringIO()
+    argv = ["droplets", *HOSTED_ARGS, *secret_files(tmp_path), "--ssh-public-key", str(key)]
+    assert cell1.main(argv, out) == 0
+    recorded = calls(log)
+    lines = [" ".join(c["argv"]) for c in recorded]
+    first_create = next(i for i, line in enumerate(lines) if "droplet create" in line)
+    assert any("firewall create" in line for line in lines[:first_create]), "a droplet before its firewall"
+    creates = [c for c in recorded if "droplet create" in " ".join(c["argv"])]
+    assert [c["argv"][4] for c in creates] == ["cell1-a", "cell1-b"]
+    server, agent = (json.loads(c["user_data"].split("\n", 1)[1]) for c in creates)
+    assert all(c["user_data_mode"] == 0o600 for c in creates)
+    assert ops_token_held(server, agent) == []
+    assert files(server)["/etc/cell1/credentials/ops-tunnel-token"]["content"] == OPS_TOKEN
+    assert "cell1-k3s-config agent 10.110.0.2" in files(agent)["/usr/local/sbin/cell1-firstboot"]["content"]
+    for call in recorded:
+        assert OPS_TOKEN not in " ".join(call["argv"]) and OPS_TOKEN not in json.dumps(call["env"])
+    assert OPS_TOKEN not in out.getvalue()
+    assert not list((tmp_path / "state").glob("user-data-*")), "user data left on disk"
+
+
+def test_recorded_droplets_twice_creates_nothing_again(isolated, monkeypatch):
+    tmp_path, _, key = isolated
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", cloudflare_api([]))
+    fingerprint = cell1.md5_fingerprint(KEY)
+    log = fresh_recorders(
+        tmp_path,
+        {
+            "tag list": "mandate-cell1",
+            "firewall list": "fw-1 mandate-cell1",
+            "vpcs list": "vpc-1 mandate-cell1",
+            "ssh-key list": fingerprint,
+            "volume list": "vol-a cell1-a-data\nvol-b cell1-b-data",
+            "droplet list": "cell1-a 10.110.0.2\ncell1-b",
+        },
+    )
+    argv = ["droplets", *HOSTED_ARGS, *secret_files(tmp_path), "--ssh-public-key", str(key)]
+    assert cell1.main(argv, io.StringIO()) == 0
+    lines = [" ".join(c["argv"]) for c in calls(log)]
+    assert not [line for line in lines if " create" in line or " import " in line], lines
+    assert any(line.startswith("doctl compute firewall update fw-1 ") for line in lines)

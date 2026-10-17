@@ -37,7 +37,9 @@ sudo install -m 0755 kubectl /usr/local/bin/kubectl
 
 helm 4.3.0 from the table in [`deploy/cell/README.md`](../cell/README.md#on-a-laptop). Then
 `doctl version`, `cloudflared --version`, `kubectl version --client` and `helm version` should
-print 1.186.0, 2026.9.3, v1.35.0 and v4.3.0.
+print 1.186.0, 2026.9.3, v1.35.0 and v4.3.0, and `python3 --version` 3.9 or later (macOS's own
+is). These are darwin-arm64 builds; on an Intel Mac take the `darwin-amd64` assets of the same
+releases and check them against each release's published checksums.
 
 ## 2. Accounts and tokens
 
@@ -119,14 +121,23 @@ k3s on cell1-a, moves the join token to cell1-b over SSH, starts the agent, and 
 kubeconfig to `~/.mandate-cell1/kubeconfig` (0600). From now on:
 `ssh -F ~/.mandate-cell1/ssh_config cell1-a` (or `cell1-b`).
 
+**If cloud-init failed.** `nodes` stops with cloud-init's own error. cell1-a starts its ops tunnel
+before anything else, so you can usually still SSH in and read
+`sudo cat /var/log/cloud-init-output.log`. If SSH to cell1-a never answers (the tunnel itself did
+not start), there is no other way in, by design: delete that droplet and its volume
+(`doctl compute droplet delete <name>`, `doctl compute volume delete <name>-data`) and run
+`cell1 droplets` again, which makes only what is missing.
+
 ## 6. The cluster, then the check
 
 Only after gate 3.
 
 ```bash
-cell1 cluster
+cell1 cluster --accept-dev-tier
 cell1 check
 ```
+
+`cluster` refuses to run without `--accept-dev-tier`, the flag that says gate 3 holds.
 
 `cluster` makes the namespace's Secrets from your files on kubectl's stdin, then installs the
 CloudNativePG operator, the journal's Postgres and the workspace chart, and waits for the

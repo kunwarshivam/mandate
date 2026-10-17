@@ -7,6 +7,8 @@ Documentation=https://docs.k3s.io
 Wants=network-online.target
 After=network-online.target cell1-metadata-block.service
 Requires=cell1-metadata-block.service
+# The data directory is the node's block volume; never start on an empty root-disk directory.
+RequiresMountsFor=/var/lib/rancher
 
 [Service]
 Type=notify

@@ -22,6 +22,8 @@ on a command line, in the environment, in a log, or in this program's output. do
 founder's own `doctl auth init` context, which this program never reads.
 """
 
+from __future__ import annotations
+
 import argparse
 import base64
 import hashlib
@@ -155,6 +157,10 @@ class Cloudflare:
         self.plan.show(f"cloudflare {method} {path}{shown}{f'  ({note})' if note else ''}")
         if self.plan.dry_run:
             return None
+        return self.send(method, path, body)
+
+    def send(self, method: str, path: str, body: dict | None = None):
+        """One request, already shown; Cloudflare's own error messages, never the body, on failure."""
         request = urllib.request.Request(
             API + path,
             method=method,
@@ -165,7 +171,12 @@ class Cloudflare:
             with urllib.request.urlopen(request, timeout=30) as response:
                 answer = json.load(response)
         except urllib.error.HTTPError as error:
-            answer = json.loads(error.read() or b"{}")
+            try:
+                answer = json.loads(error.read() or b"{}")
+            except ValueError:
+                answer = {}
+        except (urllib.error.URLError, TimeoutError) as error:
+            raise Refused(f"Cloudflare {method} {path}: {error}") from None
         if not answer.get("success"):
             errors = [e.get("message", "") for e in answer.get("errors", [])]
             raise Refused(f"Cloudflare {method} {path} failed: {errors}")
@@ -200,17 +211,7 @@ class Cloudflare:
         secret = self.plan.secret(base64.b64encode(secrets.token_bytes(32)).decode())
         body = {"name": name, "config_src": "cloudflare", "tunnel_secret": secret}
         self.plan.show(f"cloudflare POST {self.acct('/cfd_tunnel')} {{name: {name}, config_src: cloudflare}}")
-        request = urllib.request.Request(
-            API + self.acct("/cfd_tunnel"),
-            method="POST",
-            data=json.dumps(body).encode(),
-            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            answer = json.load(response)
-        if not answer.get("success"):
-            raise Refused(f"Cloudflare would not create the tunnel {name}")
-        return answer["result"]["id"]
+        return self.send("POST", self.acct("/cfd_tunnel"), body)["id"]
 
     def routes(self, tunnel_id: str, routes: dict[str, str], zone: str) -> None:
         ingress = [{"hostname": f"{host}.{zone}", "service": service} for host, service in routes.items()]
@@ -257,15 +258,7 @@ class Cloudflare:
         )
         if self.plan.dry_run:
             return placeholder(f"token of {name}")
-        request = urllib.request.Request(
-            API + self.acct(f"/cfd_tunnel/{tunnel_id}/token"),
-            headers={"Authorization": f"Bearer {self.token}"},
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            answer = json.load(response)
-        if not answer.get("success"):
-            raise Refused(f"Cloudflare would not give the token of {name}")
-        return self.plan.secret(answer["result"])
+        return self.plan.secret(self.send("GET", self.acct(f"/cfd_tunnel/{tunnel_id}/token")))
 
 
 def fqdn(host: str, zone: str) -> str:
@@ -295,8 +288,8 @@ def step_cloudflare(plan: Plan, args) -> dict[str, str]:
         cf.routes(ids[kind], tunnel["routes"], args.zone)
         session = CONFIG["access"][f"{kind}_session"]
         for host in tunnel["routes"]:
-            cf.dns(fqdn(host, args.zone), ids[kind])
             cf.application(fqdn(host, args.zone), policy, session)
+            cf.dns(fqdn(host, args.zone), ids[kind])
     return ids
 
 
@@ -359,14 +352,7 @@ def render_user_data(role: str, public_key: str, volume: str, ops_token: str, se
     ]
     for script in ("cell1-metadata-block", "cell1-k3s-config", "cell1-k3s-start", "cell1-token"):
         files.append({"path": f"/usr/local/sbin/{script}", "permissions": "0755", "content": text(script)})
-    commands = [
-        fetch("k3s", CONFIG["k3s"]),
-        "ln -sf /usr/local/bin/k3s /usr/local/bin/kubectl",
-        "systemctl daemon-reload",
-        "systemctl enable --now cell1-metadata-block.service",
-        "systemctl restart ssh",
-        f"/usr/local/sbin/cell1-k3s-config {role}" + (f" {server_ip}" if role == "agent" else ""),
-    ]
+    commands = ["systemctl daemon-reload", "systemctl restart ssh"]
     if role == "server":
         files.append(
             {
@@ -383,12 +369,20 @@ def render_user_data(role: str, public_key: str, volume: str, ops_token: str, se
                 "content": ops_token,
             }
         )
+        # The ops tunnel first: it is the only way in, so a later failure can still be read.
         commands += [
             fetch("cloudflared", CONFIG["cloudflared"]),
             "chmod 0700 /etc/cell1 /etc/cell1/credentials",
             "systemctl daemon-reload",
             "systemctl enable --now cloudflared-ops.service",
         ]
+    commands += [
+        fetch("k3s", CONFIG["k3s"]),
+        "ln -sf /usr/local/bin/k3s /usr/local/bin/kubectl",
+        "systemctl daemon-reload",
+        "systemctl enable --now cell1-metadata-block.service",
+        f"/usr/local/sbin/cell1-k3s-config {role}" + (f" {server_ip}" if role == "agent" else ""),
+    ]
     files.append(
         {
             "path": "/usr/local/sbin/cell1-firstboot",
@@ -430,7 +424,8 @@ def render_user_data(role: str, public_key: str, volume: str, ops_token: str, se
 
 def write_private(path: Path, content: str) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    path.unlink(missing_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(content)
 
@@ -440,9 +435,13 @@ def step_droplets(plan: Plan, args) -> None:
     key, the volumes, the server and, once its private address is known, the agent."""
     if not args.ssh_public_key:
         raise Refused("--ssh-public-key is required")
-    public_key = Path(args.ssh_public_key).expanduser().read_text().strip()
-    if public_key.split()[0] not in ("ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa"):
+    try:
+        public_key = Path(args.ssh_public_key).expanduser().read_text().strip()
+    except OSError as error:
+        raise Refused(f"{args.ssh_public_key}: {error.strerror}") from None
+    if public_key.split()[:1] not in (["ssh-ed25519"], ["ecdsa-sha2-nistp256"], ["ssh-rsa"]):
         raise Refused(f"{args.ssh_public_key} is not an SSH public key")
+    cf = cloudflare_client(plan, args)
     tag, region = CONFIG["tag"], CONFIG["region"]
     plan.say("DigitalOcean: the account doctl is signed in to")
     plan.run(["doctl", "account", "get", "--format", "Email,Status", "--no-header"])
@@ -550,14 +549,15 @@ def step_droplets(plan: Plan, args) -> None:
         ],
         "droplets",
     )
-    up = {r[0]: r[1] for r in found if len(r) == 2}
+    up = {r[0]: (r[1] if len(r) > 1 else "") for r in found if r}
     ops_token = ""
     server_ip = up.get(CONFIG["nodes"][0]["name"], "")
     for node in CONFIG["nodes"]:
         if node["name"] in up:
             continue
+        if node["role"] == "agent" and not server_ip and not plan.dry_run:
+            raise Refused("cell1-a has no private address yet; run `droplets` again in a minute")
         if node["role"] == "server" and not ops_token:
-            cf = cloudflare_client(plan, args)
             ops_id = cf.tunnel(CONFIG["tunnels"]["ops"]["name"])
             ops_token = cf.token_of(ops_id, CONFIG["tunnels"]["ops"]["name"])
         user_data = render_user_data(node["role"], public_key, node["volume"], ops_token, server_ip)
@@ -634,6 +634,16 @@ Host cell1-b
     return path
 
 
+def ready(node: str) -> str:
+    """Waits, on the server, for `node` to register (up to five minutes) and then to be Ready: a
+    bare `kubectl wait` fails at once on a node not yet registered."""
+    return (
+        "sudo sh -c 'for i in $(seq 60); do "
+        f"k3s kubectl get node {node} >/dev/null 2>&1 && break; sleep 5; done; "
+        f"k3s kubectl wait --for=condition=Ready node/{node} --timeout=300s'"
+    )
+
+
 def step_nodes(plan: Plan, args) -> None:
     if args.target == "k3d":
         k3d_nodes(plan)
@@ -678,7 +688,7 @@ def step_nodes(plan: Plan, args) -> None:
                 time.sleep(10)
     plan.say("k3s: the server, then the agent with the server's join token")
     ssh("cell1-a", "sudo /usr/local/sbin/cell1-k3s-start")
-    ssh("cell1-a", "sudo k3s kubectl wait --for=condition=Ready node/cell1-a --timeout=300s")
+    ssh("cell1-a", ready("cell1-a"))
     token = ssh("cell1-a", "sudo cat /etc/rancher/k3s/agent-token", capture=True, result="join token")
     plan.secret(token)
     ssh(
@@ -688,7 +698,7 @@ def step_nodes(plan: Plan, args) -> None:
         stdin_note="the join token",
     )
     ssh("cell1-b", "sudo /usr/local/sbin/cell1-k3s-start")
-    ssh("cell1-a", "sudo k3s kubectl wait --for=condition=Ready node --all --timeout=300s")
+    ssh("cell1-a", ready("cell1-b"))
     plan.say("The kubeconfig, for kubectl through the ops tunnel at 127.0.0.1")
     kubeconfig = ssh("cell1-a", "sudo cat /etc/rancher/k3s/k3s.yaml", capture=True, result="kubeconfig")
     if not plan.dry_run:
@@ -717,6 +727,7 @@ def k3d_nodes(plan: Plan) -> None:
                 "--disable=traefik@server:0",
                 "--k3s-arg",
                 "--disable=servicelb@server:0",
+                "--kubeconfig-update-default=false",
                 "--wait",
             ]
         )
@@ -789,7 +800,7 @@ def images(plan: Plan, args) -> dict[str, str]:
 
 def open_kube_tunnel(argv: list[str]) -> subprocess.Popen:
     """`cloudflared access tcp`, kept running while kubectl and helm use it."""
-    return subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return subprocess.Popen(argv, stdout=subprocess.DEVNULL)
 
 
 def step_cluster(plan: Plan, args) -> None:
@@ -797,6 +808,11 @@ def step_cluster(plan: Plan, args) -> None:
     namespace's default service account, the CloudNativePG operator, journal-db, the workspace."""
     namespace = CONFIG["namespace"]
     hosted = args.target == "hosted"
+    if hosted and not args.accept_dev_tier and not plan.dry_run:
+        raise Refused(
+            "--accept-dev-tier is required: cell #1 runs unsigned builds as `dev` (DEC-2000 item 6), "
+            "only once the founder has answered DEC-971 item 7(b)"
+        )
     kubeconfig = STATE / ("kubeconfig" if hosted else "kubeconfig-k3d")
     tunnel = None
     picked = images(plan, args)
@@ -821,7 +837,11 @@ def step_cluster(plan: Plan, args) -> None:
         kubectl = ["kubectl", "--kubeconfig", str(kubeconfig)]
         plan.say(f"The namespace {namespace} and its secrets, each from stdin")
         ns = {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}}
-        plan.run([*kubectl, "apply", "-f", "-"], stdin=json.dumps(ns).encode(), stdin_note="the Namespace")
+        plan.run(
+            [*kubectl, "apply", "--server-side", "--field-manager=cell1", "-f", "-"],
+            stdin=json.dumps(ns).encode(),
+            stdin_note="the Namespace",
+        )
         names = CONFIG["secrets"]
         if hosted:
             user = args.ghcr_user or ""
@@ -862,7 +882,7 @@ def step_cluster(plan: Plan, args) -> None:
             made.append((names["tunnel"], {"token": tunnel_token}, "Opaque", "the app tunnel's token"))
         for name, data, kind, note in made:
             plan.run(
-                [*kubectl, "apply", "-f", "-"],
+                [*kubectl, "apply", "--server-side", "--field-manager=cell1", "-f", "-"],
                 stdin=secret_manifest(name, namespace, data, kind),
                 stdin_note=f"Secret {namespace}/{name}: {note}",
             )
@@ -877,7 +897,7 @@ def step_cluster(plan: Plan, args) -> None:
             },
         }
         plan.run(
-            [*kubectl, "apply", "-f", "-"],
+            [*kubectl, "apply", "--server-side", "--field-manager=cell1", "-f", "-"],
             stdin=json.dumps(settings).encode(),
             stdin_note="the object store's settings",
         )
@@ -1015,6 +1035,11 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--r2-endpoint", help="https://<account id>.r2.cloudflarestorage.com")
     p.add_argument("--r2-access-key-id-file")
     p.add_argument("--r2-secret-access-key-file")
+    p.add_argument(
+        "--accept-dev-tier",
+        action="store_true",
+        help="the founder has answered DEC-971 item 7(b): cell #1 may run unsigned builds as dev",
+    )
     p.add_argument("--published", help="the release run's PUBLISHED file: image@sha256 per line")
     p.add_argument(
         "--local-image",
