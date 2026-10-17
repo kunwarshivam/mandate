@@ -92,6 +92,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || crate::connections::CONTROL.contains(&event_type)
                 || crate::workspace::CONTROL.contains(&event_type)
                 || crate::records::CONTROL.contains(&event_type)
+                || crate::control_plane::CONTROL.contains(&event_type)
         }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
@@ -131,6 +132,7 @@ pub(crate) fn payload(
     let schema = crate::workspace::schema(event_type, schema_version, stream_type)
         .or_else(|| crate::connections::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::records::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::control_plane::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::notices::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
@@ -155,6 +157,7 @@ pub(crate) fn payload(
         actor,
         causation_id,
     )?;
+    crate::control_plane::rules(event_type, &payload, actor)?;
     crate::notices::rules(event_type, &payload, causation_id)?;
     let p = Payload(&payload);
     match event_type {
