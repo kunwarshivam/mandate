@@ -536,9 +536,12 @@ download, `inspect`, the preflight and the run read it from the workspace and th
 
    Compare them with Robinhood's history. A difference is a finding to record, never to edit.
 4. **The restart sends nothing.** `MANDATE_RH_ACCOUNT_NUMBER=<typed by hand> "${RUN[@]}"
-   --place-one-order` is refused before any place call. Either refusal passes: `the account the
-   connection binds is not flat` (DEC-470 item 1) or `the connection record is spent` (DEC-910 item
-   3). A sold-out position that Robinhood still lists as a zero row reads not flat (R23).
+   --place-one-order` is refused before any place call. Expect `the account the connection binds
+   is not flat` (DEC-470 item 1), whether the share is still held or the stop has sold it. The
+   record is spent either way (DEC-910 item 3), but the lapse checks flatness first, and until R23
+   is decided it counts a sold-out position that Robinhood still lists as a zero row. Only if
+   Robinhood lists no row after a sale is the refusal `the connection record is spent`. Either
+   refusal passes; both send nothing.
 5. Record the evidence (no account number) in R0's docs PR.
 
 **G. While the share is held, and the kill switch.**
@@ -552,7 +555,8 @@ download, `inspect`, the preflight and the run read it from the workspace and th
   2. in the Robinhood app, cancel the open order and, to flatten, sell the share;
   3. remove the MCP connection's access in Robinhood's settings.
 - After a stop fill or a manual sale, the platform cannot book the sale: Robinhood publishes no
-  sale price (DEC-1152). Do not run the agent again on this record. A second entry needs a fresh
+  sale price (DEC-1152). Do not run the agent again on this record. If it is run, it is refused
+  before any place call, as `not flat` until R23 is decided (F.4). A second entry needs a fresh
   connect check, connection record, version and deployment (DEC-529 item 13, DEC-910 item 3).
 
 ## Decisions
