@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use common::{at, hex};
 use mandate_api_server::config::{MIN_SESSION_KEY_BYTES, SessionKey, read_session_key};
 use mandate_api_server::session::{
-    Answer, MAX_PER_PRINCIPAL, MAX_SESSIONS, Random, Sessions, Unauthenticated,
+    Answer, MAX_PER_PRINCIPAL, MAX_SESSIONS, ROTATION_GRACE_S, Random, Sessions, Unauthenticated,
 };
 use mandate_authn::Request;
 use mandate_identity::PrincipalId;
@@ -708,4 +708,173 @@ fn a_rotated_cookie_presented_at_sign_in_ends_its_session() {
         Err(Unauthenticated)
     );
     assert_eq!(store.len(), 1);
+}
+
+/// A command in flight while a refresh rotates the cookie (DEC-1022): for [`ROTATION_GRACE_S`]
+/// seconds after a granted refresh, the cookie it rotated away still serves a pause and a kill
+/// switch; any other call with it is refused with the session kept; after the window, or on the
+/// refresh route, it is reuse and ends the session.
+#[test]
+fn a_just_rotated_cookie_serves_risk_reduction_briefly_and_is_reuse_otherwise() {
+    let granted = || Answer::Granted {
+        subject: SUBJECT.to_owned(),
+        principal: alice(),
+    };
+    let store = sessions();
+    let cookie = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let rotated_at = T0 + 100;
+    let rotated = store
+        .refresh(cookie.value(), granted(), at(rotated_at))
+        .expect("granted")
+        .expect("a new cookie");
+    let edge = at(rotated_at + ROTATION_GRACE_S);
+    assert!(
+        store
+            .authenticate(cookie.value(), Request::Pause, edge)
+            .is_ok()
+    );
+    assert!(
+        store
+            .authenticate(cookie.value(), Request::KillSwitch, edge)
+            .is_ok()
+    );
+    assert_eq!(
+        store.authenticate(cookie.value(), Request::Other, edge),
+        Err(Unauthenticated),
+        "an ordinary call with it is refused"
+    );
+    assert!(
+        store
+            .authenticate(rotated.value(), Request::Other, edge)
+            .is_ok(),
+        "and the session is kept"
+    );
+    assert_eq!(
+        store.authenticate(
+            cookie.value(),
+            Request::KillSwitch,
+            at(rotated_at + ROTATION_GRACE_S + 1)
+        ),
+        Err(Unauthenticated),
+        "after the window it admits nothing"
+    );
+    assert!(
+        store.is_empty(),
+        "and its use is reuse, which ends the session"
+    );
+
+    let store = sessions();
+    let cookie = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let rotated = store
+        .refresh(cookie.value(), granted(), at(T0 + 100))
+        .expect("granted")
+        .expect("a new cookie");
+    let _again = store
+        .refresh(rotated.value(), granted(), at(T0 + 110))
+        .expect("granted")
+        .expect("a third cookie");
+    assert!(
+        store
+            .authenticate(rotated.value(), Request::Pause, at(T0 + 111))
+            .is_ok(),
+        "the cookie the last refresh rotated away is served"
+    );
+    assert_eq!(
+        store.authenticate(cookie.value(), Request::Pause, at(T0 + 112)),
+        Err(Unauthenticated),
+        "an older one is not, even within its own window"
+    );
+    assert!(store.is_empty(), "it is reuse");
+
+    let store = sessions();
+    let cookie = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let rotated = store
+        .refresh(cookie.value(), granted(), at(T0 + 100))
+        .expect("granted")
+        .expect("a new cookie");
+    assert_eq!(
+        store.refresh(cookie.value(), granted(), at(T0 + 101)),
+        Err(Unauthenticated),
+        "a refresh with it, even within the window, is reuse"
+    );
+    assert_eq!(
+        store.authenticate(rotated.value(), Request::KillSwitch, at(T0 + 102)),
+        Err(Unauthenticated)
+    );
+    assert!(store.is_empty(), "and reuse ends the session");
+}
+
+/// The window admits only what the session itself still admits (DEC-1022): a narrowed session
+/// still refuses an ordinary call, the absolute lifetime still ends it, and signing out takes the
+/// current cookie only.
+#[test]
+fn a_graced_cookie_admits_no_more_than_the_session_does() {
+    let granted = || Answer::Granted {
+        subject: SUBJECT.to_owned(),
+        principal: alice(),
+    };
+    let store = sessions();
+    let cookie = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let rotated = store
+        .refresh(cookie.value(), granted(), at(T0 + 100))
+        .expect("granted")
+        .expect("a new cookie");
+    assert_eq!(
+        store.refresh(rotated.value(), Answer::Unreachable, at(T0 + 105)),
+        Ok(None),
+        "an outage narrows the session"
+    );
+    assert!(
+        store
+            .authenticate(cookie.value(), Request::Pause, at(T0 + 111))
+            .is_ok(),
+        "a narrowed session still serves a pause with it"
+    );
+    assert_eq!(
+        store.end(cookie.value()),
+        Err(Unauthenticated),
+        "signing out takes the current cookie only"
+    );
+    assert!(
+        store
+            .authenticate(rotated.value(), Request::Pause, at(T0 + 112))
+            .is_ok(),
+        "and the refused sign-out kept the session"
+    );
+
+    let late = sessions();
+    let mut held = late
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let mut t = T0;
+    while t + 240 < T0 + ABSOLUTE_S - 10 {
+        t += 240;
+        held = late
+            .refresh(held.value(), granted(), at(t))
+            .expect("granted")
+            .expect("rotated");
+    }
+    let before = held.clone();
+    let _last = late
+        .refresh(held.value(), granted(), at(T0 + ABSOLUTE_S - 10))
+        .expect("granted")
+        .expect("rotated");
+    assert!(
+        late.authenticate(before.value(), Request::Pause, at(T0 + ABSOLUTE_S - 1))
+            .is_ok(),
+        "served before the absolute lifetime ends"
+    );
+    assert_eq!(
+        late.authenticate(before.value(), Request::KillSwitch, at(T0 + ABSOLUTE_S + 1)),
+        Err(Unauthenticated),
+        "but not past it, within the window or not"
+    );
 }

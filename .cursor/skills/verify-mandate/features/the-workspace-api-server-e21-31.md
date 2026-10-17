@@ -3,7 +3,7 @@
 - **Spec:** [workspace API spec](../../../../docs/specs/workspace-api.md) §3.3 (CORS), §3.5 (the
   problem document), §3.11 (the server process: bind, environment, probes, drain), API-1;
   [infrastructure design](../../../../docs/design/infrastructure.md) §3.4, §7.3, §9; DEC-822
-  item 4; DEC-978; §3.4, §5, §5.4, §3.11 item 10, API-4, API-7, DEC-1007 (owner commands).
+  item 4; DEC-978; §3.4, §5, §5.4, §3.11 item 10, API-4, API-7, DEC-1007 (owner commands); §4.3 and §4.7's wider reads, DEC-1020 and DEC-1021; DEC-1022 (a rotated cookie's window).
 - **Code:** `crates/mandate-api-server`. `src/config.rs` (the start checks: a loopback or pod-local
   bind, no secret-named variable, no password in the database URL, the session signing key from
   `$CREDENTIALS_DIRECTORY` with owner-only permissions), `src/lifecycle.rs` (`Lifecycle`, the
@@ -14,9 +14,9 @@
   access keeping pause and the kill switch, caps), `src/subject.rs` (the subject-link file of
   digests), `src/token.rs` and `src/keys.rs` (the issuer's access token against its fetched key
   set), `src/clock.rs`, `src/commands.rs` (pause and the kill switch as journal spec
-  §9.11's `OwnerCommandIssued`, the repeat's comparison, the scope's lookup, and the append loop),
+  §9.11's `OwnerCommandIssued`, an approval's Skip as §9.7's `ApprovalResponseSubmitted`, the repeat's comparison, the scope's lookup, and the append loop),
   `src/writes.rs` (their routes, checked in §3.3's order), `src/journal.rs` (the read and append
-  port), and the `mandate-api-server` binary (`--bind`, `--probe-bind`,
+  port), `src/documents.rs` (the mandate document's envelope, digest-checked, from the store), and the `mandate-api-server` binary (`--bind`, `--probe-bind`,
   `--pod-address`, `--drain-bound-s`; SIGTERM drains).
 - **Tests:** `tests/config.rs`: every start refusal, and that no refusal prints a secret's value.
   `tests/http.rs`: the probes' bodies and statuses, readiness during a drain, the identical 401
@@ -38,5 +38,11 @@
   `tests/writes_http.rs`: pause and each kill-switch scope recorded before the `202`, the derived
   id, no forwarded step-up, replay and conflict by key and by a concurrent copy, §3.3's order, the
   body read only after authentication, the 404s, the matrix rows, the failed reads, a lapsed
-  session, an append that does not settle, a drain, and the hold left unmounted.
+  session, an append that does not settle, a drain, the hold left unmounted, and an approval's
+  Skip (recorded, lenient, found on a deployed agent's stream, the Skip row only) with a grant
+  refused for its step-up.
+  `tests/documents.rs`: a document's envelope against hand-written values, and an absent, corrupt,
+  encrypted, or unparsable document not reported. `tests/reads.rs` also pins the bound order (v1
+  and v2), the account a connection binds, and the account's positions at reconciliation;
+  `tests/reads_http.rs` the agent's label, envelope, and positions with and without a store.
 - **Run:** `cargo nextest run -p mandate-api-server`.

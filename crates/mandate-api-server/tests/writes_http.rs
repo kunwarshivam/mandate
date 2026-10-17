@@ -86,6 +86,7 @@ fn fixture() -> Fixture {
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
         members: Arc::new(move |_: &[StoredEvent]| parsed.lock().expect("unpoisoned").clone()),
         hosted: hosted(),
+        artifacts: None,
     };
     let drain = Drain::new();
     let f = Fixture {
@@ -753,4 +754,317 @@ fn a_get_on_a_command_route_is_the_one_401() {
         let reply = send(f.addr, "GET", &ws(path), &[], b"");
         assert_eq!(reply.status, 401, "{path}");
     }
+}
+
+const APPROVAL: &str = "01JBH3BTZ8K2M4N6P8R0S2T7AA";
+
+fn hash(byte: &str) -> String {
+    format!("sha256:{}", byte.repeat(32))
+}
+
+/// `agt_a`'s stream with one approval request, and Alice an approver.
+fn approvable(f: &Fixture) {
+    let stream = format!("agent:{WORKSPACE}:agt_a");
+    let text = format!(
+        r#"{{"environment":"paper","event_id":"{APPROVAL}","event_type":"ApprovalRequested","payload":{{"content":{{}},"content_hash":"{}","deadline":900}},"stream_id":"{stream}"}}"#,
+        hash("ab")
+    );
+    let body = to_canonical(&parse(text.as_bytes()).expect("JSON"));
+    let mut requested = row(1, "ApprovalRequested", "{}");
+    requested.stream_id = stream.clone();
+    requested.event_id = APPROVAL.to_owned();
+    requested.hash = Digest::of(&body);
+    requested.body = body;
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .insert(stream, vec![requested]);
+    *f.records.lock().expect("unpoisoned") = Ok(vec![
+        activated(1, alice(), &[Role::Approver]),
+        activated(2, bob(), &[Role::Operator]),
+    ]);
+}
+
+fn responses(approval: &str) -> String {
+    ws(&format!("/approvals/{approval}/responses"))
+}
+
+fn skipped() -> Vec<u8> {
+    format!(
+        r#"{{"verdict":"skipped","content_hash":"{}","step_up":null,"delegation":null}}"#,
+        hash("ab")
+    )
+    .into_bytes()
+}
+
+/// The control stream's approval responses, as their parsed bodies.
+fn answers(f: &Fixture) -> Vec<Value> {
+    f.journal
+        .rows_of(&ctl())
+        .iter()
+        .filter(|row| row.event_type == "ApprovalResponseSubmitted")
+        .map(|row| parse(&row.body).expect("JSON"))
+        .collect()
+}
+
+#[test]
+fn a_skip_is_recorded_as_the_clis_answer_before_its_202() {
+    let f = fixture();
+    approvable(&f);
+    let cookie = signed_in(&f, alice());
+    let reply = post(&f, &responses(APPROVAL), &cookie, Some(KEY), &skipped());
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    decode::<mandate_api::responses::ApprovalResponseAccepted>(&reply.body)
+        .expect("an ApprovalResponseAccepted");
+    let answer = body(&reply);
+    assert_eq!(
+        text(&answer, &["response_id"]),
+        derived("approval_response", ALICE, KEY)
+    );
+    assert_eq!(text(&answer, &["phase"]), "recorded");
+    assert_eq!(answer.get("command_id"), None);
+    assert_eq!(answer.get("dropped"), None);
+    let recorded = answers(&f);
+    assert_eq!(recorded.len(), 1);
+    let payload = parse(
+        format!(
+            r#"{{"agent":"agt_a","approval":"{APPROVAL}","verdict":"skipped","content_hash":"{}","submitted_at":{T0},"step_up":null,"responder":"{ALICE}","role":"approver"}}"#,
+            hash("ab")
+        )
+        .as_bytes(),
+    )
+    .expect("JSON");
+    assert_eq!(member(&recorded[0], &["payload"]), &payload);
+    assert_eq!(text(&recorded[0], &["actor", "id"]), ALICE);
+    let again = post(&f, &responses(APPROVAL), &cookie, Some(KEY), &skipped());
+    assert_eq!(
+        text(&body(&again), &["response_id"]),
+        text(&answer, &["response_id"])
+    );
+    assert_eq!(answers(&f).len(), 1, "a repeat commits nothing");
+}
+
+#[test]
+fn a_skip_drops_what_it_may_and_keeps_its_hard_members_strict() {
+    let f = fixture();
+    approvable(&f);
+    let cookie = signed_in(&f, alice());
+    let loose = format!(
+        r#"{{"verdict":"skipped","content_hash":"{}","record":7,"bogus":1}}"#,
+        hash("ab")
+    );
+    let reply = post(
+        &f,
+        &responses(APPROVAL),
+        &cookie,
+        Some(KEY),
+        loose.as_bytes(),
+    );
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let dropped: Vec<String> = member(&body(&reply), &["dropped"])
+        .as_array()
+        .expect("dropped")
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(dropped, ["/record", "/bogus"]);
+    let invalid = (422, ProblemCode::Invalid, Effect::None);
+    let unhashed = br#"{"verdict":"skipped","content_hash":"nope"}"#;
+    assert_eq!(
+        code(&post(
+            &f,
+            &responses(APPROVAL),
+            &cookie,
+            Some("key-unhashed-0001"),
+            unhashed
+        )),
+        invalid
+    );
+    let unknown = format!(r#"{{"verdict":"maybe","content_hash":"{}"}}"#, hash("ab"));
+    assert_eq!(
+        code(&post(
+            &f,
+            &responses(APPROVAL),
+            &cookie,
+            Some("key-unknown-00001"),
+            unknown.as_bytes()
+        )),
+        invalid
+    );
+    assert_eq!(answers(&f).len(), 1);
+}
+
+#[test]
+fn an_unknown_approval_is_404_and_a_grant_waits_for_step_up() {
+    let f = fixture();
+    approvable(&f);
+    let cookie = signed_in(&f, alice());
+    let not_found = (404, ProblemCode::NotFound, Effect::None);
+    for approval in [
+        "01JBH3BTZ8K2M4N6P8R0S2T001",
+        "01JBH3BTZ8K2M4N6P8R0S2T7AB",
+        "nope",
+    ] {
+        let reply = post(&f, &responses(approval), &cookie, Some(KEY), &skipped());
+        assert_eq!(code(&reply), not_found, "{approval}");
+    }
+    let record = format!(
+        r#"{{"artifact":"{}","ui_build":"{}"}}"#,
+        hash("cd"),
+        hash("ef")
+    );
+    let grant = |step_up: &str| {
+        format!(
+            r#"{{"verdict":"approved","content_hash":"{}","record":{record},"step_up":{step_up},"delegation":null}}"#,
+            hash("ab")
+        )
+    };
+    let bare = post(
+        &f,
+        &responses(APPROVAL),
+        &cookie,
+        Some(KEY),
+        grant("null").as_bytes(),
+    );
+    assert_eq!(
+        code(&bare),
+        (401, ProblemCode::StepUpRequired, Effect::None)
+    );
+    let evidence = r#"{"assertion_id":"01JBH3BTZ8K2M4N6P8R0S2T0AA","authenticated_at":"2026-10-17T10:00:00.000000000Z","method":"passkey"}"#;
+    let claimed = post(
+        &f,
+        &responses(APPROVAL),
+        &cookie,
+        Some(KEY),
+        grant(evidence).as_bytes(),
+    );
+    assert_eq!(
+        code(&claimed),
+        (401, ProblemCode::StepUpMissing, Effect::None)
+    );
+    let elsewhere = post(
+        &f,
+        &responses("01JBH3BTZ8K2M4N6P8R0S2T7AB"),
+        &cookie,
+        Some(KEY),
+        grant("null").as_bytes(),
+    );
+    assert_eq!(
+        code(&elsewhere),
+        not_found,
+        "the approval is found before step-up is judged"
+    );
+    assert!(answers(&f).is_empty());
+}
+
+#[test]
+fn only_the_skip_row_skips_and_a_reduction_only_session_cannot() {
+    let f = fixture();
+    approvable(&f);
+    let operator = signed_in(&f, bob());
+    let reply = post(&f, &responses(APPROVAL), &operator, Some(KEY), &skipped());
+    assert_eq!(code(&reply), (403, ProblemCode::Forbidden, Effect::None));
+    let approver = signed_in(&f, alice());
+    f.clock.set(f.clock.secs() + 6 * 60);
+    let paused = post(
+        &f,
+        &ws("/agents/agt_a/pause"),
+        &approver,
+        Some("lapse-pause-000001"),
+        b"{}",
+    );
+    assert_eq!(paused.status, 202, "a pause records the outage refresh");
+    let lapsed = post(&f, &responses(APPROVAL), &approver, Some(KEY), &skipped());
+    assert_eq!(
+        code(&lapsed),
+        (403, ProblemCode::ReductionOnly, Effect::None)
+    );
+    assert!(answers(&f).is_empty());
+}
+
+#[test]
+fn an_unreadable_agent_stream_records_nothing_and_a_drain_still_records() {
+    let f = fixture();
+    approvable(&f);
+    let cookie = signed_in(&f, alice());
+    let stream = format!("agent:{WORKSPACE}:agt_a");
+    f.journal
+        .failing
+        .lock()
+        .expect("unpoisoned")
+        .insert(stream.clone());
+    let reply = post(&f, &responses(APPROVAL), &cookie, Some(KEY), &skipped());
+    assert_eq!(
+        code(&reply),
+        (503, ProblemCode::JournalUnavailable, Effect::None)
+    );
+    f.journal
+        .failing
+        .lock()
+        .expect("unpoisoned")
+        .remove(&stream);
+    f.drain.begin();
+    let drained = post(&f, &responses(APPROVAL), &cookie, Some(KEY), &skipped());
+    assert_eq!(drained.status, 202);
+    assert_eq!(answers(&f).len(), 1);
+}
+
+#[test]
+fn an_unreadable_stream_does_not_hide_an_approval_on_another() {
+    let f = fixture();
+    approvable(&f);
+    let a = format!("agent:{WORKSPACE}:agt_a");
+    let b = format!("agent:{WORKSPACE}:agt_b");
+    {
+        let mut streams = f.journal.streams.lock().expect("unpoisoned");
+        let moved = streams.remove(&a).expect("agt_a's stream");
+        let rows: Vec<StoredEvent> = moved
+            .into_iter()
+            .map(|mut row| {
+                row.stream_id = b.clone();
+                row
+            })
+            .collect();
+        streams.insert(b.clone(), rows);
+        let control = streams.get_mut(&ctl()).expect("the control stream");
+        control.push(row(
+            4,
+            "AgentDeployed",
+            r#"{"agent_id":"agt_b","mandate_version":"sha256:01"}"#,
+        ));
+    }
+    f.journal.failing.lock().expect("unpoisoned").insert(a);
+    let cookie = signed_in(&f, alice());
+    let reply = post(&f, &responses(APPROVAL), &cookie, Some(KEY), &skipped());
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let recorded = answers(&f);
+    assert_eq!(text(&recorded[0], &["payload", "agent"]), "agt_b");
+    let absent = post(
+        &f,
+        &responses("01JBH3BTZ8K2M4N6P8R0S2T7AB"),
+        &cookie,
+        Some("absent-key-0000001"),
+        &skipped(),
+    );
+    assert_eq!(
+        code(&absent),
+        (503, ProblemCode::JournalUnavailable, Effect::None),
+        "an absent approval cannot be told from one on the unreadable stream"
+    );
 }

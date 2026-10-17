@@ -92,6 +92,7 @@ fn expected_payload(command: &Command) -> Value {
         Command::KillSwitch(KillScope::Workspace) => {
             ("null".to_owned(), "kill_switch", "workspace", WORKSPACE)
         }
+        Command::Skip { .. } => panic!("a Skip is not an owner command"),
     };
     parse(
         format!(
@@ -430,4 +431,82 @@ fn a_refusal_after_an_ambiguous_commit_is_still_unknown() {
     journal.script(&[Scripted::Ambiguous, Scripted::Invalid]);
     assert_eq!(settled(&journal, &pause()), Settled::Unknown);
     assert_eq!(journal.appends.lock().expect("unpoisoned").len(), 2);
+}
+
+const APPROVAL: &str = "01JBH3BTZ8K2M4N6P8R0S2T7AA";
+
+fn skip() -> Command {
+    Command::Skip {
+        agent: "agt_a".to_owned(),
+        approval: APPROVAL.to_owned(),
+        content_hash: format!("sha256:{}", "ab".repeat(32)),
+    }
+}
+
+#[test]
+fn a_skip_is_the_approval_response_operation_on_the_skip_row() {
+    let command = skip();
+    assert_eq!(command.operation(), "approval_response");
+    assert_eq!(command.permission(), Permission::Skip);
+    assert_eq!(command.request(), Request::Other);
+    assert_eq!(command.id_member(), "response_id");
+    assert_eq!(Command::Pause("agt_a".to_owned()).id_member(), "command_id");
+    assert_eq!(agent("agt_a").id_member(), "command_id");
+}
+
+#[test]
+fn the_skip_draft_is_the_clis_approval_response() {
+    let bytes = draft(&issued(&skip(), EVENT, at(T0))).expect("a draft");
+    let value = parse(&bytes).expect("JSON");
+    let payload = parse(
+        format!(
+            r#"{{"agent":"agt_a","approval":"{APPROVAL}","verdict":"skipped","content_hash":"sha256:{}","submitted_at":{T0},"step_up":null,"responder":"{PRINCIPAL}","role":"approver"}}"#,
+            "ab".repeat(32)
+        )
+        .as_bytes(),
+    )
+    .expect("JSON");
+    assert_eq!(value.get("payload"), Some(&payload));
+    assert_eq!(
+        value.get("event_type"),
+        Some(&Value::Str("ApprovalResponseSubmitted".into()))
+    );
+    assert_eq!(
+        value.get("artifact_refs"),
+        Some(&Value::Array(vec![Value::Str(format!(
+            "sha256:{}",
+            "ab".repeat(32)
+        ))])),
+        "the content hash is the payload's one digest reference"
+    );
+    assert_eq!(
+        value.get("actor").and_then(|a| a.get("id")),
+        Some(&Value::Str(PRINCIPAL.into()))
+    );
+    let (mut journal, stream) = opened();
+    let epoch = journal.take_ownership(&stream);
+    let outcome = journal.append(&stream, 1, epoch, at(T0), &[&bytes]);
+    assert!(
+        matches!(outcome, AppendOutcome::Committed(_)),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn a_skip_is_in_the_workspace_when_its_agent_is_deployed() {
+    let control = vec![
+        row(1, "StreamOpened", "{}"),
+        row(
+            2,
+            "AgentDeployed",
+            r#"{"agent_id":"agt_a","mandate_version":"sha256:01"}"#,
+        ),
+    ];
+    assert!(in_workspace(&control, &skip()));
+    let elsewhere = Command::Skip {
+        agent: "agt_b".to_owned(),
+        approval: APPROVAL.to_owned(),
+        content_hash: format!("sha256:{}", "ab".repeat(32)),
+    };
+    assert!(!in_workspace(&control, &elsewhere));
 }

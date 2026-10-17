@@ -38,7 +38,8 @@ use std::time::Duration;
 use mandate_api_server::clock::SystemClock;
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
-    StartRefusal, check_bind, check_database_url, check_environment, read_session_key,
+    StartRefusal, artifact_store, check_bind, check_database_url, check_environment,
+    read_session_key,
 };
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::Postgres;
@@ -49,6 +50,7 @@ use mandate_api_server::session::{OsRandom, Sessions};
 use mandate_api_server::token::Issuer;
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_identity::{OrgId, WorkspaceId};
+use mandate_journal::ArtifactSource;
 use mandate_journal_pg::PgJournal;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
@@ -136,6 +138,7 @@ struct Start {
     links: PathBuf,
     database_url: String,
     hosted: Hosted,
+    artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
 }
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
@@ -185,6 +188,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
             name: "MANDATE_API_JWKS_URL",
         })?;
     let links = PathBuf::from(setting("MANDATE_API_SUBJECT_LINKS")?);
+    let artifacts = artifact_store(env::var_os("MANDATE_API_ARTIFACTS").as_deref())?;
     let start = Start {
         settings,
         key,
@@ -193,6 +197,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         links,
         database_url,
         hosted,
+        artifacts,
     };
     Ok((args, start))
 }
@@ -244,6 +249,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         )?)),
         members: Arc::new(members::until_parser),
         hosted: start.hosted,
+        artifacts: start.artifacts,
     };
     let api = spawn_listener(
         serve(

@@ -118,7 +118,14 @@ struct Entry {
     opened: u64,
     absolute_until: i64,
     last_active: i64,
+    /// The digest of the secret the last granted refresh rotated away, and when.
+    previous: Option<([u8; 32], i64)>,
 }
+
+/// How long, in seconds, a cookie a granted refresh just rotated away still serves a pause or a
+/// kill switch (DEC-1022). Both instants are compared in whole seconds, as the session's other
+/// lifetimes are, so the window ends at the first second past this many after the rotation's.
+pub const ROTATION_GRACE_S: i64 = 30;
 
 const ID_BYTES: usize = 16;
 const SECRET_BYTES: usize = 32;
@@ -222,6 +229,7 @@ impl Sessions {
                 opened,
                 absolute_until: now.secs().saturating_add(limits.absolute_s()),
                 last_active: now.secs(),
+                previous: None,
             },
         );
         Ok(self.encode(&id, &secret))
@@ -259,6 +267,7 @@ impl Sessions {
         match refreshed {
             Ok(Refreshed::Rotated { .. }) => {
                 entry.last_active = now.secs();
+                entry.previous = Some((digest_of(&secret), now.secs()));
                 Ok(Some(self.encode(&id, &next)))
             }
             Ok(Refreshed::Outage) => Ok(None),
@@ -292,7 +301,11 @@ impl Sessions {
     /// (§3.11 item 6); that refresh needs no randomness and the store's lock is recovered if
     /// poisoned, so neither can refuse risk reduction. A cookie whose tag verifies but whose
     /// secret is not the current one can only be one this session rotated away (the tag proves the
-    /// server issued that id and secret together): it ends the session, as reuse.
+    /// server issued that id and secret together), and it ends the session, as reuse, with one
+    /// exception (DEC-1022): for [`ROTATION_GRACE_S`] after a granted refresh, the secret that
+    /// refresh rotated away still serves a pause or a kill switch in flight across it (with no
+    /// outage refresh, which needs the current secret), and any other call with it is refused with
+    /// the session kept. [`Sessions::refresh`] treats it as reuse even then.
     ///
     /// # Errors
     /// [`Unauthenticated`] for every refusal.
@@ -305,22 +318,24 @@ impl Sessions {
         let (id, secret) = self.decode(cookie).ok_or(Unauthenticated)?;
         let mut store = self.store();
         let entry = store.entries.get_mut(&id).ok_or(Unauthenticated)?;
-        if !holds(entry, &secret) {
-            store.entries.remove(&id);
-            return Err(Unauthenticated);
-        }
-        let mut admitted = entry.record.authorize(request, now);
-        if admitted == Err(SessionRefusal::AccessExpired) && request != Request::Other {
-            let outage = entry.record.refresh(
-                &RefreshSecret(secret),
-                ProviderAnswer::Unreachable,
-                &RefreshSecret(OUTAGE_NEXT),
-                now,
-            );
-            if outage == Ok(Refreshed::Outage) {
-                admitted = entry.record.authorize(request, now);
+        let current = holds(entry, &secret);
+        let graced = entry.previous.is_some_and(|(digest, rotated)| {
+            digest == digest_of(&secret) && now.secs() <= rotated.saturating_add(ROTATION_GRACE_S)
+        });
+        let reducing = request != Request::Other;
+        match (current, graced, reducing) {
+            (true, _, _) | (false, true, true) => {}
+            (false, true, false) => return Err(Unauthenticated),
+            (false, false, _) => {
+                store.entries.remove(&id);
+                return Err(Unauthenticated);
             }
         }
+        let admitted = if current {
+            admitted_with_outage(entry, &secret, request, now)
+        } else {
+            entry.record.authorize(request, now)
+        };
         match admitted {
             Ok(()) => {
                 entry.last_active = entry.last_active.max(now.secs());
@@ -438,6 +453,30 @@ fn live(entry: &Entry, now: i64, idle_s: i64) -> bool {
 
 /// The status a failed refresh is recorded with: an answer that is neither a grant nor an outage.
 const FAILED_STATUS: u16 = 401;
+
+/// `request` on the session whose current secret is `secret`: a pause or kill switch on lapsed
+/// access is served after an outage refresh the server records itself (§3.11 item 6).
+fn admitted_with_outage(
+    entry: &mut Entry,
+    secret: &Secret,
+    request: Request,
+    now: UtcNanos,
+) -> Result<(), SessionRefusal> {
+    let admitted = entry.record.authorize(request, now);
+    if admitted != Err(SessionRefusal::AccessExpired) || request == Request::Other {
+        return admitted;
+    }
+    let outage = entry.record.refresh(
+        &RefreshSecret(*secret),
+        ProviderAnswer::Unreachable,
+        &RefreshSecret(OUTAGE_NEXT),
+        now,
+    );
+    match outage {
+        Ok(Refreshed::Outage) => entry.record.authorize(request, now),
+        _ => admitted,
+    }
+}
 
 /// Whether `secret` is the session's current one.
 fn holds(entry: &Entry, secret: &Secret) -> bool {

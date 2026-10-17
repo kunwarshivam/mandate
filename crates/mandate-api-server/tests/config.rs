@@ -291,3 +291,55 @@ fn a_key_that_is_not_a_regular_file_is_refused_as_missing_and_never_opened() {
         .expect("a FIFO is refused without being opened, so the read never blocks");
     assert_eq!(read, Err(StartRefusal::SessionKeyMissing));
 }
+
+/// The content-addressed store the agent reads take documents from (DEC-1020 item 1): optional,
+/// opened at start, and refused by name when it cannot be opened.
+#[test]
+fn the_artifact_store_is_optional_and_refused_by_name_when_unusable() {
+    use mandate_api_server::config::artifact_store;
+    use mandate_journal::{ArtifactRef, ArtifactStore, get_artifact};
+
+    assert!(artifact_store(None).expect("no store").is_none());
+    assert!(
+        artifact_store(Some(std::ffi::OsStr::new("")))
+            .expect("an empty setting is no store")
+            .is_none()
+    );
+
+    let root = credentials(None, 0o700);
+    let mut writer = mandate_artifacts_fs::FsArtifactStore::open(&root).expect("a store");
+    let reference = writer.put_artifact(b"a document").expect("stored");
+    let store = artifact_store(Some(root.as_os_str()))
+        .expect("opened")
+        .expect("a store");
+    assert_eq!(
+        get_artifact(store.as_ref(), &reference).expect("read"),
+        b"a document"
+    );
+    assert_eq!(reference, ArtifactRef::of(b"a document"));
+
+    let bare = credentials(None, 0o700);
+    assert_eq!(
+        artifact_store(Some(bare.as_os_str())).err(),
+        Some(StartRefusal::Setting {
+            name: "MANDATE_API_ARTIFACTS"
+        }),
+        "a directory that is not a store is refused"
+    );
+    assert!(
+        !bare.join("sha256").exists(),
+        "and nothing is written to it"
+    );
+
+    let file = root.join("a-file");
+    fs::write(&file, b"not a directory").expect("a file");
+    let refused = artifact_store(Some(file.join("store").as_os_str()))
+        .err()
+        .expect("refused");
+    assert_eq!(
+        refused,
+        StartRefusal::Setting {
+            name: "MANDATE_API_ARTIFACTS"
+        }
+    );
+}

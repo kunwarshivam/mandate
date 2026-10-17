@@ -26,10 +26,12 @@ use mandate_identity_seal::Seal;
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
+use crate::documents::{Envelope, envelope};
 use crate::http::{App, problem, problem_body, session_cookie, unauthenticated, with_type};
 use crate::members::ControlLookup;
 use crate::reads::{
-    AgentView, ApprovalView, Deployment, Filter, agent, approvals, deployed, inbox,
+    AgentView, ApprovalView, Deployment, Filter, account_positions, account_ref, agent, approvals,
+    deployed, inbox,
 };
 use crate::session::Authenticated;
 
@@ -262,15 +264,28 @@ pub(crate) fn enveloped(
     )
 }
 
-fn agent_value(view: &AgentView) -> Value {
-    object(vec![
+/// An agent's members, with the label and envelope of the mandate document its version names,
+/// `null` when the store does not hold it (DEC-1020 item 2).
+fn agent_members(view: &AgentView, document: Option<&Envelope>) -> Vec<(&'static str, Value)> {
+    vec![
         ("agent_id", string(&view.agent_id)),
         ("environment", string(&view.environment)),
         ("mandate_version", string(&view.mandate_version)),
         ("deployed_at", string(&view.deployed_at)),
         ("mode", view.mode.as_deref().map_or(Value::Null, string)),
         ("pending_approvals", int(view.pending_approvals)),
-    ])
+        ("label", document.map_or(Value::Null, |d| string(&d.label))),
+        (
+            "mandate",
+            document.map_or(Value::Null, |d| d.mandate.clone()),
+        ),
+    ]
+}
+
+/// The mandate document `deployment`'s version names, from the deployment's store.
+fn document(app: &App, deployment: &Deployment) -> Option<Envelope> {
+    let store = app.artifacts.as_ref()?;
+    envelope(store.as_ref(), &deployment.2)
 }
 
 fn approval_value(view: &ApprovalView, with_content: bool) -> Value {
@@ -284,6 +299,7 @@ fn approval_value(view: &ApprovalView, with_content: bool) -> Value {
             int(u64::try_from(view.deadline).unwrap_or(u64::MAX)),
         ),
         ("content_hash", string(&view.content_hash)),
+        ("order", view.order.clone()),
     ];
     if with_content {
         members.push(("content", view.content.clone()));
@@ -311,7 +327,10 @@ pub async fn list_agents(
     };
     let agents = read
         .iter()
-        .map(|(deployment, rows)| agent_value(&agent(deployment, rows)))
+        .map(|(deployment, rows)| {
+            let found = document(&app, deployment);
+            object(agent_members(&agent(deployment, rows), found.as_ref()))
+        })
         .collect();
     let streams: Vec<&[StoredEvent]> = read.iter().map(|(_, rows)| rows.as_slice()).collect();
     served(&reader, &streams, vec![("agents", Value::Array(agents))])
@@ -340,15 +359,34 @@ pub async fn one_agent(
         Ok(read) => read,
         Err(refusal) => return refusal.response(),
     };
-    let streams: Vec<&[StoredEvent]> = read.iter().map(|(_, rows)| rows.as_slice()).collect();
-    let views: Vec<Value> = read
-        .iter()
-        .map(|(deployment, rows)| agent_value(&agent(deployment, rows)))
-        .collect();
-    match views.into_iter().next() {
-        Some(view) => served(&reader, &streams, vec![("agent", view)]),
-        None => Refused::NotFound.response(),
-    }
+    let Some((deployment, rows)) = read.first() else {
+        return Refused::NotFound.response();
+    };
+    let found = document(&app, deployment);
+    let account = match &found {
+        Some(found) => match account_ref(&reader.control, &found.connection_id) {
+            Some(reference) => {
+                let stream = format!("acct:{}:{reference}", reader.workspace);
+                match app.journal.rows(&stream).await {
+                    Ok(rows) => Some(rows),
+                    Err(_) => return Refused::JournalUnavailable.response(),
+                }
+            }
+            None => None,
+        },
+        None => None,
+    };
+    let mut members = agent_members(&agent(deployment, rows), found.as_ref());
+    members.push((
+        "account_positions",
+        account
+            .as_deref()
+            .filter(|rows| !rows.is_empty())
+            .map_or(Value::Null, |rows| Value::Array(account_positions(rows))),
+    ));
+    let mut streams: Vec<&[StoredEvent]> = vec![rows.as_slice()];
+    streams.extend(account.as_deref());
+    served(&reader, &streams, vec![("agent", object(members))])
 }
 
 /// Every approval of every deployed agent, with the streams read.

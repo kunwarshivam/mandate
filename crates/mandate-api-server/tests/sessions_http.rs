@@ -84,6 +84,7 @@ fn fixture_with(keys: bool) -> Fixture {
         journal: Arc::new(common::MemJournal::default()),
         members: Arc::new(mandate_api_server::members::until_parser),
         hosted: common::hosted(),
+        artifacts: None,
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

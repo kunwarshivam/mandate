@@ -39,6 +39,13 @@ pub enum Command {
     Pause(String),
     /// Engage the kill switch at a scope.
     KillSwitch(KillScope),
+    /// Skip an approval (§5.2): its agent, its `ApprovalRequested` id, and the content hash the
+    /// client rendered.
+    Skip {
+        agent: String,
+        approval: String,
+        content_hash: String,
+    },
 }
 
 impl Command {
@@ -47,6 +54,7 @@ impl Command {
         match self {
             Self::Pause(_) => "pause",
             Self::KillSwitch(_) => "kill_switch",
+            Self::Skip { .. } => "approval_response",
         }
     }
 
@@ -56,15 +64,80 @@ impl Command {
             Self::Pause(_) => Permission::Pause,
             Self::KillSwitch(KillScope::Agent(_)) => Permission::KillSwitchAgent,
             Self::KillSwitch(_) => Permission::KillSwitchConnectionOrWorkspace,
+            Self::Skip { .. } => Permission::Skip,
         }
     }
 
-    /// What it is to the session (identity spec §6.4): both survive an outage.
+    /// What it is to the session (identity spec §6.4): pause and the kill switch survive an
+    /// outage; a Skip is not one of a reduction-only session's rows.
     pub fn request(&self) -> Request {
         match self {
             Self::Pause(_) => Request::Pause,
             Self::KillSwitch(_) => Request::KillSwitch,
+            Self::Skip { .. } => Request::Other,
         }
+    }
+
+    /// The member of the `202` that names the event: `command_id`, or a Skip's `response_id`.
+    pub fn id_member(&self) -> &'static str {
+        match self {
+            Self::Skip { .. } => "response_id",
+            Self::Pause(_) | Self::KillSwitch(_) => "command_id",
+        }
+    }
+
+    /// The event it is journaled as.
+    fn event_type(&self) -> &'static str {
+        match self {
+            Self::Skip { .. } => "ApprovalResponseSubmitted",
+            Self::Pause(_) | Self::KillSwitch(_) => "OwnerCommandIssued",
+        }
+    }
+
+    /// The digest references its payload names, which the envelope's `artifact_refs` lists
+    /// (journal spec §3): a Skip's content hash, and none for an owner command.
+    fn artifact_refs(&self) -> Vec<Value> {
+        match self {
+            Self::Skip { content_hash, .. } => vec![text(content_hash)],
+            Self::Pause(_) | Self::KillSwitch(_) => Vec::new(),
+        }
+    }
+
+    /// Its payload: journal spec §9.11's members for an owner command, §9.7's for a Skip, as the
+    /// CLI writes each.
+    fn payload(&self, workspace: &str, principal: &str, second: Int) -> Option<Value> {
+        if let Self::Skip {
+            agent,
+            approval,
+            content_hash,
+        } = self
+        {
+            return object(vec![
+                ("agent", text(agent)),
+                ("approval", text(approval)),
+                ("verdict", text("skipped")),
+                ("content_hash", text(content_hash)),
+                ("submitted_at", Value::Int(second)),
+                ("step_up", Value::Null),
+                ("responder", text(principal)),
+                ("role", text("approver")),
+            ]);
+        }
+        let (agent, scope, subject) = self.named(workspace);
+        object(vec![
+            ("agent", agent.map_or(Value::Null, text)),
+            ("command", text(self.operation())),
+            ("scope", text(scope)),
+            ("subject", text(subject)),
+            ("release", Value::Null),
+            ("warning_shown", Value::Null),
+            ("bid", Value::Null),
+            ("bid_size", Value::Null),
+            ("floor", Value::Null),
+            ("user", text(principal)),
+            ("submitted_at", Value::Int(second)),
+            ("step_up", Value::Null),
+        ])
     }
 
     /// The payload's `agent`, `scope`, and `subject` (journal spec §9.11, rule 91): the agent for
@@ -76,6 +149,7 @@ impl Command {
             }
             Self::KillSwitch(KillScope::Connection(connection)) => (None, "connection", connection),
             Self::KillSwitch(KillScope::Workspace) => (None, "workspace", workspace),
+            Self::Skip { agent, .. } => (Some(agent), "agent", agent),
         }
     }
 }
@@ -109,25 +183,13 @@ pub struct Issued<'a> {
     pub command: &'a Command,
 }
 
-/// The canonical draft of `issued`'s `OwnerCommandIssued`; `None` only for a value the canonical
-/// form cannot hold.
+/// The canonical draft of `issued`'s event; `None` only for a value the canonical form cannot
+/// hold.
 pub fn draft(issued: &Issued<'_>) -> Option<Vec<u8>> {
     let second = u64::try_from(issued.now.secs()).ok().and_then(Int::new)?;
-    let (agent, scope, subject) = issued.command.named(issued.workspace);
-    let payload = object(vec![
-        ("agent", agent.map_or(Value::Null, text)),
-        ("command", text(issued.command.operation())),
-        ("scope", text(scope)),
-        ("subject", text(subject)),
-        ("release", Value::Null),
-        ("warning_shown", Value::Null),
-        ("bid", Value::Null),
-        ("bid_size", Value::Null),
-        ("floor", Value::Null),
-        ("user", text(issued.principal)),
-        ("submitted_at", Value::Int(second)),
-        ("step_up", Value::Null),
-    ])?;
+    let payload = issued
+        .command
+        .payload(issued.workspace, issued.principal, second)?;
     let actor = object(vec![
         ("build", text(BUILD)),
         ("id", text(issued.principal)),
@@ -137,7 +199,10 @@ pub fn draft(issued: &Issued<'_>) -> Option<Vec<u8>> {
     let one = Value::Int(Int::new(1)?);
     let envelope = object(vec![
         ("actor", actor),
-        ("artifact_refs", Value::Array(Vec::new())),
+        (
+            "artifact_refs",
+            Value::Array(issued.command.artifact_refs()),
+        ),
         ("causation_id", Value::Null),
         ("clock_source", text("local")),
         ("config_refs", Value::Object(Object::new())),
@@ -146,7 +211,7 @@ pub fn draft(issued: &Issued<'_>) -> Option<Vec<u8>> {
         ("envelope_version", one.clone()),
         ("event_id", text(issued.event_id)),
         ("event_time", text(&issued.now.to_string())),
-        ("event_type", text(COMMAND)),
+        ("event_type", text(issued.command.event_type())),
         ("payload", payload),
         ("pii_refs", Value::Array(Vec::new())),
         ("schema_version", one),
@@ -154,9 +219,6 @@ pub fn draft(issued: &Issued<'_>) -> Option<Vec<u8>> {
     ])?;
     Some(to_canonical(&envelope))
 }
-
-/// The event type every owner command is.
-const COMMAND: &str = "OwnerCommandIssued";
 
 /// What a repeat must match: the event type, the stream, the actor's kind and id, and the payload
 /// without `submitted_at`.
@@ -206,6 +268,7 @@ pub fn in_workspace(control: &[StoredEvent], command: &Command) -> bool {
     };
     match command {
         Command::Pause(id) | Command::KillSwitch(KillScope::Agent(id)) => agent(id),
+        Command::Skip { agent: id, .. } => agent(id),
         Command::KillSwitch(KillScope::Connection(id)) => connection(id),
         Command::KillSwitch(KillScope::Workspace) => !control.is_empty(),
     }
