@@ -54,11 +54,19 @@ struct Buckets {
 }
 
 impl Buckets {
-    fn url(&self, tail: &str) -> String {
-        format!(
+    /// The bucket API's URL under [`CLOUDFLARE_API`], refused unless it is HTTPS; the client is
+    /// HTTPS-only as well, so nothing the run sends travels in clear text.
+    fn url(&self, tail: &str) -> Result<reqwest::Url, String> {
+        let url = reqwest::Url::parse(&format!(
             "{CLOUDFLARE_API}/accounts/{}/r2/buckets{tail}",
             self.account
-        )
+        ))
+        .map_err(|_| "the bucket API's URL does not parse".to_owned())?;
+        if url.scheme() == "https" {
+            Ok(url)
+        } else {
+            Err("the bucket API must be reached over HTTPS".to_owned())
+        }
     }
 
     async fn call(
@@ -69,7 +77,7 @@ impl Buckets {
     ) -> Result<(), String> {
         let mut request = self
             .http
-            .request(method, self.url(tail))
+            .request(method, self.url(tail)?)
             .bearer_auth(self.token.expose_secret());
         if let Some(body) = body {
             request = request
@@ -130,6 +138,7 @@ async fn run() -> Result<bool, String> {
     let store = S3::new(endpoint, key, Timestamp::now).map_err(|e| e.to_string())?;
     let buckets = Buckets {
         http: reqwest::Client::builder()
+            .https_only(true)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| "the HTTP client could not be built".to_owned())?,
