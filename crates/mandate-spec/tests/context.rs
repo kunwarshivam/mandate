@@ -241,10 +241,23 @@ fn the_connections_broker_names_the_classes_a_stop_limit_protects() {
     let live = Environment::Live;
     let alpaca = Some(BTreeSet::from([AssetClass::Crypto]));
     let robinhood = Some(BTreeSet::from([AssetClass::Crypto, AssetClass::UsEquity]));
-    let cases: [(&str, Vec<JournaledFact>, Option<BTreeSet<AssetClass>>); 8] = [
-        ("alpaca", vec![on_broker(OURS, paper, Some("alpaca"))], alpaca.clone()),
-        ("robinhood", vec![on_broker(OURS, live, Some("robinhood"))], robinhood.clone()),
-        ("another broker", vec![on_broker(OURS, live, Some("ibkr"))], None),
+    type Case<'a> = (&'a str, Vec<JournaledFact>, Option<BTreeSet<AssetClass>>);
+    let cases: [Case<'_>; 8] = [
+        (
+            "alpaca",
+            vec![on_broker(OURS, paper, Some("alpaca"))],
+            alpaca.clone(),
+        ),
+        (
+            "robinhood",
+            vec![on_broker(OURS, live, Some("robinhood"))],
+            robinhood.clone(),
+        ),
+        (
+            "another broker",
+            vec![on_broker(OURS, live, Some("ibkr"))],
+            None,
+        ),
         ("no broker named", vec![on_broker(OURS, live, None)], None),
         ("nothing known", vec![], None),
         (

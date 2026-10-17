@@ -576,7 +576,13 @@ impl Shared {
     /// the scripted price. The answer is every order's record. Any other body is `400` with
     /// nothing changed.
     fn market(&mut self, body: &[u8]) -> String {
-        let refused = || reply(400, None, &json!({"error": "not a market move"}).to_string());
+        let refused = || {
+            reply(
+                400,
+                None,
+                &json!({"error": "not a market move"}).to_string(),
+            )
+        };
         let Some(quotes) = market_quotes(body) else {
             return refused();
         };

@@ -76,7 +76,12 @@ fn a_quote_through_the_stop_fills_it_with_the_scripted_fill() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|o| (o["id"].as_str().unwrap().to_owned(), o["state"].as_str().unwrap().to_owned()))
+        .map(|o| {
+            (
+                o["id"].as_str().unwrap().to_owned(),
+                o["state"].as_str().unwrap().to_owned(),
+            )
+        })
         .collect();
     assert!(
         named.contains(&(stop.clone(), "filled".to_owned())),
@@ -110,7 +115,11 @@ fn a_body_of_another_shape_changes_nothing_and_only_a_rehearsal_has_the_route() 
     ] {
         let (status, _) = market(&server, body);
         assert_eq!(status, 400, "{body}");
-        assert_eq!(state(&server, &stop), (State::Confirmed, qty("0")), "{body}");
+        assert_eq!(
+            state(&server, &stop),
+            (State::Confirmed, qty("0")),
+            "{body}"
+        );
     }
     let plain = SimServer::start(common::sim().unwrap(), Variant::Honest).unwrap();
     let (status, _) = market(&plain, r#"{"quotes":{"SPY":"480"}}"#);

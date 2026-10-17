@@ -1789,11 +1789,35 @@ fn v008_and_the_worst_case_read_the_classes_a_stop_limit_protects() -> Checked {
     );
     let rows: Vec<Row<'_>> = vec![
         ("alpaca, no offset", alpaca.clone(), vec![], false, "0.05"),
-        ("robinhood, no offset", robinhood.clone(), vec![], true, "0.05"),
+        (
+            "robinhood, no offset",
+            robinhood.clone(),
+            vec![],
+            true,
+            "0.05",
+        ),
         ("profile absent, no offset", None, vec![], true, "0.05"),
-        ("alpaca, an offset", alpaca.clone(), vec![offset], false, "0.05"),
-        ("robinhood, an offset", robinhood.clone(), vec![offset], false, "0.06"),
-        ("profile absent, an offset", None, vec![offset], false, "0.06"),
+        (
+            "alpaca, an offset",
+            alpaca.clone(),
+            vec![offset],
+            false,
+            "0.05",
+        ),
+        (
+            "robinhood, an offset",
+            robinhood.clone(),
+            vec![offset],
+            false,
+            "0.06",
+        ),
+        (
+            "profile absent, an offset",
+            None,
+            vec![offset],
+            false,
+            "0.06",
+        ),
     ];
     for (name, classes, patches, v008, stop) in rows {
         let mut ctx = context()?;

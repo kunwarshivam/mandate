@@ -68,7 +68,11 @@ const NO_OFFSET: &str = r#""crypto_stop_limit_offset":null"#;
 
 /// The live mandate as [`document`] writes it, but with no stop-limit offset.
 fn without_offset() -> String {
-    let from = [r#""environment":"paper""#, "conn_alpaca_paper_01", NO_OFFSET];
+    let from = [
+        r#""environment":"paper""#,
+        "conn_alpaca_paper_01",
+        NO_OFFSET,
+    ];
     assert!(from.iter().all(|f| MANDATE.contains(f)));
     MANDATE
         .replace(from[0], r#""environment":"live""#)
