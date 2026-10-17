@@ -635,6 +635,7 @@ pub struct World {
     pub lineages: LineageState,
     pub active: Vec<ActiveThesis>,
     pub last_reservation: Option<RiskClock>,
+    pub data_symbols: BTreeSet<Symbol>,
 }
 
 impl World {
@@ -652,6 +653,7 @@ impl World {
             lineages: LineageState::default(),
             active: Vec::new(),
             last_reservation: None,
+            data_symbols: BTreeSet::from([symbol("AAPL"), symbol("MSFT")]),
         }
     }
 
@@ -666,6 +668,7 @@ impl World {
             lineages: &self.lineages,
             active_theses: &self.active,
             last_reservation: self.last_reservation,
+            data_symbols: &self.data_symbols,
         }
     }
 
