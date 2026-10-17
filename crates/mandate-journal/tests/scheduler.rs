@@ -1,5 +1,5 @@
-//! E21-29 (DEC-1010): the scheduler stream's five records journal spec v0.47 §9.18 closes, with
-//! rules 143 to 148. The expected reasons and paths are written out from §9.18, not read from the
+//! E21-29 (DEC-1010): the scheduler stream's five records journal spec v0.47 §9.20 closes, with
+//! rules 159 to 164. The expected reasons and paths are written out from §9.20, not read from the
 //! journal's own schema.
 //!
 //! A case is one line: `base | edits | expected`. `base` names a draft below; `edits` are
@@ -203,7 +203,7 @@ fn member_types_are_checked_before_any_rule() {
 }
 
 #[test]
-fn rule_143_the_scheduler_writes_as_a_system_actor_on_its_clock() {
+fn rule_159_the_scheduler_writes_as_a_system_actor_on_its_clock() {
     let user = r#"{"kind":"user","id":"u_1","version":"1","build":null}"#;
     for name in ["opened", "advanced", "day", "measured", "exceeded"] {
         run(&[
@@ -215,7 +215,7 @@ fn rule_143_the_scheduler_writes_as_a_system_actor_on_its_clock() {
 }
 
 #[test]
-fn rule_144_the_stream_opened_names_its_own_stream() {
+fn rule_160_the_stream_opened_names_its_own_stream() {
     run(&[
         "opened | workspace_id=ws_2 | stream_mismatch@stream_id",
         "opened | workspace_id=ws_1 | ok",
@@ -223,7 +223,7 @@ fn rule_144_the_stream_opened_names_its_own_stream() {
 }
 
 #[test]
-fn rule_145_a_tolerance_strata_delays_and_sorted_servers() {
+fn rule_161_a_tolerance_strata_delays_and_sorted_servers() {
     let unsorted = samples(&[("b.time", "0.001"), ("a.time", "0.002")]);
     let repeated = samples(&[("a.time", "0.001"), ("a.time", "0.002")]);
     let stratum =
@@ -251,7 +251,7 @@ fn rule_145_a_tolerance_strata_delays_and_sorted_servers() {
 }
 
 #[test]
-fn rule_146_the_offset_is_the_median_by_magnitude_and_of_two_the_larger() {
+fn rule_162_the_offset_is_the_median_by_magnitude_and_of_two_the_larger() {
     let two = samples(&[("a", "0.1"), ("b", "0.01")]);
     let opposite = samples(&[("a", "0.05"), ("b", "-0.05")]);
     let four = samples(&[("a", "-0.4"), ("b", "0.1"), ("c", "-0.2"), ("d", "0.3")]);
@@ -276,7 +276,7 @@ fn rule_146_the_offset_is_the_median_by_magnitude_and_of_two_the_larger() {
 }
 
 #[test]
-fn rule_147_within_tolerance_only_with_an_offset_at_most_the_tolerance() {
+fn rule_163_within_tolerance_only_with_an_offset_at_most_the_tolerance() {
     let at = |offset: &str| samples(&[("a", offset)]);
     run(&[
         "measured | within_tolerance=false | schema@payload.within_tolerance",
@@ -307,7 +307,7 @@ fn rule_147_within_tolerance_only_with_an_offset_at_most_the_tolerance() {
 }
 
 #[test]
-fn rule_148_an_exceeded_tolerance_is_out_of_tolerance_and_names_its_measurement() {
+fn rule_164_an_exceeded_tolerance_is_out_of_tolerance_and_names_its_measurement() {
     run(&[
         "exceeded | tolerance=0 | schema@payload.tolerance",
         "exceeded | offset=0.05 | schema@payload.offset",
@@ -340,7 +340,7 @@ proptest! {
     /// The oracle sorts integer nanoseconds by magnitude, then by value, and takes index n / 2;
     /// it judges tolerance on integers. The journal compares decimal strings digit by digit.
     #[test]
-    fn rules_146_and_147_agree_with_an_integer_oracle(
+    fn rules_162_and_163_agree_with_an_integer_oracle(
         offsets in prop::collection::vec(-200_000_000i64..200_000_000, 1..6),
         tolerance in 1i64..100_000_000,
         other in 0usize..6,

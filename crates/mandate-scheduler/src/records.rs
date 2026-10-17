@@ -1,4 +1,4 @@
-//! The scheduler stream's five records (journal spec §9.18) as draft bytes, with the envelope of
+//! The scheduler stream's five records (journal spec §9.20) as draft bytes, with the envelope of
 //! §3 and deterministic event ids: a retried batch re-derives the same ids, so the journal answers
 //! `AlreadyCommitted` rather than writing it twice.
 

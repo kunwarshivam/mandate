@@ -1,4 +1,4 @@
-//! Measurements of the host clock against its time servers (journal spec §5.4, §9.18).
+//! Measurements of the host clock against its time servers (journal spec §5.4, §9.20).
 
 use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
 

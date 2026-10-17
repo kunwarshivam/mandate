@@ -1,4 +1,4 @@
-//! The tick, trading-day, and measurement rules of journal spec §9.18 (E21-29, DEC-1010), each
+//! The tick, trading-day, and measurement rules of journal spec §9.20 (E21-29, DEC-1010), each
 //! checked against an oracle that states the rule its own way.
 
 use mandate_scheduler::measure::{self, Schedule, seconds};

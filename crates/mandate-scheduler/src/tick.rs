@@ -1,4 +1,4 @@
-//! The ticks of the risk clock and the trading days they start (journal spec §9.18).
+//! The ticks of the risk clock and the trading days they start (journal spec §9.20).
 
 use mandate_time::{Date, ExchangeCalendar, UtcNanos, new_york_date_and_hour};
 

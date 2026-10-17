@@ -1,5 +1,5 @@
 //! The scheduler: one writer epoch on the clock stream, a tick each second, a trading day at its
-//! first tick, and a measurement when one is due (infrastructure design §3.4, journal spec §9.18).
+//! first tick, and a measurement when one is due (infrastructure design §3.4, journal spec §9.20).
 
 use std::time::Duration;
 

@@ -9,7 +9,7 @@
     clippy::as_conversions
 )]
 //! The workspace scheduler (E21-29, DEC-1010; infrastructure design §3.1, §3.4; journal spec §2,
-//! §5.4, §9.18): the single writer of `clock:{workspace_id}`.
+//! §5.4, §9.20): the single writer of `clock:{workspace_id}`.
 //!
 //! - [`tick`] picks each tick, the later of the previous one plus a second and the host clock's
 //!   second, so the risk clock never stops, repeats, or runs backwards, and finds the first tick
@@ -17,7 +17,7 @@
 //! - [`measure`] judges a measurement of the host clock against its time servers: the median by
 //!   magnitude of the answering servers' offsets, out of tolerance when none answered, and when
 //!   one is due.
-//! - [`records`] writes the five §9.18 records as drafts with deterministic event ids.
+//! - [`records`] writes the five §9.20 records as drafts with deterministic event ids.
 //! - [`store`] is the journal port, over the in-memory journal and Postgres.
 //! - [`scheduler`] runs them under one writer epoch, with [`mandate_process`]'s lifecycle: a
 //!   `Fenced` append exits before anything more is written.

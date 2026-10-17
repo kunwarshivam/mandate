@@ -1,5 +1,5 @@
 //! The scheduler process over the shared in-memory journal (E21-29, DEC-1010; infrastructure
-//! design §3.4, OPS-14; journal spec §5.1, §5.4, §9.18): the only writer of `clock:`, fenced by
+//! design §3.4, OPS-14; journal spec §5.1, §5.4, §9.20): the only writer of `clock:`, fenced by
 //! epoch; ticks that go on through a host clock out of tolerance or stepping back; measurements
 //! journaled with their tolerance record; a retried batch never written twice.
 

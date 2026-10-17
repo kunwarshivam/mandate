@@ -1,7 +1,7 @@
-//! The scheduler-stream records journal spec v0.47 §9.18 closes (DEC-1010): `StreamOpened`,
+//! The scheduler-stream records journal spec v0.47 §9.20 closes (DEC-1010): `StreamOpened`,
 //! `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`, and `ClockToleranceExceeded` on
-//! `clock:{workspace_id}`, each at schema version 1, with consistency rules 143 and 145 to 148
-//! and subject rule 144. Offsets, delays, and tolerances are signed decimal seconds (§4.6), which
+//! `clock:{workspace_id}`, each at schema version 1, with consistency rules 159 and 161 to 164
+//! and subject rule 160. Offsets, delays, and tolerances are signed decimal seconds (§4.6), which
 //! the rules compare exactly, digit by digit, never through a float. Every rule only refuses a
 //! draft.
 
@@ -18,19 +18,19 @@ const DAY: &str = "TradingDayStarted";
 const MEASURED: &str = "ClockOffsetRecorded";
 const EXCEEDED: &str = "ClockToleranceExceeded";
 
-/// The envelope members rules 143 and 148 read.
+/// The envelope members rules 159 and 164 read.
 pub(crate) struct Envelope<'a> {
     pub(crate) actor: Option<&'a Value>,
     pub(crate) clock_source: Option<&'a Value>,
     pub(crate) causation_id: Option<&'a Value>,
 }
 
-/// Whether §9.18 governs records on `stream`: every record of the scheduler stream.
+/// Whether §9.20 governs records on `stream`: every record of the scheduler stream.
 pub(crate) fn governs(stream: &StreamId) -> bool {
     stream.stream_type() == StreamType::Scheduler
 }
 
-/// The payload normalized against its §9.18 schema, then rules 143 and 145 to 148 in number
+/// The payload normalized against its §9.20 schema, then rules 159 and 161 to 164 in number
 /// order, reported only on a well-typed payload.
 pub(crate) fn payload(
     event_type: &str,
@@ -118,7 +118,7 @@ fn rules(event_type: &str, payload: &Value, envelope: &Envelope<'_>) -> Result<(
     }
 }
 
-/// Subject rule 144 (`stream_mismatch`), reported after `artifact_refs` and `pii_refs`.
+/// Subject rule 160 (`stream_mismatch`), reported after `artifact_refs` and `pii_refs`.
 pub(crate) fn subject(event_type: &str, stream: &StreamId, payload: &Value) -> Result<(), Invalid> {
     if event_type != OPENED {
         return Ok(());
@@ -134,7 +134,7 @@ pub(crate) fn subject(event_type: &str, stream: &StreamId, payload: &Value) -> R
     }
 }
 
-/// Rule 146's offset: of the samples sorted by the magnitude of `offset`, then by `offset`, the
+/// Rule 162's offset: of the samples sorted by the magnitude of `offset`, then by `offset`, the
 /// one at index n / 2 rounded down; `None` for no sample.
 fn selected(samples: &[Value]) -> Option<&str> {
     let mut offsets: Vec<&str> = samples
