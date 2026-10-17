@@ -7,13 +7,16 @@
 //!
 //! Each run takes a fresh workspace, `demo<run id>`, because a confirmed version is refused a
 //! second confirmation (`version_invalid`), so a run never depends on what an earlier one left.
+use std::collections::BTreeMap;
 use std::fs;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use super::{CELL_REQUIRED_ENV, NAMESPACE, NODE, render, run_id, run_job, tools_missing, up};
+use super::{
+    CELL_REQUIRED_ENV, NAMESPACE, NODE, kubectl, render, run_id, run_job, tools_missing, up,
+};
 
 /// The scenarios `--scenario` takes.
 pub const SCENARIOS: &[&str] = &["demo"];
@@ -28,8 +31,9 @@ pub const FOUNDER: &str = "01K7DEM00000000000000F0VND";
 /// The demo's agent.
 pub const AGENT: &str = "demo-spy";
 /// How long the gestures' Job may run: the egress gate, the credentials copy and every gesture,
-/// one after another.
-const DEADLINE_S: u64 = 300;
+/// one after another. Under the 300 s `run_job` polls for, so the Job ends, and the report is
+/// written, before the polling gives up.
+const DEADLINE_S: u64 = 240;
 
 /// One of the demo's six steps and what it is made of.
 #[derive(Debug)]
@@ -49,7 +53,9 @@ pub enum Part {
     },
 }
 
-/// One CLI command in the cell, the text its success prints, and what it shows the demo.
+/// One CLI command in the cell, the text its success prints, and what it shows the demo. A gesture
+/// ran only when its container exited 0 and printed `expect`; a shown code is checked this way
+/// after the Job, and the CLI itself refuses a typed code that differs from the one it shows.
 #[derive(Debug)]
 pub struct Gesture {
     pub container: String,
@@ -145,7 +151,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 Part::Gap {
                     what: "sign-in to web/ and the workspace read through the API",
                     closes: "#1457 (the API server), #1486 and #1513 (subject links), the API's \
-                             cell image (processes.json `api`, lane A1 after #1457), and E21-52's \
+                             cell image (an `api` entry to add to processes.json, lane A1 after #1457), and E21-52's \
                              local-cell token issuer for POST /v1/sessions (lane SI)",
                 },
             ],
@@ -362,12 +368,32 @@ pub fn lines_of<'a>(logs: &'a str, container: &str) -> Vec<&'a str> {
     let bare = format!("[{container}] ");
     logs.lines()
         .filter_map(|line| {
-            line.find(&suffix)
-                .filter(|_| line.starts_with('['))
-                .map(|at| &line[at + suffix.len()..])
-                .or_else(|| line.strip_prefix(bare.as_str()))
+            let prefixed = line
+                .strip_prefix("[pod/")
+                .and_then(|rest| rest.split_once("] "))
+                .filter(|(pod, _)| format!("{pod}] ").ends_with(&suffix))
+                .map(|(_, said)| said);
+            prefixed.or_else(|| line.strip_prefix(bare.as_str()))
         })
         .collect()
+}
+
+/// Each container's exit code in a `kubectl get pods -o json` list, init containers included; a
+/// container that has not terminated has none.
+pub fn exit_codes(pods: &Value) -> BTreeMap<String, i64> {
+    let mut codes = BTreeMap::new();
+    for pod in pods["items"].as_array().into_iter().flatten() {
+        for key in ["initContainerStatuses", "containerStatuses"] {
+            for status in pod["status"][key].as_array().into_iter().flatten() {
+                let name = status["name"].as_str();
+                let code = status["state"]["terminated"]["exitCode"].as_i64();
+                if let (Some(name), Some(code)) = (name, code) {
+                    codes.insert(name.to_string(), code);
+                }
+            }
+        }
+    }
+    codes
 }
 
 /// `cargo xtask cell demo --scenario <name>`.
@@ -407,7 +433,24 @@ pub fn run(name: &str) -> Result<()> {
     let objects = gestures_job(rendered, &all, &format!("demo-in-{id}"), &files)?;
     eprintln!("==> the demo, end to end (paper and demo data only; local-cell results)");
     eprintln!("    workspace {workspace}, agent {AGENT}");
+    let job = objects
+        .iter()
+        .find(|o| o["kind"] == "Job")
+        .and_then(|o| o["metadata"]["name"].as_str())
+        .context("the gestures' Job has no name")?
+        .to_string();
     let (succeeded, logs) = run_job(objects)?;
+    let pods = kubectl(&[
+        "get",
+        "pods",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        &format!("job-name={job}"),
+        "-o",
+        "json",
+    ])?;
+    let codes = exit_codes(&serde_json::from_str(&pods).context("the gestures' pods")?);
     let mut failed = None;
     let mut gaps = 0;
     for step in &steps {
@@ -416,7 +459,8 @@ pub fn run(name: &str) -> Result<()> {
             match part {
                 Part::Gesture(g) => {
                     let lines = lines_of(&logs, &g.container);
-                    let said = lines.iter().any(|l| l.contains(&g.expect));
+                    let said = lines.iter().any(|l| l.contains(&g.expect))
+                        && codes.get(&g.container) == Some(&0);
                     let last = lines.last().copied().unwrap_or("(no output)");
                     if failed.is_some() {
                         eprintln!("    not run  {}", g.shows);
@@ -527,7 +571,8 @@ mod tests {
         assert_eq!(pinned[0]["symbol"], instrument["symbol"]);
     }
 
-    /// DEC-530 item 4's codes, as the CLI's own tests compute them for their fixture.
+    /// DEC-530 item 4's codes for the demo's mandate, as the CLI binary showed them when the
+    /// scenario's gestures were run against a local Postgres (and the CLI accepted them typed).
     #[test]
     fn the_codes_are_the_first_eight_hex_digits_of_the_gestures_hash() {
         let version = "sha256:19dd2428a410b41fa00ddc1b3d8d15d5775096ed223a20edf123c50adae292e6";
@@ -704,5 +749,26 @@ mod tests {
             ["opened ctl:demo1 as event A at seq 1", "again"]
         );
         assert!(lines_of(logs, "g03-config-register").is_empty());
+        let echoed = "[pod/j-x/g02-workspace-found] said /g01-workspace-open] this\n";
+        assert!(
+            lines_of(echoed, "g01-workspace-open").is_empty(),
+            "another container's line"
+        );
+    }
+
+    /// Only a terminated container has a code; init containers count, and a running one does not.
+    #[test]
+    fn exit_codes_come_from_terminated_containers_only() {
+        let pods = json!({"items": [{"status": {
+            "initContainerStatuses": [
+                {"name": "egress-gate", "state": {"terminated": {"exitCode": 0}}},
+                {"name": "g01-workspace-open", "state": {"terminated": {"exitCode": 1}}}
+            ],
+            "containerStatuses": [{"name": "g10-approvals-list", "state": {"waiting": {}}}]
+        }}]});
+        let codes = exit_codes(&pods);
+        assert_eq!(codes.get("egress-gate"), Some(&0));
+        assert_eq!(codes.get("g01-workspace-open"), Some(&1));
+        assert_eq!(codes.get("g10-approvals-list"), None);
     }
 }
