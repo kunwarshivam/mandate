@@ -85,7 +85,7 @@ const COMPANION: &str = "OrderRequestRecorded";
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     if crate::notices::governs(stream, event_type)
         || crate::gateway::governs(stream, event_type)
-        || crate::invalidation::governs(stream, event_type)
+        || crate::invalidation::governs(event_type)
     {
         return true;
     }

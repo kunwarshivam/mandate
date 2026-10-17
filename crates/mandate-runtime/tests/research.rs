@@ -13,11 +13,12 @@ use common::{
 };
 use mandate_canon::Value;
 use mandate_gateway::{CallRecord, Outcome, RequestError};
+use mandate_journal::StreamType;
 use mandate_research::{AssetId, WorkingUniverse};
 use mandate_research_run::{CallPlan, ModelPin, Retrieval};
 use mandate_runtime::{
-    ActiveThesis, Command, Effect, FoldedEvent, Input, Mode, ResearchInput, ResearchRequest,
-    RiskClock, RuntimeError, WriterEpoch, handle,
+    ActiveThesis, Command, Effect, FoldedEvent, Input, JournalCatalog, Mode, RecordCatalog,
+    ResearchInput, ResearchRecord, ResearchRequest, RiskClock, RuntimeError, WriterEpoch, handle,
 };
 
 fn boot(lp: &mut Loop, ports: &mandate_runtime::Ports<'_>) {
@@ -101,21 +102,19 @@ fn a_run_starts_in_production_once_the_journal_records_both_verdicts() {
 /// closes `ThesisInvalidated` (E19-5, DEC-2202).
 #[test]
 fn the_journal_catalog_reads_mandate_journal_s_registration() {
-    use mandate_runtime::{JournalCatalog, RecordCatalog, ResearchRecord};
-    assert_eq!(
-        JournalCatalog.registers(ResearchRecord::CandidateVerdicts),
-        mandate_journal::closes(
-            "ModelInvocationRecorded",
-            1,
-            mandate_journal::StreamType::Agent
-        )
-    );
-    assert_eq!(
-        JournalCatalog.registers(ResearchRecord::InvalidationVerdict),
-        mandate_journal::closes("ThesisInvalidated", 1, mandate_journal::StreamType::Agent)
-    );
-    assert!(JournalCatalog.registers(ResearchRecord::CandidateVerdicts));
-    assert!(JournalCatalog.registers(ResearchRecord::InvalidationVerdict));
+    let journal = JournalCatalog::JOURNAL;
+    assert!(journal.registers(ResearchRecord::CandidateVerdicts));
+    assert!(journal.registers(ResearchRecord::InvalidationVerdict));
+    let calls_only = JournalCatalog::over(|event_type, version, stream| {
+        (event_type, version, stream) == ("ModelInvocationRecorded", 1, StreamType::Agent)
+    });
+    assert!(calls_only.registers(ResearchRecord::CandidateVerdicts));
+    assert!(!calls_only.registers(ResearchRecord::InvalidationVerdict));
+    let invalidations_only = JournalCatalog::over(|event_type, version, stream| {
+        (event_type, version, stream) == ("ThesisInvalidated", 1, StreamType::Agent)
+    });
+    assert!(!invalidations_only.registers(ResearchRecord::CandidateVerdicts));
+    assert!(invalidations_only.registers(ResearchRecord::InvalidationVerdict));
 }
 
 #[test]
@@ -2610,4 +2609,40 @@ fn an_invalidation_adds_no_output_and_no_intent() {
     assert_eq!(lp.events("ThesisInvalidated").len(), 1);
     assert!(lp.events("ModelOutputRecorded").is_empty());
     assert!(lp.events("IntentProposed").is_empty());
+}
+
+/// Removing an invalidated thesis's instrument frees its slot and nothing more: with the universe
+/// at `max_instruments` (5) and the invalidated thesis's instrument outside it, the universe stays
+/// full, so a corroborated thesis on AAPL is still refused `universe_full`. Removing more than the
+/// invalidated thesis's own instrument would let it in past the limit.
+#[test]
+fn an_invalidation_frees_only_its_own_instrument_s_slot() {
+    let mut world = World::open();
+    world.active = vec![active_on(MSFT, "MSFT", "01GONE")];
+    world.universe = WorkingUniverse::Known {
+        instruments: [
+            "7b4a1c2e-3333-4a2b-9c3d-000000000003",
+            "7b4a1c2e-4444-4a2b-9c3d-000000000004",
+            "7b4a1c2e-5555-4a2b-9c3d-000000000005",
+            "7b4a1c2e-6666-4a2b-9c3d-000000000006",
+            "7b4a1c2e-7777-4a2b-9c3d-000000000007",
+        ]
+        .iter()
+        .map(|id| AssetId::new(id).unwrap_or_else(|e| panic!("{e}")))
+        .collect(),
+        pinned: false,
+    };
+    let lp = judged_with(
+        &format!(
+            r#"{{"theses":[{}],"invalidations":[{{"thesis_id":"01GONE","evidence":[]}}]}}"#,
+            thesis("AAPL", &[SERVICES, SUPPLY], "x")
+        ),
+        &world,
+    );
+    assert_eq!(lp.events("ThesisInvalidated").len(), 1);
+    assert_eq!(
+        verdicts(&lp),
+        vec!["universe_full".to_owned(), "judged".to_owned()],
+        "the thesis is refused and the invalidation judged, theses first (rule 151)"
+    );
 }

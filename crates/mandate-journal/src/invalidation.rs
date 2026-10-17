@@ -8,16 +8,17 @@ use std::collections::BTreeSet;
 use mandate_canon::Value;
 
 use crate::schema::Ty;
-use crate::{Draft, Invalid, InvalidReason, StreamId, StreamType};
+use crate::{Draft, Invalid, InvalidReason, StreamType};
 
 pub(crate) const INVALIDATED: &str = "ThesisInvalidated";
 const INVOCATION: &str = "ModelInvocationRecorded";
 const PROPOSED: &str = "ThesisProposed";
 const REVISED: &str = "ThesisRevised";
 
-/// Whether §9.21 governs `event_type` on `stream`.
-pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
-    stream.stream_type() == StreamType::Agent && event_type == INVALIDATED
+/// Whether §9.21 governs `event_type`: the catalogue admits `ThesisInvalidated` on the agent stream
+/// alone, so the stream is already the agent's here.
+pub(crate) fn governs(event_type: &str) -> bool {
+    event_type == INVALIDATED
 }
 
 /// The §9.21 schema of `event_type` at `schema_version` on `stream`, or `None`.
@@ -63,7 +64,8 @@ pub(crate) fn rules(
 }
 
 /// Rule 167 over one `append` batch whose drafts each passed [`Draft::parse`], draft by draft in
-/// batch order, the first that fails reported by its index:
+/// batch order, the first that fails reported by its index. `ThesisInvalidated` is catalogued on the
+/// agent stream alone, and only the agent stream's `ModelInvocationRecorded` has `verdicts`:
 ///
 /// - a model's `ThesisInvalidated` names as its cause a `ModelInvocationRecorded` earlier in the
 ///   batch whose verdict at `candidate` is a judged invalidation, and no earlier
@@ -72,9 +74,6 @@ pub(crate) fn rules(
 ///   by a later `ThesisInvalidated` of the batch.
 pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     for (i, draft) in drafts.iter().enumerate() {
-        if draft.stream_id().stream_type() != StreamType::Agent || draft.schema_version() != 1 {
-            continue;
-        }
         let payload = payload_of(draft);
         let p = View(&payload);
         match draft.event_type() {
@@ -150,10 +149,7 @@ fn names(draft: &Draft, cause: &str, candidate: u64) -> bool {
 /// names it with the same lineage and instrument; and that record is the latest admitted one for
 /// its instrument, so a superseded thesis is never invalidated in its place. The first that fails.
 pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
-    if draft.event_type() != INVALIDATED
-        || draft.stream_id().stream_type() != StreamType::Agent
-        || draft.schema_version() != 1
-    {
+    if draft.event_type() != INVALIDATED {
         return Ok(());
     }
     let mine = payload_of(draft);
