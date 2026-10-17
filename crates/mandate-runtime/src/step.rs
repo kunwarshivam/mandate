@@ -39,6 +39,12 @@ pub fn handle(
     if let Input::Started(epoch) = &input {
         return started(state, *epoch, ports);
     }
+    if matches!(input, Input::Research(_)) {
+        return Err(RuntimeError::NotInterpreted {
+            what: "a research input outside handle_research".to_owned(),
+            story: "E19-3",
+        });
+    }
     if !state.has_started() {
         return Err(RuntimeError::NotStarted);
     }
@@ -183,7 +189,7 @@ fn applied(
             batch.journal("ModelOutputRecorded", None, modelled(output)?)?;
             Ok(())
         }
-        Input::Journal(_) | Input::Started(_) | Input::Command(_) => Ok(()),
+        Input::Journal(_) | Input::Started(_) | Input::Command(_) | Input::Research(_) => Ok(()),
     }
 }
 
@@ -839,7 +845,7 @@ fn activated(
 /// cut-off as a §4.7 timestamp and the data as the stored artifact's digest (DEC-503 item 7). An
 /// empty `source`, which §9.1's `text` refuses, is refused here rather than at append, where the batch
 /// would go into doubt and hold every later input, the kill switch included, until restart.
-fn observed(observation: &Observation) -> Result<Value, RuntimeError> {
+pub(crate) fn observed(observation: &Observation) -> Result<Value, RuntimeError> {
     if observation.source.is_empty() {
         return Err(payload::non_canonical("source"));
     }
@@ -871,15 +877,15 @@ pub(crate) struct Batch<'a> {
     epoch: WriterEpoch,
     head: Seq,
     ordinal: u32,
-    drafts: Vec<EventDraft>,
-    effects: Vec<Effect>,
+    pub(crate) drafts: Vec<EventDraft>,
+    pub(crate) effects: Vec<Effect>,
     /// The approvals this batch has already cancelled, so one approval cannot be both cancelled and
     /// timed out by a single step: two records of one removal, where the journal should carry one.
     pub(crate) resolved: BTreeSet<EventId>,
 }
 
 impl<'a> Batch<'a> {
-    fn new(ids: &'a dyn IdGen, epoch: WriterEpoch, head: Seq) -> Self {
+    pub(crate) fn new(ids: &'a dyn IdGen, epoch: WriterEpoch, head: Seq) -> Self {
         Self {
             ids,
             epoch,
@@ -910,6 +916,18 @@ impl<'a> Batch<'a> {
         Ok(event_id)
     }
 
+    /// An id derived at `ordinal` of this batch's head, for an id that is not a draft's own (a run's,
+    /// a call's, a thesis's). The caller takes ordinals far above any draft's, so the two never
+    /// meet.
+    pub(crate) fn id_at(&self, ordinal: u32) -> EventId {
+        self.ids.event_id(self.epoch, self.head, ordinal)
+    }
+
+    /// The head this batch is built against.
+    pub(crate) fn head(&self) -> Seq {
+        self.head
+    }
+
     pub(crate) fn hand(&mut self, handoff: IntentHandoff) {
         self.effects.push(Effect::Intent(handoff));
     }
@@ -918,7 +936,7 @@ impl<'a> Batch<'a> {
         self.effects.push(Effect::Timer(request));
     }
 
-    fn notify(&mut self, reference: NotificationRef) {
+    pub(crate) fn notify(&mut self, reference: NotificationRef) {
         self.effects.push(Effect::Notify(reference));
     }
 

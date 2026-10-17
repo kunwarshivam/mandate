@@ -1,6 +1,7 @@
 //! Test databases for the Postgres journal. Each test gets its own schema in the database named by
-//! `MANDATE_PG_URL`, migrated as the owner role, and pools that act as the owner, the application
-//! role, and the connecting superuser (for planting faults and tampering). Without
+//! `MANDATE_PG_URL`, migrated as the owner role by the migration command's runner, and pools that
+//! act as the owner, the application role, and the connecting superuser (for planting faults and
+//! tampering). Without
 //! `MANDATE_PG_URL` a test says so and passes, unless `MANDATE_PG_REQUIRED` is set (CI's `full`
 //! job), where a missing database fails the test instead of skipping it (DEC-109).
 #![allow(
@@ -13,7 +14,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mandate_journal::{AppendOutcome, Head, StoredEvent, StreamId};
-use mandate_journal_pg::{APP_ROLE, OWNER_ROLE, PgJournal, migrator};
+use mandate_journal_pg::{APP_ROLE, OWNER_ROLE, PgJournal, migrate, migrations};
 use mandate_time::UtcNanos;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{AssertSqlSafe, Executor, PgPool, raw_sql};
@@ -30,9 +31,8 @@ const ROLE_LOCK: i64 = 0x4535_3350_4752;
 static SCHEMAS: AtomicU64 = AtomicU64::new(0);
 
 /// A migrated schema of its own, with pools for each role, dropped when the value is. The schema is
-/// migrated without sqlx's migration lock, which is one advisory lock per database: no one else
-/// migrates this schema, and a failed run leaves that lock held on its connection until the pool
-/// closes, which would stall every other test's setup.
+/// migrated by `mandate db migrate`'s runner, whose advisory lock is held by its transaction only,
+/// so a failed run releases it at once.
 pub struct TestDb {
     pub rt: Runtime,
     pub schema: String,
@@ -48,7 +48,7 @@ impl TestDb {
     /// is available.
     pub fn new() -> Option<Self> {
         assert!(
-            migrator().iter().next().is_some(),
+            !migrations().is_empty(),
             "mandate-journal-pg embeds no migrations"
         );
         let Ok(url) = std::env::var(URL_VAR) else {
@@ -110,13 +110,11 @@ impl TestDb {
             .execute(&setup)
             .await
             .unwrap();
+            migrate_as_the_deploy_step(&setup, &schema).await;
             setup.close().await;
             let owner = pool(&base, &schema, Some(OWNER_ROLE), 2);
             let app = pool(&base, &schema, Some(APP_ROLE), 8);
             let admin = pool(&base, &schema, None, 2);
-            let mut migrator = migrator();
-            migrator.set_locking(false);
-            migrator.run(&owner).await.unwrap();
             (owner, app, admin)
         });
         Some(TestDb {
@@ -174,6 +172,17 @@ impl Drop for TestDb {
             }
         });
     }
+}
+
+/// Migrates `schema` as `mandate db migrate` does, connected as the superuser.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test database is migrated by the same runner as the migration command"
+)]
+async fn migrate_as_the_deploy_step(setup: &PgPool, schema: &str) {
+    migrate(setup, schema)
+        .await
+        .unwrap_or_else(|e| panic!("migrating {schema}: {e} ({})", e.code()));
 }
 
 /// A lazily connecting pool whose sessions use `schema` and, when given, act as `role`.
