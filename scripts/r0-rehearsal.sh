@@ -200,7 +200,7 @@ SIM_CLOCK_MEMBER=""
 if [ -n "$SIM_CLOCK" ]; then SIM_CLOCK_MEMBER=",\"clock\":\"$(sim_now)\""; fi
 cat >"$WORK/sim.json" <<JSON
 {"accounts":[{"number":"$RH_ACCOUNT","agentic_allowed":true,"cash":"100","buying_power":"100","pattern_day_trader":false}],
- "session":"regular","quotes":{"$SYMBOL":"85"},"fills":[{"symbol":"$SYMBOL","side":"buy","price":"85"}]$SIM_CLOCK_MEMBER}
+ "session":"regular","quotes":{"$SYMBOL":"85"},"fills":[{"symbol":"$SYMBOL","side":"buy","price":"85"},{"symbol":"$SYMBOL","side":"sell","price":"80.5"},{"symbol":"$SYMBOL","side":"buy","price":"85"}]$SIM_CLOCK_MEMBER}
 JSON
 "$BIN/mandate-rh-sim" --script "$WORK/sim.json" >"$WORK/sim.out" 2>"$WORK/sim.err" &
 SIM_PID=$!
@@ -366,6 +366,19 @@ for stream in "ctl:$WORKSPACE" "agent:$WORKSPACE:$AGENT" "acct:$WORKSPACE:$ACCOU
   step "2r-$name" 'verified, stream ' cli journal verify "$WORK/$name.jsonl" --store "$STORE" || true
 done
 run 2s refused 'connection_spent|not flat' --place-one-order
+
+# --- The stop's trigger (DEC-1152 item 3): the market falls through B3's stop at 80.76, the
+# script's sell fill takes it at 80.5, inside its limit of 79.9524, and the account is flat. The
+# simulator answers every order's record; the stop's reads sold and filled.
+step 2t '"side":"sell","state":"filled","stop_price"' curl -sf -X POST \
+  -H 'content-type: application/json' --data '{"quotes":{"'"$SYMBOL"'":"80.5"}}' \
+  "${ENDPOINT%/mcp}/rehearsal/market" || true
+# The same command on the account the stop left flat: the record is spent by the entry's fill
+# (DEC-910 item 3), so it is refused before any place call, as R0 step 7 is (DEC-529 item 13: one
+# order per live record). A second entry needs a fresh connection record. Until R23 is decided
+# (DEC-1152 item 4, Proposed) the lapse counts the sold-out position's zero row, so the refusal
+# today is `not flat`, which the lapse checks before the spent record; both send nothing.
+run 2u refused 'the account the connection binds is not flat' --place-one-order
 
 echo
 echo "record: $RECORD"

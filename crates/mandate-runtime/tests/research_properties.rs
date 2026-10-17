@@ -1,6 +1,7 @@
-//! Across random model outputs (garbage, schema-shaped values, injected text, invented instruments
-//! and evidence, failures of every kind, late answers, another identity, a spent budget), no order
-//! exceeds the envelope and none skips the gate (agent harness spec HI-1, HI-2, HI-5, HI-6, HI-9,
+//! Across random model outputs through `mandate-gateway` over its recorded fake (garbage,
+//! schema-shaped values, injected text, invented instruments and evidence, every failure outcome
+//! produced the way the gateway produces it, late answers, another identity, a spent budget), no
+//! order exceeds the envelope and none skips the gate (agent harness spec HI-1, HI-2, HI-5, HI-6, HI-9,
 //! HI-10, HI-18; `AGENTS.md` rule 4).
 //!
 //! The oracle reads only the journal and the behaviour it drew. It recomputes the limits from the
@@ -13,13 +14,13 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::research::{
-    AAPL, BuilderPlan, CUT_OFF, Loop, MAX_ORDER_USD, MAX_POSITION_USD, MSFT, RecordedGateway,
-    RecordedPlane, World, copy_admissions, full_run, reply_with, view_of,
+    AAPL, BuilderPlan, CUT_OFF, Loop, MAX_ORDER_USD, MAX_POSITION_USD, MSFT, Model, RecordedPlane,
+    World, copy_admissions, full_run, view_of,
 };
 use common::{ACCOUNT_STREAM, AllowGate, DenyGate, TestIds, clock, event, ports, text, with_clock};
 use mandate_canon::Value;
+use mandate_gateway::Outcome;
 use mandate_num::{Price, Qty, Usd};
-use mandate_research_run::{CallFailure, CallOutcome, ErrorKind, ResearchCall};
 use mandate_runtime::{FoldedEvent, GateDryRun, Input, WriterEpoch};
 use proptest::prelude::*;
 
@@ -57,7 +58,7 @@ struct Candidate {
 enum Behaviour {
     Garbage(Vec<u8>),
     Shaped(Vec<Candidate>),
-    Failure(ErrorKind),
+    Failure(Outcome),
     Late(Vec<Candidate>),
     OtherIdentity(Vec<Candidate>),
 }
@@ -169,47 +170,26 @@ fn behaviour() -> impl Strategy<Value = Behaviour> {
     prop_oneof![
         1 => prop::collection::vec(any::<u8>(), 0..256).prop_map(Behaviour::Garbage),
         6 => candidates().prop_map(Behaviour::Shaped),
-        2 => prop::sample::select(vec![
-            ErrorKind::PolicyDenied,
-            ErrorKind::BudgetExhausted,
-            ErrorKind::RateLimitedLocal,
-            ErrorKind::MeterUnavailable,
-            ErrorKind::InputRejected,
-            ErrorKind::ModelWithdrawn,
-            ErrorKind::DeadlineExceeded,
-            ErrorKind::ProviderUnavailable,
-            ErrorKind::RateLimitedProvider,
-            ErrorKind::CredentialInvalid,
-            ErrorKind::ContentRefused,
-            ErrorKind::SchemaInvalid,
-            ErrorKind::IdentityMismatch,
-        ])
+        2 => prop::sample::select(
+            Outcome::ALL
+                .into_iter()
+                .filter(|outcome| *outcome != Outcome::Ok)
+                .collect::<Vec<_>>()
+        )
         .prop_map(Behaviour::Failure),
         1 => candidates().prop_map(Behaviour::Late),
         1 => candidates().prop_map(Behaviour::OtherIdentity),
     ]
 }
 
-fn answer(behaviour: &Behaviour, request: &ResearchCall) -> CallOutcome {
+/// What the drawn behaviour makes the model and the gateway do with the one call.
+fn model(behaviour: &Behaviour) -> Model {
     match behaviour {
-        Behaviour::Garbage(bytes) => Ok(reply_with(request, bytes)),
-        Behaviour::Shaped(candidates) => Ok(reply_with(request, render(candidates).as_bytes())),
-        Behaviour::Failure(kind) => Err(CallFailure {
-            call_id: request.call_id.clone(),
-            kind: *kind,
-            completed_at: request.as_of,
-        }),
-        Behaviour::Late(candidates) => {
-            let mut reply = reply_with(request, render(candidates).as_bytes());
-            reply.completed_at = mandate_time::UtcNanos::from_parts(request.deadline.secs(), 1)
-                .unwrap_or(request.deadline);
-            Ok(reply)
-        }
-        Behaviour::OtherIdentity(candidates) => {
-            let mut reply = reply_with(request, render(candidates).as_bytes());
-            reply.reported.model_id = "llm.substitute".to_owned();
-            Ok(reply)
-        }
+        Behaviour::Garbage(bytes) => Model::Output(String::from_utf8_lossy(bytes).into_owned()),
+        Behaviour::Shaped(candidates) => Model::Output(render(candidates)),
+        Behaviour::Failure(outcome) => Model::Outcome(*outcome),
+        Behaviour::Late(candidates) => Model::Late(render(candidates)),
+        Behaviour::OtherIdentity(candidates) => Model::Impostor(render(candidates)),
     }
 }
 
@@ -303,7 +283,7 @@ fn breaches(
                 calls += 1;
                 let context = event
                     .payload
-                    .get("retrieved_context")
+                    .get("observations")
                     .and_then(Value::as_array)
                     .unwrap_or_default();
                 if context
@@ -396,18 +376,13 @@ fn run_with(
     }
     let before = World::open();
     let plane = RecordedPlane::load();
-    let drawn = behaviour.clone();
-    let gateway = RecordedGateway {
-        answer: move |request: &ResearchCall| answer(&drawn, request),
-        calls: std::cell::RefCell::new(Vec::new()),
-    };
     full_run(
         &mut lp,
         clock(CUT_OFF),
         &research_ports,
         &world,
         &plane,
-        &gateway,
+        &model(behaviour),
     );
     copy_admissions(&lp, &mut world);
     let view = view_of(&world);
@@ -526,7 +501,7 @@ fn the_oracle_catches_seeded_breaches() {
         "an order over the envelope"
     );
 
-    let failure = Behaviour::Failure(ErrorKind::SchemaInvalid);
+    let failure = Behaviour::Failure(Outcome::SchemaInvalid);
     assert!(
         !breaches(&journal, &failure, false, false).is_empty(),
         "a thesis after a failed call"
@@ -595,7 +570,7 @@ fn the_oracle_catches_seeded_breaches() {
     for event in &mut uncited {
         if event.event_type == "ModelInvocationRecorded"
             && let Value::Object(members) = &mut event.payload
-            && let Ok(key) = mandate_canon::Key::new("retrieved_context")
+            && let Ok(key) = mandate_canon::Key::new("observations")
         {
             members.insert(key, Value::Array(vec![Value::Str("01NEVER".to_owned())]));
         }

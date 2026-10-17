@@ -8,12 +8,15 @@
 mod common;
 
 use common::research::{
-    AAPL, BuilderPlan, CUT_OFF, Loop, MAX_ORDER_USD, MSFT, RESPONSE_AAPL, RESPONSE_INJECTION,
-    RecordedPlane, World, copy_admissions, full_run, recorded, view_of,
+    AAPL, BuilderPlan, CUT_OFF, FIXTURE_KEY, FixtureVault, HostedDouble, Loop, MAX_ORDER_USD, MSFT,
+    RESPONSE_AAPL, RESPONSE_INJECTION, RecordedPlane, UPSTREAM, World, copy_admissions, demo_parts,
+    full_run, instant, recorded, scripted, view_of, worker_run_on,
 };
 use common::{ACCOUNT_STREAM, AllowGate, TestIds, clock, event, ports, text, with_clock};
 use mandate_canon::Value;
+use mandate_gateway::provider::NoKeys;
 use mandate_num::{Price, Qty, Usd};
+use mandate_research_run::{Backend, NoHostedTransport, Reason, research_gateway};
 use mandate_runtime::{Effect, Input, Mode, WriterEpoch};
 
 fn boot(lp: &mut Loop, ports: &mandate_runtime::Ports<'_>) {
@@ -70,7 +73,7 @@ fn recorded_bars_and_news_become_an_asked_opening_inside_the_envelope() {
     let call_record = &lp.events("ModelInvocationRecorded")[0];
     let context = call_record
         .payload
-        .get("retrieved_context")
+        .get("observations")
         .and_then(Value::as_array)
         .unwrap_or_default();
     assert_eq!(
@@ -147,25 +150,40 @@ fn injected_news_yields_at_most_a_thesis_and_an_ask_inside_the_limits() {
     let mut world = World::open();
     let envelope_before = world.mandate.clone();
     let plane = RecordedPlane::load();
-    let gateway = recorded(RESPONSE_INJECTION);
+    let (mut gateway, selection) = research_gateway(
+        demo_parts(instant(CUT_OFF)),
+        Box::new(NoKeys),
+        None::<NoHostedTransport>,
+        scripted(RESPONSE_INJECTION),
+        UPSTREAM,
+    );
+    assert_eq!(selection.backend, Backend::RecordedFake);
 
-    full_run(
+    worker_run_on(
         &mut lp,
         clock(CUT_OFF),
         &research_ports,
         &world,
         &plane,
-        &gateway,
+        &mut gateway,
+        clock(CUT_OFF + 30),
     );
 
-    let call = &gateway.calls.borrow()[0];
-    let injected = call
-        .inputs
-        .items
-        .iter()
-        .find(|item| item.item_id.as_str() == "nw-20261016-msft-inject")
-        .unwrap_or_else(|| panic!("the injection fixture was retrieved, as untrusted data"));
-    assert_eq!(injected.source.as_str(), "src.newswire");
+    let sent = gateway
+        .transport()
+        .recorded()
+        .unwrap_or_else(|| panic!("the recorded fake"))
+        .sent();
+    assert_eq!(sent.len(), 1, "one call, through the fake");
+    let records = lp.events("ModelInvocationRecorded");
+    assert_eq!(records.len(), 1);
+    let observed = lp.events("ObservationRecorded");
+    assert!(
+        observed
+            .iter()
+            .any(|event| member(&event.payload, "source") == "src.newswire"),
+        "the injection fixture was retrieved and journaled, as untrusted data"
+    );
     let records = lp.events("ThesisProposed");
     let msft = records
         .iter()
@@ -204,5 +222,96 @@ fn injected_news_yields_at_most_a_thesis_and_an_ask_inside_the_limits() {
     assert_eq!(
         world.mandate, envelope_before,
         "HI-5: the envelope does not move"
+    );
+}
+
+/// The demo's config path (DEC-1120 item 5): the same run through the recorded fake when the vault
+/// holds no key, and through the hosted transport when it holds one, with the same journal either
+/// way and a selection that says which it used. The hosted transport here is a double with no
+/// network; no test reaches a model provider.
+#[test]
+fn the_demo_runs_either_way_and_says_which_gateway_it_used() {
+    let mut journals = Vec::new();
+    for vaulted in [false, true] {
+        let ids = TestIds;
+        let silent = common::FixedPlan::silent();
+        let empty = common::universe(&[]);
+        let research_ports = ports(&ids, &AllowGate, &silent, &empty);
+        let mut lp = Loop::new(1);
+        boot(&mut lp, &research_ports);
+        let world = World::open();
+        let plane = RecordedPlane::load();
+        let hosted = HostedDouble {
+            inner: scripted(RESPONSE_AAPL),
+            keys: Vec::new(),
+        };
+        let (vault, recorded_reply): (Box<dyn mandate_gateway::provider::SecretSource>, _) =
+            if vaulted {
+                (
+                    Box::new(FixtureVault),
+                    mandate_gateway::fake::RecordedTransport::new(),
+                )
+            } else {
+                (Box::new(NoKeys), scripted(RESPONSE_AAPL))
+            };
+        let (mut gateway, selection) = research_gateway(
+            demo_parts(instant(CUT_OFF)),
+            vault,
+            Some(hosted),
+            recorded_reply,
+            UPSTREAM,
+        );
+        let line = selection.describe();
+        if vaulted {
+            assert_eq!(
+                (selection.backend, selection.reason),
+                (Backend::OpenRouter, Reason::VaultedKey)
+            );
+            assert!(line.contains("OpenRouter"), "{line}");
+        } else {
+            assert_eq!(
+                (selection.backend, selection.reason),
+                (Backend::RecordedFake, Reason::NoVaultedKey)
+            );
+            assert!(line.contains("recorded fake"), "{line}");
+        }
+        assert!(!line.contains(FIXTURE_KEY), "the line never names the key");
+        worker_run_on(
+            &mut lp,
+            clock(CUT_OFF),
+            &research_ports,
+            &world,
+            &plane,
+            &mut gateway,
+            clock(CUT_OFF + 30),
+        );
+        match gateway.transport() {
+            mandate_research_run::ResearchTransport::Hosted(double) => {
+                assert!(vaulted);
+                assert_eq!(double.inner.sent().len(), 1, "the call went out hosted");
+                assert_eq!(
+                    double.keys,
+                    vec![FIXTURE_KEY.to_owned()],
+                    "with the vault's key, read per attempt"
+                );
+            }
+            mandate_research_run::ResearchTransport::Recorded(fake) => {
+                assert!(!vaulted);
+                assert_eq!(fake.sent().len(), 1, "the call went to the fake");
+            }
+        }
+        let thesis = &lp.events("ThesisProposed")[0].payload;
+        assert_eq!(thesis.get("admitted"), Some(&Value::Bool(true)));
+        journals.push(
+            lp.shell
+                .agent_journal
+                .iter()
+                .map(|event| (event.event_type.clone(), event.payload.clone()))
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert_eq!(
+        journals[0], journals[1],
+        "the transport changes nothing the journal records"
     );
 }

@@ -331,6 +331,7 @@ fn fact_json(fact: &JournaledFact) -> Json {
         JournaledFact::ConnectionEstablished {
             connection_id,
             environment,
+            ..
         } => json!({"kind": "ConnectionEstablished", "connection_id": connection_id.as_str(),
             "environment": format!("{environment:?}").to_lowercase()}),
         JournaledFact::ConnectionRevoked { connection_id } => {

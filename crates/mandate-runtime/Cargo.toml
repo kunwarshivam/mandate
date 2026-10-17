@@ -17,6 +17,7 @@ mandate-domain.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
 mandate-research.workspace = true
+mandate-gateway.workspace = true
 mandate-research-run.workspace = true
 mandate-time.workspace = true
 thiserror.workspace = true
