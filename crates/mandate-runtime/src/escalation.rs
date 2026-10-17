@@ -40,7 +40,9 @@ use crate::error::RuntimeError;
 use crate::payload;
 use crate::ports::Ports;
 use crate::state::RuntimeState;
-use crate::step::{Batch, Switching, cancel_approvals, lifecycle_change, proposed, switched};
+use crate::step::{
+    Batch, Switching, cancel_approvals, dry_run, lifecycle_change, proposed, switched,
+};
 use crate::types::{
     AgentId, Autonomy, ConnectionId, DryRunVerdict, EventId, FlattenRequest, FoldedEvent,
     Initiator, IntentBody, IntentHandoff, KillScope, Mode, OrderExecution, OwnerConfirmation,
@@ -554,7 +556,7 @@ fn answered(
         id: TimerId::ApprovalDeadline(approval_id.clone()),
     });
     if verdict_name == "approved" {
-        revalidated(state, request, &approval_id, copy, ports, batch)?;
+        revalidated(state, request, &approval_id, copy, effective, ports, batch)?;
     }
     Ok(())
 }
@@ -636,6 +638,7 @@ fn revalidated(
     request: &Request,
     approval: &EventId,
     responded: EventId,
+    now: RiskClock,
     ports: &Ports<'_>,
     batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
@@ -652,7 +655,7 @@ fn revalidated(
         Autonomy::Deny => Classification::Deny,
     };
     let asked_label = asked_by(&classification);
-    let (dry_run, dry_run_name, dry_run_reason) = match ports.gate.check(&proposal) {
+    let (dry_run, dry_run_name, dry_run_reason) = match dry_run(state, ports, &proposal, now) {
         DryRunVerdict::Allow => (DryRun::Allow, "allow", Value::Null),
         DryRunVerdict::Deny { reason_code } => (
             DryRun::Deny {

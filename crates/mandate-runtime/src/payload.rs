@@ -82,6 +82,90 @@ pub(crate) fn clock_of(payload: &Value, field: &str) -> Option<RiskClock> {
     i64::try_from(secs).ok().map(RiskClock::from_secs)
 }
 
+/// A risk-clock second in either form the account stream carries: the canonical integer the
+/// runtime's own risk inputs write, or a §4.7 timestamp on the whole second, as the executor's
+/// records write it (DEC-946 item 6). `None` for anything else, a timestamp off the whole second
+/// among them, so an unreadable clock never dates a record.
+pub(crate) fn stamped_clock_of(payload: &Value, field: &str) -> Option<RiskClock> {
+    match payload.get(field)? {
+        Value::Str(stamp) => UtcNanos::parse(stamp)
+            .ok()
+            .filter(|instant| instant.nanos() == 0)
+            .map(|instant| RiskClock::from_secs(instant.secs())),
+        _ => clock_of(payload, field),
+    }
+}
+
+/// `ConnectionChecked.occasion`'s closed list (journal spec §9.8).
+const CHECK_OCCASIONS: [&str; 5] = [
+    "connect",
+    "reconnect",
+    "reauthorize",
+    "executor_start",
+    "daily",
+];
+
+/// The checks a `ConnectionChecked` may list (journal spec §9.8): `uniqueness` is the control
+/// services' and is never the executor's.
+const LISTABLE_CHECKS: [&str; 4] = ["account", "contract", "environment", "scope"];
+
+/// The checks every `ConnectionChecked` lists (journal spec §9.8 rule 57). `contract` is listed
+/// for an MCP connection only, which the record does not say, so its absence is not malformed.
+const REQUIRED_CHECKS: [&str; 3] = ["account", "environment", "scope"];
+
+/// What the runtime reads of one `ConnectionChecked`: whose check it was, whether every listed
+/// check passed, and when it was journaled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ConnectionCheckRead<'a> {
+    pub(crate) connection_id: &'a str,
+    pub(crate) passed: bool,
+    pub(crate) at: RiskClock,
+}
+
+/// Reads a `ConnectionChecked` payload, refusing any member outside journal spec §9.8's closed
+/// shape: an unknown occasion, check or result, a failure with no reason or a pass with one
+/// (rule 58), a list missing `scope`, `environment` or `account` (rule 57), or no readable risk
+/// clock. A refusal stops the fold rather than guessing whether the connection is usable (DEC-85,
+/// `AGENTS.md` rule 3).
+pub(crate) fn connection_check_of(
+    payload: &Value,
+) -> Result<ConnectionCheckRead<'_>, RuntimeError> {
+    let connection_id =
+        str_of(payload, "connection_id").ok_or_else(|| non_canonical("connection_id"))?;
+    if !str_of(payload, "occasion").is_some_and(|occasion| CHECK_OCCASIONS.contains(&occasion)) {
+        return Err(non_canonical("occasion"));
+    }
+    let Some(Value::Array(results)) = payload.get("results") else {
+        return Err(non_canonical("results"));
+    };
+    let mut listed = Vec::with_capacity(results.len());
+    let mut passed = true;
+    for item in results {
+        let check = str_of(item, "check")
+            .filter(|check| LISTABLE_CHECKS.contains(check))
+            .ok_or_else(|| non_canonical("results"))?;
+        let this_passed = match (str_of(item, "result"), str_of(item, "reason")) {
+            (Some("passed"), None) => true,
+            (Some("failed"), Some(_)) => false,
+            _ => return Err(non_canonical("results")),
+        };
+        passed = passed && this_passed;
+        listed.push(check);
+    }
+    if !REQUIRED_CHECKS
+        .iter()
+        .all(|required| listed.contains(required))
+    {
+        return Err(non_canonical("results"));
+    }
+    let at = stamped_clock_of(payload, "risk_clock").ok_or_else(|| non_canonical("risk_clock"))?;
+    Ok(ConnectionCheckRead {
+        connection_id,
+        passed,
+        at,
+    })
+}
+
 pub(crate) fn mode_name(mode: Mode) -> &'static str {
     match mode {
         Mode::Normal => "normal",
@@ -385,6 +469,10 @@ pub(crate) fn price_of(text: &str) -> Result<Price, RuntimeError> {
 /// state, which no account stream can know (Decisions needed 4): a replay of the agent stream is
 /// what tells a restarted process that its owner had paused or stopped it.
 pub(crate) const REASON_RESTRICTION: &str = "restriction_changed";
+/// The dry run's reason code for an opening the connection's checks do not cover: trading spec
+/// §7.3 row 5's, the account `closing_only` because the connection is not usable, which a later
+/// check's failure reaches through `suspended` (connections spec §8.1, §9.1; DEC-969).
+pub(crate) const ACCOUNT_RESTRICTED: &str = "account_restricted";
 pub(crate) const REASON_STARTUP_HOLD: &str = "awaiting_reconciliation";
 pub(crate) const REASON_OWNER_PAUSE: &str = "owner_pause";
 pub(crate) const REASON_OWNER_RESUME: &str = "owner_resume";
