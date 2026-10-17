@@ -1,0 +1,5 @@
+# The journal's Postgres in the local and CI cell: one instance on k3s's default local-path class.
+instances: 1
+storage:
+  size: 1Gi
+  storageClass: ""

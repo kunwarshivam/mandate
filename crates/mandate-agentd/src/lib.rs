@@ -18,6 +18,8 @@
 //! one. On start it runs the host's reconciliation before any cycle; on drain it starts no new
 //! cycle, lets the host settle exits and protective orders, and releases the lease. [`health`]
 //! answers liveness and readiness on loopback with generic text only (`AGENTS.md` rule 6).
+//! [`Instrumented`] counts the host's calls by outcome in `mandate-telemetry`'s metrics, after each
+//! call returns, so nothing the host journals or sends depends on telemetry (E21-3, OPS-11).
 //!
 //! Paper only: a supervisor for any other environment refuses before it takes a lease, and this
 //! crate can never reach the one crate that may declare the `live` feature (`xtask/layers.toml`).
@@ -26,7 +28,9 @@ pub mod health;
 pub mod lease;
 pub mod memory;
 pub mod supervisor;
+pub mod telemetry;
 
 pub use lease::{Epochs, FENCED, Lease};
 pub use memory::MemoryStore;
 pub use supervisor::{Config, Host, IdleHost, Phase, Status, Stop, Supervisor};
+pub use telemetry::Instrumented;
