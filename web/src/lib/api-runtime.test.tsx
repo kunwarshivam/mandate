@@ -5,7 +5,9 @@ import { ApiRuntimeProvider } from "./api-runtime";
 import { type Runtime, useRuntime } from "./mock-runtime";
 import { type Fetch } from "@/api/client";
 import { createMockServer } from "@/api/mock-server";
+import type { SessionKeeper, SessionState } from "@/api/session";
 import { useMarket } from "@/components/charts/chart-parts";
+import { WorkspaceGate } from "@/components/screens/common";
 import { FixtureTag } from "@/components/domain/placeholders";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
@@ -42,7 +44,19 @@ interface Call {
   credentials: RequestCredentials | undefined;
 }
 
-function mount(scenario: Scenario = "approvals", wrap?: (fetch: Fetch) => Fetch) {
+/** A session keeper that records what the runtime asked of it. */
+function fakeSession(opens: SessionState[] = ["open"]) {
+  const asked: string[] = [];
+  const session: SessionKeeper = {
+    open: async () => (asked.push("open"), opens.shift() ?? "open"),
+    refresh: async () => (asked.push("refresh"), "open"),
+    signOut: async () => (asked.push("signOut"), "signed_out"),
+    guard: (call) => (asked.push("guard"), call()),
+  };
+  return { session, asked };
+}
+
+function mount(scenario: Scenario = "approvals", wrap?: (fetch: Fetch) => Fetch, session?: SessionKeeper) {
   const server = createMockServer({ workspaceId: WS, scenario });
   const calls: Call[] = [];
   const recordingFetch: Fetch = (input, init) => {
@@ -50,8 +64,11 @@ function mount(scenario: Scenario = "approvals", wrap?: (fetch: Fetch) => Fetch)
     return server.fetch(input, init);
   };
   render(
-    <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={wrap ? wrap(recordingFetch) : recordingFetch} refreshMs={60_000} statusPollMs={5} retryMs={5}>
+    <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={wrap ? wrap(recordingFetch) : recordingFetch} session={session} refreshMs={60_000} statusPollMs={5} retryMs={5}>
       <Probe />
+      <WorkspaceGate>
+        <p data-testid="gated">workspace</p>
+      </WorkspaceGate>
     </ApiRuntimeProvider>,
   );
   return { server, calls, posts: () => calls.filter((c) => c.method === "POST") };
@@ -230,5 +247,52 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     });
     await waitFor(() => expect(current().commands.at(-1)?.phase).toBe("recorded"));
     expect(local).not.toHaveBeenCalled();
+  });
+
+  it("opens the API session before the first read, and reads through its guard", async () => {
+    const { session, asked } = fakeSession();
+    const { calls } = mount("approvals", undefined, session);
+    await ready();
+    expect(asked[0]).toBe("open");
+    expect(asked.filter((a) => a === "guard").length).toBeGreaterThanOrEqual(calls.filter((c) => c.method === "GET").length);
+  });
+
+  it("opens the session again once when a read answers 401, then reads again", async () => {
+    const { session, asked } = fakeSession();
+    let refusals = 1;
+    const wrap = (inner: Fetch): Fetch => (input, init) =>
+      (init.method ?? "GET") === "GET" && refusals > 0 && input.endsWith("/health")
+        ? ((refusals -= 1), Promise.resolve(new Response(JSON.stringify({ type: "about:blank", status: 401, title: "Not authenticated", code: "unauthenticated", effect: "none", retryable: false }), { status: 401 })))
+        : inner(input, init);
+    mount("approvals", wrap, session);
+    await ready();
+    expect(asked.filter((a) => a === "open")).toHaveLength(2);
+  });
+
+  it("says sign-in is needed, with no figure, when there is no session to open", async () => {
+    const { session } = fakeSession(["signed_out"]);
+    const { calls } = mount("approvals", undefined, session);
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("signed_out"));
+    expect(calls.filter((c) => c.method === "GET")).toHaveLength(0);
+    expect(current().ws.agents).toEqual([]);
+    expect(screen.queryByTestId("gated")).toBeNull();
+    expect(screen.getByRole("link", { name: /sign in/i }).getAttribute("href")).toMatch(/^\/login/);
+  });
+
+  it("shows an unreadable membership as its own state, not the deployment unreachable, and still sends Stop", async () => {
+    const wrap = (inner: Fetch): Fetch => (input, init) =>
+      (init.method ?? "GET") === "GET"
+        ? Promise.resolve(new Response(JSON.stringify({ type: "about:blank", status: 503, title: "Membership unavailable", code: "membership_unavailable", effect: "none", retryable: true }), { status: 503 }))
+        : inner(input, init);
+    const { posts } = mount("approvals", wrap);
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("membership_unavailable"));
+    expect(current().ws.agents).toEqual([]);
+    expect(screen.queryByTestId("gated")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Your membership could not be read" })).toBeTruthy();
+    act(() => {
+      current().send("stop_all", null);
+    });
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(new URL(posts()[0].url).pathname).toBe(`/v1/workspaces/${WS}/kill-switch`);
   });
 });

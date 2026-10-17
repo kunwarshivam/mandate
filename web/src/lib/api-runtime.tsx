@@ -4,6 +4,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { type Fetch, createWorkspaceClient } from "@/api/client";
 import { prepareApprovalResponse, prepareOwnerCommand } from "@/api/commands";
 import { emptyWorkspace, loadWorkspace } from "@/api/reads";
+import type { SessionKeeper } from "@/api/session";
 import type { CommandPhase, PreparedCommand } from "@/api/types";
 import type { Iso, Workspace } from "@/fixtures/types";
 import type { ApiSource } from "./data-source";
@@ -45,6 +46,7 @@ export function ApiRuntimeProvider({
   refreshMs = 5000,
   statusPollMs = 1000,
   retryMs = 1000,
+  session,
 }: {
   source: Pick<ApiSource, "origin" | "workspaceId">;
   children: ReactNode;
@@ -52,7 +54,10 @@ export function ApiRuntimeProvider({
   refreshMs?: number;
   statusPollMs?: number;
   retryMs?: number;
+  /** The API session (§3.11 items 5 and 6); none in the e2e build, whose mock API reads no cookie. */
+  session?: SessionKeeper;
 }) {
+  void session;
   const client = useMemo(
     () => createWorkspaceClient({ workspaceId: source.workspaceId, baseUrl: source.origin, fetch: fetch ?? ((input, init) => window.fetch(input, init)) }),
     [source.workspaceId, source.origin, fetch],
