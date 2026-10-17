@@ -1,4 +1,4 @@
-//! Journal spec v0.48 §9.18 (DEC-1001, DEC-1002, DEC-1142; E4-5, E17-8): `BacktestRunRecorded`, one backtest
+//! Journal spec v0.52 §9.18 (DEC-1001, DEC-1002, DEC-1142; E4-5, E17-8): `BacktestRunRecorded`, one backtest
 //! of a mandate version, and `EvaluationRunRecorded`, one forward-paper evaluation, closed at
 //! schema version 1 on the workspace control stream, with rules 143 to 145 and DEC-1141's writer
 //! (a `user` who asked or a `system` runner). Through [`MemoryJournal::append`], which runs the

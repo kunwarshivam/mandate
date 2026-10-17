@@ -1,4 +1,4 @@
-//! The backtest and evaluation records journal spec v0.48 §9.18 closes at schema version 1
+//! The backtest and evaluation records journal spec v0.52 §9.18 closes at schema version 1
 //! (DEC-1001, DEC-1002; E4-5, E17-8): `BacktestRunRecorded`, one backtest of a mandate version
 //! through its own decision path, and `EvaluationRunRecorded`, one forward-paper evaluation, both
 //! on the workspace control stream, with consistency rules 143 to 145, each refusing `schema` at
