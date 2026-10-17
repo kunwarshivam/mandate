@@ -26,7 +26,7 @@
 #      returns, below mandate-identity, which re-exports them; its allowed_dependents list is the
 #      only thing that may implement `Tenant`
 #   1  mandate-cp-agent (E20-3, DEC-982: the control-plane link's inbound checks, kept off the
-#      journal), mandate-domain, mandate-approval, mandate-liquidity, mandate-identity (pure cores over layer-0 values;
+#      journal), mandate-domain, mandate-approval, mandate-liquidity, mandate-identity, mandate-gateway (pure cores over layer-0 values;
 #      mandate-approval compares values and never reaches a limit under DEC-155 item 1), and
 #      mandate-notify, the closed notice (E8-9, DEC-710): below the journal, so it can never reach
 #      the control-stream writer (notifications spec NT-3)
@@ -387,6 +387,17 @@ layer = 4
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+# The model gateway (E15-6 to E15-10, inference spec, DEC-997, DEC-998): the one component that
+# calls a model. Pure, over layer-0 values: transport, clock, ids and the provider key come in
+# through traits, so it opens no socket and reads no clock or vault itself. It may never reach the
+# order path, a mandate or policy document's writer, or a credential store (INF-5, INF-14, INF-16).
+[crates.mandate-gateway]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["serde_json", "thiserror"]
+forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-connections", "mandate-vault-local"]
 
 [crates.mandate-research]
 layer = 5
