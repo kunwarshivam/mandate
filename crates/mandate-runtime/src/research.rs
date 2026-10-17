@@ -379,7 +379,7 @@ pub struct ResearchStep {
     /// shell stores before it appends the batch (DEC-2206 item 4).
     pub artifacts: Vec<Vec<u8>>,
     /// The run every draft of the step belongs to, which the shell writes as each draft's
-    /// `correlation_id` (journal spec §9.22 rule 171, DEC-1120 item 9, DEC-2206 item 8); `None` for a
+    /// `correlation_id` (journal spec §9.23 rule 171, DEC-1120 item 9, DEC-2206 item 8); `None` for a
     /// step that journals nothing of a run.
     pub correlation_id: Option<String>,
 }

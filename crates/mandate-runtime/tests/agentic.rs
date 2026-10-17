@@ -1,4 +1,4 @@
-//! An agentic research run in the core (agent harness spec v0.2 §6.9 to §6.11, journal spec §9.22's
+//! An agentic research run in the core (agent harness spec v0.2 §6.9 to §6.11, journal spec §9.23's
 //! run records, DEC-2206): the kind and menu fixed before anything untrusted is read, `RunStarted`
 //! before the seed, each turn's record heading its tool calls, reads dispatched only after their
 //! records, results journaled before the next turn, a final output judged once, and the run's end.
