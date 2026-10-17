@@ -231,10 +231,10 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             parts: vec![Part::Gap {
                 what: "a research run in the agent's runtime, through mandate-gateway's \
                        recorded fake",
-                closes: "#1521 (the runtime process) and its cell image (processes.json \
-                         `runtime`, lane P); the shell's research driver (DEC-996 item 2, lane \
-                         I2, after R0); E15-8's closed records and E19-5's invalidation, without \
-                         which no run starts (#1476)",
+                closes: "the runtime process is on main (#1521); still needed: its cell \
+                         image (processes.json `runtime`, lane P), the shell's research driver \
+                         (DEC-996 item 2, lane I2), E15-8's closed records and E19-5's \
+                         invalidation (its spec is on main, #1543), without which no run starts",
             }],
         },
         Step {
@@ -244,7 +244,8 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             parts: vec![
                 Part::Gap {
                     what: "the runtime sizes the opening and the gate and autonomy rules ask",
-                    closes: "#1521 and its cell image (processes.json `runtime`, lane P)",
+                    closes: "the runtime process (#1521) is on main; its cell image \
+                             (processes.json `runtime`, lane P)",
                 },
                 gesture(
                     "the owner's inbox, read (empty until the runtime asks)",
@@ -270,8 +271,9 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             parts: vec![Part::Gap {
                 what: "the backtest of this version, its report read through the API and \
                        shown in web/",
-                closes: "#1482 (the backtest), then its API read (lane I4) and a web/ \
-                         screen (lane W2)",
+                closes: "the backtest (#1482) and web/'s report screen (#1549) are on \
+                         main; still needed: a way to run it in the cell and its API read \
+                         (E4-4, lane I4)",
             }],
         },
         Step {
@@ -285,8 +287,9 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 },
                 Part::Gap {
                     what: "the agent's processes stop on it",
-                    closes: "#1521 (the runtime reads it first, lane P), E21-30's executor \
-                             slice (lane X), E21-34 (`mandate agent kill`, lane O4)",
+                    closes: "the runtime reads it first (#1521, on main; its cell image, \
+                             lane P), E21-30's executor slice (lane X), E21-34 (`mandate agent \
+                             kill`, lane O4, #1537)",
                 },
             ],
         },

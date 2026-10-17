@@ -1356,6 +1356,40 @@ fn an_owner_kill_switch_records_its_scope_and_step_up() -> Checked {
     Ok(())
 }
 
+/// Journal spec §9 rule 12: an owner's kill switch with no bid shown records the bid members as
+/// `null`, never as empty text, and the owner who issued it, so the copy is one the journal accepts
+/// and the switch is never refused for want of a bid.
+#[test]
+fn an_owner_kill_switch_without_a_bid_records_null_bid_members_and_its_owner() -> Checked {
+    let (view, flatten) = (
+        view()?,
+        Recording {
+            asked: RefCell::new(Vec::new()),
+        },
+    );
+    let plan = Plan::of(Vec::new(), Autonomy::Auto);
+    let ports = Ports {
+        ids: &Ids,
+        gate: &Allow,
+        plan: &plan,
+        flatten: &flatten,
+        view: &view,
+    };
+    let (mut rig, _) = Rig::started(&ports)?;
+    let (_, ran) = rig.control(
+        COMMAND_ISSUED,
+        command("a", "kill_switch", ("agent", "a"), Value::Null, false)?,
+        &ports,
+    )?;
+    let shown = the(&ran, "OwnerExitRequested")?;
+    for absent in ["bid", "bid_size", "floor"] {
+        assert_eq!(shown.payload.get(absent), Some(&Value::Null), "{absent}");
+    }
+    assert_eq!(shown.payload.get("confirmed"), Some(&Value::Bool(false)));
+    assert_eq!(member(shown, "user"), Some(OWNER));
+    Ok(())
+}
+
 /// An owner's exit of one instrument asks the planner to cancel only that instrument's working
 /// orders, never another's (mandate spec §6.1, trading-domain spec §5.5).
 #[test]

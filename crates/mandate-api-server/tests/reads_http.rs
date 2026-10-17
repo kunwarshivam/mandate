@@ -76,7 +76,7 @@ fn fixture_with(
         },
         sessions: Arc::clone(&sessions),
         tokens: Arc::new(Issuer::new(config, Arc::new(FixedKeys(None)))),
-        links: dir.join("absent"),
+        links: Arc::new(common::LinksAt(dir.join("absent"))),
         clock: Arc::clone(&clock) as Arc<dyn mandate_api_server::clock::Clock>,
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
         members: Arc::new(move |_: &[StoredEvent]| parsed.lock().expect("unpoisoned").clone()),
