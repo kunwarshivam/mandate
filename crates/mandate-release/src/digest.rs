@@ -66,7 +66,7 @@ impl BuildDigest {
 }
 
 /// The file this process runs: `/proc/self/exe` on Linux, elsewhere the path it was started from.
-fn running_executable() -> Result<PathBuf, ReleaseError> {
+pub(crate) fn running_executable() -> Result<PathBuf, ReleaseError> {
     if cfg!(target_os = "linux") {
         return Ok(PathBuf::from("/proc/self/exe"));
     }

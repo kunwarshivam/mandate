@@ -1,5 +1,7 @@
 //! The `mandate-agentd` process: it refuses without a wired host, and on SIGTERM it drains and
-//! exits cleanly (E21-2, DEC-968 items 4 and 6).
+//! exits cleanly (E21-2, DEC-968 items 4 and 6). It runs the start-up signature check first, so a
+//! test build, which no release key signed, starts only as `ci` and is refused outside dev and CI
+//! (E21-35, DEC-971, OPS-15).
 
 #![allow(
     clippy::disallowed_methods,
@@ -28,9 +30,18 @@ impl Drop for Guard {
 
 impl Guard {
     fn spawn(args: &[&str]) -> Self {
+        Self::spawn_with(args, &[("MANDATE_DEPLOYMENT_TIER", "ci")])
+    }
+
+    /// Spawns with exactly the release check's variables `vars`, none inherited.
+    fn spawn_with(args: &[&str], vars: &[(&str, &str)]) -> Self {
         Self(
             Command::new(BIN)
                 .args(args)
+                .env_remove("MANDATE_DEPLOYMENT_TIER")
+                .env_remove("MANDATE_RELEASE_SIGNATURE")
+                .env_remove("MANDATE_RELEASE_TEST_KEY")
+                .envs(vars.iter().copied())
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -67,6 +78,31 @@ fn without_a_wired_host_the_process_refuses() {
         pipe.read_to_string(&mut stdout).ok();
     }
     assert!(stdout.is_empty());
+}
+
+/// Outside dev and CI, which no setting means, the unsigned test build refuses before anything
+/// else, with a generic code; a signature that is not cosign's is refused too.
+#[test]
+fn outside_dev_and_ci_an_unsigned_or_wrongly_signed_build_refuses() {
+    let garbage = std::env::temp_dir().join(format!("agentd-{}.sig", std::process::id()));
+    std::fs::write(&garbage, "not a signature").unwrap_or_else(|e| panic!("write: {e}"));
+    let garbage = garbage.display().to_string();
+    let cases: [(&[(&str, &str)], &str); 4] = [
+        (&[], "release_unsigned\n"),
+        (&[("MANDATE_DEPLOYMENT_TIER", "staging")], "release_unsigned\n"),
+        (&[("MANDATE_DEPLOYMENT_TIER", "production")], "release_unsigned\n"),
+        (
+            &[("MANDATE_DEPLOYMENT_TIER", "ci"), ("MANDATE_RELEASE_SIGNATURE", &garbage)],
+            "release_signature_malformed\n",
+        ),
+    ];
+    for (vars, expected) in cases {
+        let mut child = Guard::spawn_with(&["--fixture"], vars);
+        let (status, stderr) = child.exited();
+        assert_eq!(status.code(), Some(2), "{vars:?}");
+        assert_eq!(stderr, expected, "{vars:?}");
+    }
+    std::fs::remove_file(&garbage).ok();
 }
 
 fn ready(addr: &str) -> String {

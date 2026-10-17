@@ -13,6 +13,7 @@ use std::time::SystemTime;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+mod image;
 mod release;
 
 const USAGE: &str = "\

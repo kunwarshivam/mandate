@@ -649,6 +649,57 @@ mod tests {
         assert!(compare_sums(&sums_text(&b), &sums_text(&a)).is_err());
     }
 
+    /// The jobs of `release.yml`, by name, each with its lines.
+    fn release_jobs() -> Result<BTreeMap<String, String>> {
+        let text = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/release.yml"),
+        )?;
+        let jobs = text
+            .split_once("\njobs:\n")
+            .map(|(_, jobs)| jobs)
+            .context("release.yml has no jobs")?;
+        let mut out: BTreeMap<String, String> = BTreeMap::new();
+        let mut current = None;
+        for line in jobs.lines() {
+            if let Some(name) = line
+                .strip_prefix("  ")
+                .filter(|rest| !rest.starts_with(' ') && !rest.starts_with('#'))
+                .and_then(|rest| rest.strip_suffix(':'))
+            {
+                current = Some(name.to_owned());
+                out.insert(name.to_owned(), String::new());
+            } else if let Some(name) = &current {
+                let body = out.entry(name.clone()).or_default();
+                body.push_str(line);
+                body.push('\n');
+            }
+        }
+        Ok(out)
+    }
+
+    /// Only the publish job may write packages or mint an OIDC token for keyless signing, and it
+    /// runs only on a push to `main`: never from a pull request or a branch (ES-12, E21-35).
+    #[test]
+    fn only_the_main_publish_job_can_write_packages_or_sign() -> Result<()> {
+        let jobs = release_jobs()?;
+        for (name, body) in &jobs {
+            let writes = body.contains("packages: write") || body.contains("id-token: write");
+            assert_eq!(writes, name == "publish", "{name}");
+        }
+        let publish = jobs.get("publish").context("release.yml has no publish job")?;
+        assert!(
+            publish.contains(
+                "    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}\n"
+            ),
+            "{publish}"
+        );
+        for permission in ["contents: read", "packages: write", "id-token: write"] {
+            assert!(publish.contains(permission), "{permission}");
+        }
+        assert!(publish.contains("needs: [compare]"), "{publish}");
+        Ok(())
+    }
+
     /// Each tool is pinned to a GitHub release asset of its own version, with a SHA-256.
     #[test]
     fn every_tool_is_a_pinned_github_release_asset() {
