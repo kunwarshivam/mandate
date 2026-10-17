@@ -15,24 +15,31 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
+use mandate_api::envelope::StepUpEvidence;
 use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
 use mandate_api::lenient::{Api7, ApprovalAnswer, Kept, decode_lenient};
+use mandate_api::problem::Violation;
 use mandate_api::problem::{Effect, Problem, ProblemCode};
-use mandate_api::requests::{KillSwitchRequest, PauseRequest, Scope};
-use mandate_api::wire::{EventId, Id, Ref, encode};
+use mandate_api::requests::{
+    KillSwitchRequest, OwnerExitRequest, PauseRequest, ResumeRequest, Scope, StopRequest,
+};
+use mandate_api::wire::{Asset, Decimal, EventId, Id, Ref, decode, encode};
 use mandate_authn::Request;
-use mandate_canon::{Value, parse};
-use mandate_identity::Permission;
+use mandate_canon::{Digest, Value, parse, to_canonical};
+use mandate_identity::{Permission, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
-use crate::commands::{Command, Issued, KillScope, Settled, draft, in_workspace, same, settle};
-use crate::http::{App, browser, problem, problem_body};
+use crate::commands::{
+    Command, Issued, KillScope, Settled, draft, in_workspace, release_warning, same, settle,
+};
+use crate::http::{App, browser, invalid, problem, problem_body};
 use crate::reads::deployed;
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
+use crate::stepup::{Action, journaled};
 
 /// The `Idempotency-Key` request header (§3.4).
 const IDEMPOTENCY_KEY: &str = "idempotency-key";

@@ -43,6 +43,7 @@ pub mod objects;
 pub mod reads;
 pub mod routes;
 pub mod session;
+pub mod status;
 pub mod stepup;
 pub mod subject;
 pub mod token;

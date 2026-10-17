@@ -13,7 +13,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use mandate_api::problem::{Effect, Problem, ProblemCode};
+use mandate_api::problem::{Effect, Problem, ProblemCode, Violation};
 use mandate_api::wire::encode;
 use mandate_canon::Value;
 use mandate_journal::ArtifactSource;
@@ -350,6 +350,20 @@ pub(crate) fn problem_body(code: ProblemCode) -> Bytes {
         .and_then(|problem| encode(&problem).ok())
         .map(Bytes::from)
         .unwrap_or_default()
+}
+
+/// The 422 `invalid` naming `violations`, with nothing recorded.
+pub(crate) fn invalid(violations: Vec<Violation>) -> Response {
+    let body = Problem::of(ProblemCode::Invalid, Effect::None, None, None)
+        .ok()
+        .map(|problem| Problem {
+            violations,
+            ..problem
+        })
+        .and_then(|problem| encode(&problem).ok())
+        .map(Bytes::from)
+        .unwrap_or_default();
+    problem(StatusCode::UNPROCESSABLE_ENTITY, body)
 }
 
 pub(crate) fn problem(code: StatusCode, body: Bytes) -> Response {
