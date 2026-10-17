@@ -164,7 +164,8 @@ impl LocalSource {
 }
 
 /// A local vault refusal as a source refusal: a failure to reach the files is an outage, an
-/// entry that fails its checks is an integrity refusal, and the rest are refusals.
+/// entry or directory that fails its checks is an integrity refusal, and the rest are
+/// refusals. A role the vault refuses never reaches here: the policy check runs first.
 fn from_vault(error: VaultError) -> SourceError {
     match error {
         VaultError::Io => SourceError::Unavailable,
@@ -172,7 +173,6 @@ fn from_vault(error: VaultError) -> SourceError {
         | VaultError::DirectoryMismatch { .. }
         | VaultError::EntryMalformed
         | VaultError::EntryRejected => SourceError::Integrity,
-        VaultError::WrongRole { .. } => SourceError::Denied,
         _ => SourceError::Malformed,
     }
 }

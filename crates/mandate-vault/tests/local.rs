@@ -270,3 +270,27 @@ async fn a_tampered_token_is_an_integrity_refusal_that_drops_the_lease() {
     keeper.apply(renewed, now);
     assert!(keeper.secret(now).is_none());
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn each_local_grant_has_its_own_random_accessor_and_secret_id() {
+    let h = Local::new();
+    let now = conformance::at(1_000_000);
+    let manager = h.source(Identity::ConnectionManager, now).await;
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..4 {
+        let grant =
+            mandate_vault::source::SecretSource::issue_grant(&manager, &conformance::c("c1"), now)
+                .await
+                .unwrap();
+        let secret = secrecy::ExposeSecret::expose_secret(&grant.secret_id).to_owned();
+        assert_eq!(grant.accessor.len(), 32);
+        assert_eq!(secret.len(), 64);
+        for text in [&grant.accessor, &secret] {
+            assert!(
+                text.bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+            );
+            assert!(seen.insert(text.clone()), "a repeated id");
+        }
+    }
+}

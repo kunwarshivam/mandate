@@ -69,10 +69,12 @@ impl LeaseKeeper {
     }
 
     /// Whether a renewal is due at `now`: a lease is held and `now` is at or past its `renew_at`.
+    /// A lease past its expiry is dropped by the next [`LeaseKeeper::apply`] or
+    /// [`LeaseKeeper::secret`], whatever this says.
     pub fn renewal_due(&self, now: UtcNanos) -> bool {
         self.lease
             .as_ref()
-            .is_some_and(|lease| now >= lease.renew_at && now < lease.expires_at)
+            .is_some_and(|lease| now >= lease.renew_at)
     }
 
     /// Applies a renewal's outcome, as the module's rule says. A lease already expired at `now`
