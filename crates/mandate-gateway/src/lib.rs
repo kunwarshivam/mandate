@@ -18,15 +18,21 @@
 //! journals the record (`ModelInvocationRecorded`, journal spec §9.19) before it uses the output
 //! (INF-10).
 //!
-//! **Opinions, never orders** (`AGENTS.md` rule 4, INF-5): a request carries no tool, function, or
-//! plugin; an output is data validated against its pinned schema; nothing here sizes, gates, or
-//! places an order, and the crate layering keeps it from reaching any crate that does, or any
-//! mandate or policy writer (INF-16).
+//! **Opinions, never orders** (`AGENTS.md` rule 4, INF-5): a request carries no function or plugin,
+//! and no tool but the pinned declarations an agentic turn offers ([`tools`], inference spec v0.4,
+//! DEC-2203); an output is data validated against its pinned schema, and a tool call is data
+//! validated against its tool's, which the gateway returns and never runs; nothing here sizes,
+//! gates, or places an order, and the crate layering keeps it from reaching any crate that does,
+//! or any mandate or policy writer (INF-16).
+//!
+//! **Budgets are settings** ([`budgets`], DEC-2207): the deployment's monthly cap folds from the
+//! deployment meter stream across every workspace, and no figure is in the code.
 //!
 //! **Pure.** Time, transport, provider keys, and event ids come in through [`provider`]'s traits.
 //! The [`fake::RecordedTransport`] is the default everywhere except a real cell with a vaulted key
 //! (DEC-997 item 4); the [`openrouter::OpenRouter`] adapter sets DEC-997 item 2's routing lock.
 
+pub mod budgets;
 pub mod call;
 pub mod fake;
 pub mod guard;
@@ -39,6 +45,7 @@ pub mod provider;
 pub mod record;
 pub mod registry;
 pub mod schema;
+pub mod tools;
 
 pub use call::{CallRequest, Gateway, RateCaps, RequestError, Settings};
 pub use kinds::{KeyOwner, Outcome, Purpose};

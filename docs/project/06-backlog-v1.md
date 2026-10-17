@@ -30,7 +30,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E15 Signal models: LLM and fast models, scorecards | M5 (LLM research, scorecards); Phase 3 (fast models) | 6.3, 6.5 | Must (E15-1, E15-3, E15-6 to E15-10); Should |
 | E16 Kraken Derivatives US connector | Phase 3 | 6.2 (FR-2.5) | Should |
 | E17 Research agent and dynamic universe | M5 | 6.3 (FR-3.9), 6.5 | Must |
-| E19 Agent harness | M5 (construction, the research loop, the bench); before live trading (E19-8) | 6.3 (FR-3.9), 6.5 (FR-5.1) | Must (E19-1 to E19-6, E19-8, E19-10); Should |
+| E19 Agent harness | M5 (construction, the research loop, the bench); before live trading (E19-8) | 6.3 (FR-3.9), 6.5 (FR-5.1) | Must (E19-1 to E19-6, E19-8, E19-10, E19-13); Should |
 
 ## Stories
 
@@ -2294,6 +2294,47 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   - a burst of events never starts more runs than the caps allow, tested over random event
     sequences;
   - a run still produces opinions only (rule 4) and never sizes or places an order.
+- **E19-13 (Must, M5, before the 2026-10-26 demo runs the loop; SC; spec first)** As the founder, I
+  want the research run to be a bounded agent loop, "like Claude Code for trading", so that the
+  product is an agent harness for trading ([ADR-0005](../adr/0005-agentic-harness.md),
+  [DEC-2203](decisions/DEC-2203.md); agent harness spec v0.2 §6.9 to §6.13, inference spec v0.4,
+  journal spec v0.50 §9.23; claim [#1534](https://github.com/kunwarshivam/mandate/issues/1534)).
+  *Accepted when:*
+  - `mandate-gateway` takes `turns`, the run's menu as `tools`, and `spend_ceiling_usd`, sends only
+    the pinned declarations, keeps every `single_call` hash and request digest unchanged, pins the
+    reasoning mode and effort and `top_p`, keeps the stable prompt order, and returns a final output
+    or validated tool calls, refusing anything else `schema_invalid`, with the reported identity read
+    before any tool call is parsed (INF-5's new test; lane I1's slice 2);
+  - `mandate-research-run` holds the loop's state as a pure fold of the run's records, the declared
+    read and think tools over read-only ports with §6.10's scope, item keys, and caps, the menus per
+    run kind, and §6.11's bounds, each ending the run except result size;
+  - the `final_output` path runs end to end: the runtime core (lane I2's E19-3 side) judges the final
+    output once, as a single call's; `action_tools` (`propose_thesis`, `invalidate` with verdict
+    feedback, theses committed only at a normal end, DEC-2203 item 25) follows in its own slice;
+  - `mandate-journal` registers the five §9.23 records with a draft for every rule 171 to 183;
+  - HI-1, HI-2, HI-3, HI-4, HI-8, HI-9, HI-10, HI-11, HI-22, HI-23, HI-24, HI-25 (its action half once `action_tools` is declared), and HI-28 hold as
+    property tests with independent oracles, each shown to catch a seeded bug, against an adaptive
+    compromised model at pass^k and random crashes, and INF-7's fuzz covers the run ceiling; HI-26
+    and HI-27 hold vacuously until §15's owner runs and `ask_owner` land, and get their tests then;
+  - E19-6's adversarial bench and a §8.3 regression evaluation on recorded-fake scenarios are built
+    inside this story's loop slice and pass on the agentic entry by about 10/24, so the demo agents
+    may pin it;
+  - recorded multi-turn fixtures run the loop in CI and the demo with no network (HI-3);
+  - no agent pins an agentic entry before E19-6's bench and a §8.3 regression evaluation pass on it
+    (DEC-2203 item 13).
+- **E19-14 (Should; SC; spec first)** As an owner, I want the agentic loop's follow-ups
+  ([DEC-2203](decisions/DEC-2203.md) items 12, 14, 15, 17, 20). *Accepted when:* `propose_exit` has
+  its structured record with the instrument, a fourth `DecisionMade.exit_origin` (journal spec §9.1,
+  rule 8), mandate spec §8.3's builder branch for a stored request (the whole position less working
+  exits, working openings cancelled first, the same collar), and trading-domain spec §9.1's origin,
+  so an `action_tools` entry may declare it; `ask_owner` has its
+  journaled question and answer records and its delivery (in-app, with an email ping of generic text
+  only), so an entry may declare it; `propose_mandate_change` has its record and its draft path to the
+  owner (always ASK, the diff with its classification, step-up, expiry, rate limit; a `monitor` run
+  only risk-reducing changes); event triggers and a monitoring interval exist as envelope fields with
+  their debounce and rate limit (mandate spec change); the longer strategy brief exists, with the
+  validator's warning where it contradicts the envelope; and a journaled turn start lets a restart
+  resume a run within its deadline without losing a reservation from the ceiling's fold.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 
@@ -2930,6 +2971,26 @@ enables `live` (ES-23, OPS-5).
   2), and refuses to start with its `MANDATE_API_JWKS_URL` setting refusal when the URL is `http`
   and the tier is anything but `dev` or `ci` (no value included), shown by a test for each tier;
   and it still starts with an `https` URL in every tier.
+- **E21-54 (Proposed, M8, for the 2026-10-26 demo; lane E2E; claim #1528; DEC-2002)** As the
+  founder, I want the demo's whole story run end to end on the local cell by one command, so that
+  every link the demo needs is either proven or named by the PR or story that closes it.
+  *Accepted when:* `cargo xtask cell demo --scenario demo` runs on the local cell, with paper and
+  demo data only and no credential, the six steps in order: (1) the owner signs in to `web/` and
+  sees their workspace through the workspace API; (2) deploys an agent with a confirmed mandate
+  envelope; (3) the research loop reads news and filings and calls the model through
+  mandate-gateway, the recorded fake by default; (4) deterministic code sizes the order, the risk
+  gate and autonomy rules ask, the ask shows in `web/`, the owner approves it, the paper order
+  fills on a fixture broker and the protective stop goes out; (5) a backtest of the same mandate
+  version is shown; (6) the kill switch from `web/` stops the agent. Each gesture whose pieces are
+  on `main` runs in the cell and is checked by what it prints; each missing link is printed as a
+  gap naming its PR or story, never faked, and a test refuses a gap that names neither; the run
+  ends with the workspace's control stream exported and verified by journal spec §11; and a CI
+  job that is not a required check runs the scenario on every change so its ready steps stay
+  green. Slice 1 runs steps 1 and 2 through the CLI and names every other link; later slices
+  replace each gap as its PR lands: E21-52's local-cell token issuer for the API's sign-in, the
+  API's image (A1), its version and deploy routes (A2), the runtime's image (P), the executor (X),
+  the research driver (I2), step-up (SU), the backtest's API read and `web/` screen (I4, W2), the
+  kill switch's CLI (O4) and the deployment manager (D1).
 
 ## Won't (v1)
 

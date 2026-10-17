@@ -23,6 +23,7 @@ import type {
   WorkingOrder,
   Workspace,
 } from "@/fixtures/types";
+import type { Classification } from "@/api/confirm";
 import { lastPrice } from "@/fixtures/market";
 import { type Dec, ONE, ZERO, add, dec, div, min, mul, sub, toDecimalString, toFixed } from "./decimal";
 import { fixtureUlid } from "./fixture-ids";
@@ -51,6 +52,14 @@ export function canonicalJson(value: unknown): string {
 export function mandateVersion(mandate: Mandate): ContentRef {
   return `sha256:${sha256Hex(canonicalJson(mandate))}`;
 }
+
+/**
+ * A new agent's first version has no base to compare with (spec §5.1: `base_version` is `null`). It is
+ * classified risk-increasing (DEC-2401 item 2, under DEC-176): every path goes from absent to set, and
+ * mandate spec §9.2 counts a larger maximum (an absent one being none) and every unlisted path as
+ * increasing, so confirming it needs step-up, as a deployment does.
+ */
+export const FIRST_VERSION_CLASSIFICATION: Classification = "risk_increasing";
 
 /** Agents still running on the account: a stopped agent's allocation is free again. */
 function activeAgents(ws: Workspace): Agent[] {
