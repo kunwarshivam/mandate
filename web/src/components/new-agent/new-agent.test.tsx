@@ -2,20 +2,25 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KEY } from "@/components/kumo/key";
 import { PASSKEY_ANSWER_MS, type Passkey } from "@/components/stop/step-up-dialog";
-import type { Workspace } from "@/fixtures/types";
+import type { Scenario, Workspace } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { dec, fromInt, mul } from "@/lib/decimal";
 import { mandateVersion } from "@/lib/fixture-journey";
-import type { Deployment } from "@/lib/mock-runtime";
+import type { SetUp } from "@/lib/mock-runtime";
+import { confirmStepUpDigest } from "@/api/confirm";
+import { BACKTEST_IDS } from "@/fixtures/backtests";
+import { VERSION } from "@/fixtures/versions";
 import type { Role } from "@/lib/roles";
 import { RECORD_AFTER_MS, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { RuntimeProbe, probed } from "@/test/runtime-probe";
+import { setUpThrough } from "@/test/set-up";
 import { failingPasskey, press, stepUpDialog } from "@/test/step-up";
 import { ADVICE_REPLY, type Compiler, type CompilerInput, fixtureCompiler } from "./compiler";
 import { INTRO, READY } from "./conversation";
 import { MODELS, type Read, compile, mandateFrom, readAnswers, readLoss, readStrategy, unaskedUsd } from "./draft";
 import { NewAgentFlow } from "./new-agent-flow";
+import { DeployDetails, StepStatus, deployLines } from "./set-up-steps";
 import { GAP_NOTE, summaryLines } from "./summary";
 
 const main = () => screen.getByRole("main");
@@ -25,7 +30,7 @@ const composer = () => screen.getByRole("textbox", { name: "Your answer" });
 const log = () => screen.getByRole("log", { name: "Conversation" });
 const thinking = () => main().querySelector<HTMLElement>("[data-slot=thinking]")!;
 
-const deployments = (): Deployment[] => probed().deployments;
+const setUps = (): SetUp[] => probed().setUps;
 
 const INSTANT = fixtureCompiler({ latencyMs: 0 });
 
@@ -34,14 +39,15 @@ function renderFlow({
   passkey,
   compiler = INSTANT,
   workspace,
-}: { role?: Role; passkey?: Passkey; compiler?: Compiler; workspace?: (ws: Workspace) => Workspace } = {}) {
+  scenario = "normal",
+}: { role?: Role; passkey?: Passkey; compiler?: Compiler; workspace?: (ws: Workspace) => Workspace; scenario?: Scenario } = {}) {
   setPathname("/agents/new");
   return renderWithRuntime(
     <main>
       <NewAgentFlow compiler={compiler} />
       <RuntimeProbe />
     </main>,
-    "normal",
+    scenario,
     { role, ...(passkey ? { passkey } : {}), ...(workspace ? { workspace } : {}) },
   );
 }
@@ -79,10 +85,28 @@ async function toSummary({ money = "$3,000", goal = "Grow it steadily", loss = "
   await send("20");
 }
 
-function createWithPasskey() {
-  fireEvent.click(button("Create agent"));
+/** One of the three steps under the summary (DEC-2401), and its phase once sent. */
+const step = (key: "version" | "confirm" | "deploy") => main().querySelector<HTMLElement>(`[data-slot=set-up-steps] [data-step=${key}]`);
+const phase = (key: "version" | "confirm" | "deploy") => step(key)?.getAttribute("data-phase") ?? null;
+
+function withPasskey(name: string) {
+  fireEvent.click(button(name));
   press("Use passkey");
   act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS));
+}
+
+/** Step 1, then step 2 with a passkey once step 1 is recorded: the agent's version, confirmed. Fake timers. */
+function createAndConfirm() {
+  fireEvent.click(button("Create the version"));
+  act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+  withPasskey("Confirm version 1");
+  act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+}
+
+/** All three steps, each once the one before it is recorded; leaves the deployment sent. Fake timers. */
+function setUpWithPasskeys() {
+  createAndConfirm();
+  withPasskey("Deploy to paper");
 }
 
 let fetchSpy: MockInstance;
@@ -313,7 +337,7 @@ describe("the strategy, the owner's choice", () => {
   });
 });
 
-describe("the agent, shown once and created in one step", () => {
+describe("the agent, shown once, then set up in three recorded steps", () => {
   it("shows every value once nothing is missing, marks what Owlhead drafted, and sends nothing yet", async () => {
     renderFlow();
     await toSummary();
@@ -331,8 +355,12 @@ describe("the agent, shown once and created in one step", () => {
     for (const r of limits) expect(r.querySelector("[data-slot=tag]")).toHaveTextContent("Proposed");
     expect(summary().querySelector("details, [aria-expanded=false]")).toBeNull();
     expect(screen.queryByRole("button", { name: /confirm section|accept all/i })).toBeNull();
-    expect(button("Create agent")).toBeEnabled();
-    expect(deployments()).toEqual([]);
+    expect(button("Create the version")).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Confirm version 1" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Deploy to paper" })).toBeNull();
+    expect(step("confirm")).toBeNull();
+    expect(step("deploy")).toBeNull();
+    expect(setUps()).toEqual([]);
   });
 
   it("states the losses in dollars and what could buy without asking", async () => {
@@ -360,7 +388,7 @@ describe("the agent, shown once and created in one step", () => {
     expect(summaries()).toHaveLength(1);
     expect(log().querySelectorAll("[data-slot=replaced]")).toHaveLength(1);
     expect(row("Money it may use")).toHaveTextContent("$2,000.00");
-    expect(screen.getAllByRole("button", { name: "Create agent" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Create the version" })).toHaveLength(1);
   });
 
   it("asks again for a loss a change no longer fits, and offers nothing to create until it has one", async () => {
@@ -369,9 +397,9 @@ describe("the agent, shown once and created in one step", () => {
     await send("Make it $1,000");
     expect(lastReply()[1]).toBe("With $1,000.00, the loss you gave no longer fits. That is more than this workspace allows: at most 20% of the money, $200.00. Change your answer to continue.");
     expect(lastReply()[2]).toMatch(/^How much could you stand to lose, in total\?/);
-    expect(screen.queryByRole("button", { name: "Create agent" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create the version" })).toBeNull();
     await send("$100");
-    expect(button("Create agent")).toBeEnabled();
+    expect(button("Create the version")).toBeEnabled();
   });
 
   it("draws every action as the app's one key, so no button shouts over another (DEC-469)", async () => {
@@ -435,109 +463,227 @@ describe("when the model fails", () => {
   });
 });
 
-describe("creating it", () => {
+describe("setting it up: create the version, confirm it, deploy it (DEC-2401)", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  const progress = () => main().querySelector<HTMLElement>("[data-slot=after-confirm]");
-
-  it("keeps every line it shows in the record it sends, bound to the same version", async () => {
+  it("creates the version first, and shows its hash, classification and validation only once it is recorded", async () => {
     renderFlow();
     await toSummary();
     const version = summary().querySelector("[data-slot=mandate-version]")!.textContent!;
-    const text = summary().textContent!.replace(/\s+/g, " ");
-    createWithPasskey();
-    expect(deployments()).toHaveLength(1);
-    const [d] = deployments();
-    expect(d.version).toBe(version);
-    expect(d.record.screen).toBe("A5");
-    expect(d.record.environment).toBe("paper");
-    for (const line of d.record.shown) for (const part of line.split(/: | \(|\)$/).filter(Boolean)) expect(text, line).toContain(part.replace(/\s+/g, " "));
-    expect(d.record.shown).toContain(`Version 1: ${version}`);
+    fireEvent.click(button("Create the version"));
+    expect(setUps()).toHaveLength(1);
+    expect(setUps()[0].version).toBe(version);
+    expect(phase("version")).toBe("sent");
+    expect(step("version")).toHaveTextContent("Creating version 1… Sent at 14:05:20 ET. Nothing is recorded until the journal has it.");
+    expect(step("version")!.querySelector("[data-slot=created-version]")).toBeNull();
+    expect(screen.getByRole("heading", { name: "1. Create the version" })).toHaveFocus();
+    expect(step("confirm")).toBeNull();
+    expect(composer()).toBeEnabled();
+
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(phase("version")).toBe("recorded");
+    expect(step("version")).toHaveTextContent("Version 1 created at 14:05:20 ET. Its validation passed.");
+    expect(step("version")!.querySelector("[data-slot=created-version]")!.textContent).toBe(version);
+    const classification = step("version")!.querySelector<HTMLElement>("[data-slot=classification]")!;
+    expect(classification).toHaveAttribute("data-classification", "risk_increasing");
+    expect(classification).toHaveTextContent("A first version has no earlier version to compare with, so it counts as risk-increasing: confirming it needs your passkey.");
+    expect(screen.queryByRole("button", { name: "Create the version" })).toBeNull();
+    expect(button("Confirm version 1")).toBeEnabled();
+    expect(step("deploy")).toBeNull();
+    expect(probed().ws.agents.map((a) => a.label)).toEqual(["Agent 1", "Agent 2", "Agent 3"]);
   });
 
-  it("asks for the passkey; a cancel or a failure sends nothing", async () => {
-    renderFlow({ passkey: failingPasskey });
+  it("confirms it with a passkey bound to the version, keeping every line it shows in the record", async () => {
+    renderFlow();
     await toSummary();
-    fireEvent.click(button("Create agent"));
-    expect(stepUpDialog()).toHaveTextContent("Create this agent on paper with $3,000.00 of simulated money, trading MSFT.");
-    press("Cancel");
-    expect(main()).toHaveTextContent("Passkey check canceled. Nothing was created or sent.");
-    fireEvent.click(button("Create agent"));
+    const version = summary().querySelector("[data-slot=mandate-version]")!.textContent! as SetUp["version"];
+    const text = summary().textContent!.replace(/\s+/g, " ");
+    fireEvent.click(button("Create the version"));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    fireEvent.click(button("Confirm version 1"));
+    expect(stepUpDialog()).toHaveTextContent("Confirm version 1 of this agent: $3,000.00 of simulated money on paper, trading MSFT.");
     press("Use passkey");
     act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS));
-    expect(main()).toHaveTextContent("Passkey check failed. Nothing was created or sent.");
-    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 4));
-    expect(deployments()).toEqual([]);
-    expect(progress()).toBeNull();
+    const confirmed = setUps()[0].confirmed!;
+    expect(confirmed.phase).toBe("sent");
+    expect(confirmed.stepUp).toBe(confirmStepUpDigest(version, null, null));
+    expect(confirmed.record.screen).toBe("A5");
+    expect(confirmed.record.environment).toBe("paper");
+    expect(confirmed.record.classification).toBe("risk_increasing");
+    for (const line of confirmed.record.shown) for (const part of line.split(/: | \(|\)$/).filter(Boolean)) expect(text, line).toContain(part.replace(/\s+/g, " "));
+    expect(confirmed.record.shown).toContain(`Version 1: ${version}`);
+    expect(confirmed.record.paths).toContain("/capital/allocation_usd");
+    expect(confirmed.record.paths).toContain("/universe/pinned_instruments");
+    expect(new Set(confirmed.record.paths).size).toBe(confirmed.record.paths.length);
+    for (const path of confirmed.record.paths) expect(path).toMatch(/^(\/([^/~]|~[01])*)+$/);
+    expect(step("confirm")).toHaveTextContent("Confirming version 1… Sent at 14:05:20 ET. Nothing is confirmed until the journal records it.");
+    expect(screen.getByRole("heading", { name: "2. Confirm it" })).toHaveFocus();
+    expect(composer()).toBeDisabled();
+    expect(step("deploy")).toBeNull();
+
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(phase("confirm")).toBe("recorded");
+    expect(step("confirm")).toHaveTextContent("Confirmed by you at 14:05:20 ET, with your passkey. Version 1 is confirmed; no agent exists until you deploy it.");
+    expect(button("Deploy to paper")).toBeEnabled();
+    expect(probed().ws.agents.map((a) => a.label)).toEqual(["Agent 1", "Agent 2", "Agent 3"]);
+  });
+
+  it("deploys it to paper only, showing the version and that no backtest of it has run, and keeps that in the record", async () => {
+    renderFlow();
+    await toSummary();
+    const version = summary().querySelector("[data-slot=mandate-version]")!.textContent!;
+    createAndConfirm();
+    const deploy = step("deploy")!;
+    expect(deploy.querySelector("[data-slot=deploy-version]")!.textContent).toBe(version);
+    expect(deploy.querySelector("[data-slot=backtest-shown]")).toHaveTextContent("None: no backtest of this version has run.");
+    expect(within(deploy).queryByRole("link", { name: /backtest/i })).toBeNull();
+    expect(deploy).toHaveTextContent("Paper only: simulated funds. Going live is not available.");
+    expect(main()).not.toHaveTextContent(/go live/i);
+    expect(screen.queryByRole("button", { name: /live/i })).toBeNull();
+    fireEvent.click(button("Deploy to paper"));
+    expect(stepUpDialog()).toHaveTextContent("Deploy version 1 to paper with $3,000.00 of simulated money, trading MSFT.");
+    press("Use passkey");
+    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS));
+    const deployed = setUps()[0].deployed!;
+    expect(deployed.record).toEqual({ screen: "B3", environment: "paper", shown: deployLines(version as SetUp["version"], null), backtestId: null });
+    const text = deploy.textContent!.replace(/\s+/g, " ");
+    for (const line of deployed.record.shown) for (const part of line.split(/: /).filter(Boolean)) expect(text, line).toContain(part);
   });
 
   it("is sent, then recorded as a running agent with its owl, then shows the first request", async () => {
     renderFlow();
     await toSummary();
-    createWithPasskey();
-    expect(progress()!.querySelector("[data-phase]")).toHaveAttribute("data-phase", "sent");
-    expect(progress()).toHaveTextContent("Creating it… Sent at 14:05:20 ET. Nothing is active until the runtime records it.");
-    expect(screen.queryByRole("button", { name: "Create agent" })).toBeNull();
-    expect(screen.getByRole("heading", { name: "After you created it" })).toHaveFocus();
+    setUpWithPasskeys();
+    expect(phase("deploy")).toBe("sent");
+    expect(step("deploy")).toHaveTextContent("Deploying it to paper… Sent at 14:05:20 ET. Nothing is active until the runtime records it.");
+    expect(screen.queryByRole("button", { name: "Deploy to paper" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "3. Deploy to paper" })).toHaveFocus();
     expect(composer()).toBeDisabled();
 
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
-    const [d] = deployments();
-    expect(progress()!.querySelector("[data-phase]")).toHaveAttribute("data-phase", "recorded");
-    expect(progress()).toHaveTextContent("Agent 4 is running on paper.");
-    expect(progress()).toHaveTextContent("Recorded in the journal at 14:05:20 ET, as version 1.");
-    expect(progress()!.querySelector("[data-slot=owl]")).toHaveAttribute("data-mood", "awake");
-    expect(progress()!.querySelector("[data-slot=hatch] [data-slot=egg]"), "the owl hatches once, answering the owner's act (DEC-514)").not.toBeNull();
-    expect(within(progress()!).getByRole("link", { name: "Open Agent 4" })).toHaveAttribute("href", `/agents/${d.agentId}`);
+    const [s] = setUps();
+    const done = step("deploy")!;
+    expect(phase("deploy")).toBe("recorded");
+    expect(done).toHaveTextContent("Agent 4 is running on paper.");
+    expect(done).toHaveTextContent("Recorded in the journal at 14:05:20 ET, as version 1.");
+    expect(done.querySelector("[data-slot=owl]")).toHaveAttribute("data-mood", "awake");
+    expect(done.querySelector("[data-slot=hatch] [data-slot=egg]"), "the owl hatches once, answering the owner's act (DEC-514)").not.toBeNull();
+    expect(within(done).getByRole("link", { name: "Open Agent 4" })).toHaveAttribute("href", `/agents/${s.agentId}`);
 
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 2));
-    expect(progress()!.querySelector("[data-slot=first-ask]")).toHaveTextContent("Its first check asks you: buy 6 MSFT at $44.62. If you do not answer by 14:10:20 ET, it is skipped.");
-    expect(within(progress()!).getByRole("link", { name: "Review the request" }).getAttribute("href")).toMatch(/^\/approvals\/apr_[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(done.querySelector("[data-slot=first-ask]")).toHaveTextContent("Its first check asks you: buy 6 MSFT at $44.62. If you do not answer by 14:10:20 ET, it is skipped.");
+    expect(within(done).getByRole("link", { name: "Review the request" }).getAttribute("href")).toMatch(/^\/approvals\/apr_[0-9A-HJKMNP-TV-Z]{26}$/);
   });
 
-  /** Another agent takes $1,000 of the account's free money while this one is being set up. */
+  it("asks for the passkey at each step that needs one; a cancel or a failure sends nothing", async () => {
+    renderFlow({ passkey: failingPasskey });
+    await toSummary();
+    fireEvent.click(button("Create the version"));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    fireEvent.click(button("Confirm version 1"));
+    press("Cancel");
+    expect(main()).toHaveTextContent("Passkey check canceled. Nothing was confirmed or sent.");
+    withPasskey("Confirm version 1");
+    expect(main()).toHaveTextContent("Passkey check failed. Nothing was confirmed or sent.");
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 4));
+    expect(setUps().map((s) => [s.created.phase, s.confirmed, s.deployed])).toEqual([["recorded", null, null]]);
+    expect(step("confirm")!.hasAttribute("data-phase")).toBe(false);
+    expect(step("deploy")).toBeNull();
+    expect(button("Confirm version 1")).toBeEnabled();
+  });
+
+  it("sends nothing to deploy when its passkey check is canceled", async () => {
+    renderFlow();
+    await toSummary();
+    createAndConfirm();
+    fireEvent.click(button("Deploy to paper"));
+    press("Cancel");
+    expect(main()).toHaveTextContent("Passkey check canceled. Nothing was deployed or sent.");
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 2));
+    expect(setUps()[0].deployed).toBeNull();
+    expect(probed().ws.agents.map((a) => a.label)).toEqual(["Agent 1", "Agent 2", "Agent 3"]);
+  });
+
+  /** Another agent takes $1,000 of the account's free money through its own three steps, its deployment left sent. */
   function anotherAgentTakesMoney() {
     const strategy = readStrategy({ model: "quant.momentum", params: { lookback_bars: "20" } });
     const other = readAnswers("$1,000", "Grow it", "$100");
     if (!strategy.ok || !other.ok) throw new Error("fixture answers");
-    act(() => {
-      probed().deploy(mandateFrom(compile(other.value, ["AAPL"], strategy.value), probed().ws.connection.connection_id)!, { screen: "A5", environment: "paper", shown: [] });
-    });
+    setUpThrough(mandateFrom(compile(other.value, ["AAPL"], strategy.value), probed().ws.connection.connection_id)!);
   }
 
-  it("will not create it when the account changed after the money was said (V-002 again), and takes a change", async () => {
+  it("will not create the version when the account changed after the money was said (V-002 again), and takes a change", async () => {
     renderFlow();
     await toSummary();
     anotherAgentTakesMoney();
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
     expect(main().querySelector("[data-slot=blocked]")).toHaveTextContent("Your paper account has $2,478.36 that no agent uses, less than the $3,000.00 this agent would use. Write a smaller amount.");
-    expect(screen.queryByRole("button", { name: "Create agent" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create the version" })).toBeNull();
     await send("Make it $2,000");
     expect(row("Money it may use")).toHaveTextContent("$2,000.00");
-    expect(button("Create agent")).toBeEnabled();
+    expect(button("Create the version")).toBeEnabled();
   });
 
-  it("says nothing was created when the runtime refuses it after the passkey, and takes a change", async () => {
+  it("says what was and was not recorded when the runtime refuses the deployment after the passkey, and takes a change", async () => {
     renderFlow();
     await toSummary();
+    createAndConfirm();
     anotherAgentTakesMoney();
-    createWithPasskey();
+    withPasskey("Deploy to paper");
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
-    expect(deployments().map((d) => d.phase)).toEqual(["recorded", "rejected"]);
-    const rejected = progress()!.querySelector<HTMLElement>("[data-phase=rejected]")!;
-    expect(rejected).toHaveTextContent("Not created. Nothing was confirmed, and version 1 does not exist.");
+    expect(setUps().map((s) => s.deployed?.phase)).toEqual(["rejected", "recorded"]);
+    const rejected = step("deploy")!;
+    expect(rejected).toHaveAttribute("data-phase", "rejected");
+    expect(rejected).toHaveTextContent("Not deployed. Version 1 was created and confirmed, and no agent exists.");
     expect(rejected).toHaveTextContent("Your paper account has $2,478.36 that no agent uses, less than the $3,000.00 this agent asks for.");
+    expect(rejected).toHaveTextContent("Tell me what to change.");
     expect(probed().ws.agents.map((a) => a.label)).toEqual(["Agent 1", "Agent 2", "Agent 3", "Agent 4"]);
     expect(composer()).toBeEnabled();
     await send("Make it $2,000");
-    expect(button("Create agent")).toBeEnabled();
+    expect(log().querySelector("[data-slot=replaced]")).toHaveTextContent("An earlier version of your agent, replaced after you changed it. Its version 1 was created and confirmed, and not deployed; no agent exists for it.");
+    expect(button("Create the version")).toBeEnabled();
+  });
+
+  it("says a created version was not confirmed when a change replaces it", async () => {
+    renderFlow();
+    await toSummary();
+    fireEvent.click(button("Create the version"));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    await send("Make it $2,000");
+    expect(log().querySelector("[data-slot=replaced]")).toHaveTextContent("An earlier version of your agent, replaced after you changed it. Its version 1 was created and not confirmed; no agent exists for it.");
+    expect(summaries()).toHaveLength(1);
+    expect(button("Create the version")).toBeEnabled();
+    expect(step("confirm")).toBeNull();
+  });
+
+  it("says the result is unknown, never to try again, when the journal does not answer", async () => {
+    renderFlow({ scenario: "result-unknown" });
+    await toSummary();
+    fireEvent.click(button("Create the version"));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 3));
+    expect(phase("version")).toBe("unknown");
+    expect(step("version")).toHaveTextContent("The result is unknown; we are checking. Whether version 1 was created is not known yet; nothing was confirmed, and no agent exists.");
+    expect(main()).not.toHaveTextContent(/try again/i);
+    expect(screen.queryByRole("button", { name: "Create the version" })).toBeNull();
+    expect(step("confirm")).toBeNull();
+  });
+
+  it("says nothing was recorded, and offers the step again, when the deployment does not answer", async () => {
+    renderFlow({ scenario: "unreachable" });
+    await toSummary();
+    fireEvent.click(button("Create the version"));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(phase("version")).toBe("undelivered");
+    expect(step("version")).toHaveTextContent("Not delivered: your deployment did not answer. No version was created, nothing was confirmed, and no agent exists. Try again once it is reachable.");
+    expect(button("Create the version")).toBeEnabled();
+    expect(step("confirm")).toBeNull();
   });
 
   it("will not let the next agent claim an instrument the new agent trades", async () => {
     renderFlow();
     await toSummary();
-    createWithPasskey();
+    setUpWithPasskeys();
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 3));
     fireEvent.click(button("Set up another agent"));
     expect(heading()).toHaveTextContent("Set up an agent");
@@ -550,11 +696,78 @@ describe("creating it", () => {
     expect(lastReply()[0]).toBe("MSFT is already traded by Agent 4. One agent trades an instrument on an account; choose another.");
   });
 
-  it("is the owner's alone to create", async () => {
+  it("is the owner's alone to set up", async () => {
     renderFlow({ role: "operator" });
     await toSummary();
-    expect(screen.queryByRole("button", { name: "Create agent" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create the version" })).toBeNull();
     expect(main()).toHaveTextContent("Only the workspace owner can create an agent.");
+  });
+});
+
+describe("each step's words, over either data source", () => {
+  const V = `sha256:${"1f".repeat(32)}` as const;
+  const AT = "2026-09-28T14:05:20-04:00";
+  const recorded = { phase: "recorded" as const, sentAt: AT, recordedAt: AT };
+  const confirmedSetUp = (): SetUp => ({
+    id: "set-1",
+    agentId: "",
+    version: V,
+    created: { ...recorded, base: null, classification: "risk_increasing", validated: true },
+    confirmed: { ...recorded, record: { screen: "A5", environment: "paper", shown: [], paths: [], classification: "risk_increasing" }, stepUp: confirmStepUpDigest(V, null, null) },
+    deployed: null,
+  });
+  const words = (which: "version" | "confirm" | "deploy", setUp: SetUp) => {
+    const view = renderWithRuntime(<StepStatus which={which} setUp={setUp} />);
+    const text = view.container.textContent!;
+    view.unmount();
+    return text;
+  };
+
+  it("says a step the API does not take from here yet was not sent, and what exists", () => {
+    const base = confirmedSetUp();
+    const notSent = { phase: "undelivered" as const, sentAt: AT, reason: "not_sent" };
+    expect(words("version", { ...base, created: { ...notSent, base: null, classification: null, validated: false }, confirmed: null })).toBe(
+      "Not sent: your deployment does not take this step from here yet. No version was created, nothing was confirmed, and no agent exists.",
+    );
+    expect(words("deploy", { ...base, deployed: { ...notSent, record: { screen: "B3", environment: "paper", shown: [], backtestId: null } } })).toBe(
+      "Not sent: your deployment does not take this step from here yet. Version 1 was created and confirmed, and no agent exists.",
+    );
+  });
+
+  it("says a confirm the deployment refused was not recorded, and why, without a code", () => {
+    const base = confirmedSetUp();
+    const refused = { ...base.confirmed!, phase: "undelivered" as const, recordedAt: undefined, reason: "step_up_required" };
+    expect(words("confirm", { ...base, confirmed: refused })).toBe(
+      "Not recorded: your deployment needs a passkey check this browser can't send yet. Version 1 was created and is not confirmed, and no agent exists.",
+    );
+    const other = words("confirm", { ...base, confirmed: { ...refused, reason: "stale_base" } });
+    expect(other).toBe("Not recorded: your deployment refused it. Version 1 was created and is not confirmed, and no agent exists.");
+    expect(other).not.toContain("stale_base");
+  });
+
+  it("never says to try again when a result is unknown", () => {
+    const base = confirmedSetUp();
+    const unknown = { phase: "unknown" as const, sentAt: AT };
+    expect(words("confirm", { ...base, confirmed: { ...base.confirmed!, ...unknown, recordedAt: undefined } })).toBe(
+      "The result is unknown; we are checking. Version 1 was created; whether it is confirmed is not known yet, and no agent exists.",
+    );
+    const deploy = words("deploy", { ...base, deployed: { ...unknown, record: { screen: "B3", environment: "paper", shown: [], backtestId: null } } });
+    expect(deploy).toBe(
+      "The result is unknown; we are checking. Version 1 was created and confirmed; whether the agent exists is not known yet. Look in All agents before deploying it again, so the same agent is not created twice.",
+    );
+    expect(deploy).not.toMatch(/try again/i);
+  });
+});
+
+describe("the deploy step's backtest (B3)", () => {
+  it("links the version's backtest by its id, which the record keeps", () => {
+    renderWithRuntime(<DeployDetails version={VERSION.lmn} backtestId={BACKTEST_IDS.lmnCompleted} />);
+    const shown = document.querySelector<HTMLElement>("[data-slot=backtest-shown]")!;
+    expect(within(shown).getByRole("link", { name: `Backtest ${BACKTEST_IDS.lmnCompleted}` })).toHaveAttribute("href", `/backtests/${BACKTEST_IDS.lmnCompleted}`);
+    expect(document.querySelector("[data-slot=deploy-version]")!.textContent).toBe(VERSION.lmn);
+    expect(deployLines(VERSION.lmn, BACKTEST_IDS.lmnCompleted)).toContain(`Backtest shown: ${BACKTEST_IDS.lmnCompleted}`);
+    expect(deployLines(VERSION.lmn, null)).toContain("Backtest shown: None: no backtest of this version has run.");
+    expect(deployLines(VERSION.lmn, null)).toContain(`Version 1: ${VERSION.lmn}`);
   });
 });
 
@@ -576,11 +789,13 @@ describe("creating it where the workspace requires independent approval (§4.3, 
     [true, 1],
     [null, 2],
     ["absent", 2],
-  ] as const)("offers no passkey confirm when the policy is %s with %s approvers, says why, and creates nothing", async (value, approvers) => {
+  ] as const)("offers no step when the policy is %s with %s approvers, says why, and creates nothing", async (value, approvers) => {
     renderFlow({ workspace: policy(value, approvers) });
     await toSummary();
     expect(summary()).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create agent" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create the version" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Confirm version 1" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Deploy to paper" })).toBeNull();
     expect(main()).not.toHaveTextContent("Uses your passkey.");
     const refusal = main().querySelector<HTMLElement>("[data-slot=blocked]")!;
     expect(refusal).toHaveTextContent(SECOND_PERSON);
@@ -589,9 +804,9 @@ describe("creating it where the workspace requires independent approval (§4.3, 
 
     act(() => vi.advanceTimersByTime((PASSKEY_ANSWER_MS + RECORD_AFTER_MS) * 3));
     expect(stepUpDialog()).toBeNull();
-    expect(deployments()).toEqual([]);
+    expect(setUps()).toEqual([]);
     expect(probed().ws.agents.map((a) => a.label)).toEqual(["Agent 1", "Agent 2", "Agent 3"]);
-    expect(main().querySelector("[data-slot=after-confirm]")).toBeNull();
+    expect(main().querySelector("[data-step] [data-phase]")).toBeNull();
   });
 
   const NOT_HERE = "That's everything. Here is your agent. It can't be created here without a second person's approval.";
@@ -622,24 +837,25 @@ describe("creating it where the workspace requires independent approval (§4.3, 
     await toSummary();
     await send("Make it $2,000");
     expect(row("Money it may use")).toHaveTextContent("$2,000.00");
-    expect(screen.queryByRole("button", { name: "Create agent" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create the version" })).toBeNull();
     expect(main().querySelector("[data-slot=blocked]")).toHaveAttribute("data-rule", "V-047");
   });
 
-  it("takes the passkey and creates the agent exactly as before when the policy is off, even with one approver", async () => {
+  it("takes the three steps and creates the agent exactly as before when the policy is off, even with one approver", async () => {
     renderFlow({ workspace: policy(false, 1) });
     await toSummary();
     expect(main().querySelector("[data-slot=blocked]")).toBeNull();
-    createWithPasskey();
+    setUpWithPasskeys();
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
-    expect(deployments().map((d) => d.phase)).toEqual(["recorded"]);
+    expect(setUps().map((s) => [s.created.phase, s.confirmed?.phase, s.deployed?.phase])).toEqual([["recorded", "recorded", "recorded"]]);
     expect(probed().ws.agents.at(-1)!.label).toBe("Agent 4");
   });
 
   it("shows the rule only as an attribute when the runtime refuses a deployment under the policy", async () => {
     renderFlow({ workspace: policy(false) });
     await toSummary();
-    fireEvent.click(button("Create agent"));
+    createAndConfirm();
+    fireEvent.click(button("Deploy to paper"));
     press("Use passkey");
     act(() => {
       // Deliberate direct mutation: the policy changes between the owner's click and the runtime applying it.
@@ -647,8 +863,8 @@ describe("creating it where the workspace requires independent approval (§4.3, 
       vi.advanceTimersByTime(PASSKEY_ANSWER_MS);
     });
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
-    const rejected = main().querySelector<HTMLElement>("[data-slot=after-confirm] [data-phase=rejected]")!;
-    expect(rejected).toHaveTextContent("Not created. Nothing was confirmed, and version 1 does not exist.");
+    const rejected = main().querySelector<HTMLElement>("[data-step=deploy][data-phase=rejected]")!;
+    expect(rejected).toHaveTextContent("Not deployed. Version 1 was created and confirmed, and no agent exists.");
     expect(within(rejected).getByText(SECOND_PERSON)).toHaveAttribute("data-rule", "V-047");
     expect(rejected).not.toHaveTextContent("V-047");
     expect(probed().ws.agents.map((a) => a.label)).toEqual(["Agent 1", "Agent 2", "Agent 3"]);
@@ -656,15 +872,16 @@ describe("creating it where the workspace requires independent approval (§4.3, 
 });
 
 describe("nothing leaves the page", () => {
-  it("fetches nothing and stores nothing through the whole conversation, and reaches the runtime only after the passkey", async () => {
+  it("fetches nothing and stores nothing through the whole conversation and set-up, and reaches the runtime only from the steps", async () => {
     vi.useFakeTimers();
     const cookie = document.cookie;
     renderFlow();
     await toSummary();
-    expect(deployments()).toEqual([]);
-    createWithPasskey();
+    expect(setUps()).toEqual([]);
+    setUpWithPasskeys();
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 3));
-    expect(deployments()).toHaveLength(1);
+    expect(setUps()).toHaveLength(1);
+    expect(setUps()[0].deployed?.phase).toBe("recorded");
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(setItem).not.toHaveBeenCalled();
     expect(getItem).not.toHaveBeenCalled();

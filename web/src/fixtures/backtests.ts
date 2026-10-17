@@ -289,3 +289,12 @@ export const BACKTEST_FIXTURES: Readonly<Record<string, unknown>> = {
 export function servedBacktestFixture(backtestId: string): unknown {
   return Object.hasOwn(BACKTEST_FIXTURES, backtestId) ? structuredClone(BACKTEST_FIXTURES[backtestId]) : undefined;
 }
+
+/**
+ * The backtest the deploy step shows for a version (B3): the fixtures' completed run of exactly that
+ * version, or `null`. A research-agent run is never offered (PX-9 (a)).
+ */
+export function backtestOfVersion(version: string): string | null {
+  void version;
+  throw new Error("Unimplemented: E10-12");
+}

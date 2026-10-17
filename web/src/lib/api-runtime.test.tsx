@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiRuntimeProvider } from "./api-runtime";
-import { type Runtime, useRuntime } from "./mock-runtime";
+import { type ConfirmRecord, type Runtime, useRuntime } from "./mock-runtime";
 import { type Fetch } from "@/api/client";
 import { createMockServer } from "@/api/mock-server";
 import type { SessionKeeper, SessionState } from "@/api/session";
@@ -11,6 +11,8 @@ import { WorkspaceGate } from "@/components/screens/common";
 import { FixtureTag } from "@/components/domain/placeholders";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
+import { confirmStepUpDigest } from "@/api/confirm";
+import { CONFIRM_RECORD, DEPLOY_RECORD } from "@/test/set-up";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
 const ORIGIN = "https://api.owlhead.ai";
@@ -237,17 +239,58 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     expect(current().view).toBeNull();
   });
 
-  it("refuses set-up and mandate changes it cannot send yet, and sends nothing for them", async () => {
+  it("sends no version creation and no deployment, which have no request schema yet, and says not sent, never recorded", async () => {
     const { posts } = mount();
     await ready();
     const agent = buildWorkspace("approvals").agents[0];
-    let deployment: ReturnType<Runtime["deploy"]> | null = null;
+    let id = "";
     act(() => {
-      deployment = current().deploy({ mandate: agent.mandate, provenance: agent.provenance }, { screen: "A5", environment: "paper", shown: [] });
+      id = current().createVersion({ mandate: agent.mandate, provenance: agent.provenance }).id;
     });
-    expect(deployment).not.toBeNull();
-    await waitFor(() => expect(current().deployments.at(-1)?.phase).toBe("undelivered"));
+    expect(current().setUps.at(-1)).toMatchObject({ id, agentId: "", created: { phase: "sent", validated: false, classification: null } });
+    await waitFor(() => expect(current().setUps.at(-1)?.created).toMatchObject({ phase: "undelivered", reason: "not_sent", validated: false, classification: null }));
+    act(() => current().deployVersion(id, DEPLOY_RECORD));
+    await waitFor(() => expect(current().setUps.at(-1)?.deployed).toMatchObject({ phase: "undelivered", reason: "not_sent" }));
+    expect(current().setUps.at(-1)?.confirmed).toBeNull();
     expect(posts()).toHaveLength(0);
+    expect(current().backtestFor(agent.mandate_version)).toBeNull();
+  });
+
+  /** A set-up whose version the test confirms directly: the screen never offers it over the API until step 1 can be sent. */
+  async function confirmOverApi(record: ConfirmRecord, wrap?: (fetch: Fetch) => Fetch) {
+    const mounted = mount("approvals", wrap);
+    await ready();
+    const agent = buildWorkspace("approvals").agents[0];
+    let id = "";
+    act(() => {
+      id = current().createVersion({ mandate: agent.mandate, provenance: agent.provenance }).id;
+    });
+    const version = current().setUps.at(-1)!.version;
+    act(() => current().confirmVersion(id, record, confirmStepUpDigest(version, null, null)));
+    return { ...mounted, id, version, setUp: () => current().setUps.find((s) => s.id === id)! };
+  }
+
+  it("confirms per spec §5.1 with the schema's body, and a risk-increasing confirm the API answers step_up_required is not recorded", async () => {
+    const { posts, setUp, version } = await confirmOverApi(CONFIRM_RECORD);
+    expect(setUp().confirmed).toMatchObject({ phase: "sent", record: CONFIRM_RECORD });
+    await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "undelivered", reason: "step_up_required" }));
+    expect(posts()).toHaveLength(1);
+    expect(new URL(posts()[0].url).pathname).toBe(`/v1/workspaces/${WS}/mandate-versions/${encodeURIComponent(version)}/confirm`);
+    expect(JSON.parse(posts()[0].body ?? "{}")).toMatchObject({ agent_id: null, base_version: null, confirmed_paths: CONFIRM_RECORD.paths, classification_shown: "risk_increasing", step_up: null });
+  });
+
+  it("records a confirm the API accepts, with the server's classification and when it applies, decoded as confirm-accepted", async () => {
+    const { setUp } = await confirmOverApi({ ...CONFIRM_RECORD, classification: "neutral" });
+    await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "recorded", classification: "neutral", applies: "now" }));
+    expect(setUp().confirmed?.recordedAt).toBeDefined();
+  });
+
+  it("calls a confirm unknown, never recorded, when its 202 does not decode as confirm-accepted", async () => {
+    const generic: (fetch: Fetch) => Fetch = (fetch) => async (input, init) =>
+      init.method === "POST" && input.endsWith("/confirm") ? new Response(JSON.stringify({ command_id: "01JBH3BTZ8K2M4N6P8R0S2T4V6", phase: "recorded", step_up_status: null }), { status: 202 }) : fetch(input, init);
+    const { setUp } = await confirmOverApi({ ...CONFIRM_RECORD, classification: "neutral" }, generic);
+    await waitFor(() => expect(setUp().confirmed?.phase).toBe("unknown"));
+    expect(setUp().confirmed?.recordedAt).toBeUndefined();
   });
 
   it("writes nothing to browser storage", async () => {

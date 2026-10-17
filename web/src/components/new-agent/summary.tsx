@@ -92,6 +92,18 @@ export function summaryLines(draft: Draft, version: ContentRef): string[] {
   ];
 }
 
+/** Every path the summary shows, each one the owner confirms (journal rule 18), in order and once. */
+export function confirmedPaths(draft: Draft): string[] {
+  void draft;
+  throw new Error("Unimplemented: E10-11");
+}
+
+/** The confirmation the first passkey check authorizes, in words. */
+export function confirmAction(draft: Draft): string {
+  void draft;
+  throw new Error("Unimplemented: E10-11");
+}
+
 /** The one action the passkey authorizes, in words. */
 export function deployAction(draft: Draft): string {
   return `Create this agent on paper with ${usd(draft.terms.allocationUsd)} of simulated money, trading ${draft.symbols.join(", ")}.`;

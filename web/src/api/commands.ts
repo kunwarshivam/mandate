@@ -12,7 +12,7 @@
 import type { WorkspaceClient } from "./client";
 import type { JsonObject, PreparedCommand } from "./types";
 import type { AgentMode, ContentRef, ShownEnvironment } from "@/fixtures/types";
-import type { ApprovalRecord, CommandKind, CommandRecord } from "@/lib/mock-runtime";
+import type { ApprovalRecord, CommandKind, CommandRecord, ConfirmRecord } from "@/lib/mock-runtime";
 import { sha256Hex } from "@/lib/sha256";
 
 export type Prepared = { ok: true; commands: PreparedCommand[] } | { ok: false; reason: string };
@@ -79,4 +79,19 @@ export function prepareApprovalResponse(client: WorkspaceClient, approval: { app
       { verdict: response === "approve" ? "approved" : "skipped", content_hash: approval.content_hash, record: recordRef(record), step_up: null, delegation: null },
     ),
   );
+}
+
+/** What a confirm binds (spec §5.1): the version, the agent and base it is for (`null` for a new agent), and the A5 record. */
+export interface ConfirmInput {
+  version: ContentRef;
+  agentId: string | null;
+  base: ContentRef | null;
+  record: ConfirmRecord;
+}
+
+/** `POST /mandate-versions/{hash}/confirm`, its body exactly as `confirm-request.schema.json` requires it. */
+export function prepareConfirm(client: WorkspaceClient, input: ConfirmInput): PreparedCommand {
+  void client;
+  void input;
+  throw new Error("Unimplemented: E10-11");
 }

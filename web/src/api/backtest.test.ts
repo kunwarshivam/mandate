@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 import { type BacktestRead, backtestNotFound, backtestRead, readBacktestFrom, servedBacktest } from "./backtest";
 import { type Fetch, createWorkspaceClient } from "./client";
 import { createMockServer } from "./mock-server";
-import { BACKTESTS_BY_AGENT, BACKTEST_FIXTURES, BACKTEST_IDS } from "@/fixtures/backtests";
+import { BACKTESTS_BY_AGENT, BACKTEST_FIXTURES, BACKTEST_IDS, backtestOfVersion } from "@/fixtures/backtests";
+import { VERSION } from "@/fixtures/versions";
 import { buildWorkspace } from "@/fixtures/workspace";
 
 /**
@@ -236,5 +237,17 @@ describe("reading a backtest over the API (GET /backtests/{id})", () => {
     const answer = await readBacktestFrom(client, BACKTEST_IDS.lmnCompleted);
     expect(errorOf(answer)?.code).toBe("invalid_response");
     expect(errorOf(answer)?.decode).toMatchObject({ path: "/backtest/report/strategy/net_pnl", problem: "decimal_number" });
+  });
+});
+
+describe("the backtest the deploy step shows (B3, DEC-2401)", () => {
+  it("is the fixtures' completed run of exactly that version", () => {
+    expect(backtestOfVersion(VERSION.lmn)).toBe(BACKTEST_IDS.lmnCompleted);
+  });
+
+  it("is none for a version whose only run was refused, for a version with no run, and for a research-agent run (PX-9 (a))", () => {
+    expect(backtestOfVersion(VERSION.btc)).toBeNull();
+    expect(backtestOfVersion(VERSION.swing)).toBeNull();
+    expect(backtestOfVersion(`sha256:${"ef".repeat(32)}`)).toBeNull();
   });
 });

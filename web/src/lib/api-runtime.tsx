@@ -270,12 +270,33 @@ export function ApiRuntimeProvider({
     return request;
   }, []);
 
+  const [setUps] = useState<Runtime["setUps"]>([]);
+  const createVersion = useCallback<Runtime["createVersion"]>((request) => {
+    void request;
+    throw new Error("Unimplemented: E10-11");
+  }, []);
+  const confirmVersion = useCallback<Runtime["confirmVersion"]>((setUpId, record, stepUp) => {
+    void setUpId;
+    void record;
+    void stepUp;
+    throw new Error("Unimplemented: E10-11");
+  }, []);
+  const deployVersion = useCallback<Runtime["deployVersion"]>((setUpId, record) => {
+    void setUpId;
+    void record;
+    throw new Error("Unimplemented: E10-12");
+  }, []);
+  const backtestFor = useCallback<Runtime["backtestFor"]>((version) => {
+    void version;
+    throw new Error("Unimplemented: E10-12");
+  }, []);
+
   /** `GET /backtests/{id}` (DEC-2400): read when a screen asks, not with the workspace's refresh, since no list names them. */
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, deployments, mandateChanges, send, respond, deploy, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, deployments, mandateChanges, send, respond, deploy, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

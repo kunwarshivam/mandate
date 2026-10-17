@@ -9,6 +9,7 @@ import { RESTRICTIONS } from "./restrictions";
 import { type BacktestRead, backtestNotFound, servedBacktest } from "@/api/backtest";
 import { servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView } from "@/api/read-models";
+import type { Applies, Classification } from "@/api/confirm";
 
 /**
  * A stand-in for the workspace deployment. Commands and approval responses are held in memory
@@ -89,6 +90,78 @@ export interface Deployment {
   record: DeployRecord;
 }
 
+/**
+ * One step of setting up an agent, as its own record (DEC-2401). `recorded` once the journal has it;
+ * `rejected`: refused, and `reason` says why in words (`rule` names the rule for the record, never the
+ * sentence, C-6); `undelivered`: nothing was recorded, for `reason` (`not_sent` when the deployment
+ * does not take this step from here yet); `unknown`: taken, with no journal entry back.
+ */
+export type StepPhase = "sent" | "recorded" | "rejected" | "undelivered" | "unknown";
+
+export interface SetUpStep {
+  phase: StepPhase;
+  sentAt: Iso;
+  recordedAt?: Iso;
+  reason?: string;
+  rule?: string;
+}
+
+/** Step 1, `MandateVersionCreated` (spec §4.1): the version, its base, its classification against it, and its validation. */
+export interface VersionStep extends SetUpStep {
+  /** The version it is classified against; a new agent's first version has none. */
+  base: ContentRef | null;
+  /** Set once recorded. */
+  classification: Classification | null;
+  /** True once recorded: a version is created only from a passing validation. */
+  validated: boolean;
+}
+
+/**
+ * What A5 showed when the owner confirmed (brief §4.1, mandate spec §10): every line of the record
+ * screen in order, every path it confirmed (journal rule 18), and the classification it showed.
+ */
+export interface ConfirmRecord {
+  screen: "A5";
+  environment: ShownEnvironment;
+  shown: string[];
+  paths: string[];
+  classification: Classification;
+}
+
+/** Step 2, `MandateConfirmed` (spec §5.1). */
+export interface ConfirmStep extends SetUpStep {
+  record: ConfirmRecord;
+  /** The digest the passkey check was bound to, or `null` when none ran. */
+  stepUp: ContentRef | null;
+  /** The server's classification and when the version applies, once the API answers (§5.1). */
+  classification?: Classification;
+  applies?: Applies;
+}
+
+/** What B3 showed when the owner deployed: every line, and the backtest it showed, if any. Paper only. */
+export interface DeployToPaperRecord {
+  screen: "B3";
+  environment: "paper";
+  shown: string[];
+  backtestId: string | null;
+}
+
+/** Step 3, `AgentDeployed` or `DeploymentRejected` (spec §4.2). */
+export interface DeployStep extends SetUpStep {
+  record: DeployToPaperRecord;
+}
+
+/** One agent's set-up: its version and the three steps, each shown only once the one before it is recorded. */
+export interface SetUp {
+  id: string;
+  /** The agent's id once deployed; `""` where the deployment assigns it. */
+  agentId: string;
+  version: ContentRef;
+  created: VersionStep;
+  confirmed: ConfirmStep | null;
+  deployed: DeployStep | null;
+}
+
 /** What the change review showed when the owner confirmed (brief §4.1): every line, in order. */
 export interface ChangeRecord {
   screen: "A6";
@@ -130,6 +203,15 @@ export interface Runtime {
   send: (kind: CommandKind, agentId: string | null, record?: CommandRecord) => Command;
   respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => void;
   deploy: (request: NewAgent, record: DeployRecord) => Deployment;
+  setUps: SetUp[];
+  /** Step 1: `POST /mandate-drafts/{id}/versions`. */
+  createVersion: (request: NewAgent) => SetUp;
+  /** Step 2: `POST /mandate-versions/{hash}/confirm`, with the digest the passkey check was bound to. */
+  confirmVersion: (setUpId: string, record: ConfirmRecord, stepUp: ContentRef | null) => void;
+  /** Step 3: `POST /agents`, to paper only. */
+  deployVersion: (setUpId: string, record: DeployToPaperRecord) => void;
+  /** The completed backtest of a version the screen shows at deployment, or `null`. */
+  backtestFor: (version: ContentRef) => string | null;
   changeMandate: (proposal: Proposal, origin: Origin, record: ChangeRecord) => MandateChangeRequest;
   /** One backtest (`GET /backtests/{id}`, DEC-2400): the fixture's served body or the API's answer, through the same decoder. */
   readBacktest: (backtestId: string) => Promise<BacktestRead>;
@@ -455,6 +537,27 @@ export function RuntimeProvider({
     [reachable, silent, recordAfterMs, recorded],
   );
 
+  const [setUps] = useState<SetUp[]>([]);
+  const createVersion = useCallback((request: NewAgent): SetUp => {
+    void request;
+    throw new Error("Unimplemented: E10-11");
+  }, []);
+  const confirmVersion = useCallback((setUpId: string, record: ConfirmRecord, stepUp: ContentRef | null) => {
+    void setUpId;
+    void record;
+    void stepUp;
+    throw new Error("Unimplemented: E10-11");
+  }, []);
+  const deployVersion = useCallback((setUpId: string, record: DeployToPaperRecord) => {
+    void setUpId;
+    void record;
+    throw new Error("Unimplemented: E10-12");
+  }, []);
+  const backtestFor = useCallback((version: ContentRef): string | null => {
+    void version;
+    throw new Error("Unimplemented: E10-12");
+  }, []);
+
   /** A fixture backtest in its served shape, through the API's own decoder; an id no fixture holds is the API's 404. */
   const readBacktest = useCallback(async (backtestId: string): Promise<BacktestRead> => {
     const body = servedBacktestFixture(backtestId);
@@ -462,8 +565,8 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest }),
-    [ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate, readBacktest],
+    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [ws, now, reachable, commands, responses, deployments, mandateChanges, send, respond, deploy, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
