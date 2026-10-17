@@ -24,7 +24,7 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | objectstore | mutants | schema-mutants | cell | sweep; or one part
+                        postgres | objectstore | mutants | schema-mutants | cell | cell-demo | sweep; or one part
                         of test: test-nextest | test-doc | test-rh-sim | test-python. Tests,
                         pending tests, doctests, the rehearsal, Postgres and object-store runs and `portable` run over
                         the crates the diff selects (DEC-1190); with no diff base, all of them
@@ -68,6 +68,9 @@ commands:
                         drill still holds
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
                         ready and what waits on its lane, then web/ at 127.0.0.1:4317
+  cell demo --scenario demo
+                        the demo's six steps in order on the local cell: each gesture on main run
+                        in the cell, each missing link named by its PR or story (E21-54)
   cell down             delete the local cell
   cell generate [--write]
                         the Compose file and the journal's roles file from processes.json
@@ -265,6 +268,7 @@ fn run() -> Result<()> {
         ["cell", "down"] => cell::down(),
         ["cell", "demo"] => cell::demo(true),
         ["cell", "demo", "--no-web"] => cell::demo(false),
+        ["cell", "demo", "--scenario", name] => cell::scenario::run(name),
         ["cell", "generate"] => cell::generate(false),
         ["cell", "generate", "--write"] => cell::generate(true),
         ["cell", "drill", rest @ ..] => {
@@ -309,6 +313,7 @@ fn ci(job: &str) -> Result<()> {
         "portable" => portable(),
         "select" => ci_select(),
         "cell" => cell::ci(),
+        "cell-demo" => cell::scenario::ci(),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -588,8 +593,9 @@ fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<
     Ok(args)
 }
 
-/// The Postgres journal tests against a real database (ADR-0001 ES-08), `mandate-journal-pg`'s and
-/// the CLI's control journal's (P0, DEC-520). `test` runs them too, but they skip there unless
+/// The Postgres journal tests against a real database (ADR-0001 ES-08), `mandate-journal-pg`'s,
+/// the CLI's control journal's (P0, DEC-520), and the dispatcher's (DEC-2500 item 8). `test` runs
+/// them too, but they skip there unless
 /// `MANDATE_PG_URL` is set; here they must run.
 fn postgres() -> Result<()> {
     if env::var_os(PG_URL).is_none() {
@@ -731,9 +737,10 @@ const BINARY_COUPLINGS: [(&str, &str); 1] = [(RH_SIM_BIN_ENV, "mandate-rh-sim")]
 /// path, so no path matches it.
 const BINARY_REFERENCE: &str = "bin:";
 
-/// The packages whose tests need the database (ADR-0001 ES-08, DEC-520): `cargo xtask ci postgres`
-/// runs those of them the selection holds.
-const PG_TESTED: [&str; 2] = ["mandate-journal-pg", "mandate-cli"];
+/// The packages whose tests need the database (ADR-0001 ES-08, DEC-520), the dispatcher's journal
+/// adapter among them (E8-10 slice D10a, DEC-2500 item 8): `cargo xtask ci postgres` runs those of
+/// them the selection holds.
+const PG_TESTED: [&str; 3] = ["mandate-journal-pg", "mandate-cli", "mandate-dispatcher"];
 
 /// Whether `path` is `entry`, lies under it when `entry` names a directory (ends in `/`), or
 /// starts with it when `entry` ends in `*`.
@@ -15221,10 +15228,11 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            12,
+            13,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, and `cell`"
+             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, and \
+             `cell-demo` (DEC-2002)"
         );
         for checkout in checkouts {
             assert!(
