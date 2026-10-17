@@ -291,6 +291,17 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The research agent's inputs beyond prices (E17-7, data-plane spec §4, DEC-996): the vetted-source
+# allowlist, news and filings records, their typed readers, and the guarded fetchers. Layer 6,
+# above mandate-research, whose source and drift types it fills, and level with the executor, so
+# neither the executor nor anything below it (the builder, the gate, accounting) can reach its
+# untrusted text (DP-8). Pure: the HTTPS transport is mandate-sources-http's.
+[crates.mandate-sources]
+layer = 6
+safety_critical = true
+pure = true
+allowed_external = ["secrecy", "serde", "serde_json", "thiserror", "toml"]
+
 [crates.mandate-marketdata]
 layer = 6
 safety_critical = false

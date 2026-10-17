@@ -2050,6 +2050,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-sources"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-research",
+ "mandate-time",
+ "proptest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
 name = "mandate-spec"
 version = "0.0.0"
 dependencies = [
