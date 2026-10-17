@@ -5,8 +5,8 @@
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_cp_agent::{
-    HandOver, Ident, Instruction, InstructionSink, KeyKind, MessageKind, PinnedKeys, Refusal,
-    RefusalReason, Site, Verified, receive, signed_bytes,
+    CatalogKind, Feature, HandOver, Ident, Instruction, InstructionSink, KeyKind, MessageKind,
+    PinnedKeys, Refusal, RefusalReason, Site, Verified, WithdrawalReason, receive, signed_bytes,
 };
 use proptest::prelude::*;
 use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -403,6 +403,16 @@ fn the_spellings_are_the_journal_specs() {
         assert_eq!(reason.as_str(), spelling);
     }
     assert_eq!(MessageKind::Unknown.as_str(), "unknown");
+    assert_eq!(Feature::ConnectedClients.as_str(), "connected_clients");
+    assert_eq!(Feature::Hybrid.as_str(), "hybrid");
+    assert_eq!(WithdrawalReason::Defect.as_str(), "defect");
+    assert_eq!(WithdrawalReason::Security.as_str(), "security");
+    assert_eq!(WithdrawalReason::Superseded.as_str(), "superseded");
+    assert_eq!(CatalogKind::ConnectorPackage.as_str(), "connector_package");
+    assert_eq!(
+        CatalogKind::ModelRegistryEntry.as_str(),
+        "model_registry_entry"
+    );
 }
 
 proptest! {
