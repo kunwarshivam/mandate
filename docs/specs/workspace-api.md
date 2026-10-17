@@ -481,48 +481,88 @@ shedding applies to the API-7 operations, which run on the reserved pool of API-
 
 ### 3.11 The server process (E21-31)
 
-The API is served by one binary, `mandate-api-server`, one Deployment per workspace deployment
-behind the cell's one ingress ([DEC-978](../project/decisions/DEC-978.md)). It holds no route of
-its own: it serves the operations of §4 as their stories land.
+The API is served by one binary, `mandate-api-server`, behind the cell's one ingress
+([DEC-978](../project/decisions/DEC-978.md)). It holds no route of its own: it serves the
+operations of §4 as their stories land. Until sessions live in Postgres it runs as **one replica**
+per workspace deployment (item 6).
 
-1. **Bind.** `--bind <ip>:<port>` must be a loopback address, or equal `--pod-address`, the
-   pod's own address. The unspecified addresses and every other address refuse the start.
-2. **Environment.** Settings come from named variables that hold no secret:
-   `MANDATE_API_DATABASE_URL` (refused if it carries a password), `MANDATE_API_ISSUER`,
-   `MANDATE_API_AUDIENCE`, `MANDATE_API_JWKS_URL`, `MANDATE_API_APP_ORIGIN`, and
-   `MANDATE_API_SUBJECT_LINKS`. A variable whose name contains `SECRET`, `PASSWORD`, `TOKEN`, or
-   `KEY` (ASCII case-insensitive) refuses the start (DEC-822 item 4). The session signing key is
-   the file `$CREDENTIALS_DIRECTORY/session-signing-key`: at least 32 bytes, refused when group- or
+1. **Bind.** `--bind <ip>:<port>`, the API's listener, and `--probe-bind <ip>:<port>`, the probes'
+   listener, must each be a loopback address or equal `--pod-address`, the pod's own address. The
+   unspecified addresses and every other address refuse the start. The ingress routes only the API
+   listener; the probes are never on it.
+2. **Environment.** Settings come from named variables: `MANDATE_API_DATABASE_URL`,
+   `MANDATE_API_ISSUER`, `MANDATE_API_AUDIENCE`, `MANDATE_API_JWKS_URL`, `MANDATE_API_APP_ORIGIN`,
+   and `MANDATE_API_SUBJECT_LINKS`. As a guard against a secret placed in the environment (DEC-822
+   item 4), a variable whose name contains `SECRET`, `PASSWORD`, `TOKEN`, or `KEY` (ASCII
+   case-insensitive) refuses the start, and so does a database URL that carries a password: the
+   API reaches Postgres over its local socket by peer authentication, or with a credential file.
+   The guard reads names, not values. The session signing key is the file
+   `$CREDENTIALS_DIRECTORY/session-signing-key`: at least 32 bytes, refused when group- or
    world-readable.
-3. **Probes.** `GET /livez` and `GET /readyz`, outside `/v1`, unauthenticated, reading no data
-   (API-1's exemption covers both). The body is `{"status": "live"}`, `{"status": "ready"}`, or,
-   with 503, `{"status": "not_ready"}`. Readiness is the process lifecycle's (E21-28). A process
-   that is not ready still serves every API-7 operation.
-4. **Drain.** On SIGTERM the process reports `not_ready`, finishes what is in flight, answers each
-   new call that is not an API-7 operation with `busy`, and keeps serving API-7 operations. It exits
-   when nothing is in flight, or at the drain bound (infrastructure §7.3, Proposed 90 seconds).
-5. **Browser sessions** (identity spec §6.2). `POST /v1/sessions` (§4.10) takes the managed
-   issuer's access token, verified as identity spec §6.1 says, under §3.3 item 1's `Origin` and
-   `X-Mandate-Request` checks. The subject maps to a user principal through the subject link, a
-   root-owned file of `sha256:` digests of the canonical `{"issuer", "subject"}` object, each with
-   its principal's ULID; no raw subject is stored. The server opens a session record and sets the
-   §3.3 item 5 cookie, `__Host-mandate_session`, whose value is an opaque session id and a fresh
-   32-byte secret authenticated with HMAC-SHA256 under the session signing key; the record keeps
-   only the secret's digest. The access lifetime is five minutes: `POST /v1/sessions/refresh`, with
-   the cookie and a fresh access token for the same subject, rotates the secret; a token that does
-   not verify or names another subject ends the session (`refresh_failed`), and a rotated secret
-   presented again ends it (`refresh_reuse`). `DELETE /v1/sessions/current` ends it (`sign_out`).
-   Every refusal on these routes is the one 401. Until a Postgres store exists, records live in the
-   process and a restart ends them (fail closed).
-6. **Memberships.** Each request folds journal §9.12's records from the workspace's control stream
+3. **Probes.** On the probes' listener only, `GET /livez` and `GET /readyz`, unauthenticated and
+   reading no data. The body is `{"status": "live"}`, `{"status": "ready"}`, or, with 503,
+   `{"status": "not_ready"}`; any other request there is 404 with no body. Readiness is the
+   process lifecycle's (E21-28); until that lands, the process is ready once serving and not
+   draining. A process that is not ready still serves every API-7 operation.
+4. **Drain.** On SIGTERM the process reports `not_ready`, finishes what is in flight, and answers
+   each new authenticated call that is not an API-7 operation with `busy`; an unauthenticated call
+   still gets the one 401 first (API-1). API-7 operations are served until it exits. It exits when
+   nothing is in flight, or at its drain bound, Proposed 90 seconds by analogy with infrastructure
+   §7.3. A kill switch still in flight at the bound has either committed or not; its client
+   resolves it by §5.5 and the same key (API-4, API-13).
+5. **Opening a browser session** (identity spec §6.2). `POST /v1/sessions` takes `{access_token}`,
+   the managed issuer's access token, which the web app's sign-in client already holds on the app
+   origin (DEC-211); the API adds no token storage of its own.
+   - It is a browser-only route: `Origin` must equal the app origin and `X-Mandate-Request: 1`
+     must be present, or the call is refused 403 `forbidden` before the token is read (§3.3 item
+     1's login half; a missing `Origin` is refused too).
+   - The token is verified as identity spec §6.1 says: the one configured issuer and audience, its
+     published keys by `kid`, ES256 only for the managed issuer. The subject maps to a user
+     principal through the subject link (item 7). Any failure is the one 401.
+   - The server opens a session record with identity spec §6.2's business limits for every
+     session (idle 1 hour, absolute 12 hours), the strictest, until the organization's kind is
+     read from its store. It sets the §3.3 item 5 cookie, `__Host-mandate_session`: an opaque
+     session id and a fresh 32-byte secret, authenticated with HMAC-SHA256 under the session
+     signing key. The record keeps only the secret's digest. A cookie presented with the call ends
+     that earlier session (`sign_out`) and is replaced, never reused (no fixation).
+   - At most 16 sessions per principal: opening a 17th ends the oldest (`sign_out`).
+6. **Keeping it.** The record's access lifetime is five minutes. `POST /v1/sessions/refresh`, with
+   the cookie, `Origin`, and `X-Mandate-Request`, takes `{access_token}` or `{access_token: null}`:
+   - a token that verifies, for the session's subject: a granted refresh; the secret rotates and a
+     new cookie is set;
+   - `null`, sent when the web app's sign-in client could not reach the provider, or the server
+     failing to fetch the issuer's keys: an outage (identity spec §6.4 route 1). The session keeps
+     only pause and the kill switch until its absolute lifetime ends or a later refresh is granted.
+     The caller can only narrow its own session this way;
+   - a token that does not verify, or names another subject: a failed refresh, which ends the
+     session (`refresh_failed`);
+   - a rotated secret presented again ends the session (`refresh_reuse`).
+
+   So a session's full reach never outlasts the last access token it was given by more than five
+   minutes. `DELETE /v1/sessions/current` ends it (`sign_out`) and clears the cookie. Records live
+   in the process until a Postgres store exists: a restart, a deploy included, ends every session.
+   The user signs in again; with the identity provider down, pause and the kill switch remain
+   through the host CLI (identity spec §6.4 route 3) until route 2's reduction-only sessions are
+   served.
+7. **The subject link** (interim, for the demo cell's paper workspace only). Identity spec §3.3 keeps
+   IdP subjects in the personal-data vault; until that store serves links, the server reads the
+   file `MANDATE_API_SUBJECT_LINKS` at each sign-in, refused like the signing key when group- or
+   world-writable or not owned by the process's user or root. One line per link: `sha256:<hex>` of
+   the canonical `{"issuer", "subject"}` object, a space, and the principal's ULID. It holds no raw
+   subject. A removed line takes effect at the next sign-in or refresh.
+8. **Memberships.** Each request folds journal §9.12's records from the workspace's control stream
    (identity spec ID-3, uncached). A failed read is a failed membership read, never "no
    membership".
+9. **Not journaled yet.** Identity spec §6.2 commits `SessionOpened` at every sign-in, which drives
+   the new-device notice (ID-14). The journal does not register `SessionOpened` or `SessionRevoked`
+   yet; until it does, these routes journal nothing and no new-device notice is sent (DEC-978
+   item 10, Proposed).
 
 ---
 
 ## 4. Resources and operations
 
-Every path is under `/v1/workspaces/{workspace_id}` except those §4.10 lists: `/v1/me/*`, `/v1/sessions*`, `/v1/reduction-sessions*`, and the OAuth callback of §4.5; and the probes of §3.11, outside `/v1`. "Event" names the control-stream event the call
+Every path is under `/v1/workspaces/{workspace_id}` except those §4.10 lists: `/v1/me/*`, `/v1/sessions*`, `/v1/reduction-sessions*`, and the OAuth callback of §4.5; the probes of §3.11 are on their own listener. "Event" names the control-stream event the call
 commits (journal spec §9). **Journal change** marks an event or member the journal spec does not
 define yet; §11's E10-15 adds them before the operation ships.
 
@@ -572,11 +612,16 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Resolve a notice | `GET /notices/{notice_id}` | `RecordsAccessed` | §3.9 |
 
 The inbox and the single read return `read-models/approvals` and `read-models/approval`
-([DEC-979](../project/decisions/DEC-979.md)): each approval's id, agent, state (`pending`, `acted`,
-`skipped`, `timed_out`, `canceled`, folded from the agent stream), `requested_at`, `deadline` (the
-journaled risk-clock seconds), and `content_hash`; the single read adds `content`. The inbox lists
-pending approvals by deadline, then resolved ones, most recent first; `state` other than `pending`
-or `resolved` is `invalid`. More of D5 and D6 arrives as optional members.
+([DEC-979](../project/decisions/DEC-979.md)): each approval's id, agent, state, `requested_at`,
+`deadline` (the journaled risk-clock seconds), and `content_hash`; the single read adds `content`.
+The state is folded from the agent stream, and the first terminal event wins: `pending` until
+re-validation acts (`acted`) or the approval ends `skipped` (by the owner's Skip or by
+re-validation), `timed_out`, or `canceled`. An admitted grant still awaiting re-validation, and a
+`refused` or `counted` answer, leave it `pending`; so does a deadline that has passed before the
+runtime journals `ApprovalTimedOut`, and a response to it then is refused `late` by the runtime.
+The inbox lists every pending approval by deadline, then the 100 most recently requested resolved
+ones; `state` other than `pending` or `resolved` is `invalid`. "The grants so far", and the rest of
+D5 and D6, are planned as optional members.
 
 ### 4.4 Delegations and autonomy
 
@@ -645,7 +690,9 @@ The first shapes served are `read-models/agents` and `read-models/agent`
 ([DEC-979](../project/decisions/DEC-979.md)): each agent `AgentDeployed` names on the control stream,
 with its environment, deployed mandate version, `deployed_at`, `mode` (the last `AgentModeChanged`'s
 `to`, `stopped` after `AgentStopped`, `null` before either: not reported, never read as `normal`),
-and `pending_approvals`. The rest of D2 arrives as optional members.
+and `pending_approvals`. An owner's hold shows as the mode it sets, `exits_only`. The rest of D2
+(restrictions, limits and headroom, the ladder, the floor, the universe) is planned as optional
+members.
 
 ### 4.8 Journal and audit (audit explorer backend)
 
@@ -1161,11 +1208,11 @@ they sit outside the matrix, DEC-816 item 7). Every failure of the last is the o
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
-| Open a browser session | `POST /v1/sessions` | — | §3.11 item 5. Body `{access_token}`; answers 204 with the session cookie. Every refusal is the one 401 |
-| Refresh it | `POST /v1/sessions/refresh` | — | §3.11 item 5. The cookie and `{access_token}` for the same subject; 204 with the rotated cookie |
-| Sign out | `DELETE /v1/sessions/current` | — | §3.11 item 5. Ends the session; 204 and the cookie cleared |
+| Open a browser session | `POST /v1/sessions` | — | §3.11 item 5. Body `{access_token}`; answers 204 with the session cookie. A failed `Origin` or `X-Mandate-Request` check is 403 `forbidden`; every other refusal is the one 401 |
+| Refresh it | `POST /v1/sessions/refresh` | — | §3.11 item 6. The cookie and `{access_token}` for the same subject, or `null` on a provider outage; 204, with the rotated cookie on a grant |
+| Sign out | `DELETE /v1/sessions/current` | — | §3.11 item 6. Ends the session; 204 and the cookie cleared |
 
-`SessionOpened` and `SessionRevoked` (identity spec §12.1) are journaled once the identity lanes register them; until then these routes write nothing to the journal.
+`SessionOpened` and `SessionRevoked` (identity spec §12.1) are journaled once the journal registers them (§3.11 item 9).
 
 ### 4.11 Notification addresses (web push)
 

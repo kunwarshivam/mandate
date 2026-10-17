@@ -4922,3 +4922,11 @@ From the Robinhood connector correctness follow-ups ([DEC-956](decisions/DEC-956
   refuses every order of an instrument with no registered ticker, exits included; the live wiring
   that builds `RobinhoodConnector` must pass the run's `(asset_id, symbol)` pairs, with a startup
   check that the pinned instrument has one.
+- **Journal the API's sign-ins (DEC-978 item 10, E9-7).** The workspace API server (E21-31) opens
+  and ends browser sessions without journaling them, because the journal registers neither
+  `SessionOpened` nor `SessionRevoked` (identity spec §12.1). Register both, with test vectors, in
+  a journal spec change, then journal each sign-in and end, with `first_seen_device`, so the
+  new-device notice (ID-14) is sent; workspace API spec §3.11 item 9.
+- **Sessions in Postgres (DEC-978 item 6).** The API holds session records in its process, so it
+  runs as one replica and a restart ends every session. Move them to a Postgres store with the
+  workspace's row-level security before a second replica is deployed.
