@@ -1585,6 +1585,7 @@ dependencies = [
  "mandate-authn",
  "mandate-canon",
  "mandate-identity",
+ "mandate-journal",
  "mandate-time",
  "reqwest",
  "ring",

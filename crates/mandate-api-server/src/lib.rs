@@ -28,6 +28,7 @@ pub mod config;
 pub mod http;
 pub mod keys;
 pub mod lifecycle;
+pub mod reads;
 pub mod session;
 pub mod subject;
 pub mod token;
