@@ -34,6 +34,7 @@ pub mod db;
 pub mod deploy;
 pub mod download;
 pub mod gestures;
+pub mod identity;
 pub mod inbox;
 pub mod inspect;
 pub mod journal;
@@ -76,9 +77,13 @@ pub enum Command {
     /// Store a model's content object and register it on the workspace control stream, in paper.
     #[command(subcommand)]
     Model(register::ModelCommand),
-    /// Open the workspace control stream, once, in paper.
+    /// Open the workspace control stream, once, in paper, or write its founding grant.
     #[command(subcommand)]
     Workspace(workspace::WorkspaceCommand),
+    /// Link an identity provider's subject to a user principal in the API server's subject-link
+    /// file.
+    #[command(subcommand)]
+    Identity(identity::IdentityCommand),
     /// Record a checked broker connection on the workspace control stream.
     #[command(subcommand)]
     Connection(connection::ConnectionCommand),
