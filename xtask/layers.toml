@@ -165,7 +165,7 @@ layer = 3
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
-forbidden_internal = ["mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-cli", "mandate-paper", "mandate-risk", "mandate-approval", "mandate-dispatcher"]
+forbidden_internal = ["mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-cli", "mandate-paper", "mandate-agentd", "mandate-risk", "mandate-approval", "mandate-dispatcher", "mandate-webpush", "mandate-push-relay", "mandate-connections", "mandate-vault-local", "mandate-api", "mandate-authn"]
 
 [crates.mandate-push-relay]
 layer = 3

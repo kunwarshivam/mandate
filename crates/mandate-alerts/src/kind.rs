@@ -35,6 +35,7 @@ pub enum AlertKind {
     OrderUnknownPastLookup,
     DuplicateOrder,
     MarketDataStale,
+    MarketDataStaleAtScale,
     ModelSpendCap,
     ModelGatewayDegraded,
     JournalAppendDegraded,
@@ -55,7 +56,7 @@ pub enum AlertKind {
 }
 
 impl AlertKind {
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::ReconciliationMismatch,
         Self::UnprotectedIntervalLimit,
         Self::ProtectionUnattributed,
@@ -66,6 +67,7 @@ impl AlertKind {
         Self::OrderUnknownPastLookup,
         Self::DuplicateOrder,
         Self::MarketDataStale,
+        Self::MarketDataStaleAtScale,
         Self::ModelSpendCap,
         Self::ModelGatewayDegraded,
         Self::JournalAppendDegraded,
@@ -98,6 +100,7 @@ impl AlertKind {
             Self::OrderUnknownPastLookup => "order_unknown_past_lookup",
             Self::DuplicateOrder => "duplicate_order",
             Self::MarketDataStale => "market_data_stale",
+            Self::MarketDataStaleAtScale => "market_data_stale_at_scale",
             Self::ModelSpendCap => "model_spend_cap",
             Self::ModelGatewayDegraded => "model_gateway_degraded",
             Self::JournalAppendDegraded => "journal_append_degraded",
@@ -136,6 +139,7 @@ impl AlertKind {
             | Self::UnprotectedIntervalLimit
             | Self::WatchdogFired
             | Self::OrderUnknownPastLookup
+            | Self::MarketDataStaleAtScale
             | Self::JournalAppendDegraded
             | Self::StandbyLost
             | Self::UnexpectedFenced
@@ -162,7 +166,7 @@ impl AlertKind {
             | Self::KillSwitchAutomatedWorkspace
             | Self::GlobalKillSwitch => "RB-03",
             Self::OrderUnknownPastLookup | Self::DuplicateOrder => "RB-04",
-            Self::MarketDataStale => "RB-05",
+            Self::MarketDataStale | Self::MarketDataStaleAtScale => "RB-05",
             Self::ModelSpendCap | Self::ModelGatewayDegraded => "RB-06",
             Self::JournalAppendDegraded | Self::StandbyLost => "RB-07",
             Self::UnexpectedFenced => "RB-08",
@@ -193,6 +197,7 @@ impl AlertKind {
             Self::OrderUnknownPastLookup => "An order is unknown beyond its lookup window.",
             Self::DuplicateOrder => "A duplicate order was detected.",
             Self::MarketDataStale => "A market data feed is stale.",
+            Self::MarketDataStaleAtScale => "Several market data feeds are stale.",
             Self::ModelSpendCap => "A research model spend cap was reached.",
             Self::ModelGatewayDegraded => "The model gateway is failing or refusing calls.",
             Self::JournalAppendDegraded => "Journal appends are failing or slow.",

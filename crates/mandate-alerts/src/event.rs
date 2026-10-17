@@ -13,7 +13,7 @@ use crate::{AlertError, AlertKind};
 ///   limit; with `action` `watchdog`: the triggered-stop watchdog fired.
 /// - `GateDecided` with `reason_code` `protection_unattributed`: openings held.
 /// - `KillSwitchActivated`: informational, or SEV-1 when its `scope` is `workspace` and its
-///   `initiator` is not the owner.
+///   `initiator` is not the owner: a risk limit or the platform operator, or none named.
 /// - `VerificationRun` with `result` `fail` or `incomplete`.
 /// - `AnchorComputed` whose `token` is null: an anchor or timestamping gap.
 /// - `ClockToleranceExceeded`, whatever it holds.
@@ -21,8 +21,10 @@ use crate::{AlertError, AlertKind};
 /// - `OwnerAlertSent` with `kind` `data_feed_down` or `spend_cap`.
 ///
 /// # Errors
-/// [`AlertError::Unreadable`] for a body that does not parse or holds no payload object. The
-/// caller treats that as the journal's own integrity question, not as no alert.
+/// [`AlertError::Unreadable`] for a body that does not parse or holds no payload object, and for
+/// a `ReconciliationRun`, `ProtectionChanged`, `VerificationRun`, `ApprovalDelivered`, or
+/// `OwnerAlertSent` whose discriminating member is absent or not text, so a dropped member never
+/// silences an alert. The caller treats that as the journal's own integrity question.
 pub fn from_event(row: &StoredEvent) -> Result<Option<AlertKind>, AlertError> {
     let body = mandate_canon::parse(&row.body).map_err(|_| AlertError::Unreadable)?;
     let payload = body
@@ -30,13 +32,14 @@ pub fn from_event(row: &StoredEvent) -> Result<Option<AlertKind>, AlertError> {
         .filter(|p| p.as_object().is_some())
         .ok_or(AlertError::Unreadable)?;
     let text = |member: &str| payload.get(member).and_then(Value::as_str);
+    let required = |member: &str| text(member).ok_or(AlertError::Unreadable);
     let kind = match row.event_type.as_str() {
         "ReconciliationRun" => {
-            (text("result") == Some("mismatch")).then_some(AlertKind::ReconciliationMismatch)
+            (required("result")? == "mismatch").then_some(AlertKind::ReconciliationMismatch)
         }
-        "ProtectionChanged" => match text("action") {
-            Some("interval_limit") => Some(AlertKind::UnprotectedIntervalLimit),
-            Some("watchdog") => Some(AlertKind::WatchdogFired),
+        "ProtectionChanged" => match required("action")? {
+            "interval_limit" => Some(AlertKind::UnprotectedIntervalLimit),
+            "watchdog" => Some(AlertKind::WatchdogFired),
             _ => None,
         },
         "GateDecided" => (text("reason_code") == Some("protection_unattributed"))
@@ -49,9 +52,9 @@ pub fn from_event(row: &StoredEvent) -> Result<Option<AlertKind>, AlertError> {
                 Some(AlertKind::KillSwitchActivated)
             }
         }
-        "VerificationRun" => match text("result") {
-            Some("fail") => Some(AlertKind::VerificationFailed),
-            Some("incomplete") => Some(AlertKind::VerificationIncomplete),
+        "VerificationRun" => match required("result")? {
+            "fail" => Some(AlertKind::VerificationFailed),
+            "incomplete" => Some(AlertKind::VerificationIncomplete),
             _ => None,
         },
         "AnchorComputed" => {
@@ -59,11 +62,11 @@ pub fn from_event(row: &StoredEvent) -> Result<Option<AlertKind>, AlertError> {
         }
         "ClockToleranceExceeded" => Some(AlertKind::ClockOutOfTolerance),
         "ApprovalDelivered" => {
-            (text("status") == Some("failed")).then_some(AlertKind::ApprovalNotDelivered)
+            (required("status")? == "failed").then_some(AlertKind::ApprovalNotDelivered)
         }
-        "OwnerAlertSent" => match text("kind") {
-            Some("data_feed_down") => Some(AlertKind::MarketDataStale),
-            Some("spend_cap") => Some(AlertKind::ModelSpendCap),
+        "OwnerAlertSent" => match required("kind")? {
+            "data_feed_down" => Some(AlertKind::MarketDataStale),
+            "spend_cap" => Some(AlertKind::ModelSpendCap),
             _ => None,
         },
         _ => None,

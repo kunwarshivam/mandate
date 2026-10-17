@@ -14,7 +14,7 @@
   - every kind fires from its fixture, with and without canary members;
   - records and signals that are not alerts raise nothing, and thresholds hold at their bounds;
   - the kill switch is SEV-1 only when automated at workspace scope;
-  - an unreadable body is an error;
+  - an unreadable body, or one missing its discriminating member, is an error;
   - the payload is the five members and nothing else;
   - ids are fresh and none is raised without entropy;
   - a payload capture of every alert finds no `mandate-notify` canary and no event id;

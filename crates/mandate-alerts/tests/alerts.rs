@@ -3,8 +3,8 @@
 //! or mandate content (OPS-10).
 
 use mandate_alerts::{
-    APPEND_P99_LIMIT_US, AlertError, AlertKind, COLD_EXPORT_LAG_LIMIT_S, CaptureSink, Severity,
-    Signal, from_event, from_signal, payload, rendered, send,
+    APPEND_P99_LIMIT_US, AlertError, AlertKind, COLD_EXPORT_LAG_LIMIT_S, CaptureSink,
+    STALE_FEEDS_AT_SCALE, Severity, Signal, from_event, from_signal, payload, rendered, send,
 };
 use mandate_canon::{Digest, Key, Object, Value, to_canonical};
 use mandate_journal::StoredEvent;
@@ -128,6 +128,9 @@ fn fixture(kind: AlertKind) -> Fixture {
         AlertKind::OrderUnknownPastLookup => Sig(Signal::OrderUnknownPastLookup),
         AlertKind::DuplicateOrder => Sig(Signal::DuplicateOrder),
         AlertKind::MarketDataStale => Event("OwnerAlertSent", vec![("kind", s("data_feed_down"))]),
+        AlertKind::MarketDataStaleAtScale => Sig(Signal::MarketDataStale {
+            feeds: STALE_FEEDS_AT_SCALE,
+        }),
         AlertKind::ModelSpendCap => Event("OwnerAlertSent", vec![("kind", s("spend_cap"))]),
         AlertKind::ModelGatewayDegraded => Sig(Signal::ModelGateway {
             errors: 0,
@@ -182,7 +185,7 @@ fn raised(fixture: &Fixture, with_canaries: bool) -> Option<AlertKind> {
 /// The §8.2 table, typed here from the design rather than from the crate: each kind's severity
 /// and runbook.
 #[rustfmt::skip]
-const TABLE: [(AlertKind, Severity, &str); 27] = [
+const TABLE: [(AlertKind, Severity, &str); 28] = [
     (AlertKind::ReconciliationMismatch, Severity::Sev2, "RB-01"),
     (AlertKind::UnprotectedIntervalLimit, Severity::Sev2, "RB-02"),
     (AlertKind::ProtectionUnattributed, Severity::Sev3, "RB-02"),
@@ -193,6 +196,7 @@ const TABLE: [(AlertKind, Severity, &str); 27] = [
     (AlertKind::OrderUnknownPastLookup, Severity::Sev2, "RB-04"),
     (AlertKind::DuplicateOrder, Severity::Sev1, "RB-04"),
     (AlertKind::MarketDataStale, Severity::Sev3, "RB-05"),
+    (AlertKind::MarketDataStaleAtScale, Severity::Sev2, "RB-05"),
     (AlertKind::ModelSpendCap, Severity::Informational, "RB-06"),
     (AlertKind::ModelGatewayDegraded, Severity::Sev3, "RB-06"),
     (AlertKind::JournalAppendDegraded, Severity::Sev2, "RB-07"),
@@ -320,7 +324,13 @@ fn a_kill_switch_is_sev1_only_when_automated_at_workspace_scope() {
 
 #[test]
 fn signals_alert_only_past_their_thresholds() {
+    assert_eq!(
+        from_signal(Signal::MarketDataStale { feeds: 1 }),
+        Some(AlertKind::MarketDataStale)
+    );
+    assert_eq!(STALE_FEEDS_AT_SCALE, 2);
     let quiet = [
+        Signal::MarketDataStale { feeds: 0 },
         Signal::ModelGateway {
             errors: 0,
             deadline_misses: 0,
@@ -399,6 +409,28 @@ fn signals_alert_only_past_their_thresholds() {
     }
     assert_eq!(APPEND_P99_LIMIT_US, 5_000);
     assert_eq!(COLD_EXPORT_LAG_LIMIT_S, 60);
+}
+
+#[test]
+fn a_record_missing_its_discriminator_is_an_error_not_silence() {
+    for (event_type, member) in [
+        ("ReconciliationRun", "result"),
+        ("ProtectionChanged", "action"),
+        ("VerificationRun", "result"),
+        ("ApprovalDelivered", "status"),
+        ("OwnerAlertSent", "kind"),
+    ] {
+        assert_eq!(
+            from_event(&stored(event_type, &[])),
+            Err(AlertError::Unreadable),
+            "{event_type} without {member}"
+        );
+        assert_eq!(
+            from_event(&stored(event_type, &[(member, Value::Null)])),
+            Err(AlertError::Unreadable),
+            "{event_type} with a null {member}"
+        );
+    }
 }
 
 #[test]

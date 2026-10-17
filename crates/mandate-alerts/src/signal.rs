@@ -6,6 +6,9 @@ use crate::AlertKind;
 
 /// p99 journal append latency above which appends are degraded (journal spec §5.3: 5 ms).
 pub const APPEND_P99_LIMIT_US: u64 = 5_000;
+/// Stale feeds at or above which a stale feed is SEV-2 "at scale" (§8.2 names no number; two is
+/// the conservative reading, DEC-981 item 4).
+pub const STALE_FEEDS_AT_SCALE: u64 = 2;
 /// Cold export lag above which it alerts (journal spec §6.2: 1 minute, before live capital).
 pub const COLD_EXPORT_LAG_LIMIT_S: u64 = 60;
 
@@ -18,8 +21,10 @@ pub enum Signal {
     OrderUnknownPastLookup,
     /// Reconciliation found the same order twice at the broker.
     DuplicateOrder,
-    /// Runtime observations or ingest metrics found a feed stale.
-    MarketDataStale,
+    /// Runtime observations or ingest metrics found this many feeds stale.
+    MarketDataStale {
+        feeds: u64,
+    },
     /// Model gateway errors, deadline misses, and `meter_unavailable` refusals.
     ModelGateway {
         errors: u64,
@@ -65,7 +70,11 @@ pub fn from_signal(signal: Signal) -> Option<AlertKind> {
         Signal::GlobalKillSwitch => Some(AlertKind::GlobalKillSwitch),
         Signal::OrderUnknownPastLookup => Some(AlertKind::OrderUnknownPastLookup),
         Signal::DuplicateOrder => Some(AlertKind::DuplicateOrder),
-        Signal::MarketDataStale => Some(AlertKind::MarketDataStale),
+        Signal::MarketDataStale { feeds: 0 } => None,
+        Signal::MarketDataStale { feeds } if feeds >= STALE_FEEDS_AT_SCALE => {
+            Some(AlertKind::MarketDataStaleAtScale)
+        }
+        Signal::MarketDataStale { .. } => Some(AlertKind::MarketDataStale),
         Signal::ModelGateway {
             errors,
             deadline_misses,

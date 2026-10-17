@@ -18,6 +18,10 @@
 //! record's payload; [`from_signal`] raises the rest from a [`Signal`], which holds only counts,
 //! durations, and flags.
 //!
+//! **De-duplication is the caller's.** One cause can raise several alerts: a workspace kill switch
+//! is journaled on every stream it touches, and every opening held for an unattributed leg is its
+//! own gate decision. The cell's alert path (E21-39) groups them; nothing here drops one.
+//!
 //! **Nothing about trading leaves** (`AGENTS.md` rule 6, OPS-10). An [`Alert`] holds an id
 //! minted from a [`mandate_notify::SecureRandom`] source and a kind, and no field for its cause,
 //! so neither the record that raised it nor its stream, instrument, amount, or mandate can reach
@@ -37,7 +41,9 @@ mod signal;
 pub use event::from_event;
 pub use kind::{AlertKind, Severity};
 pub use payload::{Alert, CaptureSink, Sink, payload, rendered, send};
-pub use signal::{APPEND_P99_LIMIT_US, COLD_EXPORT_LAG_LIMIT_S, Signal, from_signal};
+pub use signal::{
+    APPEND_P99_LIMIT_US, COLD_EXPORT_LAG_LIMIT_S, STALE_FEEDS_AT_SCALE, Signal, from_signal,
+};
 
 /// Every way an entry point can refuse. None is ever a reason to act on trading.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
