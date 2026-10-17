@@ -67,7 +67,7 @@ fn document() -> Result<(Value, Mandate, MandateVersion, Value), SpecError> {
 fn each_connection_and_disclosure_record_maps_to_its_fact() -> Result<(), SpecError> {
     let established = obj(vec![
         ("connection_id", s(CONNECTION)),
-        ("broker", s("alpaca")),
+        ("broker", s("robinhood")),
         ("environment", s("live")),
         ("scopes", texts(&["account:write", "trading"])),
     ]);
@@ -76,8 +76,10 @@ fn each_connection_and_disclosure_record_maps_to_its_fact() -> Result<(), SpecEr
         Some(JournaledFact::ConnectionEstablished {
             connection_id: connection()?,
             environment: Environment::Live,
+            broker: Some("robinhood".to_owned()),
         }),
-        "the environment is the record's, `live` here so no default can pass"
+        "the environment and the broker are the record's, `live` and `robinhood` here so no \
+         default can pass"
     );
     assert_eq!(
         mapped(

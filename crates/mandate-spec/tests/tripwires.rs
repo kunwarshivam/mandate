@@ -82,6 +82,7 @@ fn context(previous: Option<&Value>, confirmed: bool) -> ValidationContext {
             mandate_version: None,
         }),
         current_mandate_version: None,
+        stop_limit_asset_classes: mandate_spec::context::stop_limit_asset_classes("alpaca"),
     }
 }
 
