@@ -743,6 +743,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "DecisionMade"
         | "ThesisProposed"
         | "ThesisRevised"
+        | "ThesisInvalidated"
         | "BrokerExchangeRecorded"
         | "FillApplied"
         | "LateFillApplied"

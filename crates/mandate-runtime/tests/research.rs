@@ -2480,7 +2480,7 @@ fn a_judged_invalidation_is_journaled_after_its_call_record_and_before_any_thesi
     );
     assert_eq!(
         verdicts(&lp),
-        vec!["judged".to_owned(), "judged".to_owned()]
+        vec!["admitted".to_owned(), "judged".to_owned()]
     );
     let judged: Vec<&str> = lp
         .shell
@@ -2526,21 +2526,19 @@ fn a_judged_invalidation_is_journaled_after_its_call_record_and_before_any_thesi
     assert_eq!(evidence, vec![SERVICES, SUPPLY], "as the output gave them");
 }
 
-/// §6.7: invalidations are judged in response order and an accepted one ends its thesis, so a
-/// second invalidation of it in the same response names no active thesis.
+/// A final output that invalidates one thesis twice is refused by the harness's strict read
+/// (`duplicate_invalidation`), so nothing of it is judged and no thesis is invalidated twice (HI-6).
+/// §6.7's `unknown_thesis` for a repeat is the agentic loop's, across turns.
 #[test]
-fn a_thesis_invalidated_twice_in_one_response_is_journaled_once() {
+fn a_final_output_invalidating_a_thesis_twice_is_unreadable_and_invalidates_nothing() {
     let mut world = World::open();
     world.active = vec![active_on(MSFT, "MSFT", "01ACTIVE")];
     let lp = judged_with(
         r#"{"theses":[],"invalidations":[{"thesis_id":"01ACTIVE","evidence":[]},{"thesis_id":"01ACTIVE","evidence":[]}]}"#,
         &world,
     );
-    assert_eq!(
-        verdicts(&lp),
-        vec!["judged".to_owned(), "unknown_thesis".to_owned()]
-    );
-    assert_eq!(lp.events("ThesisInvalidated").len(), 1);
+    assert!(verdicts(&lp).is_empty());
+    assert!(lp.events("ThesisInvalidated").is_empty());
 }
 
 /// §6.7's judging order: a response's invalidations are judged first and its theses against what

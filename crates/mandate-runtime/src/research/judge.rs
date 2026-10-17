@@ -14,7 +14,7 @@ use mandate_research::{
     AdmissionFacts, AssetClass, AssetId, ContentHash, Corroboration, Direction, FoldInput, GroupId,
     InstrumentFacts, Invalidation, LineageId, ModelId, ModelVersion, OutputEnvelope,
     ProposedThesis, RefusalReason, ResearchEvent, SchemaDec, SourceId as ResearchSource, Thesis,
-    ThesisEntry, ThesisId, fold_theses,
+    ThesisEntry, ThesisId, WorkingUniverse, fold_theses,
 };
 use mandate_research_run::{CandidateThesis, InstrumentFact, ItemKind, Symbol, parse_output};
 use mandate_time::UtcNanos;
@@ -83,11 +83,13 @@ pub(super) struct ThesisDraft {
     pub(super) output: Option<Value>,
 }
 
-/// What judging decided: one verdict per candidate in response order, theses first (rule 151), and
-/// the thesis records to journal. Both are empty when nothing can be judged.
+/// What judging decided: one verdict per candidate in response order, theses first (rule 151), the
+/// accepted invalidations' `ThesisInvalidated` bodies, and the thesis records to journal. All are
+/// empty when nothing can be judged.
 #[derive(Default)]
 pub(super) struct Judged {
     pub(super) verdicts: Vec<Verdict>,
+    pub(super) invalidations: Vec<Value>,
     pub(super) theses: Vec<ThesisDraft>,
 }
 
@@ -117,6 +119,46 @@ pub(super) fn judge(
         return Ok(Judged::default());
     };
     let refs = Refs { prompt, response };
+    let first_invalidation = output.theses.len();
+    let mut ended = BTreeSet::new();
+    let mut invalidation_results = Vec::new();
+    let mut invalidations = Vec::new();
+    for (index, candidate) in output.invalidations.iter().enumerate() {
+        let thesis = context
+            .active_theses
+            .iter()
+            .find(|active| active.thesis_id == candidate.thesis_id);
+        let Some(thesis) = thesis else {
+            invalidation_results.push(VerdictResult::UnknownThesis);
+            continue;
+        };
+        ended.insert(thesis.thesis_id.as_str());
+        invalidation_results.push(VerdictResult::Judged);
+        invalidations.push(invalidation_record(
+            thesis,
+            first_invalidation.saturating_add(index),
+            &candidate.evidence,
+        )?);
+    }
+    let left: WorkingUniverse = match context.universe {
+        WorkingUniverse::Known {
+            instruments,
+            pinned,
+        } => WorkingUniverse::Known {
+            instruments: instruments
+                .iter()
+                .filter(|instrument| {
+                    !context.active_theses.iter().any(|active| {
+                        ended.contains(active.thesis_id.as_str())
+                            && active.instrument == **instrument
+                    })
+                })
+                .cloned()
+                .collect(),
+            pinned: *pinned,
+        },
+        WorkingUniverse::Unavailable => WorkingUniverse::Unavailable,
+    };
     let cited: BTreeMap<&str, Cited<'_>> = called
         .observations
         .iter()
@@ -140,8 +182,9 @@ pub(super) fn judge(
             (None, Some(fact)) => {
                 let ordinal = THESIS_ORDINALS.saturating_add(u32::try_from(index).unwrap_or(0));
                 let thesis_id = batch.id_at(ordinal);
-                let Ok(filled) = fill(candidate, fact, &cited, &thesis_id, run, config, context)
-                else {
+                let Ok(filled) = fill(
+                    candidate, fact, &cited, &thesis_id, run, config, context, &ended,
+                ) else {
                     return Ok(Judged::default());
                 };
                 passed.push(filled);
@@ -157,7 +200,7 @@ pub(super) fn judge(
     let fold = fold_theses(&FoldInput {
         mandate: context.mandate,
         overlay: context.overlay,
-        universe: context.universe,
+        universe: &left,
         proposals: &proposals,
         facts: &facts,
         lineages: context.lineages,
@@ -209,27 +252,48 @@ pub(super) fn judge(
             output,
         });
     }
-    let active: BTreeSet<&str> = context
-        .active_theses
-        .iter()
-        .map(|thesis| thesis.thesis_id.as_str())
-        .collect();
     let verdicts = results
         .into_iter()
         .map(|result| Verdict {
             kind: CandidateKind::Thesis,
             result,
         })
-        .chain(output.invalidations.iter().map(|invalidation| Verdict {
+        .chain(invalidation_results.into_iter().map(|result| Verdict {
             kind: CandidateKind::Invalidation,
-            result: if active.contains(invalidation.thesis_id.as_str()) {
-                VerdictResult::Judged
-            } else {
-                VerdictResult::UnknownThesis
-            },
+            result,
         }))
         .collect();
-    Ok(Judged { verdicts, theses })
+    Ok(Judged {
+        verdicts,
+        invalidations,
+        theses,
+    })
+}
+
+/// An accepted invalidation's `ThesisInvalidated` body (journal spec §9.21): the thesis, its
+/// lineage, and its instrument as the run's inputs held them, the verdict's index in the call
+/// record's `verdicts`, and the evidence as the output gave it. The model is its cause; the record's
+/// `causation_id` is the call record, which heads the batch.
+fn invalidation_record(
+    thesis: &super::ActiveThesis,
+    candidate: usize,
+    evidence: &[String],
+) -> Result<Value, RuntimeError> {
+    payload::object(vec![
+        ("thesis_id", payload::text(&thesis.thesis_id)),
+        ("lineage_id", payload::text(&thesis.lineage_id)),
+        ("instrument_id", payload::text(thesis.instrument.as_str())),
+        ("cause", payload::text("model")),
+        (
+            "candidate",
+            payload::count(u64::try_from(candidate).unwrap_or(u64::MAX), "candidate")?,
+        ),
+        (
+            "evidence",
+            Value::Array(evidence.iter().map(|id| payload::text(id)).collect()),
+        ),
+        ("source", Value::Null),
+    ])
 }
 
 /// The artifacts a judged call's thesis records name.
@@ -298,6 +362,7 @@ fn fill<'a>(
     run: &Run,
     config: &ResearchConfig,
     context: &ResearchContext<'_>,
+    ended: &BTreeSet<&str>,
 ) -> Result<Passed<'a>, RuntimeError> {
     let instrument =
         AssetId::new(fact.asset_id.as_str()).map_err(|_| payload::non_canonical("asset_id"))?;
@@ -309,10 +374,9 @@ fn fill<'a>(
             .ok_or_else(|| payload::non_canonical("expires_at"))?,
         0,
     )?;
-    let active = context
-        .active_theses
-        .iter()
-        .find(|thesis| thesis.instrument == instrument);
+    let active = context.active_theses.iter().find(|thesis| {
+        thesis.instrument == instrument && !ended.contains(thesis.thesis_id.as_str())
+    });
     let (lineage, revision, predecessor) = match active {
         Some(thesis) => (
             thesis.lineage_id.clone(),
