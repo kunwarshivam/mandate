@@ -912,8 +912,9 @@ fn the_opposite_fill_interval_is_read_from_the_runs_fills() {
 }
 
 /// DEC-1000 item 5's visibility at its edges: a thesis received exactly at the 09:30 decision is
-/// seen by it; one expiring or invalidated exactly then is not; and a later refused record ends an
-/// earlier admission.
+/// seen by it; one expiring or invalidated exactly then is not; a later refused record ends an
+/// earlier admission; and a refused record received at the same instant as an admitted one wins
+/// (DEC-1140 item 1).
 #[test]
 fn thesis_visibility_holds_at_its_edges() {
     let days = trading_days(DAYS);
@@ -958,6 +959,20 @@ fn thesis_visibility_holds_at_its_edges() {
         opened(&[admitted, refused_renewal]),
         None,
         "the later refused record ends it"
+    );
+    let received = at("2026-09-02T12:00:00Z");
+    let refused_at_once = mandate_version_backtest::RecordedThesis {
+        thesis_id: "th_01".to_owned(),
+        ..thesis(received, at("2026-10-30T12:00:00Z"), false)
+    };
+    let admitted_at_once = mandate_version_backtest::RecordedThesis {
+        thesis_id: "th_02".to_owned(),
+        ..thesis(received, at("2026-10-30T12:00:00Z"), true)
+    };
+    assert_eq!(
+        opened(&[admitted_at_once, refused_at_once]),
+        None,
+        "at one receive time the refused record wins, whatever the ids"
     );
 }
 

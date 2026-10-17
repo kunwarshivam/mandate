@@ -127,7 +127,9 @@ fn outputs_received_by_each_decision(
 }
 
 /// No opening or increase of a research-agent version goes out unless the latest thesis record
-/// received by its instant is admitted, unexpired and not invalidated, recomputed from the records.
+/// received by its instant (at one receive time, a refused record before an admitted one, then
+/// thesis id; DEC-1140 item 1) is admitted, unexpired and not invalidated, recomputed from the
+/// records.
 fn openings_only_on_an_active_thesis(
     run: &VersionRun,
     theses: &[mandate_version_backtest::RecordedThesis],
@@ -140,7 +142,14 @@ fn openings_only_on_an_active_thesis(
         let mut latest: Option<&mandate_version_backtest::RecordedThesis> = None;
         for thesis in theses.iter().filter(|thesis| thesis.received_at <= row.at) {
             let later = latest.is_none_or(|kept| {
-                (thesis.received_at, &thesis.thesis_id) > (kept.received_at, &kept.thesis_id)
+                let key = |record: &mandate_version_backtest::RecordedThesis| {
+                    (
+                        record.received_at,
+                        !record.admitted,
+                        record.thesis_id.clone(),
+                    )
+                };
+                key(thesis) > key(kept)
             });
             if later {
                 latest = Some(thesis);

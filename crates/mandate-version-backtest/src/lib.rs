@@ -1023,7 +1023,7 @@ impl<'a, 'c> Run<'a, 'c> {
             .theses
             .iter()
             .filter(|thesis| thesis.received_at <= t)
-            .max_by(|a, b| (a.received_at, &a.thesis_id).cmp(&(b.received_at, &b.thesis_id)))
+            .max_by_key(|thesis| (thesis.received_at, !thesis.admitted, &thesis.thesis_id))
             .filter(|thesis| {
                 thesis.admitted
                     && t < thesis.expires_at
