@@ -50,8 +50,8 @@ pub use budget::{
 };
 pub use content::{
     AskablePurpose, AssetClass, BoundAction, ConfirmationCode, ContentHash, EvidenceAuthor,
-    EvidenceRef, ReferenceMark, RequestContent, RiskField, RiskFigure, confirmation_code,
-    content_hash, content_object,
+    EvidenceRef, ExecutionTerms, ProtectionTerms, ReferenceMark, RequestContent, RiskField,
+    RiskFigure, TimeInForce, confirmation_code, content_hash, content_object, execution_object,
 };
 pub use drift::{band_bp, within_band};
 pub use live::{

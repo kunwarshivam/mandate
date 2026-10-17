@@ -1276,11 +1276,13 @@ impl<'s> Session<'s> {
     /// A governed run writes `ModelOutputRecorded` with `model_registry` and `DecisionMade` with
     /// `model_registry` and `policy_set` beside `mandate_version`, at schema version 2 (journal
     /// spec v0.16, DEC-484 item 4). Every other record, and every record of an ungoverned run,
-    /// stays at version 1 with `mandate_version` alone.
-    fn agent_refs(&self, event_type: &str) -> Result<(u64, Object), ShellError> {
+    /// stays at version 1 with `mandate_version` alone, except an `ApprovalRequested` whose
+    /// content binds the builder's plan, which is version 2 ([`planned_request_version`]).
+    fn agent_refs(&self, draft: &EventDraft) -> Result<(u64, Object), ShellError> {
+        let event_type = draft.event_type.as_str();
         let mut refs = vec![("mandate_version", Value::Str(self.view.version.clone()))];
         let reference = |digest: Digest| Value::Str(format!("sha256:{digest}"));
-        let mut version = 1;
+        let mut version = planned_request_version(draft);
         if let Some(governed) = self.governed {
             let decision = event_type == "DecisionMade";
             if decision || event_type == "ModelOutputRecorded" {
@@ -1306,7 +1308,7 @@ impl<'s> Session<'s> {
         let bytes = drafts
             .iter()
             .map(|draft| {
-                let (schema_version, config_refs) = self.agent_refs(&draft.event_type)?;
+                let (schema_version, config_refs) = self.agent_refs(draft)?;
                 draft_bytes(
                     &Envelope {
                         stream: &stream,
@@ -1457,6 +1459,18 @@ fn consecutive_executor_journals(
     drafts
 }
 
+/// `ApprovalRequested`'s schema version for the content it carries: 2 when the content binds the
+/// order builder's plan, which version 1's closed content refuses, and 1 otherwise (DEC-942
+/// item 2). Every other agent-stream draft starts at version 1.
+fn planned_request_version(draft: &EventDraft) -> u64 {
+    let planned = draft.event_type == "ApprovalRequested"
+        && draft
+            .payload
+            .get("content")
+            .is_some_and(|content| content.get("execution").is_some());
+    if planned { 2 } else { 1 }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -1465,7 +1479,7 @@ mod tests {
     use mandate_executor::{Effect, EventDraft, EventId, NotificationRef};
     use mandate_journal::StoredEvent;
 
-    use super::{consecutive_executor_journals, with_environment};
+    use super::{consecutive_executor_journals, planned_request_version, with_environment};
 
     fn draft(id: &str, event_type: &str, schema_version: u64) -> EventDraft {
         EventDraft {
@@ -1497,6 +1511,38 @@ mod tests {
         );
         assert!(matches!(effects.front(), Some(Effect::Notify(_))));
         assert_eq!(effects.len(), 1);
+    }
+
+    /// DEC-942 item 2: only an `ApprovalRequested` whose content binds a plan is version 2; a
+    /// request without one, and any other record carrying the same member, stay at version 1.
+    #[test]
+    fn only_a_request_that_binds_a_plan_is_version_two() -> Result<(), String> {
+        let with_plan = mandate_canon::parse(br#"{"content":{"execution":null}}"#)
+            .map_err(|e| format!("{e:?}"))?;
+        let without = mandate_canon::parse(br#"{"content":{}}"#).map_err(|e| format!("{e:?}"))?;
+        let agent = |event_type: &str, payload: &Value| mandate_runtime::EventDraft {
+            event_id: mandate_runtime::EventId("00000100000000000000000001".to_owned()),
+            event_type: event_type.to_owned(),
+            causation_id: None,
+            payload: payload.clone(),
+        };
+        assert_eq!(
+            planned_request_version(&agent("ApprovalRequested", &with_plan)),
+            2
+        );
+        assert_eq!(
+            planned_request_version(&agent("ApprovalRequested", &without)),
+            1
+        );
+        assert_eq!(
+            planned_request_version(&agent("ApprovalDelivered", &with_plan)),
+            1
+        );
+        assert_eq!(
+            planned_request_version(&agent("ApprovalRequested", &Value::Null)),
+            1
+        );
+        Ok(())
     }
 
     fn stored(event_type: &str) -> StoredEvent {
