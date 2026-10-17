@@ -1,5 +1,5 @@
 //! The fencing lease: two processes never both hold a deployment's streams, and a restart never
-//! sends anything twice (E21-2, DEC-968 items 1 and 2).
+//! sends anything twice (E21-2, DEC-968 items 2, 3, and 5).
 
 mod common;
 
@@ -285,4 +285,11 @@ fn the_memory_store_refuses_a_stream_id_it_cannot_parse() {
         store.append("nonsense", 0, 0, &[b"{}".to_vec()]),
         AppendOutcome::Unavailable
     );
+}
+
+#[test]
+fn a_lease_over_no_stream_is_refused_before_the_store_is_asked() {
+    let store = FakeStore::default();
+    assert!(Lease::acquire(store.clone(), &[]).is_err());
+    assert!(store.journal.borrow().streams.is_empty());
 }

@@ -142,6 +142,7 @@ pub struct PaperHost {
     pub id: usize,
     pub status: Option<Status>,
     pub cycle_fails: bool,
+    pub settle_fails: bool,
     pub before_append: Option<Box<dyn FnMut()>>,
 }
 
@@ -160,6 +161,7 @@ impl PaperHost {
             id,
             status: None,
             cycle_fails: false,
+            settle_fails: false,
             before_append: None,
         }
     }
@@ -229,6 +231,9 @@ impl Host for PaperHost {
         self.log.borrow_mut().push((self.id, "settle"));
         if let Some(status) = &self.status {
             assert_eq!(status.phase(), mandate_agentd::Phase::Draining);
+        }
+        if self.settle_fails {
+            return Err(Cause::Absent { what: "settle" });
         }
         journal.take_ownership(ACCOUNT).map(drop)
     }

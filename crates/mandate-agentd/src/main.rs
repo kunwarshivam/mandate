@@ -1,9 +1,20 @@
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::float_arithmetic,
+    clippy::float_cmp,
+    clippy::as_conversions
+)]
 //! `mandate-agentd`: one deployment's long-running process (E21-2, DEC-968).
 //!
 //! Slice 1 hosts only [`IdleHost`] over an in-memory journal, behind `--fixture`; without it the
 //! process refuses, because no deployment's production cycle is wired in yet (DEC-968 item 6).
 //! It prints `health <addr>` once it is listening and SIGTERM is handled, drains on SIGTERM, and
-//! exits with its stop's status.
+//! exits with its stop's status. SIGINT is not handled: it ends the process as a crash does, which
+//! the next process recovers from the journal.
 
 use std::cell::RefCell;
 use std::net::SocketAddr;

@@ -1,13 +1,14 @@
-//! Liveness and readiness on loopback, with fixed generic words only (E21-2, DEC-968 item 3;
+//! Liveness and readiness on loopback, with fixed generic words only (E21-2, DEC-968 item 7;
 //! `AGENTS.md` rule 6).
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::time::Duration;
 
 use mandate_agentd::health::{answer, serve};
 use mandate_agentd::{Phase, Stop};
 
-const PHASES: [Phase; 7] = [
+const PHASES: [Phase; 8] = [
     Phase::Starting,
     Phase::Ready,
     Phase::Draining,
@@ -15,6 +16,7 @@ const PHASES: [Phase; 7] = [
     Phase::Stopped(Stop::Fenced),
     Phase::Stopped(Stop::Refused),
     Phase::Stopped(Stop::CycleFailed),
+    Phase::Stopped(Stop::DrainIncomplete),
 ];
 
 #[test]
@@ -53,6 +55,9 @@ fn health_refuses_to_listen_off_loopback() {
 fn get(addr: SocketAddr, request: &str) -> String {
     let mut stream = TcpStream::connect(addr).unwrap_or_else(|e| panic!("connect: {e}"));
     stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap_or_else(|e| panic!("timeout: {e}"));
+    stream
         .write_all(request.as_bytes())
         .unwrap_or_else(|e| panic!("write: {e}"));
     let mut response = String::new();
@@ -85,4 +90,32 @@ fn the_listener_answers_each_path_from_the_shared_status() {
         get(addr, "\r\n"),
         "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot_found"
     );
+}
+
+const NOT_FOUND: &str = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot_found";
+
+#[test]
+fn a_silent_client_does_not_hold_the_listener_from_the_next_probe() {
+    let addr = serve(
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+        mandate_agentd::Status::default(),
+    )
+    .unwrap_or_else(|e| panic!("bind: {e}"));
+    let _silent = TcpStream::connect(addr).unwrap_or_else(|e| panic!("connect: {e}"));
+    assert_eq!(
+        get(addr, "GET /livez HTTP/1.1\r\n\r\n"),
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlive"
+    );
+}
+
+#[test]
+fn a_request_line_that_reaches_the_bound_without_ending_is_answered_at_the_bound() {
+    let addr = serve(
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+        mandate_agentd::Status::default(),
+    )
+    .unwrap_or_else(|e| panic!("bind: {e}"));
+    let long = format!("GET /{}", "a".repeat(1019));
+    assert_eq!(long.len(), 1024);
+    assert_eq!(get(addr, &long), NOT_FOUND);
 }

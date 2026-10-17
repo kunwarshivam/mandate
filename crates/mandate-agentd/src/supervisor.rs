@@ -76,6 +76,9 @@ pub enum Stop {
     Refused,
     /// A cycle stopped fail-closed while the lease still held.
     CycleFailed,
+    /// Drained on request, but the host could not settle what was in flight; the lease was
+    /// released, and the next process recovers it as after a crash.
+    DrainIncomplete,
 }
 
 impl Stop {
@@ -85,6 +88,7 @@ impl Stop {
             Self::Fenced => "fenced",
             Self::Refused => "refused",
             Self::CycleFailed => "cycle_failed",
+            Self::DrainIncomplete => "drain_incomplete",
         }
     }
 
@@ -94,6 +98,7 @@ impl Stop {
             Self::Refused => 2,
             Self::Fenced => 3,
             Self::CycleFailed => 4,
+            Self::DrainIncomplete => 5,
         }
     }
 }
@@ -108,7 +113,7 @@ pub enum Phase {
 }
 
 impl Phase {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Starting,
         Self::Ready,
         Self::Draining,
@@ -116,6 +121,7 @@ impl Phase {
         Self::Stopped(Stop::Fenced),
         Self::Stopped(Stop::Refused),
         Self::Stopped(Stop::CycleFailed),
+        Self::Stopped(Stop::DrainIncomplete),
     ];
 
     fn index(self) -> u8 {
@@ -127,6 +133,7 @@ impl Phase {
             Self::Stopped(Stop::Fenced) => 4,
             Self::Stopped(Stop::Refused) => 5,
             Self::Stopped(Stop::CycleFailed) => 6,
+            Self::Stopped(Stop::DrainIncomplete) => 7,
         }
     }
 }
@@ -229,7 +236,8 @@ impl<S: JournalWriter + Epochs, H: Host> Supervisor<S, H> {
     }
 
     /// Drains: no new cycle starts; while the lease holds, the host settles what is in flight;
-    /// then the lease is released. A supervisor that already stopped is left as it is.
+    /// then the lease is released. A settle that fails stops `DrainIncomplete`, never `Drained`
+    /// (`AGENTS.md` rule 3). A supervisor that already stopped is left as it is.
     pub fn drain(&mut self) {
         if matches!(self.phase(), Phase::Stopped(_)) {
             return;
@@ -239,8 +247,11 @@ impl<S: JournalWriter + Epochs, H: Host> Supervisor<S, H> {
             self.stop(Stop::Fenced);
             return;
         };
-        let _settled = self.host.settle(lease);
-        self.stop(Stop::Drained);
+        let stop = match self.host.settle(lease) {
+            Ok(()) => Stop::Drained,
+            Err(_) => Stop::DrainIncomplete,
+        };
+        self.stop(stop);
     }
 
     fn stop(&mut self, stop: Stop) {

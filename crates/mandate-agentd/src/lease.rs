@@ -34,8 +34,15 @@ impl<S: JournalWriter + Epochs> Lease<S> {
     /// Takes the writer epoch of every stream, in the order given, fencing out any earlier writer.
     ///
     /// # Errors
-    /// The store's refusal to hand over a stream; nothing is held then.
+    /// An empty list of streams, which would hold nothing, refused before the store is asked; or
+    /// the store's refusal to hand over a stream. Nothing is held then, but a stream taken before
+    /// the refusal stays fenced against its earlier writer, which only stops more (rule 3).
     pub fn acquire(mut store: S, streams: &[String]) -> Result<Self, Cause> {
+        if streams.is_empty() {
+            return Err(Cause::Absent {
+                what: "a stream for the lease to hold",
+            });
+        }
         let mut epochs = BTreeMap::new();
         for stream in streams {
             let epoch = store.take_ownership(stream)?;

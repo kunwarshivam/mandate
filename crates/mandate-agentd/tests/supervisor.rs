@@ -1,4 +1,4 @@
-//! The supervisor's start, schedule, fence, and drain (E21-2, DEC-968 items 1 to 4).
+//! The supervisor's start, schedule, fence, and drain (E21-2, DEC-968 items 1 to 5 and 8).
 
 mod common;
 
@@ -241,6 +241,7 @@ fn every_stop_has_its_own_code_and_exit_status() {
         (Stop::Refused, "refused", 2),
         (Stop::Fenced, "fenced", 3),
         (Stop::CycleFailed, "cycle_failed", 4),
+        (Stop::DrainIncomplete, "drain_incomplete", 5),
     ];
     for (stop, code, status) in stops {
         assert_eq!((stop.code(), stop.exit_status()), (code, status));
@@ -286,4 +287,26 @@ fn the_idle_host_reads_every_stream_at_every_call_and_reports_a_read_it_cannot_m
     assert!(host.reconcile(&mut store).is_err());
     assert!(host.cycle(&mut store).is_err());
     assert!(host.settle(&mut store).is_err());
+}
+
+#[test]
+fn a_drain_of_a_process_whose_stream_was_taken_stops_fenced_without_settling() {
+    let world = World::new();
+    let mut supervisor = world.start(world.host(0), &paper(), 0);
+    world.store.clone().take_ownership(ACCOUNT).ok();
+    supervisor.drain();
+    assert_eq!(supervisor.phase(), Phase::Stopped(Stop::Fenced));
+    assert_eq!(world.calls(), vec![(0, "reconcile")]);
+}
+
+#[test]
+fn a_settle_that_fails_stops_the_drain_incomplete() {
+    let world = World::new();
+    let mut host = world.host(0);
+    host.settle_fails = true;
+    let mut supervisor = world.start(host, &paper(), 0);
+    supervisor.drain();
+    assert_eq!(supervisor.phase(), Phase::Stopped(Stop::DrainIncomplete));
+    supervisor.tick(0);
+    assert_eq!(world.calls(), vec![(0, "reconcile"), (0, "settle")]);
 }

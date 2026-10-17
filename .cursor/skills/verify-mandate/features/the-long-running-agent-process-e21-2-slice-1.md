@@ -17,7 +17,8 @@
   twice, nothing is sent unjournaled, only the newest process cycles, and a final restart leaves
   every submission answered. Each oracle is shown to fail on a seeded bug (a lease that takes a
   newer epoch for each cycle; a tick that skips the lease check). `tests/supervisor.rs`: refusal
-  of live and backtest, reconciliation first, schedule, fencing before and during a cycle, drain.
-  `tests/health.rs`: every phase's answers and the wire bytes. `tests/process.rs`: the binary
+  of live and backtest, reconciliation first, schedule, fencing before and during a cycle and
+  before a drain, drain and a drain whose settle fails. `tests/health.rs`: every phase's answers,
+  the wire bytes, a silent client, and the request-line bound. `tests/process.rs`: the binary
   refuses without a wired host, and drains and exits 0 on SIGTERM.
 - **Run:** `cargo nextest run -p mandate-agentd`.

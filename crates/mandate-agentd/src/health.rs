@@ -1,9 +1,15 @@
 //! Liveness and readiness over loopback HTTP (infrastructure design §3.4). Every answer is one of
 //! a few fixed words: no id, symbol, price, quantity, or mandate content (`AGENTS.md` rule 6).
 
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::thread;
+use std::time::Duration;
+
+/// The longest request line read, and how long a client may stay silent, so that one client
+/// cannot hold the listener from the orchestrator's probes.
+const LINE_BOUND: u64 = 1024;
+const READ_BOUND: Duration = Duration::from_secs(1);
 
 use crate::supervisor::{Phase, Status};
 
@@ -46,8 +52,9 @@ pub fn serve(addr: SocketAddr, status: Status) -> io::Result<SocketAddr> {
 }
 
 fn respond(stream: TcpStream, status: &Status) -> io::Result<()> {
+    stream.set_read_timeout(Some(READ_BOUND))?;
     let mut line = String::new();
-    BufReader::new(&stream).read_line(&mut line)?;
+    BufReader::new((&stream).take(LINE_BOUND)).read_line(&mut line)?;
     let path = line.split_whitespace().nth(1).unwrap_or("");
     let (code, body) = answer(path, status.phase());
     let reason = match code {
