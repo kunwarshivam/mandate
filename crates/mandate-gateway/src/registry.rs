@@ -184,6 +184,7 @@ impl PinnedContent {
             for (name, value) in [
                 ("loop_bounds", agentic.loop_bounds.canonical()),
                 ("mode", Value::Str("agentic".to_owned())),
+                ("output", Value::Str(agentic.output.code().to_owned())),
                 ("output_schemas", Value::Object(schemas)),
                 (
                     "tools",

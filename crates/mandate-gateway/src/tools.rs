@@ -167,10 +167,44 @@ impl LoopBounds {
     }
 }
 
-/// An agentic entry's pinned loop (inference spec §4.1): its tools, strictly sorted by name, its
-/// bounds, and the final output's schema for each run kind it serves.
+/// How an agentic run gives its opinion (agent harness spec §6.9): its last reply is the structured
+/// output, judged once, or the model proposes through action tools and its last reply is a summary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OutputKind {
+    FinalOutput,
+    ActionTools,
+}
+
+impl OutputKind {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::FinalOutput => "final_output",
+            Self::ActionTools => "action_tools",
+        }
+    }
+}
+
+/// The members a structured output schema holds and a summary-only schema never does (agent harness
+/// spec §6.5's `{theses, invalidations}`).
+pub const STRUCTURED_MEMBERS: [&str; 2] = ["theses", "invalidations"];
+
+/// Whether `schema` is a structured output's: an object with a `theses` or `invalidations` member.
+pub fn structured(schema: &Value) -> bool {
+    schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .is_some_and(|members| {
+            members
+                .keys()
+                .any(|k| STRUCTURED_MEMBERS.contains(&k.as_str()))
+        })
+}
+
+/// An agentic entry's pinned loop (inference spec §4.1): how it gives its opinion, its tools,
+/// strictly sorted by name, its bounds, and the final reply's schema for each run kind it serves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agentic {
+    pub output: OutputKind,
     pub tools: Vec<ToolDeclaration>,
     pub loop_bounds: LoopBounds,
     pub output_schemas: BTreeMap<String, Value>,
@@ -183,8 +217,17 @@ impl Agentic {
 
     /// Whether the loop is one a registry may pin: at least one run kind, each kind's schema in the
     /// gateway's language, every declaration well formed with a menu of kinds the entry serves,
-    /// names strictly sorted, and the bounds well formed.
+    /// names strictly sorted, the bounds well formed, and the output kind one of agent harness spec
+    /// §6.9's two combinations: `final_output` with no action tool and every schema structured, or
+    /// `action_tools` with an action tool and every schema summary-only, so no action call can
+    /// reach a run with no path to mediate it.
     pub fn well_formed(&self) -> bool {
+        let actions = self.tools.iter().any(|t| t.class == ToolClass::Action);
+        let schemas_fit = |want: bool| self.output_schemas.values().all(|s| structured(s) == want);
+        let combination = match self.output {
+            OutputKind::FinalOutput => !actions && schemas_fit(true),
+            OutputKind::ActionTools => actions && schemas_fit(false),
+        };
         let sorted = self
             .tools
             .windows(2)
@@ -199,6 +242,7 @@ impl Agentic {
                 t.well_formed() && t.menu.iter().all(|k| self.output_schemas.contains_key(k))
             })
             && self.loop_bounds.well_formed()
+            && combination
     }
 }
 

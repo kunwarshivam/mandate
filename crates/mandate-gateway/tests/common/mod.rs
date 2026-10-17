@@ -23,7 +23,7 @@ use mandate_gateway::registry::{
     Effort, Endpoint, Identity, Locality, Mode, ModelRef, PinnedContent, Reasoning, Registry,
     Reported, Route, Snapshot, Template, TopP,
 };
-use mandate_gateway::tools::{Agentic, LoopBounds, ToolClass, ToolDeclaration, Turn};
+use mandate_gateway::tools::{Agentic, LoopBounds, OutputKind, ToolClass, ToolDeclaration, Turn};
 use mandate_gateway::{CallRequest, Gateway, KeyOwner, Purpose, RateCaps, Settings};
 use mandate_time::UtcNanos;
 
@@ -334,6 +334,7 @@ pub fn agentic_content() -> PinnedContent {
         top_p: TopP::from_millionths(900_000),
         reasoning: Some(Reasoning::On(Effort::Low)),
         mode: Mode::Agentic(Agentic {
+            output: OutputKind::FinalOutput,
             tools: vec![
                 tool(
                     "market.bars",

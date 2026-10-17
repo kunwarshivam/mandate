@@ -16,7 +16,7 @@ use mandate_gateway::money::Usd6;
 use mandate_gateway::openrouter::{CAPABILITY_MEMBERS, OpenRouter, TOOL_MEMBERS};
 use mandate_gateway::provider::{Delivery, Prompt, ProviderAdapter};
 use mandate_gateway::registry::{Mode, Reasoning, Registry, RegistryError};
-use mandate_gateway::tools::{Agentic, ToolCall, ToolClass, Turn};
+use mandate_gateway::tools::{Agentic, OutputKind, ToolCall, ToolClass, Turn};
 use serde_json::Value as Json;
 
 type ContentEdit = Box<dyn Fn(&mut mandate_gateway::registry::PinnedContent)>;
@@ -50,7 +50,7 @@ fn first_turn() -> Turn {
 fn a_single_call_entry_hashes_and_digests_as_before_inference_v0_4() {
     let pinned = content();
     let canonical = pinned.canonical();
-    for absent in ["mode", "tools", "loop_bounds", "output_schemas"] {
+    for absent in ["mode", "output", "tools", "loop_bounds", "output_schemas"] {
         assert!(canonical.get(absent).is_none(), "{absent} is left out");
     }
     let sampling = canonical.get("sampling").unwrap();
@@ -70,6 +70,10 @@ fn every_agentic_member_is_inside_the_content_hash() {
     assert_eq!(
         canonical.get("mode").and_then(Value::as_str),
         Some("agentic")
+    );
+    assert_eq!(
+        canonical.get("output").and_then(Value::as_str),
+        Some("final_output")
     );
     for present in ["tools", "loop_bounds", "output_schemas"] {
         assert!(canonical.get(present).is_some(), "{present} is pinned");
@@ -99,6 +103,7 @@ fn every_agentic_member_is_inside_the_content_hash() {
         Box::new(|c| c.top_p = None),
         Box::new(|c| c.reasoning = Some(Reasoning::Off)),
         Box::new(|c| c.mode = Mode::SingleCall),
+        Box::new(move |c| agentic(c).output = OutputKind::ActionTools),
         Box::new(move |c| agentic(c).tools[0].description.push('!')),
         Box::new(move |c| agentic(c).tools[0].result_cap_bytes += 1),
         Box::new(move |c| agentic(c).tools[1].menu.push("monitor".to_owned())),
@@ -226,6 +231,40 @@ fn the_registry_refuses_a_loop_it_could_not_pin() {
             "a zero run read budget",
             Box::new(|a| a.loop_bounds.max_run_result_bytes = 0),
         ),
+        (
+            "final_output with an action tool",
+            Box::new(|a| a.tools[2].class = ToolClass::Action),
+        ),
+        (
+            "final_output with a summary-only schema",
+            Box::new(|a| {
+                a.output_schemas
+                    .insert("monitor".to_owned(), summary_schema());
+            }),
+        ),
+        (
+            "action_tools with no action tool",
+            Box::new(|a| {
+                a.output = OutputKind::ActionTools;
+                a.output_schemas = summary_schemas();
+            }),
+        ),
+        (
+            "action_tools with structured schemas",
+            Box::new(|a| {
+                a.output = OutputKind::ActionTools;
+                a.tools[2].class = ToolClass::Action;
+            }),
+        ),
+        (
+            "action_tools with one structured schema left",
+            Box::new(|a| {
+                a.output = OutputKind::ActionTools;
+                a.tools[2].class = ToolClass::Action;
+                a.output_schemas
+                    .insert("monitor".to_owned(), summary_schema());
+            }),
+        ),
     ];
     for (what, edit) in &cases {
         assert_eq!(
@@ -235,6 +274,29 @@ fn the_registry_refuses_a_loop_it_could_not_pin() {
         );
     }
     assert!(Registry::new().register(agentic_content()).is_ok());
+    let mut action = agentic_content();
+    if let Mode::Agentic(a) = &mut action.mode {
+        a.output = OutputKind::ActionTools;
+        a.tools[2].class = ToolClass::Action;
+        a.output_schemas = summary_schemas();
+    }
+    assert!(
+        Registry::new().register(action).is_ok(),
+        "action_tools with an action tool and summary-only schemas is the other valid combination"
+    );
+}
+
+fn summary_schema() -> Value {
+    common::json(
+        r#"{"type":"object","properties":{"watch":{"type":"array","max_items":10,"items":{"type":"string","max_length":12}}}}"#,
+    )
+}
+
+fn summary_schemas() -> std::collections::BTreeMap<String, Value> {
+    ["ideate", "monitor"]
+        .into_iter()
+        .map(|k| (k.to_owned(), summary_schema()))
+        .collect()
 }
 
 #[test]
