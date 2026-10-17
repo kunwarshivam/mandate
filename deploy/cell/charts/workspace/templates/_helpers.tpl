@@ -79,16 +79,17 @@ capabilities:
 {{/*
 The workspace's shared artifact store (mandate documents, backtest reports): one claim, at one
 fixed path. Who may write it is fixed here, by process type, not a value, so no value widens it:
-the API server and the control runs write, the runtime and the deployment manager read, and every
-other process has no store at all.
+the control runs write ("rw"); the API server only reads, but its pod lays the store out before it
+starts ("seed": the pod's volume is writable, the server's own mount is not); the runtime and the
+deployment manager read ("ro"); every other process has no store at all.
 */}}
 {{- define "mandate.artifactsRole" -}}
-{{- $access := dict "api" "rw" "control" "rw" "runtime" "ro" "deploy-manager" "ro" -}}
+{{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "deploy-manager" "ro" -}}
 {{- get $access .p.name -}}
 {{- end -}}
 
 {{/*
-Whether the claim renders: only with a long-running process that writes it (the API server). A
+Whether the claim renders: only with the long-running process whose pod lays it out (the API server). A
 claim on a class that binds on first use (local-path does) binds only when a pod uses it, and `helm
 --wait` waits for it to; and a reader alone would wait for a layout no writer makes. "true" or
 empty.
@@ -96,12 +97,12 @@ empty.
 {{- define "mandate.artifactsClaimed" -}}
 {{- $root := . -}}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) -}}
-{{- if eq (include "mandate.artifactsRole" (dict "root" $root "p" .)) "rw" -}}true{{- end -}}
+{{- if eq (include "mandate.artifactsRole" (dict "root" $root "p" .)) "seed" -}}true{{- end -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-Process `p`'s access to the store, "rw" or "ro", or empty when it has none or no claim renders, so
+Process `p`'s access to the store, "rw", "seed" or "ro", or empty when it has none or no claim renders, so
 no pod ever names a claim that is not there.
 */}}
 {{- define "mandate.artifactsAccess" -}}
@@ -114,7 +115,7 @@ no pod ever names a claim that is not there.
 
 {{/*
 The store's layout, before the process starts: the API server refuses a root without `sha256/`,
-and the readers need `sha256/` and `tmp/` to exist. A writer's pod makes both; a reader's pod,
+and the readers need `sha256/` and `tmp/` to exist. A writer's or the API server's pod makes both; a reader's pod,
 mounted read-only, waits for a writer to have made them, and after two minutes fails rather than
 start without them (AGENTS.md rule 3).
 */}}
@@ -126,7 +127,7 @@ start without them (AGENTS.md rule 3).
   command:
     - bash
     - -c
-    {{- if eq (include "mandate.artifactsAccess" .) "rw" }}
+    {{- if ne (include "mandate.artifactsAccess" .) "ro" }}
     - {{ printf "mkdir -p %s/sha256 %s/tmp" $path $path | quote }}
     {{- else }}
     - {{ printf "for _ in $(seq 1 120); do [ -d %s/sha256 ] && [ -d %s/tmp ] && exit 0; sleep 1; done; echo 'the artifact store has no sha256/ and tmp/ after two minutes: refusing to start' >&2; exit 1" $path $path | quote }}
@@ -174,7 +175,7 @@ start without them (AGENTS.md rule 3).
 {{- with include "mandate.artifactsAccess" . }}
 - name: artifacts
   mountPath: {{ include "mandate.artifactsPath" $ | quote }}
-  readOnly: {{ eq . "ro" }}
+  readOnly: {{ ne . "rw" }}
 {{- end }}
 {{- end -}}
 

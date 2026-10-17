@@ -47,11 +47,12 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   k3d's differs only by the tunnel.
 - one shared artifact store (mandate documents, backtest reports), the claim `artifacts` at
   `/var/lib/mandate/artifacts`, which survives a pod's restart and an upgrade (it goes with the
-  release on uninstall, since a kept claim would make a reinstall refuse it). The API server
-  (`MANDATE_API_ARTIFACTS`) and the control runs (`MANDATE_ARTIFACTS`) mount it read-write, the
-  runtime and the deployment manager read-only at both the volume and the mount, and no other
+  release on uninstall, since a kept claim would make a reinstall refuse it). The control runs
+  (`MANDATE_ARTIFACTS`) mount it read-write; the API server (`MANDATE_API_ARTIFACTS`) only reads it,
+  read-only, though its pod's volume is writable for the layout step; the runtime and the deployment
+  manager (`MANDATE_ARTIFACTS`) read it, read-only at both the volume and the mount; and no other
   process mounts it. Before a process starts, its pod's `artifacts-layout` step makes `sha256/` and
-  `tmp/` (a writer's) or waits two minutes for them, read-only (a reader's): the API server refuses
+  `tmp/` (the control run's and the API server's) or waits two minutes for them, read-only (a reader's): the API server refuses
   a root without `sha256/`. The modes are fixed in the chart by process type, never values; size,
   class and access mode are values (`artifacts`). The claim, and every mount of it, renders only
   with the API server, its one long-running writer, since local-path binds on first use and `helm

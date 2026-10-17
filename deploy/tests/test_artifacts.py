@@ -2,9 +2,10 @@
 
 One volume holds the workspace's artifacts (mandate documents, backtest reports), so a pod's restart
 loses none. Which process may write it is written out here, not read from the chart, so a chart that
-drifts fails: the API server and the control runs write, the runtime and the deployment manager only
-read, and no other process mounts it at all. Before any process starts, the store has `sha256/` and
-`tmp/`: the API server refuses a root without `sha256/`, and the readers need both.
+drifts fails: the control runs write; the API server only reads, though its pod lays the store out
+before it starts; the runtime and the deployment manager only read; and no other process mounts it.
+Before any process starts, the store has `sha256/` and `tmp/`: the API server refuses a root without
+`sha256/`, and the readers need both.
 """
 
 import copy
@@ -14,7 +15,8 @@ from test_cell import render_all
 CLAIM = "artifacts"
 MOUNT = "/var/lib/mandate/artifacts"
 # The access each process type has; a process not named here has none.
-ACCESS = {"api": "rw", "control": "rw", "runtime": "ro", "deploy-manager": "ro"}
+# "seed": the pod's volume and its layout step write, and the process's own mount is read-only.
+ACCESS = {"api": "seed", "control": "rw", "runtime": "ro", "deploy-manager": "ro"}
 ENV = {"api": "MANDATE_API_ARTIFACTS"}
 DEFAULT_ENV = "MANDATE_ARTIFACTS"
 LAYOUT = "artifacts-layout"
@@ -40,7 +42,7 @@ def layout_problems(name: str, init: dict, want: str) -> list[str]:
     in a reader's."""
     script = " ".join(init.get("command", []))
     problems = [f"{name}'s layout step names no {d}" for d in LAYOUT_DIRS if d not in script]
-    if want == "rw" and init.get("command") != ["bash", "-c", f"mkdir -p {' '.join(LAYOUT_DIRS)}"]:
+    if want != "ro" and init.get("command") != ["bash", "-c", f"mkdir -p {' '.join(LAYOUT_DIRS)}"]:
         problems.append(f"{name}'s layout step does not make exactly the store's directories")
     if want == "ro" and ("mkdir" in script or "exit 1" not in script):
         problems.append(f"{name}'s layout step writes, or never gives up waiting")
@@ -98,7 +100,7 @@ def artifact_modes(docs: list[dict]) -> list[str]:
                 problems.append(f"{name}'s {c['name']} mounts the store as {mounts}, want once at {MOUNT}")
                 continue
             read_only = mounts[0].get("readOnly") is True
-            if read_only != (want == "ro"):
+            if read_only != (want != "rw"):
                 problems.append(
                     f"{name}'s {c['name']} mounts the store {'ro' if read_only else 'rw'}, want {want}"
                 )
@@ -131,7 +133,7 @@ def test_the_store_size_and_class_are_values_not_its_access():
     assert artifact_modes(docs) == []
 
 
-def test_no_claim_and_no_mount_without_a_long_running_process_to_bind_it():
+def test_no_claim_and_no_mount_without_the_api_server():
     """As `cell up` renders on a host that pulls images: no API image, so only the control run would
     mount the store. A claim on a class that binds on first use would never bind under `helm --wait`,
     and a Job naming an absent claim would stay pending, so neither renders."""
@@ -216,6 +218,12 @@ def test_each_seeded_bug_is_caught():
         command = layout(workload(docs, "api"))["command"]
         command[-1] = "echo " + command[-1]
 
+    def api_writes(docs):
+        main_mount(workload(docs, "api"))["readOnly"] = False
+
+    def api_volume_read_only(docs):
+        store_volumes(pod_spec(workload(docs, "api")))[0]["persistentVolumeClaim"]["readOnly"] = True
+
     def runtime_layout_writes(docs):
         layout(workload(docs, "runtime"))["command"][-1] = f"mkdir -p {MOUNT}/sha256 {MOUNT}/tmp"
 
@@ -231,6 +239,8 @@ def test_each_seeded_bug_is_caught():
         api_layout_without_tmp,
         runtime_layout_writes,
         api_layout_only_echoes,
+        api_writes,
+        api_volume_read_only,
     ):
         assert artifact_modes(seeded(change)), change.__name__
 
