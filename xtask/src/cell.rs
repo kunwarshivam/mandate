@@ -292,10 +292,18 @@ fn kubeconfig() -> Result<String> {
     Ok(state()?.join("kubeconfig").display().to_string())
 }
 
-/// The image tag this change's build gets: the commit, so two changes never share one.
+/// The image tag of this checkout's build: the binary's own SHA-256, so an uncommitted edit gets a
+/// new image rather than the last one imported under the same commit.
 fn image_tag() -> Result<String> {
-    let commit = output("git", &["rev-parse", "--short=12", "HEAD"])?;
-    Ok(format!("mandate.local/mandate:{}", commit.trim()))
+    let digest = sha256(&static_binary())?;
+    let short = digest
+        .get(..12)
+        .context("a SHA-256 shorter than 12 digits")?;
+    Ok(format!("mandate.local/mandate:{short}"))
+}
+
+fn static_binary() -> String {
+    format!("{STATIC_TARGET}/{STATIC_TRIPLE}/debug/mandate")
 }
 
 /// `cargo xtask cell up`: build the `mandate` image from this checkout (never with the `live`
@@ -303,6 +311,7 @@ fn image_tag() -> Result<String> {
 /// journal's Postgres and the workspace chart, and wait until every pod is ready and the
 /// migration Job has finished.
 pub fn up() -> Result<()> {
+    build_binary()?;
     let image = image_tag()?;
     build_image(&image)?;
     if !cluster_exists()? {
@@ -396,7 +405,7 @@ const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 /// `mandate-cli` linked statically, so the image needs no base (DEC-993 item 9), with no feature
 /// at all: never `live`. The dev profile, for the CI job's ten minutes (DEC-464): it keeps
 /// overflow checks, and the cell's journals are small.
-fn build_image(image: &str) -> Result<()> {
+fn build_binary() -> Result<()> {
     let args = [
         "build",
         "--locked",
@@ -419,12 +428,16 @@ fn build_image(image: &str) -> Result<()> {
     if !status.success() {
         bail!("the static build of mandate-cli failed with {status}");
     }
+    Ok(())
+}
+
+fn build_image(image: &str) -> Result<()> {
     let context = state()?.join("image");
     if context.exists() {
         fs::remove_dir_all(&context).context("clearing the image context")?;
     }
     fs::create_dir_all(&context)?;
-    let binary = format!("{STATIC_TARGET}/{STATIC_TRIPLE}/debug/mandate");
+    let binary = static_binary();
     fs::copy(&binary, context.join("mandate"))
         .with_context(|| format!("copying {binary} into the image context"))?;
     let context = context.display().to_string();
@@ -654,7 +667,8 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
 }
 
 /// Puts back every object of the release a seeded drill removed, as helm's own field manager, so a
-/// later `helm upgrade` (the demo's) owns them again without a conflict.
+/// later `helm upgrade` (the demo's, at the end of `ci cell`) can own them again; that upgrade is
+/// the check that it does.
 fn restore() -> Result<()> {
     apply_as(
         &release_objects()?,
@@ -1636,6 +1650,9 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
 const DEMO_WORKSPACE: &str = "demo";
 /// Where `web/` serves on the developer's machine (its `npm run dev`).
 const WEB_URL: &str = "http://127.0.0.1:4317";
+/// The process-list name lane A1 gives the workspace API server; `api_is_a_planned_name` checks
+/// that, once listed, it is a service.
+const API_PROCESS: &str = "api";
 
 /// One piece of the full local cell (E21-37's demo): ready, or skipped because the lane that
 /// builds it is not on `main` yet. A skipped piece is named, never faked.
@@ -1666,7 +1683,7 @@ pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
         DemoPart {
             name: "the workspace API server, through a port-forward",
             skipped: lane(
-                built("api"),
+                built(API_PROCESS),
                 "the API server is not on main yet (lane A1, E21-31)",
             ),
         },
@@ -1682,14 +1699,15 @@ pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
             skipped: lane(
                 cli_help
                     .lines()
-                    .any(|l| l.trim_start().starts_with("membership")),
+                    .filter(|l| l.starts_with("  ") && !l.starts_with("   "))
+                    .any(|l| l.split_whitespace().next() == Some("membership")),
                 "the founding membership gesture is not on main yet (lane ID1)",
             ),
         },
         DemoPart {
             name: "web/ against the cell's API",
             skipped: lane(
-                built("api"),
+                built(API_PROCESS),
                 "web/ runs on its own fixtures until the API server lands (lane A1)",
             ),
         },
@@ -1706,11 +1724,12 @@ pub fn demo(web: bool) -> Result<()> {
     }
     up()?;
     demo_workspace()?;
+    let image = image_tag()?;
     let help = output(
-        &format!("{STATIC_TARGET}/{STATIC_TRIPLE}/debug/mandate"),
-        &["--help"],
+        "docker",
+        &["run", "--rm", "--network", "none", &image, "--help"],
     )
-    .unwrap_or_default();
+    .context("reading the CLI's commands from the image it built")?;
     let parts = demo_parts(&processes()?, &help);
     eprintln!("==> the local cell (paper and demo data only; local-cell results, never staging's)");
     for part in &parts {
@@ -1733,8 +1752,26 @@ pub fn demo(web: bool) -> Result<()> {
     if !Path::new("web/node_modules").exists() {
         sh_in("web", "npm", &["ci"])?;
     }
+    let wanted = fs::read_to_string("web/.nvmrc").unwrap_or_default();
+    let node = output("node", &["--version"]).unwrap_or_default();
+    if node.trim().trim_start_matches('v') != wanted.trim() {
+        eprintln!(
+            "    web/: Node.js is {}, web/.nvmrc names {}; it may still run",
+            node.trim(),
+            wanted.trim()
+        );
+    }
     eprintln!("==> web/ at {WEB_URL} (Ctrl-C stops it; the cell keeps running)");
-    sh_in("web", "npm", &["run", "dev"])
+    let status = Command::new("npm")
+        .current_dir("web")
+        .args(["run", "dev"])
+        .status()
+        .context("starting `npm run dev`")?;
+    if status.success() || status.code().is_none() {
+        Ok(())
+    } else {
+        bail!("`npm run dev` in web/ failed with {status}")
+    }
 }
 
 /// Opens the demo workspace's control stream once (a second run finds it open and goes on), then
@@ -1746,6 +1783,8 @@ fn demo_workspace() -> Result<()> {
         "open",
         "--workspace",
         DEMO_WORKSPACE,
+        "--environment",
+        "paper",
         "--journal",
         "$(MANDATE_JOURNAL_DSN)",
         "--store",
@@ -1834,6 +1873,25 @@ mod tests {
             "Commands:\n  membership  Grant the founding membership\n",
         );
         assert!(parts.iter().all(|p| p.skipped.is_none()), "{parts:?}");
+    }
+
+    #[test]
+    fn api_is_a_planned_name() -> Result<()> {
+        let all = processes_in(&crate::repo_root()?)?;
+        let listed = all.iter().find(|p| p["name"] == API_PROCESS);
+        assert!(
+            listed.is_none_or(|p| p["kind"] == "service"),
+            "the API server, once listed, is a service named `{API_PROCESS}`"
+        );
+        let help = "Commands:\n  workspace  Open\n      membership is named in a wrapped line\n";
+        let membership = demo_parts(&[], help)
+            .into_iter()
+            .find(|p| p.name == "the founding membership");
+        assert!(
+            membership.is_some_and(|m| m.skipped.is_some()),
+            "a wrapped description line is not a command"
+        );
+        Ok(())
     }
 
     #[test]
