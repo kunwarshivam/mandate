@@ -1,4 +1,4 @@
-//! Pause, a hold, and the kill switch as `OwnerCommandIssued` on the workspace's control stream
+//! Pause and the kill switch as `OwnerCommandIssued` on the workspace's control stream
 //! (§3.11 item 10, §4.2, §5.4, DEC-1007): the members journal spec §9.11 lists, as the CLI writes
 //! them, so the runtime reads the API's commands exactly as it reads the CLI's.
 //!
@@ -37,8 +37,6 @@ pub enum KillScope {
 pub enum Command {
     /// Pause the agent.
     Pause(String),
-    /// Hold the agent's new openings (DEC-191).
-    Hold(String),
     /// Engage the kill switch at a scope.
     KillSwitch(KillScope),
 }
@@ -48,7 +46,6 @@ impl Command {
     pub fn operation(&self) -> &'static str {
         match self {
             Self::Pause(_) => "pause",
-            Self::Hold(_) => "hold_openings",
             Self::KillSwitch(_) => "kill_switch",
         }
     }
@@ -57,18 +54,15 @@ impl Command {
     pub fn permission(&self) -> Permission {
         match self {
             Self::Pause(_) => Permission::Pause,
-            Self::Hold(_) => Permission::HoldNewOpenings,
             Self::KillSwitch(KillScope::Agent(_)) => Permission::KillSwitchAgent,
             Self::KillSwitch(_) => Permission::KillSwitchConnectionOrWorkspace,
         }
     }
 
-    /// What it is to the session (identity spec §6.4): pause and the kill switch survive an
-    /// outage; a hold does not.
+    /// What it is to the session (identity spec §6.4): both survive an outage.
     pub fn request(&self) -> Request {
         match self {
             Self::Pause(_) => Request::Pause,
-            Self::Hold(_) => Request::Other,
             Self::KillSwitch(_) => Request::KillSwitch,
         }
     }
@@ -77,7 +71,7 @@ impl Command {
     /// an agent's command, and for a kill switch the scope it stops.
     fn named<'a>(&'a self, workspace: &'a str) -> (Option<&'a str>, &'static str, &'a str) {
         match self {
-            Self::Pause(agent) | Self::Hold(agent) | Self::KillSwitch(KillScope::Agent(agent)) => {
+            Self::Pause(agent) | Self::KillSwitch(KillScope::Agent(agent)) => {
                 (Some(agent), "agent", agent)
             }
             Self::KillSwitch(KillScope::Connection(connection)) => (None, "connection", connection),
@@ -211,9 +205,7 @@ pub fn in_workspace(control: &[StoredEvent], command: &Command) -> bool {
         })
     };
     match command {
-        Command::Pause(id) | Command::Hold(id) | Command::KillSwitch(KillScope::Agent(id)) => {
-            agent(id)
-        }
+        Command::Pause(id) | Command::KillSwitch(KillScope::Agent(id)) => agent(id),
         Command::KillSwitch(KillScope::Connection(id)) => connection(id),
         Command::KillSwitch(KillScope::Workspace) => !control.is_empty(),
     }
@@ -232,7 +224,8 @@ pub enum Settled {
     Unavailable,
 }
 
-/// Appends `draft`, whose id is `event_id`, to `stream`, in up to [`ATTEMPTS`] attempts.
+/// Appends `draft`, whose id is `event_id`, to `stream`, in up to [`ATTEMPTS`] attempts; a draft
+/// the journal refuses ends them, since the same bytes are refused again (DEC-1007 item 6).
 pub async fn settle(
     journal: &dyn Journal,
     stream: &str,
@@ -250,6 +243,7 @@ pub async fn settle(
                 }
             }
             Some(AppendOutcome::IdempotencyConflict { .. }) => return Settled::Conflict,
+            Some(AppendOutcome::Invalid { .. }) => break,
             Some(AppendOutcome::Ambiguous) => ambiguous = true,
             Some(_) | None => {}
         }

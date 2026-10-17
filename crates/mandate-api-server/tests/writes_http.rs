@@ -1,4 +1,4 @@
-//! Pause, a hold, and the kill switch over HTTP (§3.3, §3.4, §5, §5.4, §3.11 item 10, API-4,
+//! Pause and the kill switch over HTTP (§3.3, §3.4, §5, §5.4, §3.11 item 10, API-4,
 //! API-7; DEC-1007): checked in §3.3's order, recorded on the control stream before the `202`,
 //! replayed by key, and never gated on drain.
 
@@ -302,20 +302,9 @@ fn a_pause_is_recorded_on_the_control_stream_before_its_202() {
 }
 
 #[test]
-fn a_hold_is_hold_openings_and_a_kill_switch_names_its_scope() {
+fn a_kill_switch_names_its_scope() {
     let f = fixture();
     let cookie = signed_in(&f, alice());
-    let hold = post(
-        &f,
-        &ws("/agents/agt_a/hold"),
-        &cookie,
-        Some("hold-key-0000000001"),
-        b"{}",
-    );
-    assert_eq!(
-        text(&body(&hold), &["command_id"]),
-        derived("hold_openings", ALICE, "hold-key-0000000001")
-    );
     let scopes = [
         (
             r#"{"kind":"workspace","id":null}"#,
@@ -356,10 +345,8 @@ fn a_hold_is_hold_openings_and_a_kill_switch_names_its_scope() {
         let _ = subject;
     }
     let recorded = commands(&f);
-    assert_eq!(recorded.len(), 4);
-    assert_eq!(text(&recorded[0], &["payload", "command"]), "hold_openings");
-    assert_eq!(text(&recorded[0], &["payload", "subject"]), "agt_a");
-    for (event, (_, kind, subject, agent)) in recorded[1..].iter().zip(&scopes) {
+    assert_eq!(recorded.len(), 3);
+    for (event, (_, kind, subject, agent)) in recorded.iter().zip(&scopes) {
         assert_eq!(text(event, &["payload", "command"]), "kill_switch");
         assert_eq!(text(event, &["payload", "scope"]), *kind);
         assert_eq!(text(event, &["payload", "subject"]), *subject);
@@ -526,11 +513,7 @@ fn a_scope_the_workspace_does_not_hold_is_404_and_records_nothing() {
     let f = fixture();
     let cookie = signed_in(&f, alice());
     let not_found = (404, ProblemCode::NotFound, Effect::None);
-    for path in [
-        "/agents/agt_zz/pause",
-        "/agents/agt_zz/hold",
-        "/agents/a%20b/pause",
-    ] {
+    for path in ["/agents/agt_zz/pause", "/agents/a%20b/pause"] {
         assert_eq!(
             code(&post(&f, &ws(path), &cookie, Some(KEY), b"{}")),
             not_found,
@@ -574,14 +557,8 @@ fn a_scope_the_workspace_does_not_hold_is_404_and_records_nothing() {
 fn a_member_without_the_row_is_refused_and_a_stranger_is_404() {
     let f = fixture();
     let viewer = signed_in(&f, bob());
-    for path in ["/agents/agt_a/pause", "/agents/agt_a/hold"] {
-        let reply = post(&f, &ws(path), &viewer, Some(KEY), b"{}");
-        assert_eq!(
-            code(&reply),
-            (403, ProblemCode::Forbidden, Effect::None),
-            "{path}"
-        );
-    }
+    let reply = post(&f, &ws("/agents/agt_a/pause"), &viewer, Some(KEY), b"{}");
+    assert_eq!(code(&reply), (403, ProblemCode::Forbidden, Effect::None));
     *f.records.lock().expect("unpoisoned") = Ok(vec![activated(1, alice(), &[Role::Approver])]);
     let approver = signed_in(&f, alice());
     let paused = post(&f, &ws("/agents/agt_a/pause"), &approver, Some(KEY), b"{}");
@@ -620,7 +597,7 @@ fn a_failed_membership_or_control_read_records_nothing() {
 }
 
 #[test]
-fn a_lapsed_session_still_pauses_and_kills_but_holds_nothing() {
+fn a_lapsed_session_still_pauses_and_kills() {
     let f = fixture();
     let cookie = signed_in(&f, alice());
     f.clock.set(f.clock.secs() + 6 * 60);
@@ -634,8 +611,6 @@ fn a_lapsed_session_still_pauses_and_kills_but_holds_nothing() {
         br#"{"scope":{"kind":"agent","id":"agt_a"}}"#,
     );
     accepted(&killed);
-    let held = post(&f, &ws("/agents/agt_a/hold"), &cookie, Some(KEY), b"{}");
-    assert_eq!(code(&held), (403, ProblemCode::ReductionOnly, Effect::None));
     assert_eq!(commands(&f).len(), 2);
 }
 
@@ -680,17 +655,74 @@ fn an_append_that_does_not_settle_says_what_it_knows() {
         json_text(&mandate_api::wire::encode(&named).expect("JSON")),
         derived("pause", ALICE, "retry-key-000000003")
     );
-    f.journal.script(&[Scripted::Conflict]);
-    let conflict = post(&f, &path, &cookie, Some("retry-key-000000004"), b"{}");
+    f.journal.script(&[Scripted::Invalid]);
+    let refused = post(&f, &path, &cookie, Some("retry-key-000000004"), b"{}");
     assert_eq!(
-        code(&conflict),
-        (409, ProblemCode::IdempotencyConflict, Effect::None)
+        code(&refused),
+        (503, ProblemCode::JournalUnavailable, Effect::None)
     );
     assert_eq!(commands(&f).len(), 1);
 }
 
 #[test]
-fn a_draining_process_still_records_all_three() {
+fn a_concurrent_copy_replays_and_other_content_under_the_id_conflicts() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    let path = ws("/agents/agt_a/pause");
+    f.journal.script(&[Scripted::RaceSame]);
+    let copy = post(&f, &path, &cookie, Some("race-key-000000001"), b"{}");
+    let answer = body(&copy);
+    accepted(&copy);
+    assert_eq!(
+        text(&answer, &["command_id"]),
+        derived("pause", ALICE, "race-key-000000001")
+    );
+    assert_eq!(
+        commands(&f).len(),
+        1,
+        "the copy that landed first is the one"
+    );
+    f.journal.script(&[Scripted::RaceOther]);
+    let other = post(&f, &path, &cookie, Some("race-key-000000002"), b"{}");
+    assert_eq!(
+        code(&other),
+        (409, ProblemCode::IdempotencyConflict, Effect::None)
+    );
+    f.journal.script(&[Scripted::Conflict]);
+    let vanished = post(&f, &path, &cookie, Some("race-key-000000003"), b"{}");
+    assert_eq!(
+        code(&vanished),
+        (503, ProblemCode::OutcomeUnknown, Effect::Unknown)
+    );
+}
+
+#[test]
+fn the_hold_is_not_served_until_the_runtime_folds_it() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    let held = post(&f, &ws("/agents/agt_a/hold"), &cookie, Some(KEY), b"{}");
+    assert_eq!(held.status, 401);
+    assert_eq!(held.body, send(f.addr, "GET", "/nowhere", &[], b"").body);
+    assert!(commands(&f).is_empty());
+}
+
+#[test]
+fn the_body_is_read_only_after_authentication_and_bounded() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    let path = ws("/agents/agt_a/pause");
+    let large = vec![b' '; mandate_api_server::writes::MAX_BODY + 1];
+    let anonymous = send(f.addr, "POST", &path, &[("Idempotency-Key", KEY)], &large);
+    assert_eq!(anonymous.status, 401);
+    let refused = post(&f, &path, &cookie, Some(KEY), &large);
+    assert_eq!(code(&refused), (422, ProblemCode::Invalid, Effect::None));
+    let mut padded = b"{}".to_vec();
+    padded.resize(mandate_api_server::writes::MAX_BODY, b' ');
+    accepted(&post(&f, &path, &cookie, Some(KEY), &padded));
+}
+
+#[test]
+fn a_draining_process_still_records_both() {
     let f = fixture();
     let cookie = signed_in(&f, alice());
     f.drain.begin();
@@ -703,19 +735,12 @@ fn a_draining_process_still_records_all_three() {
     ));
     accepted(&post(
         &f,
-        &ws("/agents/agt_a/hold"),
-        &cookie,
-        Some("drain-key-00000002"),
-        b"{}",
-    ));
-    accepted(&post(
-        &f,
         &ws("/kill-switch"),
         &cookie,
         Some("drain-key-00000003"),
         br#"{"scope":{"kind":"workspace","id":null}}"#,
     ));
-    assert_eq!(commands(&f).len(), 3);
+    assert_eq!(commands(&f).len(), 2);
 }
 
 #[test]

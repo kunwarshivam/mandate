@@ -44,7 +44,6 @@ fn agent(id: &str) -> Command {
 fn every() -> Vec<Command> {
     vec![
         Command::Pause("agt_a".to_owned()),
-        Command::Hold("agt_a".to_owned()),
         agent("agt_a"),
         Command::KillSwitch(KillScope::Connection("conn_1".to_owned())),
         Command::KillSwitch(KillScope::Workspace),
@@ -61,7 +60,6 @@ fn each_command_names_its_operation_row_and_session_reach() {
         named,
         [
             ("pause", Permission::Pause, Request::Pause),
-            ("hold_openings", Permission::HoldNewOpenings, Request::Other),
             (
                 "kill_switch",
                 Permission::KillSwitchAgent,
@@ -85,7 +83,6 @@ fn each_command_names_its_operation_row_and_session_reach() {
 fn expected_payload(command: &Command) -> Value {
     let (agent, name, scope, subject) = match command {
         Command::Pause(a) => (format!("\"{a}\""), "pause", "agent", a.as_str()),
-        Command::Hold(a) => (format!("\"{a}\""), "hold_openings", "agent", a.as_str()),
         Command::KillSwitch(KillScope::Agent(a)) => {
             (format!("\"{a}\""), "kill_switch", "agent", a.as_str())
         }
@@ -277,17 +274,27 @@ fn a_scope_is_found_only_where_the_control_stream_names_it() {
             "MandateDraftSaved",
             r#"{"agent_id":"agt_c","connection_id":7,"mandate_version":"sha256:01"}"#,
         ),
+        row(
+            5,
+            "AgentDeployed",
+            r#"{"agent_id":"agt_s","mandate_version":"sha256:01"}"#,
+        ),
+        row(6, "AgentStopped", r#"{"agent_id":"agt_s"}"#),
     ];
     let found = |c: &Command| in_workspace(&control, c);
     assert!(found(&Command::Pause("agt_a".to_owned())));
-    assert!(found(&Command::Hold("agt_a".to_owned())));
     assert!(found(&agent("agt_a")));
     assert!(found(&Command::KillSwitch(KillScope::Connection(
         "conn_1".to_owned()
     ))));
     assert!(found(&Command::KillSwitch(KillScope::Workspace)));
+    assert!(
+        found(&agent("agt_s")),
+        "a stopped agent is still found: stopping it adds no risk"
+    );
+    assert!(found(&Command::Pause("agt_s".to_owned())));
     assert!(!found(&Command::Pause("agt_c".to_owned())));
-    assert!(!found(&Command::Hold("agt_b".to_owned())));
+    assert!(!found(&Command::Pause("agt_b".to_owned())));
     assert!(!found(&agent("conn_1")));
     assert!(!found(&Command::KillSwitch(KillScope::Connection(
         "agt_a".to_owned()
@@ -407,4 +414,20 @@ fn a_committed_answer_without_the_event_is_not_taken_as_stored() {
         .expect("a runtime");
     let answer = runtime.block_on(settle(&journal, &ctl(), EVENT, &other, at(T0)));
     assert_eq!(answer, Settled::Unknown);
+}
+
+#[test]
+fn a_draft_the_journal_refuses_is_not_retried() {
+    let journal = MemJournal::default();
+    journal.script(&[Scripted::Invalid]);
+    assert_eq!(settled(&journal, &pause()), Settled::Unavailable);
+    assert_eq!(journal.appends.lock().expect("unpoisoned").len(), 1);
+}
+
+#[test]
+fn a_refusal_after_an_ambiguous_commit_is_still_unknown() {
+    let journal = MemJournal::default();
+    journal.script(&[Scripted::Ambiguous, Scripted::Invalid]);
+    assert_eq!(settled(&journal, &pause()), Settled::Unknown);
+    assert_eq!(journal.appends.lock().expect("unpoisoned").len(), 2);
 }

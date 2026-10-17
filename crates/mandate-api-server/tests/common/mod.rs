@@ -284,6 +284,12 @@ pub enum Scripted {
     CommittedThenAmbiguous,
     /// Nothing written: `IdempotencyConflict`.
     Conflict,
+    /// A concurrent copy of the same call, a second later, lands first: `IdempotencyConflict`.
+    RaceSame,
+    /// Another command lands under the same id first: `IdempotencyConflict`.
+    RaceOther,
+    /// The draft is refused: `Invalid`.
+    Invalid,
     /// Nothing written: the call fails (`JournalUnavailable`).
     Failed,
 }
@@ -416,6 +422,33 @@ impl mandate_api_server::journal::Journal for MemJournal {
             }),
             Some(Scripted::Ambiguous) => Ok(AppendOutcome::Ambiguous),
             Some(Scripted::Conflict) => Ok(AppendOutcome::IdempotencyConflict { stored_seq: 1 }),
+            Some(Scripted::RaceSame) => {
+                let copy = edited(draft, "submitted_at", |v| {
+                    mandate_canon::Value::Int(
+                        mandate_canon::Int::new(v.as_int().expect("a second") + 1).expect("an int"),
+                    )
+                });
+                let row = self.store(stream, recorded_at, &copy);
+                Ok(AppendOutcome::IdempotencyConflict {
+                    stored_seq: row.seq,
+                })
+            }
+            Some(Scripted::RaceOther) => {
+                let other = edited(draft, "subject", |_| {
+                    mandate_canon::Value::Str("other".into())
+                });
+                let row = self.store(stream, recorded_at, &other);
+                Ok(AppendOutcome::IdempotencyConflict {
+                    stored_seq: row.seq,
+                })
+            }
+            Some(Scripted::Invalid) => Ok(AppendOutcome::Invalid {
+                draft: 0,
+                error: mandate_journal::Invalid {
+                    reason: mandate_journal::InvalidReason::Schema,
+                    path: "payload".to_owned(),
+                },
+            }),
             Some(Scripted::CommittedThenAmbiguous) => {
                 self.store(stream, recorded_at, draft);
                 Ok(AppendOutcome::Ambiguous)
@@ -424,6 +457,24 @@ impl mandate_api_server::journal::Journal for MemJournal {
         };
         Box::pin(async move { outcome })
     }
+}
+
+/// `draft` with its payload member `name` replaced by `change` of its value.
+fn edited(
+    draft: &[u8],
+    name: &str,
+    change: impl FnOnce(&mandate_canon::Value) -> mandate_canon::Value,
+) -> Vec<u8> {
+    let mut value = mandate_canon::parse(draft).expect("a JSON draft");
+    let mandate_canon::Value::Object(fields) = &mut value else {
+        panic!("an object");
+    };
+    let Some(mandate_canon::Value::Object(payload)) = fields.get_mut("payload") else {
+        panic!("a payload");
+    };
+    let old = payload.get(name).cloned().expect(name);
+    payload.insert(mandate_canon::Key::new(name).expect("a key"), change(&old));
+    mandate_canon::to_canonical(&value)
 }
 
 impl MemJournal {

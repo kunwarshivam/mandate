@@ -13,7 +13,7 @@
   `__Host-` cookie over `mandate-authn`'s `SessionRecord`, refresh onto route 1's outage, lapsed
   access keeping pause and the kill switch, caps), `src/subject.rs` (the subject-link file of
   digests), `src/token.rs` and `src/keys.rs` (the issuer's access token against its fetched key
-  set), `src/clock.rs`, `src/commands.rs` (pause, a hold, and the kill switch as journal spec
+  set), `src/clock.rs`, `src/commands.rs` (pause and the kill switch as journal spec
   §9.11's `OwnerCommandIssued`, the repeat's comparison, the scope's lookup, and the append loop),
   `src/writes.rs` (their routes, checked in §3.3's order), `src/journal.rs` (the read and append
   port), and the `mandate-api-server` binary (`--bind`, `--probe-bind`,
@@ -35,7 +35,8 @@
   `tests/commands.rs`: each draft's members written out by hand and accepted by the journal's own
   `MemoryJournal`, the repeat's comparison member by member, the scope's lookup, and the append
   loop under fences, moved heads, outages, ambiguous commits, and conflicts.
-  `tests/writes_http.rs`: pause, hold, and each kill-switch scope recorded before the `202`, the
-  derived id, no forwarded step-up, replay and conflict by key, §3.3's order, the 404s, the
-  matrix rows, the failed reads, a lapsed session, an append that does not settle, and a drain.
+  `tests/writes_http.rs`: pause and each kill-switch scope recorded before the `202`, the derived
+  id, no forwarded step-up, replay and conflict by key and by a concurrent copy, §3.3's order, the
+  body read only after authentication, the 404s, the matrix rows, the failed reads, a lapsed
+  session, an append that does not settle, a drain, and the hold left unmounted.
 - **Run:** `cargo nextest run -p mandate-api-server`.

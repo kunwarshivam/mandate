@@ -1,15 +1,17 @@
 //! The owner-command routes (§4.2, §5.4, §3.11 item 10, DEC-1007): `POST
-//! /v1/workspaces/{ws}/agents/{id}/pause`, `…/agents/{id}/hold`, and `…/kill-switch`.
+//! /v1/workspaces/{ws}/agents/{id}/pause` and `…/kill-switch`. The hold is not mounted until the
+//! runtime folds it (DEC-1007 item 1).
 //!
 //! Each is checked in §3.3 item 1's order: the session (the one 401, or `reduction_only`), the
-//! CSRF mark (403), then the `Idempotency-Key` and the body by §5's lenient decoder (422), then the
+//! CSRF mark (403), then the `Idempotency-Key` and the body, read only then, by §5's lenient
+//! decoder (422), then the
 //! matrix row and the scope (403 or the one 404). Its `OwnerCommandIssued` is on the control stream
 //! before the `202` (rule 5), and a repeat under the key replays it (API-4). Neither readiness nor
 //! a drain gates them (API-7).
 
 use std::sync::Arc;
 
-use axum::body::Bytes;
+use axum::body::{Body, Bytes, to_bytes};
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -17,7 +19,7 @@ use axum::response::Response;
 use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
 use mandate_api::lenient::{Api7, Kept, decode_lenient};
 use mandate_api::problem::{Effect, Problem, ProblemCode};
-use mandate_api::requests::{HoldRequest, KillSwitchRequest, PauseRequest, Scope};
+use mandate_api::requests::{KillSwitchRequest, PauseRequest, Scope};
 use mandate_api::wire::{EventId, Id, encode};
 use mandate_authn::Request;
 use mandate_canon::{Value, parse};
@@ -39,35 +41,15 @@ pub async fn pause(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
     path: Result<Path<(String, String)>, PathRejection>,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let Ok(Path((workspace, agent))) = path else {
         return path_refused(&app, &headers, Request::Pause).await;
     };
-    let accepted = admitted::<PauseRequest>(&app, &headers, Request::Pause, &body);
+    let accepted = admitted::<PauseRequest>(&app, &headers, Request::Pause, body).await;
     match accepted {
         Ok((gate, kept)) => {
             let command = Command::Pause(agent);
-            recorded(&app, &gate, &workspace, &command, &kept.dropped, None).await
-        }
-        Err(refusal) => refusal.response(),
-    }
-}
-
-/// `POST /v1/workspaces/{ws}/agents/{id}/hold`.
-pub async fn hold(
-    State(app): State<Arc<App>>,
-    headers: HeaderMap,
-    path: Result<Path<(String, String)>, PathRejection>,
-    body: Bytes,
-) -> Response {
-    let Ok(Path((workspace, agent))) = path else {
-        return path_refused(&app, &headers, Request::Other).await;
-    };
-    let accepted = admitted::<HoldRequest>(&app, &headers, Request::Other, &body);
-    match accepted {
-        Ok((gate, kept)) => {
-            let command = Command::Hold(agent);
             recorded(&app, &gate, &workspace, &command, &kept.dropped, None).await
         }
         Err(refusal) => refusal.response(),
@@ -80,13 +62,13 @@ pub async fn kill_switch(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
     path: Result<Path<String>, PathRejection>,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let Ok(Path(workspace)) = path else {
         return path_refused(&app, &headers, Request::KillSwitch).await;
     };
     let (gate, kept) =
-        match admitted::<KillSwitchRequest>(&app, &headers, Request::KillSwitch, &body) {
+        match admitted::<KillSwitchRequest>(&app, &headers, Request::KillSwitch, body).await {
             Ok(accepted) => accepted,
             Err(refusal) => return refusal.response(),
         };
@@ -119,19 +101,27 @@ struct Gate {
     key: IdempotencyKey,
 }
 
-/// The session, the CSRF mark, the key, and the body, in that order.
-fn admitted<T: Api7>(
+/// The largest body read, in bytes: a command's members and a record's two references fit many
+/// times over.
+pub const MAX_BODY: usize = 64 * 1024;
+
+/// The session, the CSRF mark, the key, and the body, in that order: the body is read only once
+/// the call is authenticated, so an unauthenticated one gets the one 401 whatever it sends.
+async fn admitted<T: Api7>(
     app: &App,
     headers: &HeaderMap,
     request: Request,
-    body: &[u8],
+    body: Body,
 ) -> Result<(Gate, Kept<T>), Refused> {
     let (admitted, now) = session(app, headers, request)?;
     if !browser(headers, &app.settings.app_origin) {
         return Err(Refused::Forbidden);
     }
     let key = one_key(headers).ok_or(Refused::Invalid)?;
-    let kept = decode_lenient::<T>(body).map_err(|_| Refused::Invalid)?;
+    let body = to_bytes(body, MAX_BODY)
+        .await
+        .map_err(|_| Refused::Invalid)?;
+    let kept = decode_lenient::<T>(&body).map_err(|_| Refused::Invalid)?;
     Ok((Gate { admitted, now, key }, kept))
 }
 
@@ -202,14 +192,19 @@ async fn recorded(
     let Some(bytes) = draft(&issued) else {
         return Refused::JournalUnavailable.response();
     };
-    let repeat = reader.control.iter().find(|row| row.event_id == text);
-    let settled = match repeat {
-        Some(row) if same(row, &bytes) => Settled::Stored(Box::new(row.clone())),
-        Some(_) => Settled::Conflict,
-        None => {
-            let stream = format!("ctl:{}", reader.workspace);
-            settle(app.journal.as_ref(), &stream, &text, &bytes, gate.now).await
-        }
+    let stream = format!("ctl:{}", reader.workspace);
+    let settled = match repeated(&reader.control, &text, &bytes) {
+        Some(settled) => settled,
+        None => match settle(app.journal.as_ref(), &stream, &text, &bytes, gate.now).await {
+            Settled::Conflict => app
+                .journal
+                .rows(&stream)
+                .await
+                .ok()
+                .and_then(|rows| repeated(&rows, &text, &bytes))
+                .unwrap_or(Settled::Unknown),
+            settled => settled,
+        },
     };
     match settled {
         Settled::Stored(row) => accepted(&row, gate.now, dropped, status),
@@ -220,6 +215,16 @@ async fn recorded(
         Settled::Unknown => unknown(id),
         Settled::Unavailable => Refused::JournalUnavailable.response(),
     }
+}
+
+/// What `rows` already hold under `id` (§3.4 step 1): the same command, replayed, or other content,
+/// a conflict; `None` when nothing is stored under it.
+fn repeated(rows: &[StoredEvent], id: &str, draft: &[u8]) -> Option<Settled> {
+    let row = rows.iter().find(|row| row.event_id == id)?;
+    Some(match same(row, draft) {
+        true => Settled::Stored(Box::new(row.clone())),
+        false => Settled::Conflict,
+    })
 }
 
 fn principal_text(gate: &Gate) -> Option<String> {
