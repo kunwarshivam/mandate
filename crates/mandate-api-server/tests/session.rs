@@ -710,32 +710,47 @@ fn a_rotated_cookie_presented_at_sign_in_ends_its_session() {
     assert_eq!(store.len(), 1);
 }
 
-/// A call in flight while a refresh rotates the cookie (DEC-1022): the rotated-away cookie still
-/// admits a call other than a refresh for [`ROTATION_GRACE_S`] seconds after the rotation, and
-/// after that is refused without ending the session. Only a refresh treats it as reuse.
+/// A command in flight while a refresh rotates the cookie (DEC-1022): for [`ROTATION_GRACE_S`]
+/// seconds after a granted refresh, the cookie it rotated away still serves a pause and a kill
+/// switch; any other call with it is refused with the session kept; after the window, or on the
+/// refresh route, it is reuse and ends the session.
 #[test]
-fn a_just_rotated_cookie_admits_calls_briefly_and_only_a_refresh_treats_it_as_reuse() {
-    let store = sessions();
-    let cookie = store
-        .open(alice(), SUBJECT.to_owned(), None, at(T0))
-        .expect("opened");
+fn a_just_rotated_cookie_serves_risk_reduction_briefly_and_is_reuse_otherwise() {
     let granted = || Answer::Granted {
         subject: SUBJECT.to_owned(),
         principal: alice(),
     };
+    let store = sessions();
+    let cookie = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
     let rotated_at = T0 + 100;
     let rotated = store
         .refresh(cookie.value(), granted(), at(rotated_at))
         .expect("granted")
         .expect("a new cookie");
-    for request in [Request::Other, Request::Pause, Request::KillSwitch] {
-        assert!(
-            store
-                .authenticate(cookie.value(), request, at(rotated_at + ROTATION_GRACE_S))
-                .is_ok(),
-            "{request:?} in flight across the rotation is admitted"
-        );
-    }
+    let edge = at(rotated_at + ROTATION_GRACE_S);
+    assert!(
+        store
+            .authenticate(cookie.value(), Request::Pause, edge)
+            .is_ok()
+    );
+    assert!(
+        store
+            .authenticate(cookie.value(), Request::KillSwitch, edge)
+            .is_ok()
+    );
+    assert_eq!(
+        store.authenticate(cookie.value(), Request::Other, edge),
+        Err(Unauthenticated),
+        "an ordinary call with it is refused"
+    );
+    assert!(
+        store
+            .authenticate(rotated.value(), Request::Other, edge)
+            .is_ok(),
+        "and the session is kept"
+    );
     assert_eq!(
         store.authenticate(
             cookie.value(),
@@ -743,42 +758,125 @@ fn a_just_rotated_cookie_admits_calls_briefly_and_only_a_refresh_treats_it_as_re
             at(rotated_at + ROTATION_GRACE_S + 1)
         ),
         Err(Unauthenticated),
-        "after the grace the old cookie is refused"
+        "after the window it admits nothing"
     );
     assert!(
-        store
-            .authenticate(
-                rotated.value(),
-                Request::Other,
-                at(rotated_at + ROTATION_GRACE_S + 2)
-            )
-            .is_ok(),
-        "and the session lives on"
+        store.is_empty(),
+        "and its use is reuse, which ends the session"
     );
+
+    let store = sessions();
+    let cookie = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let rotated = store
+        .refresh(cookie.value(), granted(), at(T0 + 100))
+        .expect("granted")
+        .expect("a new cookie");
     let again = store
-        .refresh(rotated.value(), granted(), at(rotated_at + 200))
+        .refresh(rotated.value(), granted(), at(T0 + 110))
         .expect("granted")
         .expect("a third cookie");
-    assert_eq!(
-        store.authenticate(cookie.value(), Request::Other, at(rotated_at + 201)),
-        Err(Unauthenticated),
-        "only the cookie just rotated away has a grace, never an older one"
-    );
     assert!(
         store
-            .authenticate(rotated.value(), Request::Other, at(rotated_at + 201))
+            .authenticate(rotated.value(), Request::Pause, at(T0 + 111))
             .is_ok(),
-        "the one just rotated away does"
-    );
-    assert!(
-        store
-            .authenticate(again.value(), Request::Other, at(rotated_at + 202))
-            .is_ok()
+        "the cookie the last refresh rotated away is served"
     );
     assert_eq!(
-        store.refresh(rotated.value(), granted(), at(rotated_at + 203)),
+        store.authenticate(cookie.value(), Request::Pause, at(T0 + 112)),
         Err(Unauthenticated),
-        "a refresh with it, even within the grace, is reuse"
+        "an older one is not, even within its own window"
+    );
+    assert!(store.is_empty(), "it is reuse");
+    let _ = again;
+
+    let store = sessions();
+    let cookie = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let rotated = store
+        .refresh(cookie.value(), granted(), at(T0 + 100))
+        .expect("granted")
+        .expect("a new cookie");
+    assert_eq!(
+        store.refresh(cookie.value(), granted(), at(T0 + 101)),
+        Err(Unauthenticated),
+        "a refresh with it, even within the window, is reuse"
+    );
+    assert_eq!(
+        store.authenticate(rotated.value(), Request::KillSwitch, at(T0 + 102)),
+        Err(Unauthenticated)
     );
     assert!(store.is_empty(), "and reuse ends the session");
+}
+
+/// The window admits only what the session itself still admits (DEC-1022): a narrowed session
+/// still refuses an ordinary call, the absolute lifetime still ends it, and signing out takes the
+/// current cookie only.
+#[test]
+fn a_graced_cookie_admits_no_more_than_the_session_does() {
+    let granted = || Answer::Granted {
+        subject: SUBJECT.to_owned(),
+        principal: alice(),
+    };
+    let store = sessions();
+    let cookie = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let rotated = store
+        .refresh(cookie.value(), granted(), at(T0 + 100))
+        .expect("granted")
+        .expect("a new cookie");
+    assert_eq!(
+        store.refresh(rotated.value(), Answer::Unreachable, at(T0 + 105)),
+        Ok(None),
+        "an outage narrows the session"
+    );
+    assert!(
+        store
+            .authenticate(cookie.value(), Request::Pause, at(T0 + 111))
+            .is_ok(),
+        "a narrowed session still serves a pause with it"
+    );
+    assert_eq!(
+        store.end(cookie.value()),
+        Err(Unauthenticated),
+        "signing out takes the current cookie only"
+    );
+    assert!(
+        store
+            .authenticate(rotated.value(), Request::Pause, at(T0 + 112))
+            .is_ok(),
+        "and the refused sign-out kept the session"
+    );
+
+    let late = sessions();
+    let mut held = late
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    let mut t = T0;
+    while t + 240 < T0 + ABSOLUTE_S - 10 {
+        t += 240;
+        held = late
+            .refresh(held.value(), granted(), at(t))
+            .expect("granted")
+            .expect("rotated");
+    }
+    let before = held.clone();
+    let last = late
+        .refresh(held.value(), granted(), at(T0 + ABSOLUTE_S - 10))
+        .expect("granted")
+        .expect("rotated");
+    assert!(
+        late.authenticate(before.value(), Request::Pause, at(T0 + ABSOLUTE_S - 1))
+            .is_ok(),
+        "served before the absolute lifetime ends"
+    );
+    assert_eq!(
+        late.authenticate(before.value(), Request::KillSwitch, at(T0 + ABSOLUTE_S + 1)),
+        Err(Unauthenticated),
+        "but not past it, within the window or not"
+    );
+    let _ = last;
 }
