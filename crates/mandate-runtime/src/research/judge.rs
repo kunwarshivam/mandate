@@ -270,7 +270,7 @@ pub(super) fn judge(
     })
 }
 
-/// An accepted invalidation's `ThesisInvalidated` body (journal spec §9.21): the thesis, its
+/// An accepted invalidation's `ThesisInvalidated` body (journal spec §9.22): the thesis, its
 /// lineage, and its instrument as the run's inputs held them, the verdict's index in the call
 /// record's `verdicts`, and the evidence as the output gave it. The model is its cause; the record's
 /// `causation_id` is the call record, which heads the batch.

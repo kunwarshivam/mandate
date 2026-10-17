@@ -56,6 +56,7 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN: ${{ vars.NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN }}
       - run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run
       - run: node scripts/workers.mjs size .wrangler/dry-run
       - run: npx wrangler deploy

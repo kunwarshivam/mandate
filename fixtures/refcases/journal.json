@@ -22473,6 +22473,1178 @@
    }
   ]
  },
+ "deployment_manager": {
+  "spec": "docs/specs/journal.md v0.48 §9.21 (DEC-1170)",
+  "drafts": {
+   "process_start_issued": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4DM000000000000000000",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ProcessStartIssued",
+    "schema_version": 1,
+    "event_time": "2026-10-17T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "process": "runtime",
+     "subject": "agent_a",
+     "generation": 1,
+     "cause": "deployed"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "process_stop_issued": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4DM010000000000000000",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ProcessStopIssued",
+    "schema_version": 1,
+    "event_time": "2026-10-17T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "process": "runtime",
+     "subject": "agent_a",
+     "generation": 3,
+     "cause": "agent_stopped"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "process_crash_looped": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4DM020000000000000000",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ProcessCrashLooped",
+    "schema_version": 1,
+    "event_time": "2026-10-17T15:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "process": "executor",
+     "subject": "01J8Z2ACCT00000000000000A1",
+     "generation": 6,
+     "restarts": 5,
+     "window_seconds": 600
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "ProcessStartIssued.process.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.process.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.process.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.subject.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.subject.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "not an id"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.subject.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.generation.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.generation.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.cause.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.cause.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.cause.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.missing",
+    "clause": "§9.21 closed",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.extra",
+    "clause": "§9.21 closed",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.process.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.process.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.process.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.subject.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.subject.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "not an id"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.subject.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.generation.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.generation.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.cause.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.cause.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.cause.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.missing",
+    "clause": "§9.21 closed",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.extra",
+    "clause": "§9.21 closed",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.process.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.process.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.process.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.subject.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.subject.form",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": "not an id"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.subject.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.subject",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.subject"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.generation.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.generation.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.restarts.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.restarts",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restarts"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.restarts.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.restarts",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restarts"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.window_seconds.kind",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.window_seconds",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.window_seconds"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.window_seconds.null",
+    "clause": "§9.21 types",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.window_seconds",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.window_seconds"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.missing",
+    "clause": "§9.21 closed",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.process",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.process"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.extra",
+    "clause": "§9.21 closed",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.note",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.note"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.by_a_user",
+    "clause": "rule 165: workspace control services write it as a system actor",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.on_an_agent_stream",
+    "clause": "§9 row: a control-stream record",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.at_version_2",
+    "clause": "§9.21: closed at schema version 1 only",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.generation_zero",
+    "clause": "rule 166: a generation is at least 1",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 0
+     },
+     {
+      "path": "payload.cause",
+      "value": "restart"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.by_a_user",
+    "clause": "rule 165: workspace control services write it as a system actor",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.on_an_agent_stream",
+    "clause": "§9 row: a control-stream record",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.at_version_2",
+    "clause": "§9.21: closed at schema version 1 only",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.generation_zero",
+    "clause": "rule 166: a generation is at least 1",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.by_a_user",
+    "clause": "rule 165: workspace control services write it as a system actor",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.on_an_agent_stream",
+    "clause": "§9 row: a control-stream record",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.at_version_2",
+    "clause": "§9.21: closed at schema version 1 only",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.generation_zero",
+    "clause": "rule 166: a generation is at least 1",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.generation"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.first_start_as_restart",
+    "clause": "rule 167: generation 1 is the deployed start",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "restart"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.first_start_for_kill_switch",
+    "clause": "rule 167: generation 1 is the deployed start",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "kill_switch"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.deployed_twice",
+    "clause": "rule 167: only generation 1 is deployed",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.no_restarts",
+    "clause": "rule 168: a crash loop counted a restart",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.restarts",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restarts"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.no_window",
+    "clause": "rule 168: the window is at least a second",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.window_seconds",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.window_seconds"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "ProcessStartIssued.executor",
+    "clause": "§9.21: an executor, named by its account",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "executor"
+     },
+     {
+      "path": "payload.subject",
+      "value": "01J8Z2ACCT00000000000000A1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.restart",
+    "clause": "rule 167: a later generation restarts",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 2
+     },
+     {
+      "path": "payload.cause",
+      "value": "restart"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.kill_switch",
+    "clause": "rule 167: a kill switch starts a later generation",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 7
+     },
+     {
+      "path": "payload.cause",
+      "value": "kill_switch"
+     },
+     {
+      "path": "causation_id",
+      "value": "01J8Z3P2A000000000000000Q3"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.first_stopped",
+    "clause": "rule 166: generation 1 may be stopped",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.generation",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.executor_stopped",
+    "clause": "§9.21: an executor stopped with its last agent",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "executor"
+     },
+     {
+      "path": "payload.subject",
+      "value": "01J8Z2ACCT00000000000000A1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.one_restart",
+    "clause": "rule 168: one restart is enough to record",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.restarts",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.one_second_window",
+    "clause": "rule 168: a window of one second is enough",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.window_seconds",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.runtime",
+    "clause": "§9.21: a runtime's crash loop",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "runtime"
+     },
+     {
+      "path": "payload.subject",
+      "value": "agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.live",
+    "clause": "§9.21: either environment",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "environment",
+      "value": "live"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
+ },
  "broker_profile": {
   "spec": "docs/specs/journal.md v0.19 §9 and rule 21b (DEC-531 item 4, DEC-630)",
   "artifacts": [
@@ -78341,7 +79513,7 @@
   }
  },
  "thesis_invalidation": {
-  "spec": "docs/specs/journal.md v0.48 §9.21 (DEC-2202)",
+  "spec": "docs/specs/journal.md v0.49 §9.22 (DEC-2202)",
   "drafts": {
    "call": {
     "envelope_version": 1,
@@ -78665,7 +79837,7 @@
   "invalid_drafts": [
    {
     "name": "invalidated.thesis_id.kind",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78681,7 +79853,7 @@
    },
    {
     "name": "invalidated.thesis_id.form",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78697,7 +79869,7 @@
    },
    {
     "name": "invalidated.lineage_id.kind",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78713,7 +79885,7 @@
    },
    {
     "name": "invalidated.lineage_id.form",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78729,7 +79901,7 @@
    },
    {
     "name": "invalidated.instrument_id.kind",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78745,7 +79917,7 @@
    },
    {
     "name": "invalidated.instrument_id.form",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78761,7 +79933,7 @@
    },
    {
     "name": "invalidated.cause.kind",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78777,7 +79949,7 @@
    },
    {
     "name": "invalidated.cause.form",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78793,7 +79965,7 @@
    },
    {
     "name": "invalidated.candidate.kind",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78809,7 +79981,7 @@
    },
    {
     "name": "invalidated.evidence.kind",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78825,7 +79997,7 @@
    },
    {
     "name": "invalidated.source.kind",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78841,7 +80013,7 @@
    },
    {
     "name": "invalidated.thesis_id.null",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78857,7 +80029,7 @@
    },
    {
     "name": "invalidated.lineage_id.null",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78873,7 +80045,7 @@
    },
    {
     "name": "invalidated.instrument_id.null",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78889,7 +80061,7 @@
    },
    {
     "name": "invalidated.cause.null",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78905,7 +80077,7 @@
    },
    {
     "name": "invalidated.evidence.null",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78921,7 +80093,7 @@
    },
    {
     "name": "invalidated.evidence.item",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78939,7 +80111,7 @@
    },
    {
     "name": "invalidated.missing",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78955,7 +80127,7 @@
    },
    {
     "name": "invalidated.extra",
-    "clause": "§9.21 types",
+    "clause": "§9.22 types",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78970,8 +80142,8 @@
     }
    },
    {
-    "name": "invalidated.165.no_candidate",
-    "clause": "rule 165: a model's invalidation names its verdict",
+    "name": "invalidated.184.no_candidate",
+    "clause": "rule 184: a model's invalidation names its verdict",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -78986,8 +80158,8 @@
     }
    },
    {
-    "name": "invalidated.165.source",
-    "clause": "rule 165: a model's invalidation names no source",
+    "name": "invalidated.184.source",
+    "clause": "rule 184: a model's invalidation names no source",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -79002,8 +80174,8 @@
     }
    },
    {
-    "name": "invalidated.165.no_cause",
-    "clause": "rule 165: a model's invalidation names its call",
+    "name": "invalidated.184.no_cause",
+    "clause": "rule 184: a model's invalidation names its call",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -79018,8 +80190,8 @@
     }
    },
    {
-    "name": "revoked.165.candidate",
-    "clause": "rule 165: a revoked source's invalidation names no verdict",
+    "name": "revoked.184.candidate",
+    "clause": "rule 184: a revoked source's invalidation names no verdict",
     "base_draft": "revoked",
     "changes": [
      {
@@ -79034,8 +80206,8 @@
     }
    },
    {
-    "name": "revoked.165.evidence",
-    "clause": "rule 165: a revoked source's invalidation cites no items",
+    "name": "revoked.184.evidence",
+    "clause": "rule 184: a revoked source's invalidation cites no items",
     "base_draft": "revoked",
     "changes": [
      {
@@ -79053,8 +80225,8 @@
     }
    },
    {
-    "name": "revoked.165.no_source",
-    "clause": "rule 165: a revoked source's invalidation names the source",
+    "name": "revoked.184.no_source",
+    "clause": "rule 184: a revoked source's invalidation names the source",
     "base_draft": "revoked",
     "changes": [
      {
@@ -79069,8 +80241,8 @@
     }
    },
    {
-    "name": "revoked.165.no_cause",
-    "clause": "rule 165: a revoked source's invalidation names the allowlist that dropped it",
+    "name": "revoked.184.no_cause",
+    "clause": "rule 184: a revoked source's invalidation names the allowlist that dropped it",
     "base_draft": "revoked",
     "changes": [
      {
@@ -79085,8 +80257,8 @@
     }
    },
    {
-    "name": "invalidated.165.first",
-    "clause": "rule 165: the first that fails, in order",
+    "name": "invalidated.184.first",
+    "clause": "rule 184: the first that fails, in order",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -79105,8 +80277,8 @@
     }
    },
    {
-    "name": "invalidated.166.actor",
-    "clause": "rule 166",
+    "name": "invalidated.185.actor",
+    "clause": "rule 185",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -79159,7 +80331,7 @@
    },
    {
     "name": "invalidated.at_version_2",
-    "clause": "§9.21: schema version 1 only",
+    "clause": "§9.22: schema version 1 only",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -79177,7 +80349,7 @@
   "valid_drafts": [
    {
     "name": "invalidated.no_evidence",
-    "clause": "rule 165: the output may cite no item",
+    "clause": "rule 184: the output may cite no item",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -79191,7 +80363,7 @@
    },
    {
     "name": "invalidated.evidence_as_given",
-    "clause": "§9.21: the items as the output gave them, unordered and repeated",
+    "clause": "§9.22: the items as the output gave them, unordered and repeated",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -79209,7 +80381,7 @@
    },
    {
     "name": "invalidated.later_candidate",
-    "clause": "rule 165: any candidate index",
+    "clause": "rule 184: any candidate index",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -79223,7 +80395,7 @@
    },
    {
     "name": "invalidated.revision",
-    "clause": "§9.21: a revision's thesis, in its lineage",
+    "clause": "§9.22: a revision's thesis, in its lineage",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -79237,7 +80409,7 @@
    },
    {
     "name": "invalidated.no_run",
-    "clause": "§9.21: `correlation_id` is not read",
+    "clause": "§9.22: `correlation_id` is not read",
     "base_draft": "invalidated",
     "changes": [
      {
@@ -79253,7 +80425,7 @@
   "batches": [
    {
     "name": "the_call_then_its_invalidation",
-    "clause": "rule 167: one batch, the call first",
+    "clause": "rule 186: one batch, the call first",
     "drafts": [
      {
       "envelope_version": 1,
@@ -79370,7 +80542,7 @@
    },
    {
     "name": "two_invalidations",
-    "clause": "rule 167: each judged verdict its own record",
+    "clause": "rule 186: each judged verdict its own record",
     "drafts": [
      {
       "envelope_version": 1,
@@ -79527,7 +80699,7 @@
    },
    {
     "name": "a_refused_invalidation_has_no_record",
-    "clause": "rule 167: only a judged verdict is handed on",
+    "clause": "rule 186: only a judged verdict is handed on",
     "drafts": [
      {
       "envelope_version": 1,
@@ -79649,7 +80821,7 @@
    },
    {
     "name": "after_the_theses",
-    "clause": "rule 167: a candidate counts the theses before it",
+    "clause": "rule 186: a candidate counts the theses before it",
     "drafts": [
      {
       "envelope_version": 1,
@@ -79771,7 +80943,7 @@
    },
    {
     "name": "a_call_with_theses_only",
-    "clause": "rule 167: a call with no invalidation names none",
+    "clause": "rule 186: a call with no invalidation names none",
     "drafts": [
      {
       "envelope_version": 1,
@@ -79853,7 +81025,7 @@
    },
    {
     "name": "a_revoked_source",
-    "clause": "rule 167: a revoked source's invalidation names no call",
+    "clause": "rule 186: a revoked source's invalidation names no call",
     "drafts": [
      {
       "envelope_version": 1,
@@ -79894,7 +81066,7 @@
    },
    {
     "name": "alone",
-    "clause": "rule 167: the call is in the same batch",
+    "clause": "rule 186: the call is in the same batch",
     "drafts": [
      {
       "envelope_version": 1,
@@ -79941,7 +81113,7 @@
    },
    {
     "name": "before_its_call",
-    "clause": "rule 167: the call is earlier in the batch",
+    "clause": "rule 186: the call is earlier in the batch",
     "drafts": [
      {
       "envelope_version": 1,
@@ -80061,7 +81233,7 @@
    },
    {
     "name": "names_another_event",
-    "clause": "rule 167: the cause is the call, not another record of the batch",
+    "clause": "rule 186: the cause is the call, not another record of the batch",
     "drafts": [
      {
       "envelope_version": 1,
@@ -80240,7 +81412,7 @@
    },
    {
     "name": "names_a_thesis_verdict",
-    "clause": "rule 167: the verdict is an invalidation's",
+    "clause": "rule 186: the verdict is an invalidation's",
     "drafts": [
      {
       "envelope_version": 1,
@@ -80360,7 +81532,7 @@
    },
    {
     "name": "names_a_refused_verdict",
-    "clause": "rule 167: the verdict is judged",
+    "clause": "rule 186: the verdict is judged",
     "drafts": [
      {
       "envelope_version": 1,
@@ -80520,7 +81692,7 @@
    },
    {
     "name": "names_no_verdict",
-    "clause": "rule 167: the call has a verdict at the candidate",
+    "clause": "rule 186: the call has a verdict at the candidate",
     "drafts": [
      {
       "envelope_version": 1,
@@ -80675,7 +81847,7 @@
    },
    {
     "name": "one_verdict_twice",
-    "clause": "rule 167: one record per verdict",
+    "clause": "rule 186: one record per verdict",
     "drafts": [
      {
       "envelope_version": 1,
@@ -80830,7 +82002,7 @@
    },
    {
     "name": "a_judged_verdict_with_no_record",
-    "clause": "rule 167: every judged verdict is handed on",
+    "clause": "rule 186: every judged verdict is handed on",
     "drafts": [
      {
       "envelope_version": 1,
@@ -80915,7 +82087,7 @@
    },
    {
     "name": "the_second_verdict_with_no_record",
-    "clause": "rule 167: every judged verdict, in order",
+    "clause": "rule 186: every judged verdict, in order",
     "drafts": [
      {
       "envelope_version": 1,
@@ -81042,7 +82214,7 @@
   "streams": [
    {
     "name": "invalidated_after_admission",
-    "clause": "rule 168: an admitted thesis",
+    "clause": "rule 187: an admitted thesis",
     "batches": [
      [
       {
@@ -81222,7 +82394,7 @@
    },
    {
     "name": "a_revision_invalidated",
-    "clause": "rule 168: the revision holds its instrument",
+    "clause": "rule 187: the revision holds its instrument",
     "batches": [
      [
       {
@@ -81464,7 +82636,7 @@
    },
    {
     "name": "a_revoked_source",
-    "clause": "rule 168: a revoked source's invalidation too",
+    "clause": "rule 187: a revoked source's invalidation too",
     "batches": [
      [
       {
@@ -81568,7 +82740,7 @@
    },
    {
     "name": "re_admitted_after_its_invalidation",
-    "clause": "rule 168: an invalidated instrument may be admitted again, in a new lineage",
+    "clause": "rule 187: an invalidated instrument may be admitted again, in a new lineage",
     "batches": [
      [
       {
@@ -81809,7 +82981,7 @@
    },
    {
     "name": "a_re_admission_invalidated",
-    "clause": "rule 168: a re-admission is a new thesis, invalidated once too",
+    "clause": "rule 187: a re-admission is a new thesis, invalidated once too",
     "batches": [
      [
       {
@@ -82160,7 +83332,7 @@
    },
    {
     "name": "invalidated_then_a_new_thesis_in_one_response",
-    "clause": "§9.21 batch order: the invalidation follows the call and precedes the response's thesis records",
+    "clause": "§9.22 batch order: the invalidation follows the call and precedes the response's thesis records",
     "batches": [
      [
       {
@@ -82404,7 +83576,7 @@
    },
    {
     "name": "in_one_batch",
-    "clause": "rule 168: the admission is earlier in the batch",
+    "clause": "rule 187: the admission is earlier in the batch",
     "batches": [
      [
       {
@@ -82582,7 +83754,7 @@
    },
    {
     "name": "never_admitted",
-    "clause": "rule 168: a thesis the stream admitted",
+    "clause": "rule 187: a thesis the stream admitted",
     "batches": [
      [
       {
@@ -82704,7 +83876,7 @@
    },
    {
     "name": "before_its_admission",
-    "clause": "rule 168: admitted earlier",
+    "clause": "rule 187: admitted earlier",
     "batches": [
      [
       {
@@ -82885,7 +84057,7 @@
    },
    {
     "name": "a_refused_thesis",
-    "clause": "rule 168: admitted, not only judged",
+    "clause": "rule 187: admitted, not only judged",
     "batches": [
      [
       {
@@ -83068,7 +84240,7 @@
    },
    {
     "name": "invalidated_twice",
-    "clause": "rule 168: one invalidation per thesis",
+    "clause": "rule 187: one invalidation per thesis",
     "batches": [
      [
       {
@@ -83361,7 +84533,7 @@
    },
    {
     "name": "revoked_after_its_invalidation",
-    "clause": "rule 168: whatever the second's cause",
+    "clause": "rule 187: whatever the second's cause",
     "batches": [
      [
       {
@@ -83578,7 +84750,7 @@
    },
    {
     "name": "another_lineage",
-    "clause": "rule 168: the thesis's own lineage",
+    "clause": "rule 187: the thesis's own lineage",
     "batches": [
      [
       {
@@ -83761,7 +84933,7 @@
    },
    {
     "name": "a_substituted_instrument",
-    "clause": "rule 168: the thesis's own instrument",
+    "clause": "rule 187: the thesis's own instrument",
     "batches": [
      [
       {
@@ -83944,7 +85116,7 @@
    },
    {
     "name": "superseded_by_its_revision",
-    "clause": "rule 168: the thesis that holds the instrument now",
+    "clause": "rule 187: the thesis that holds the instrument now",
     "batches": [
      [
       {
@@ -84189,7 +85361,7 @@
    },
    {
     "name": "a_new_thesis_before_its_invalidation_a_correct_writer_never_uses",
-    "clause": "§9.21 batch order: a thesis record before the invalidation supersedes it",
+    "clause": "§9.22 batch order: a thesis record before the invalidation supersedes it",
     "batches": [
      [
       {
@@ -84436,7 +85608,7 @@
    },
    {
     "name": "superseded_by_a_renewal",
-    "clause": "rule 168: a renewal holds it now",
+    "clause": "rule 187: a renewal holds it now",
     "batches": [
      [
       {

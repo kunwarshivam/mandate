@@ -98,7 +98,7 @@ fn a_run_starts_in_production_once_the_journal_records_both_verdicts() {
 }
 
 /// The shell's catalogue reads `mandate-journal`'s own registration, never a constant: §9.19 closes
-/// the agent stream's `ModelInvocationRecorded` with its `verdicts` (E15-8, DEC-2201), and §9.21
+/// the agent stream's `ModelInvocationRecorded` with its `verdicts` (E15-8, DEC-2201), and §9.22
 /// closes `ThesisInvalidated` (E19-5, DEC-2202).
 #[test]
 fn the_journal_catalog_reads_mandate_journal_s_registration() {
@@ -2461,7 +2461,7 @@ fn in_universe(world: &mut World, instrument: &str) {
     };
 }
 
-/// Journal spec §9.21 and agent harness spec §6.7: an accepted invalidation is journaled as
+/// Journal spec §9.22 and agent harness spec §6.7: an accepted invalidation is journaled as
 /// `ThesisInvalidated` in its call's judging batch, after the call record and before every thesis
 /// record, naming its verdict by index (theses first, rule 151) and its thesis as the run's inputs
 /// held it; the call record is its cause.
@@ -2496,7 +2496,7 @@ fn a_judged_invalidation_is_journaled_after_its_call_record_and_before_any_thesi
             "ThesisInvalidated",
             "ThesisProposed"
         ],
-        "§9.21: the invalidation records come before the thesis records"
+        "§9.22: the invalidation records come before the thesis records"
     );
     let call = lp.events("ModelInvocationRecorded")[0];
     let invalidated = lp.events("ThesisInvalidated");

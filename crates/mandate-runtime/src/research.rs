@@ -94,7 +94,7 @@ pub trait RecordCatalog {
 /// Which closed agent-stream records register the research records, read through a catalogue's
 /// `closes`: the candidates' verdicts are registered once the agent stream's
 /// `ModelInvocationRecorded` is closed with its `verdicts` (journal spec §9.19, E15-8), and the
-/// invalidation verdict once `ThesisInvalidated` is (§9.21, E19-5). The shell passes
+/// invalidation verdict once `ThesisInvalidated` is (§9.22, E19-5). The shell passes
 /// [`JournalCatalog::JOURNAL`], `mandate-journal`'s own catalogue.
 #[derive(Clone, Copy)]
 pub struct JournalCatalog {

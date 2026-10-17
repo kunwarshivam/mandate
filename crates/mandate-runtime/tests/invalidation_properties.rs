@@ -1,4 +1,4 @@
-//! E19-5's fuzz (agent harness spec HI-19, mandate spec MI-19, journal spec §9.21, DEC-2202): random
+//! E19-5's fuzz (agent harness spec HI-19, mandate spec MI-19, journal spec §9.22, DEC-2202): random
 //! active theses, random invalidations, and random theses on the same instruments, each judged in
 //! one research run. An oracle computed from the inputs alone, never from the judge, asserts:
 //! exactly the invalidations that name an active thesis are accepted, each journaled once as

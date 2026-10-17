@@ -57,8 +57,8 @@ pub fn closes(event_type: &str, schema_version: u64, stream: StreamType) -> bool
             || (stream == StreamType::Agent && agent::closes(event_type, schema_version)))
 }
 
-/// The event types the stream rules read: §9.19's rules 153 and 158, §9.21's rule 168, and §9.22's
-/// rules 173 to 183.
+/// The event types the stream rules read: §9.19's rules 153 and 158, the invalidation's rule 187,
+/// and the run records' rules 173 to 183.
 pub const STREAM_RULE_TYPES: [&str; 11] = [
     "ModelInvocationRecorded",
     "MeterReserved",
@@ -74,8 +74,8 @@ pub const STREAM_RULE_TYPES: [&str; 11] = [
 ];
 
 /// Whether a draft of `batch` is judged by a stream rule (journal spec §9.19 rules 153 and 158,
-/// §9.21 rule 168, §9.22 rules 173 to 183), so `append` reads the stream's earlier records of
-/// [`STREAM_RULE_TYPES`] to judge it.
+/// the invalidation's rule 187, the run records' rules 173 to 183), so `append` reads the stream's
+/// earlier records of [`STREAM_RULE_TYPES`] to judge it.
 pub fn reads_stream(batch: &[Draft]) -> bool {
     batch.iter().any(|draft| {
         matches!(
@@ -104,7 +104,7 @@ pub fn reads_stream(batch: &[Draft]) -> bool {
 /// - 158: a `MeterReserved` names a `call_id` no earlier one names; a `MeterSettled` names as its
 ///   `reservation` an earlier `MeterReserved` of the same `call_id` that no earlier `MeterSettled`
 ///   names, the first that fails.
-/// - 168: a `ThesisInvalidated` names a thesis no earlier invalidation names, that an earlier
+/// - 187: a `ThesisInvalidated` names a thesis no earlier invalidation names, that an earlier
 ///   admitted thesis record names with the same lineage and instrument, and that is still the
 ///   latest admitted thesis for its instrument.
 /// - 173 to 183: a run starts once, its records follow its start and precede its end, a tool call

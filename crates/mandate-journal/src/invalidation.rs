@@ -1,6 +1,6 @@
-//! The record journal spec v0.48 §9.21 closes for an invalidated thesis (E19-5, DEC-2202): the agent
-//! stream's `ThesisInvalidated`, with rules 165 and 166 on the draft, rule 167 over its `append`
-//! batch ([`check_batch`]), and rule 168 over the stream's earlier records ([`stream_rule`]). Every
+//! The record journal spec v0.49 §9.22 closes for an invalidated thesis (E19-5, DEC-2202): the agent
+//! stream's `ThesisInvalidated`, with rules 184 and 185 on the draft, rule 186 over its `append`
+//! batch ([`check_batch`]), and rule 187 over the stream's earlier records ([`stream_rule`]). Every
 //! rule only refuses a draft.
 
 use std::collections::BTreeSet;
@@ -15,13 +15,13 @@ const INVOCATION: &str = "ModelInvocationRecorded";
 const PROPOSED: &str = "ThesisProposed";
 const REVISED: &str = "ThesisRevised";
 
-/// Whether §9.21 governs `event_type`: the catalogue admits `ThesisInvalidated` on the agent stream
+/// Whether §9.22 governs `event_type`: the catalogue admits `ThesisInvalidated` on the agent stream
 /// alone, so the stream is already the agent's here.
 pub(crate) fn governs(event_type: &str) -> bool {
     event_type == INVALIDATED
 }
 
-/// The §9.21 schema of `event_type` at `schema_version` on `stream`, or `None`.
+/// The §9.22 schema of `event_type` at `schema_version` on `stream`, or `None`.
 pub(crate) fn schema(
     event_type: &str,
     schema_version: u64,
@@ -33,7 +33,7 @@ pub(crate) fn schema(
     }
 }
 
-/// Rules 165 and 166 on a payload its schema has normalized, in rule order: the first that fails is
+/// Rules 184 and 185 on a payload its schema has normalized, in rule order: the first that fails is
 /// reported. `actor` and `causation_id` are the envelope's.
 pub(crate) fn rules(
     event_type: &str,
@@ -63,7 +63,7 @@ pub(crate) fn rules(
     ensure(writer == "agent", "actor.kind")
 }
 
-/// Rule 167 over one `append` batch whose drafts each passed [`Draft::parse`], draft by draft in
+/// Rule 186 over one `append` batch whose drafts each passed [`Draft::parse`], draft by draft in
 /// batch order, the first that fails reported by its index. `ThesisInvalidated` is catalogued on the
 /// agent stream alone, and only the agent stream's `ModelInvocationRecorded` has `verdicts`:
 ///
@@ -144,7 +144,7 @@ fn names(draft: &Draft, cause: &str, candidate: u64) -> bool {
         && draft.fields().get("causation_id").and_then(Value::as_str) == Some(cause)
 }
 
-/// Rule 168 on one `ThesisInvalidated`, against the stream's records `before` it, in order: no
+/// Rule 187 on one `ThesisInvalidated`, against the stream's records `before` it, in order: no
 /// earlier invalidation names its thesis; an earlier admitted `ThesisProposed` or `ThesisRevised`
 /// names it with the same lineage and instrument; and that record is the latest admitted one for
 /// its instrument, so a superseded thesis is never invalidated in its place. The first that fails.
