@@ -48,7 +48,8 @@
         "spread_from_fill_model",
         "single_instrument",
         "daily_decisions",
-        "asks_unanswered_skip"
+        "asks_unanswered_skip",
+        "participation_from_bar_volume"
       ],
       "/backtest/report/disclosures": [
         "LEGEND-HYPOTHETICAL",

@@ -257,6 +257,7 @@
         "single_instrument",
         "daily_decisions",
         "asks_unanswered_skip",
+        "participation_from_bar_volume",
         "mechanics_not_thesis_quality"
       ],
       "disclosures": [
