@@ -319,7 +319,11 @@ pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
         (TARGET_CC, ["--version"]),
         ("ld", ["--version"]),
     ] {
-        run(Command::new(program).env_clear().envs(&vars).args(args))?;
+        run(Command::new(program)
+            .current_dir(root)
+            .env_clear()
+            .envs(&vars)
+            .args(args))?;
     }
     let mut cargo = Command::new("cargo");
     cargo
