@@ -43,6 +43,14 @@ commands:
                         SBOM each, and print digest=<sha256 of SHA256SUMS> (E21-8)
   release compare <a> <b>
                         check that two release builds' SHA256SUMS are identical
+  release images <dist> <out> [--test-sign]
+                        write one OCI image a release binary into <out>/images, signed by an
+                        ephemeral test key with --test-sign (E21-35)
+  release drill <dist> <out>
+                        run the signed, unsigned and wrongly signed images' start-up check
+  release publish <dist> <out>
+                        push the images to GHCR, sign them keyless and attest their SBOMs (main
+                        only, from CI)
 ";
 
 /// The two required-check command groups (DEC-76). `pending` follows `test` in `fast` because it
@@ -199,6 +207,16 @@ fn run() -> Result<()> {
         }
         ["release", "build", out] => release::build(&root, Path::new(out)),
         ["release", "compare", a, b] => release::compare(Path::new(a), Path::new(b)),
+        ["release", "images", dist, out] => {
+            release::images(&root, Path::new(dist), Path::new(out), false)
+        }
+        ["release", "images", dist, out, "--test-sign"] => {
+            release::images(&root, Path::new(dist), Path::new(out), true)
+        }
+        ["release", "drill", dist, out] => release::drill(&root, Path::new(dist), Path::new(out)),
+        ["release", "publish", dist, out] => {
+            release::publish(&root, Path::new(dist), Path::new(out))
+        }
         _ => {
             eprint!("{USAGE}");
             bail!("unknown command: {}", args.join(" "))

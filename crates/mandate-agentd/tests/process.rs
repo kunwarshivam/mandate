@@ -89,10 +89,19 @@ fn outside_dev_and_ci_an_unsigned_or_wrongly_signed_build_refuses() {
     let garbage = garbage.display().to_string();
     let cases: [(&[(&str, &str)], &str); 4] = [
         (&[], "release_unsigned\n"),
-        (&[("MANDATE_DEPLOYMENT_TIER", "staging")], "release_unsigned\n"),
-        (&[("MANDATE_DEPLOYMENT_TIER", "production")], "release_unsigned\n"),
         (
-            &[("MANDATE_DEPLOYMENT_TIER", "ci"), ("MANDATE_RELEASE_SIGNATURE", &garbage)],
+            &[("MANDATE_DEPLOYMENT_TIER", "staging")],
+            "release_unsigned\n",
+        ),
+        (
+            &[("MANDATE_DEPLOYMENT_TIER", "production")],
+            "release_unsigned\n",
+        ),
+        (
+            &[
+                ("MANDATE_DEPLOYMENT_TIER", "ci"),
+                ("MANDATE_RELEASE_SIGNATURE", &garbage),
+            ],
             "release_signature_malformed\n",
         ),
     ];

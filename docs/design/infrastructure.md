@@ -566,7 +566,10 @@ range's `cause` `token_unverifiable`; any `anchor_unstamped` fails the drill (DE
    the binary's SHA-256, as `SHA256SUMS` lists it.
 3. **Sign.** From M11 or the first external install, images and bundles are signed with cosign
    under the founder's hardware key, with build provenance (ES-17). Every process checks its own
-   signature at start (OPS-15) and journals its build digest (`actor.build`).
+   signature at start (OPS-15) and journals its build digest (`actor.build`). The images, the
+   check and the publish job are [DEC-971](../project/decisions/DEC-971.md): CI signs only with
+   an ephemeral test key; outside dev and CI only a compiled-in release key is trusted, and none
+   is wired until the founder's hardware key is (item 7).
 4. **Promote.** `main` → staging automatically; staging → production by the founder's approval
    while live money is involved (DEC-79). Production rolls out one cell at a time, starting with a
    canary cell of internal workspaces (Proposed).

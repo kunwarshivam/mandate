@@ -2,9 +2,25 @@
 //! process outside dev and CI starts only when its own executable carries a signature that
 //! verifies against a release key compiled into it.
 
-use std::path::Path;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 
-use crate::digest::BuildDigest;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+use ring::signature::{ECDSA_P256_SHA256_ASN1, UnparsedPublicKey};
+
+use crate::digest::{BuildDigest, running_executable};
+
+/// The DER prefix of a P-256 `SubjectPublicKeyInfo` (RFC 5480): `id-ecPublicKey` with the
+/// `prime256v1` curve, then the 65-byte uncompressed point. cosign writes exactly this.
+const SPKI_P256_PREFIX: [u8; 26] = [
+    0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
+    0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+];
+const POINT_LEN: usize = 65;
+const PEM_BEGIN: &str = "-----BEGIN PUBLIC KEY-----";
+const PEM_END: &str = "-----END PUBLIC KEY-----";
 
 /// The release keys a process outside dev and CI trusts, as cosign's PEM public keys: the
 /// founder's hardware key (ES-17, H8) once it exists. None is wired yet, so no binary passes the
@@ -30,8 +46,17 @@ pub enum Tier {
 impl Tier {
     /// The tier a setting names; no setting, or one it does not know, is production.
     pub fn from_setting(setting: Option<&str>) -> Self {
-        let _ = setting;
-        Self::Dev
+        match setting {
+            Some("dev") => Self::Dev,
+            Some("ci") => Self::Ci,
+            Some("staging") => Self::Staging,
+            _ => Self::Production,
+        }
+    }
+
+    /// Dev and CI admit an unsigned build and honour a test key; nothing else does.
+    fn lenient(self) -> bool {
+        matches!(self, Self::Dev | Self::Ci)
     }
 }
 
@@ -44,8 +69,26 @@ pub struct ReleaseKey {
 impl ReleaseKey {
     /// Reads cosign's PEM public key: a P-256 `SubjectPublicKeyInfo`.
     pub fn from_pem(pem: &str) -> Result<Self, Refused> {
-        let _ = pem;
-        Err(Refused::Unimplemented)
+        let body = pem
+            .trim()
+            .strip_prefix(PEM_BEGIN)
+            .and_then(|rest| rest.strip_suffix(PEM_END))
+            .ok_or(Refused::Malformed)?;
+        let compact: String = body.split_whitespace().collect();
+        let der = STANDARD.decode(compact).map_err(|_| Refused::Malformed)?;
+        let point = der
+            .strip_prefix(SPKI_P256_PREFIX.as_slice())
+            .filter(|point| point.len() == POINT_LEN && point.first() == Some(&0x04))
+            .ok_or(Refused::Malformed)?;
+        Ok(Self {
+            point: point.to_vec(),
+        })
+    }
+
+    fn verifies(&self, message: &[u8], signature: &[u8]) -> bool {
+        UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, &self.point)
+            .verify(message, signature)
+            .is_ok()
     }
 
     /// The uncompressed P-256 point, `04 || X || Y`.
@@ -67,7 +110,11 @@ pub enum Trust {
 
 impl Trust {
     pub fn code(&self) -> &'static str {
-        ""
+        match self {
+            Self::Release => "release",
+            Self::Test => "test",
+            Self::Unsigned => "unsigned",
+        }
     }
 }
 
@@ -93,15 +140,17 @@ pub enum Refused {
     /// The executable, its signature, or the test key could not be read.
     #[error("release_unreadable")]
     Unreadable(std::io::ErrorKind),
-    /// The tests-first stub (DEC-921).
-    #[error("unimplemented (E21-35)")]
-    Unimplemented,
 }
 
 impl Refused {
     /// The generic code the process prints when it refuses (`AGENTS.md` rule 6).
     pub fn code(&self) -> &'static str {
-        ""
+        match self {
+            Self::Unsigned => "release_unsigned",
+            Self::NotVerified => "release_signature_not_verified",
+            Self::Malformed => "release_signature_malformed",
+            Self::Unreadable(_) => "release_unreadable",
+        }
     }
 }
 
@@ -114,8 +163,31 @@ pub fn decide(
     release_keys: &[ReleaseKey],
     test_key: Option<&ReleaseKey>,
 ) -> Result<Admitted, Refused> {
-    let _ = (tier, executable, signature, release_keys, test_key);
-    Err(Refused::Unimplemented)
+    let digest = BuildDigest::of_bytes(executable);
+    let Some(signature) = signature else {
+        return if tier.lenient() {
+            Ok(Admitted {
+                digest,
+                trust: Trust::Unsigned,
+            })
+        } else {
+            Err(Refused::Unsigned)
+        };
+    };
+    let der = STANDARD
+        .decode(signature.trim())
+        .map_err(|_| Refused::Malformed)?;
+    let trust = if release_keys
+        .iter()
+        .any(|key| key.verifies(executable, &der))
+    {
+        Trust::Release
+    } else if tier.lenient() && test_key.is_some_and(|key| key.verifies(executable, &der)) {
+        Trust::Test
+    } else {
+        return Err(Refused::NotVerified);
+    };
+    Ok(Admitted { digest, trust })
 }
 
 /// The check a process runs before anything else: its tier from `vars`, the bytes at
@@ -126,11 +198,50 @@ pub fn check(
     executable: &Path,
     default_signature: &Path,
 ) -> Result<Admitted, Refused> {
-    let _ = (vars, executable, default_signature);
-    Err(Refused::Unimplemented)
+    let tier = Tier::from_setting(vars(TIER_VAR).as_deref());
+    let bytes = fs::read(executable).map_err(unreadable)?;
+    let signature = match vars(SIGNATURE_VAR) {
+        Some(named) => Some(fs::read_to_string(named).map_err(unreadable)?),
+        None => match fs::read_to_string(default_signature) {
+            Ok(text) => Some(text),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(unreadable(error)),
+        },
+    };
+    let release_keys = RELEASE_KEYS
+        .iter()
+        .map(|pem| ReleaseKey::from_pem(pem))
+        .collect::<Result<Vec<_>, _>>()?;
+    let test_key = match vars(TEST_KEY_VAR).filter(|_| tier.lenient()) {
+        Some(path) => Some(ReleaseKey::from_pem(
+            &fs::read_to_string(path).map_err(unreadable)?,
+        )?),
+        None => None,
+    };
+    decide(
+        tier,
+        &bytes,
+        signature.as_deref(),
+        &release_keys,
+        test_key.as_ref(),
+    )
 }
 
-/// [`check`] over this process's environment and its running executable.
+/// [`check`] over this process's environment and its running executable, whose signature is
+/// `<the path it was started from>.sig` unless [`SIGNATURE_VAR`] names another file.
 pub fn check_running() -> Result<Admitted, Refused> {
-    Err(Refused::Unimplemented)
+    let executable =
+        running_executable().map_err(|_| Refused::Unreadable(io::ErrorKind::NotFound))?;
+    let started_from = std::env::current_exe().map_err(unreadable)?;
+    let mut beside = started_from.into_os_string();
+    beside.push(".sig");
+    check(
+        &|name| std::env::var(name).ok(),
+        &executable,
+        &PathBuf::from(beside),
+    )
+}
+
+fn unreadable(error: io::Error) -> Refused {
+    Refused::Unreadable(error.kind())
 }

@@ -32,9 +32,8 @@ impl Signer {
         let rng = SystemRandom::new();
         let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng)
             .unwrap_or_else(|e| panic!("generate: {e}"));
-        let pair =
-            EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
-                .unwrap_or_else(|e| panic!("pkcs8: {e}"));
+        let pair = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
+            .unwrap_or_else(|e| panic!("pkcs8: {e}"));
         let mut spki = SPKI_P256_PREFIX.to_vec();
         spki.extend_from_slice(pair.public_key().as_ref());
         let body = STANDARD.encode(&spki);
@@ -69,7 +68,11 @@ fn admitted(trust: Trust) -> Result<Admitted, Refused> {
 fn no_setting_and_an_unknown_setting_are_production() {
     assert_eq!(Tier::from_setting(None), Tier::Production);
     for unknown in ["", "prod", "DEV", "Ci", " dev", "local", "test"] {
-        assert_eq!(Tier::from_setting(Some(unknown)), Tier::Production, "{unknown:?}");
+        assert_eq!(
+            Tier::from_setting(Some(unknown)),
+            Tier::Production,
+            "{unknown:?}"
+        );
     }
     assert_eq!(Tier::from_setting(Some("dev")), Tier::Dev);
     assert_eq!(Tier::from_setting(Some("ci")), Tier::Ci);
@@ -105,7 +108,11 @@ fn an_unsigned_build_starts_only_in_dev_and_ci() {
             Tier::Dev | Tier::Ci => admitted(Trust::Unsigned),
             Tier::Staging | Tier::Production => Err(Refused::Unsigned),
         };
-        assert_eq!(decide(tier, RELEASE, None, &[release.key()], None), expected, "{tier:?}");
+        assert_eq!(
+            decide(tier, RELEASE, None, &[release.key()], None),
+            expected,
+            "{tier:?}"
+        );
     }
 }
 
@@ -120,7 +127,13 @@ fn a_test_key_is_honoured_only_in_dev_and_ci() {
             Tier::Staging | Tier::Production => Err(Refused::NotVerified),
         };
         assert_eq!(
-            decide(tier, RELEASE, Some(&signature), &[release.key()], Some(&test.key())),
+            decide(
+                tier,
+                RELEASE,
+                Some(&signature),
+                &[release.key()],
+                Some(&test.key())
+            ),
             expected,
             "{tier:?}"
         );
@@ -143,7 +156,13 @@ fn a_wrong_signature_is_refused_in_every_tier() {
     for tier in TIERS {
         for (what, signature) in &cases {
             assert_eq!(
-                decide(tier, RELEASE, Some(signature), &[release.key()], Some(&test.key())),
+                decide(
+                    tier,
+                    RELEASE,
+                    Some(signature),
+                    &[release.key()],
+                    Some(&test.key())
+                ),
                 Err(Refused::NotVerified),
                 "{what} in {tier:?}"
             );
@@ -169,7 +188,10 @@ fn without_a_release_key_nothing_starts_outside_dev_and_ci() {
     let test = Signer::new();
     let signature = test.sign(RELEASE);
     for tier in [Tier::Staging, Tier::Production] {
-        assert_eq!(decide(tier, RELEASE, None, &[], Some(&test.key())), Err(Refused::Unsigned));
+        assert_eq!(
+            decide(tier, RELEASE, None, &[], Some(&test.key())),
+            Err(Refused::Unsigned)
+        );
         assert_eq!(
             decide(tier, RELEASE, Some(&signature), &[], Some(&test.key())),
             Err(Refused::NotVerified)
@@ -182,7 +204,13 @@ fn a_signature_file_may_end_in_a_newline() {
     let release = Signer::new();
     let signature = format!("{}\n", release.sign(RELEASE));
     assert_eq!(
-        decide(Tier::Production, RELEASE, Some(&signature), &[release.key()], None),
+        decide(
+            Tier::Production,
+            RELEASE,
+            Some(&signature),
+            &[release.key()],
+            None
+        ),
         admitted(Trust::Release)
     );
 }
@@ -196,7 +224,13 @@ fn a_cosign_signature_verifies() {
     let blob = include_bytes!("fixtures/blob");
     let signature = include_str!("fixtures/blob.sig");
     assert_eq!(
-        decide(Tier::Production, blob, Some(signature), &[key.clone()], None),
+        decide(
+            Tier::Production,
+            blob,
+            Some(signature),
+            std::slice::from_ref(&key),
+            None
+        ),
         Ok(Admitted {
             digest: BuildDigest::of_bytes(blob),
             trust: Trust::Release
@@ -236,7 +270,11 @@ fn a_pem_that_is_not_a_p256_public_key_is_malformed() {
         pem(&der[..der.len() - 1]),
         "-----BEGIN PUBLIC KEY-----\n!!!\n-----END PUBLIC KEY-----\n".to_owned(),
     ] {
-        assert_eq!(ReleaseKey::from_pem(&bad), Err(Refused::Malformed), "{bad:?}");
+        assert_eq!(
+            ReleaseKey::from_pem(&bad),
+            Err(Refused::Malformed),
+            "{bad:?}"
+        );
     }
     assert_eq!(ReleaseKey::from_pem(&good).map(|k| k.point().len()), Ok(65));
 }
@@ -314,7 +352,11 @@ fn the_check_reads_its_inputs_from_files_and_variables() {
     let named = dir.join("named.sig");
     fs::write(&named, Signer::new().sign(RELEASE)).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
-        startup::check(&vars("ci", Some(named.display().to_string())), &executable, &beside),
+        startup::check(
+            &vars("ci", Some(named.display().to_string())),
+            &executable,
+            &beside
+        ),
         Err(Refused::NotVerified)
     );
     assert_eq!(
@@ -328,6 +370,22 @@ fn the_check_reads_its_inputs_from_files_and_variables() {
     assert_eq!(
         startup::check(&vars("ci", None), &dir.join("absent"), &beside),
         Err(Refused::Unreadable(std::io::ErrorKind::NotFound))
+    );
+}
+
+/// A signature beside the executable that exists but cannot be read is a refusal, not an
+/// unsigned build: only its absence means unsigned.
+#[test]
+fn an_unreadable_signature_beside_the_executable_is_refused() {
+    let dir = scratch("unreadable");
+    let executable = dir.join("process");
+    fs::write(&executable, RELEASE).unwrap_or_else(|e| panic!("{e}"));
+    let beside = dir.join("process.sig");
+    fs::create_dir(&beside).unwrap_or_else(|e| panic!("{e}"));
+    let vars = |name: &str| (name == TIER_VAR).then(|| "ci".to_owned());
+    assert_eq!(
+        startup::check(&vars, &executable, &beside),
+        Err(Refused::Unreadable(std::io::ErrorKind::IsADirectory))
     );
 }
 

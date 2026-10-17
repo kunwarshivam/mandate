@@ -3,9 +3,14 @@
 # with no cache, so nothing one build left behind can reach the other. `compare` fails unless both
 # printed the same digest of their SHA256SUMS, which lists every binary's SHA-256: one commit,
 # byte-identical binaries. On `main` and on demand, `build-a`'s binaries, SHA256SUMS and SBOMs are
-# kept as the run's artifact, `release-<commit>`, which E21-35's images are built from. A pull
-# request that changes the release build runs the same jobs and keeps and publishes nothing
-# (ES-12). Nothing here builds a feature, so no release build holds `live` (DEC-529 item 3).
+# kept as the run's artifact, `release-<commit>`. `build-a` also builds one image a binary
+# (E21-35, DEC-971), signed by an ephemeral test key, and drills the start-up signature check on
+# them: an unsigned and a wrongly signed image are refused outside dev and CI. Only a push to
+# `main` runs `publish`, which rebuilds the release, requires the same digest, pushes the images to
+# GHCR by digest, signs each keyless with the run's OIDC identity and attests its SBOM. A pull
+# request that changes the release build runs the builds and the drill and keeps and publishes
+# nothing (ES-12). Nothing here builds a feature, so no release build holds `live` (DEC-529
+# item 3).
 name: release
 
 on:
@@ -56,11 +61,20 @@ jobs:
       - name: Build the release
         id: build
         run: cargo xtask release build dist | tee -a "$GITHUB_OUTPUT"
+      - name: Build the images, signed by an ephemeral test key
+        run: cargo xtask release images dist images --test-sign
+      - name: Drill the start-up check on signed, unsigned and wrongly signed images
+        run: cargo xtask release drill dist images
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: github.event_name != 'pull_request'
         with:
           name: release-${{ github.sha }}
-          path: dist/
+          path: |
+            dist/
+            images/IMAGES
+            images/images/
+            images/signatures/
+            images/test-key/cosign.pub
           if-no-files-found: error
           retention-days: 90
 
@@ -110,3 +124,44 @@ jobs:
           exit 1
       - name: The two builds are identical
         run: echo "both release builds of this commit printed the same SHA256SUMS digest"
+
+  # A push to main only: never a pull request, never a branch (ES-12, E21-35). The rebuild must
+  # print build-a's digest, so what is published is what `compare` proved reproducible.
+  publish:
+    needs: [build-a, compare]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Rebuild the release
+        id: build
+        run: cargo xtask release build dist | tee -a "$GITHUB_OUTPUT"
+      - name: The rebuild differs from build-a
+        if: steps.build.outputs.digest != needs.build-a.outputs.digest
+        run: |
+          echo "the publish job's rebuild is not the release build-a built and compare proved"
+          exit 1
+      - name: Publish the images to GHCR, sign them keyless and attest their SBOMs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: cargo xtask release publish dist published
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-${{ github.sha }}
+          path: |
+            published/PUBLISHED
+            published/IMAGES
+          if-no-files-found: error
+          retention-days: 90

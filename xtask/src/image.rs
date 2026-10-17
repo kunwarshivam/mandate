@@ -11,8 +11,11 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
+use serde_json::json;
+use sha2::{Digest as _, Sha256};
 
 /// The user every image runs as: not root, and no account in the image, so no shell or login.
 pub(crate) const USER: &str = "65532:65532";
@@ -37,8 +40,57 @@ pub(crate) struct Layout {
 
 /// The tar of one file at the root, owned by root with `mode`, every timestamp zero.
 pub(crate) fn tar_one(name: &str, mode: u32, contents: &[u8]) -> Vec<u8> {
-    let _ = (name, mode, contents);
-    Vec::new()
+    let mut header = [0u8; RECORD];
+    put(&mut header, 0, name.as_bytes());
+    put(&mut header, 100, format!("{mode:07o}\0").as_bytes());
+    put(&mut header, 108, b"0000000\0");
+    put(&mut header, 116, b"0000000\0");
+    put(
+        &mut header,
+        124,
+        format!("{:011o}\0", contents.len()).as_bytes(),
+    );
+    put(&mut header, 136, b"00000000000\0");
+    put(&mut header, 148, b"        ");
+    put(&mut header, 156, b"0");
+    put(&mut header, 257, b"ustar\0");
+    put(&mut header, 263, b"00");
+    let sum: u32 = header.iter().map(|b| u32::from(*b)).sum();
+    put(&mut header, 148, format!("{sum:06o}\0 ").as_bytes());
+    let mut tar = header.to_vec();
+    tar.extend_from_slice(contents);
+    tar.resize(tar.len().div_ceil(RECORD) * RECORD + 2 * RECORD, 0);
+    tar
+}
+
+/// Writes `field` into `header` at `at`; a field past the end is dropped, which no caller does.
+fn put(header: &mut [u8; RECORD], at: usize, field: &[u8]) {
+    if let Some(slot) = header.get_mut(at..at + field.len()) {
+        slot.copy_from_slice(field);
+    }
+}
+
+/// A tar record's size.
+const RECORD: usize = 512;
+
+/// The binary's mode: read and run by anyone, written by no one.
+const BINARY_MODE: u32 = 0o555;
+/// The signature's mode: read by anyone, written by no one.
+const SIGNATURE_MODE: u32 = 0o444;
+
+fn hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+fn descriptor(media_type: &str, bytes: &[u8]) -> serde_json::Value {
+    json!({
+        "mediaType": media_type,
+        "digest": format!("sha256:{}", hex(bytes)),
+        "size": bytes.len(),
+    })
 }
 
 /// The image of the binary `name` with `binary`'s bytes, signed by `signature` if given, built
@@ -49,12 +101,56 @@ pub(crate) fn layout(
     signature: Option<&[u8]>,
     revision: &str,
 ) -> Layout {
-    let _ = (name, binary, signature, revision);
+    let mut tars = vec![tar_one(name, BINARY_MODE, binary)];
+    if let Some(signature) = signature {
+        tars.push(tar_one(&format!("{name}.sig"), SIGNATURE_MODE, signature));
+    }
+    let layers: Vec<String> = tars.iter().map(|tar| hex(tar)).collect();
+    let labels = json!({
+        "org.opencontainers.image.revision": revision,
+        "org.opencontainers.image.source": SOURCE,
+    });
+    let config = json!({
+        "architecture": "amd64",
+        "os": "linux",
+        "config": {
+            "Entrypoint": [format!("/{name}")],
+            "Labels": labels,
+            "User": USER,
+        },
+        "rootfs": {
+            "type": "layers",
+            "diff_ids": layers.iter().map(|h| format!("sha256:{h}")).collect::<Vec<_>>(),
+        },
+    })
+    .to_string()
+    .into_bytes();
+    let manifest = json!({
+        "schemaVersion": 2,
+        "mediaType": MANIFEST_TYPE,
+        "config": descriptor(CONFIG_TYPE, &config),
+        "layers": tars.iter().map(|tar| descriptor(LAYER_TYPE, tar)).collect::<Vec<_>>(),
+        "annotations": labels,
+    })
+    .to_string()
+    .into_bytes();
+    let index = json!({
+        "schemaVersion": 2,
+        "mediaType": INDEX_TYPE,
+        "manifests": [descriptor(MANIFEST_TYPE, &manifest)],
+    })
+    .to_string()
+    .into_bytes();
+    let manifest_hex = hex(&manifest);
+    let mut blobs: BTreeMap<String, Vec<u8>> =
+        tars.into_iter().map(|tar| (hex(&tar), tar)).collect();
+    blobs.insert(hex(&config), config);
+    blobs.insert(manifest_hex.clone(), manifest);
     Layout {
-        blobs: BTreeMap::new(),
-        index: Vec::new(),
-        manifest: String::new(),
-        layers: Vec::new(),
+        blobs,
+        index,
+        manifest: manifest_hex,
+        layers,
     }
 }
 
@@ -68,6 +164,161 @@ pub(crate) fn write(layout: &Layout, dir: &Path) -> Result<()> {
     fs::write(dir.join("oci-layout"), br#"{"imageLayoutVersion":"1.0.0"}"#)
         .context("writing oci-layout")?;
     fs::write(dir.join("index.json"), &layout.index).context("writing index.json")?;
+    Ok(())
+}
+
+/// Pushes the image layout at `dir` to `base` (`https://ghcr.io`, or a local registry's
+/// `http://…` in a test) as `repository:tag`, by the OCI distribution API, with the
+/// `Authorization` header in the file `auth` if given, so no credential is ever on a command line
+/// or in a log. Returns the digest the registry reports for the tag, which must be the
+/// manifest's.
+pub(crate) fn push(
+    layout: &Layout,
+    dir: &Path,
+    base: &str,
+    repository: &str,
+    tag: &str,
+    auth: Option<&Path>,
+) -> Result<String> {
+    let blobs = dir.join("blobs").join("sha256");
+    let api = format!("{base}/v2/{repository}");
+    for hex in layout.blobs.keys().filter(|hex| **hex != layout.manifest) {
+        let digest = format!("sha256:{hex}");
+        if curl(
+            auth,
+            &["-I", "-o", "/dev/null"],
+            &format!("{api}/blobs/{digest}"),
+        )
+        .is_ok()
+        {
+            continue;
+        }
+        let headers = dir.join("upload.headers");
+        curl(
+            auth,
+            &[
+                "-X",
+                "POST",
+                "-o",
+                "/dev/null",
+                "-D",
+                &headers.display().to_string(),
+            ],
+            &format!("{api}/blobs/uploads/"),
+        )?;
+        let location = header(&fs::read_to_string(&headers)?, "location")
+            .with_context(|| format!("no upload location for {digest}"))?;
+        let location = if location.starts_with('/') {
+            format!("{base}{location}")
+        } else {
+            location
+        };
+        let separator = if location.contains('?') { '&' } else { '?' };
+        curl(
+            auth,
+            &[
+                "-X",
+                "PUT",
+                "-o",
+                "/dev/null",
+                "-H",
+                "Content-Type: application/octet-stream",
+                "--data-binary",
+                &format!("@{}", blobs.join(hex).display()),
+            ],
+            &format!("{location}{separator}digest={digest}"),
+        )?;
+    }
+    curl(
+        auth,
+        &[
+            "-X",
+            "PUT",
+            "-o",
+            "/dev/null",
+            "-H",
+            &format!("Content-Type: {MANIFEST_TYPE}"),
+            "--data-binary",
+            &format!("@{}", blobs.join(&layout.manifest).display()),
+        ],
+        &format!("{api}/manifests/{tag}"),
+    )?;
+    let headers = curl(
+        auth,
+        &["-I", "-H", &format!("Accept: {MANIFEST_TYPE}")],
+        &format!("{api}/manifests/{tag}"),
+    )?;
+    let reported = header(&headers, "docker-content-digest").context("no digest reported")?;
+    ensure!(
+        reported == format!("sha256:{}", layout.manifest),
+        "{repository}:{tag} is {reported}, not the image's sha256:{}",
+        layout.manifest
+    );
+    Ok(reported)
+}
+
+/// The value of the HTTP header `name` (any case) in `text`.
+fn header(text: &str, name: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.trim()
+            .eq_ignore_ascii_case(name)
+            .then(|| value.trim().to_owned())
+    })
+}
+
+/// Runs `curl -sSf` with `args`, the header file `auth` if given, and `url`; returns its stdout.
+fn curl(auth: Option<&Path>, args: &[&str], url: &str) -> Result<String> {
+    let mut command = Command::new("curl");
+    command.args(["-sSf"]).args(args);
+    if let Some(auth) = auth {
+        command.arg("-H").arg(format!("@{}", auth.display()));
+    }
+    let out = command.arg(url).output().context("starting `curl`")?;
+    ensure!(
+        out.status.success(),
+        "curl {url} failed: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
+    String::from_utf8(out.stdout).context("curl printed non-UTF-8")
+}
+
+/// Standard base64 with padding (RFC 4648 §4), for a Basic `Authorization` header.
+pub(crate) fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk.first().copied().unwrap_or(0),
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for (at, shift) in [18u32, 12, 6, 0].into_iter().enumerate() {
+            if at <= chunk.len() {
+                let index = usize::try_from((n >> shift) & 63).unwrap_or(0);
+                out.push(char::from(ALPHABET.get(index).copied().unwrap_or(b'=')));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// Extracts every layer of `layout` into `rootfs`, in order, as a runtime would.
+pub(crate) fn unpack(layout: &Layout, dir: &Path, rootfs: &Path) -> Result<()> {
+    fs::create_dir_all(rootfs).with_context(|| format!("creating {}", rootfs.display()))?;
+    for hex in &layout.layers {
+        let status = Command::new("tar")
+            .arg("-xf")
+            .arg(dir.join("blobs").join("sha256").join(hex))
+            .arg("-C")
+            .arg(rootfs)
+            .status()
+            .context("starting `tar`")?;
+        ensure!(status.success(), "unpacking layer {hex}");
+    }
     Ok(())
 }
 
@@ -132,7 +383,11 @@ mod tests {
             .arg(path)
             .output()
             .unwrap_or_else(|e| panic!("tar: {e}"));
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
@@ -143,7 +398,11 @@ mod tests {
             .arg(member)
             .output()
             .unwrap_or_else(|e| panic!("tar: {e}"));
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         out.stdout
     }
 
@@ -262,8 +521,41 @@ mod tests {
         assert_eq!(lines.len(), 1, "{listing}");
         assert!(lines[0].starts_with("-r--r--r-- 0/0"), "{listing}");
         assert!(lines[0].ends_with(" mandate-agentd.sig"), "{listing}");
-        assert_eq!(tar_extract(&signature, "mandate-agentd.sig"), b"the signature");
+        assert_eq!(
+            tar_extract(&signature, "mandate-agentd.sig"),
+            b"the signature"
+        );
         fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Every padding case: one, two and three trailing bytes, and the empty input.
+    #[test]
+    fn base64_is_rfc_4648() {
+        for (plain, encoded) in [
+            ("", ""),
+            ("a", "YQ=="),
+            ("ab", "YWI="),
+            ("abc", "YWJj"),
+            ("abcd", "YWJjZA=="),
+            ("hello world", "aGVsbG8gd29ybGQ="),
+            ("\u{ff}\u{fe}", "w7/Dvg=="),
+        ] {
+            assert_eq!(base64(plain.as_bytes()), encoded, "{plain:?}");
+        }
+    }
+
+    #[test]
+    fn a_header_is_found_in_any_case() {
+        let text = "HTTP/1.1 202 Accepted\r\nLocation: /v2/x/blobs/uploads/1?s=2\r\nDocker-Content-Digest: sha256:ab\r\n";
+        assert_eq!(
+            header(text, "location").as_deref(),
+            Some("/v2/x/blobs/uploads/1?s=2")
+        );
+        assert_eq!(
+            header(text, "DOCKER-CONTENT-DIGEST").as_deref(),
+            Some("sha256:ab")
+        );
+        assert_eq!(header(text, "etag"), None);
     }
 
     /// A tar is whole 512-byte records and ends in two zero records.

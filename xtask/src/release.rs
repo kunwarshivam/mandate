@@ -18,10 +18,13 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
+
+use crate::image;
 
 /// The one target every release binary is built for: static, so the image needs no libc.
 pub(crate) const TARGET: &str = "x86_64-unknown-linux-musl";
@@ -66,31 +69,39 @@ const PASSED_ENV: [&str; 11] = [
 /// crate's metadata, so a tool inside each checkout made two checkouts build different binaries.
 const TOOLS_DIR: &str = "mandate-release-tools";
 
-/// One pinned tool: its release asset, the asset's SHA-256, and the executable's path inside it.
+/// One pinned tool: its release asset, the asset's SHA-256, and the executable's path inside it,
+/// or `None` when the asset is the executable itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Tool {
     pub(crate) name: &'static str,
     pub(crate) version: &'static str,
     pub(crate) url: &'static str,
     pub(crate) sha256: &'static str,
-    pub(crate) member: &'static str,
+    pub(crate) member: Option<&'static str>,
 }
 
 /// The release build's tools (D-7, DEC-969; rows in `docs/dependencies.md`).
-pub(crate) const TOOLS: [Tool; 2] = [
+pub(crate) const TOOLS: [Tool; 3] = [
     Tool {
         name: "cargo-auditable",
         version: "0.7.7",
         url: "https://github.com/rust-secure-code/cargo-auditable/releases/download/v0.7.7/cargo-auditable-x86_64-unknown-linux-gnu.tar.xz",
         sha256: "4c8d3b08c3c34e9f2333367224dbbfb4aab68067698b43de59fe19aded3416dd",
-        member: "cargo-auditable-x86_64-unknown-linux-gnu/cargo-auditable",
+        member: Some("cargo-auditable-x86_64-unknown-linux-gnu/cargo-auditable"),
     },
     Tool {
         name: "syft",
         version: "1.52.0",
         url: "https://github.com/anchore/syft/releases/download/v1.52.0/syft_1.52.0_linux_amd64.tar.gz",
         sha256: "caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d",
-        member: "syft",
+        member: Some("syft"),
+    },
+    Tool {
+        name: "cosign",
+        version: "3.1.3",
+        url: "https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-linux-amd64",
+        sha256: "4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71",
+        member: None,
     },
 ];
 
@@ -255,14 +266,21 @@ pub(crate) fn tools(cargo_home: &Path) -> Result<PathBuf> {
             tool.version,
             tool.sha256
         );
-        run(Command::new("tar")
-            .arg("-xf")
-            .arg(&archive)
-            .arg("-C")
-            .arg(&work)
-            .arg(tool.member))?;
-        fs::copy(work.join(tool.member), &installed)
-            .with_context(|| format!("installing {}", tool.name))?;
+        let executable = match tool.member {
+            Some(member) => {
+                run(Command::new("tar")
+                    .arg("-xf")
+                    .arg(&archive)
+                    .arg("-C")
+                    .arg(&work)
+                    .arg(member))?;
+                work.join(member)
+            }
+            None => archive,
+        };
+        fs::copy(&executable, &installed).with_context(|| format!("installing {}", tool.name))?;
+        fs::set_permissions(&installed, fs::Permissions::from_mode(0o755))
+            .with_context(|| format!("making {} executable", tool.name))?;
         fs::write(&stamp, sha256(&installed)?)
             .with_context(|| format!("writing {}", stamp.display()))?;
     }
@@ -366,6 +384,292 @@ pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
     eprint!("    release {commit} (SOURCE_DATE_EPOCH={epoch}):\n{text}");
     println!("digest={}", sha256(&sums_file)?);
     Ok(())
+}
+
+/// One drill run: the image, the variables it runs with, and the code it must print.
+type DrillCase<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a str);
+
+/// The binary the drill runs: the one that checks its signature at start today.
+const DRILLED: &str = "mandate-agentd";
+
+/// What a drilled binary prints on stderr once the check has let it start: it has no wired host.
+const ADMITTED: &str = "deployment_host_not_wired";
+
+/// The registry and the repository path the images are published under (H5: the repository's
+/// GHCR, public images, no spend).
+const REGISTRY: &str = "https://ghcr.io";
+const REGISTRY_HOST: &str = "ghcr.io";
+const REPOSITORY: &str = "kunwarshivam/mandate";
+
+/// `cargo xtask release images <dist> <out> [--test-sign]` (E21-35): one image a binary of the
+/// release `dist`, each checked against its `SHA256SUMS` line, written as an OCI layout to
+/// `<out>/images/<binary>`, with `<out>/IMAGES` listing each image's digest. With `--test-sign`,
+/// an ephemeral test key made here signs each binary (`<out>/signatures/<binary>.sig`, also the
+/// image's second layer); its private half is deleted once the binaries are signed and its public
+/// half kept as `<out>/test-key/cosign.pub`. Only the founder's hardware key signs a release for a
+/// hosted cell, and it is never here.
+pub(crate) fn images(root: &Path, dist: &Path, out: &Path, test_sign: bool) -> Result<()> {
+    let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
+    let revision = git(root, &["rev-parse", "HEAD"])?;
+    let sums = parse_sums(
+        &fs::read_to_string(dist.join("SHA256SUMS"))
+            .with_context(|| format!("reading {}/SHA256SUMS", dist.display()))?,
+    )?;
+    let key = if test_sign {
+        Some(new_key(&tools, &out.join("test-key"))?)
+    } else {
+        None
+    };
+    let signatures = out.join("signatures");
+    fs::create_dir_all(&signatures)
+        .with_context(|| format!("creating {}", signatures.display()))?;
+    let mut listing = String::new();
+    for (name, hex) in &sums {
+        let binary = dist.join("bin").join(name);
+        ensure!(
+            sha256(&binary)? == *hex,
+            "{name} is not the binary SHA256SUMS lists"
+        );
+        let signature = match &key {
+            Some(key) => {
+                let file = signatures.join(format!("{name}.sig"));
+                sign(&tools, key, &binary, &file)?;
+                Some(fs::read(&file).with_context(|| format!("reading {}", file.display()))?)
+            }
+            None => None,
+        };
+        let bytes = fs::read(&binary).with_context(|| format!("reading {}", binary.display()))?;
+        let layout = image::layout(name, &bytes, signature.as_deref(), &revision);
+        image::write(&layout, &out.join("images").join(name))?;
+        listing.push_str(&format!("sha256:{}  {name}\n", layout.manifest));
+    }
+    if let Some(key) = &key {
+        fs::remove_file(key).with_context(|| format!("deleting {}", key.display()))?;
+    }
+    fs::write(out.join("IMAGES"), &listing).context("writing IMAGES")?;
+    eprint!("    images of {revision}:\n{listing}");
+    Ok(())
+}
+
+/// `cargo xtask release drill <dist> <out>` (E21-35): after `release images <dist> <out>
+/// --test-sign`, runs [`DRILLED`] as each of three images would run it, unpacked as a runtime
+/// does with the signature beside the binary: the test-signed image, the same binary unsigned,
+/// and one signed by a key nothing trusts. The unsigned and the wrongly signed are refused
+/// outside dev and CI, the wrongly signed and the test-signed outside dev and CI are refused, and
+/// in CI with the test key the test-signed and the unsigned start.
+pub(crate) fn drill(root: &Path, dist: &Path, out: &Path) -> Result<()> {
+    let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
+    let binary = dist.join("bin").join(DRILLED);
+    let bytes = fs::read(&binary).with_context(|| format!("reading {}", binary.display()))?;
+    let test_key = out.join("test-key").join("cosign.pub");
+    let signed = fs::read(out.join("signatures").join(format!("{DRILLED}.sig")))
+        .context("reading the test signature; run `release images --test-sign` first")?;
+    let drill = out.join("drill");
+    let _ = fs::remove_dir_all(&drill);
+    let stranger = new_key(&tools, &drill.join("stranger"))?;
+    let wrong_file = drill.join("wrong.sig");
+    sign(&tools, &stranger, &binary, &wrong_file)?;
+    fs::remove_file(&stranger).context("deleting the stranger's key")?;
+    let wrong = fs::read(&wrong_file).context("reading the stranger's signature")?;
+    let mut runs = BTreeMap::new();
+    for (image, signature) in [
+        ("signed", Some(signed.as_slice())),
+        ("unsigned", None),
+        ("wrong", Some(wrong.as_slice())),
+    ] {
+        let layout = image::layout(DRILLED, &bytes, signature, "drill");
+        let dir = drill.join(image);
+        image::write(&layout, &dir.join("layout"))?;
+        image::unpack(&layout, &dir.join("layout"), &dir.join("rootfs"))?;
+        runs.insert(image, dir.join("rootfs").join(DRILLED));
+    }
+    let key = test_key.display().to_string();
+    let cases: [DrillCase<'_>; 7] = [
+        (
+            "signed",
+            &[
+                ("MANDATE_DEPLOYMENT_TIER", "ci"),
+                ("MANDATE_RELEASE_TEST_KEY", &key),
+            ],
+            ADMITTED,
+        ),
+        ("signed", &[], "release_signature_not_verified"),
+        (
+            "signed",
+            &[
+                ("MANDATE_DEPLOYMENT_TIER", "staging"),
+                ("MANDATE_RELEASE_TEST_KEY", &key),
+            ],
+            "release_signature_not_verified",
+        ),
+        ("unsigned", &[], "release_unsigned"),
+        (
+            "unsigned",
+            &[("MANDATE_DEPLOYMENT_TIER", "production")],
+            "release_unsigned",
+        ),
+        ("unsigned", &[("MANDATE_DEPLOYMENT_TIER", "ci")], ADMITTED),
+        (
+            "wrong",
+            &[
+                ("MANDATE_DEPLOYMENT_TIER", "ci"),
+                ("MANDATE_RELEASE_TEST_KEY", &key),
+            ],
+            "release_signature_not_verified",
+        ),
+    ];
+    for (image, vars, expected) in cases {
+        let program = runs
+            .get(image)
+            .context("an image the drill did not build")?;
+        let output = Command::new(program)
+            .env_clear()
+            .envs(vars.iter().copied())
+            .output()
+            .with_context(|| format!("running the {image} image"))?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        ensure!(
+            output.status.code() == Some(2) && stderr.trim_end() == expected,
+            "the {image} image with {vars:?}: expected {expected}, got {:?} and {stderr:?}",
+            output.status.code()
+        );
+        eprintln!("    drill: the {image} image with {vars:?}: {expected}");
+    }
+    Ok(())
+}
+
+/// `cargo xtask release publish <dist> <out>` (E21-35): only from a push to `main`, where CI's
+/// `publish` job runs it (ES-12). Builds the images of `dist` without a binary signature (the
+/// founder's hardware key is not wired, so no binary is release-signed and none starts outside dev
+/// and CI), pushes each to GHCR as `main-<commit>`, checks the registry reports the image's own
+/// digest, signs each image's digest keyless with cosign (the run's GitHub OIDC identity) and
+/// attaches its SBOM as a CycloneDX attestation, and writes `<out>/PUBLISHED`. The token is read
+/// from `GH_TOKEN` and reaches curl and cosign only through a file and stdin.
+pub(crate) fn publish(root: &Path, dist: &Path, out: &Path) -> Result<()> {
+    let token = env::var("GH_TOKEN").context("GH_TOKEN is not set")?;
+    let actor = env::var("GITHUB_ACTOR").context("GITHUB_ACTOR is not set")?;
+    images(root, dist, out, false)?;
+    let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
+    let revision = git(root, &["rev-parse", "HEAD"])?;
+    let secrets = out.join("auth");
+    fs::create_dir_all(&secrets).context("creating the auth directory")?;
+    fs::set_permissions(&secrets, fs::Permissions::from_mode(0o700))?;
+    let basic = secrets.join("basic");
+    write_secret(
+        &basic,
+        &format!(
+            "Authorization: Basic {}\n",
+            image::base64(format!("{actor}:{token}").as_bytes())
+        ),
+    )?;
+    let mut login = Command::new(tools.join("cosign"))
+        .args([
+            "login",
+            REGISTRY_HOST,
+            "--username",
+            &actor,
+            "--password-stdin",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(io::stderr())
+        .spawn()
+        .context("starting `cosign login`")?;
+    if let Some(mut stdin) = login.stdin.take() {
+        io::Write::write_all(&mut stdin, token.as_bytes()).context("handing cosign the token")?;
+    }
+    ensure!(login.wait()?.success(), "cosign login failed");
+    let sums = parse_sums(&fs::read_to_string(dist.join("SHA256SUMS"))?)?;
+    let mut published = String::new();
+    for name in sums.keys() {
+        let repository = format!("{REPOSITORY}/{name}");
+        let token_json = image_token(&basic, &repository)?;
+        let bearer = secrets.join("bearer");
+        write_secret(&bearer, &format!("Authorization: Bearer {token_json}\n"))?;
+        let dir = out.join("images").join(name);
+        let bytes = fs::read(dist.join("bin").join(name))?;
+        let layout = image::layout(name, &bytes, None, &revision);
+        let digest = image::push(
+            &layout,
+            &dir,
+            REGISTRY,
+            &repository,
+            &format!("main-{revision}"),
+            Some(&bearer),
+        )?;
+        let reference = format!("{REGISTRY_HOST}/{repository}@{digest}");
+        run(Command::new(tools.join("cosign")).args(["sign", "--yes", &reference]))?;
+        run(Command::new(tools.join("cosign"))
+            .args(["attest", "--yes", "--type", "cyclonedx", "--predicate"])
+            .arg(dist.join("sbom").join(format!("{name}.cdx.json")))
+            .arg(&reference))?;
+        published.push_str(&format!("{reference}  {name}\n"));
+    }
+    fs::remove_dir_all(&secrets).context("deleting the auth directory")?;
+    fs::write(out.join("PUBLISHED"), &published).context("writing PUBLISHED")?;
+    eprint!("    published {revision}:\n{published}");
+    Ok(())
+}
+
+/// A registry token for pushing to `repository`, exchanged for the Basic header in `basic`.
+fn image_token(basic: &Path, repository: &str) -> Result<String> {
+    let out = Command::new("curl")
+        .args(["-sSf", "-H"])
+        .arg(format!("@{}", basic.display()))
+        .arg(format!(
+            "{REGISTRY}/token?service={REGISTRY_HOST}&scope=repository:{repository}:pull,push"
+        ))
+        .output()
+        .context("starting `curl`")?;
+    ensure!(
+        out.status.success(),
+        "the registry refused a token for {repository}"
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(&out.stdout).context("the registry's token is not JSON")?;
+    body.get("token")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .context("the registry's answer has no token")
+}
+
+/// Writes `text` to `path`, readable by this user only.
+fn write_secret(path: &Path, text: &str) -> Result<()> {
+    fs::write(path, text).with_context(|| format!("writing {}", path.display()))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("restricting {}", path.display()))
+}
+
+/// Makes an ephemeral cosign key pair, with no password, in `dir`, and returns its private key's
+/// path; the caller deletes it once it has signed.
+fn new_key(tools: &Path, dir: &Path) -> Result<PathBuf> {
+    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    run(Command::new(tools.join("cosign"))
+        .current_dir(dir)
+        .env("COSIGN_PASSWORD", "")
+        .arg("generate-key-pair"))?;
+    Ok(dir.join("cosign.key"))
+}
+
+/// Signs `file` with the cosign key `key` into `signature`, offline: no transparency log, the
+/// signature file cosign's `--output-signature` writes.
+fn sign(tools: &Path, key: &Path, file: &Path, signature: &Path) -> Result<()> {
+    run(Command::new(tools.join("cosign"))
+        .env("COSIGN_PASSWORD", "")
+        .args([
+            "sign-blob",
+            "--yes",
+            "--new-bundle-format=false",
+            "--use-signing-config=false",
+            "--tlog-upload=false",
+            "--key",
+        ])
+        .arg(key)
+        .arg("--output-signature")
+        .arg(signature)
+        .arg(file))
 }
 
 /// The SHA-256 of the file at `path`, as `sha256sum` prints it.
@@ -686,7 +990,9 @@ mod tests {
             let writes = body.contains("packages: write") || body.contains("id-token: write");
             assert_eq!(writes, name == "publish", "{name}");
         }
-        let publish = jobs.get("publish").context("release.yml has no publish job")?;
+        let publish = jobs
+            .get("publish")
+            .context("release.yml has no publish job")?;
         assert!(
             publish.contains(
                 "    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}\n"
@@ -696,7 +1002,7 @@ mod tests {
         for permission in ["contents: read", "packages: write", "id-token: write"] {
             assert!(publish.contains(permission), "{permission}");
         }
-        assert!(publish.contains("needs: [compare]"), "{publish}");
+        assert!(publish.contains("needs: [build-a, compare]"), "{publish}");
         Ok(())
     }
 
