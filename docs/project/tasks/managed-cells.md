@@ -75,7 +75,7 @@ process its own pod, a workspace's data service, executors and runtimes on one n
 | Journal Postgres, under the CloudNativePG operator: a primary and a synchronous standby, WAL archived to object storage, point-in-time recovery (DEC-967 item 8) | One cluster per cell | Lane S (E21-41) |
 | Object storage: a plain S3 endpoint with a lock check, Cloudflare R2 for cell #1 (DEC-967 item 9) | One bucket set per cell, off the cell's VMs | Lane S (E21-40) |
 
-**Out of scope here:** the model gateway, the cold exporter and anchorer (E5-7), the market-data
+**Out of scope here,** except where E21-48 needs it before the first live order: the model gateway, the cold exporter and anchorer (E5-7, which E21-48 needs), the market-data
 service's live ingest, the token-exchange process's hosting (it waits on E10-13 and DEC-821's
 connection manager), the control plane beyond lane G's first slice (licensing, metering, the relay, E14 billing) and the shared data plane. The
 cell runs without them: the runtime's research path stays off, and data comes as fixtures or the
@@ -101,7 +101,7 @@ too (DEC-967 item 11). There are three surfaces, each its own lane, all packaged
 |---|---|---|---|---|
 | **1. Workspace services API** (lane A, first: the web app, the CLI and the owner's MCP adapter, E10-6, all call it) | [Workspace API spec](../../specs/workspace-api.md) v0.1; E10-10 to E10-14 | `mandate-api`: the contract (problem documents, request and response shapes, principals, the idempotency key), pure, with no transport; the identity crates; `mandate-audit`'s reads | E21-31: the server process over that contract, serving the routes already on `main`, with sessions, tenant scope and probes | One Deployment per workspace deployment behind the cell's one ingress (the `cloudflared` pod). More traffic is more replicas of the same Deployment: every mutating call commits its control-stream event first (API-3), so replicas share nothing but the journal |
 | **2. Global control plane** (lane G) | [Control-plane design](../../design/control-plane.md) v0.1; E20 | Nothing built (design §7); `actor.build` digests are journaled | E21-43: the directory (E20-1), cell routing (the directory maps a workspace to its cell's API endpoint, and clients cache the route), fleet health from heartbeats (E20-5), and the cell's `cp-agent` with enrollment (E20-2). Licensing, metering, billing, the relay, distribution and the anchor witness come later | Its own Helm release from the same chart conventions, in its own namespace with its own database, keys and egress (DEC-440 item 16 wants separate accounts and keys from every cell). On cell #1's k3s only if the founder accepts that (H10); moving it to its own cluster later is a values change. The cell reaches it only outbound through `cp-agent` (design §3), and its outage stops no trading (OPS-12) |
-| **3. Data plane** (lane M) | [Data-plane spec](../../specs/data-plane.md) v0.2 (§3, §5, §6); infrastructure §3.1's internal channels | `mandate-marketdata` (historical bars and trades into Parquet, `inspect`); `mandate-alpaca`'s latest-quote and asset reads; `mandate-time`'s calendar. No live stream, no data service (spec §9) | Two halves. **Market data:** E2-6 (the workspace data service) then E2-5 (Alpaca streaming, on recorded fixtures in CI), served to runtimes and executors over the host-local channel (E21-44). **Internal interfaces:** E21-42, which pins down that workspace services and the agent processes meet only in the journal | The data service is a pod per workspace, on the workspace's node by pod affinity (§3.2). The host-local channel is a per-workspace Unix socket, never a network route, so spreading a workspace over nodes stays the data-plane spec change §3.2 says it is, not a chart rewrite. The shared data plane (spec §6) stays Won't for v1 |
+| **3. Data plane** (lane M) | [Data-plane spec](../../specs/data-plane.md) v0.2 (§3, §5, §6); infrastructure §3.1's internal channels | `mandate-marketdata` (historical bars and trades into Parquet, `inspect`); `mandate-alpaca`'s latest-quote and asset reads; `mandate-time`'s calendar. No live stream, no data service (spec §9) | Two halves. **Market data:** E2-6 (the workspace data service) then E2-5 (Alpaca streaming, on recorded fixtures in CI), served to runtimes and executors over the host-local channel (E21-44). **Internal interfaces:** E21-42, which pins down that workspace services and the agent processes meet only in the journal | The data service is a pod per workspace, on the workspace's node by pod affinity (§3.2). The host-local channel stays on the node and is never a network route (E21-44's DEC picks the mechanism, a per-workspace Unix socket being the expected one), so spreading a workspace over nodes stays the data-plane spec change §3.2 says it is, not a chart rewrite. The shared data plane (spec §6) stays Won't for v1 |
 
 What "internal interfaces" means here: workspace services (the API server, the deployment manager,
 the approval service) never call a runtime, an executor or the scheduler. They append to the
@@ -144,7 +144,7 @@ special work", then "real trade through robinhood", not the simulator (DEC-967 i
   Robinhood-only code, binary or runner beyond the connector crate itself.
 - **Real trades, from cell #1.** The founder's Robinhood connection in cell #1 is a `live`
   connection: real orders on the founder's own agentic account, under the founder's mandate, with
-  DEC-529's caps and `ask` for openings until the founder raises them through a confirmed mandate
+  the envelope DEC-529 used (allocation and `max_order_usd`) and `ask` for openings until the founder raises them through a confirmed mandate
   version. It replaces the R0 runner as the way the founder trades on Robinhood once E21-48's
   conditions hold; until then the R0 runner stays the path (DEC-529).
 - **The simulator is only for tests.** Robinhood has no paper or demo environment, and no test or
@@ -153,12 +153,15 @@ special work", then "real trade through robinhood", not the simulator (DEC-967 i
 - **What must hold before the first real order from the cell** (E21-48), each from an existing
   rule, not new work: a signed live executor image (OPS-15, the founder's hardware key); egress to
   Robinhood's host for that executor only; the journal's synchronous standby on a second node, so
-  cell #1 needs both VMs (OPS-2: live needs a standby in a second failure domain); write-once
-  storage proven by E21-40 and a second-region copy of the cold store (journal §6.2: both before
-  live capital); backups with no secret outside the vault (DEC-822 item 4's condition); the
-  hosted login (E21-47) and the vault (E21-32) in place, so the token never sits on a disk outside
-  the vault; and DEC-529 item 3 narrowed so this one executor image may build `live`, with CI still
-  only compiling it (DEC-967 item 15 does this).
+  cell #1 needs both VMs (OPS-2: live needs a standby in a second failure domain; two VMs in a
+  spread placement group in one Hetzner location are separate hosts, not separate sites, and the
+  plan discloses that); write-once storage proven by E21-40, and E5-7 shipping segments within a
+  minute of closing to the locked store and its second-region copy (journal §6.2: before live
+  capital); backups with no secret outside the vault (DEC-822 item 4's condition); the hosted login
+  (E21-47) and the vault (E21-32) in place, so the token never sits on a disk outside the vault;
+  `cargo xtask live-feature` changed to allow `mandate-daemon` as well as the runner, with CI still
+  only compiling `live` (DEC-967 item 15 narrows DEC-529 item 3 for this); and, until the founder
+  decides otherwise, the M13 penetration test and counsel's review (DEC-967 item 15, Proposed).
 
 ## The rule that makes the lanes parallel
 
@@ -168,6 +171,8 @@ No lane edits these files until R0 closes (DEC-967 item 2):
 - `crates/mandate-shell/src/control.rs`
 - `crates/mandate-shell/src/adapters.rs`
 - `crates/mandate-shell/src/paper/` (every file)
+- `crates/mandate-paper/src/lt10.rs`, and `crates/mandate-paper/Cargo.toml`'s `live` feature (the
+  R0 runner's own)
 
 A lane uses `mandate-shell` and `mandate-paper` only through what they already make public, and
 puts new code in new crates. A slice that finds it needs one of these files changed stops and
@@ -182,7 +187,7 @@ first dependency is a founder decision (listed under [Dependencies](#dependencie
 
 ## Lanes
 
-Twelve lanes. A lane is a sequence of stories one builder holds; lanes run in parallel and merge one
+Thirteen lanes (P, A, V, D, O, R, K, C, S, G, M, B, W). A lane is a sequence of stories one builder holds; lanes run in parallel and merge one
 PR at a time. **SC** marks a safety-critical story: tests PR first, reviewed by an agent on a
 different model, zero missed mutants, green CI (`AGENTS.md` Safety-critical paths, DEC-79).
 
@@ -242,16 +247,17 @@ the journal spec's catalogue has none, a journal spec change with test vectors c
 | Order | Story | What | Existing crates it needs | New crate |
 |---|---|---|---|---|
 | R1 | E21-8 (exists) | Reproducible static builds from `main`, SBOM, the build digest journaled | the binaries' crates | — |
-| R2 | **E21-35** | Images by digest from those builds (static binaries on an empty base: no shell, non-root, read-only root), signed with cosign; the start-up signature check (OPS-15) that refuses an unsigned binary outside dev and CI; promotion `main` → the local cell's CI run → staging, once staging exists. CI signs with an ephemeral test key; the founder's hardware key (ES-17) signs only what goes to a hosted cell | `mandate-process` (the start-up check's hook) | — |
+| R2 | **E21-35** (SC) | Images by digest from those builds (static binaries on an empty base: no shell, non-root, read-only root), signed with cosign; the start-up signature check (OPS-15) that refuses an unsigned binary outside dev and CI; promotion `main` → the local cell's CI run → staging, once staging exists. CI signs with an ephemeral test key; the founder's hardware key (ES-17) signs only what goes to a hosted cell | `mandate-process` (the start-up check's hook) | — |
 
 ### Lane K: packaging (Helm and Compose, per M11)
 
 | Order | Story | What | Existing crates it needs | New crate |
 |---|---|---|---|---|
-| K1 | **E21-36** (SC) | One Helm chart and one Compose file for a workspace deployment, from the same process list: a pod (or service) per process, pod affinity per workspace (§3.2), requests equal to limits for the executor and scheduler (§3.3), default-deny `NetworkPolicy` per process type with exactly §3.1's egress (OPS-5, E21-1), no inbound to the data plane, the migration Job under the migration-owner role before processes roll (OPS-13), secrets only as mounted files (DEC-822 item 4). E13-1 and E13-2 (hybrid) reuse it | `mandate-cli` (`db migrate`, as `deploy/` uses it) | — |
+| K0 | **E21-50** (SC; first) | `mandate-cli db migrate`: forward-only migrations under the migration-owner role, taking over from `deploy/`'s table and the embedded migrator (OPS-13, ES-08). It does not exist yet; E5-3 left it "Not done" | `mandate-cli`, `mandate-journal-pg` | — |
+| K1 | **E21-36** (SC) | One Helm chart and one Compose file for a workspace deployment, from the same process list: a pod (or service) per process, pod affinity per workspace (§3.2), requests equal to limits for the executor and scheduler (§3.3), default-deny `NetworkPolicy` per process type with exactly §3.1's egress (OPS-5, E21-1), no inbound to the data plane, the migration Job under the migration-owner role before processes roll (OPS-13), secrets only as mounted files (DEC-822 item 4). E13-1 and E13-2 (hybrid) reuse it | `mandate-cli` (`db migrate`, from K0) | — |
 
-K1 starts with what exists today (Postgres, the migration Job, a `mandate journal verify` Job) and
-gains each process as its lane's image lands.
+K1 starts with Postgres, the migration Job (once K0 lands) and a `mandate journal verify` Job,
+and gains each process as its lane's image lands.
 
 ### Lane C: the local and CI cell
 
@@ -259,8 +265,9 @@ gains each process as its lane's image lands.
 |---|---|---|---|---|
 | C1 | **E21-37** (its drills exercise SC paths; the harness itself is tooling) | `cargo xtask cell up` and `cell drill`: a k3d cluster (k3s in containers, cell #1's own distribution; kind if k3d cannot run on the runner) on the CI runner and on a developer machine, the chart installed from the PR's images, and the drills: kill each process at each step with zero duplicates; two executors for one account, the older `Fenced` before it sends (OPS-3); a request to each live trading host fails at the network layer (OPS-5); the kill switch with the exporter, API and deployment manager down (OPS-4); the upgrade drill (OPS-7); a restore of the cell's Postgres verified by journal §11 (OPS-8). Each drill fails on a seeded bug before it is trusted. A CI job under ten minutes (DEC-464), sharded by drill | everything above; `mandate-journal-pg` and `mandate-cli` from the start | — |
 
-C1's first slice needs no process lane: it boots K1's skeleton and runs the migration and a
-journal verification, so the cell runs in CI from Wave 0.
+C1's first slice needs no process lane: it boots K1's skeleton, runs K0's migration and a journal
+verification, so the cell runs in CI from early Wave 0. Its live-host drill runs on the drilled
+images, all built without `live`; the one live image of E21-48 is never started in CI.
 
 ### Lane S: storage (object storage and the journal's Postgres)
 
@@ -279,7 +286,7 @@ item 10, DEC-434 item 16).
 | Order | Story | What | Existing crates it needs | New crate |
 |---|---|---|---|---|
 | G0 | E20-3 (SC, exists; journal spec first) | The closed message set and its journal events, before any message flows | `mandate-journal` | — |
-| G1 | **E21-43** with E20-1, E20-2, E20-5 (exist) | Directory, cell routing and fleet health as one small service, and `cp-agent` in the cell; packaged as its own Helm release | `mandate-api` (the problem-document conventions), `mandate-identity` (role names only; no personal data, E20-1), `mandate-journal-pg` (its own database), `mandate-process` | `mandate-cp` (the service), `mandate-cp-agent` (SC: it hands verified instructions to workspace services) |
+| G1 | **E21-43** (SC) with E20-1, E20-2, E20-5 (exist) | Directory, cell routing and fleet health as one small service, and `cp-agent` in the cell; packaged as its own Helm release | `mandate-api` (the problem-document conventions), `mandate-identity` (role names only; no personal data, E20-1), `mandate-journal-pg` (its own database), `mandate-process` | `mandate-cp` (the service), `mandate-cp-agent` (SC: it hands verified instructions to workspace services) |
 | G2 | later: E20-4, E20-6 to E20-10, E14 | Licensing, signed manifests, metering, the relay, distribution, the anchor witness | — | — |
 
 ### Lane M: the data plane
@@ -297,7 +304,7 @@ item 10, DEC-434 item 16).
 |---|---|---|---|---|
 | B1 | **E21-46** (SC) | Both connectors in the cell's executor process: Alpaca against paper and recorded fixtures, Robinhood against `mandate-rh-sim` as a pod sidecar; capability profiles only | `mandate-alpaca`, `mandate-robinhood`, `mandate-mcp` (`rh-sim` feature), `mandate-rh-sim`, `mandate-executor`, `mandate-daemon` (P3) | — |
 | B2 | **E21-47** (SC; connections spec first) | Hosted Robinhood login: the OAuth callback through the API server, the token into the vault, leased to that one executor, tested against the simulator | `mandate-connections`, `mandate-vault` (V2), `mandate-api-server` (A1), `mandate-robinhood` | — |
-| B3 | **E21-48** (SC) | Real Robinhood trades from cell #1: the signed live executor image, its egress, the standby on the second node, the storage conditions, the founder's first live order from the cell | B1, B2, R2, K1, S1, S2 | — |
+| B3 | **E21-48** (SC; after E5-7, and the penetration test and counsel until the founder decides otherwise) | Real Robinhood trades from cell #1: the signed live executor image, the `live-feature` check allowing `mandate-daemon`, its egress, the standby on the second node, the storage conditions, the founder's first live order from the cell | B1, B2, R2, K1, S1, S2 | — |
 
 B1 and B2 must not edit the R0 files; where the R0 runner's own Robinhood wiring sits in
 `crates/mandate-paper` or `crates/mandate-shell/src/paper/`, B1 reuses the connector crates
@@ -373,19 +380,25 @@ flowchart LR
     P4 & V3 & O3 & O4 & C1b --> G --> H
 ```
 
-- **Wave 0** (start now, in parallel): P1, V1, O1, R1, K1 and C1's first slice, W1, S1's interface
-  and its CI half, M1's check over what exists, G0's journal spec change. None needs another lane.
+- **Wave 0** (start now, in parallel): K0 first, then P1, V1, O1, R1, K1 and C1's first slice, W1,
+  S1's interface and its CI half, M2, and G0's journal spec change. M1 starts as the rules for the
+  crates that exist and gains one rule as each lane's crate lands.
 - **Wave 1**: P2 and P3 after P1; A1 once the HTTP dependency (D-1) is approved and E10-10's first
-  routes are on `main`; V2 after V1; D1 after P1 and K1; O2 after O1; R2 after R1; S2 after S1 and K1; M2 now (it needs no other lane); G1 after G0 and K1; B1 after P3.
-- **Wave 2** also: B2 after B1, A1 and V2; A3 after A1; A4 after A3.
-- **Wave 3:** B3 once B1, B2, R2, S1 and S2 are green and H1 (both VMs) and H3 are approved.
-- **Wave 2**: P4 after P3 and D1; V3 after V2 and P3; O3 after O2 and K1; O4 after P3; C1's drills
-  as each process image lands.
-- **After R0 closes**: P5, and any queued change to the four R0 files.
-- **The local-cell gate**: every C1 drill passes in CI on `main` for a week of merges. Only then is
-  the founder asked for H1 (the VMs) and H3 (R2); S1's check against R2 itself runs the day H3 is
-  approved, before anything is stored there. Whether cell #1 also counts as DEC-434 item 19's
-  minimal staging cell is asked with H1; it carries paper and demo only either way.
+  routes are on `main`; V2 after V1; D1 after P1 and K1; O2 after O1; R2 after R1; S2 after S1, K0
+  and K1; M3 after M2 and K1; G1 after G0 and K1; B1 after P3.
+- **Wave 2**: P4 after P3 and D1; V3 after V2 and P3; O3 after O2 and K1; O4 after P3; B2 after
+  B1, A1 and V2; A3 after A1; A4 after A3; C1's drills as each process image lands.
+- **Wave 3**: B3, once B1, B2, R2, S1, S2 and E5-7 are green, H1 (both VMs) and H3 are bought,
+  and the penetration test and counsel have answered, unless the founder decides they are not
+  needed for the founder's own account (DEC-967 item 15).
+- **After R0 closes**: P5, and any queued change to the R0 files.
+- **The local-cell gate**: every C1 drill passes in CI on `main` for a week of merges (DEC-967
+  item 16). Then the founder buys H1 (the VMs) and H3 (R2), and S1's check against R2 itself runs
+  before anything is stored there. **If the founder confirms [DEC-990](../decisions/DEC-990.md)
+  item 2** (rush the hosted cell for the 2026-10-26 demo), the week is dropped: H1 and H3 are
+  bought when every C1 drill has first passed in CI on `main`; the cell carries paper and demo data
+  only; S1's check still runs first; and B3 keeps its own conditions above. Whether cell #1 also
+  counts as DEC-434 item 19's minimal staging cell is asked with H1.
 
 What the lanes need from each other is small on purpose: `mandate-process` (P1) is the one crate
 four lanes import, so it lands first and its interface is reviewed before P3, A1, V2 and D1 build
@@ -402,15 +415,15 @@ cost model (§10) is the formula; these are its first inputs.
 | ID | Decision | Trigger | Options, rough cost per month |
 |---|---|---|---|
 | H0 | Does the demo host (DEC-822, a Hetzner CX22) keep running after the 2026-10-26 demo? It is a dev and demo convenience now (DEC-967 item 6) | The demo ends | Keep it, about $5 to $7; or retire it once cell #1 runs |
-| H1 | **Approved at the gate (item 16): cell #1's VMs, k3s on two Hetzner Cloud VMs in Ashburn, VA** (DEC-967 item 7; DEC-434 items 13 and 19) | The local-cell gate | Confirm at order time which server types Ashburn offers: as the recording agent knows it, Hetzner's US locations offer the shared AMD (CPX) and dedicated (CCX) lines, and the cheapest shared Intel line (CX, the demo host's CX22) is EU-only. One CPX31 (4 vCPU, 8 GB): about $15 to $20; two: about $30 to $40. Two CPX21 (3 vCPU, 4 GB) are cheaper, about $18 to $25, but tight for Postgres, OpenBao, Prometheus and the processes. Plus volumes, about $0.05 per GB (40 GB per node: about $2 each), and one primary IPv4 per VM, under $1 each. US locations include less traffic than the EU's; the cell's traffic is small |
+| H1 | **Approved at the gate (item 16; DEC-990 item 2 would move it to the drills' first pass): cell #1's VMs, k3s on two Hetzner Cloud VMs in Ashburn, VA** (DEC-967 item 7; DEC-434 items 13 and 19) | The local-cell gate | Confirm at order time which server types Ashburn offers: as the recording agent knows it, Hetzner's US locations offer the shared AMD (CPX) and dedicated (CCX) lines, and the cheapest shared Intel line (CX, the demo host's CX22) is EU-only. One CPX31 (4 vCPU, 8 GB): about $15 to $20; two: about $30 to $40. Two CPX21 (3 vCPU, 4 GB) are cheaper, about $18 to $25, but tight for Postgres, OpenBao, Prometheus and the processes. Plus volumes, about $0.05 per GB (40 GB per node: about $2 each), and one primary IPv4 per VM, under $1 each. US locations include less traffic than the EU's; the cell's traffic is small |
 | H2 | The journal's Postgres (DEC-434 item 15) | — | **Decided as relayed** (DEC-967 item 8): in the cell under CloudNativePG, so no separate spend; it runs on H1's VMs and archives to H3 |
-| H3 | **Approved at the gate (item 16): object storage on Cloudflare R2**, location hint eastern North America (DEC-967 item 9) | The local-cell gate, and S1's check against R2 passing | Storage about $0.015 per GB-month after a 10 GB free tier, no egress fee, operations about $4.50 per million writes and $0.36 per million reads after their free tiers: about **$0 to $2** at cell #1's scale (a few GB of WAL, backups and artifacts). Grows with records kept six years (§4.5) |
+| H3 | **Approved at the gate (item 16; DEC-990 item 2 would move it to the drills' first pass): object storage on Cloudflare R2**, location hint eastern North America (DEC-967 item 9) | The local-cell gate, and S1's check against R2 passing | Storage about $0.015 per GB-month after a 10 GB free tier, no egress fee, operations about $4.50 per million writes and $0.36 per million reads after their free tiers: about **$0 to $2** at cell #1's scale (a few GB of WAL, backups and artifacts). Grows with records kept six years (§4.5) |
 | H3b | Fallback for the cold store only, if S1 finds R2's locks weaker than journal spec §6.2 needs: **Backblaze B2** with standard S3 Object Lock in compliance mode | S1's finding | About $6 per TB-month, first 10 GB free; at cell #1's scale about $0 to $1. Recorded as its own DEC when taken |
 | H4 | Key management for OpenBao's auto-unseal (DEC-434 item 14, §5.2) | H1 | Hetzner has no key service. Options: a cloud key service elsewhere, about $1 to $5; or a manual unseal by the founder after every vault restart, which costs nothing and adds a step after every node reboot |
-| H5 | Container registry for signed images | R2 reaches a hosted cell | Free for public images on the repository's host; a private registry about $0 to $20 |
+| H5 | Container registry for signed images | Lane R's E21-35 reaches a hosted cell | Free for public images on the repository's host; a private registry about $0 to $20 |
 | H6 | Paging and on-call tool (DEC-434 item 20) | O3, before design partners | A free tier, or about $10 to $30 per user |
 | H7 | Larger CI runners, if the cell job cannot stay under ten minutes on standard runners by sharding (DEC-464) | C1 | About $0.01 to $0.05 per runner-minute: a few dollars to tens of dollars a month at today's PR rate |
-| H8 | A hardware signing key for ES-17, if the founder holds none | R2 reaches a hosted cell | One-off, about $50 to $90 |
+| H8 | A hardware signing key for ES-17, if the founder holds none | Lane R's E21-35 reaches a hosted cell | One-off, about $50 to $90 |
 | L-1 | Live for anyone but the founder's own Robinhood account (other users; Alpaca live) | The Phase 2 gate, counsel and the penetration test | No hosting cost of its own. The founder's own account is decided (DEC-967 item 15) |
 | L-2 | **Approved at the gate (item 16):** the second-region copy of the cold store that journal §6.2 requires before live capital | Before B3 | At cell #1's scale about $0 to $1: a second R2 bucket in another location hint, or B2 |
 | H10 | Where the control plane's first slice runs (DEC-440 item 16) | G1 reaches a hosted cell | On cell #1's VMs as a separate release, namespace, database and keys: no extra cost, but not the separate accounts item 16 recommends. On its own small VM: about $8 to $20 |
@@ -429,7 +442,10 @@ because live needs the standby in a second failure domain (OPS-2).
 
 Each is a `docs/dependencies.md` row, added in the slice that first uses it, which the founder
 approves by merging the row (the registry is founder-owned). The lane names alternatives in the
-row; these are the expected first rows.
+row; these are the expected first rows. **If the founder confirms
+[DEC-990](../decisions/DEC-990.md) item 1**, these seven kinds are pre-approved: the coordinator
+checks that each row matches its kind and merges it, and anything outside them still goes to the
+founder.
 
 | ID | Needed by | Kind | Note |
 |---|---|---|---|

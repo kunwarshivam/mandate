@@ -61,6 +61,11 @@ Rules that hold across the ladder:
   are rejected (ES-23), so a paper journal can never become a live one.
 - Until the founder decides to go live (reserved by DEC-79), no production environment exists and
   the most conservative option holds: paper only.
+- **Narrowing ([DEC-967](../project/decisions/DEC-967.md) item 15, the founder):** managed cell #1
+  carries one live connection, the founder's own Robinhood agentic account, served by one signed
+  executor image built with `live` (E21-48). Every other image in it is built without `live`,
+  every other process has no route to a live host, and every other connection is paper or demo.
+  Live for any other user still needs the Phase 2 gate, counsel and the M13 penetration test
 
 ### 1.2 What runs where, by deployment mode
 

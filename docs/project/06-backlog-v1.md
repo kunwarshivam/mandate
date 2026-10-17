@@ -2558,7 +2558,7 @@ v0.2 fixes ([DEC-434](decisions/DEC-434.md) items 21 to 24).
   executor implementation (#174); and §14 and DEC-434 item 12 say once whether E21 is in the epic
   overview.
 
-Rows E21-28 to E21-49 come from the [managed-cells plan](tasks/managed-cells.md)
+Rows E21-28 to E21-50 come from the [managed-cells plan](tasks/managed-cells.md)
 ([DEC-967](decisions/DEC-967.md), Accepted by the founder). Each names its lane. None buys
 hosting (the founder orders it at the local-cell gate, item 16), and none edits
 `crates/mandate-paper/src/lib.rs` or `crates/mandate-shell/src/control.rs`, `adapters.rs` or
@@ -2641,7 +2641,7 @@ enables `live` (ES-23, OPS-5).
   run` with only the journal's role; a local-cell test with the API, the deployment manager, the
   metrics exporter, the model gateway and the control plane all unreachable shows each scope's
   `KillSwitchActivated` in every stream owner; and the runbook RB-03 names the command.
-- **E21-35 (Proposed, M8 then M11; lane R2)** As the founder, I want the cell's images built
+- **E21-35 (Proposed, M8 then M11; SC; lane R2)** As the founder, I want the cell's images built
   from `main` by digest, signed, and checked at start, so that only a release I can identify runs
   against a broker (design §7.1, OPS-15, ES-17). *Accepted when:* images hold E21-8's static
   binaries on an empty base, run as non-root with a read-only root filesystem and no shell; each is
@@ -2672,7 +2672,8 @@ enables `live` (ES-23, OPS-5).
   broker credential and no broker host; `cargo xtask cell drill` runs, as each process exists: a
   kill of each process at each step of submission with zero duplicates; two executors for one
   account with the older `Fenced` before it sends (OPS-3); a request to each live trading host
-  failing at the network layer from every process (OPS-5); the kill switch with the API, the
+  failing at the network layer from every process, the drilled cell's images all being built
+  without `live` and only the token-exchange process reaching DEC-821's one token host (OPS-5); the kill switch with the API, the
   deployment manager and the exporter down (OPS-4, E21-34); the upgrade drill of E21-7 (OPS-7);
   and a restore of the cell's Postgres passing journal spec §11 over every stream (OPS-8); each
   drill fails on a seeded bug before it is trusted; the CI job finishes in under ten minutes,
@@ -2716,7 +2717,9 @@ enables `live` (ES-23, OPS-5).
   migration Job (OPS-13); WAL and base backups go to E21-40's endpoint under a key separate from
   the database's; a local-cell drill restores to a point in time and passes journal spec §11 over
   every stream (OPS-8); a failover drill with intents in flight shows zero duplicates and zero lost
-  acknowledged appends; and while the cell has one node the standby's shared failure domain is
+  acknowledged appends, and that the old primary is fenced before the standby is promoted
+  (DEC-434 item 15); the two instances run on different VMs in a spread placement group, and that
+  two VMs in one Hetzner location are one site, not two regions, is disclosed; and while the cell has one node the standby's shared failure domain is
   disclosed in the cell's own status, not hidden.
 - **E21-42 (Proposed, M8; SC; lane M1)** As an owner, I want workspace services and my agent's
   processes to meet only in the journal, so that the API, the deployment manager or the approval
@@ -2729,7 +2732,7 @@ enables `live` (ES-23, OPS-5).
   every `LISTEN`/`NOTIFY` wake-up still delivers each owner command, a kill switch included, by
   tailing; and the design's §3.1 lists every channel that remains (the journal, the host-local
   market-data channel, the probes), with nothing else.
-- **E21-43 (Proposed, M8; lane G1; with E20-1, E20-2 and E20-5)** As an org admin, I want the
+- **E21-43 (Proposed, M8; SC; lane G1; with E20-1, E20-2 and E20-5)** As an org admin, I want the
   global control plane's first slice (the directory, cell routing and fleet health) running as its
   own deployment in the same packaging as a cell, so that a second cell is a new install and not a
   redesign (control-plane design §3.1, §3.2, §3.4; DEC-967 item 11). *Accepted when:* E20-1's,
@@ -2786,21 +2789,26 @@ enables `live` (ES-23, OPS-5).
   leaves the deployment `closing_only` with resting protection untouched (as E7-24 does for the
   runner); the terms hash is journaled through `DisclosureAccepted` (connections spec §4); and
   every test runs against `mandate-rh-sim`, never a Robinhood host (rule 8).
-- **E21-48 (Proposed, M8; SC; lane B3; after E21-40, E21-41, E21-46, E21-47, E21-35)** As the
+- **E21-48 (Proposed, M8; SC; lane B3; after E21-40, E21-41, E21-46, E21-47, E21-35 and E5-7)** As the
   founder, I want my agent to place real orders through my Robinhood agentic account from cell #1,
   on the same path every broker uses, so that the first hosted version trades for real (DEC-967
   item 15). *Accepted when:* the cell's Robinhood executor image is the only image built with
-  `live`, signed with the founder's hardware key, and refuses to start unsigned (OPS-15), and CI
-  only compiles it (DEC-529 item 3 as item 15 narrows it); that executor alone has egress to
+  `live`, signed with the founder's hardware key, and refuses to start unsigned (OPS-15);
+  `xtask/layers.toml` marks `mandate-daemon` as the one crate besides `mandate-paper` that may
+  declare `live`, `cargo xtask live-feature` and its tests allow exactly those two, and CI still
+  only compiles `live` (DEC-529 item 3 as item 15 narrows it), with `mandate-paper` untouched; that executor alone has egress to
   Robinhood's host and every other process none to any live host; the journal runs with its
   synchronous standby on the second node, and start-up refuses live trading without it (OPS-2);
-  E21-40's write-once check passes and the cold store has its second-region copy (journal §6.2);
+  E21-40's write-once check passes, and E5-7 ships segments within one minute of closing to the
+  locked store and its second-region copy (journal §6.2, before live capital);
   backups hold no secret outside the vault (DEC-822 item 4's condition); the token arrives only
-  through E21-47's hosted login into the vault; the mandate carries DEC-529's caps and `ask` for
+  through E21-47's hosted login into the vault; the mandate's envelope starts from DEC-529's allocation and `max_order_usd`, with `ask` for
   openings; a stream's environment is fixed at open and a live stream refuses a paper credential
   and the reverse (ES-23); no code differs from the drilled path; and the first real order is
-  placed by the founder's confirmation, never by a test, a CI job or an agent (rule 8). Live for
-  any other user stays blocked on the Phase 2 gate, counsel and the penetration test.
+  placed by the founder's confirmation, never by a test, a CI job or an agent (rule 8). It also
+  waits for the M13 penetration test and counsel's review until the founder decides otherwise
+  (DEC-967 item 15, Proposed). Live for any other user stays blocked on the Phase 2 gate, counsel
+  and the penetration test.
 - **E21-49 (Proposed, M8; SC; lane A4; after E21-45, with E10-6, E10-8 and E10-14)** As an owner, I
   want my own agent to work my workspace through the cell's API over MCP, so that my agents are a
   first-class caller beside my code and the web app (DEC-967 item 17; DEC-141; workspace API spec
@@ -2811,6 +2819,17 @@ enables `live` (ES-23, OPS-5).
   gate and autonomy rules as the owner's own and never changes the envelope (`AGENTS.md` rule 11);
   every client call, reads included, is journaled with the `client` actor kind; revoking the client
   fails its next call; and the server holds no broker credential and has no egress but the API.
+
+- **E21-50 (Proposed, M8, first in lane K; SC)** As an operator, I want `mandate-cli db migrate`,
+  so that migrations are applied only by the migration-owner role as a separate step before
+  processes roll, never at start (OPS-13, ES-08; E5-3 left it "Not done"). *Accepted when:* `mandate
+  db migrate` applies `migrations/` forward only under the migration-owner role, records each file's
+  SHA-256, and stops if an applied file's content changed (as `deploy/bootstrap.sh` does today);
+  it takes over from `deploy/`'s `deploy.migrations` table and `mandate-journal-pg`'s embedded
+  migrator rather than running beside them, with a test that a host bootstrapped by `deploy/` and
+  then migrated by the command ends with each file applied once; no process applies a migration at
+  start, shown by the existing xtask lint; and the chart's migration Job (E21-36), E21-41 and the
+  CI cell (E21-37) all run it.
 
 ## Won't (v1)
 
