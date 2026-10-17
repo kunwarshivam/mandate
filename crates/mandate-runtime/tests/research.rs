@@ -877,6 +877,37 @@ fn each_harness_check_refuses_with_its_own_reason_and_admits_nothing() {
 }
 
 #[test]
+fn a_revision_a_schema_admits_is_still_refused_while_revisions_are_not_enabled() {
+    let f = Fixture::new();
+    let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
+    let mut lp = Loop::new(1);
+    boot(&mut lp, &ports);
+    let mut world = World::open();
+    if let Some(config) = world.config.as_mut() {
+        config.pin = common::research::revisable_content().model_ref();
+    }
+    let revision = thesis("AAPL", &[SERVICES, SUPPLY], "x").replace(
+        r#""evidence""#,
+        r#""predecessor_thesis_id":"01PRED","evidence""#,
+    );
+    let plane = RecordedPlane::load();
+    full_run(
+        &mut lp,
+        clock(CUT_OFF),
+        &ports,
+        &world,
+        &plane,
+        &Model::Revisable(format!(r#"{{"theses":[{revision}],"invalidations":[]}}"#)),
+    );
+    assert_eq!(
+        verdicts(&lp),
+        vec!["revisions_not_enabled".to_owned()],
+        "§6.5: the harness refuses a revision whatever the schema admits"
+    );
+    assert!(lp.events("ThesisProposed").is_empty());
+}
+
+#[test]
 fn a_revision_fails_the_pinned_schema_while_revisions_are_not_enabled() {
     let world = World::open();
     let revision = thesis("AAPL", &[SERVICES, SUPPLY], "x").replace(

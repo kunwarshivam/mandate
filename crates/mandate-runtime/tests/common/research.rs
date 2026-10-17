@@ -14,7 +14,7 @@ use mandate_builder::{
     ModelOutput as BuilderOutput, ModelVersion as BuilderVersion, RiskContext, SignalModel, Sizing,
     classify, propose,
 };
-use mandate_canon::{Digest, Value, parse};
+use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_domain::{AssetClass, AssetId as DomainAsset, AutonomyDecision, MarketSession};
 use mandate_gateway::fake::{Recorded, RecordedTransport};
 use mandate_gateway::guard::GuardContext;
@@ -27,7 +27,7 @@ use mandate_gateway::provider::{
     SequentialIds, Transport,
 };
 use mandate_gateway::registry::{
-    Endpoint, Identity, Locality, Registry, Reported, Route, Snapshot, Status,
+    Endpoint, Identity, Locality, PinnedContent, Registry, Reported, Route, Snapshot, Status,
 };
 use mandate_gateway::{CallRecord, Gateway, Outcome, RateCaps, Settings};
 use mandate_num::{CostBasis, FeeRate, MarkPrice, Price, Qty, Signed, SizeFraction, Unit, Usd};
@@ -285,19 +285,41 @@ fn endpoint() -> Endpoint {
 }
 
 fn registry() -> Registry {
+    registry_of(entry().content())
+}
+
+/// An entry whose output schema also admits `predecessor_thesis_id`, as one would once §8.6 item
+/// 5 allows revisions, so a revision reaches the harness's own check.
+pub fn revisable_content() -> PinnedContent {
+    let mut content = entry().content();
+    content.model_version = "0.1.1".to_owned();
+    let schema =
+        String::from_utf8(to_canonical(&content.output_schema)).unwrap_or_else(|e| panic!("{e}"));
+    let thesis_text = r#""invalidation":{"max_length":2000,"type":"string"},"thesis":"#;
+    assert_eq!(schema.matches(thesis_text).count(), 1, "{schema}");
+    let widened = schema.replace(
+        thesis_text,
+        r#""invalidation":{"max_length":2000,"type":"string"},"predecessor_thesis_id":{"max_length":128,"type":"string"},"thesis":"#,
+    );
+    content.output_schema = parse(widened.as_bytes()).unwrap_or_else(|e| panic!("{e:?}"));
+    content
+}
+
+fn registry_of(content: PinnedContent) -> Registry {
+    let pin = content.model_ref();
     let mut registry = Registry::new();
     registry
-        .register(entry().content())
+        .register(content)
         .unwrap_or_else(|e| panic!("the research entry registers: {e}"));
     let probe = Reported {
         model: Some(SLUG.to_owned()),
         provider: Some(REPORTED_PROVIDER.to_owned()),
     };
     registry
-        .add_endpoint(&pin(), endpoint(), &[probe])
+        .add_endpoint(&pin, endpoint(), &[probe])
         .unwrap_or_else(|e| panic!("{e}"));
     registry
-        .set_status(&pin(), Status::Offered)
+        .set_status(&pin, Status::Offered)
         .unwrap_or_else(|e| panic!("{e}"));
     registry
 }
@@ -312,6 +334,8 @@ pub enum Model {
     Late(String),
     /// A reply carrying this output from a model other than the pin's (INF-2).
     Impostor(String),
+    /// The pinned model's reply carrying this output, through [`revisable_content`]'s entry.
+    Revisable(String),
 }
 
 pub fn recorded(output: &str) -> Model {
@@ -366,6 +390,9 @@ pub fn gateway_for(model: &Model, now: UtcNanos) -> TestGateway {
     };
     match model {
         Model::Output(output) => recorded.script(vec![delivered(200, reply(output), LATENCY_MS)]),
+        Model::Revisable(output) => {
+            recorded.script(vec![delivered(200, reply(output), LATENCY_MS)])
+        }
         Model::Late(output) => recorded.script(vec![delivered(200, reply(output), 200_000)]),
         Model::Impostor(output) => recorded.script(vec![delivered(
             200,
@@ -443,7 +470,10 @@ pub fn gateway_for(model: &Model, now: UtcNanos) -> TestGateway {
             guard,
             rate,
         },
-        registry: registry(),
+        registry: match model {
+            Model::Revisable(_) => registry_of(revisable_content()),
+            _ => registry(),
+        },
         meter: Meter::new(meter, caps),
         clock: ManualClock::at(now),
         ids: Box::new(SequentialIds::starting_at(1 << 80)),

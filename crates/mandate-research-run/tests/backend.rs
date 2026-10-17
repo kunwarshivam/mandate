@@ -168,3 +168,57 @@ fn a_recorded_reply_reads_back_through_the_openrouter_adapter() {
     let value: Value = parse(&body).unwrap_or_else(|e| panic!("canonical JSON: {e:?}"));
     assert!(value.get("id").and_then(Value::as_str).is_some());
 }
+
+#[test]
+fn a_reply_scripted_through_the_gateway_s_own_fake_is_the_one_it_replays() {
+    let (mut gateway, _) = recorded_gateway(Vec::new());
+    let fake = gateway
+        .transport_mut()
+        .recorded_mut()
+        .unwrap_or_else(|| panic!("the default transport is the fake"));
+    fake.script(vec![Recorded {
+        latency_ms: 10,
+        delivery: Delivery::Response {
+            status: 200,
+            body: reply(r#"{"invalidations":[],"theses":[]}"#),
+            retry_after_ms: None,
+        },
+    }]);
+    let request = mandate_gateway::CallRequest {
+        call_id: mandate_canon::encode_ulid((1 << 100) + 9),
+        workspace_id: common::WORKSPACE.to_owned(),
+        agent_id: Some(common::AGENT.to_owned()),
+        purpose: mandate_gateway::Purpose::Research,
+        model: common::registry().1,
+        inputs: ["context", "items", "memory"]
+            .into_iter()
+            .map(|slot| (slot.to_owned(), "{}".to_owned()))
+            .collect(),
+        as_of: common::at(common::CUT_OFF),
+        deadline: common::at(common::CUT_OFF + 120),
+        observations: Vec::new(),
+        key_owner: mandate_gateway::KeyOwner::Platform,
+    };
+    let record = gateway.call(&request).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        record.outcome,
+        mandate_gateway::Outcome::Ok,
+        "the reply scripted through recorded_mut is the one the gateway read"
+    );
+    let sent = gateway
+        .transport()
+        .recorded()
+        .map_or(0, |fake| fake.sent().len());
+    assert_eq!(
+        usize::try_from(record.attempts).unwrap_or(0),
+        sent,
+        "every attempt reached the fake the script was written to"
+    );
+    assert_eq!(
+        gateway
+            .transport_mut()
+            .recorded_mut()
+            .map(|fake| fake.sent().len()),
+        Some(sent)
+    );
+}
