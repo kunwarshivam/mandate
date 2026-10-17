@@ -180,7 +180,6 @@ fn record(
 /// under the same key, and journaled with the verdict of the answer's own variant; `accepted` and
 /// `permanent` end it, and no later step sends on it again.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_retry_is_the_next_attempt_under_one_key_with_its_own_variants_verdict() -> Checked {
     let journal = world()?;
     alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
@@ -248,7 +247,6 @@ fn a_retry_is_the_next_attempt_under_one_key_with_its_own_variants_verdict() -> 
 /// the first step at or after that end (`safety` 24 hours, `info` 6 hours from attempt 1), with no
 /// send, and once. The delivered channel beside it is untouched.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_failing_send_is_abandoned_once_at_the_first_step_at_or_after_its_window_end() -> Checked {
     for (kind, window) in [("risk_limit", SAFETY_WINDOW), ("daily_brief", INFO_WINDOW)] {
         let journal = world()?;
@@ -303,7 +301,6 @@ fn a_failing_send_is_abandoned_once_at_the_first_step_at_or_after_its_window_end
 /// DEC-707: a dispatcher that steps long after a retry fell due makes one attempt per send in
 /// that step, not one for each instant it missed, and the schedule runs on from that attempt.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_step_makes_at_most_one_record_per_send_after_a_lapse() -> Checked {
     let journal = world()?;
     alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
@@ -653,7 +650,6 @@ fn whole_run(records: &[Record], window: i64) -> Result<(), String> {
 /// abandon the oracle expects, and nothing else. A proptest `TestRunner` in a plain function, as a
 /// macro-generated pending test is refused by `cargo xtask markers`.
 #[test]
-#[ignore = "pending E8-10"]
 fn retries_follow_the_schedule_through_random_answers_ticks_and_restarts() {
     let checked = TestRunner::default().run(&scenarios(), |scenario| {
         run_scenario(&scenario).map_err(TestCaseError::fail)

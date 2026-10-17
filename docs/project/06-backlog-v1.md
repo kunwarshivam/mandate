@@ -2380,6 +2380,9 @@ with the founder (DEC-440 items 13 to 17); no story here buys a service or touch
   all four kinds (license, release manifest, catalog entry, data bundle); `cp-agent` reaches the site
   only through a port it declares and workspace services implement; a test shows `cp-agent` never
   takes a writer epoch, and the kill switch commits with `cp-agent` hung.
+  *Follow-up (DEC-983):* a stateful fuzz of message sequences through `cp-agent` into
+  `mandate-cp-site` that also asserts every effect follows its own record (today's fuzz checks one
+  message at a time and the record types only).
 - **E20-4 (Proposed, M8; SC; mandate spec change first)** As an org owner, I want licenses
   verified on site, with states `valid`, `renewal_due`, `grace`, and `lapsed`, where after grace a
   lapsed license refuses only new deployments and new openings; it never blocks an exit, a
@@ -2486,6 +2489,11 @@ items 13 to 20); no story here buys a service or touches live money.
   reproducible, carry an SBOM, and from M11 are signed with my hardware key and checked at start
   (ES-14, ES-17, OPS-15). *Accepted when:* two builds of one commit are byte-identical; each process
   journals its build digest; and outside dev and CI an unsigned binary refuses to start.
+  *Status:* the reproducible build, its SBOMs, the CI double build and `mandate-release`'s
+  `BuildDigest` land with DEC-972. **After R0:** `crates/mandate-shell/src/envelope.rs` and
+  `crates/mandate-cli/src/control.rs` still name a placeholder `build` (a digest of the crate's
+  name and version); switching both to `BuildDigest::running()` is this row's last slice, blocked
+  on R0 closing (DEC-967 item 2, DEC-972 item 7). Signing and the start-up check are E21-35's.
 - **E21-9 (Proposed, M8; SC)** As an owner, I want my broker credential held in the workspace vault,
   leased only to the executor for my connection, and checked for scope, environment, and account at
   every start, so that no other process can use it (design §5). *Accepted when:* a runtime's
@@ -2698,6 +2706,11 @@ enables `live` (ES-23, OPS-5).
   does; CI signs with an ephemeral test key, and only the founder's hardware key signs an image for a
   hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
   never from a branch; and a test shows an unsigned and a wrongly signed image both refused.
+  *Status:* the images, the start-up check in `mandate-agentd`, the CI test-key drill and the
+  `main`-only publish to GHCR land with DEC-971; images for amd64 and arm64, each built natively,
+  under one signed multi-arch index, with DEC-1060. **After R0:** the CLI runs the check (with
+  E21-8's last slice). **Founder:** the hardware key's public half in `RELEASE_KEYS` (H8), until
+  which nothing starts outside dev and CI (DEC-971 item 7). Staging promotion waits on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
