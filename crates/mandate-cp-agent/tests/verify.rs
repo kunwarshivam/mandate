@@ -500,6 +500,19 @@ fn only_the_canonical_form_of_a_message_is_verified() {
 
 #[test]
 fn a_message_over_the_cap_is_refused_before_it_is_parsed() {
+    assert_eq!(
+        mandate_cp_agent::MAX_MESSAGE_BYTES,
+        65_536,
+        "64 KiB, DEC-982 item 1"
+    );
+    let mut at_cap = message("license", "license_key_1", LICENSE, &pair(1));
+    at_cap.resize(mandate_cp_agent::MAX_MESSAGE_BYTES, b' ');
+    let r = refusal(&at_cap);
+    assert_eq!(
+        (r.message, r.reason),
+        (MessageKind::License, RefusalReason::Malformed),
+        "a message at the cap is parsed, and refused only for its form"
+    );
     let mut big = message("license", "license_key_1", LICENSE, &pair(1));
     big.resize(mandate_cp_agent::MAX_MESSAGE_BYTES + 1, b' ');
     let r = refusal(&big);
