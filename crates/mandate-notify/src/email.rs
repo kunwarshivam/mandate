@@ -23,8 +23,6 @@
 
 use crate::{Notification, NotifyError, Origin, TextKey};
 
-const STORY: &str = "E8-11";
-
 /// The sentence every mail body carries between the text and the link (spec §4.4).
 pub const OPEN_SENTENCE: &str = "Open Owlhead to see it.";
 
@@ -48,7 +46,7 @@ impl FounderAddress {
     /// [`NotifyError::NotAnAddress`] for anything else; the error names no part of the text.
     pub fn parse(text: &str) -> Result<Self, NotifyError> {
         let _ = text;
-        Err(NotifyError::Unimplemented { story: STORY })
+        Err(NotifyError::Unimplemented { story: "E8-11" })
     }
 }
 
@@ -72,7 +70,7 @@ pub fn founder_mail(
     notification: &Notification,
 ) -> Result<FounderMail, NotifyError> {
     let _ = (origin, notification, TextKey::BriefReady);
-    Err(NotifyError::Unimplemented { story: STORY })
+    Err(NotifyError::Unimplemented { story: "E8-11" })
 }
 
 impl FounderMail {
@@ -84,6 +82,6 @@ impl FounderMail {
     /// None once implemented. The `Result` is the stub API's shape.
     pub fn wire(&self, to: &FounderAddress) -> Result<Vec<u8>, NotifyError> {
         let _ = to;
-        Err(NotifyError::Unimplemented { story: STORY })
+        Err(NotifyError::Unimplemented { story: "E8-11" })
     }
 }
