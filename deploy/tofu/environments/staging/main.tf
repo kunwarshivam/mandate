@@ -1,11 +1,13 @@
 # Staging (DEC-2011 item 1): one DOKS cluster of two nodes in nyc3, its buckets, and the API host
-# behind the tunnel and Access. The providers read their credentials from the environment
-# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, CLOUDFLARE_API_TOKEN), which
-# only infra.yml's jobs under infra-staging receive.
+# behind the tunnel and Access. DigitalOcean's provider reads its credentials from the environment
+# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
+# token as a variable; only infra.yml's job under infra-staging receives either.
 
 provider "digitalocean" {}
 
-provider "cloudflare" {}
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
+}
 
 locals {
   environment = "staging"
