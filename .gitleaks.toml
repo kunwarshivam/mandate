@@ -128,3 +128,56 @@ condition = "AND"
 paths = ['''^deploy/tests/test_cell\.py$''']
 regexTarget = "match"
 regexes = ['''(?:workspace-key": "0123456789abcdef|subject-key": "fedcba9876543210)"?$''']
+
+# Test-fixture values that the generic key heuristic reads as credentials. The whole-tree scan of
+# the nightly found them (DEC-2603); a pull request's scan reads only its own commits, and a
+# `web/`-only change skips it. Each entry allows one exact value or shape in one file only, so a
+# real key there, or the same text anywhere else, is still reported; `cargo xtask ci supply-chain`
+# plants each case beside a near miss and a stray copy.
+
+# An agent id the web test asks the API about and expects to be unknown: `agt_` and a ULID, an
+# opaque public identifier.
+[[allowlists]]
+description = "Unknown-agent id in the API screens test"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^web/src/components/api-screens/api-screens\.test\.tsx$''']
+regexTarget = "match"
+regexes = ['''^ApiAgent agentId="agt_[0-9A-HJKMNP-TV-Z]{26}"$''']
+
+# The push tests' fake browser subscription: the Web Push documentation's example `auth` secret
+# and a VAPID application server key, which is a public key by design. Allowed only as those exact
+# values and only in the two push test files.
+[[allowlists]]
+description = "Web Push example subscription values in the push tests"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^web/src/(?:components/notifications/push-section\.test\.tsx|lib/push/subscribe\.test\.ts)$''']
+regexTarget = "match"
+regexes = [
+  '''^VAPID = "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8"$''',
+  '''^auth: "BTBZMqHH6r4Tts7J_aSIgg"$''',
+]
+
+# The cell test's placeholder API image tag: `api:` and twelve fixed hex digits, an image
+# reference, not a credential. Allowed only as that exact tag and only in the cell module.
+[[allowlists]]
+description = "Placeholder API image tag in the cell test"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^xtask/src/cell\.rs$''']
+regexTarget = "match"
+regexes = ['''^api:0123456789ab"$''']
+
+# The step-up challenge examples' `webauthn_challenge` values (E9-4, DEC-2103 item 9): fixed
+# base64url strings of 32 example bytes and four malformed variants the invalid cases refuse, not
+# credentials (a WebAuthn challenge is public by design). Allowed only as those exact values and
+# only in the challenge response's example files, so another value there, or the same value
+# anywhere else, is still reported.
+[[allowlists]]
+description = "Example WebAuthn challenges in the step-up challenge examples"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^schemas/workspace-api/examples/commands\.step-up-challenge(?:\.valid|\.invalid)?\.json$''']
+regexTarget = "match"
+regexes = ['''^webauthn_challenge": "(?:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJ(?:A=?|B)|q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWe\+A|q83vEjRWeJCrze8SNFZ4kA)"$''']
