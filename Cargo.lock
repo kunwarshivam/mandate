@@ -1695,6 +1695,7 @@ dependencies = [
  "mandate-identity-seal",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-passkey",
  "mandate-release",
  "mandate-spec",
  "mandate-time",
