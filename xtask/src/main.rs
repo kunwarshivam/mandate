@@ -3780,8 +3780,14 @@ const PROGRAM_IN_AN_ARGUMENT: &str = "a shell or interpreter given its program i
 /// `xargs -r sudo rm -f` removes the Microsoft apt source files `grep` lists; `web.yml` and
 /// `web-deploy.yml` measure the Worker's dry run with `web/scripts/workers.mjs` (DEC-731 item 6).
 /// `nightly.yml`'s clock line writes the runner's time, in seconds, to the step's outputs for the
-/// sweep's rotation (DEC-1190 item 5).
+/// sweep's rotation (DEC-1190 item 5). `r2-lockcheck.yml` runs the example its earlier step built
+/// with `cargo build`, which this check reads, so the step holding R2's key and the Cloudflare
+/// token compiles nothing.
 const READ_LINES: &[(&str, &str)] = &[
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "target/debug/examples/r2_finding",
+    ),
     (
         ".github/workflows/nightly.yml",
         r##"echo "seconds=$(date -u +%s)" >> "$GITHUB_OUTPUT""##,

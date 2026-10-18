@@ -149,9 +149,10 @@ const WEB_WORKFLOW = "../.github/workflows/web.yml";
 /**
  * The other workflows that may use the `production` environment, each pinned to the SHA-256 of the
  * text a reviewer read (DEC-1091): `r2-lockcheck.yml` (E21-40, #1454), dispatched from `main` only,
- * one job, R2's key and the token in its one step. Any edit fails until the pin is re-read and moved.
+ * one job, R2's key and the token in its one step, which runs the example a step with no secret
+ * built, so no build script runs beside them. Any edit fails until the pin is re-read and moved.
  */
-const PINNED_PRODUCTION_WORKFLOWS = { "../.github/workflows/r2-lockcheck.yml": "fb00fb81f15b06337dce27c44a9d124cc9a817f7986643439c26d34dca3c2d8e" };
+const PINNED_PRODUCTION_WORKFLOWS = { "../.github/workflows/r2-lockcheck.yml": "e8774b31a9a984e4ee1f26e807b3fdc68004b356d03762bc283386a62784c059" };
 const DEPLOY_WORKFLOW = "../.github/workflows/web-deploy.yml";
 const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".github", "workflows");
 /** The deploy workflow's triggers, exactly: a push to `main` touching the app, or a dispatch (DEC-1005 item 1). */
