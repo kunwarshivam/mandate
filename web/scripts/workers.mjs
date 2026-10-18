@@ -249,6 +249,9 @@ function deployWorkflowProblems(tree) {
   const runOf = (step) => step.find((line) => /^ {6}- run: |^ {8}run: /.test(line))?.replace(/^ {6}- run: |^ {8}run: /, "");
   const deploying = steps.filter((step) => runOf(step) === DEPLOY_STEP.run);
   if (deploying.length !== 1 || steps.at(-1) !== deploying[0]) fail(`must end with the one step that runs ${DEPLOY_STEP.run} (DEC-1005 item 1)`);
+  if (job.some((line) => /^\s*(?:-\s+)?cache(?:-dependency-path)?:|actions\/cache@/.test(line))) fail("the deploy job may restore or save no cache, which pull request runs could share with the job that holds the token");
+  const installs = steps.map(runOf).filter((run) => /^npm (?:ci|install|i)\b/.test(run ?? ""));
+  if (installs.length !== 1 || installs[0] !== "npm ci --ignore-scripts") fail("the deploy job must install once, with npm ci --ignore-scripts, so no dependency's install script runs beside the token");
   const buildAt = steps.findIndex((step) => runOf(step) === "npm run cf:build");
   if (buildAt < 0 || buildAt > steps.length - 2) fail("must build the Worker with npm run cf:build before it deploys (DEC-1005 item 1)");
   for (const step of steps) {
