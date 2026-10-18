@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use mandate_canon::{Value, parse, to_canonical};
+use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_gateway::money::Usd6;
 use mandate_research_run::{
@@ -16,10 +16,11 @@ use mandate_time::UtcNanos;
 use proptest::prelude::*;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/research");
-const FILES: [&str; 4] = [
+const FILES: [&str; 5] = [
     "research.json",
     "bars.json",
     "news.json",
+    "filings.json",
     "instruments.json",
 ];
 
@@ -169,6 +170,67 @@ fn the_plane_gives_no_filings_and_only_the_instruments_asked_for() {
         .unwrap();
     let symbols: Vec<_> = facts.iter().map(|f| f.symbol.as_str().to_owned()).collect();
     assert_eq!(symbols, ["MSFT"]);
+}
+
+/// One recorded filing row, as `filings.json` holds it.
+fn filing_row() -> Value {
+    parse(
+        br#"{"age_s": 86400, "excerpt": "Net sales rose in every segment.", "filed_age_s": 90000,
+            "form": "10-Q", "item_id": "fl-aapl-10q", "licensed": false, "source": "src.edgar",
+            "symbol": "AAPL"}"#,
+    )
+    .unwrap()
+}
+
+/// A recorded filing is read from the recording and stamped at its ages before the cut-off, as
+/// news is (DEC-2211); a row missing a member refuses the load. The cell's own recording holds
+/// none, so its plane still gives no filings (DEC-2210 item 2).
+#[test]
+fn a_recorded_filing_is_read_at_its_age_before_the_cut_off() {
+    let dir = copy("filing", "filings.json", |value| {
+        *value = Value::Array(vec![filing_row()]);
+    });
+    let plane = Bundle::load(&dir).unwrap().plane;
+    let cut_off = 1_792_180_800;
+    let query = TextQuery {
+        workspace: "ws1".to_owned(),
+        symbols: BTreeSet::from([symbol("AAPL")]),
+        window_start: at(cut_off - 604_800),
+        cut_off: at(cut_off),
+        allowlist_version: 3,
+        max_items: 50,
+    };
+    let filings = plane.filings(&query).unwrap();
+    assert_eq!(filings.len(), 1);
+    let filing = &filings[0];
+    assert_eq!(filing.item_id.as_str(), "fl-aapl-10q");
+    assert_eq!(filing.source.as_str(), "src.edgar");
+    assert_eq!(filing.symbol, symbol("AAPL"));
+    assert_eq!(filing.form, "10-Q");
+    assert_eq!(filing.knowledge_at, at(cut_off - 86_400));
+    assert_eq!(filing.filed_at, at(cut_off - 90_000));
+    assert_eq!(filing.excerpt, "Net sales rose in every segment.");
+    assert_eq!(
+        filing.content_hash,
+        Digest::of_parts(&[b"10-Q", b"Net sales rose in every segment."])
+    );
+    assert!(!filing.licensed);
+
+    for member in ["form", "filed_age_s", "licensed"] {
+        let dir = copy(&format!("filing-{member}"), "filings.json", |value| {
+            let mut row = filing_row();
+            remove(&mut row, &[member]);
+            *value = Value::Array(vec![row]);
+        });
+        assert_eq!(
+            Bundle::load(&dir),
+            Err(BundleError::Malformed {
+                file: "filings.json",
+                member
+            }),
+            "{member}"
+        );
+    }
 }
 
 /// The scope a run at `cut_off` reads with: AAPL and MSFT, two allowlisted wires.
