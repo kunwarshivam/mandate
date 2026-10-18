@@ -963,10 +963,10 @@ fn build_image(image: &str, dockerfile: &str, binary: &str, files: &[(&str, &str
 const IMPORT_ATTEMPTS: u32 = 3;
 
 /// Imports `image` into the cell's node and confirms the node's containerd holds it. `k3d image
-/// import` exits 0 when the import fails inside the node (its own `ERRO` lines, a node killed with
-/// exit 137 and restarting), so a missing image surfaced only later, as a pod that could not pull
-/// it or an API server that never answered. Each attempt waits for the API server first, since a
-/// failed import can leave the node restarting.
+/// import` exits 0 when the import fails inside the node (its own error-level log lines, a node
+/// killed with exit 137 and restarting), so a missing image surfaced only later, as a pod that
+/// could not pull it or an API server that never answered. Each attempt waits for the API server
+/// first, since a failed import can leave the node restarting.
 fn import_image(image: &str) -> Result<()> {
     for attempt in 1..=IMPORT_ATTEMPTS {
         let imported = sh("k3d", &["image", "import", "--cluster", CLUSTER, image]);
