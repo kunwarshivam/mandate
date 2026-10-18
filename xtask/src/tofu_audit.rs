@@ -166,8 +166,8 @@ pub(crate) fn plan_summary(plan: &Value) -> Vec<String> {
 
 /// The forms of `value` a log could carry, each of which GitHub must mask: the value itself, its
 /// standard and URL-safe base64 with and without padding, its URL encoding, its JSON-escaped
-/// form, and each of its lines. Empty forms, and a multi-line value's whole form, which one
-/// workflow command cannot carry, are dropped; its lines are masked one by one.
+/// form, and each of its lines. Empty forms are dropped. A multi-line form is kept: its command
+/// escapes the line breaks ([`command_escaped`]).
 pub(crate) fn mask_forms(value: &str) -> BTreeSet<String> {
     let standard = base64(value.as_bytes());
     let url_safe = standard.replace('+', "-").replace('/', "_");
@@ -185,7 +185,7 @@ pub(crate) fn mask_forms(value: &str) -> BTreeSet<String> {
     ]
     .into();
     forms.extend(value.lines().map(str::to_owned));
-    forms.retain(|form| !form.trim().is_empty() && !form.contains(['\n', '\r']));
+    forms.retain(|form| !form.trim().is_empty());
     forms
 }
 
@@ -203,12 +203,21 @@ fn percent_encoded(value: &str) -> String {
         .collect()
 }
 
-/// The workflow commands that mask `value` in every form (see [`mask_forms`]); GitHub hides the
-/// commands themselves from the log.
+/// `data` escaped as a workflow command's data: `%` first, then CR and LF, as the runner decodes
+/// them. Unescaped, a `%` in the value (every URL-encoded form holds one) or a line break would
+/// register a different mask from the value it is meant to hide.
+pub(crate) fn command_escaped(data: &str) -> String {
+    data.replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
+/// The workflow commands that mask `value` in every form (see [`mask_forms`]), each one's data
+/// [`command_escaped`]; GitHub hides the commands themselves from the log.
 pub(crate) fn mask_commands(value: &str) -> Vec<String> {
     mask_forms(value)
         .into_iter()
-        .map(|form| format!("::add-mask::{form}"))
+        .map(|form| format!("::add-mask::{}", command_escaped(&form)))
         .collect()
 }
 
@@ -340,8 +349,8 @@ mod tests {
         let forms = mask_forms(value);
         let standard = base64(value.as_bytes());
         assert!(
-            !forms.contains(value),
-            "a multi-line form would break its command"
+            forms.contains(value),
+            "the whole multi-line value is masked too"
         );
         assert!(mask_forms("single").contains("single"));
         for form in [
@@ -356,6 +365,26 @@ mod tests {
             assert!(forms.contains(&form), "{form:?} is not masked: {forms:?}");
         }
         assert!(mask_forms("").is_empty(), "an empty value masks nothing");
+        let commands = mask_commands("a%b\r\nc");
+        assert!(
+            commands.contains(&"::add-mask::a%25b%0D%0Ac".to_owned()),
+            "the whole value, its % and its line breaks escaped: {commands:?}"
+        );
+        assert!(
+            commands.contains(&"::add-mask::a%2525b%250D%250Ac".to_owned()),
+            "the URL-encoded form's own % escaped: {commands:?}"
+        );
+        assert!(
+            commands
+                .iter()
+                .all(|command| !command.contains(['\r', '\n'])),
+            "no printed command spans lines: {commands:?}"
+        );
+        assert_eq!(
+            command_escaped("%0A"),
+            "%250A",
+            "% is escaped before the line breaks"
+        );
         assert!(
             mask_commands("x")
                 .iter()
