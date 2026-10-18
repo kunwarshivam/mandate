@@ -78,6 +78,12 @@ impl Refs for FixtureMandate {
 
 /// The fixture wiring, with `owner` as the deployment's one approver and author.
 pub fn wiring(owner: &str) -> Wiring {
+    wiring_for(&[owner.to_owned()], owner)
+}
+
+/// The fixture wiring with the deployment's `approvers` and `author` (DEC-1016). An empty approver
+/// set grants no approval, which the deny-all wiring never asks for anyway.
+pub fn wiring_for(approvers: &[String], author: &str) -> Wiring {
     Wiring {
         ids: Box::new(Ids),
         gate: Box::new(DenyAll),
@@ -89,8 +95,8 @@ pub fn wiring(owner: &str) -> Wiring {
             working_universe: Default::default(),
             restricted_instruments: Default::default(),
             approval: ApprovalSettings {
-                approvers: [owner.to_owned()].into(),
-                author: owner.to_owned(),
+                approvers: approvers.iter().cloned().collect(),
+                author: author.to_owned(),
                 timeout_s: 300,
                 environment: Environment::Paper,
                 live_cli_confirm: None,
