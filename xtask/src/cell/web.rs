@@ -139,6 +139,10 @@ fn answers(program: &str, arg: &str) -> bool {
 
 /// How many polls the group gets to stop on SIGTERM before it is killed: five seconds.
 const STOP_POLLS: u32 = 20;
+/// How often, and how many times, the group is looked at after SIGKILL, which is delivered
+/// asynchronously: up to two seconds for its last process to go.
+const KILL_POLL: Duration = Duration::from_millis(100);
+const KILL_POLLS: u32 = 20;
 
 /// A process and everything it starts, in a process group of their own: `npx`, Playwright, and the
 /// `next dev` server Playwright starts. Dropping it, on success, timeout, error, or unwinding, stops
@@ -180,11 +184,13 @@ impl Group {
         group_alive(self.pgid)
     }
 
-    /// Stops every process in the group: SIGTERM, up to [`STOP_POLLS`] polls, then SIGKILL, and
-    /// reaps the leader, whose status it returns (`None` once already stopped). Idempotent.
-    pub fn stop(&mut self) -> Option<ExitStatus> {
+    /// Stops every process in the group: SIGTERM, up to [`STOP_POLLS`] polls, then SIGKILL, reaps
+    /// the leader, and waits up to [`KILL_POLLS`] polls for the group to be empty. It returns the
+    /// leader's status (`None` once already stopped), or an error naming the group if a process
+    /// of it is still alive at the deadline. Idempotent.
+    pub fn stop(&mut self) -> Result<Option<ExitStatus>> {
         if self.stopped {
-            return None;
+            return Ok(None);
         }
         self.stopped = true;
         signal("-TERM", self.pgid);
@@ -196,7 +202,21 @@ impl Group {
             sleep(POLL);
         }
         signal("-KILL", self.pgid);
-        self.child.wait().ok()
+        let leader = self.child.wait().ok();
+        for _ in 0..KILL_POLLS {
+            if !self.alive() {
+                return Ok(leader);
+            }
+            sleep(KILL_POLL);
+        }
+        if self.alive() {
+            bail!(
+                "process group {} still has a live process {}s after SIGKILL",
+                self.pgid,
+                (KILL_POLL * KILL_POLLS).as_secs()
+            );
+        }
+        Ok(leader)
     }
 }
 
@@ -303,7 +323,7 @@ pub fn kill_switch_from_web(workspace: &str, agent: Option<&str>) -> Result<WebG
     )
     .context("starting web/'s Playwright gesture")?;
     let (status, polls) = group.wait_within(GESTURE_POLLS)?;
-    let _ = group.stop();
+    group.stop()?;
     let Some(status) = status else {
         bail!(
             "web/'s gesture ran past {}s and was stopped; its log is {}",
@@ -479,7 +499,7 @@ mod tests {
             "the group is still running before it is stopped"
         );
         assert!(group.alive());
-        let leader = group.stop();
+        let leader = group.stop()?;
         assert_eq!(
             leader.and_then(|s| s.signal()),
             Some(9),
