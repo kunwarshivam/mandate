@@ -5048,9 +5048,14 @@ The executor writes each record from `mandate-spec`'s risk-state fold and, for a
 `mandate-executor`'s §6.7 fold, at the input that produced it and in the fold's order (mandate spec
 §5.2), before it acts on the change (`AGENTS.md` rule 5). Every member is the fold's event or the
 risk state's snapshot after that input, so replaying the account stream's inputs reproduces each
-record byte for byte; E6-15's reader treats a journaled record its replay would not have produced as
-an unreadable risk state, which holds new openings and never an exit
-([DEC-2301](../project/decisions/DEC-2301.md) items 2 and 3). No payload carries a credential or
+record byte for byte. The risk state is **unreadable** when the executor meets any of these: a
+record it cannot decode, a `schema_version` it does not know, a gap in the stream's `seq`, an event
+type it does not fold, a journaled record its replay would not have produced, or a record it could not
+append. An unreadable risk state holds new openings and never an exit
+([DEC-2301](../project/decisions/DEC-2301.md) items 2 and 3). Writing first never delays risk
+reduction: a risk-exit flatten, a protective order, or an automated kill switch goes ahead when the
+record before it cannot be appended, and the failed append makes the risk state unreadable
+(`AGENTS.md` rules 3 and 13). No payload carries a credential or
 personal data: an agent, a user, and an order are named by opaque IDs, and step-up evidence by its
 assertion.
 
@@ -5071,7 +5076,7 @@ after the input, which mandate spec §5.10 lists as E, H, DD, E₀, C, L and §9
 |---|---|---|
 | `agent_equity` | `decimal` | E |
 | `high_water_mark` | `decimal` | H |
-| `drawdown` | `decimal` | DD = (H − E) / H, a fraction from 0 to 1: rule 231 |
+| `drawdown` | `decimal` | DD = (H − E) / H, as the risk state computes it |
 | `day_start_equity` | `decimal` | E₀ |
 | `capital_base` | `decimal` | C |
 | `inherited_loss` | `decimal` | L, never negative: rule 231 |
@@ -5092,7 +5097,7 @@ after the input, which mandate spec §5.10 lists as E, H, DD, E₀, C, L and §9
 | `limit` | `limit_key` | The limit |
 | `action` | `scale_sizes` \| `exits_only` \| `flatten_and_pause` \| `end_delegations` | What it does while it holds: a rung's own action, the daily loss's `daily_loss_action`, or a tripwire's: rule 230 |
 | `reason` | `hard_trigger` \| `hard_breach_pending` \| `resolved_at_rollover` \| `new_day_breach` \| `after_reset` \| `tripwire_condition`, or `null` | Why, when it is not plain confirmation by breach time: rule 230 |
-| `breach_time_s` | `integer?` | The breach time accumulated when it triggered, in seconds; `null` for a tripwire: rule 232 |
+| `breach_time_s` | `integer?` | The breach time (mandate spec §5.6) the limit's confirmation had accumulated at the input that triggered it, read before the trigger clears it, in whole seconds; 0 when it had none, as for a hard trigger or a rung that triggers again after a reset; `null` for a tripwire: rule 232 |
 | `metric` | `consecutive_losing_exits` \| `realized_loss_usd` \| `new_instruments`, or `null` | A tripwire's metric: rule 232 |
 | `threshold` | `decimal?` | A tripwire's threshold: rules 232 and 233 |
 | `value` | `decimal?` | The metric's value reached: rules 232 and 233 |
@@ -5123,7 +5128,7 @@ Its `causation_id` names the `OwnerAcknowledged` copy (rule 235).
 | Member | Type | Meaning |
 |---|---|---|
 | `instrument` | `asset_id` | The instrument |
-| `qty` | `decimal` | The quantity released, greater than 0: rule 236 |
+| `qty` | `decimal` | The quantity released: greater than 0 for an owner's release, and possibly 0 for a goal's, which completes whether or not the agent holds a position: rule 236 |
 | `cause` | `owner_release` \| `goal_release` | The owner's release, or a goal completing with `on_complete` `release`: rule 236 |
 | `canceled_order_ids` | `[id]` | The protective orders canceled with it, possibly none |
 | `warning_ref` | `ref?` | The warning the owner was shown, stored: rule 236 |
@@ -5156,11 +5161,12 @@ that names what follows instead, with its reason when the risk state confirmed i
      `end_delegations` or `exits_only`, and no other limit has either `tripwire_condition` or
      `end_delegations` (`payload.reason`, then `payload.action`). `scale_sizes` is a rung's only
      (`payload.action`). Mandate spec §6.7: a tripwire never pauses (`AGENTS.md` rule 13).
-231. `RiskLimitTriggered`, `RiskLimitLifted`: `drawdown` is from 0 to 1 and `inherited_loss` is not
-     negative (`payload.drawdown`, then `payload.inherited_loss`).
+231. `RiskLimitTriggered`, `RiskLimitLifted`: `inherited_loss` is not negative
+     (`payload.inherited_loss`): L only ever adds a loss (mandate spec §5.7). `drawdown` has no bound
+     here, since agent equity is not bounded below by an invariant this record could rely on.
 232. `RiskLimitTriggered`: for a `tripwire:` limit, `metric`, `threshold`, and `value` are non-null
      and `breach_time_s` is `null`; for any other, `metric`, `threshold`, and `value` are `null` and
-     `breach_time_s` is non-null and not negative. Reported at the first offending member, in table
+     `breach_time_s` is non-null (§4.4 keeps it non-negative). Reported at the first offending member, in table
      order. A tripwire counts fills, never breach time (mandate spec §6.7).
 233. `RiskLimitTriggered`: `value` is at least `threshold`, since a tripwire fires when its metric
      reaches it; for `consecutive_losing_exits` and `new_instruments` both are whole numbers and
@@ -5173,7 +5179,8 @@ that names what follows instead, with its reason when the risk state confirmed i
      `payload.reason`; mandate spec §5.6 to §5.8, §6.7).
 235. `RiskLimitLifted` with `reason` `owner_acknowledged`, and `HighWaterMarkReset`: `causation_id`
      is non-null (`causation_id`). Only the owner's acknowledgment lifts a latch or resets H (MI-3).
-236. `PositionReleased`: `qty` is greater than 0 (`payload.qty`); `warning_ref`, `user_id`, and
+236. `PositionReleased`: `qty` is greater than 0 when `cause` is `owner_release`, and not negative when
+     it is `goal_release` (`payload.qty`); `warning_ref`, `user_id`, and
      `step_up` are non-null when `cause` is `owner_release` and `null` when it is `goal_release`,
      reported at the first offending member in table order. An owner's release is a step-up
      gesture after a shown warning; a goal's release follows from a confirmed version.
