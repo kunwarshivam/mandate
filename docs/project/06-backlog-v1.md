@@ -2826,7 +2826,9 @@ enables `live` (ES-23, OPS-5).
   #1458): the crate, both backends, one conformance suite, the policies, leases and grants.
   *Slice 2* ([DEC-2019](decisions/DEC-2019.md)): the cell's OpenBao chart, in server mode on raft
   over TLS 1.3, reached only by the processes whose egress names it, initialized and unsealed by
-  `cargo xtask cell up`. *Left:* provisioning the policies and roles in the cell, each process's
+  `cargo xtask cell up`. *Slice 3a* ([DEC-2021](decisions/DEC-2021.md)): staging unseals itself
+  with the static seal from a mounted, bootstrap-created key (DEC-2605 row 10); the cell and
+  production stay unsealed by hand. *Left:* provisioning the policies and roles in the cell, each process's
   secret id as a mounted file, and the egress drill's vault probe; the audit device; the metrics
   and journal parts of the canary scan once either carries a vault operation.
 - **E21-33 (Proposed, M8; SC; lane D1; journal spec first if needed)** As an owner, I want a
