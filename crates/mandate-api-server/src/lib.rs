@@ -26,6 +26,8 @@
 //!   screen, a new mandate's confirm, deploy, and go-live, judged and recorded as the CLI records
 //!   them (DEC-2101). [`stepup`] is the port every step-up goes through, which counts no evidence
 //!   until E9-4 binds it; [`objects`] is the content-addressed store those routes add records to.
+//! - [`challenges`]: the step-up challenge route and the store of the challenges it issues, each
+//!   issued under the context `authorize` returned for its action's row (DEC-2103).
 //! - [`writes`] also records resume, Stop, and an owner exit as the CLI records them, with step-up
 //!   forwarded only once the port verifies it, and [`status`] reports a command's phase from the
 //!   owning streams' direct causation (DEC-2102).
@@ -35,6 +37,7 @@
 //! `xtask/layers.toml` keeps it from every crate that could.
 
 pub mod backtests;
+pub mod challenges;
 pub mod clock;
 pub mod commands;
 pub mod config;

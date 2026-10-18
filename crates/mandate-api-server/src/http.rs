@@ -18,6 +18,7 @@ use mandate_api::wire::encode;
 use mandate_canon::Value;
 use mandate_journal::ArtifactSource;
 
+use crate::challenges::{self, Challenges};
 use crate::clock::Clock;
 use crate::journal::Journal;
 use crate::lifecycle::{Drain, Lifecycle};
@@ -79,6 +80,8 @@ pub struct App {
     pub objects: Option<Arc<dyn ObjectStore>>,
     /// The step-up port (DEC-2101 item 2): [`crate::stepup::Unbound`] until E9-4 binds it.
     pub step_up: Arc<dyn StepUp>,
+    /// The step-up challenges issued and not yet expired (DEC-2103 item 5).
+    pub challenges: Arc<Challenges>,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
@@ -169,6 +172,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/commands/{command}",
             get(status::status).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/step-up/challenges",
+            post(challenges::challenge).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/go-live",

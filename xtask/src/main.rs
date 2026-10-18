@@ -24,7 +24,8 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | openbao | objectstore | mutants | schema-mutants | cell |
+                        postgres | openbao | objectstore | stub-release | mutants |
+                        schema-mutants | cell |
                         cell-demo | cell-journal | cell-failover | cell-kill-switch | sweep; or
                         one part of test: test-nextest | test-doc | test-rh-sim | test-python.
                         Tests, pending tests,
@@ -64,6 +65,9 @@ commands:
   release publish-index <out>
                         push and sign the multi-arch index over every arch's published images
                         (main only, from CI, after each arch's publish)
+  release publish-charts <out>
+                        package the hosted clusters' charts, push them to GHCR and sign each
+                        digest keyless (main only, from CI; E21-58)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
   cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
@@ -75,6 +79,8 @@ commands:
                         the demo's six steps in order on the local cell: each gesture on main run
                         in the cell, each missing link named by its PR or story (E21-54)
   cell down             delete the local cell
+  cell hosted           cell #1's bring-up (deploy/hosted/) against a two-node k3d cluster of
+                        its own, the tunnel off
   cell generate [--write]
                         the Compose file and the journal's roles file from processes.json
                         (drift check unless --write)
@@ -101,6 +107,7 @@ const FULL_JOB: &[&str] = &[
     "postgres",
     "openbao",
     "objectstore",
+    "stub-release",
 ];
 const PR_JOBS: &[&str] = &[
     "lint",
@@ -115,6 +122,7 @@ const PR_JOBS: &[&str] = &[
     "postgres",
     "openbao",
     "objectstore",
+    "stub-release",
     "mutants",
     "schema-mutants",
     "cell",
@@ -277,8 +285,10 @@ fn run() -> Result<()> {
             release::publish(&root, Path::new(dist), Path::new(out))
         }
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
+        ["release", "publish-charts", out] => release::publish_charts(&root, Path::new(out)),
         ["cell", "up"] => cell::up(),
         ["cell", "down"] => cell::down(),
+        ["cell", "hosted"] => cell::hosted(),
         ["cell", "demo"] => cell::demo(true),
         ["cell", "demo", "--no-web"] => cell::demo(false),
         ["cell", "demo", "--scenario", name] => cell::scenario::run(name),
@@ -385,6 +395,7 @@ fn ci(job: &str) -> Result<()> {
         "postgres" => postgres(),
         "openbao" => openbao(),
         "objectstore" => objectstore(),
+        "stub-release" => stub_release(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "sweep" => sweep(Path::new(".")),
         "fast" => {
@@ -687,6 +698,95 @@ fn openbao() -> Result<()> {
     Ok(())
 }
 
+/// The stub token issuer's crate and binary (E21-52, DEC-2100).
+const STUB_ISSUER: &str = "mandate-stub-issuer";
+
+/// All a build of the stub without debug assertions may write, to standard error (DEC-2100 item 2).
+const STUB_NOT_BUILT: &str = "stub_issuer_not_built\n";
+
+/// How many 20 ms waits the release stub gets to exit before it is killed and the check fails: a
+/// stub that holds an issuer serves instead of exiting.
+const STUB_RELEASE_WAITS: u32 = 250;
+
+/// DEC-2100 item 2: a build without debug assertions holds no issuer. Builds the stub with
+/// `--release` once, only when the diff selects its crate (DEC-1190), runs it as a `dev` cell
+/// would, and requires [`release_stub_refused`]. It runs here rather than as a crate test, so the
+/// mutation gate never rebuilds the crate in release.
+fn stub_release() -> Result<()> {
+    if !selection()?.crates.contains(STUB_ISSUER) {
+        eprintln!("    stub-release: {STUB_ISSUER} is not affected (DEC-1190)");
+        return Ok(());
+    }
+    sh(
+        "cargo",
+        &[
+            "build",
+            "--locked",
+            "--release",
+            "--package",
+            STUB_ISSUER,
+            "--bin",
+            STUB_ISSUER,
+        ],
+    )?;
+    let meta: serde_json::Value = serde_json::from_str(&output_in(
+        Path::new("."),
+        "cargo",
+        &["metadata", "--format-version", "1", "--no-deps", "--locked"],
+    )?)
+    .context("parsing cargo metadata")?;
+    let target = meta["target_directory"]
+        .as_str()
+        .context("cargo metadata names no target directory")?;
+    let binary = Path::new(target).join("release").join(STUB_ISSUER);
+    eprintln!(
+        "    $ MANDATE_DEPLOYMENT_TIER=dev {} --bind 127.0.0.1:8899",
+        binary.display()
+    );
+    let mut child = Command::new(&binary)
+        .args(["--bind", "127.0.0.1:8899"])
+        .env("MANDATE_DEPLOYMENT_TIER", "dev")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("starting {}", binary.display()))?;
+    let mut exited = false;
+    for _ in 0..STUB_RELEASE_WAITS {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        if child.try_wait()?.is_some() {
+            exited = true;
+            break;
+        }
+    }
+    if !exited {
+        child.kill()?;
+    }
+    let output = child.wait_with_output()?;
+    if !exited {
+        bail!(
+            "the release build of {STUB_ISSUER} kept running instead of refusing: it holds an \
+             issuer (DEC-2100 item 2)"
+        );
+    }
+    release_stub_refused(&output)
+}
+
+/// Whether a release stub's run is DEC-2100 item 2's refusal: exit 2, [`STUB_NOT_BUILT`] alone on
+/// standard error, and nothing on standard output.
+fn release_stub_refused(output: &std::process::Output) -> Result<()> {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.code() != Some(2) || stderr != STUB_NOT_BUILT || !output.stdout.is_empty() {
+        bail!(
+            "the release build of {STUB_ISSUER} must exit 2 writing only {STUB_NOT_BUILT:?} to \
+             standard error (DEC-2100 item 2); it exited {} with stdout {:?} and stderr {stderr:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+    Ok(())
+}
+
 /// The object store's conformance suite against a real S3-compatible store (E21-40, DEC-973),
 /// run only when the selection holds `mandate-objectstore` (DEC-1190). `test` runs it too, but it
 /// skips there unless `MANDATE_S3_URL` is set; here it must run.
@@ -779,6 +879,13 @@ const SCHEMA_SWEEP_INPUTS: [&str; 4] = [
     "docs/project/06-backlog-v1.md",
     "reference/mandate/requirements.txt",
 ];
+
+/// The paths outside every crate that the cell jobs read (DEC-2609): the charts, images, compose
+/// files and drills under `deploy/`, and the Python environment `cargo xtask ci cell` runs the
+/// charts' invariant tests (`deploy/tests`) in. With the crates the cell's images hold
+/// ([`cell::IMAGE_PACKAGES`]) they are everything a cell job builds or reads that `xtask/` and
+/// `.github/`, which select everything, do not already cover.
+const CELL_INPUTS: [&str; 3] = ["deploy/", "python/pyproject.toml", "python/uv.lock"];
 
 /// The runner, the one crate whose `live` build the founder runs (DEC-529): `fast-portable` lints
 /// and tests it on macOS (DEC-954) and `fast-rh-sim-live` runs its rehearsal build (DEC-964), so
@@ -1043,6 +1150,10 @@ struct Selection {
     full_checks: bool,
     /// Whether `schema-mutants` runs: a path the schema sweep reads changed ([`SCHEMA_SWEEP_INPUTS`]).
     schema_mutants: bool,
+    /// Whether the cell jobs run (DEC-2609): a path they read changed ([`CELL_INPUTS`]), or the
+    /// selection holds a crate the cell's images hold ([`cell::IMAGE_PACKAGES`]), which it does
+    /// whenever any crate those are built on changed.
+    cell: bool,
 }
 
 impl Selection {
@@ -1054,6 +1165,7 @@ impl Selection {
             python: true,
             full_checks: true,
             schema_mutants: true,
+            cell: true,
         }
     }
 
@@ -1090,12 +1202,14 @@ impl Selection {
         };
         format!(
             "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {}; \
-             schema-mutants {}; lint, the spec guard and mutants run as always (DEC-1190)",
+             schema-mutants {}; cell {}; lint, the spec guard and mutants run as always \
+             (DEC-1190)",
             yes(self.tests()),
             yes(self.python),
             yes(self.runner()),
             yes(self.full_checks),
             yes(self.schema_mutants),
+            yes(self.cell),
         )
     }
 
@@ -1104,13 +1218,14 @@ impl Selection {
     fn outputs(&self) -> String {
         format!(
             "tests={}\npython={}\nportable={}\nrh_sim_live={}\nfull_checks={}\nschema_mutants={}\n\
-             reasons={}\n",
+             cell={}\nreasons={}\n",
             self.tests(),
             self.python,
             self.runner(),
             self.runner(),
             self.full_checks,
             self.schema_mutants,
+            self.cell,
             self.reasons(),
         )
     }
@@ -1140,6 +1255,7 @@ fn select(
     let mut python = false;
     let mut full_checks = false;
     let mut schema_mutants = false;
+    let mut cell = false;
     for path in changed {
         if selects_everything(path) {
             return Selection::everything(graph, format!("{path} changed"));
@@ -1171,6 +1287,7 @@ fn select(
         schema_mutants |= SCHEMA_SWEEP_INPUTS
             .iter()
             .any(|entry| path_under(path, entry));
+        cell |= CELL_INPUTS.iter().any(|entry| path_under(path, entry));
     }
     let mut crates = dependents_closure(graph, &seeds);
     loop {
@@ -1192,12 +1309,16 @@ fn select(
         seeds.extend(coupled);
         crates = dependents_closure(graph, &seeds);
     }
+    cell |= cell::IMAGE_PACKAGES
+        .iter()
+        .any(|package| crates.contains(*package));
     Selection {
         everything: None,
         crates,
         python,
         full_checks,
         schema_mutants,
+        cell,
     }
 }
 
@@ -9388,10 +9509,11 @@ mod tests {
         mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
         plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems, registry_rows,
-        rehearsal_runs, repo_root, schema_mutants, shard_packages, shellcheck_scripts,
-        simulator_harnesses, simulator_oracles, spec_guard_problems, spec_guard_problems_for_pr,
-        status_flip_problems, test_binary, test_order_config, test_outcomes, unique_temp_path,
-        unjudged_mutants, used_by, verdicts, workspace_closure, workspace_packages,
+        rehearsal_runs, release_stub_refused, repo_root, schema_mutants, shard_packages,
+        shellcheck_scripts, simulator_harnesses, simulator_oracles, spec_guard_problems,
+        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_order_config,
+        test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts, workspace_closure,
+        workspace_packages,
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
@@ -9902,6 +10024,7 @@ mod tests {
                 "mandate-alpaca",
                 "mandate-daemon",
                 "mandate-executor",
+                "mandate-executord",
                 "mandate-mcp",
                 "mandate-paper",
                 "mandate-robinhood",
@@ -10395,6 +10518,125 @@ mod tests {
             "the check names each setting a manifest turns off"
         );
         Ok(())
+    }
+
+    /// The settings in a manifest or `.cargo/config.toml` that turn debug assertions on for
+    /// `release` or for any profile inheriting from it, directly or not, the profile itself or
+    /// any package override in it (DEC-2100 item 2: the stub issuer compiles only with debug
+    /// assertions, so a release build must never have them).
+    fn release_assertions_on(manifest: &str) -> Result<Vec<String>> {
+        let manifest: toml::Table = toml::from_str(manifest)?;
+        let mut on = Vec::new();
+        let Some(profiles) = manifest.get("profile").and_then(toml::Value::as_table) else {
+            return Ok(on);
+        };
+        let from_release = |name: &str| {
+            let mut seen = BTreeSet::new();
+            let mut current = name.to_owned();
+            while current != "release" {
+                if !seen.insert(current.clone()) {
+                    return false;
+                }
+                let Some(parent) = profiles
+                    .get(&current)
+                    .and_then(|profile| profile.get("inherits"))
+                    .and_then(toml::Value::as_str)
+                else {
+                    return false;
+                };
+                current = parent.to_owned();
+            }
+            true
+        };
+        for (name, profile) in profiles {
+            let Some(profile) = profile.as_table().filter(|_| from_release(name)) else {
+                continue;
+            };
+            let mut tables = vec![(name.clone(), profile)];
+            if let Some(packages) = profile.get("package").and_then(toml::Value::as_table) {
+                tables.extend(packages.iter().filter_map(|(package, table)| {
+                    table
+                        .as_table()
+                        .map(|table| (format!("{name}.package.{package}"), table))
+                }));
+            }
+            for (path, table) in tables {
+                if table
+                    .get("debug-assertions")
+                    .is_some_and(|value| value.as_bool() != Some(false))
+                {
+                    on.push(format!("profile.{path}.debug-assertions"));
+                }
+            }
+        }
+        Ok(on)
+    }
+
+    /// DEC-2100 item 2: neither the workspace manifest nor `.cargo/config.toml` turns debug
+    /// assertions on for `release` or a profile built on it, so no release build holds the stub
+    /// issuer; the check is shown to catch each way a manifest could.
+    #[test]
+    fn release_builds_keep_debug_assertions_off() -> Result<()> {
+        for file in ["Cargo.toml", ".cargo/config.toml"] {
+            let text = fs::read_to_string(repo_root()?.join(file))?;
+            assert_eq!(
+                release_assertions_on(&text)?,
+                Vec::<String>::new(),
+                "{file} leaves debug assertions off in every release profile (DEC-2100 item 2)"
+            );
+        }
+        let seeded = "[profile.release]\ndebug-assertions = true\n\
+             [profile.release.package.mandate-stub-issuer]\ndebug-assertions = true\n\
+             [profile.dist]\ninherits = \"release\"\ndebug-assertions = true\n\
+             [profile.deep]\ninherits = \"dist\"\ndebug-assertions = \"yes\"\n\
+             [profile.loop-a]\ninherits = \"loop-b\"\ndebug-assertions = true\n\
+             [profile.loop-b]\ninherits = \"loop-a\"\n\
+             [profile.dev]\ndebug-assertions = true\n\
+             [profile.fast]\ninherits = \"dev\"\ndebug-assertions = true\n\
+             [profile.lean]\ninherits = \"release\"\ndebug-assertions = false\n";
+        assert_eq!(
+            release_assertions_on(seeded)?,
+            [
+                "profile.deep.debug-assertions",
+                "profile.dist.debug-assertions",
+                "profile.release.debug-assertions",
+                "profile.release.package.mandate-stub-issuer.debug-assertions",
+            ],
+            "the check names each release-derived setting that turns debug assertions on, and \
+             nothing for `dev`, a profile built on it, a cycle, or one turned off"
+        );
+        Ok(())
+    }
+
+    /// DEC-2100 item 2: `stub-release` accepts only exit 2 with `stub_issuer_not_built` alone on
+    /// standard error, and runs in `full` and in `check`.
+    #[test]
+    fn the_release_stub_check_accepts_only_the_lone_refusal() {
+        let run = |code: i32, stdout: &str, stderr: &str| std::process::Output {
+            status: ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        assert!(release_stub_refused(&run(2, "", "stub_issuer_not_built\n")).is_ok());
+        for (code, stdout, stderr) in [
+            (0, "", "stub_issuer_not_built\n"),
+            (1, "", "stub_issuer_not_built\n"),
+            (
+                2,
+                "issuer http://127.0.0.1:8899\n",
+                "stub_issuer_not_built\n",
+            ),
+            (2, "", "stub_issuer_not_built\nstub_issuer_not_built\n"),
+            (2, "", "stub_issuer_tier\n"),
+            (2, "", "stub_issuer_not_built"),
+            (2, "", ""),
+        ] {
+            assert!(
+                release_stub_refused(&run(code, stdout, stderr)).is_err(),
+                "{code} {stdout:?} {stderr:?}"
+            );
+        }
+        assert!(FULL_JOB.contains(&"stub-release") && PR_JOBS.contains(&"stub-release"));
     }
 
     /// DEC-931: every package built on a mutated one stays unoptimised, so a mutant rebuilds only
@@ -14206,7 +14448,7 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 7] = [
+    const SELECT_GATES: [(&str, &str); 12] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
@@ -14214,6 +14456,11 @@ mod tests {
         ("fast-rh-sim-live", "rh_sim_live"),
         ("full-checks", "full_checks"),
         ("schema-mutants", "schema_mutants"),
+        ("cell", "cell"),
+        ("cell-demo", "cell"),
+        ("cell-journal", "cell"),
+        ("cell-failover", "cell"),
+        ("cell-kill-switch", "cell"),
     ];
 
     /// DEC-1190 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
@@ -14455,6 +14702,7 @@ mod tests {
             python: bool,
             full_checks: bool,
             schema_mutants: bool,
+            cell: bool,
         }
         let cases: Vec<(&[&str], Expected)> = vec![
             (
@@ -14464,6 +14712,7 @@ mod tests {
                     python: false,
                     full_checks: false,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14473,6 +14722,7 @@ mod tests {
                     python: false,
                     full_checks: false,
                     schema_mutants: true,
+                    cell: false,
                 },
             ),
             (
@@ -14488,6 +14738,7 @@ mod tests {
                     python: false,
                     full_checks: true,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14497,6 +14748,7 @@ mod tests {
                     python: false,
                     full_checks: true,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14506,6 +14758,7 @@ mod tests {
                     python: false,
                     full_checks: false,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14515,6 +14768,7 @@ mod tests {
                     python: false,
                     full_checks: false,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14524,6 +14778,7 @@ mod tests {
                     python: true,
                     full_checks: true,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14533,6 +14788,7 @@ mod tests {
                     python: true,
                     full_checks: true,
                     schema_mutants: true,
+                    cell: false,
                 },
             ),
             (
@@ -14545,6 +14801,7 @@ mod tests {
                     python: true,
                     full_checks: true,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14554,6 +14811,7 @@ mod tests {
                     python: true,
                     full_checks: true,
                     schema_mutants: true,
+                    cell: false,
                 },
             ),
             (
@@ -14563,6 +14821,7 @@ mod tests {
                     python: false,
                     full_checks: false,
                     schema_mutants: true,
+                    cell: false,
                 },
             ),
             (
@@ -14572,6 +14831,7 @@ mod tests {
                     python: true,
                     full_checks: true,
                     schema_mutants: true,
+                    cell: false,
                 },
             ),
             (
@@ -14581,6 +14841,27 @@ mod tests {
                     python: false,
                     full_checks: true,
                     schema_mutants: true,
+                    cell: false,
+                },
+            ),
+            (
+                &["deploy/cell/charts/workspace/values.yaml"],
+                Expected {
+                    crates: &[],
+                    python: true,
+                    full_checks: true,
+                    schema_mutants: false,
+                    cell: true,
+                },
+            ),
+            (
+                &["python/uv.lock"],
+                Expected {
+                    crates: &[],
+                    python: true,
+                    full_checks: true,
+                    schema_mutants: false,
+                    cell: true,
                 },
             ),
         ];
@@ -14601,6 +14882,7 @@ mod tests {
                 selected.schema_mutants, expected.schema_mutants,
                 "{paths:?}'s schema-mutants"
             );
+            assert_eq!(selected.cell, expected.cell, "{paths:?}'s cell jobs");
             assert_eq!(
                 selected.tests(),
                 !expected.crates.is_empty(),
@@ -14684,9 +14966,10 @@ mod tests {
                 nothing.tests(),
                 nothing.python,
                 nothing.full_checks,
-                nothing.schema_mutants
+                nothing.schema_mutants,
+                nothing.cell
             ),
-            (false, false, false, false),
+            (false, false, false, false, false),
             "an empty diff runs no scoped job"
         );
     }
@@ -14701,7 +14984,7 @@ mod tests {
         let outputs = selected.outputs();
         let lines: Vec<&str> = outputs.lines().collect();
         assert_eq!(
-            lines.get(..6),
+            lines.get(..7),
             Some(
                 [
                     "tests=true",
@@ -14710,18 +14993,78 @@ mod tests {
                     "rh_sim_live=true",
                     "full_checks=true",
                     "schema_mutants=false",
+                    "cell=false",
                 ]
                 .as_slice()
             )
         );
-        let reasons = lines.get(6).copied().unwrap_or_default();
+        let reasons = lines.get(7).copied().unwrap_or_default();
         assert!(
             reasons.starts_with(
                 "reasons=3 crate(s) affected: mandate-executor, mandate-paper, mandate-risk;"
             ),
             "{reasons}"
         );
-        assert_eq!(lines.len(), 7, "{outputs}");
+        assert_eq!(lines.len(), 8, "{outputs}");
+    }
+
+    /// DEC-2609: the cell jobs start for a change to a crate any image package is built on, the
+    /// image package itself included, and for a path under `deploy/` or the cell's Python pins;
+    /// never for a crate no image holds, the documentation or `web/`; and always with no base.
+    #[test]
+    fn the_cell_jobs_run_only_for_what_the_cell_builds_or_reads() {
+        let mut graph = sample_graph();
+        for package in crate::cell::IMAGE_PACKAGES {
+            graph
+                .dirs
+                .insert(package.to_owned(), format!("crates/{package}"));
+            graph
+                .deps
+                .insert(package.to_owned(), crate_set(&["mandate-risk"]));
+        }
+        let cell_for = |paths: &[&str]| {
+            let changed: Vec<String> = paths.iter().map(|p| (*p).to_owned()).collect();
+            select(Some(&changed), &graph, &BTreeMap::new()).cell
+        };
+        for package in crate::cell::IMAGE_PACKAGES {
+            assert!(
+                cell_for(&[&format!("crates/{package}/src/main.rs")]),
+                "{package}'s own change runs the cell"
+            );
+        }
+        for paths in [
+            &["crates/mandate-num/src/lib.rs"][..],
+            &["crates/mandate-risk/tests/limits.rs"],
+            &["deploy/cell/images/mandate.Dockerfile"],
+            &["deploy/tests/test_chart.py"],
+            &["python/pyproject.toml"],
+            &["python/uv.lock"],
+        ] {
+            assert!(cell_for(paths), "{paths:?} runs the cell");
+        }
+        for paths in [
+            &["crates/mandate-canon/src/lib.rs"][..],
+            &["crates/mandate-identity/src/lib.rs"],
+            &["docs/specs/journal.md"],
+            &["web/src/app.tsx"],
+            &["python/mandate_tools/tests/test_x.py"],
+            &[],
+        ] {
+            assert!(!cell_for(paths), "{paths:?} leaves the cell out");
+        }
+        assert!(
+            select(None, &graph, &BTreeMap::new()).cell,
+            "a run with no base, as on main and the nightly, runs the cell"
+        );
+        assert!(
+            select(
+                Some(&[".github/workflows/ci.yml".to_owned()]),
+                &graph,
+                &BTreeMap::new()
+            )
+            .cell,
+            "a change that selects everything runs the cell"
+        );
     }
 
     /// A xorshift generator, so the property tests below need no dependency and replay from
@@ -15440,12 +15783,12 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            16,
+            17,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, \
              `cell-demo` (DEC-2002), `cell-journal`, `cell-failover`, and `cell-kill-switch` \
-             (DEC-2602)"
+             (DEC-2602), and `hosted-k3d` (E21-51)"
         );
         for checkout in checkouts {
             assert!(

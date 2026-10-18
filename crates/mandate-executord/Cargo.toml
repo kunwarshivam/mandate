@@ -1,0 +1,26 @@
+[package]
+name = "mandate-executord"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The account executor as a long-running process: one writer epoch on the account stream, the journal as the only channel from the runtime, the kill switch handed first, and mandate-process's lifecycle (E21-30, DEC-2003)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-accounting.workspace = true
+mandate-alpaca.workspace = true
+mandate-canon.workspace = true
+mandate-domain.workspace = true
+mandate-executor.workspace = true
+mandate-journal.workspace = true
+mandate-num.workspace = true
+mandate-process.workspace = true
+mandate-store.workspace = true
+mandate-time.workspace = true
+tokio = { workspace = true, features = ["rt", "time"] }
+
+[dev-dependencies]
+proptest.workspace = true
