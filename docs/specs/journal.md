@@ -29,8 +29,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   and 241. An acknowledgment carries the requesting user and the independence requirement as it
   stood (as §9's catalogue row and mandate spec §6.7 already required, and DEC-279 item 7's members
   lacked), names the `RiskLimitTriggered` it acknowledges as `event`, and, where an independent
-  user is required, names the request it answers. A request names a trigger, and is void once that
-  trigger is superseded. Agent-accepted under DEC-176: both events were refused `unknown_schema`
+  user is required, names the request it answers. A request names a trigger, carries step-up, and
+  is void once that trigger is superseded. The writer sets both users from the principal it
+  authenticated. The executor judges each acknowledgment copy from its account stream, matching a
+  request copy by `causation_id`, and `OwnerCommandRefused` gains the account-stream reasons
+  `trigger_unknown`, `trigger_superseded`, and `request_invalid` (rule 28). Agent-accepted under DEC-176: both events were refused `unknown_schema`
   until now, nothing could append them, and every rule only refuses an acknowledgment, which only
   ever lifts a limit; none holds an exit, a protective order, or a kill switch.
   - **Versions.** v0.58 (DEC-2301) is on main and reserves v0.57 for M7; v0.56 is D1's (#1589).
@@ -1330,7 +1333,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `OwnerAcknowledged`, `OwnerAcknowledgmentRequested` | — | copied from the control stream (with `causation_id`); a risk input; judged at processing as §9.28 says |
 | `ConnectionChecked`, `ConnectionStateChanged`, `ConnectionCredentialRefreshed` | — | The executor's permission checks and their results; the connection's state (`active`, `degraded`, `suspended`) and why; a refreshed token's scopes; each with `risk_clock`, closed in §9.8 |
 | `ConnectionEstablished`, `ConnectionCredentialRotated` (copies) | — | The executor's copies of the control stream's establishment (version 2) and each rotation, with `risk_clock` and the original as `causation_id`; closed in §9.8 |
-| `OwnerCommandRefused` | — | An acknowledgment the executor refused, for its step-up or, under `independent_approval_required`, because it is not independent ([mandate spec §6.1](mandate.md#61-purposes), [§6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`, `not_independent`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
+| `OwnerCommandRefused` | — | An acknowledgment the executor refused, for its step-up or, under `independent_approval_required`, because it is not independent ([mandate spec §6.1](mandate.md#61-purposes), [§6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), or because its trigger or request does not hold (§9.28): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`, `not_independent`, `trigger_unknown`, `trigger_superseded`, `request_invalid`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
 | `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N, and for a tripwire (limit `tripwire:<id>`, reason `tripwire_condition`, [mandate spec §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)) its metric, threshold, and the value reached; reset evidence; released positions; stale-mark and removed-instrument changes with the reason; goal completion; `MandateVersionApplied` is closed in §9.3 and the other seven in §9.27 |
 | `UniverseChanged` | man | The working universe changed ([mandate spec §2.3, §8.5](mandate.md#23-the-working-universe-at-runtime-dec-97)); a risk input, so it carries `risk_clock`: agent, instrument, change (`admitted`, `removed`), reason (`thesis_admitted`, `thesis_expired`, `thesis_invalidated`, `lineage_retired`, `eligibility_lost`, `operator_halt`, `version_applied`), thesis and lineage ids, working-universe size after |
 
@@ -1852,7 +1855,7 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 | Member | Type | Meaning |
 |---|---|---|
 | `command` | `resume` \| `stop` \| `acknowledge` | Rule 26 |
-| `reason` | `step_up_missing` \| `step_up_stale` \| `step_up_reused` \| `step_up_method` \| `not_independent` | `not_independent` only on the account stream: rule 28 |
+| `reason` | `step_up_missing` \| `step_up_stale` \| `step_up_reused` \| `step_up_method` \| `not_independent` \| `trigger_unknown` \| `trigger_superseded` \| `request_invalid` | The last four only on the account stream: rule 28. The last three are §9.28's ([DEC-2509](../project/decisions/DEC-2509.md)) |
 | `effective_at` | `timestamp` | The effective time the command was judged at. A §4.7 timestamp, never risk-clock seconds (§9.1's types). This supersedes DEC-291 item 1's whole second for this member (DEC-261 item 7) |
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
@@ -1895,10 +1898,12 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
     the agent stream (`payload.command`), or at version 2 also `lift_hold`, which is registered on the
     agent stream only (§9.11). The executor refuses acknowledgments, and the runtime
     refuses resumes and Stops (§2).
-28. `OwnerCommandRefused` with reason `not_independent` is on the account stream (`payload.reason`):
-    only an acknowledgment is judged for independence, and only under `independent_approval_required`
-    ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)). A resume or Stop is
-    refused only for its step-up.
+28. `OwnerCommandRefused` with reason `not_independent`, `trigger_unknown`, `trigger_superseded`, or
+    `request_invalid` is on the account stream (`payload.reason`): only an acknowledgment is judged
+    for independence, and only under `independent_approval_required`
+    ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), and only an
+    acknowledgment names a trigger and a request (§9.28). A resume or Stop is refused only for its
+    step-up.
 
 **Copy rule** (reason `schema`):
 
@@ -5249,7 +5254,7 @@ independent user must acknowledge it.
 | `independent_required` | `boolean` | The independence requirement as it stood when the lift was requested: `true` on every request (rule 239) |
 | `submitted_at` | `integer` | The second the owner ran the command |
 | `risk_clock` | `risk_clock` | The owner's tick (§2) |
-| `step_up` | `step_up?` | The requester's step-up evidence, or `null` |
+| `step_up` | `step_up` | The requester's step-up evidence: rule 239 |
 
 **`OwnerAcknowledged`**: an owner acknowledged one triggered limit.
 
@@ -5268,13 +5273,22 @@ independent user must acknowledge it.
 **Consistency rules** (reason `schema`; the path is the member named):
 
 239. `OwnerAcknowledgmentRequested`: `independent_required` is `true` (`payload.independent_required`):
-     a request exists only where an independent user must acknowledge. `OwnerAcknowledged`: when
+     a request exists only where an independent user must acknowledge. Its `step_up` is non-null,
+     since the request is half of a lift (`payload.step_up`). `OwnerAcknowledged`: when
      `independent_required` is `true`, `request` is non-null and `requested_by` differs from `user`
      (`payload.request`, then `payload.requested_by`); when it is `false`, `request` is `null` and
      `requested_by` equals `user` (`payload.request`, then `payload.requested_by`). A user never
-     acknowledges their own request (mandate spec §6.7, `not_independent`).
+     acknowledges their own request (mandate spec §6.7).
 
-**Stream rules**, judged before anything takes effect, and failing closed:
+**Who writes them.** The writer (the CLI, and the workspace API once its route mounts) sets
+`user` on an acknowledgment, and `requested_by` on a request, from the principal it authenticated
+for the command, the same principal its step-up evidence names: the CLI's owner as D1b's flags give
+it, and the API's session and step-up subject. Never from anything the caller supplies. An
+acknowledgment's `requested_by` is copied from the request it names. A request carries step-up
+evidence, so `step_up` is required on it (rule 239), and it is judged as §6.1 judges an owner
+command's.
+
+**Stream rules** on the control stream, judged before anything takes effect, and failing closed:
 
 240. Control stream, `OwnerAcknowledged` with a non-null `request`: an earlier
      `OwnerAcknowledgmentRequested` on the same stream has that `event_id`, and its `agent`,
@@ -5282,37 +5296,58 @@ independent user must acknowledge it.
      (`payload.request`). A reordered stream, in which the acknowledgment comes before its request,
      breaks this rule.
 241. Control stream: no two `OwnerAcknowledged` name the same non-null `request`
-     (`payload.request`). One request is acknowledged at most once; a second acknowledgment by a
-     third user lifts nothing more.
+     (`payload.request`). A request is spent by the first acknowledgment that names it, **whether
+     that acknowledgment then lifts the limit or is refused**: a retry needs a new request, and a
+     second acknowledgment by a third user lifts nothing more.
 
-The writer (the CLI, and the workspace API once its route mounts) checks rules 239 to 241 against
-its own fold of the control stream before appending, and appends nothing that would fail them.
-`append` sees one record and checks rule 239 only.
+The writer checks rules 239 to 241 against its own fold of the control stream before appending,
+and appends nothing that would fail them. `append` sees one record and checks rule 239 only.
 
-**The executor judges at processing.** It copies both events into the agent's account stream, the
-request as well as the acknowledgment, each with `causation_id` naming the control-stream original
-and copied at most once, so its account-stream fold holds every input it judges from and a replay
-of the account stream decides the same way. It refuses an acknowledgment, recording
-`OwnerCommandRefused` with `command` `acknowledge` and the reason below, and lifts nothing, when:
+**The executor judges at processing, from its account stream.** It copies both events into the
+agent's account stream, the request as well as the acknowledgment. Each copy is the original's
+payload unchanged, with `causation_id` naming the control-stream original, and is copied at most
+once. A copy has its own `event_id`, so on the account stream an acknowledgment copy's `request`
+(the control-stream request's `event_id`) is matched to the request copy whose `causation_id`
+equals it. The executor's fold holds every input it judges from, so a replay of the account stream
+decides the same way.
 
-- its step-up fails §6.1's checks: the `step_up_*` reasons, as before;
-- the stricter of its `independent_required` and the overlay's `independent_approval_required` at
-  processing is `true`, and rules 239 to 241 do not hold on the account stream's copies:
-  `not_independent`;
-- **its trigger was superseded**: `event` is not the latest `RiskLimitTriggered` of its `limit` on
-  the account stream, or a `RiskLimitLifted` of that `limit` follows it: `not_independent`. A
-  request is void once its trigger is superseded, so a stale request never lifts a later latch of
-  the same limit. A new latch needs a new request.
+It judges an acknowledgment copy in this order, and at the first check that fails it records
+`OwnerCommandRefused` with `command` `acknowledge`, the reason shown, and `causation_id` naming the
+control-stream `OwnerAcknowledged`, and lifts nothing:
 
-None of these refusals holds an exit, a protective order, or a kill switch: an acknowledgment only
-ever lifts a limit, which adds risk, so refusing it never delays risk reduction (`AGENTS.md` rules 3
-and 13).
+1. **The trigger exists:** `event` is the `event_id` of a `RiskLimitTriggered` of this `agent` on
+   this account stream, before the acknowledgment copy. An unknown ULID, another agent's trigger,
+   or another event type is refused `trigger_unknown`.
+2. **The trigger stands:** no later `RiskLimitTriggered` of the same `limit`, and no
+   `RiskLimitLifted` of that `limit`, comes between that trigger and the acknowledgment copy.
+   Otherwise `trigger_superseded`: a request and an acknowledgment are void once their trigger is
+   superseded, so neither lifts a later latch of the same limit, which needs a new request.
+3. **Its step-up holds:** §6.1's checks, as for every acknowledgment: the `step_up_*` reasons.
+4. **Independence**, when the stricter of the copy's `independent_required` and the overlay's
+   `independent_approval_required` at processing is `true`:
+   - the copy names a `request`, and its `user` differs from its `requested_by`. Otherwise
+     `not_independent`;
+   - a request copy whose `causation_id` equals `request` comes before the acknowledgment copy.
+     Its `agent`, `event`, `requested_by`, and `independent_required` equal the acknowledgment
+     copy's, and its step-up passes §6.1's checks, judged at its own `submitted_at`. No earlier
+     acknowledgment copy, refused or not, names the same `request`. Otherwise `request_invalid`:
+     rules 240 and 241, restated on the account stream by `causation_id`.
+
+Only an acknowledgment that passes all four lifts its limit. A request copy is never judged by
+itself and never lifts anything. None of these refusals holds an exit, a protective order, or a
+kill switch: an acknowledgment only ever lifts a limit, which adds risk, so refusing one never
+delays risk reduction (`AGENTS.md` rules 3 and 13).
 
 **No `JournaledFact`.** Neither event feeds `ValidationContext`. **Vectors** come with the
 registration change: `reference/journal` gains an `acknowledgments` section with base drafts of
 both events, an invalid draft for every type and for rule 239, control streams for rules 240 and
 241 (a reordered stream, a self-acknowledgment, a second acknowledgment of one request, and a
-request whose `agent` or `event` differs), and the vectors stay version 3.
+request whose `agent` or `event` differs). The executor's judgment gets account streams of its own:
+an unknown trigger, a later trigger and a lift that supersede one, a request copy after its
+acknowledgment copy, a request spent by a refused acknowledgment, and a request with failing
+step-up. It also gets a fuzz over random orderings of requests, acknowledgments, triggers and lifts,
+judged by an oracle written apart from the executor, and a seeded mutant for each rule and each
+check. The vectors stay version 3.
 
 ## 10. Anchoring
 

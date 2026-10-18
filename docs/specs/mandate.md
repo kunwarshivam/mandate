@@ -822,7 +822,8 @@ Applies to `exits_only` and `flatten_and_pause` rungs, daily loss, the lifetime 
 - **Latched limits:** `drawdown_exits_only`, `drawdown_flatten`, `daily_loss` (until its lift),
   `lifetime_floor`, and every fired tripwire (§6.7), which lifts only by the owner's acknowledgment of it
   with step-up (§6.1) and, with `independent_approval_required`, by a user other than the requester, as
-  for the drawdown ladder below; it touches neither H, C, nor L.
+  for the drawdown ladder below; it touches neither H, C, nor L. Where a user other than the
+  requester must acknowledge, the request is its own record ([journal spec §9.28](journal.md#928-the-owners-acknowledgment-and-its-request-dec-2509)).
 - **Acknowledging the drawdown ladder** (owner, step-up; with `independent_approval_required`, by
   a user other than the requester):
   - is rejected with `flatten_in_progress` while a flatten has not finished (the agent is not
@@ -1355,7 +1356,9 @@ the user who requested the lift. The requirement is the stricter of the policy w
 requested, which the acknowledgment carries, and the overlay when the executor processes it, as §4.3
 and §6.4 check 7 read it. Under it the acknowledgment names both users, and one that names the
 requester as the acknowledging user, or omits either name, is refused with `not_independent` (rule 3:
-a missing name never counts as a second user). With the requirement on and only one user in the
+a missing name never counts as a second user). The request and the acknowledgment are the journal's
+`OwnerAcknowledgmentRequested` and `OwnerAcknowledged` ([journal spec §9.28](journal.md#928-the-owners-acknowledgment-and-its-request-dec-2509)), which also says how an unknown or
+superseded trigger and a spent request are refused ([DEC-2509](../project/decisions/DEC-2509.md)). With the requirement on and only one user in the
 workspace, a fired tripwire could not be lifted until a second user exists, as for the drawdown ladder,
 so V-047 refuses such a mandate at validation. What stays reachable is a workspace that falls to one
 user, or turns the requirement on, after its version was confirmed

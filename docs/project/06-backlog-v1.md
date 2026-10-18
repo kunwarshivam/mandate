@@ -1164,6 +1164,15 @@ after U-A1 to U-A5 are recorded.
     fold advances on every event;
   - the approval surface shows the current requirement, not only the bound `approvers` (a PX item);
   - add the per-order approval to §4.3's list of what `independent_approval_required` scopes.
+  *Follow-up (DEC-2509, M7 S2; claim [#1594](https://github.com/kunwarshivam/mandate/issues/1594)):*
+  journal spec §9.28 closes `OwnerAcknowledged` and adds `OwnerAcknowledgmentRequested`. Still
+  owed:
+  - `mandate-journal` registers both, with rule 239 and §9.28's vectors (M7 S2);
+  - the CLI's `agent request-ack` and `agent acknowledge` (M7 S2);
+  - the workspace API's members (DEC-2102 item 4, lane L1);
+  - the executor's copy and its four checks (E7-4, lane X);
+  - **a §11 range check for stream rules 240 and 241**, with a new `VerificationRun` check code.
+    Until it lands, the writers and the executor hold those rules, failing closed.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
   *Spec:* [notifications spec](../specs/notifications.md) ([DEC-438](decisions/DEC-438.md)). The
