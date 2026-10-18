@@ -3,6 +3,8 @@
 
 #![allow(dead_code, reason = "each test file uses part of the shared helpers")]
 
+pub mod control;
+
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::mpsc;

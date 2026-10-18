@@ -88766,7 +88766,7 @@
   ]
  },
  "agent_deployed": {
-  "spec": "docs/specs/journal.md v0.54 §9.24 (DEC-1171)",
+  "spec": "docs/specs/journal.md v0.56 §9.21, §9.24 (DEC-1171, DEC-1173)",
   "stream_id": "ctl:ws_01J8Z2",
   "artifacts": [
    {
@@ -91037,6 +91037,283 @@
      "runtimes": [],
      "executors": []
     }
+   },
+   {
+    "name": "version_1_stopped_then_version_2",
+    "clause": "§9.21: a stop is final, the deployment it stops read or not",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J9DA16000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "event_time": "2026-10-17T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J9DA00C000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper_01",
+       "broker": "alpaca",
+       "environment": "paper",
+       "scopes": [
+        "data",
+        "trading"
+       ],
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_11",
+        "authenticated_at": "2026-10-17T15:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "margin_attestation": null
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J9DA16010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "AgentDeployed",
+      "schema_version": 1,
+      "event_time": "2026-10-17T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {
+       "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+       "record_ref": "sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe"
+      },
+      "artifact_refs": [
+       "sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe",
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J9DA16020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "AgentStopped",
+      "schema_version": 1,
+      "event_time": "2026-10-17T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {
+       "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "connection_id": "conn_alpaca_paper_01",
+       "reason": "owner_stop",
+       "retired_on": "2026-10-17",
+       "loss_added": "0"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J9DA16030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "AgentDeployed",
+      "schema_version": 2,
+      "event_time": "2026-10-17T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {
+       "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+       "record_ref": "sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe",
+       "connection_id": "conn_alpaca_paper_01"
+      },
+      "artifact_refs": [
+       "sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe",
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    },
+    "processes": {
+     "runtimes": [],
+     "executors": []
+    }
+   },
+   {
+    "name": "account_stream_copy_only",
+    "clause": "rule 201: an establishment on the control stream, never an account stream's copy",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J9DA17000000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionChecked",
+      "schema_version": 1,
+      "event_time": "2026-10-17T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper_01",
+       "occasion": "connect",
+       "results": [
+        {
+         "check": "account",
+         "result": "passed",
+         "reason": null
+        },
+        {
+         "check": "environment",
+         "result": "passed",
+         "reason": null
+        },
+        {
+         "check": "scope",
+         "result": "passed",
+         "reason": null
+        }
+       ],
+       "account_pii_ref": "pii_01J8Z2PR0000000000000000A1",
+       "risk_clock": "2026-10-17T16:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": [
+       "pii_01J8Z2PR0000000000000000A1"
+      ]
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J9DA17010000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "event_time": "2026-10-17T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J9DA00E000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper_01",
+       "broker": "alpaca",
+       "environment": "paper",
+       "scopes": [
+        "data",
+        "trading"
+       ],
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_11",
+        "authenticated_at": "2026-10-17T15:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "margin_attestation": null,
+       "risk_clock": "2026-10-17T16:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J9DA17020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "AgentDeployed",
+      "schema_version": 2,
+      "event_time": "2026-10-17T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {
+       "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "mandate_version": "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43",
+       "record_ref": "sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe",
+       "connection_id": "conn_alpaca_paper_01"
+      },
+      "artifact_refs": [
+       "sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe",
+       "sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 2,
+     "rule": 201,
+     "path": "payload.connection_id"
+    },
+    "processes": {
+     "runtimes": [],
+     "executors": []
+    }
    }
   ],
   "ranges": [
@@ -91151,6 +91428,3690 @@
      "index": 1,
      "rule": 201,
      "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "anchored_after_the_deployment",
+    "clause": "§11: a revocation after the deployment is not judged",
+    "stream": "revoked_after_the_deployment",
+    "start": 2,
+    "anchored": true,
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
+ },
+ "risk_limits": {
+  "spec": "docs/specs/journal.md v0.58 §9.27 (DEC-2301)",
+  "drafts": {
+   "day_started": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B1",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "RiskDayStarted",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "day": "2026-09-22",
+     "day_start_equity": "9500",
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "rung_triggered": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B2",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "RiskLimitTriggered",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "agent_equity": "9300",
+     "high_water_mark": "10000",
+     "drawdown": "0.07",
+     "day_start_equity": "9500",
+     "capital_base": "10000",
+     "inherited_loss": "0",
+     "net_contributed": "10000",
+     "limit": "drawdown_ladder[1]",
+     "action": "exits_only",
+     "reason": null,
+     "breach_time_s": 300,
+     "metric": null,
+     "threshold": null,
+     "value": null,
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "tripwire_triggered": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B3",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "RiskLimitTriggered",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "agent_equity": "9300",
+     "high_water_mark": "10000",
+     "drawdown": "0.07",
+     "day_start_equity": "9500",
+     "capital_base": "10000",
+     "inherited_loss": "0",
+     "net_contributed": "10000",
+     "limit": "tripwire:losing_streak",
+     "action": "exits_only",
+     "reason": "tripwire_condition",
+     "breach_time_s": null,
+     "metric": "consecutive_losing_exits",
+     "threshold": "2",
+     "value": "2",
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "rung_lifted": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B4",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "RiskLimitLifted",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "agent_equity": "9300",
+     "high_water_mark": "10000",
+     "drawdown": "0.07",
+     "day_start_equity": "9500",
+     "capital_base": "10000",
+     "inherited_loss": "0",
+     "net_contributed": "10000",
+     "limit": "drawdown_ladder[0]",
+     "action": "scale_sizes",
+     "reason": null,
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "tripwire_lifted": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B5",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "RiskLimitLifted",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z4R0A000000000000000A1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "agent_equity": "9300",
+     "high_water_mark": "10000",
+     "drawdown": "0.07",
+     "day_start_equity": "9500",
+     "capital_base": "10000",
+     "inherited_loss": "0",
+     "net_contributed": "10000",
+     "limit": "tripwire:losing_streak",
+     "action": null,
+     "reason": "owner_acknowledged",
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "mark_reset": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B6",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "HighWaterMarkReset",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z4R0A000000000000000A1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "from": "10500",
+     "to": "9650",
+     "user_id": "user_owner",
+     "step_up": {
+      "assertion_id": "assert_owner_01",
+      "authenticated_at": "2026-09-22T14:29:10.000000000Z",
+      "method": "webauthn"
+     },
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "owner_released": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B7",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "PositionReleased",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+     "qty": "0.15",
+     "cause": "owner_release",
+     "canceled_order_ids": [
+      "order_stop_1"
+     ],
+     "warning_ref": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+     "user_id": "user_owner",
+     "step_up": {
+      "assertion_id": "assert_owner_01",
+      "authenticated_at": "2026-09-22T14:29:10.000000000Z",
+      "method": "webauthn"
+     },
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [
+     "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    ],
+    "pii_refs": []
+   },
+   "mark_stale": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B8",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "InstrumentRestrictionChanged",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+     "restriction": "stale_mark",
+     "reason": "no_sane_mark",
+     "active": true,
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "goal_completed": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B9",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "GoalCompleted",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "reason": null,
+     "then": null,
+     "on_complete": "release",
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "day_started.day.kind",
+    "clause": "§9.27 types",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "payload.day",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.day"
+    }
+   },
+   {
+    "name": "day_started.day.form",
+    "clause": "§9.27 types",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "payload.day",
+      "value": "22-09-2026"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.day"
+    }
+   },
+   {
+    "name": "day_started.day_start_equity.kind",
+    "clause": "§9.27 types",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "payload.day_start_equity",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.day_start_equity"
+    }
+   },
+   {
+    "name": "day_started.day_start_equity.form",
+    "clause": "§9.27 types",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "payload.day_start_equity",
+      "value": "9,500"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.day_start_equity"
+    }
+   },
+   {
+    "name": "rung_triggered.agent_equity.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.agent_equity",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.agent_equity"
+    }
+   },
+   {
+    "name": "rung_triggered.agent_equity.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.agent_equity",
+      "value": "1,000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.agent_equity"
+    }
+   },
+   {
+    "name": "rung_triggered.high_water_mark.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.high_water_mark",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.high_water_mark"
+    }
+   },
+   {
+    "name": "rung_triggered.high_water_mark.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.high_water_mark",
+      "value": "1,000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.high_water_mark"
+    }
+   },
+   {
+    "name": "rung_triggered.drawdown.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.drawdown",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.drawdown"
+    }
+   },
+   {
+    "name": "rung_triggered.drawdown.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.drawdown",
+      "value": "1,000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.drawdown"
+    }
+   },
+   {
+    "name": "rung_triggered.day_start_equity.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.day_start_equity",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.day_start_equity"
+    }
+   },
+   {
+    "name": "rung_triggered.day_start_equity.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.day_start_equity",
+      "value": "1,000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.day_start_equity"
+    }
+   },
+   {
+    "name": "rung_triggered.capital_base.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.capital_base",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.capital_base"
+    }
+   },
+   {
+    "name": "rung_triggered.capital_base.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.capital_base",
+      "value": "1,000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.capital_base"
+    }
+   },
+   {
+    "name": "rung_triggered.inherited_loss.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.inherited_loss",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.inherited_loss"
+    }
+   },
+   {
+    "name": "rung_triggered.inherited_loss.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.inherited_loss",
+      "value": "1,000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.inherited_loss"
+    }
+   },
+   {
+    "name": "rung_triggered.net_contributed.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.net_contributed",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.net_contributed"
+    }
+   },
+   {
+    "name": "rung_triggered.net_contributed.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.net_contributed",
+      "value": "1,000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.net_contributed"
+    }
+   },
+   {
+    "name": "rung_triggered.limit.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit"
+    }
+   },
+   {
+    "name": "rung_triggered.limit.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "daily"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.limit"
+    }
+   },
+   {
+    "name": "rung_triggered.action.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.action"
+    }
+   },
+   {
+    "name": "rung_triggered.action.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "paused"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.action"
+    }
+   },
+   {
+    "name": "rung_triggered.reason.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "rung_triggered.reason.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "breach"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "rung_triggered.breach_time_s.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.breach_time_s",
+      "value": "300"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.breach_time_s"
+    }
+   },
+   {
+    "name": "tripwire_triggered.metric.kind",
+    "clause": "§9.27 types",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.metric",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.metric"
+    }
+   },
+   {
+    "name": "tripwire_triggered.metric.form",
+    "clause": "§9.27 types",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.metric",
+      "value": "losing_exits"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.metric"
+    }
+   },
+   {
+    "name": "tripwire_triggered.threshold.kind",
+    "clause": "§9.27 types",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.threshold",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.threshold"
+    }
+   },
+   {
+    "name": "tripwire_triggered.threshold.form",
+    "clause": "§9.27 types",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.threshold",
+      "value": "two"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.threshold"
+    }
+   },
+   {
+    "name": "tripwire_triggered.value.kind",
+    "clause": "§9.27 types",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.value",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.value"
+    }
+   },
+   {
+    "name": "tripwire_triggered.value.form",
+    "clause": "§9.27 types",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.value",
+      "value": "two"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.value"
+    }
+   },
+   {
+    "name": "rung_lifted.limit.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit"
+    }
+   },
+   {
+    "name": "rung_lifted.limit.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "drawdown_ladder[01]"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.limit"
+    }
+   },
+   {
+    "name": "rung_lifted.action.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.action"
+    }
+   },
+   {
+    "name": "rung_lifted.action.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "resume"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.action"
+    }
+   },
+   {
+    "name": "rung_lifted.reason.kind",
+    "clause": "§9.27 types",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "rung_lifted.reason.form",
+    "clause": "§9.27 types",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "lifted"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "mark_reset.from.kind",
+    "clause": "§9.27 types",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.from"
+    }
+   },
+   {
+    "name": "mark_reset.from.form",
+    "clause": "§9.27 types",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": "ten"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.from"
+    }
+   },
+   {
+    "name": "mark_reset.to.kind",
+    "clause": "§9.27 types",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.to"
+    }
+   },
+   {
+    "name": "mark_reset.to.form",
+    "clause": "§9.27 types",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": "ten"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.to"
+    }
+   },
+   {
+    "name": "mark_reset.user_id.kind",
+    "clause": "§9.27 types",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.user_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.user_id"
+    }
+   },
+   {
+    "name": "mark_reset.user_id.form",
+    "clause": "§9.27 types",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.user_id",
+      "value": "user owner"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.user_id"
+    }
+   },
+   {
+    "name": "owner_released.instrument.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "owner_released.instrument.form",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "7B4A1C2E-1111-4A2B-9C3D-000000000001"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "owner_released.qty.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "owner_released.qty.form",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "0,15"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "owner_released.cause.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "owner_released.cause.form",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "release"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "owner_released.canceled_order_ids.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.canceled_order_ids",
+      "value": "order_stop_1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.canceled_order_ids"
+    }
+   },
+   {
+    "name": "owner_released.warning_ref.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.warning_ref",
+      "value": 7
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.warning_ref"
+    }
+   },
+   {
+    "name": "owner_released.warning_ref.form",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.warning_ref",
+      "value": "sha256:short"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.warning_ref"
+    }
+   },
+   {
+    "name": "owner_released.user_id.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.user_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.user_id"
+    }
+   },
+   {
+    "name": "owner_released.user_id.form",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.user_id",
+      "value": "user owner"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.user_id"
+    }
+   },
+   {
+    "name": "mark_stale.instrument.kind",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "mark_stale.instrument.form",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "not-an-asset"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "mark_stale.restriction.kind",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restriction"
+    }
+   },
+   {
+    "name": "mark_stale.restriction.form",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "halted"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.restriction"
+    }
+   },
+   {
+    "name": "mark_stale.reason.kind",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "mark_stale.reason.form",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "quote_gap"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "mark_stale.active.kind",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.active",
+      "value": "true"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.active"
+    }
+   },
+   {
+    "name": "goal_completed.reason.kind",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "goal_completed.reason.form",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "done"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "goal_completed.then.kind",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.then",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.then"
+    }
+   },
+   {
+    "name": "goal_completed.then.form",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.then",
+      "value": "retire"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.then"
+    }
+   },
+   {
+    "name": "goal_completed.on_complete.kind",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.on_complete",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.on_complete"
+    }
+   },
+   {
+    "name": "goal_completed.on_complete.form",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.on_complete",
+      "value": "sell_all"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.on_complete"
+    }
+   },
+   {
+    "name": "day_started.day.null",
+    "clause": "§9.27 types",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "payload.day",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.day"
+    }
+   },
+   {
+    "name": "day_started.day_start_equity.null",
+    "clause": "§9.27 types",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "payload.day_start_equity",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.day_start_equity"
+    }
+   },
+   {
+    "name": "day_started.agent_id.null",
+    "clause": "§9.27 types",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "payload.agent_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.agent_id"
+    }
+   },
+   {
+    "name": "day_started.risk_clock.null",
+    "clause": "§9.27 types",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "rung_triggered.agent_equity.null",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.agent_equity",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.agent_equity"
+    }
+   },
+   {
+    "name": "rung_triggered.high_water_mark.null",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.high_water_mark",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.high_water_mark"
+    }
+   },
+   {
+    "name": "rung_triggered.drawdown.null",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.drawdown",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.drawdown"
+    }
+   },
+   {
+    "name": "rung_triggered.day_start_equity.null",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.day_start_equity",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.day_start_equity"
+    }
+   },
+   {
+    "name": "rung_triggered.capital_base.null",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.capital_base",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.capital_base"
+    }
+   },
+   {
+    "name": "rung_triggered.inherited_loss.null",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.inherited_loss",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.inherited_loss"
+    }
+   },
+   {
+    "name": "rung_triggered.net_contributed.null",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.net_contributed",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.net_contributed"
+    }
+   },
+   {
+    "name": "rung_triggered.limit.null",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit"
+    }
+   },
+   {
+    "name": "rung_triggered.action.null",
+    "clause": "§9.27 types",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.action"
+    }
+   },
+   {
+    "name": "mark_reset.from.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.from",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.from"
+    }
+   },
+   {
+    "name": "mark_reset.to.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.to",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.to"
+    }
+   },
+   {
+    "name": "mark_reset.user_id.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.user_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.user_id"
+    }
+   },
+   {
+    "name": "mark_reset.step_up.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "owner_released.instrument.null",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "owner_released.qty.null",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "owner_released.cause.null",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "owner_released.canceled_order_ids.null",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.canceled_order_ids",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.canceled_order_ids"
+    }
+   },
+   {
+    "name": "mark_stale.instrument.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "mark_stale.restriction.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restriction"
+    }
+   },
+   {
+    "name": "mark_stale.reason.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "mark_stale.active.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.active",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.active"
+    }
+   },
+   {
+    "name": "day_started.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "day_started.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "day_started.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "day_started.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "day_started.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "rung_triggered.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "rung_triggered.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "rung_triggered.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "rung_triggered.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "rung_triggered.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "tripwire_triggered.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "tripwire_triggered.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "tripwire_triggered.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "tripwire_triggered.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "tripwire_triggered.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "rung_lifted.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "rung_lifted.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "rung_lifted.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "rung_lifted.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "rung_lifted.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "tripwire_lifted.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "tripwire_lifted",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "tripwire_lifted.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "tripwire_lifted",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "tripwire_lifted.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "tripwire_lifted",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "tripwire_lifted.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "tripwire_lifted",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "tripwire_lifted.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "tripwire_lifted",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "mark_reset.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "mark_reset.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "mark_reset.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "mark_reset.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "mark_reset.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "owner_released.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "owner_released.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "owner_released.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "owner_released.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "owner_released.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "mark_stale.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "mark_stale.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "mark_stale.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "mark_stale.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "mark_stale.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "goal_completed.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "goal_completed.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "goal_completed.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "goal_completed.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "goal_completed.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "rung_triggered.limit.sixth_rung",
+    "clause": "§9.27 `limit_key`: a ladder has at most five rungs",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "drawdown_ladder[5]"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.limit"
+    }
+   },
+   {
+    "name": "tripwire_triggered.limit.uppercase_id",
+    "clause": "§9.27 `limit_key`: a tripwire id is the mandate schema's",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "tripwire:Losing"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.limit"
+    }
+   },
+   {
+    "name": "230.tripwire_without_its_reason",
+    "clause": "rule 230",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "230.tripwire_pauses",
+    "clause": "rule 230",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "flatten_and_pause"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.action"
+    }
+   },
+   {
+    "name": "230.rung_with_the_tripwire_reason",
+    "clause": "rule 230",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "tripwire_condition"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "230.rung_ends_delegations",
+    "clause": "rule 230",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "end_delegations"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.action"
+    }
+   },
+   {
+    "name": "230.daily_loss_scales",
+    "clause": "rule 230",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "max_daily_loss"
+     },
+     {
+      "path": "payload.action",
+      "value": "scale_sizes"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.action"
+    }
+   },
+   {
+    "name": "231.inherited_loss_negative",
+    "clause": "rule 231",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.inherited_loss",
+      "value": "-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.inherited_loss"
+    }
+   },
+   {
+    "name": "232.tripwire_with_breach_time",
+    "clause": "rule 232",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.breach_time_s",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.breach_time_s"
+    }
+   },
+   {
+    "name": "232.tripwire_without_value",
+    "clause": "rule 232",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.value",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.value"
+    }
+   },
+   {
+    "name": "232.rung_without_breach_time",
+    "clause": "rule 232",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.breach_time_s",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.breach_time_s"
+    }
+   },
+   {
+    "name": "232.rung_with_a_metric",
+    "clause": "rule 232",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.metric",
+      "value": "new_instruments"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.metric"
+    }
+   },
+   {
+    "name": "233.short_of_threshold",
+    "clause": "rule 233",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.value",
+      "value": "1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.value"
+    }
+   },
+   {
+    "name": "233.fractional_count",
+    "clause": "rule 233",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.value",
+      "value": "2.5"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.value"
+    }
+   },
+   {
+    "name": "233.count_threshold_zero",
+    "clause": "rule 233",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.threshold",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.threshold"
+    }
+   },
+   {
+    "name": "233.count_threshold_over_1000",
+    "clause": "rule 233",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.threshold",
+      "value": "1001"
+     },
+     {
+      "path": "payload.value",
+      "value": "1001"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.threshold"
+    }
+   },
+   {
+    "name": "233.loss_threshold_below_a_cent",
+    "clause": "rule 233",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.metric",
+      "value": "realized_loss_usd"
+     },
+     {
+      "path": "payload.threshold",
+      "value": "100.005"
+     },
+     {
+      "path": "payload.value",
+      "value": "101"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.threshold"
+    }
+   },
+   {
+    "name": "234.floor_lift_scales",
+    "clause": "rule 234",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "lifetime_floor"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.action"
+    }
+   },
+   {
+    "name": "234.rung_lift_with_action_and_reason",
+    "clause": "rule 234",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "hard_breach_cleared"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.action"
+    }
+   },
+   {
+    "name": "234.tripwire_lifts_without_the_owner",
+    "clause": "rule 234",
+    "base_draft": "tripwire_lifted",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "234.daily_loss_loosened",
+    "clause": "rule 234",
+    "base_draft": "tripwire_lifted",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "max_daily_loss"
+     },
+     {
+      "path": "payload.reason",
+      "value": "version_loosened"
+     },
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "235.lift_without_its_acknowledgment",
+    "clause": "rule 235",
+    "base_draft": "tripwire_lifted",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "235.reset_without_its_acknowledgment",
+    "clause": "rule 235",
+    "base_draft": "mark_reset",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "236.owner_releases_nothing",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "236.goal_releases_a_negative",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "goal_release"
+     },
+     {
+      "path": "payload.warning_ref",
+      "value": null
+     },
+     {
+      "path": "payload.user_id",
+      "value": null
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     },
+     {
+      "path": "payload.qty",
+      "value": "-0.1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "236.owner_release_without_its_warning",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.warning_ref",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.warning_ref"
+    }
+   },
+   {
+    "name": "236.owner_release_without_step_up",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "236.goal_release_with_a_user",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "goal_release"
+     },
+     {
+      "path": "payload.warning_ref",
+      "value": null
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.user_id"
+    }
+   },
+   {
+    "name": "237.stale_mark_for_a_removal",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "operator_halt"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "237.stale_mark_cleared_as_set",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.active",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.active"
+    }
+   },
+   {
+    "name": "237.removed_for_no_mark",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "237.removed_by_an_admission",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "thesis_admitted"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.active"
+    }
+   },
+   {
+    "name": "237.cleared_by_a_removal",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "eligibility_lost"
+     },
+     {
+      "path": "payload.active",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.active"
+    }
+   },
+   {
+    "name": "238.both_forms",
+    "clause": "rule 238",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.then",
+      "value": "discretionary_exit_all_then_retire"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.then"
+    }
+   },
+   {
+    "name": "238.neither_form",
+    "clause": "rule 238",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.on_complete",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.then"
+    }
+   },
+   {
+    "name": "238.reason_with_on_complete",
+    "clause": "rule 238",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "target_qty"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "tripwire_ends_delegations",
+    "clause": "rule 230",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "end_delegations"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "daily_loss_flattens",
+    "clause": "rule 230",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "max_daily_loss"
+     },
+     {
+      "path": "payload.action",
+      "value": "flatten_and_pause"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "rung_scales",
+    "clause": "rule 230",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "drawdown_ladder[4]"
+     },
+     {
+      "path": "payload.action",
+      "value": "scale_sizes"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "hard_trigger_at_once",
+    "clause": "rule 232",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "hard_trigger"
+     },
+     {
+      "path": "payload.breach_time_s",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "pending_hard_breach",
+    "clause": "rule 230: MC-R19",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "hard_breach_pending"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "drawdown_past_one",
+    "clause": "rule 231: DD is unbounded",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.drawdown",
+      "value": "1.2"
+     },
+     {
+      "path": "payload.agent_equity",
+      "value": "-2000"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "no_drawdown",
+    "clause": "rule 231",
+    "base_draft": "rung_triggered",
+    "changes": [
+     {
+      "path": "payload.drawdown",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "value_past_threshold",
+    "clause": "rule 233",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.value",
+      "value": "3"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "loss_value_below_a_cent",
+    "clause": "rule 233",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "tripwire:day_loss"
+     },
+     {
+      "path": "payload.action",
+      "value": "end_delegations"
+     },
+     {
+      "path": "payload.metric",
+      "value": "realized_loss_usd"
+     },
+     {
+      "path": "payload.threshold",
+      "value": "100"
+     },
+     {
+      "path": "payload.value",
+      "value": "100.000000000001"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "new_instruments_at_1000",
+    "clause": "rule 233: V-044",
+    "base_draft": "tripwire_triggered",
+    "changes": [
+     {
+      "path": "payload.metric",
+      "value": "new_instruments"
+     },
+     {
+      "path": "payload.threshold",
+      "value": "1000"
+     },
+     {
+      "path": "payload.value",
+      "value": "1000"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "daily_loss_lifts_plainly",
+    "clause": "rule 234",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "max_daily_loss"
+     },
+     {
+      "path": "payload.action",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "rung_hard_breach_cleared",
+    "clause": "rule 234: MC-R19",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "drawdown_ladder[1]"
+     },
+     {
+      "path": "payload.action",
+      "value": null
+     },
+     {
+      "path": "payload.reason",
+      "value": "hard_breach_cleared"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "floor_loosened",
+    "clause": "rule 234",
+    "base_draft": "rung_lifted",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "lifetime_floor"
+     },
+     {
+      "path": "payload.action",
+      "value": null
+     },
+     {
+      "path": "payload.reason",
+      "value": "version_loosened"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "rung_acknowledged",
+    "clause": "rule 235",
+    "base_draft": "tripwire_lifted",
+    "changes": [
+     {
+      "path": "payload.limit",
+      "value": "drawdown_ladder[3]"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "goal_release",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "goal_release"
+     },
+     {
+      "path": "payload.warning_ref",
+      "value": null
+     },
+     {
+      "path": "payload.user_id",
+      "value": null
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     },
+     {
+      "path": "payload.canceled_order_ids",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "goal_releases_nothing",
+    "clause": "rule 236: a goal completes flat or not",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "goal_release"
+     },
+     {
+      "path": "payload.warning_ref",
+      "value": null
+     },
+     {
+      "path": "payload.user_id",
+      "value": null
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     },
+     {
+      "path": "payload.qty",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "sane_mark_clears",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "sane_mark"
+     },
+     {
+      "path": "payload.active",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_thesis_expired",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "thesis_expired"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_operator_halt",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "operator_halt"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_version_applied",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "version_applied"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "readmitted_thesis_admitted",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "thesis_admitted"
+     },
+     {
+      "path": "payload.active",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "readmitted_version_applied",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "version_applied"
+     },
+     {
+      "path": "payload.active",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "profit_stop_confirmed",
+    "clause": "rule 238",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "profit_stop_reached"
+     },
+     {
+      "path": "payload.then",
+      "value": "discretionary_exit_all_then_retire"
+     },
+     {
+      "path": "payload.on_complete",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "goal_with_no_on_complete",
+    "clause": "rule 238",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.then",
+      "value": "discretionary_exit_all_then_retire"
+     },
+     {
+      "path": "payload.on_complete",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "day_started_at_zero",
+    "clause": "§9.27",
+    "base_draft": "day_started",
+    "changes": [
+     {
+      "path": "payload.day_start_equity",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
     }
    }
   ]
