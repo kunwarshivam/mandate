@@ -13,7 +13,7 @@ test("/ shows the welcome page and keeps the address /", async ({ page, baseURL 
   await expect(page).toHaveURL(`${baseURL}/`);
   await page.getByRole("tab", { name: "Owlhead Home Page" }).click();
   await expect(page.locator("[data-slot=landing]")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Sign in" }).first()).toHaveAttribute("href", "/login");
+  await expect(page.getByRole("link", { name: "Sign in" }).first()).toHaveAttribute("href", `${baseURL}/login`);
   await expect(page.locator("[data-slot=stop-control]")).toHaveCount(0);
 });
 

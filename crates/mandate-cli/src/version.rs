@@ -161,6 +161,10 @@ impl Row {
         self.payload.get(name).and_then(Value::as_str)
     }
 
+    pub(crate) fn payload(&self) -> &Value {
+        &self.payload
+    }
+
     pub(crate) fn submitted(&self) -> Submitted {
         Submitted {
             event_id: self.event_id.clone(),

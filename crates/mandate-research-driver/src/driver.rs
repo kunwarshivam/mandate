@@ -49,14 +49,25 @@ pub trait Core {
     fn abandon(&mut self) -> bool;
 }
 
+/// One step's batch as the journal writer takes it (DEC-2206 items 4 and 8): the drafts, the
+/// artifacts the core made for them, which the writer stores before it appends, and the run every
+/// draft belongs to, which the writer puts on each envelope as its `correlation_id`.
+#[derive(Debug, Clone, Copy)]
+pub struct StepBatch<'a> {
+    pub drafts: &'a [EventDraft],
+    pub artifacts: &'a [Vec<u8>],
+    pub correlation_id: Option<&'a str>,
+}
+
 /// The agent stream's writer: one step's drafts as one `append` batch.
 pub trait JournalWriter {
-    /// The stored events, in order, whether this append committed them or an earlier one with the
-    /// same drafts did (journal spec §5.1's `AlreadyCommitted`).
+    /// Stores the batch's artifacts, then appends its drafts. Returns the stored events, in order,
+    /// whether this append committed them or an earlier one with the same drafts did (journal spec
+    /// §5.1's `AlreadyCommitted`).
     ///
     /// # Errors
     /// [`AppendFailure`] when the batch is not known to be stored.
-    fn append(&mut self, drafts: &[EventDraft]) -> Result<Vec<FoldedEvent>, AppendFailure>;
+    fn append(&mut self, batch: &StepBatch<'_>) -> Result<Vec<FoldedEvent>, AppendFailure>;
 }
 
 /// The research worker: retrieval, the gateway call, and cancellation.
@@ -149,7 +160,12 @@ impl Driver {
             }
         }
         if !drafts.is_empty() {
-            match journal.append(&drafts) {
+            let batch = StepBatch {
+                drafts: &drafts,
+                artifacts: &step.artifacts,
+                correlation_id: step.correlation_id.as_deref(),
+            };
+            match journal.append(&batch) {
                 Ok(stored) => {
                     let same = stored.len() == drafts.len()
                         && stored

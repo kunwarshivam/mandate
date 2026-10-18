@@ -1,5 +1,9 @@
 //! One agent deployment's runtime as a long-running process (E21-30 slice 1, DEC-1012).
 
+mod research;
+
+pub use research::{ArtifactSink, ResearchParts, ResearchSource, ResearchWiring, ResearchWorker};
+
 use std::time::Duration;
 
 use mandate_canon::{Object, parse};
@@ -31,6 +35,8 @@ pub struct Wiring {
     pub flatten: Box<dyn FlattenPlanner>,
     pub refs: Box<dyn Refs>,
     pub view: MandateView,
+    /// The deployment's research (DEC-2208); `None`, the default, runs none.
+    pub research: Option<ResearchWiring>,
 }
 
 impl Wiring {
@@ -68,6 +74,13 @@ enum Ran {
     Stopped,
 }
 
+/// How a read of the account stream ended.
+enum Account {
+    Folded,
+    Unreadable,
+    Unfoldable,
+}
+
 /// One agent deployment's runtime process.
 pub struct RuntimeProcess<S> {
     store: S,
@@ -78,6 +91,9 @@ pub struct RuntimeProcess<S> {
     agent: Option<StreamId>,
     control: Option<StreamId>,
     clock: Option<StreamId>,
+    /// The account stream the deployment's connection writes through, once the control stream's
+    /// `ConnectionEstablished` names it (DEC-1014). It never changes while the process runs.
+    account: Option<StreamId>,
     epoch: u64,
     /// The control stream's head when it was last handed whole while ready.
     control_handed: Option<u64>,
@@ -87,13 +103,16 @@ pub struct RuntimeProcess<S> {
     pending: Option<(Input, UtcNanos)>,
     /// The event time the drafts being written carry.
     written_at: UtcNanos,
+    /// The deployment's research, when its wiring has one (DEC-2208).
+    research: Option<research::Research>,
 }
 
 impl<S: Store> RuntimeProcess<S> {
     /// Starts at `now`: refuses any environment but paper before taking anything, takes a newer
     /// writer epoch on the agent stream (fencing every earlier process), folds the stream, and hands
     /// the core `Input::Started`. Only once that batch commits is the process ready.
-    pub fn start(store: S, wiring: Wiring, config: &Config, now: UtcNanos) -> Self {
+    pub fn start(store: S, mut wiring: Wiring, config: &Config, now: UtcNanos) -> Self {
+        let research = wiring.research.take().map(research::Research::new);
         let deployment = &config.deployment;
         let stream = |kind: &str, rest: &str| StreamId::parse(&format!("{kind}:{rest}"));
         let workspace = deployment.workspace.0.as_str();
@@ -106,10 +125,12 @@ impl<S: Store> RuntimeProcess<S> {
             agent: stream("agent", &format!("{workspace}:{}", deployment.agent.0)),
             control: stream("ctl", workspace),
             clock: stream("clock", workspace),
+            account: None,
             epoch: 0,
             control_handed: None,
             pending: None,
             written_at: now,
+            research,
         };
         if config.environment != Environment::Paper {
             this.lifecycle.observe(now, Lifecycled::Failed);
@@ -151,6 +172,10 @@ impl<S: Store> RuntimeProcess<S> {
                 Ran::Stopped => return this,
             }
         }
+        if !this.replay_account() {
+            this.lifecycle.observe(now, Lifecycled::Failed);
+            return this;
+        }
         this.hand(
             now,
             now,
@@ -158,6 +183,20 @@ impl<S: Store> RuntimeProcess<S> {
             &mut Vec::new(),
         );
         this
+    }
+
+    /// Folds the account stream before `Input::Started`, as the shell's open replays it, so the
+    /// startup hold is taken on the whole fold (DEC-1014 item 2). Whether the control stream, and
+    /// the account stream it names if any, were read and folded whole.
+    fn replay_account(&mut self) -> bool {
+        let Some(control) = self.control.as_ref().and_then(|c| self.store.rows(c)) else {
+            return false;
+        };
+        self.account = account_of(&control, self.state.deployment(), self.environment);
+        match self.account.clone() {
+            Some(account) => matches!(self.fold_account(&account), Account::Folded),
+            None => true,
+        }
     }
 
     /// Journal spec §2's stream lifecycle: the process that owns a new agent stream writes its
@@ -184,7 +223,8 @@ impl<S: Store> RuntimeProcess<S> {
     }
 
     /// One pass of the loop at the injected time `now`: an input in doubt first, then the control
-    /// stream, then the clock stream's latest tick. Returns the alerts whose drafts committed.
+    /// stream, then the account stream, then the clock stream's latest tick. Returns the alerts
+    /// whose drafts committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
         let mut alerts = Vec::new();
         if self.exited() {
@@ -196,8 +236,14 @@ impl<S: Store> RuntimeProcess<S> {
         {
             return alerts;
         }
-        if self.control_pass(now, &mut alerts) {
-            self.clock_pass(now, &mut alerts);
+        if !self.research_retry(now, &mut alerts) || self.exited() {
+            return alerts;
+        }
+        if let Some(control) = self.control_pass(now, &mut alerts)
+            && self.account_pass(now, &control)
+            && self.clock_pass(now, &mut alerts)
+        {
+            self.research_pass(now, &mut alerts);
         }
         alerts
     }
@@ -239,51 +285,105 @@ impl<S: Store> RuntimeProcess<S> {
 
     /// The control stream, handed whole each time it has grown (DEC-914 item 2: the core's own
     /// copy fold makes a row handed again inert). It is read before anything else in a pass, so
-    /// the owner's kill switch is never queued behind a tick (ES-06). Whether the pass ended with
-    /// nothing in doubt.
-    fn control_pass(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> bool {
-        let Some(control) = self.control.clone() else {
-            return false;
-        };
-        let Some(events) = self.store.rows(&control).and_then(|r| tailed(&r).ok()) else {
-            return false;
-        };
+    /// the owner's kill switch is never queued behind a tick (ES-06). The rows read, if the pass
+    /// ended with nothing in doubt.
+    fn control_pass(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Vec<StoredEvent>> {
+        let control = self.control.clone()?;
+        let rows = self.store.rows(&control)?;
+        let events = tailed(&rows).ok()?;
         let head = events.last().map_or(0, |e| e.seq.0);
         if self.control_handed == Some(head) {
-            return true;
+            return Some(rows);
         }
         for event in events {
             if !self.hand(now, now, Input::Journal(event), alerts) {
-                return false;
+                return None;
             }
         }
         self.control_handed = Some(head);
-        true
+        Some(rows)
+    }
+
+    /// The account stream's rows past the core's head, folded into the core as the shell's copy
+    /// fold folds them, so a clean `ReconciliationRun` lifts the startup hold and the executor's
+    /// `AgentModeApplied` reaches the runtime on the next input (DEC-1014 item 1). The account is
+    /// the one the control stream's `control` rows name; a process that follows one account and
+    /// is told of another stops, and the next process follows the new one from its start. Whether
+    /// the clock may be read: an account that cannot be read folds nothing this pass, and the tick
+    /// is still handed, so no risk exit or deadline waits on it (`AGENTS.md` rule 13); an opening
+    /// decided on a mode that may be stale still meets the executor's gate (rule 1).
+    fn account_pass(&mut self, now: UtcNanos, control: &[StoredEvent]) -> bool {
+        let named = account_of(control, self.state.deployment(), self.environment);
+        match (&self.account, named) {
+            (Some(followed), Some(named)) if *followed != named => {
+                self.lifecycle.observe(now, Lifecycled::Failed);
+                return false;
+            }
+            (None, named) => self.account = named,
+            _ => {}
+        }
+        let Some(account) = self.account.clone() else {
+            return true;
+        };
+        match self.fold_account(&account) {
+            Account::Folded | Account::Unreadable => true,
+            Account::Unfoldable => {
+                self.lifecycle.observe(now, Lifecycled::Failed);
+                false
+            }
+        }
+    }
+
+    /// Folds the rows of `account` past the core's head for it. A row the core cannot fold, or one
+    /// journaled for another environment, is never skipped (DEC-85, `AGENTS.md` rule 8).
+    fn fold_account(&mut self, account: &StreamId) -> Account {
+        let Some(rows) = self.store.rows(account) else {
+            return Account::Unreadable;
+        };
+        let head = self.state.head(account.as_str()).map_or(0, |seq| seq.0);
+        let fresh: Vec<StoredEvent> = rows.into_iter().filter(|r| r.seq > head).collect();
+        if fresh
+            .iter()
+            .any(|r| r.environment != self.environment.as_str())
+        {
+            return Account::Unfoldable;
+        }
+        let Ok(events) = tailed(&fresh) else {
+            return Account::Unfoldable;
+        };
+        for event in events {
+            if fold(&mut self.state, &event).is_err() {
+                return Account::Unfoldable;
+            }
+        }
+        Account::Folded
     }
 
     /// The scheduler's latest tick, as the core's risk clock. It is handed on every pass: the core
     /// evaluates each risk-clock second once and takes a tick it has seen as no input at all, so a
     /// repeat costs nothing and no bookkeeping of what was handed can drift from the journal. A clock
-    /// stream that cannot be read hands no tick and holds nothing else.
-    fn clock_pass(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) {
+    /// stream that cannot be read hands no tick and holds nothing else. Whether the pass ended with
+    /// a readable clock and nothing in doubt, so the research pass may follow.
+    fn clock_pass(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> bool {
         let Some(clock) = self.clock.clone() else {
-            return;
+            return false;
         };
         let Some(rows) = self.store.rows(&clock) else {
-            return;
+            return false;
         };
         let latest = rows
             .iter()
             .filter(|r| r.event_type == "ClockAdvanced")
             .filter_map(tick_of)
             .max();
-        if let Some(tick) = latest {
-            self.hand(
+        match latest {
+            Some(tick) => self.hand(
                 now,
                 now,
                 Input::Tick(RiskClock::from_secs(tick.secs())),
                 alerts,
-            );
+            ),
+            None => true,
         }
     }
 
@@ -391,6 +491,7 @@ impl<S: Store> RuntimeProcess<S> {
                         event_type: &draft.event_type,
                         schema_version,
                         causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
+                        correlation_id: None,
                         config_refs: &config_refs,
                         payload: &draft.payload,
                     },
@@ -434,6 +535,29 @@ impl<S: Store> RuntimeProcess<S> {
         let agent = self.agent.as_ref()?;
         Some(self.state.head(agent.as_str()).map_or(0, |seq| seq.0))
     }
+}
+
+/// The account stream the latest version-2 `ConnectionEstablished` of the deployment's connection
+/// in `environment` names on the control stream (journal spec §9.8: an account stream belongs to
+/// the connection whose establishment names its `account_ref`). `None` until one does.
+fn account_of(
+    control: &[StoredEvent],
+    deployment: &Deployment,
+    environment: Environment,
+) -> Option<StreamId> {
+    let reference = control.iter().rev().find_map(|row| {
+        if row.event_type != "ConnectionEstablished" || row.schema_version != 2 {
+            return None;
+        }
+        let payload = parse(&row.body).ok()?.get("payload")?.clone();
+        if payload.get("connection_id")?.as_str()? != deployment.connection.0
+            || payload.get("environment")?.as_str()? != environment.as_str()
+        {
+            return None;
+        }
+        payload.get("account_ref")?.as_str().map(str::to_owned)
+    })?;
+    StreamId::parse(&format!("acct:{}:{reference}", deployment.workspace.0))
 }
 
 /// The tick a `ClockAdvanced` row carries (journal spec §9.20).

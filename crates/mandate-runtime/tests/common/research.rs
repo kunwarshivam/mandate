@@ -556,6 +556,7 @@ pub fn config() -> ResearchConfig {
         bounds: OutputBounds::v0_1(),
         description: "Long-only US large caps, on public news and filings.".to_owned(),
         revisions_enabled: false,
+        agentic: None,
     }
 }
 
@@ -573,7 +574,7 @@ pub fn open_preconditions() -> Preconditions {
 }
 
 pub fn production_preconditions() -> Preconditions {
-    Preconditions::read(&JournalCatalog)
+    Preconditions::read(&JournalCatalog::JOURNAL)
 }
 
 /// The `research_equity` envelope: five instruments, US equities, a research envelope with a
@@ -634,6 +635,7 @@ pub struct World {
     pub lineages: LineageState,
     pub active: Vec<ActiveThesis>,
     pub last_reservation: Option<RiskClock>,
+    pub data_symbols: BTreeSet<Symbol>,
 }
 
 impl World {
@@ -651,6 +653,7 @@ impl World {
             lineages: LineageState::default(),
             active: Vec::new(),
             last_reservation: None,
+            data_symbols: BTreeSet::from([symbol("AAPL"), symbol("MSFT")]),
         }
     }
 
@@ -665,6 +668,7 @@ impl World {
             lineages: &self.lineages,
             active_theses: &self.active,
             last_reservation: self.last_reservation,
+            data_symbols: &self.data_symbols,
         }
     }
 

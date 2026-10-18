@@ -102,5 +102,6 @@ pub fn wiring_for(approvers: &[String], author: &str) -> Wiring {
                 live_cli_confirm: None,
             },
         },
+        research: None,
     }
 }

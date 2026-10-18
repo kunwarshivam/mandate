@@ -2,7 +2,6 @@ import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { OwlheadWordmark } from "@/components/brand/Logo";
-import { LOGIN_PATH } from "@/lib/auth-routes";
 import { cn } from "@/lib/utils";
 import { BetaForm } from "../beta-form";
 import { Ambient } from "./ambient";
@@ -15,6 +14,7 @@ import { Shot } from "./shot";
 import { SPRING_VARS } from "./spring";
 import { Wont } from "./wont";
 import styles from "./scroll.module.css";
+import { SIGN_IN_HREF } from "@/lib/hosts";
 
 /** Limits are never said to cap a loss without this beside them. */
 export const GAP_CAVEAT =
@@ -120,7 +120,7 @@ export function LongPage() {
             <a href={`#${SIGN_UP_ID}`} className={PRIMARY}>
               Join the beta
             </a>
-            <Link href={LOGIN_PATH} className={SECONDARY}>
+            <Link href={SIGN_IN_HREF} className={SECONDARY}>
               Sign in
             </Link>
           </p>
@@ -224,7 +224,7 @@ export function LongPage() {
             <p className="max-w-[36rem] text-pretty">Owlhead is in private beta. It is software, not investment advice. Trading involves risk, and you can lose money.</p>
             <p className="flex flex-wrap gap-x-4 gap-y-1">
               <span>© 2026 Owlhead</span>
-              <Link href={LOGIN_PATH} className="underline decoration-1 underline-offset-2 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring">
+              <Link href={SIGN_IN_HREF} className="underline decoration-1 underline-offset-2 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring">
                 Sign in
               </Link>
               <a href="#desktop" className="underline decoration-1 underline-offset-2 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring">

@@ -288,6 +288,14 @@ the spec invariants (DP-n) its tests cover.
   §9.18) is registered in `mandate-journal` with vectors for rules 143 and 144; `GET
   /backtests/{id}` serves `read-models/backtest` in the workspace that ran it only; disclosures
   stay DEC-1003's placeholder names.
+  *Registration landed* (claim [#1463](https://github.com/kunwarshivam/mandate/issues/1463), lane
+  I4): `mandate-journal` registers `BacktestRunRecorded` (`src/backtest_records.rs`) with rules 143
+  and 144, `rule` and `man` required, written by a `user` or `system` actor only
+  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors. *The
+  run's append landed* ([DEC-1144](decisions/DEC-1144.md)): `mandate-backtest-runner run` runs a
+  version over JSON inputs and stores the report, its input objects and the payload as artifacts,
+  and `mandate backtest record` re-checks them and journals the record as the `backtest_runner`
+  system. `POST /backtests` and the local cell's Job remain.
 
 ### E5 Journal
 
@@ -1514,7 +1522,10 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   compile, validate, diffs, and an agent's later versions (with `MandateConfirmed` version 2,
   E10-15); the confirmation screen's worst-case figures, unasked dollars, and provenance badges;
   `DeploymentRejected`; the acknowledgment route, until `mandate-journal` registers
-  `OwnerAcknowledged` on the control stream (DEC-2102 item 7); the hold and its lift (after the runtime folds them, DEC-1007 item 1); and
+  `OwnerAcknowledged` on the control stream (DEC-2102 item 7); when E9-4 binds the step-up port,
+  an owner command's append made conditional on the `control_head` its evidence names (DEC-279
+  item 1's digest binds the head read before step-up is judged, and the append does not yet check
+  it); the hold and its lift (after the runtime folds them, DEC-1007 item 1); and
   the deploy request's schema with its `mandate-api` type, which must land together (DEC-2101
   item 6).
 - **E10-13 (Must, M8, with the connections spec; SC)** As a workspace admin, I want to connect and
@@ -2147,8 +2158,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   `check_thesis_record`, scores every closed thesis (admitted or not) by `score::evaluate`, one
   scorecard per research-agent `(model_id, model_version, content_hash)` (E15-3), costs each
   thesis against itself, and writes the report artifact and `EvaluationRunRecorded` (journal spec
-  §9.18, rule 145; registration with vectors follows). `GET /evaluations/{id}` serves it in an
-  internal paper workspace only.
+  §9.18, rule 145). `GET /evaluations/{id}` serves it in an internal paper workspace only.
+  *Registration landed* (lane I4): `mandate-journal` registers `EvaluationRunRecorded` with rule
+  145, `rule` required, written by a `user` or `system` actor only
+  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors; the harness
+  and the route remain.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -2335,6 +2349,35 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   their debounce and rate limit (mandate spec change); the longer strategy brief exists, with the
   validator's warning where it contradicts the envelope; and a journaled turn start lets a restart
   resume a run within its deadline without losing a reservation from the ceiling's fold.
+
+- **E19-15 (Should, for the 2026-10-26 demo; SC: tenant isolation, roles; claim
+  [#1536](https://github.com/kunwarshivam/mandate/issues/1536), lane EX)** As an owner, I want to
+  ask my agent at the desk "why did you buy X?", "why did you ask me?", "what are you watching?", or
+  "why was this refused?" and get an answer from my own records, each claim linked to the record it
+  rests on, a plain-language explanation under each approval ask, and a transcript of every desk and explain run, so
+  that I understand what my agent did without reading the journal
+  ([agent harness spec §15](../specs/agent-harness.md#15-owner-and-explain-runs-the-desk),
+  [DEC-2240](decisions/DEC-2240.md); implements E12-5 and DEC-192 as `owner` and `explain` runs).
+  *Depends on:* E19-13 (lane AH): the loop, its run records, and the tool contract, which it reuses
+  and does not duplicate; E15-6 to E15-10 (the gateway); E21-31 (the API server). *Accepted when:*
+  - the owner and explain tool sets are read, `note`, and `answer` only, and every stream after any
+    run holds only that run's records more than before, under a compromised model (EX-1);
+  - cross-tenant and cross-agent reads: a property test over two workspaces and several agents with
+    canaries finds no foreign canary in any tool result, prompt, answer, or record, and identical
+    refusals (`unknown_item` to the model, `not_found` at the API) for foreign and absent refs (EX-2, EX-3), its oracle shown to catch a seeded
+    scope bug; and an API-2 matrix test of the desk, cited-record, transcript, and approval routes;
+  - no answer with an uncited segment, an unread citation, or a fixture advice phrase is shown
+    (EX-4, EX-5); no prompt holds a record's numeric field or a number from the question (EX-6);
+  - every shown answer's `written_after_reading` and every turn's menu are recomputed by an oracle
+    from the run's records (EX-12); every returned field is servable to the reader's row by the cited-record projections workspace API §4.6.1 defines (EX-13);
+  - spend is reserved against the agent's, workspace's, and deployment's configured budgets, never a
+    constant (EX-7); answers are journaled before shown (EX-8); approvals, exits, and kill switches
+    are byte-identical with the explain run absent, stalled, or failing (EX-9);
+  - CI and the demo use recorded fakes only; the disclaimer is the placeholder until DEC-2241, and
+    approval explanations stay behind both `desk.model_answers` and `desk.approval_explanations` until its item 3 is decided.
+  *Slice 2 (planned, spec §15.12):* desk actions become proposal cards built by deterministic code
+  through E19-13's action tools and sent only by the owner's own call with step-up (HI-26, lane SU);
+  its own spec change and DEC first.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 
@@ -2738,7 +2781,29 @@ enables `live` (ES-23, OPS-5).
   an agent the control stream does not deploy, and a property test over random event sequences
   with an independent oracle shows it; after the crash-loop bound the agent is left `Paused`, the
   pause is journaled and an opaque alert raised; it holds no broker credential and sends no order;
-  and its own outage stops no running process and no kill switch (OPS-4).
+  and its own outage stops no running process and no kill switch (OPS-4). *Slice 1* ([DEC-1170](decisions/DEC-1170.md)): journal spec v0.48 §9.21's records, the
+  crate's fold, driver, fake and Kubernetes adapter, with the property test. *Left:* the process
+  binary (loop, probes, Postgres journal port, and a deployment's account read from `AgentDeployed`
+  version 2's connection and that connection's establishment, journal spec v0.54,
+  [DEC-1171](decisions/DEC-1171.md), in place of a resolver over stored mandates, with the CLI and
+  the workspace API writing version 2), the chart's
+  templates, RBAC and Deployment, the Compose adapter, the restart drill through `cargo xtask cell
+  drill`; the owner's resume lifting a crash-loop pause once the runtime copies the pause (E21-30);
+  an alert for an instance stuck `Pending` or `Unknown`; deleting exited pods; a check that the
+  pod templates mount no service-account token; the writers' checks of rules 200 and 201 (a writer writes version 2
+  exactly when rule 201 holds, and version 1 otherwise, as today). Follow-ups from DEC-1171's review
+  (minors, freeze rule):
+  - m1: the CLI lets a stopped agent's id be deployed again, while §9.21 reads `AgentStopped` as
+    final; decide whether agent ids are reused.
+  - m2: add a vector for a version-1 deployment, a stop, then a version-2 deployment of the same
+    agent; the Rust manager must treat that stop as final (code change).
+  - m3: a manager must not ship into a workspace holding version-1 deployments; say how an existing
+    one is retired or redeployed at version 2.
+  - m4: the `agent_deployed` oracle's case of a revocation after the deployment cannot fail a
+    mutant; and no vector shows an account-stream copy against rule 201.
+  - m5: the §9 catalogue row for `AgentDeployed` does not mention version 2.
+  - m6: `docs/specs/workspace-api.md` (near line 673) and `docs/design/infrastructure.md` (near line
+    277) still describe version 1; the code change updates them.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
