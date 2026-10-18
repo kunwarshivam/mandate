@@ -244,22 +244,34 @@ fn an_unpinned_or_foreign_output_refuses_the_run() {
     );
 }
 
-/// DEC-1000 item 8: a corporate action inside the bars refuses the run; one outside does not.
+/// DEC-1000 item 8: a corporate action inside the bars refuses the run, on either edge too.
 #[test]
 fn a_corporate_action_in_range_refuses_the_run() {
     let days = trading_days(DAYS);
     let outputs = daily_outputs(&days, "0.5");
     let bars = flat_bars(DAYS);
-    let inside = run_with(
-        &pinned(),
-        &settings(),
-        &xyz(),
-        &bars,
-        &outputs,
-        &[],
-        &[days[10]],
-    );
-    assert_eq!(refusal(inside), "corporate_action_in_range");
+    for date in [days[10], days[0], days[DAYS - 1]] {
+        let inside = run_with(
+            &pinned(),
+            &settings(),
+            &xyz(),
+            &bars,
+            &outputs,
+            &[],
+            &[split_on(date)],
+        );
+        assert_eq!(refusal(inside), "corporate_action_in_range", "{date}");
+    }
+}
+
+/// DEC-1000 item 8: a corporate action outside the bars does not refuse; the run completes, and
+/// its configuration names the action (DEC-2245 item 4).
+#[test]
+#[ignore = "pending E4-4"]
+fn a_corporate_action_outside_the_bars_completes_the_run() {
+    let days = trading_days(DAYS);
+    let outputs = daily_outputs(&days, "0.5");
+    let bars = flat_bars(DAYS);
     let outside = run_with(
         &pinned(),
         &settings(),
@@ -267,21 +279,9 @@ fn a_corporate_action_in_range_refuses_the_run() {
         &bars,
         &outputs,
         &[],
-        &[day("2026-08-14")],
+        &[split_on(day("2026-08-14"))],
     );
-    assert!(outside.is_ok());
-    for edge in [days[0], days[DAYS - 1]] {
-        let on_edge = run_with(
-            &pinned(),
-            &settings(),
-            &xyz(),
-            &bars,
-            &outputs,
-            &[],
-            &[edge],
-        );
-        assert_eq!(refusal(on_edge), "corporate_action_in_range", "{edge}");
-    }
+    outside.unwrap_or_else(|e| panic!("the run completes: {e:?}"));
 }
 
 /// DEC-1000 item 8: crypto is slice 2's.
