@@ -98,7 +98,6 @@ fn steps(path: &str) -> Vec<&str> {
 /// DEC-2244 item 3, hand-written: the example is the hand-calculated cases' decision, closes, cost
 /// and baselines.
 #[test]
-#[ignore = "pending E17-8"]
 fn the_example_decodes_to_the_hand_calculated_inputs() {
     let inputs = decode_values(&example()).unwrap_or_else(|e| panic!("decodes: {e:?}"));
     assert_eq!(inputs.decision_id, "DEC-122");
@@ -116,7 +115,6 @@ fn the_example_decodes_to_the_hand_calculated_inputs() {
 /// Every object member is required: removing any one, at any depth of any file, refuses, naming
 /// it.
 #[test]
-#[ignore = "pending E17-8"]
 fn a_missing_member_refuses_naming_it() {
     for (file, path) in every_path() {
         let all = steps(&path);
@@ -138,7 +136,6 @@ fn a_missing_member_refuses_naming_it() {
 
 /// A member no reader names refuses, naming it, in every object of every file.
 #[test]
-#[ignore = "pending E17-8"]
 fn an_unknown_member_refuses_naming_it() {
     let objects = INPUT_FILE_NAMES
         .iter()
@@ -163,7 +160,6 @@ fn an_unknown_member_refuses_naming_it() {
 /// Every leaf of the wrong type refuses, naming it: text (a decimal, an instant, a date, an id or
 /// a word) as `null`, and the count as text.
 #[test]
-#[ignore = "pending E17-8"]
 fn a_leaf_of_the_wrong_type_refuses_naming_it() {
     for (file, path) in every_path() {
         let mut values = example();
@@ -180,7 +176,6 @@ fn a_leaf_of_the_wrong_type_refuses_naming_it() {
 
 /// A text leaf that is the right type but not its value's form refuses, naming it.
 #[test]
-#[ignore = "pending E17-8"]
 fn a_malformed_value_refuses_naming_it() {
     for (file, path, bad) in [
         (0, "decision.json/window/from", "2026-09-01"),
@@ -205,7 +200,6 @@ fn a_malformed_value_refuses_naming_it() {
 /// One instrument with two series, or a window that ends before it starts, refuses; a window of
 /// one instant is a window.
 #[test]
-#[ignore = "pending E17-8"]
 fn a_repeated_series_or_a_reversed_window_refuses() {
     let mut values = example();
     let first = parent(&mut values[1], &steps("closes.json/series/0/instrument")).clone();
@@ -230,7 +224,6 @@ fn a_repeated_series_or_a_reversed_window_refuses() {
 
 /// A file that is not canonical JSON refuses, naming the file.
 #[test]
-#[ignore = "pending E17-8"]
 fn an_unreadable_file_refuses_naming_it() {
     let [decision, closes, cost, baselines] = example().each_ref().map(mandate_canon::to_canonical);
     let files = [&decision, &closes, &cost, &baselines];
