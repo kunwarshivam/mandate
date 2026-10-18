@@ -1787,6 +1787,10 @@
       "digest": "sha256:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
     },
     {
+      "kind": "mutant_value",
+      "digest": "sha256:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+    },
+    {
       "kind": "approve",
       "digest": "sha256:5E"
     },
