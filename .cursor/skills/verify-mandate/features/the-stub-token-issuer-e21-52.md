@@ -12,4 +12,4 @@
   refusals), `http.rs` (421, 415, 400, 413, 404, no CORS), `process.rs` (each refusal alone on
   standard error with exit 2, the announced issuer, SIGTERM), and `sign_in.rs` (`POST /v1/sessions`
   on `mandate-api-server` with the stub's key set fetched over loopback).
-- **Run:** `cargo nextest run -p mandate-stub-issuer --run-ignored all`.
+- **Run:** `cargo nextest run -p mandate-stub-issuer`.
