@@ -88766,7 +88766,7 @@
   ]
  },
  "agent_deployed": {
-  "spec": "docs/specs/journal.md v0.54 §9.24 (DEC-1171)",
+  "spec": "docs/specs/journal.md v0.56 §9.21, §9.24 (DEC-1171, DEC-1173)",
   "stream_id": "ctl:ws_01J8Z2",
   "artifacts": [
    {

@@ -53,7 +53,7 @@ from control import (
     violations,
 )
 
-SPEC = "docs/specs/journal.md v0.54 §9.24 (DEC-1171)"
+SPEC = "docs/specs/journal.md v0.56 §9.21, §9.24 (DEC-1171, DEC-1173)"
 AT = "2026-10-17T16:00:00.000000000Z"
 ARTIFACTS = {name: obj for name, obj in artifacts().items() if name in ("mandate_document", "deployment_record")}
 DOCUMENT = ARTIFACTS["mandate_document"]
