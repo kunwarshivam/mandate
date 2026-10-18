@@ -15,7 +15,7 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 | `charts/vault/` | The workspace vault: OpenBao, pinned by digest, in server mode on raft storage over TLS 1.3, reached only by the processes whose egress names it, unsealed by hand ([DEC-2019](../../docs/project/decisions/DEC-2019.md)). Installed before the workspace chart |
 | `charts/archive-store/` | The local cell's stand-in for the S1 endpoint the journal archives to: the pinned test store, in its own namespace, reachable only by the journal's archive clients (DEC-1050 item 5). Never in cell #1 |
 | `compose/compose.json` | The same processes for one host (infrastructure §3.2, hybrid), generated: `cargo xtask cell generate --write` |
-| `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ |
+| `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ ; cell #1's own settings on top of `k3s.yaml`, and its bring-up, are in [`../hosted/`](../hosted/README.md) |
 | `images/mandate.Dockerfile` | The interim `mandate` image the cell builds from the change; lane R2 (E21-35) replaces it |
 | `images/deploy-manager.Dockerfile` | The deployment manager's image (`mandate-deployd`, DEC-1172), built beside it the same way |
 | `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
@@ -60,6 +60,9 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   process's start (OPS-13);
 - `environment` is `paper` or `backtest` only, and every image is pinned by digest or is the
   cell's own `mandate.local/` build;
+- `MANDATE_DEPLOYMENT_TIER` on every process comes from the `deploymentTier` value alone:
+  `production` unless a values file says otherwise, `ci` in the local cell, `dev` on hosted cell #1
+  (DEC-971 item 2, [DEC-2001](../../docs/project/decisions/DEC-2001.md) item 6);
 - the cell's one ingress is a `cloudflared` pod dialing out to Cloudflare's tunnel edge, off in the
   local cell: no Service, NodePort, LoadBalancer or Ingress, and the tunnel token a mounted file;
 - no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and
@@ -206,19 +209,23 @@ there is one, and what the lane still has to land. A gap never fails the run and
 Each step's heading reads `ready`, `partial` or `skipped` with the lanes it waits on, and the
 report closes with every wait grouped by lane. The run ends, in the same pod, by exporting the
 workspace's control stream and verifying it by journal spec §11 against the artifact store its
-gestures wrote, so every artifact a record names is checked. Each run uses a fresh workspace,
-`demo<run id>`.
+gestures wrote, so every artifact a record names is checked. Each run uses a fresh workspace, a
+ULID made from the run id (`01KDEM<run id>000000000D`), founded for the demo owner, the member the
+stub issuer's `demo-owner` subject is linked to; before the gestures, the scenario points the API
+and the deployment manager at it (`helm upgrade --reuse-values --set api.workspace=…`) and waits
+for both to roll out, so every step, through the CLI, the API or `web/`, acts on one workspace
+(DEC-2010).
 
-The run's own report is the up-to-date list; on 2026-10-18, after slice 4, it read:
+The run's own report is the up-to-date list; on 2026-10-18, after slice 5, it read:
 
 | Step | Today | Runs | Waits on |
 |---|---|---|---|
-| 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found`; the cell's API refusing a read with no session (the one 401) | SI (E21-52, #1591): the stub issuer's entry point; E2E (E21-54): sign in and read the API's own workspace |
-| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy`, each code shown then typed | SI and W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
+| 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found` for the demo owner; the cell's API refusing a read of the run's workspace with no session (the one 401); the demo owner's sign-in through the stub issuer (204 and its cookie) | MB (E21-31), the membership parser: the API reads memberships through `control_entry`, without which every signed-in read answers `membership_unavailable`; W2: the same in `web/` |
+| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy`, each code shown then typed | MB and W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
 | 3. Research, through the gateway's recorded fake | skipped | Nothing yet | D1: the runtime started; I2 (E19-2): a deployment's research configured (DEC-2208); AH (E19-13): the agentic loop over its state (#1551, #1561, #1566, #1569 on `main`) |
-| 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4, #1592) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
-| 5. A backtest of the same version | skipped | Nothing yet | E2E: run the runner and `mandate backtest record` (#1581) in the gestures' pod; SI: the API read with a session |
-| 6. The kill switch | partial | `agent kill --agent demo-spy` (agent scope), recorded before the closing export and verify | SI and W2: from `web/`; D1 and X: the processes stop on it |
+| 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
+| 5. A backtest of the same version | skipped | Nothing yet | E2E: run the runner and `mandate backtest record` (#1581) in the gestures' pod; MB: the API read with a session |
+| 6. The kill switch | partial | `agent kill --agent demo-spy` (agent scope), recorded before the closing export and verify | MB and W2: from `web/`; D1 and X: the processes stop on it |
 
 The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
 every opening asked, protection on. CI's `cell-demo` job, which no required check depends on, runs

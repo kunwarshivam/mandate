@@ -1,0 +1,6 @@
+#!/bin/sh
+# Drops every packet from the pod bridge to the metadata address, before routing; idempotent.
+set -eu
+rule="PREROUTING -i cni0 -d 169.254.169.254/32 -j DROP"
+# shellcheck disable=SC2086
+iptables -t raw -C $rule 2>/dev/null || iptables -t raw -I $rule

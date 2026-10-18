@@ -1164,6 +1164,17 @@ after U-A1 to U-A5 are recorded.
     fold advances on every event;
   - the approval surface shows the current requirement, not only the bound `approvers` (a PX item);
   - add the per-order approval to §4.3's list of what `independent_approval_required` scopes.
+  *Follow-up (DEC-2509, M7 S2; claim [#1594](https://github.com/kunwarshivam/mandate/issues/1594)):*
+  journal spec §9.28 closes `OwnerAcknowledged` and adds `OwnerAcknowledgmentRequested`. Still
+  owed:
+  - `mandate-journal` registers both, with rule 239 and §9.28's vectors (M7 S2);
+  - `mandate-journal` registers `OwnerCommandRefused`'s reasons `trigger_unknown`,
+    `trigger_superseded` and `request_invalid`, with rule 28's scoping (M7 S2);
+  - the CLI's `agent request-ack` and `agent acknowledge` (M7 S2);
+  - the workspace API's members (DEC-2102 item 4, lane L1);
+  - the executor's copy and its four checks (E7-4, lane X);
+  - **a §11 range check for stream rules 240 and 241**, with a new `VerificationRun` check code.
+    Until it lands, the writers and the executor hold those rules, failing closed.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
   *Spec:* [notifications spec](../specs/notifications.md) ([DEC-438](decisions/DEC-438.md)). The
@@ -2192,6 +2203,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   `MANDATE_API_INTERNAL_PAPER_WORKSPACE=true`, which start refuses unless the hosted control stream
   is paper throughout; otherwise every evaluation id is the 404 an absent one gets. The harness
   remains.
+  *Debt (DEC-2244 slice (b), #1609):* `crates/mandate-evaluation/src/inputs.rs`'s `fee_config`
+  (about line 230) and its helpers `fields`, `text`, `parsed`, `list`, `date` and `word` repeat
+  `crates/mandate-backtest-runner/src/inputs.rs`'s (about line 598), because nothing may depend on
+  the runner. One shared strict parser of `mandate_accounting::Config`, in a crate below both,
+  replaces the two copies.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -2767,8 +2783,9 @@ enables `live` (ES-23, OPS-5).
 - **E21-30 (Proposed, M8; SC; lane P3)** As an owner, I want my agent's runtime and my account's
   executor run as long-running processes in the cell, so that the agent trades unattended within
   its mandate (design §3.1, §3.4). E21-2's criteria, met in the local cell (E21-37). *Accepted
-  when:* a new crate `mandate-daemon` runs one runtime per agent deployment and one executor per
-  account over the existing crates, using `mandate-shell` and `mandate-paper` only through their
+  when:* a new crate `mandate-daemon` runs one runtime per agent deployment, and a new crate
+  `mandate-executord` one executor per account ([DEC-2003](decisions/DEC-2003.md) item 1), over
+  the existing crates, using `mandate-shell` and `mandate-paper` only through their
   public items; each loop tails its inputs from the journal with `LISTEN`/`NOTIFY` only as a wake-up
   hint, and a test that drops every notification changes no outcome; kill-switch and risk-exit
   inputs are read before any other (ES-06); killing either process at each step of submission
@@ -2776,6 +2793,11 @@ enables `live` (ES-23, OPS-5).
   but still applies the kill switch and, once replayed, risk exits; the runtime has no broker
   credential and no route to a broker; the executor's broker in CI is a fixture, never a broker
   host; and each image is built without the `live` feature, except the one E21-48 adds.
+  *Left (lane X, [DEC-2003](decisions/DEC-2003.md) item 6):* a prerequisite before the executor
+  process runs anywhere beyond the dev and CI cell: E7-4's flatten-intent body and its account and
+  workspace kill-switch scopes, so a kill switch reaches the executor from the control stream
+  without the runtime (design §3.6, `AGENTS.md` rule 13). Until then it reaches the executor only
+  through the runtime's copy.
 - **E21-31 (Proposed, M8; SC; lane A1)** As a workspace member, I want the workspace API served by
   its own process in the cell, so that the web app and the CLI reach my deployment the same way
   (design §3.1, §9; the API server, "A2" in `deploy/README.md`). *Accepted when:* a new crate
@@ -2840,18 +2862,20 @@ enables `live` (ES-23, OPS-5).
   - The chart test of the gate seeds no 9153 allow in the manager's policy.
   - `PgControl`'s `rows_after` reads the whole control stream on every pass.
   - `pg.rs` has no competing-writer test for the writer epoch taken for each append.
-  Follow-ups from DEC-1171's review (minors, freeze rule):
-  - m1: the CLI lets a stopped agent's id be deployed again, while §9.21 reads `AgentStopped` as
-    final; decide whether agent ids are reused.
-  - m2: add a vector for a version-1 deployment, a stop, then a version-2 deployment of the same
-    agent; the Rust manager must treat that stop as final (code change).
-  - m3: a manager must not ship into a workspace holding version-1 deployments; say how an existing
-    one is retired or redeployed at version 2.
-  - m4: the `agent_deployed` oracle's case of a revocation after the deployment cannot fail a
-    mutant; and no vector shows an account-stream copy against rule 201.
-  - m5: the §9 catalogue row for `AgentDeployed` does not mention version 2.
-  - m6: `docs/specs/workspace-api.md` (near line 673) and `docs/design/infrastructure.md` (near line
-    277) still describe version 1; the code change updates them.
+  Follow-ups from DEC-1171's review (minors, freeze rule), decided in
+  [DEC-1173](decisions/DEC-1173.md) and specified in journal spec v0.56:
+  - m1 (decided, writers to build): an agent id is deployed once, so a writer refuses an agent an
+    `AgentStopped` names; the CLI's `agent_stopped` and the workspace API's refusal land with the
+    writers.
+  - m2 (done in the vectors; the manager to build): a stop is final even for a deployment the
+    manager never read.
+  - m3 (decided; the manager to build): a version-1 deployment is retired before the manager runs
+    its workspace, and the manager raises `deployment_unread` for one it finds.
+  - m4 (done): the oracle's revocation-after-deployment case now fails two seeded bugs, and a
+    vector shows rule 201 refusing an account stream's copy.
+  - m5 (done): the §9 catalogue row names version 2.
+  - m6 (half done): `docs/specs/workspace-api.md` states the version its deployment writes;
+    `docs/design/infrastructure.md` changes with the manager's code.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
@@ -3067,6 +3091,23 @@ enables `live` (ES-23, OPS-5).
   then migrated by the command ends with each file applied once; no process applies a migration at
   start, shown by the existing xtask lint; and the chart's migration Job (E21-36), E21-41 and the
   CI cell (E21-37) all run it.
+- **E21-51 (Proposed, M8, for the 2026-10-26 demo; lane H; its steps touch SC paths: credentials, the
+  cell's ingress)** As the founder, I want cell #1 stood up on its two DigitalOcean droplets from a clean
+  account in one scripted run, so that the demo runs on the hosted cell, paper and demo data only
+  (DEC-995, DEC-990 item 2; [DEC-2001](decisions/DEC-2001.md)). *Accepted when:* `deploy/hosted/`
+  holds cloud-init for both nodes, k3s pinned by version and SHA-256, the cloud firewall as code,
+  and `cell1.py`, whose `--dry-run` prints every doctl, cloudflared, ssh, kubectl, helm and Cloudflare
+  API call and calls nothing; no droplet admits an inbound connection from the internet, SSH
+  included, and the founder reaches the nodes only through an ops tunnel behind Cloudflare Access;
+  the chart (E21-36) is installed with hosted values, its images pulled from private GHCR with a
+  `read:packages` token held as a Secret in the cluster, and `MANDATE_DEPLOYMENT_TIER` set from the
+  chart's own value; the API's public hostname answers only through Access; the journal's cold
+  store is bound to the R2 bucket `mandate-cell1-journal-cold`; no secret is on a command line, in
+  an environment variable, in a log, or in the runbook, shown by a recorded run; the same `cluster`
+  step passes against a two-node k3d cluster; and the founder's runbook gives the exact commands.
+  Agents create no cloud resource and spend nothing. Follow-ups: rotating the ops tunnel's first
+  token (DEC-2001 item 4); the `object-storage` egress CIDRs once E5-7's shipper or E21-41's backups
+  run.
 - **E21-52 (Proposed, M8; SC; lane SI)** As an operator of a `dev` or `ci` cell, I want a local stub
   token issuer, so that `cargo xtask cell demo` can open an API session without the managed issuer
   (DEC-2100; the E2E lane's gap 1). *Accepted when:* the tool crate `mandate-stub-issuer`, which no
@@ -3109,6 +3150,38 @@ enables `live` (ES-23, OPS-5).
   API's image (A1), its version and deploy routes (A2), the runtime's image (P), the executor (X),
   the research driver (I2), step-up (SU), the backtest's API read and `web/` screen (I4, W2), the
   kill switch's CLI (O4) and the deployment manager (D1).
+- **E21-55 (Proposed, M8, for the 2026-10-26 demo; SC; lane MB; after E21-31; claim #1623;
+  DEC-2110)** As a workspace member, I want the API server to read my membership from the
+  workspace's control stream, so that my signed-in reads are answered rather than refused as
+  `membership_unavailable` (workspace API spec §3.11 item 8; DEC-978 item 8; DEC-991 item 4).
+  *Accepted when:* `mandate-api-server` wires `members::control_parser` instead of the placeholder
+  that fails every lookup; every `Member*` record of the hosted workspace's stream maps through
+  `mandate_identity::control_entry` and folds in stream order at the lookup's instant; rows of
+  another workspace's stream and records of other types are passed over; an unreadable row, a
+  stream not opened by `StreamOpened`, a `Member*` record of an unknown schema version or of an
+  environment other than the stream's each fail the whole lookup closed, never skipping the row;
+  a revoked member is refused; and a property test folds random grant, revoke and role-change
+  histories against an independent oracle that catches each seeded bug.
+- **E21-56 (Proposed, M8, staging for the 2026-10-26 demo; lane IAC; claim #1634; DEC-2011,
+  DEC-2012; ADR-0006)** As the founder, I want the hosted staging and production environments made
+  by OpenTofu from the repository, so that cell #1's infrastructure is reviewed code applied only
+  with my approval, never a script run by hand and never a token an agent holds (DEC-2011).
+  *Accepted when:* `deploy/tofu/` has one module per concern (network: a VPC and a firewall; DOKS:
+  one pool of two nodes, the Kubernetes version pinned and auto-upgrade off; Spaces: OpenTofu's
+  state bucket, versioned, and nothing else; Cloudflare: the tunnel, the API host's DNS record, its
+  Access application, and the R2 bucket for E21-41's WAL archive and base backups with a lock rule
+  over every key for at least the archive's 30-day retention (DEC-973 item 6); the budget: an
+  estimate the plan refuses past $65 per environment) and one root per environment (`staging`,
+  `production`), with state in Spaces, encrypted on the client, and the providers pinned by a
+  committed lock file; every pull request touching `deploy/tofu/` runs `tofu fmt -check`,
+  `tofu validate`, tflint and `tofu test` against mocked providers as the policy check (no public
+  firewall source, the state bucket private, the archive locked, no load balancer, the cap), with
+  no credential, selected by `cargo xtask ci select` (DEC-1190); `.github/workflows/infra.yml`
+  runs `plan` and `apply` only from `main` by manual dispatch, under the environments `infra-staging` and `infra-production`
+  with the founder as required reviewer (ES-12, DEC-1005); and the runbook names every token,
+  key, environment and secret the founder creates, each with the least permissions the plan
+  needs. It stops at a reachable, empty cluster with its buckets, DNS and Access: add-ons and
+  applications are lane GO's.
 
 ## Won't (v1)
 

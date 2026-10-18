@@ -199,7 +199,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   schemas' mutation sweep (`schema-mutants`). CI runs them as two required checks:
   `cargo xtask ci fast` (lint, test, pending tests, spec guard, and `portable`, which CI runs on
   macOS so the runner keeps building where the founder runs it; DEC-954) and `full`, an aggregate over
-  `cargo xtask ci full` (fixtures, reference, schemas, supply chain, Postgres), every
+  `cargo xtask ci full` (fixtures, reference, schemas, supply chain, Postgres, and the
+  stub issuer's release build, DEC-2100), every
   deterministic `cargo xtask ci mutants` shard, and every `cargo xtask ci schema-mutants` shard (DEC-688). Every
   required check and aggregated job must finish in under ten minutes; add parallel shards rather
   than removing tests, baselines, mutants, or safety gates (DEC-464). Both CI and `cargo xtask

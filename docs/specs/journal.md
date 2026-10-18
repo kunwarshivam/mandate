@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | v0.58 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 adds the agent stream's invalidation verdict, `ThesisInvalidated`, [DEC-2202](../project/decisions/DEC-2202.md); v0.50 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md); v0.51 closes the control stream's `NotificationAddressChanged` and adds `NoticeAttempted` version 3, which names the web-push address an attempt went to, [DEC-2505](../project/decisions/DEC-2505.md); v0.52 types `EvaluationRunRecorded`'s `theses_head` as record hashes, [DEC-1142](../project/decisions/DEC-1142.md); v0.53 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md); v0.54 names the deployment's connection on `AgentDeployed` version 2, with rules 200 and 201, [DEC-1171](../project/decisions/DEC-1171.md); v0.55 adds the desk's `OwnerQuestionSubmitted` and the `answer` tool's check codes, [DEC-2240](../project/decisions/DEC-2240.md); v0.58 closes the account stream's risk-limit records, [DEC-2301](../project/decisions/DEC-2301.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.58 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 adds the agent stream's invalidation verdict, `ThesisInvalidated`, [DEC-2202](../project/decisions/DEC-2202.md); v0.50 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md); v0.51 closes the control stream's `NotificationAddressChanged` and adds `NoticeAttempted` version 3, which names the web-push address an attempt went to, [DEC-2505](../project/decisions/DEC-2505.md); v0.52 types `EvaluationRunRecorded`'s `theses_head` as record hashes, [DEC-1142](../project/decisions/DEC-1142.md); v0.53 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md); v0.54 names the deployment's connection on `AgentDeployed` version 2, with rules 200 and 201, [DEC-1171](../project/decisions/DEC-1171.md); v0.55 adds the desk's `OwnerQuestionSubmitted` and the `answer` tool's check codes, [DEC-2240](../project/decisions/DEC-2240.md); v0.56 deploys an agent id once and reads a stop as final whether or not its deployment was read, [DEC-1173](../project/decisions/DEC-1173.md); v0.57 closes the owner's acknowledgment and adds its request, [DEC-2509](../project/decisions/DEC-2509.md); v0.58 closes the account stream's risk-limit records, [DEC-2301](../project/decisions/DEC-2301.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `backtest_records` section of §9.18, `model_gateway` section of §9.19, `deployment_manager` section of §9.21, `thesis_invalidation` section of §9.22, and `agent_deployed` section of §9.24; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `backtest_records` section of §9.18, `model_gateway` section of §9.19, `deployment_manager` section of §9.21, `thesis_invalidation` section of §9.22, `agent_deployed` section of §9.24, and `risk_limits` section of §9.27; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
@@ -22,6 +22,36 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   - **Versions.** v0.55 (DEC-2240) is on main; v0.56 and v0.57 are queued for D1 (#1589) and M7
     (claim #1491's order), so this change takes v0.58, §9.27, and rules 230 to 238, which no other
     section or open branch uses. It renumbers at merge if that order changes.
+
+- **v0.57 ([DEC-2509](../project/decisions/DEC-2509.md); E8-3's CLI follow-up, claim #1594):**
+  §9.28 closes the control stream's `OwnerAcknowledged` at schema version 1 and adds
+  `OwnerAcknowledgmentRequested`, with their account-stream copies, rule 239 and stream rules 240
+  and 241. An acknowledgment carries the requesting user and the independence requirement as it
+  stood (as §9's catalogue row and mandate spec §6.7 already required, and DEC-279 item 7's members
+  lacked), names the `RiskLimitTriggered` it acknowledges as `event`, and, where an independent
+  user is required, names the request it answers. A request names a trigger, carries step-up, and
+  is void once that trigger is superseded. The writer sets both users from the principal it
+  authenticated. The executor judges each acknowledgment copy from its account stream, matching a
+  request copy by `causation_id`, and `OwnerCommandRefused` gains the account-stream reasons
+  `trigger_unknown`, `trigger_superseded`, and `request_invalid` (rule 28). Agent-accepted under DEC-176: both events were refused `unknown_schema`
+  until now, nothing could append them, and every rule only refuses an acknowledgment, which only
+  ever lifts a limit; none holds an exit, a protective order, or a kill switch.
+  - **Versions.** v0.58 (DEC-2301) is on main and reserves v0.57 for M7; v0.56 is D1's (#1589).
+    This change takes v0.57, §9.28, and rules 239 to 241, which no other section or open branch
+    uses (#1491). It renumbers at merge if that order changes.
+
+- **v0.56 ([DEC-1173](../project/decisions/DEC-1173.md); E21-33):** §9.24 states that an agent id
+  is deployed once: a writer of `AgentDeployed` refuses an agent that an `AgentStopped` on the
+  control stream names, whatever version it would write. §9.21 reads an `AgentStopped` as final
+  whether or not the manager read the deployment it stops (a version-1 deployment, or a version-2
+  one rule 201 refuses). The `agent_deployed` vectors add a version-1 deployment, its stop and a
+  version-2 deployment of the same agent, which starts nothing; a stream whose only establishment
+  is an account stream's copy, which rule 201 refuses; and a range anchored after a revocation that
+  follows the deployment, which passes. The oracle gains four seeded bugs, each caught. Only
+  deployments, which add risk, are refused, and the vectors stay version 3 (DEC-176).
+  - **Versions.** v0.55 (DEC-2240), v0.57 (DEC-2509) and v0.58 (DEC-2301) are on main; this
+    change takes v0.56, which they left for it, adds no rule number, and changes only §9.21's and §9.24's text and the
+    `agent_deployed` section.
 
 - **v0.55 ([DEC-2240](../project/decisions/DEC-2240.md); E12-5, E19-15):** §9.25 closes the
   desk's `OwnerQuestionSubmitted` on the control stream at schema version 1 before anything writes
@@ -1313,10 +1343,10 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `ExternalActivityIngested`, `RelatedAccountsCoordination` | — | unattributed activity; canceled opening orders across the group |
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
 | `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | Closed `AgentModeApplied` version 1: agent (including `*`), mode, restriction, originated flag, and risk clock (§9.6); other gating facts copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
-| `OwnerAcknowledged` | — | copied from the control stream (with `causation_id`); a risk input |
+| `OwnerAcknowledged`, `OwnerAcknowledgmentRequested` | — | copied from the control stream (with `causation_id`); a risk input; judged at processing as §9.28 says |
 | `ConnectionChecked`, `ConnectionStateChanged`, `ConnectionCredentialRefreshed` | — | The executor's permission checks and their results; the connection's state (`active`, `degraded`, `suspended`) and why; a refreshed token's scopes; each with `risk_clock`, closed in §9.8 |
 | `ConnectionEstablished`, `ConnectionCredentialRotated` (copies) | — | The executor's copies of the control stream's establishment (version 2) and each rotation, with `risk_clock` and the original as `causation_id`; closed in §9.8 |
-| `OwnerCommandRefused` | — | An acknowledgment the executor refused, for its step-up or, under `independent_approval_required`, because it is not independent ([mandate spec §6.1](mandate.md#61-purposes), [§6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`, `not_independent`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
+| `OwnerCommandRefused` | — | An acknowledgment the executor refused, for its step-up or, under `independent_approval_required`, because it is not independent ([mandate spec §6.1](mandate.md#61-purposes), [§6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), or because its trigger or request does not hold (§9.28): the command (`acknowledge`), the reason (`step_up_missing`, `step_up_stale`, `step_up_reused`, `step_up_method`, `not_independent`, `trigger_unknown`, `trigger_superseded`, `request_invalid`), and the effective time it was judged at; `causation_id` is the control stream's `OwnerAcknowledged`, copied at most once. The agent runtime records a refused resume or Stop the same way on the agent stream |
 | `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N, and for a tripwire (limit `tripwire:<id>`, reason `tripwire_condition`, [mandate spec §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)) its metric, threshold, and the value reached; reset evidence; released positions; stale-mark and removed-instrument changes with the reason; goal completion; `MandateVersionApplied` is closed in §9.3 and the other seven in §9.27 |
 | `UniverseChanged` | man | The working universe changed ([mandate spec §2.3, §8.5](mandate.md#23-the-working-universe-at-runtime-dec-97)); a risk input, so it carries `risk_clock`: agent, instrument, change (`admitted`, `removed`), reason (`thesis_admitted`, `thesis_expired`, `thesis_invalidated`, `lineage_retired`, `eligibility_lost`, `operator_halt`, `version_applied`), thesis and lineage ids, working-universe size after |
 
@@ -1353,7 +1383,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `ModelInvocationRecorded` | mod | The compiler's model call, for a draft ([inference spec §3.6](inference.md#36-journaling)); closed in §9.9 |
 | `OwnerQuestionSubmitted` | — | A member's question to their agent at the desk ([agent harness spec §15](agent-harness.md#15-owner-and-explain-runs-the-desk)): agent, the question (artifact, never stored when the guard refused it, with the guard's rule); closed in §9.25. The runtime copies it and starts an `owner` run. Never a risk input |
 | `MandateVersionCreated`, `MandateConfirmed` | — | per [mandate spec §10](mandate.md#10-records-dec-51-dec-97): source text (artifact), compiled fields, provenance per path with quoted spans, template, policy-set hashes, validation results and warnings, classification, diff; version hash, confirmed paths, rendered confirmation (artifact) and UI build, warnings acknowledged, step-up evidence, confirming user (opaque); `MandateConfirmed` version 2 also names the agent and the version it replaces (§9.9) |
-| `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason (`goal_complete`, `profit_stop_reached`, `end_date`, owner stop), net dollar loss added to the connection's loss carry; for `AgentDeployed`: the rendered go-live screen (artifact), backtest and paper-run IDs shown, performance legend and disclosure versions shown, approving users, step-up evidence ([mandate spec §10](mandate.md#10-records-dec-51-dec-97)) |
+| `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason (`goal_complete`, `profit_stop_reached`, `end_date`, owner stop), net dollar loss added to the connection's loss carry; for `AgentDeployed`: the rendered go-live screen (artifact), backtest and paper-run IDs shown, performance legend and disclosure versions shown, approving users, step-up evidence ([mandate spec §10](mandate.md#10-records-dec-51-dec-97)), and at version 2 the document's connection (§9.24) |
 | `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
 | `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result; closed in §9.2, version 2 of `ConnectionEstablished` with `account_ref`, user, step-up, and the live margin attestation in §9.8 |
 | `ConnectionRequested` | — | A connect's start: the pending connection's `connection_id` and `account_ref`, broker, environment, user (opaque), and step-up evidence; closed in §9.8 |
@@ -1362,7 +1392,8 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
 | `OwnerAlertSent` | — | Written by the owner of the subject event's stream, in that stream and in the subject's batch, on the agent, account, or control stream ([notifications spec §5.5](notifications.md#55-records)): subject event, kind (notifications spec §3.2), and for a kill switch the owner command it carries out, if any. It records that an alert was raised; delivery is the notice stream's. Closed in §9.15 |
 | `NotificationAddressChanged` | — | A member set or removed one of their own push addresses ([workspace API spec §4.11, §5.7](workspace-api.md), [DEC-795](../project/decisions/DEC-795.md) item 5): member (opaque), channel (`web_push`), action (`added`, `removed`), `address_ref` (the `added` event's own id, listed in `pii_refs`), and step-up evidence (assertion ID, authentication time, method), `null` only for a `removed` that rides a deactivation's commit; written with its `OwnerAlertSent` (`notification_address_changed`) in one batch. The endpoint and keys stay in the vault. Closed in §9.15 (v0.51, [DEC-2505](../project/decisions/DEC-2505.md)) |
-| `OwnerAcknowledged` | — | user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
+| `OwnerAcknowledgmentRequested` | — | An owner's request that one triggered limit be lifted, where an independent user must acknowledge it ([mandate spec §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)): agent, the `RiskLimitTriggered` named, the requesting user (opaque), the independence requirement as it stood, step-up evidence; closed in §9.28 |
+| `OwnerAcknowledged` | — | user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), the request it answers when an independent user is required, the `RiskLimitTriggered` named, step-up evidence (assertion ID, authentication time, method); closed in §9.28 |
 | `ApprovalResponseSubmitted` | — | The owner's answer to an approval ([mandate spec §6.4](mandate.md#64-approvals)): agent, approval, verdict (`approved`, `skipped`), content hash, `submitted_at`, step-up evidence (assertion ID, authentication time, method) or null, responder (opaque) and role |
 | `OwnerRequestSubmitted` | — | An owner's request for an order (workspace API §4.6): agent, instrument, side, optional size, who asked; closed in §9.9 |
 | `OwnerCommandIssued` | — | The owner's command ([mandate spec §6.1](mandate.md#61-purposes)): agent or kill-switch scope, command (`pause`, `resume`, `stop`, `kill_switch`, `owner_exit`, and `hold_openings` and `lift_hold`, closed in §9.11), the release choice and warning shown for a Stop with release, the bid, bid size, and floor confirmed for an owner exit, `submitted_at`, step-up evidence or null, user (opaque) |
@@ -1837,7 +1868,7 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
 | Member | Type | Meaning |
 |---|---|---|
 | `command` | `resume` \| `stop` \| `acknowledge` | Rule 26 |
-| `reason` | `step_up_missing` \| `step_up_stale` \| `step_up_reused` \| `step_up_method` \| `not_independent` | `not_independent` only on the account stream: rule 28 |
+| `reason` | `step_up_missing` \| `step_up_stale` \| `step_up_reused` \| `step_up_method` \| `not_independent` \| `trigger_unknown` \| `trigger_superseded` \| `request_invalid` | The last four only on the account stream: rule 28. The last three are §9.28's ([DEC-2509](../project/decisions/DEC-2509.md)) |
 | `effective_at` | `timestamp` | The effective time the command was judged at. A §4.7 timestamp, never risk-clock seconds (§9.1's types). This supersedes DEC-291 item 1's whole second for this member (DEC-261 item 7) |
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
@@ -1880,8 +1911,11 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
     the agent stream (`payload.command`), or at version 2 also `lift_hold`, which is registered on the
     agent stream only (§9.11). The executor refuses acknowledgments, and the runtime
     refuses resumes and Stops (§2).
-28. `OwnerCommandRefused` with reason `not_independent` is on the account stream (`payload.reason`):
-    only an acknowledgment is judged for independence, and only under `independent_approval_required`
+28. `OwnerCommandRefused` with reason `not_independent`, `trigger_unknown`, `trigger_superseded`, or
+    `request_invalid` is on the account stream (`payload.reason`): only an acknowledgment names a
+    trigger and a request (§9.28). `trigger_unknown` and `trigger_superseded`, like the `step_up_*`
+    reasons, apply to every acknowledgment. `not_independent` and `request_invalid` apply only
+    under `independent_approval_required`
     ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)). A resume or Stop is
     refused only for its step-up.
 
@@ -4575,7 +4609,10 @@ start whose `cause` is `kill_switch` is not counted.
 for a kill switch, once per `OwnerCommandIssued` with `kill_switch` whose scope covers it, and
 raises one opaque operator alert (design §8.2, RB-14). Nothing at this version ends the pause but
 the agent's `AgentStopped`, or for an executor every agent of its account stopped (DEC-1170 item
-3). An `AgentStopped` is final: no record here follows it for that agent's runtime.
+3). An `AgentStopped` is final: no record here follows it for that agent's runtime, whether or
+not the manager read the deployment it stops (a version-1 `AgentDeployed`, or a version-2 one rule
+201 refuses), so a later `AgentDeployed` of that agent starts nothing. No writer writes one, since
+an agent id is deployed once (§9.24, [DEC-1173](../project/decisions/DEC-1173.md)).
 
 **The kill switch is never gated here.** No record here is written because of a kill switch except
 a `kill_switch` start: the manager never stops, drains, or replaces a process for one, and never
@@ -4965,10 +5002,9 @@ manager does not start (fail closed). Not every deployment written today meets i
   `agent deploy` deploys a paper agent today on a connection the stream records nothing about. The
   workspace API's deployment clears the environment the same way, though it refuses V-002 for a
   deployment. Such a paper deployment is written as version 1, as today, and is never refused for
-  rule 201; the manager starts nothing for it until the owner records the connection (with
-  `connection record`, which needs the connect sequence's `ConnectionChecked`) and deploys under a
-  new agent id: the CLI refuses a second deployment of an active agent, and §9.21 reads its
-  `AgentStopped` as final (the backlog's E21-33 follow-ups on reusing agent ids).
+  rule 201; the manager starts nothing for it until the owner stops it, records the connection
+  (with `connection record`, which needs the connect sequence's `ConnectionChecked`), and deploys
+  under a new agent id, since an agent id is deployed once (below).
   The CLI changes in the code change that follows only in writing version 2 when rule 201
   holds.
 - **Revoked.** A connection whose latest record is a revocation is known to the fold, so V-001
@@ -4976,6 +5012,26 @@ manager does not start (fail closed). Not every deployment written today meets i
 
 A revocation after the deployment is not judged here: what it stops is §9.10's and the kill
 switch's, unchanged.
+
+**An agent id is deployed once** ([DEC-1173](../project/decisions/DEC-1173.md)). A writer of
+`AgentDeployed` (the CLI's `agent deploy`, the workspace API's deployment) refuses an agent that an
+`AgentStopped` on the control stream names, whatever version it would write and whatever the stop's
+`reason` (an owner stop, `goal_complete`, `profit_stop_reached`, or `end_date`), and appends
+nothing; the CLI's code is `agent_stopped`, the workspace API's `invalid` at `/agent_id`. An agent
+active with the same version is answered with its deployment, as before. So §9.21's final stop and
+the writers agree, and a stopped agent's runtime is never wanted again. A new agent id leaves the
+lifetime floor as it was: the loss carry is the connection's (mandate spec §5.7;
+`AgentStopped.loss_added` adds to the connection's carry, and V-032 reads it), and the high-water
+mark starts from the deployment under either id (§5.5). The per-agent daily and conduct state does
+restart with a new agent id, as it does for any other agent deployed on the connection: the
+`max_daily_loss` latch and its E₀ (§5.4), the drawdown ladder's latches (§5.5, §5.8), the
+tripwire windows and a fired tripwire's latch (restriction `tripwire`, §5.8, §5.9, §6.7), the
+`goal_complete` restriction, the re-entry cooldown, the order-to-fill limit (trading spec §9.6),
+the per-agent part of the order-rate limit and `max_orders_per_day` (§9.7), and MI-25's per-agent
+ask caps with their `skipped_today` and `recent_timeout` suppressions. The order-rate limit's
+per-account part does not restart. That is bounded by the lifetime floor and by a deployment being the owner's
+stepped-up gesture ([DEC-1173](../project/decisions/DEC-1173.md) item 6 leaves keying them by
+connection to the founder). `append` does not judge it: it reads no stream.
 
 **Every reader of `AgentDeployed`**, by version:
 
@@ -5097,7 +5153,7 @@ after the input, which mandate spec §5.10 lists as E, H, DD, E₀, C, L and §9
 | `limit` | `limit_key` | The limit |
 | `action` | `scale_sizes` \| `exits_only` \| `flatten_and_pause` \| `end_delegations` | What it does while it holds: a rung's own action, the daily loss's `daily_loss_action`, or a tripwire's: rule 230 |
 | `reason` | `hard_trigger` \| `hard_breach_pending` \| `resolved_at_rollover` \| `new_day_breach` \| `after_reset` \| `tripwire_condition`, or `null` | Why, when it is not plain confirmation by breach time: rule 230 |
-| `breach_time_s` | `integer?` | The breach time (mandate spec §5.6) the limit's confirmation holds at the input that produced the record, in whole seconds. The risk fold's event carries no breach time, so the writer reads the confirmation at that input, before the fold's latch removes it. A hard trigger, `hard_breach_pending`, and `new_day_breach` carry whatever had accumulated, which may be more than 0 and less than `breach_confirm_s`. It is 0 only where the limit has no confirmation at that input: an `after_reset` rung, or a scale rung. `null` for a tripwire: rule 232 |
+| `breach_time_s` | `integer?` | The breach time (mandate spec §5.6) the limit's confirmation holds at the input that produced the record, in whole seconds. The risk fold's event carries no breach time, so the writer reads the confirmation at that input, before the fold's latch removes it. A trigger confirmed by breach time, a plain confirmed scale rung or a confirmed `new_day_breach` included, carries at least `breach_confirm_s`. A hard trigger and `hard_breach_pending` carry whatever had accumulated, which may be more than 0 and less than `breach_confirm_s`. It is 0 only where the limit has no confirmation at that input, as for an `after_reset` rung. `null` for a tripwire: rule 232 |
 | `metric` | `consecutive_losing_exits` \| `realized_loss_usd` \| `new_instruments`, or `null` | A tripwire's metric: rule 232 |
 | `threshold` | `decimal?` | A tripwire's threshold: rules 232 and 233 |
 | `value` | `decimal?` | The metric's value reached: rules 232 and 233 |
@@ -5194,10 +5250,152 @@ that names what follows instead, with its reason when the risk state confirmed i
      follows instead (mandate spec §3.1).
 
 **No `JournaledFact`.** None of the seven feeds `ValidationContext`; they are the risk state's own
-record, read back only by the risk-state fold. **Vectors** come with their own change (E6-15's
-slice A1): `reference/journal` gains a `risk_limits` section with base drafts of all seven, an
-invalid draft for every type and rule above, and valid drafts for the cases a rule might be misread
-to refuse, and the vectors stay version 3 (the section is additive, as in DEC-177 item 6).
+record, read back only by the risk-state fold. **Vectors:** the test vectors' `risk_limits` section
+holds a base draft of each record shaped as the mandate reference cases' risk-state events, an
+invalid draft for every type and rule above, and valid drafts for the shapes the risk-state fold emits
+that a rule might be misread to refuse. The vectors stay version 3 (the section is additive, as in
+DEC-177 item 6).
+
+### 9.28 The owner's acknowledgment and its request ([DEC-2509](../project/decisions/DEC-2509.md))
+
+This subsection closes `OwnerAcknowledged` and adds `OwnerAcknowledgmentRequested`, on the
+workspace control stream at schema version 1, with their account-stream copies. Until now §9
+catalogued `OwnerAcknowledged` and registered no payload, so every append was refused
+`unknown_schema` (DEC-257 item 17). It replaces the "Key payload fields" column of §9 for both.
+§9.2's conventions apply: §9.1's and §9.2's types, the absent-member rule, the report order,
+`schema_version` 1, and `risk_clock` as §2 requires of an owner command. The rules number from 239.
+
+An acknowledgment lifts one latched limit, rung, or tripwire that a `RiskLimitTriggered` on the
+agent's account stream recorded (mandate spec §5.8, §6.7). It takes effect only when the executor
+processes its copy, and only under the stricter of the independence requirement it carries and the
+overlay's at processing (DEC-351 items 4 to 6). **An `OwnerAcknowledged` is always an
+acknowledgment that takes effect when it passes; it is never a request.** Where independence is
+required, one user records the request as `OwnerAcknowledgmentRequested`, and a different user
+acknowledges it, naming that request. So no fold decides from policy whether an acknowledgment was
+"only" a request, and a policy misread on replay cannot turn a request into a lift.
+
+**Types**, beyond §9.1's and §9.2's:
+
+| Type | Values | Refused as |
+|---|---|---|
+| `step_up` | `{assertion_id: text, authenticated_at: integer, method: text}`, as §9.7's `ApprovalResponseSubmitted` writes it: the control stream's owner-command evidence, `authenticated_at` in whole seconds | As §9.7's |
+
+**`OwnerAcknowledgmentRequested`**: an owner asked that one triggered limit be lifted, where an
+independent user must acknowledge it.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `agent` | `id` | The agent whose limit is triggered |
+| `event` | `ulid` | The `event_id` of the account stream's `RiskLimitTriggered` the lift is asked for |
+| `requested_by` | `id` | The requesting user, opaque |
+| `independent_required` | `boolean` | The independence requirement as it stood when the lift was requested: `true` on every request (rule 239) |
+| `submitted_at` | `integer` | The second the owner ran the command |
+| `risk_clock` | `risk_clock` | The owner's tick (§2) |
+| `step_up` | `step_up` | The requester's step-up evidence: rule 239 |
+
+**`OwnerAcknowledged`**: an owner acknowledged one triggered limit.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `agent` | `id` | The agent whose limit is triggered |
+| `event` | `ulid` | The `event_id` of the account stream's `RiskLimitTriggered` acknowledged |
+| `user` | `id` | The acknowledging user, opaque |
+| `requested_by` | `id` | The requesting user, opaque: the acknowledging user when no independent user is required (rule 239) |
+| `independent_required` | `boolean` | The independence requirement as it stood when the lift was requested (mandate spec §6.7) |
+| `request` | `ulid?` | The `event_id` of the `OwnerAcknowledgmentRequested` it answers, or `null`: rule 239 |
+| `submitted_at` | `integer` | The second the owner ran the command |
+| `risk_clock` | `risk_clock` | The owner's tick (§2) |
+| `step_up` | `step_up?` | The acknowledging user's step-up evidence, or `null`. The authentication method the §9 catalogue named is `step_up.method`; there is no second member |
+
+**Consistency rules** (reason `schema`; the path is the member named):
+
+239. `OwnerAcknowledgmentRequested`: `independent_required` is `true` (`payload.independent_required`):
+     a request exists only where an independent user must acknowledge. Its `step_up` is non-null,
+     since the request is half of a lift (`payload.step_up`). `OwnerAcknowledged`: when
+     `independent_required` is `true`, `request` is non-null and `requested_by` differs from `user`
+     (`payload.request`, then `payload.requested_by`); when it is `false`, `request` is `null` and
+     `requested_by` equals `user` (`payload.request`, then `payload.requested_by`). A user never
+     acknowledges their own request (mandate spec §6.7).
+
+**Who writes them.** The writer (the CLI, and the workspace API once its route mounts) sets
+`user` on an acknowledgment, and `requested_by` on a request, from the principal it authenticated
+for the command, the same principal its step-up evidence names: the CLI's owner as D1b's flags give
+it, and the API's session and step-up subject. Never from anything the caller supplies. An
+acknowledgment's `requested_by` is copied from the request it names. A request carries step-up
+evidence, so `step_up` is required on it (rule 239), and it is judged as §6.1 judges an owner
+command's. That includes reuse: a request's assertion is spent like any other owner command's.
+The assertion of a request, an acknowledgment, an `ApprovalResponseSubmitted`, or an
+`OwnerCommandIssued` may appear on no later one of those four, whatever its outcome (mandate spec
+§6.1). So a request's assertion is never replayed on a second request, a resume, a Stop, or an
+acknowledgment, and a request reusing an earlier command's assertion is refused.
+
+**The residual: the users are the writer's word.** A `step_up` names its assertion,
+`authenticated_at`, and method, not its subject. The executor cannot check that `user` or
+`requested_by` is the user the step-up authenticated, so it trusts the writer for that binding,
+as it does for every owner command's `user`. A writer that set them from the caller's input could
+let one user both request and acknowledge. Until the step-up evidence names its subject (E9-4's
+signed assertions), the writer binding above is the control.
+
+**Stream rules** on the control stream, judged before anything takes effect, and failing closed:
+
+240. Control stream, `OwnerAcknowledged` with a non-null `request`: an earlier
+     `OwnerAcknowledgmentRequested` on the same stream has that `event_id`, and its `agent`,
+     `event`, `requested_by`, and `independent_required` equal the acknowledgment's
+     (`payload.request`). A reordered stream, in which the acknowledgment comes before its request,
+     breaks this rule.
+241. Control stream: no two `OwnerAcknowledged` name the same non-null `request`
+     (`payload.request`). A request is spent by the first acknowledgment that names it, **whether
+     that acknowledgment then lifts the limit or is refused**: a retry needs a new request, and a
+     second acknowledgment by a third user lifts nothing more.
+
+The writer checks rules 239 to 241 against its own fold of the control stream before appending,
+and appends nothing that would fail them. `append` sees one record and checks rule 239 only.
+
+**The executor judges at processing, from its account stream.** It copies both events into the
+agent's account stream, the request as well as the acknowledgment. Each copy is the original's
+payload unchanged, with `causation_id` naming the control-stream original, and is copied at most
+once. A copy has its own `event_id`, so on the account stream an acknowledgment copy's `request`
+(the control-stream request's `event_id`) is matched to the request copy whose `causation_id`
+equals it. The executor's fold holds every input it judges from, so a replay of the account stream
+decides the same way.
+
+It judges an acknowledgment copy in this order, and at the first check that fails it records
+`OwnerCommandRefused` with `command` `acknowledge`, the reason shown, and `causation_id` naming the
+control-stream `OwnerAcknowledged`, and lifts nothing:
+
+1. **The trigger exists:** `event` is the `event_id` of a `RiskLimitTriggered` of this `agent` on
+   this account stream, before the acknowledgment copy. An unknown ULID, another agent's trigger,
+   or another event type is refused `trigger_unknown`.
+2. **The trigger stands:** no later `RiskLimitTriggered` of the same `limit`, and no
+   `RiskLimitLifted` of that `limit`, comes between that trigger and the acknowledgment copy.
+   Otherwise `trigger_superseded`: a request and an acknowledgment are void once their trigger is
+   superseded, so neither lifts a later latch of the same limit, which needs a new request.
+3. **Its step-up holds:** §6.1's checks, as for every acknowledgment: the `step_up_*` reasons.
+4. **Independence**, when the stricter of the copy's `independent_required` and the overlay's
+   `independent_approval_required` at processing is `true`:
+   - the copy names a `request`, and its `user` differs from its `requested_by`. Otherwise
+     `not_independent`;
+   - a request copy whose `causation_id` equals `request` comes before the acknowledgment copy.
+     Its `agent`, `event`, `requested_by`, and `independent_required` equal the acknowledgment
+     copy's, and its step-up passes §6.1's checks, judged at its own `submitted_at`. No earlier
+     acknowledgment copy, refused or not, names the same `request`. Otherwise `request_invalid`:
+     rules 240 and 241, restated on the account stream by `causation_id`.
+
+Only an acknowledgment that passes all four lifts its limit. A request copy is never judged by
+itself and never lifts anything. None of these refusals holds an exit, a protective order, or a
+kill switch: an acknowledgment only ever lifts a limit, which adds risk, so refusing one never
+delays risk reduction (`AGENTS.md` rules 3 and 13).
+
+**No `JournaledFact`.** Neither event feeds `ValidationContext`. **Vectors** come with the
+registration change: `reference/journal` gains an `acknowledgments` section with base drafts of
+both events, an invalid draft for every type and for rule 239, control streams for rules 240 and
+241 (a reordered stream, a self-acknowledgment, a second acknowledgment of one request, and a
+request whose `agent` or `event` differs). The executor's judgment gets account streams of its own:
+an unknown trigger, a later trigger and a lift that supersede one, a request copy after its
+acknowledgment copy, a request spent by a refused acknowledgment, and a request with failing
+step-up. It also gets a fuzz over random orderings of requests, acknowledgments, triggers and lifts,
+judged by an oracle written apart from the executor, and a seeded mutant for each rule and each
+check. The vectors stay version 3.
 
 ## 10. Anchoring
 
