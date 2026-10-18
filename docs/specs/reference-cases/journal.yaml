@@ -58153,10 +58153,10 @@ acknowledgments:
     clause: 'rule 28: only an acknowledgment, on the account stream'
     base_draft: refused_trigger_unknown
     changes:
-    - &id129
+    - &id138
       path: stream_id
       value: agent:ws_01J8Z2:agent_a
-    - &id130
+    - &id139
       path: actor
       value:
         kind: agent
@@ -58173,8 +58173,8 @@ acknowledgments:
     clause: 'rule 28: a lift is refused only for its step-up'
     base_draft: refused_trigger_unknown
     changes:
-    - *id129
-    - *id130
+    - *id138
+    - *id139
     - path: payload.command
       value: lift_hold
     - path: schema_version
@@ -58187,10 +58187,10 @@ acknowledgments:
     clause: 'rule 28: only an acknowledgment, on the account stream'
     base_draft: refused_trigger_superseded
     changes:
-    - &id131
+    - &id140
       path: stream_id
       value: agent:ws_01J8Z2:agent_a
-    - &id132
+    - &id141
       path: actor
       value:
         kind: agent
@@ -58207,8 +58207,8 @@ acknowledgments:
     clause: 'rule 28: a lift is refused only for its step-up'
     base_draft: refused_trigger_superseded
     changes:
-    - *id131
-    - *id132
+    - *id140
+    - *id141
     - path: payload.command
       value: lift_hold
     - path: schema_version
@@ -58221,10 +58221,10 @@ acknowledgments:
     clause: 'rule 28: only an acknowledgment, on the account stream'
     base_draft: refused_request_invalid
     changes:
-    - &id133
+    - &id142
       path: stream_id
       value: agent:ws_01J8Z2:agent_a
-    - &id134
+    - &id143
       path: actor
       value:
         kind: agent
@@ -58241,8 +58241,8 @@ acknowledgments:
     clause: 'rule 28: a lift is refused only for its step-up'
     base_draft: refused_request_invalid
     changes:
-    - *id133
-    - *id134
+    - *id142
+    - *id143
     - path: payload.command
       value: lift_hold
     - path: schema_version
@@ -58446,9 +58446,9 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id135
+    expect: &id144
       outcome: Valid
-    stream_rules: *id135
+    stream_rules: *id144
   - name: plain_acknowledgment
     clause: rules 240 and 241 judge only an acknowledgment naming a request
     records:
@@ -58483,8 +58483,8 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: *id135
-    stream_rules: *id135
+    expect: *id144
+    stream_rules: *id144
   - name: two_plain_acknowledgments
     clause: 'rule 241: only a non-null request is spent'
     records:
@@ -58550,8 +58550,8 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: *id135
-    stream_rules: *id135
+    expect: *id144
+    stream_rules: *id144
   - name: interleaved
     clause: 'rule 240: each acknowledgment its own request'
     records:
@@ -58675,8 +58675,8 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: *id135
-    stream_rules: *id135
+    expect: *id144
+    stream_rules: *id144
   - name: retry_with_a_new_request
     clause: 'rule 241: a retry needs a new request'
     records:
@@ -58800,8 +58800,8 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: *id135
-    stream_rules: *id135
+    expect: *id144
+    stream_rules: *id144
   - name: reordered
     clause: 'rule 240: a reordered stream breaks it'
     records:
@@ -58865,12 +58865,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id136
+    expect: &id145
       outcome: Invalid
       index: 0
       rule: 240
       path: payload.request
-    stream_rules: *id136
+    stream_rules: *id145
   - name: unknown_request
     clause: 'rule 240: the request exists'
     records:
@@ -58934,12 +58934,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id137
+    expect: &id146
       outcome: Invalid
       index: 1
       rule: 240
       path: payload.request
-    stream_rules: *id137
+    stream_rules: *id146
   - name: agent_differs
     clause: 'rule 240: `agent` matches'
     records:
@@ -59003,12 +59003,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id138
+    expect: &id147
       outcome: Invalid
       index: 1
       rule: 240
       path: payload.request
-    stream_rules: *id138
+    stream_rules: *id147
   - name: event_differs
     clause: 'rule 240: `event` matches'
     records:
@@ -59072,12 +59072,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id139
+    expect: &id148
       outcome: Invalid
       index: 1
       rule: 240
       path: payload.request
-    stream_rules: *id139
+    stream_rules: *id148
   - name: requested_by_differs
     clause: 'rule 240: `requested_by` matches'
     records:
@@ -59141,12 +59141,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id140
+    expect: &id149
       outcome: Invalid
       index: 1
       rule: 240
       path: payload.request
-    stream_rules: *id140
+    stream_rules: *id149
   - name: requirement_differs
     clause: 'rule 240: `independent_required` matches; rule 239 refuses the request first'
     records:
@@ -59314,12 +59314,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id141
+    expect: &id150
       outcome: Invalid
       index: 2
       rule: 241
       path: payload.request
-    stream_rules: *id141
+    stream_rules: *id150
   - name: second_acknowledgment_by_the_same_user
     clause: rule 241
     records:
@@ -59414,12 +59414,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id142
+    expect: &id151
       outcome: Invalid
       index: 2
       rule: 241
       path: payload.request
-    stream_rules: *id142
+    stream_rules: *id151
   - name: self_acknowledgment
     clause: 'rule 239: a user never acknowledges their own request'
     records:
@@ -59488,7 +59488,7 @@ acknowledgments:
       index: 1
       rule: 239
       path: payload.requested_by
-    stream_rules: *id135
+    stream_rules: *id144
   - name: self_acknowledgment_naming_another_requester
     clause: 'rule 240: the requester is the request''s'
     records:
@@ -59552,12 +59552,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id143
+    expect: &id152
       outcome: Invalid
       index: 1
       rule: 240
       path: payload.request
-    stream_rules: *id143
+    stream_rules: *id152
   - name: acknowledgment_naming_an_acknowledgment
     clause: 'rule 240: the named record is a request'
     records:
@@ -59652,19 +59652,20 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id144
+    expect: &id153
       outcome: Invalid
       index: 2
       rule: 240
       path: payload.request
-    stream_rules: *id144
+    stream_rules: *id153
   executor:
   - name: independent_lifts
     clause: '§9.28: all four checks pass'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - &id147
-      envelope_version: 1
+    - envelope_version: 1
       environment: paper
       event_id: 01JBRQ00001000000000000000
       stream_id: ctl:ws_01J8Z2
@@ -59693,8 +59694,7 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    - &id148
-      envelope_version: 1
+    - envelope_version: 1
       environment: paper
       event_id: 01JBAK00001000000000000000
       stream_id: ctl:ws_01J8Z2
@@ -59726,8 +59726,7 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - &id145
-      envelope_version: 1
+    - envelope_version: 1
       environment: paper
       event_id: 01JBTG00001000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
@@ -59830,9 +59829,10 @@ acknowledgments:
   - name: plain_lifts
     clause: check 4 does not apply when neither the copy nor the overlay requires independence
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - &id146
-      envelope_version: 1
+    - envelope_version: 1
       environment: paper
       event_id: 01JBAK00002000000000000000
       stream_id: ctl:ws_01J8Z2
@@ -59864,7 +59864,42 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00003000000000000000
@@ -59903,10 +59938,77 @@ acknowledgments:
   - name: plain_under_overlay
     clause: 'check 4: the stricter of the copy''s requirement and the overlay''s at processing'
     overlay_independent: true
+    environment: paper
+    founder_connection: false
     control:
-    - *id146
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00004000000000000000
@@ -59945,11 +60047,106 @@ acknowledgments:
   - name: independent_without_overlay
     clause: 'check 4: the copy''s own requirement holds when the overlay no longer asks'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id147
-    - *id148
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00005000000000000000
@@ -60017,6 +60214,8 @@ acknowledgments:
   - name: unknown_ulid
     clause: 'check 1: an unknown ULID'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -60050,7 +60249,42 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00007000000000000000
@@ -60089,8 +60323,40 @@ acknowledgments:
   - name: another_agents_trigger
     clause: 'check 1: another agent''s trigger'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id146
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
     - envelope_version: 1
       environment: paper
@@ -60166,6 +60432,8 @@ acknowledgments:
   - name: another_event_type
     clause: 'check 1: the event named is not a `RiskLimitTriggered`'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -60199,7 +60467,42 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBXF00001000000000000000
@@ -60270,8 +60573,40 @@ acknowledgments:
   - name: trigger_after_the_copy
     clause: 'check 1: the trigger comes before the acknowledgment copy'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id146
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
     - envelope_version: 1
       environment: paper
@@ -60304,7 +60639,42 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     refused_at_append: []
     expect:
     - index: 0
@@ -60312,10 +60682,77 @@ acknowledgments:
   - name: superseded_by_a_later_trigger
     clause: 'check 2: a later `RiskLimitTriggered` of the same limit'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id146
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBTG00002000000000000000
@@ -60390,6 +60827,8 @@ acknowledgments:
   - name: the_later_trigger_stands
     clause: 'check 2: the latest latch is acknowledged by naming it'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -60423,7 +60862,42 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBTG00002000000000000000
@@ -60498,10 +60972,77 @@ acknowledgments:
   - name: superseded_by_a_lift
     clause: 'check 2: a `RiskLimitLifted` of that limit'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id146
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBXF00002000000000000000
@@ -60572,10 +61113,77 @@ acknowledgments:
   - name: later_trigger_of_another_limit
     clause: 'check 2: only the same limit supersedes'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id146
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBTG00002000000000000000
@@ -60650,10 +61258,77 @@ acknowledgments:
   - name: lift_of_another_limit
     clause: 'check 2: only a lift of that limit supersedes'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id146
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBXF00003000000000000000
@@ -60724,10 +61399,77 @@ acknowledgments:
   - name: another_agents_later_trigger
     clause: 'check 2: the limit is this agent''s risk state''s'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id146
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBTG00002000000000000000
@@ -60802,8 +61544,40 @@ acknowledgments:
   - name: second_acknowledgment_after_a_lift
     clause: 'check 2: the executor''s own lift supersedes the trigger'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id146
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBAK00003000000000000000
@@ -60836,7 +61610,42 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00017000000000000000
@@ -60908,6 +61717,8 @@ acknowledgments:
   - name: refused_acknowledgment_lifts_nothing
     clause: '§9.28: a refusal lifts nothing, so the trigger still stands'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -60969,7 +61780,42 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00019000000000000000
@@ -61038,11 +61884,106 @@ acknowledgments:
   - name: request_copy_after_the_acknowledgment_copy
     clause: 'check 4: the request copy comes first'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id147
-    - *id148
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00021000000000000000
@@ -61110,11 +62051,106 @@ acknowledgments:
   - name: request_never_copied
     clause: 'check 4: a request copy names the request'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id147
-    - *id148
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00023000000000000000
@@ -61153,8 +62189,38 @@ acknowledgments:
   - name: request_spent_by_a_refused_acknowledgment
     clause: 'check 4: no earlier acknowledgment copy, refused or not, names it'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id147
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBAK00001000000000000000
@@ -61180,7 +62246,7 @@ acknowledgments:
         request: 01JBRQ00001000000000000000
         submitted_at: 1792339260
         risk_clock: '2026-10-18T16:01:00.000000000Z'
-        step_up: &id149
+        step_up:
           assertion_id: assert_stale
           authenticated_at: 1792338959
           method: cli_confirm
@@ -61218,7 +62284,42 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00024000000000000000
@@ -61319,9 +62420,69 @@ acknowledgments:
   - name: second_acknowledgment_of_a_lifted_request
     clause: 'checks 2 then 4: the lift supersedes the trigger first'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id147
-    - *id148
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBAK00003000000000000000
@@ -61354,7 +62515,42 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00027000000000000000
@@ -61452,17 +62648,19 @@ acknowledgments:
       outcome: lift
     - index: 3
       outcome: trigger_superseded
-  - name: request_step_up_stale
-    clause: 'check 4: the request''s step-up, judged at its own `submitted_at`'
+  - name: acknowledgment_processed_late
+    clause: 'check 3: an acknowledgment''s step-up is judged when the executor processes its copy'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
-      event_id: 01JBRQ00001000000000000000
+      event_id: 01JBAK00002000000000000000
       stream_id: ctl:ws_01J8Z2
-      event_type: OwnerAcknowledgmentRequested
+      event_type: OwnerAcknowledged
       schema_version: 1
-      event_time: '2026-10-18T16:00:00.000000000Z'
+      event_time: '2026-10-18T16:01:00.000000000Z'
       clock_source: local
       causation_id: null
       correlation_id: null
@@ -61475,28 +62673,64 @@ acknowledgments:
       payload:
         agent: agent_a
         event: 01JBTG00001000000000000000
+        user: user_owner_01
         requested_by: user_owner_01
-        independent_required: true
-        submitted_at: 1792339200
-        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
         step_up:
-          assertion_id: assert_req_old
-          authenticated_at: 1792338899
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    - *id148
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00030000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      event_type: OwnerAcknowledgmentRequested
+      event_type: OwnerAcknowledged
       schema_version: 1
-      event_time: '2026-10-18T16:00:00.000000000Z'
+      event_time: '2026-10-18T16:05:51.000000000Z'
       clock_source: local
-      causation_id: 01JBRQ00001000000000000000
+      causation_id: 01JBAK00002000000000000000
       correlation_id: null
       actor:
         kind: system
@@ -61507,14 +62741,94 @@ acknowledgments:
       payload:
         agent: agent_a
         event: 01JBTG00001000000000000000
+        user: user_owner_01
         requested_by: user_owner_01
-        independent_required: true
-        submitted_at: 1792339200
-        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
         step_up:
-          assertion_id: assert_req_old
-          authenticated_at: 1792338899
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
           method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    refused_at_append: []
+    expect:
+    - index: 1
+      outcome: step_up_stale
+  - name: acknowledgment_processed_at_the_window
+    clause: 'check 3: 300 s old at processing is valid'
+    overlay_independent: false
+    environment: paper
+    founder_connection: false
+    control:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    account:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
       artifact_refs: []
       pii_refs: []
     - envelope_version: 1
@@ -61523,9 +62837,9 @@ acknowledgments:
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
-      event_time: '2026-10-18T16:01:00.000000000Z'
+      event_time: '2026-10-18T16:05:50.000000000Z'
       clock_source: local
-      causation_id: 01JBAK00001000000000000000
+      causation_id: 01JBAK00002000000000000000
       correlation_id: null
       actor:
         kind: system
@@ -61536,33 +62850,35 @@ acknowledgments:
       payload:
         agent: agent_a
         event: 01JBTG00001000000000000000
-        user: user_owner_02
+        user: user_owner_01
         requested_by: user_owner_01
-        independent_required: true
-        request: 01JBRQ00001000000000000000
+        independent_required: false
+        request: null
         submitted_at: 1792339260
         risk_clock: '2026-10-18T16:01:00.000000000Z'
         step_up:
-          assertion_id: assert_ak00001
+          assertion_id: assert_ak00002
           authenticated_at: 1792339250
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
     refused_at_append: []
     expect:
-    - index: 2
-      outcome: request_invalid
-  - name: request_step_up_at_the_window
-    clause: 'check 4: 300 s old at the request is valid'
+    - index: 1
+      outcome: lift
+  - name: live_without_the_founder_connection
+    clause: 'check 3: `cli_confirm` is not a live method off the founder''s connection'
     overlay_independent: false
+    environment: live
+    founder_connection: false
     control:
     - envelope_version: 1
-      environment: paper
-      event_id: 01JBRQ00001000000000000000
+      environment: live
+      event_id: 01JBAK00002000000000000000
       stream_id: ctl:ws_01J8Z2
-      event_type: OwnerAcknowledgmentRequested
+      event_type: OwnerAcknowledged
       schema_version: 1
-      event_time: '2026-10-18T16:00:00.000000000Z'
+      event_time: '2026-10-18T16:01:00.000000000Z'
       clock_source: local
       causation_id: null
       correlation_id: null
@@ -61575,28 +62891,64 @@ acknowledgments:
       payload:
         agent: agent_a
         event: 01JBTG00001000000000000000
+        user: user_owner_01
         requested_by: user_owner_01
-        independent_required: true
-        submitted_at: 1792339200
-        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
         step_up:
-          assertion_id: assert_req_edge
-          authenticated_at: 1792338900
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    - *id148
     account:
-    - *id145
     - envelope_version: 1
-      environment: paper
+      environment: live
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: live
       event_id: 01JBCP00032000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      event_type: OwnerAcknowledgmentRequested
+      event_type: OwnerAcknowledged
       schema_version: 1
-      event_time: '2026-10-18T16:00:00.000000000Z'
+      event_time: '2026-10-18T16:01:00.000000000Z'
       clock_source: local
-      causation_id: 01JBRQ00001000000000000000
+      causation_id: 01JBAK00002000000000000000
       correlation_id: null
       actor:
         kind: system
@@ -61607,25 +62959,105 @@ acknowledgments:
       payload:
         agent: agent_a
         event: 01JBTG00001000000000000000
+        user: user_owner_01
         requested_by: user_owner_01
-        independent_required: true
-        submitted_at: 1792339200
-        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
         step_up:
-          assertion_id: assert_req_edge
-          authenticated_at: 1792338900
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
+    refused_at_append: []
+    expect:
+    - index: 1
+      outcome: step_up_method
+  - name: live_on_the_founder_connection
+    clause: 'check 3: `cli_confirm` on the founder''s own live connection (DEC-529 item 3)'
+    overlay_independent: false
+    environment: live
+    founder_connection: true
+    control:
     - envelope_version: 1
-      environment: paper
+      environment: live
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    account:
+    - envelope_version: 1
+      environment: live
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: live
       event_id: 01JBCP00033000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
       event_time: '2026-10-18T16:01:00.000000000Z'
       clock_source: local
-      causation_id: 01JBAK00001000000000000000
+      causation_id: 01JBAK00002000000000000000
       correlation_id: null
       actor:
         kind: system
@@ -61636,25 +63068,27 @@ acknowledgments:
       payload:
         agent: agent_a
         event: 01JBTG00001000000000000000
-        user: user_owner_02
+        user: user_owner_01
         requested_by: user_owner_01
-        independent_required: true
-        request: 01JBRQ00001000000000000000
+        independent_required: false
+        request: null
         submitted_at: 1792339260
         risk_clock: '2026-10-18T16:01:00.000000000Z'
         step_up:
-          assertion_id: assert_ak00001
+          assertion_id: assert_ak00002
           authenticated_at: 1792339250
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
     refused_at_append: []
     expect:
-    - index: 2
+    - index: 1
       outcome: lift
-  - name: request_step_up_after_the_request
-    clause: 'check 4: evidence authenticated after the request is stale'
+  - name: request_step_up_stale
+    clause: 'check 4: the request''s step-up, judged at its own `submitted_at`'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -61680,14 +63114,79 @@ acknowledgments:
         submitted_at: 1792339200
         risk_clock: '2026-10-18T16:00:00.000000000Z'
         step_up:
-          assertion_id: assert_req_next
-          authenticated_at: 1792339201
+          assertion_id: assert_req_old
+          authenticated_at: 1792338899
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    - *id148
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00034000000000000000
@@ -61712,8 +63211,8 @@ acknowledgments:
         submitted_at: 1792339200
         risk_clock: '2026-10-18T16:00:00.000000000Z'
         step_up:
-          assertion_id: assert_req_next
-          authenticated_at: 1792339201
+          assertion_id: assert_req_old
+          authenticated_at: 1792338899
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
@@ -61752,9 +63251,11 @@ acknowledgments:
     expect:
     - index: 2
       outcome: request_invalid
-  - name: request_step_up_method
-    clause: 'check 4: the request''s method'
+  - name: request_step_up_at_the_window
+    clause: 'check 4: 300 s old at the request is valid'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -61780,14 +63281,79 @@ acknowledgments:
         submitted_at: 1792339200
         risk_clock: '2026-10-18T16:00:00.000000000Z'
         step_up:
-          assertion_id: assert_req_pw
-          authenticated_at: 1792339190
-          method: password
+          assertion_id: assert_req_edge
+          authenticated_at: 1792338900
+          method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    - *id148
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00036000000000000000
@@ -61812,9 +63378,9 @@ acknowledgments:
         submitted_at: 1792339200
         risk_clock: '2026-10-18T16:00:00.000000000Z'
         step_up:
-          assertion_id: assert_req_pw
-          authenticated_at: 1792339190
-          method: password
+          assertion_id: assert_req_edge
+          authenticated_at: 1792338900
+          method: cli_confirm
       artifact_refs: []
       pii_refs: []
     - envelope_version: 1
@@ -61851,10 +63417,346 @@ acknowledgments:
     refused_at_append: []
     expect:
     - index: 2
+      outcome: lift
+  - name: request_step_up_after_the_request
+    clause: 'check 4: evidence authenticated after the request is stale'
+    overlay_independent: false
+    environment: paper
+    founder_connection: false
+    control:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_req_next
+          authenticated_at: 1792339201
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    account:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00038000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01JBRQ00001000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_req_next
+          authenticated_at: 1792339201
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00039000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: 01JBAK00001000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    refused_at_append: []
+    expect:
+    - index: 2
+      outcome: request_invalid
+  - name: request_step_up_method
+    clause: 'check 4: the request''s method'
+    overlay_independent: false
+    environment: paper
+    founder_connection: false
+    control:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_req_pw
+          authenticated_at: 1792339190
+          method: password
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    account:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00040000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01JBRQ00001000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_req_pw
+          authenticated_at: 1792339190
+          method: password
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00041000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: 01JBAK00001000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    refused_at_append: []
+    expect:
+    - index: 2
       outcome: request_invalid
   - name: request_without_step_up
     clause: 'check 4: rule 239 refuses it at append; the executor fails closed all the same'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -61882,12 +63784,77 @@ acknowledgments:
         step_up: null
       artifact_refs: []
       pii_refs: []
-    - *id148
-    account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00038000000000000000
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    account:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00042000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledgmentRequested
       schema_version: 1
@@ -61913,7 +63880,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00039000000000000000
+      event_id: 01JBCP00043000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -61957,6 +63924,8 @@ acknowledgments:
   - name: request_reuses_a_commands_assertion
     clause: 'check 4 and mandate spec §6.1: a request''s assertion appears on no earlier command'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -62021,12 +63990,77 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    - *id148
-    account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00040000000000000000
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    account:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00044000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledgmentRequested
       schema_version: 1
@@ -62055,7 +64089,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00041000000000000000
+      event_id: 01JBCP00045000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -62091,8 +64125,38 @@ acknowledgments:
   - name: acknowledgment_reuses_the_requests_assertion
     clause: 'check 3: a request''s assertion is spent'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id147
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBAK00001000000000000000
@@ -62125,10 +64189,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00042000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00046000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledgmentRequested
       schema_version: 1
@@ -62157,7 +64256,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00043000000000000000
+      event_id: 01JBCP00047000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -62193,6 +64292,8 @@ acknowledgments:
   - name: acknowledgment_reuses_an_answers_assertion
     clause: 'check 3: an approval answer''s assertion is spent'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -62257,10 +64358,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00044000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00048000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -62296,6 +64432,8 @@ acknowledgments:
   - name: acknowledgment_reuses_an_acknowledgments_assertion
     clause: 'check 3: an earlier acknowledgment''s assertion is spent, whatever its outcome'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -62360,10 +64498,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00045000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00049000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -62394,7 +64567,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00046000000000000000
+      event_id: 01JBCP00050000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -62432,6 +64605,8 @@ acknowledgments:
   - name: a_later_command_reuses_the_assertion
     clause: 'check 3: only an earlier record spends an assertion'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -62499,10 +64674,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00047000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00051000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -62538,6 +64748,8 @@ acknowledgments:
   - name: acknowledgment_step_up_missing
     clause: check 3
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -62568,10 +64780,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00048000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00052000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -62604,6 +64851,8 @@ acknowledgments:
   - name: acknowledgment_step_up_stale
     clause: 'check 3: more than 300 s'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -62637,10 +64886,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00049000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00053000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -62676,6 +64960,8 @@ acknowledgments:
   - name: acknowledgment_step_up_at_the_window
     clause: 'check 3: 300 s is valid'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -62709,10 +64995,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00050000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00054000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -62748,6 +65069,8 @@ acknowledgments:
   - name: acknowledgment_step_up_after_it
     clause: 'check 3: authenticated after the command is stale'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -62781,10 +65104,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00051000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00055000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -62820,6 +65178,8 @@ acknowledgments:
   - name: acknowledgment_step_up_method
     clause: 'check 3: the method is allowed for the environment'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -62853,10 +65213,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00052000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00056000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -62892,6 +65287,8 @@ acknowledgments:
   - name: request_agent_differs
     clause: 'check 4: the request copy''s `agent`'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -62922,53 +65319,21 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    - *id148
-    account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00053000000000000000
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      event_type: OwnerAcknowledgmentRequested
-      schema_version: 1
-      event_time: '2026-10-18T16:00:00.000000000Z'
-      clock_source: local
-      causation_id: 01JBRQ00001000000000000000
-      correlation_id: null
-      actor:
-        kind: system
-        id: executor
-        version: 0.1.0
-        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
-      config_refs: {}
-      payload:
-        agent: agent_b
-        event: 01JBTG00001000000000000000
-        requested_by: user_owner_01
-        independent_required: true
-        submitted_at: 1792339200
-        risk_clock: '2026-10-18T16:00:00.000000000Z'
-        step_up:
-          assertion_id: assert_rq00001
-          authenticated_at: 1792339190
-          method: cli_confirm
-      artifact_refs: []
-      pii_refs: []
-    - envelope_version: 1
-      environment: paper
-      event_id: 01JBCP00054000000000000000
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
       event_type: OwnerAcknowledged
       schema_version: 1
       event_time: '2026-10-18T16:01:00.000000000Z'
       clock_source: local
-      causation_id: 01JBAK00001000000000000000
+      causation_id: null
       correlation_id: null
       actor:
-        kind: system
-        id: executor
-        version: 0.1.0
-        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
       config_refs: {}
       payload:
         agent: agent_a
@@ -62985,146 +65350,43 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    refused_at_append: []
-    expect:
-    - index: 2
-      outcome: request_invalid
-  - name: request_event_differs
-    clause: 'check 4: the request copy''s `event`'
-    overlay_independent: false
-    control:
+    account:
     - envelope_version: 1
       environment: paper
-      event_id: 01JBRQ00001000000000000000
-      stream_id: ctl:ws_01J8Z2
-      event_type: OwnerAcknowledgmentRequested
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
       schema_version: 1
-      event_time: '2026-10-18T16:00:00.000000000Z'
+      event_time: '2026-10-18T15:50:00.000000000Z'
       clock_source: local
       causation_id: null
-      correlation_id: null
-      actor:
-        kind: user
-        id: user_owner_01
-        version: '1'
-        build: null
-      config_refs: {}
-      payload:
-        agent: agent_a
-        event: 01JBTG00002000000000000000
-        requested_by: user_owner_01
-        independent_required: true
-        submitted_at: 1792339200
-        risk_clock: '2026-10-18T16:00:00.000000000Z'
-        step_up:
-          assertion_id: assert_rq00001
-          authenticated_at: 1792339190
-          method: cli_confirm
-      artifact_refs: []
-      pii_refs: []
-    - *id148
-    account:
-    - *id145
-    - envelope_version: 1
-      environment: paper
-      event_id: 01JBCP00055000000000000000
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      event_type: OwnerAcknowledgmentRequested
-      schema_version: 1
-      event_time: '2026-10-18T16:00:00.000000000Z'
-      clock_source: local
-      causation_id: 01JBRQ00001000000000000000
       correlation_id: null
       actor:
         kind: system
         id: executor
         version: 0.1.0
         build: sha256:3333333333333333333333333333333333333333333333333333333333333333
-      config_refs: {}
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
       payload:
-        agent: agent_a
-        event: 01JBTG00002000000000000000
-        requested_by: user_owner_01
-        independent_required: true
-        submitted_at: 1792339200
-        risk_clock: '2026-10-18T16:00:00.000000000Z'
-        step_up:
-          assertion_id: assert_rq00001
-          authenticated_at: 1792339190
-          method: cli_confirm
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - envelope_version: 1
-      environment: paper
-      event_id: 01JBCP00056000000000000000
-      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      event_type: OwnerAcknowledged
-      schema_version: 1
-      event_time: '2026-10-18T16:01:00.000000000Z'
-      clock_source: local
-      causation_id: 01JBAK00001000000000000000
-      correlation_id: null
-      actor:
-        kind: system
-        id: executor
-        version: 0.1.0
-        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
-      config_refs: {}
-      payload:
-        agent: agent_a
-        event: 01JBTG00001000000000000000
-        user: user_owner_02
-        requested_by: user_owner_01
-        independent_required: true
-        request: 01JBRQ00001000000000000000
-        submitted_at: 1792339260
-        risk_clock: '2026-10-18T16:01:00.000000000Z'
-        step_up:
-          assertion_id: assert_ak00001
-          authenticated_at: 1792339250
-          method: cli_confirm
-      artifact_refs: []
-      pii_refs: []
-    refused_at_append: []
-    expect:
-    - index: 2
-      outcome: request_invalid
-  - name: request_requested_by_differs
-    clause: 'check 4: the request copy''s `requested_by`'
-    overlay_independent: false
-    control:
-    - envelope_version: 1
-      environment: paper
-      event_id: 01JBRQ00001000000000000000
-      stream_id: ctl:ws_01J8Z2
-      event_type: OwnerAcknowledgmentRequested
-      schema_version: 1
-      event_time: '2026-10-18T16:00:00.000000000Z'
-      clock_source: local
-      causation_id: null
-      correlation_id: null
-      actor:
-        kind: user
-        id: user_owner_03
-        version: '1'
-        build: null
-      config_refs: {}
-      payload:
-        agent: agent_a
-        event: 01JBTG00001000000000000000
-        requested_by: user_owner_03
-        independent_required: true
-        submitted_at: 1792339200
-        risk_clock: '2026-10-18T16:00:00.000000000Z'
-        step_up:
-          assertion_id: assert_rq00001
-          authenticated_at: 1792339190
-          method: cli_confirm
-      artifact_refs: []
-      pii_refs: []
-    - *id148
-    account:
-    - *id145
     - envelope_version: 1
       environment: paper
       event_id: 01JBCP00057000000000000000
@@ -63142,9 +65404,9 @@ acknowledgments:
         build: sha256:3333333333333333333333333333333333333333333333333333333333333333
       config_refs: {}
       payload:
-        agent: agent_a
+        agent: agent_b
         event: 01JBTG00001000000000000000
-        requested_by: user_owner_03
+        requested_by: user_owner_01
         independent_required: true
         submitted_at: 1792339200
         risk_clock: '2026-10-18T16:00:00.000000000Z'
@@ -63189,9 +65451,345 @@ acknowledgments:
     expect:
     - index: 2
       outcome: request_invalid
+  - name: request_event_differs
+    clause: 'check 4: the request copy''s `event`'
+    overlay_independent: false
+    environment: paper
+    founder_connection: false
+    control:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00002000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    account:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00059000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01JBRQ00001000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00002000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00060000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: 01JBAK00001000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    refused_at_append: []
+    expect:
+    - index: 2
+      outcome: request_invalid
+  - name: request_requested_by_differs
+    clause: 'check 4: the request copy''s `requested_by`'
+    overlay_independent: false
+    environment: paper
+    founder_connection: false
+    control:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_03
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_03
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    account:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00061000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01JBRQ00001000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_03
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00062000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: 01JBAK00001000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    refused_at_append: []
+    expect:
+    - index: 2
+      outcome: request_invalid
   - name: request_requirement_differs
     clause: 'check 4: the request copy''s `independent_required`; rule 239 refuses it at append'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -63222,12 +65820,77 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    - *id148
-    account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00059000000000000000
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    account:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00063000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledgmentRequested
       schema_version: 1
@@ -63256,7 +65919,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00060000000000000000
+      event_id: 01JBCP00064000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -63300,8 +65963,38 @@ acknowledgments:
   - name: another_requests_copy
     clause: 'check 4: the request copy whose `causation_id` is the request'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id147
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBRQ00002000000000000000
@@ -63331,12 +66024,77 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    - *id148
-    account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00061000000000000000
+      event_id: 01JBAK00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_02
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_02
+        requested_by: user_owner_01
+        independent_required: true
+        request: 01JBRQ00001000000000000000
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00001
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    account:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00065000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledgmentRequested
       schema_version: 1
@@ -63365,7 +66123,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00062000000000000000
+      event_id: 01JBCP00066000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -63401,8 +66159,38 @@ acknowledgments:
   - name: self_acknowledgment
     clause: 'check 4: `user` differs from `requested_by`; rule 239 refuses it at append'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id147
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBAK00001000000000000000
@@ -63435,10 +66223,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00063000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00067000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledgmentRequested
       schema_version: 1
@@ -63467,7 +66290,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00064000000000000000
+      event_id: 01JBCP00068000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -63511,6 +66334,8 @@ acknowledgments:
   - name: unknown_trigger_before_stale_step_up
     clause: 'the order: check 1 before check 3'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -63537,14 +66362,52 @@ acknowledgments:
         request: null
         submitted_at: 1792339260
         risk_clock: '2026-10-18T16:01:00.000000000Z'
-        step_up: *id149
+        step_up:
+          assertion_id: assert_stale
+          authenticated_at: 1792338959
+          method: cli_confirm
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00065000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00069000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -63580,6 +66443,8 @@ acknowledgments:
   - name: superseded_before_stale_step_up
     clause: 'the order: check 2 before check 3'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -63606,11 +66471,49 @@ acknowledgments:
         request: null
         submitted_at: 1792339260
         risk_clock: '2026-10-18T16:01:00.000000000Z'
-        step_up: *id149
+        step_up:
+          assertion_id: assert_stale
+          authenticated_at: 1792338959
+          method: cli_confirm
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBXF00004000000000000000
@@ -63645,7 +66548,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00066000000000000000
+      event_id: 01JBCP00070000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -63681,6 +66584,8 @@ acknowledgments:
   - name: stale_step_up_before_independence
     clause: 'the order: check 3 before check 4'
     overlay_independent: true
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -63707,14 +66612,52 @@ acknowledgments:
         request: null
         submitted_at: 1792339260
         risk_clock: '2026-10-18T16:01:00.000000000Z'
-        step_up: *id149
+        step_up:
+          assertion_id: assert_stale
+          authenticated_at: 1792338959
+          method: cli_confirm
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00067000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00071000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -63750,6 +66693,8 @@ acknowledgments:
   - name: independence_before_the_request
     clause: 'the order: `not_independent` before `request_invalid`'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
     - envelope_version: 1
       environment: paper
@@ -63783,10 +66728,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00068000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00072000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -63830,8 +66810,40 @@ acknowledgments:
   - name: two_agents_two_lifts
     clause: '§9.28: each acknowledgment its own agent''s trigger'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id146
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBAK00002000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledged
+      schema_version: 1
+      event_time: '2026-10-18T16:01:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        user: user_owner_01
+        requested_by: user_owner_01
+        independent_required: false
+        request: null
+        submitted_at: 1792339260
+        risk_clock: '2026-10-18T16:01:00.000000000Z'
+        step_up:
+          assertion_id: assert_ak00002
+          authenticated_at: 1792339250
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBAK00003000000000000000
@@ -63864,7 +66876,42 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBTG00002000000000000000
@@ -63903,7 +66950,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00069000000000000000
+      event_id: 01JBCP00073000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -63934,7 +66981,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00070000000000000000
+      event_id: 01JBCP00074000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -63972,8 +67019,38 @@ acknowledgments:
   - name: retry_with_a_new_request
     clause: 'check 4: a retry after a refusal needs a new request, and lifts'
     overlay_independent: false
+    environment: paper
+    founder_connection: false
     control:
-    - *id147
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBRQ00001000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: OwnerAcknowledgmentRequested
+      schema_version: 1
+      event_time: '2026-10-18T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        agent: agent_a
+        event: 01JBTG00001000000000000000
+        requested_by: user_owner_01
+        independent_required: true
+        submitted_at: 1792339200
+        risk_clock: '2026-10-18T16:00:00.000000000Z'
+        step_up:
+          assertion_id: assert_rq00001
+          authenticated_at: 1792339190
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JBAK00001000000000000000
@@ -63999,7 +67076,10 @@ acknowledgments:
         request: 01JBRQ00001000000000000000
         submitted_at: 1792339260
         risk_clock: '2026-10-18T16:01:00.000000000Z'
-        step_up: *id149
+        step_up:
+          assertion_id: assert_stale
+          authenticated_at: 1792338959
+          method: cli_confirm
       artifact_refs: []
       pii_refs: []
     - envelope_version: 1
@@ -64063,10 +67143,45 @@ acknowledgments:
       artifact_refs: []
       pii_refs: []
     account:
-    - *id145
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00071000000000000000
+      event_id: 01JBTG00001000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RiskLimitTriggered
+      schema_version: 1
+      event_time: '2026-10-18T15:50:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs:
+        mandate_version: sha256:7777777777777777777777777777777777777777777777777777777777777777
+      payload:
+        agent_id: agent_a
+        agent_equity: '9700'
+        high_water_mark: '10000'
+        drawdown: '0.03'
+        day_start_equity: '10000'
+        capital_base: '10000'
+        inherited_loss: '0'
+        net_contributed: '10000'
+        limit: max_daily_loss
+        action: exits_only
+        reason: null
+        breach_time_s: 0
+        metric: null
+        threshold: null
+        value: null
+        risk_clock: '2026-10-18T15:50:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JBCP00075000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledgmentRequested
       schema_version: 1
@@ -64095,7 +67210,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00072000000000000000
+      event_id: 01JBCP00076000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1
@@ -64126,7 +67241,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00073000000000000000
+      event_id: 01JBCP00077000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledgmentRequested
       schema_version: 1
@@ -64155,7 +67270,7 @@ acknowledgments:
       pii_refs: []
     - envelope_version: 1
       environment: paper
-      event_id: 01JBCP00074000000000000000
+      event_id: 01JBCP00078000000000000000
       stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
       event_type: OwnerAcknowledged
       schema_version: 1

@@ -532,8 +532,9 @@ def stream_cases() -> list[dict]:
 # --------------------------------------------------------------------------- the executor's judgment
 
 
-def step_up_failure(step_up, at: int, prior: set[str], skip: frozenset[str], who: str) -> str | None:
-    """Mandate spec §6.1 at the second `at`, with `prior` the assertions spent before it."""
+def step_up_failure(step_up, at: int, prior: set[str], skip: frozenset[str], who: str, methods: tuple) -> str | None:
+    """Mandate spec §6.1 at the second `at`, with `prior` the assertions spent before it and
+    `methods` the methods the environment allows."""
     if step_up is None:
         return None if f"executor.3.missing.{who}" in skip else "step_up_missing"
     gap = at - step_up["authenticated_at"]
@@ -544,7 +545,8 @@ def step_up_failure(step_up, at: int, prior: set[str], skip: frozenset[str], who
         return "step_up_stale"
     if step_up["assertion_id"] in prior and "executor.reuse" not in skip:
         return "step_up_reused"
-    if step_up["method"] not in METHODS and "executor.3.method" not in skip:
+    allowed = METHODS if "executor.3.live" in skip else methods
+    if step_up["method"] not in allowed and "executor.3.method" not in skip:
         return "step_up_method"
     return None
 
@@ -573,7 +575,19 @@ def spent_before(control: list[dict], skip: frozenset[str]) -> dict[str, set[str
     return out
 
 
-def judge(control: list[dict], account: list[dict], overlay: bool, skip: frozenset[str] = frozenset()) -> list[dict]:
+def methods_for(environment: str, founder_connection: bool) -> tuple:
+    """Mandate spec §6.1's methods: `cli_confirm` in `paper`, and in `live` only on the founder's
+    own connection (DEC-529 item 3), which a case states as an input as it states the overlay."""
+    return METHODS if environment == "paper" or founder_connection else ()
+
+
+def judge(
+    control: list[dict],
+    account: list[dict],
+    overlay: bool,
+    skip: frozenset[str] = frozenset(),
+    methods: tuple = METHODS,
+) -> list[dict]:
     """The executor's fold of its account stream, forward: each acknowledgment copy judged by §9.28's
     checks 1 to 4 in order, its own lift folded back in. One outcome per acknowledgment copy."""
     spent = spent_before(control, skip)
@@ -612,7 +626,7 @@ def judge(control: list[dict], account: list[dict], overlay: bool, skip: frozens
         elif kind == "OwnerAcknowledgmentRequested":
             requests.setdefault(r["causation_id"], p)
         elif kind == "OwnerAcknowledged":
-            outcome = judged(r, triggers, standing, requests, named, spent, overlay, skip)
+            outcome = judged(r, triggers, standing, requests, named, spent, overlay, skip, methods)
             if p["request"] is not None:
                 named.add(p["request"])
             out.append({"index": i, "outcome": outcome})
@@ -623,7 +637,7 @@ def judge(control: list[dict], account: list[dict], overlay: bool, skip: frozens
     return out
 
 
-def judged(r, triggers, standing, requests, named, spent, overlay, skip) -> str:
+def judged(r, triggers, standing, requests, named, spent, overlay, skip, methods) -> str:
     p = r["payload"]
     original = r["causation_id"]
     trigger = triggers.get(p["event"])
@@ -633,7 +647,8 @@ def judged(r, triggers, standing, requests, named, spent, overlay, skip) -> str:
     if trigger is not None and not standing.get(p["event"], True) and "executor.2" not in skip:
         return "trigger_superseded"
     if "executor.3" not in skip:
-        failed = step_up_failure(p["step_up"], p["submitted_at"], spent.get(original, set()), skip, "acknowledgment")
+        at = p["submitted_at"] if "executor.3.at_submission" in skip else seconds_of(r["event_time"])
+        failed = step_up_failure(p["step_up"], at, spent.get(original, set()), skip, "acknowledgment", methods)
         if failed:
             return failed
     flag = p["independent_required"] and "executor.4.copy_flag" not in skip
@@ -648,7 +663,9 @@ def judged(r, triggers, standing, requests, named, spent, overlay, skip) -> str:
         return "request_invalid"
     if any(request[m] != p[m] for m in MATCHED if f"executor.4.match.{m}" not in skip):
         return "request_invalid"
-    request_failed = step_up_failure(request["step_up"], request["submitted_at"], spent.get(p["request"], set()), skip, "request")
+    request_failed = step_up_failure(
+        request["step_up"], request["submitted_at"], spent.get(p["request"], set()), skip, "request", methods
+    )
     if request_failed and "executor.4.request_step_up" not in skip:
         return "request_invalid"
     if p["request"] in named and "executor.4.spent" not in skip:
@@ -662,13 +679,21 @@ def judge_streams(case: dict, skip: frozenset[str] = frozenset()) -> list[dict]:
     account = case["account"]
     if "executor.4.order" in skip:
         account = [{**r, "_later": account[i + 1 :]} for i, r in enumerate(account)]
-    return judge(case["control"], account, case["overlay_independent"], skip)
+    methods = methods_for(case["environment"], case["founder_connection"])
+    return judge(case["control"], account, case["overlay_independent"], skip, methods)
 
 
 # --------------------------------------------------------------------------- the independent oracle
 
 
-def oracle(control: list[dict], account: list[dict], overlay: bool, skip: frozenset[str] = frozenset()) -> list[dict]:
+def oracle(
+    control: list[dict],
+    account: list[dict],
+    overlay: bool,
+    skip: frozenset[str] = frozenset(),
+    environment: str = "paper",
+    founder_connection: bool = False,
+) -> list[dict]:
     """§9.28's judgment restated: for each acknowledgment copy, scan the account stream's prefix
     backwards for its trigger, anything since that ended it, its request copy and any earlier copy
     naming it, and the control stream's prefix backwards for a spent assertion. Earlier outcomes are
@@ -690,7 +715,7 @@ def oracle(control: list[dict], account: list[dict], overlay: bool, skip: frozen
             return "step_up_stale"
         if assertion_spent(original_id, step_up["assertion_id"]):
             return "step_up_reused"
-        if step_up["method"] != "cli_confirm":
+        if step_up["method"] != "cli_confirm" or (environment == "live" and not founder_connection):
             return "step_up_method"
         return None
 
@@ -719,7 +744,8 @@ def oracle(control: list[dict], account: list[dict], overlay: bool, skip: frozen
                 earlier = triggers_of(j)
                 if earlier is not None and same_limit(earlier, agent, limit) and outcomes[j] == "lift":
                     return "trigger_superseded"
-        failed = evidence_fails(p["step_up"], p["submitted_at"], account[k]["causation_id"])
+        processed = seconds_of(account[k]["event_time"])
+        failed = evidence_fails(p["step_up"], processed, account[k]["causation_id"])
         if failed:
             return failed
         if not (p["independent_required"] or overlay):
@@ -763,10 +789,17 @@ def executor_cases() -> list[dict]:
     requirement at processing, and each acknowledgment copy's outcome, typed from §9.28's checks."""
     counter = iter(range(1, 10_000))
 
-    def cp(original: dict) -> dict:
-        return copied(original, uid("CP", next(counter)))
+    def cp(original: dict, late: int = 0) -> dict:
+        record = copied(original, uid("CP", next(counter)))
+        record["event_time"] = ts(original["payload"]["submitted_at"] + late)
+        return record
 
-    def case(name, clause, control, account, outcomes, overlay=False, refused_at_append=()):
+    def case(
+        name, clause, control, account, outcomes, overlay=False, refused_at_append=(), environment="paper", founder=False
+    ):
+        control, account = copy.deepcopy(control), copy.deepcopy(account)
+        for record in (*control, *account):
+            record["environment"] = environment
         acks = [i for i, r in enumerate(account) if r["event_type"] == "OwnerAcknowledged"]
         assert len(acks) == len(outcomes), name
         expect = [{"index": i, "outcome": o} for i, o in zip(acks, outcomes, strict=True)]
@@ -774,6 +807,8 @@ def executor_cases() -> list[dict]:
             "name": name,
             "clause": clause,
             "overlay_independent": overlay,
+            "environment": environment,
+            "founder_connection": founder,
             "control": control,
             "account": account,
             "refused_at_append": [{"stream": s, "index": i, "rule": 239, "path": path} for s, i, path in refused_at_append],
@@ -827,6 +862,14 @@ def executor_cases() -> list[dict]:
         case("second_acknowledgment_of_a_lifted_request", "checks 2 then 4: the lift supersedes the trigger first",
              [req, ack, acknowledged(second, by=THIRD, at=T0 + 90)],
              [trig, cp(req), cp(ack), cp(acknowledged(second, by=THIRD, at=T0 + 90))], ["lift", "trigger_superseded"]),
+        case("acknowledgment_processed_late", "check 3: an acknowledgment's step-up is judged when the executor processes its copy",
+             [own], [trig, cp(own, late=291)], ["step_up_stale"]),
+        case("acknowledgment_processed_at_the_window", "check 3: 300 s old at processing is valid",
+             [own], [trig, cp(own, late=290)], ["lift"]),
+        case("live_without_the_founder_connection", "check 3: `cli_confirm` is not a live method off the founder's connection",
+             [own], [trig, cp(own)], ["step_up_method"], environment="live"),
+        case("live_on_the_founder_connection", "check 3: `cli_confirm` on the founder's own live connection (DEC-529 item 3)",
+             [own], [trig, cp(own)], ["lift"], environment="live", founder=True),
         case("request_step_up_stale", "check 4: the request's step-up, judged at its own `submitted_at`",
              [requested(step_up=evidence("assert_req_old", T0 - 301)), ack],
              [trig, cp(requested(step_up=evidence("assert_req_old", T0 - 301))), cp(ack)], ["request_invalid"]),
@@ -1105,14 +1148,21 @@ def check_section(section: dict, skip: frozenset[str] = frozenset()) -> list[str
         got = judge_streams(case, skip)
         if got != case["expect"]:
             problems.append(found("executor.outcomes", f"{case['name']}: expected {case['expect']}, got {got}"))
-        got = oracle(case["control"], case["account"], case["overlay_independent"], skip)
+        got = oracle(
+            case["control"],
+            case["account"],
+            case["overlay_independent"],
+            skip,
+            case["environment"],
+            case["founder_connection"],
+        )
         if got != case["expect"]:
             problems.append(found("executor.oracle", f"{case['name']}: expected {case['expect']}, got {got}"))
         for n, item in enumerate(case["expect"]):
             if item["outcome"] == "lift":
                 continue
             ack = case["account"][item["index"]]
-            record = refused(uid("RF", 50 + n), item["outcome"], ack["causation_id"], ack["payload"]["submitted_at"])
+            record = refused(uid("RF", 50 + n), item["outcome"], ack["causation_id"], seconds_of(ack["event_time"]))
             got = violations(record, skip)
             if got:
                 problems.append(found("executor.refusals", f"{case['name']}: its {item['outcome']} refusal is refused: {got}"))
@@ -1160,6 +1210,8 @@ VALIDATOR_MUTANTS = (
     "executor.3.future",
     "executor.3.window",
     "executor.3.method",
+    "executor.3.at_submission",
+    "executor.3.live",
     "executor.reuse",
     "executor.reuse.requests",
     "executor.reuse.commands",

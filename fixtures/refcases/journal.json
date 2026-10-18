@@ -98769,6 +98769,8 @@
     "name": "independent_lifts",
     "clause": "§9.28: all four checks pass",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -98966,6 +98968,8 @@
     "name": "plain_lifts",
     "clause": "check 4 does not apply when neither the copy nor the overlay requires independence",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -99095,6 +99099,8 @@
     "name": "plain_under_overlay",
     "clause": "check 4: the stricter of the copy's requirement and the overlay's at processing",
     "overlay_independent": true,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -99224,6 +99230,8 @@
     "name": "independent_without_overlay",
     "clause": "check 4: the copy's own requirement holds when the overlay no longer asks",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -99421,6 +99429,8 @@
     "name": "unknown_ulid",
     "clause": "check 1: an unknown ULID",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -99550,6 +99560,8 @@
     "name": "another_agents_trigger",
     "clause": "check 1: another agent's trigger",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -99679,6 +99691,8 @@
     "name": "another_event_type",
     "clause": "check 1: the event named is not a `RiskLimitTriggered`",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -99845,6 +99859,8 @@
     "name": "trigger_after_the_copy",
     "clause": "check 1: the trigger comes before the acknowledgment copy",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -99974,6 +99990,8 @@
     "name": "superseded_by_a_later_trigger",
     "clause": "check 2: a later `RiskLimitTriggered` of the same limit",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -100144,6 +100162,8 @@
     "name": "the_later_trigger_stands",
     "clause": "check 2: the latest latch is acknowledged by naming it",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -100314,6 +100334,8 @@
     "name": "superseded_by_a_lift",
     "clause": "check 2: a `RiskLimitLifted` of that limit",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -100480,6 +100502,8 @@
     "name": "later_trigger_of_another_limit",
     "clause": "check 2: only the same limit supersedes",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -100650,6 +100674,8 @@
     "name": "lift_of_another_limit",
     "clause": "check 2: only a lift of that limit supersedes",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -100816,6 +100842,8 @@
     "name": "another_agents_later_trigger",
     "clause": "check 2: the limit is this agent's risk state's",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -100986,6 +101014,8 @@
     "name": "second_acknowledgment_after_a_lift",
     "clause": "check 2: the executor's own lift supersedes the trigger",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -101191,6 +101221,8 @@
     "name": "refused_acknowledgment_lifts_nothing",
     "clause": "§9.28: a refusal lifts nothing, so the trigger still stands",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -101388,6 +101420,8 @@
     "name": "request_copy_after_the_acknowledgment_copy",
     "clause": "check 4: the request copy comes first",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -101585,6 +101619,8 @@
     "name": "request_never_copied",
     "clause": "check 4: a request copy names the request",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -101748,6 +101784,8 @@
     "name": "request_spent_by_a_refused_acknowledgment",
     "clause": "check 4: no earlier acknowledgment copy, refused or not, names it",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -102021,6 +102059,8 @@
     "name": "second_acknowledgment_of_a_lifted_request",
     "clause": "checks 2 then 4: the lift supersedes the trigger first",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -102291,18 +102331,20 @@
     ]
    },
    {
-    "name": "request_step_up_stale",
-    "clause": "check 4: the request's step-up, judged at its own `submitted_at`",
+    "name": "acknowledgment_processed_late",
+    "clause": "check 3: an acknowledgment's step-up is judged when the executor processes its copy",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBRQ00001000000000000000",
+      "event_id": "01JBAK00002000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "OwnerAcknowledgmentRequested",
+      "event_type": "OwnerAcknowledged",
       "schema_version": 1,
-      "event_time": "2026-10-18T16:00:00.000000000Z",
+      "event_time": "2026-10-18T16:01:00.000000000Z",
       "clock_source": "local",
       "causation_id": null,
       "correlation_id": null,
@@ -102316,48 +102358,14 @@
       "payload": {
        "agent": "agent_a",
        "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
        "requested_by": "user_owner_01",
-       "independent_required": true,
-       "submitted_at": 1792339200,
-       "risk_clock": "2026-10-18T16:00:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_req_old",
-        "authenticated_at": 1792338899,
-        "method": "cli_confirm"
-       }
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBAK00001000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "OwnerAcknowledged",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "user",
-       "id": "user_owner_02",
-       "version": "1",
-       "build": null
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "user": "user_owner_02",
-       "requested_by": "user_owner_01",
-       "independent_required": true,
-       "request": "01JBRQ00001000000000000000",
+       "independent_required": false,
+       "request": null,
        "submitted_at": 1792339260,
        "risk_clock": "2026-10-18T16:01:00.000000000Z",
        "step_up": {
-        "assertion_id": "assert_ak00001",
+        "assertion_id": "assert_ak00002",
         "authenticated_at": 1792339250,
         "method": "cli_confirm"
        }
@@ -102413,45 +102421,11 @@
       "environment": "paper",
       "event_id": "01JBCP00030000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "event_type": "OwnerAcknowledgmentRequested",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:00:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": "01JBRQ00001000000000000000",
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "executor",
-       "version": "0.1.0",
-       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "requested_by": "user_owner_01",
-       "independent_required": true,
-       "submitted_at": 1792339200,
-       "risk_clock": "2026-10-18T16:00:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_req_old",
-        "authenticated_at": 1792338899,
-        "method": "cli_confirm"
-       }
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBCP00031000000000000000",
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "event_time": "2026-10-18T16:05:51.000000000Z",
       "clock_source": "local",
-      "causation_id": "01JBAK00001000000000000000",
+      "causation_id": "01JBAK00002000000000000000",
       "correlation_id": null,
       "actor": {
        "kind": "system",
@@ -102463,14 +102437,14 @@
       "payload": {
        "agent": "agent_a",
        "event": "01JBTG00001000000000000000",
-       "user": "user_owner_02",
+       "user": "user_owner_01",
        "requested_by": "user_owner_01",
-       "independent_required": true,
-       "request": "01JBRQ00001000000000000000",
+       "independent_required": false,
+       "request": null,
        "submitted_at": 1792339260,
        "risk_clock": "2026-10-18T16:01:00.000000000Z",
        "step_up": {
-        "assertion_id": "assert_ak00001",
+        "assertion_id": "assert_ak00002",
         "authenticated_at": 1792339250,
         "method": "cli_confirm"
        }
@@ -102482,24 +102456,26 @@
     "refused_at_append": [],
     "expect": [
      {
-      "index": 2,
-      "outcome": "request_invalid"
+      "index": 1,
+      "outcome": "step_up_stale"
      }
     ]
    },
    {
-    "name": "request_step_up_at_the_window",
-    "clause": "check 4: 300 s old at the request is valid",
+    "name": "acknowledgment_processed_at_the_window",
+    "clause": "check 3: 300 s old at processing is valid",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBRQ00001000000000000000",
+      "event_id": "01JBAK00002000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "OwnerAcknowledgmentRequested",
+      "event_type": "OwnerAcknowledged",
       "schema_version": 1,
-      "event_time": "2026-10-18T16:00:00.000000000Z",
+      "event_time": "2026-10-18T16:01:00.000000000Z",
       "clock_source": "local",
       "causation_id": null,
       "correlation_id": null,
@@ -102513,48 +102489,14 @@
       "payload": {
        "agent": "agent_a",
        "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
        "requested_by": "user_owner_01",
-       "independent_required": true,
-       "submitted_at": 1792339200,
-       "risk_clock": "2026-10-18T16:00:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_req_edge",
-        "authenticated_at": 1792338900,
-        "method": "cli_confirm"
-       }
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBAK00001000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "OwnerAcknowledged",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "user",
-       "id": "user_owner_02",
-       "version": "1",
-       "build": null
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "user": "user_owner_02",
-       "requested_by": "user_owner_01",
-       "independent_required": true,
-       "request": "01JBRQ00001000000000000000",
+       "independent_required": false,
+       "request": null,
        "submitted_at": 1792339260,
        "risk_clock": "2026-10-18T16:01:00.000000000Z",
        "step_up": {
-        "assertion_id": "assert_ak00001",
+        "assertion_id": "assert_ak00002",
         "authenticated_at": 1792339250,
         "method": "cli_confirm"
        }
@@ -102608,47 +102550,13 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00032000000000000000",
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "event_type": "OwnerAcknowledgmentRequested",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:00:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": "01JBRQ00001000000000000000",
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "executor",
-       "version": "0.1.0",
-       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "requested_by": "user_owner_01",
-       "independent_required": true,
-       "submitted_at": 1792339200,
-       "risk_clock": "2026-10-18T16:00:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_req_edge",
-        "authenticated_at": 1792338900,
-        "method": "cli_confirm"
-       }
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBCP00033000000000000000",
+      "event_id": "01JBCP00031000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "event_time": "2026-10-18T16:05:50.000000000Z",
       "clock_source": "local",
-      "causation_id": "01JBAK00001000000000000000",
+      "causation_id": "01JBAK00002000000000000000",
       "correlation_id": null,
       "actor": {
        "kind": "system",
@@ -102660,14 +102568,14 @@
       "payload": {
        "agent": "agent_a",
        "event": "01JBTG00001000000000000000",
-       "user": "user_owner_02",
+       "user": "user_owner_01",
        "requested_by": "user_owner_01",
-       "independent_required": true,
-       "request": "01JBRQ00001000000000000000",
+       "independent_required": false,
+       "request": null,
        "submitted_at": 1792339260,
        "risk_clock": "2026-10-18T16:01:00.000000000Z",
        "step_up": {
-        "assertion_id": "assert_ak00001",
+        "assertion_id": "assert_ak00002",
         "authenticated_at": 1792339250,
         "method": "cli_confirm"
        }
@@ -102679,15 +102587,279 @@
     "refused_at_append": [],
     "expect": [
      {
-      "index": 2,
+      "index": 1,
       "outcome": "lift"
      }
     ]
    },
    {
-    "name": "request_step_up_after_the_request",
-    "clause": "check 4: evidence authenticated after the request is stale",
+    "name": "live_without_the_founder_connection",
+    "clause": "check 3: `cli_confirm` is not a live method off the founder's connection",
     "overlay_independent": false,
+    "environment": "live",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "live",
+      "event_id": "01JBAK00002000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00002",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "live",
+      "event_id": "01JBTG00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "RiskLimitTriggered",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "agent_equity": "9700",
+       "high_water_mark": "10000",
+       "drawdown": "0.03",
+       "day_start_equity": "10000",
+       "capital_base": "10000",
+       "inherited_loss": "0",
+       "net_contributed": "10000",
+       "limit": "max_daily_loss",
+       "action": "exits_only",
+       "reason": null,
+       "breach_time_s": 0,
+       "metric": null,
+       "threshold": null,
+       "value": null,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "live",
+      "event_id": "01JBCP00032000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00002000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00002",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "step_up_method"
+     }
+    ]
+   },
+   {
+    "name": "live_on_the_founder_connection",
+    "clause": "check 3: `cli_confirm` on the founder's own live connection (DEC-529 item 3)",
+    "overlay_independent": false,
+    "environment": "live",
+    "founder_connection": true,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "live",
+      "event_id": "01JBAK00002000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00002",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "live",
+      "event_id": "01JBTG00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "RiskLimitTriggered",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "agent_equity": "9700",
+       "high_water_mark": "10000",
+       "drawdown": "0.03",
+       "day_start_equity": "10000",
+       "capital_base": "10000",
+       "inherited_loss": "0",
+       "net_contributed": "10000",
+       "limit": "max_daily_loss",
+       "action": "exits_only",
+       "reason": null,
+       "breach_time_s": 0,
+       "metric": null,
+       "threshold": null,
+       "value": null,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "live",
+      "event_id": "01JBCP00033000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00002000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00002",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "lift"
+     }
+    ]
+   },
+   {
+    "name": "request_step_up_stale",
+    "clause": "check 4: the request's step-up, judged at its own `submitted_at`",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -102715,8 +102887,8 @@
        "submitted_at": 1792339200,
        "risk_clock": "2026-10-18T16:00:00.000000000Z",
        "step_up": {
-        "assertion_id": "assert_req_next",
-        "authenticated_at": 1792339201,
+        "assertion_id": "assert_req_old",
+        "authenticated_at": 1792338899,
         "method": "cli_confirm"
        }
       },
@@ -102828,8 +103000,8 @@
        "submitted_at": 1792339200,
        "risk_clock": "2026-10-18T16:00:00.000000000Z",
        "step_up": {
-        "assertion_id": "assert_req_next",
-        "authenticated_at": 1792339201,
+        "assertion_id": "assert_req_old",
+        "authenticated_at": 1792338899,
         "method": "cli_confirm"
        }
       },
@@ -102882,9 +103054,11 @@
     ]
    },
    {
-    "name": "request_step_up_method",
-    "clause": "check 4: the request's method",
+    "name": "request_step_up_at_the_window",
+    "clause": "check 4: 300 s old at the request is valid",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -102912,9 +103086,9 @@
        "submitted_at": 1792339200,
        "risk_clock": "2026-10-18T16:00:00.000000000Z",
        "step_up": {
-        "assertion_id": "assert_req_pw",
-        "authenticated_at": 1792339190,
-        "method": "password"
+        "assertion_id": "assert_req_edge",
+        "authenticated_at": 1792338900,
+        "method": "cli_confirm"
        }
       },
       "artifact_refs": [],
@@ -103025,9 +103199,9 @@
        "submitted_at": 1792339200,
        "risk_clock": "2026-10-18T16:00:00.000000000Z",
        "step_up": {
-        "assertion_id": "assert_req_pw",
-        "authenticated_at": 1792339190,
-        "method": "password"
+        "assertion_id": "assert_req_edge",
+        "authenticated_at": 1792338900,
+        "method": "cli_confirm"
        }
       },
       "artifact_refs": [],
@@ -103074,6 +103248,404 @@
     "expect": [
      {
       "index": 2,
+      "outcome": "lift"
+     }
+    ]
+   },
+   {
+    "name": "request_step_up_after_the_request",
+    "clause": "check 4: evidence authenticated after the request is stale",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBRQ00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledgmentRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "requested_by": "user_owner_01",
+       "independent_required": true,
+       "submitted_at": 1792339200,
+       "risk_clock": "2026-10-18T16:00:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_req_next",
+        "authenticated_at": 1792339201,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_02",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_02",
+       "requested_by": "user_owner_01",
+       "independent_required": true,
+       "request": "01JBRQ00001000000000000000",
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBTG00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "RiskLimitTriggered",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "agent_equity": "9700",
+       "high_water_mark": "10000",
+       "drawdown": "0.03",
+       "day_start_equity": "10000",
+       "capital_base": "10000",
+       "inherited_loss": "0",
+       "net_contributed": "10000",
+       "limit": "max_daily_loss",
+       "action": "exits_only",
+       "reason": null,
+       "breach_time_s": 0,
+       "metric": null,
+       "threshold": null,
+       "value": null,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00038000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledgmentRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBRQ00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "requested_by": "user_owner_01",
+       "independent_required": true,
+       "submitted_at": 1792339200,
+       "risk_clock": "2026-10-18T16:00:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_req_next",
+        "authenticated_at": 1792339201,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00039000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_02",
+       "requested_by": "user_owner_01",
+       "independent_required": true,
+       "request": "01JBRQ00001000000000000000",
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 2,
+      "outcome": "request_invalid"
+     }
+    ]
+   },
+   {
+    "name": "request_step_up_method",
+    "clause": "check 4: the request's method",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBRQ00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledgmentRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "requested_by": "user_owner_01",
+       "independent_required": true,
+       "submitted_at": 1792339200,
+       "risk_clock": "2026-10-18T16:00:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_req_pw",
+        "authenticated_at": 1792339190,
+        "method": "password"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_02",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_02",
+       "requested_by": "user_owner_01",
+       "independent_required": true,
+       "request": "01JBRQ00001000000000000000",
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBTG00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "RiskLimitTriggered",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "agent_equity": "9700",
+       "high_water_mark": "10000",
+       "drawdown": "0.03",
+       "day_start_equity": "10000",
+       "capital_base": "10000",
+       "inherited_loss": "0",
+       "net_contributed": "10000",
+       "limit": "max_daily_loss",
+       "action": "exits_only",
+       "reason": null,
+       "breach_time_s": 0,
+       "metric": null,
+       "threshold": null,
+       "value": null,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00040000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledgmentRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBRQ00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "requested_by": "user_owner_01",
+       "independent_required": true,
+       "submitted_at": 1792339200,
+       "risk_clock": "2026-10-18T16:00:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_req_pw",
+        "authenticated_at": 1792339190,
+        "method": "password"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00041000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_02",
+       "requested_by": "user_owner_01",
+       "independent_required": true,
+       "request": "01JBRQ00001000000000000000",
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 2,
       "outcome": "request_invalid"
      }
     ]
@@ -103082,6 +103654,8 @@
     "name": "request_without_step_up",
     "clause": "check 4: rule 239 refuses it at append; the executor fails closed all the same",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -103195,7 +103769,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00038000000000000000",
+      "event_id": "01JBCP00042000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -103225,7 +103799,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00039000000000000000",
+      "event_id": "01JBCP00043000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -103284,6 +103858,8 @@
     "name": "request_reuses_a_commands_assertion",
     "clause": "check 4 and mandate spec §6.1: a request's assertion appears on no earlier command",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -103440,7 +104016,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00040000000000000000",
+      "event_id": "01JBCP00044000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -103474,7 +104050,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00041000000000000000",
+      "event_id": "01JBCP00045000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -103520,6 +104096,8 @@
     "name": "acknowledgment_reuses_the_requests_assertion",
     "clause": "check 3: a request's assertion is spent",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -103637,7 +104215,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00042000000000000000",
+      "event_id": "01JBCP00046000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -103671,7 +104249,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00043000000000000000",
+      "event_id": "01JBCP00047000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -103717,6 +104295,8 @@
     "name": "acknowledgment_reuses_an_answers_assertion",
     "clause": "check 3: an approval answer's assertion is spent",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -103837,7 +104417,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00044000000000000000",
+      "event_id": "01JBCP00048000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -103883,6 +104463,8 @@
     "name": "acknowledgment_reuses_an_acknowledgments_assertion",
     "clause": "check 3: an earlier acknowledgment's assertion is spent, whatever its outcome",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -104002,7 +104584,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00045000000000000000",
+      "event_id": "01JBCP00049000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -104038,7 +104620,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00046000000000000000",
+      "event_id": "01JBCP00050000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -104088,6 +104670,8 @@
     "name": "a_later_command_reuses_the_assertion",
     "clause": "check 3: only an earlier record spends an assertion",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -104210,7 +104794,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00047000000000000000",
+      "event_id": "01JBCP00051000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -104256,6 +104840,8 @@
     "name": "acknowledgment_step_up_missing",
     "clause": "check 3",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -104285,518 +104871,6 @@
        "submitted_at": 1792339260,
        "risk_clock": "2026-10-18T16:01:00.000000000Z",
        "step_up": null
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "account": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBTG00001000000000000000",
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "event_type": "RiskLimitTriggered",
-      "schema_version": 1,
-      "event_time": "2026-10-18T15:50:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "executor",
-       "version": "0.1.0",
-       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
-      },
-      "payload": {
-       "agent_id": "agent_a",
-       "agent_equity": "9700",
-       "high_water_mark": "10000",
-       "drawdown": "0.03",
-       "day_start_equity": "10000",
-       "capital_base": "10000",
-       "inherited_loss": "0",
-       "net_contributed": "10000",
-       "limit": "max_daily_loss",
-       "action": "exits_only",
-       "reason": null,
-       "breach_time_s": 0,
-       "metric": null,
-       "threshold": null,
-       "value": null,
-       "risk_clock": "2026-10-18T15:50:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBCP00048000000000000000",
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "event_type": "OwnerAcknowledged",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": "01JBAK00002000000000000000",
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "executor",
-       "version": "0.1.0",
-       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "user": "user_owner_01",
-       "requested_by": "user_owner_01",
-       "independent_required": false,
-       "request": null,
-       "submitted_at": 1792339260,
-       "risk_clock": "2026-10-18T16:01:00.000000000Z",
-       "step_up": null
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "refused_at_append": [],
-    "expect": [
-     {
-      "index": 1,
-      "outcome": "step_up_missing"
-     }
-    ]
-   },
-   {
-    "name": "acknowledgment_step_up_stale",
-    "clause": "check 3: more than 300 s",
-    "overlay_independent": false,
-    "control": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBAK00002000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "OwnerAcknowledged",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "user",
-       "id": "user_owner_01",
-       "version": "1",
-       "build": null
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "user": "user_owner_01",
-       "requested_by": "user_owner_01",
-       "independent_required": false,
-       "request": null,
-       "submitted_at": 1792339260,
-       "risk_clock": "2026-10-18T16:01:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_old",
-        "authenticated_at": 1792338959,
-        "method": "cli_confirm"
-       }
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "account": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBTG00001000000000000000",
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "event_type": "RiskLimitTriggered",
-      "schema_version": 1,
-      "event_time": "2026-10-18T15:50:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "executor",
-       "version": "0.1.0",
-       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
-      },
-      "payload": {
-       "agent_id": "agent_a",
-       "agent_equity": "9700",
-       "high_water_mark": "10000",
-       "drawdown": "0.03",
-       "day_start_equity": "10000",
-       "capital_base": "10000",
-       "inherited_loss": "0",
-       "net_contributed": "10000",
-       "limit": "max_daily_loss",
-       "action": "exits_only",
-       "reason": null,
-       "breach_time_s": 0,
-       "metric": null,
-       "threshold": null,
-       "value": null,
-       "risk_clock": "2026-10-18T15:50:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBCP00049000000000000000",
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "event_type": "OwnerAcknowledged",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": "01JBAK00002000000000000000",
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "executor",
-       "version": "0.1.0",
-       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "user": "user_owner_01",
-       "requested_by": "user_owner_01",
-       "independent_required": false,
-       "request": null,
-       "submitted_at": 1792339260,
-       "risk_clock": "2026-10-18T16:01:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_old",
-        "authenticated_at": 1792338959,
-        "method": "cli_confirm"
-       }
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "refused_at_append": [],
-    "expect": [
-     {
-      "index": 1,
-      "outcome": "step_up_stale"
-     }
-    ]
-   },
-   {
-    "name": "acknowledgment_step_up_at_the_window",
-    "clause": "check 3: 300 s is valid",
-    "overlay_independent": false,
-    "control": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBAK00002000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "OwnerAcknowledged",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "user",
-       "id": "user_owner_01",
-       "version": "1",
-       "build": null
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "user": "user_owner_01",
-       "requested_by": "user_owner_01",
-       "independent_required": false,
-       "request": null,
-       "submitted_at": 1792339260,
-       "risk_clock": "2026-10-18T16:01:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_edge",
-        "authenticated_at": 1792338960,
-        "method": "cli_confirm"
-       }
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "account": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBTG00001000000000000000",
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "event_type": "RiskLimitTriggered",
-      "schema_version": 1,
-      "event_time": "2026-10-18T15:50:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "executor",
-       "version": "0.1.0",
-       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
-      },
-      "payload": {
-       "agent_id": "agent_a",
-       "agent_equity": "9700",
-       "high_water_mark": "10000",
-       "drawdown": "0.03",
-       "day_start_equity": "10000",
-       "capital_base": "10000",
-       "inherited_loss": "0",
-       "net_contributed": "10000",
-       "limit": "max_daily_loss",
-       "action": "exits_only",
-       "reason": null,
-       "breach_time_s": 0,
-       "metric": null,
-       "threshold": null,
-       "value": null,
-       "risk_clock": "2026-10-18T15:50:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBCP00050000000000000000",
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "event_type": "OwnerAcknowledged",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": "01JBAK00002000000000000000",
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "executor",
-       "version": "0.1.0",
-       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "user": "user_owner_01",
-       "requested_by": "user_owner_01",
-       "independent_required": false,
-       "request": null,
-       "submitted_at": 1792339260,
-       "risk_clock": "2026-10-18T16:01:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_edge",
-        "authenticated_at": 1792338960,
-        "method": "cli_confirm"
-       }
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "refused_at_append": [],
-    "expect": [
-     {
-      "index": 1,
-      "outcome": "lift"
-     }
-    ]
-   },
-   {
-    "name": "acknowledgment_step_up_after_it",
-    "clause": "check 3: authenticated after the command is stale",
-    "overlay_independent": false,
-    "control": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBAK00002000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "OwnerAcknowledged",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "user",
-       "id": "user_owner_01",
-       "version": "1",
-       "build": null
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "user": "user_owner_01",
-       "requested_by": "user_owner_01",
-       "independent_required": false,
-       "request": null,
-       "submitted_at": 1792339260,
-       "risk_clock": "2026-10-18T16:01:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_next",
-        "authenticated_at": 1792339261,
-        "method": "cli_confirm"
-       }
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "account": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBTG00001000000000000000",
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "event_type": "RiskLimitTriggered",
-      "schema_version": 1,
-      "event_time": "2026-10-18T15:50:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "executor",
-       "version": "0.1.0",
-       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
-      },
-      "payload": {
-       "agent_id": "agent_a",
-       "agent_equity": "9700",
-       "high_water_mark": "10000",
-       "drawdown": "0.03",
-       "day_start_equity": "10000",
-       "capital_base": "10000",
-       "inherited_loss": "0",
-       "net_contributed": "10000",
-       "limit": "max_daily_loss",
-       "action": "exits_only",
-       "reason": null,
-       "breach_time_s": 0,
-       "metric": null,
-       "threshold": null,
-       "value": null,
-       "risk_clock": "2026-10-18T15:50:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBCP00051000000000000000",
-      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
-      "event_type": "OwnerAcknowledged",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": "01JBAK00002000000000000000",
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "executor",
-       "version": "0.1.0",
-       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "user": "user_owner_01",
-       "requested_by": "user_owner_01",
-       "independent_required": false,
-       "request": null,
-       "submitted_at": 1792339260,
-       "risk_clock": "2026-10-18T16:01:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_next",
-        "authenticated_at": 1792339261,
-        "method": "cli_confirm"
-       }
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "refused_at_append": [],
-    "expect": [
-     {
-      "index": 1,
-      "outcome": "step_up_stale"
-     }
-    ]
-   },
-   {
-    "name": "acknowledgment_step_up_method",
-    "clause": "check 3: the method is allowed for the environment",
-    "overlay_independent": false,
-    "control": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBAK00002000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "OwnerAcknowledged",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "user",
-       "id": "user_owner_01",
-       "version": "1",
-       "build": null
-      },
-      "config_refs": {},
-      "payload": {
-       "agent": "agent_a",
-       "event": "01JBTG00001000000000000000",
-       "user": "user_owner_01",
-       "requested_by": "user_owner_01",
-       "independent_required": false,
-       "request": null,
-       "submitted_at": 1792339260,
-       "risk_clock": "2026-10-18T16:01:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_pw",
-        "authenticated_at": 1792339250,
-        "method": "password"
-       }
       },
       "artifact_refs": [],
       "pii_refs": []
@@ -104871,11 +104945,7 @@
        "request": null,
        "submitted_at": 1792339260,
        "risk_clock": "2026-10-18T16:01:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_pw",
-        "authenticated_at": 1792339250,
-        "method": "password"
-       }
+       "step_up": null
       },
       "artifact_refs": [],
       "pii_refs": []
@@ -104885,23 +104955,25 @@
     "expect": [
      {
       "index": 1,
-      "outcome": "step_up_method"
+      "outcome": "step_up_missing"
      }
     ]
    },
    {
-    "name": "request_agent_differs",
-    "clause": "check 4: the request copy's `agent`",
+    "name": "acknowledgment_step_up_stale",
+    "clause": "check 3: more than 300 s",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBRQ00001000000000000000",
+      "event_id": "01JBAK00002000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "OwnerAcknowledgmentRequested",
+      "event_type": "OwnerAcknowledged",
       "schema_version": 1,
-      "event_time": "2026-10-18T16:00:00.000000000Z",
+      "event_time": "2026-10-18T16:01:00.000000000Z",
       "clock_source": "local",
       "causation_id": null,
       "correlation_id": null,
@@ -104913,51 +104985,17 @@
       },
       "config_refs": {},
       "payload": {
-       "agent": "agent_b",
-       "event": "01JBTG00001000000000000000",
-       "requested_by": "user_owner_01",
-       "independent_required": true,
-       "submitted_at": 1792339200,
-       "risk_clock": "2026-10-18T16:00:00.000000000Z",
-       "step_up": {
-        "assertion_id": "assert_rq00001",
-        "authenticated_at": 1792339190,
-        "method": "cli_confirm"
-       }
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JBAK00001000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "OwnerAcknowledged",
-      "schema_version": 1,
-      "event_time": "2026-10-18T16:01:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "user",
-       "id": "user_owner_02",
-       "version": "1",
-       "build": null
-      },
-      "config_refs": {},
-      "payload": {
        "agent": "agent_a",
        "event": "01JBTG00001000000000000000",
-       "user": "user_owner_02",
+       "user": "user_owner_01",
        "requested_by": "user_owner_01",
-       "independent_required": true,
-       "request": "01JBRQ00001000000000000000",
+       "independent_required": false,
+       "request": null,
        "submitted_at": 1792339260,
        "risk_clock": "2026-10-18T16:01:00.000000000Z",
        "step_up": {
-        "assertion_id": "assert_ak00001",
-        "authenticated_at": 1792339250,
+        "assertion_id": "assert_old",
+        "authenticated_at": 1792338959,
         "method": "cli_confirm"
        }
       },
@@ -105012,6 +105050,564 @@
       "environment": "paper",
       "event_id": "01JBCP00053000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00002000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_old",
+        "authenticated_at": 1792338959,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "step_up_stale"
+     }
+    ]
+   },
+   {
+    "name": "acknowledgment_step_up_at_the_window",
+    "clause": "check 3: 300 s is valid",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00002000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_edge",
+        "authenticated_at": 1792338960,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBTG00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "RiskLimitTriggered",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "agent_equity": "9700",
+       "high_water_mark": "10000",
+       "drawdown": "0.03",
+       "day_start_equity": "10000",
+       "capital_base": "10000",
+       "inherited_loss": "0",
+       "net_contributed": "10000",
+       "limit": "max_daily_loss",
+       "action": "exits_only",
+       "reason": null,
+       "breach_time_s": 0,
+       "metric": null,
+       "threshold": null,
+       "value": null,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00054000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00002000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_edge",
+        "authenticated_at": 1792338960,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "lift"
+     }
+    ]
+   },
+   {
+    "name": "acknowledgment_step_up_after_it",
+    "clause": "check 3: authenticated after the command is stale",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00002000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_next",
+        "authenticated_at": 1792339261,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBTG00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "RiskLimitTriggered",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "agent_equity": "9700",
+       "high_water_mark": "10000",
+       "drawdown": "0.03",
+       "day_start_equity": "10000",
+       "capital_base": "10000",
+       "inherited_loss": "0",
+       "net_contributed": "10000",
+       "limit": "max_daily_loss",
+       "action": "exits_only",
+       "reason": null,
+       "breach_time_s": 0,
+       "metric": null,
+       "threshold": null,
+       "value": null,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00055000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00002000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_next",
+        "authenticated_at": 1792339261,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "step_up_stale"
+     }
+    ]
+   },
+   {
+    "name": "acknowledgment_step_up_method",
+    "clause": "check 3: the method is allowed for the environment",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00002000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_pw",
+        "authenticated_at": 1792339250,
+        "method": "password"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBTG00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "RiskLimitTriggered",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "agent_equity": "9700",
+       "high_water_mark": "10000",
+       "drawdown": "0.03",
+       "day_start_equity": "10000",
+       "capital_base": "10000",
+       "inherited_loss": "0",
+       "net_contributed": "10000",
+       "limit": "max_daily_loss",
+       "action": "exits_only",
+       "reason": null,
+       "breach_time_s": 0,
+       "metric": null,
+       "threshold": null,
+       "value": null,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00056000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00002000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_pw",
+        "authenticated_at": 1792339250,
+        "method": "password"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "refused_at_append": [],
+    "expect": [
+     {
+      "index": 1,
+      "outcome": "step_up_method"
+     }
+    ]
+   },
+   {
+    "name": "request_agent_differs",
+    "clause": "check 4: the request copy's `agent`",
+    "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
+    "control": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBRQ00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledgmentRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_b",
+       "event": "01JBTG00001000000000000000",
+       "requested_by": "user_owner_01",
+       "independent_required": true,
+       "submitted_at": 1792339200,
+       "risk_clock": "2026-10-18T16:00:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_rq00001",
+        "authenticated_at": 1792339190,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAK00001000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 1,
+      "event_time": "2026-10-18T16:01:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_02",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBTG00001000000000000000",
+       "user": "user_owner_02",
+       "requested_by": "user_owner_01",
+       "independent_required": true,
+       "request": "01JBRQ00001000000000000000",
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "account": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBTG00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "RiskLimitTriggered",
+      "schema_version": 1,
+      "event_time": "2026-10-18T15:50:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      },
+      "payload": {
+       "agent_id": "agent_a",
+       "agent_equity": "9700",
+       "high_water_mark": "10000",
+       "drawdown": "0.03",
+       "day_start_equity": "10000",
+       "capital_base": "10000",
+       "inherited_loss": "0",
+       "net_contributed": "10000",
+       "limit": "max_daily_loss",
+       "action": "exits_only",
+       "reason": null,
+       "breach_time_s": 0,
+       "metric": null,
+       "threshold": null,
+       "value": null,
+       "risk_clock": "2026-10-18T15:50:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00057000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
       "event_time": "2026-10-18T16:00:00.000000000Z",
@@ -105044,7 +105640,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00054000000000000000",
+      "event_id": "01JBCP00058000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -105090,6 +105686,8 @@
     "name": "request_event_differs",
     "clause": "check 4: the request copy's `event`",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -105207,7 +105805,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00055000000000000000",
+      "event_id": "01JBCP00059000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -105241,7 +105839,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00056000000000000000",
+      "event_id": "01JBCP00060000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -105287,6 +105885,8 @@
     "name": "request_requested_by_differs",
     "clause": "check 4: the request copy's `requested_by`",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -105404,7 +106004,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00057000000000000000",
+      "event_id": "01JBCP00061000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -105438,7 +106038,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00058000000000000000",
+      "event_id": "01JBCP00062000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -105484,6 +106084,8 @@
     "name": "request_requirement_differs",
     "clause": "check 4: the request copy's `independent_required`; rule 239 refuses it at append",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -105601,7 +106203,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00059000000000000000",
+      "event_id": "01JBCP00063000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -105635,7 +106237,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00060000000000000000",
+      "event_id": "01JBCP00064000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -105694,6 +106296,8 @@
     "name": "another_requests_copy",
     "clause": "check 4: the request copy whose `causation_id` is the request",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -105845,7 +106449,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00061000000000000000",
+      "event_id": "01JBCP00065000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -105879,7 +106483,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00062000000000000000",
+      "event_id": "01JBCP00066000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -105925,6 +106529,8 @@
     "name": "self_acknowledgment",
     "clause": "check 4: `user` differs from `requested_by`; rule 239 refuses it at append",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -106042,7 +106648,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00063000000000000000",
+      "event_id": "01JBCP00067000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -106076,7 +106682,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00064000000000000000",
+      "event_id": "01JBCP00068000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -106135,6 +106741,8 @@
     "name": "unknown_trigger_before_stale_step_up",
     "clause": "the order: check 1 before check 3",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -106218,7 +106826,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00065000000000000000",
+      "event_id": "01JBCP00069000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -106264,6 +106872,8 @@
     "name": "superseded_before_stale_step_up",
     "clause": "the order: check 2 before check 3",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -106384,7 +106994,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00066000000000000000",
+      "event_id": "01JBCP00070000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -106430,6 +107040,8 @@
     "name": "stale_step_up_before_independence",
     "clause": "the order: check 3 before check 4",
     "overlay_independent": true,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -106513,7 +107125,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00067000000000000000",
+      "event_id": "01JBCP00071000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -106559,6 +107171,8 @@
     "name": "independence_before_the_request",
     "clause": "the order: `not_independent` before `request_invalid`",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -106642,7 +107256,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00068000000000000000",
+      "event_id": "01JBCP00072000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -106701,6 +107315,8 @@
     "name": "two_agents_two_lifts",
     "clause": "§9.28: each acknowledgment its own agent's trigger",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -106861,7 +107477,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00069000000000000000",
+      "event_id": "01JBCP00073000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -106897,7 +107513,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00070000000000000000",
+      "event_id": "01JBCP00074000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -106947,6 +107563,8 @@
     "name": "retry_with_a_new_request",
     "clause": "check 4: a retry after a refusal needs a new request, and lifts",
     "overlay_independent": false,
+    "environment": "paper",
+    "founder_connection": false,
     "control": [
      {
       "envelope_version": 1,
@@ -107134,7 +107752,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00071000000000000000",
+      "event_id": "01JBCP00075000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -107168,7 +107786,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00072000000000000000",
+      "event_id": "01JBCP00076000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
@@ -107204,7 +107822,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00073000000000000000",
+      "event_id": "01JBCP00077000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledgmentRequested",
       "schema_version": 1,
@@ -107238,7 +107856,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01JBCP00074000000000000000",
+      "event_id": "01JBCP00078000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "OwnerAcknowledged",
       "schema_version": 1,
