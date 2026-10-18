@@ -3,9 +3,10 @@
 
 use std::process::ExitCode;
 
-use mandate_stub_issuer::start::Refused;
-
+#[expect(
+    clippy::todo,
+    reason = "a process's entry point has no error to carry, so its stub is todo!(), the other form DEC-137 names"
+)]
 fn main() -> ExitCode {
-    eprintln!("{}", Refused::Unimplemented { story: "E21-52" }.code());
-    ExitCode::from(2)
+    todo!()
 }
