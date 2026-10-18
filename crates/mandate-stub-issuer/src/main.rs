@@ -16,14 +16,12 @@ fn refuse(refused: Refused) -> ExitCode {
 }
 
 /// A build without debug assertions holds no issuer: it refuses before reading anything (I1).
-#[cfg(not(debug_assertions))]
 fn main() -> ExitCode {
-    refuse(Refused::NotBuilt)
-}
-
-#[cfg(debug_assertions)]
-fn main() -> ExitCode {
-    started::main()
+    #[cfg(not(debug_assertions))]
+    let exit = refuse(Refused::NotBuilt);
+    #[cfg(debug_assertions)]
+    let exit = started::main();
+    exit
 }
 
 /// The stub as a debug build runs it: the start checks, then the port, then the key.
