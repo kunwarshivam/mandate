@@ -37,6 +37,7 @@ import audit
 import backtest_records
 import canceled
 import control_plane
+import deployed
 import deployment_manager
 import connections
 import clients
@@ -3855,6 +3856,7 @@ def render(
     gateway_section: dict,
     backtest_section: dict,
     invalidation_section: dict,
+    deployed_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3890,6 +3892,7 @@ def render(
             "model_gateway": gateway_section,
             "backtest_records": backtest_section,
             "thesis_invalidation": invalidation_section,
+            "agent_deployed": deployed_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3956,6 +3959,7 @@ def main(argv: list[str] | None = None) -> int:
     gateway_section = gateway.build_section()
     backtest_section = backtest_records.build_section()
     invalidation_section = invalidation.build_section()
+    deployed_section = deployed.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3991,6 +3995,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += deployment_manager.run_mutants(deployment_manager_section)
     problems += invalidation.check_section(invalidation_section)
     problems += invalidation.run_mutants(invalidation_section)
+    problems += deployed.check_section(deployed_section)
+    problems += deployed.run_mutants(deployed_section)
     problems += check_broker_profile(broker_profile)
     problems += run_broker_profile_mutants(broker_profile)
     problems += connections.check_section(connections_section)
@@ -4057,6 +4063,7 @@ def main(argv: list[str] | None = None) -> int:
         gateway_section,
         backtest_section,
         invalidation_section,
+        deployed_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -4091,6 +4098,7 @@ def main(argv: list[str] | None = None) -> int:
         or gateway.check_section(reread["model_gateway"])
         or backtest_records.check_section(reread["backtest_records"])
         or invalidation.check_section(reread["thesis_invalidation"])
+        or deployed.check_section(reread["agent_deployed"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -4164,6 +4172,11 @@ def main(argv: list[str] | None = None) -> int:
         f"thesis-invalidation drafts, {len(invalidation_section['batches'])} rule-186 batches and "
         f"{len(invalidation_section['streams'])} rule-187 streams, {len(invalidation.VALIDATOR_MUTANTS)} validator and "
         f"{len(invalidation.vector_mutants(invalidation_section))} vector mutants caught; "
+        f"{len(deployed_section['invalid_drafts'])} invalid and {len(deployed_section['valid_drafts'])} valid "
+        f"agent-deployed drafts, {len(deployed_section['mappings'])} rule-200 mappings, "
+        f"{len(deployed_section['streams'])} rule-201 streams with their processes and "
+        f"{len(deployed_section['ranges'])} ranges, {len(deployed.VALIDATOR_MUTANTS)} validator and "
+        f"{len(deployed.vector_mutants(deployed_section))} vector mutants caught; "
         f"{len(broker_profile['invalid_drafts'])} invalid broker-profile registrations and "
         f"{len(broker_profile['invalid_artifacts'])} invalid profiles, 2 validator and 3 vector mutants caught; "
         f"{len(connections_section['drafts'])} connection drafts, {len(connections_section['invalid_drafts'])} invalid and "

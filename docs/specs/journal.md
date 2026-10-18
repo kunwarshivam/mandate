@@ -2,15 +2,45 @@
 
 | | |
 |---|---|
-| **Status** | v0.53 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 adds the agent stream's invalidation verdict, `ThesisInvalidated`, [DEC-2202](../project/decisions/DEC-2202.md); v0.50 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md); v0.51 closes the control stream's `NotificationAddressChanged` and adds `NoticeAttempted` version 3, which names the web-push address an attempt went to, [DEC-2505](../project/decisions/DEC-2505.md); v0.52 types `EvaluationRunRecorded`'s `theses_head` as record hashes, [DEC-1142](../project/decisions/DEC-1142.md); v0.53 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.54 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 adds the agent stream's invalidation verdict, `ThesisInvalidated`, [DEC-2202](../project/decisions/DEC-2202.md); v0.50 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md); v0.51 closes the control stream's `NotificationAddressChanged` and adds `NoticeAttempted` version 3, which names the web-push address an attempt went to, [DEC-2505](../project/decisions/DEC-2505.md); v0.52 types `EvaluationRunRecorded`'s `theses_head` as record hashes, [DEC-1142](../project/decisions/DEC-1142.md); v0.53 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md); v0.54 names the deployment's connection on `AgentDeployed` version 2, with rules 200 and 201, [DEC-1171](../project/decisions/DEC-1171.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `backtest_records` section of §9.18, `model_gateway` section of §9.19, `deployment_manager` section of §9.21, and `thesis_invalidation` section of §9.22; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `backtest_records` section of §9.18, `model_gateway` section of §9.19, `deployment_manager` section of §9.21, `thesis_invalidation` section of §9.22, and `agent_deployed` section of §9.24; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
+
+- **v0.54 ([DEC-1171](../project/decisions/DEC-1171.md); E21-33):** §9.24 registers `AgentDeployed`
+  at schema version 2: version 1's members, then `connection_id`, the connection of the stored
+  mandate document `mandate_version` names. The deployment manager (§9.21) must learn a
+  deployment's account from the journal alone, since the cell has no artifact store it shares with
+  the workspace services; it reads the account from that connection's own version-2
+  `ConnectionEstablished` on the same control stream, as it already does for a connection kill
+  switch. Version 1 stays registered and unchanged. It adds a member and two checks and loosens
+  nothing (DEC-176).
+  - **Rule 200, where the document is read.** The member equals the document's `connection_id`.
+    The writer judges it before appending, from the document it deploys, and §9.2's mapping to
+    `AgentVersionActive` refuses a mismatch as malformed, so every `ValidationContext::from_journal`
+    reader refuses the control stream at that record. `append`, §11, and the manager do not judge
+    it; a stored mismatch fails closed, since the agent's runtime refuses it.
+  - **Rule 201, a stream rule.** The connection was established on this control stream with an
+    `account_ref` (version 2), and not since revoked, before the deployment. Held as rules 66 to 68
+    are: the writer checks it before appending, and §11's `connection_lifecycle_mismatch` checks it
+    from the connection anchor, which already holds what it reads. A writer writes version 2
+    exactly when rule 201 holds, and version 1 otherwise, as it does today: a live deployment meets
+    it already (the CLI's `admitted()`, DEC-529 item 3), and the CLI's paper `agent deploy` on a
+    connection the stream never recorded stays version 1, which the manager does not start. No
+    deployment that is accepted today is refused.
+  - **Version 1 names no account.** The manager starts nothing for a version-1 deployment: it fails
+    closed rather than read the document. Every other reader treats the two versions alike.
+  - **Vectors.** A new generated `agent_deployed` section; no other section changes, so the
+    vectors stay version 3 and `mandate-journal`'s tests are unchanged until it registers version 2.
+  - **Versions.** v0.49 (DEC-2202) to v0.53 (DEC-2207) are on main; this change takes v0.54,
+    §9.24, and rules 200 and 201, lane D1's block; numbers between §9.23's rules and 200 are left
+    to other lanes. Whichever change lands first keeps its version and section numbers; the other
+    renumbers at merge.
 
 - **v0.53 ([DEC-2207](../project/decisions/DEC-2207.md); E19-13, delivery slice 2 of ADR-0005):**
   §2 and §9.19 add the deployment meter stream, `dmeter:{deployment_id}`, so the deployment's
@@ -1637,7 +1667,7 @@ it ([DEC-291](../project/04-decision-log.md#decisions)). The fold also reads `Un
 `PlatformOperatorAction`, which stays open (below). For these events it replaces the "Key payload
 fields" column of §9, and the required `config_refs` stay as §9 lists them. §9.1's types, its
 absent-member rule, and its report order apply unchanged, with the rules below numbered on from
-§9.1's. Each schema is `schema_version` 1.
+§9.1's. Each schema is `schema_version` 1; `AgentDeployed` also has version 2 (§9.24).
 
 Every member comes from a writer that exists or from a clause that names it, and DEC-261 traces
 each one. No member is inferred where neither exists. The test vectors' `control_stream` section
@@ -1743,7 +1773,9 @@ document was confirmed and which record was shown. A bare ID or a path is refuse
 
 **`AgentDeployed`** ([mandate spec §10](mandate.md#10-records-dec-51-dec-97)). The connection,
 environment, allocation, and pinned instruments the deployment runs under are the document's. They
-are read from the stored document that `mandate_version` names, never restated here.
+are read from the stored document that `mandate_version` names, never restated here. Version 2
+(§9.24, v0.54) restates the connection alone, for a reader that holds only the journal, and rule
+200 binds it to the document's.
 
 | Member | Type | Meaning |
 |---|---|---|
@@ -1852,7 +1884,7 @@ what no event carries the same way.
 | `ConfigSnapshotRegistered` of kind `model_version` | `ModelRegistered` | `model_id`, `model_version`, `content_hash`, `params`, `admits_instruments`; other kinds map to none |
 | `MandateVersionCreated` | `MandateVersionCreated` | `mandate_version`, `provenance` |
 | `MandateConfirmed` | `MandateConfirmed` | `mandate_version`, `confirmed_paths` |
-| `AgentDeployed` | `AgentVersionActive` | `agent_id`; `connection_id`, `environment`, `capital.allocation_usd`, and `universe.pinned_instruments[].asset_id` of the stored document `mandate_version` names. A document that is not stored maps to none, and the mapping refuses it |
+| `AgentDeployed` | `AgentVersionActive` | `agent_id`; `connection_id`, `environment`, `capital.allocation_usd`, and `universe.pinned_instruments[].asset_id` of the stored document `mandate_version` names. A document that is not stored maps to none, and the mapping refuses it. Version 2 maps the same, from the same document; one whose `connection_id` differs from the document's is refused (§9.24 rule 200) |
 | `AgentStopped` | `AgentStopped` | `agent_id`, `connection_id`, `retired_on`, `loss_added` |
 | `AccountSnapshotRecorded` | `AccountSnapshot` | `equity`, with the account stream's connection given |
 
@@ -4495,6 +4527,22 @@ only after `Committed` or `AlreadyCommitted` (§5.2). A call that fails is retri
 writers of one stream; each process still takes its stream's writer epoch, which fences any copy
 the manager could not see (§5.1).
 
+**Which account a deployment runs on** ([DEC-1171](../project/decisions/DEC-1171.md), §9.24). The
+executor a deployment needs is named by its account's `account_ref` (`subject`). The manager reads
+it from the control stream alone, never from the mandate document: a version-2 `AgentDeployed`
+names its `connection_id`, and the account is the `account_ref` of that connection's version-2
+`ConnectionEstablished` earlier on the same stream, read as a connection kill switch's scope is. A
+deployment with no such account starts nothing, and the manager fails closed on it: a version-1
+`AgentDeployed`, which names no connection, and a version-2 one that rule 201 refuses (its
+connection not established with an `account_ref` on this stream before it, or revoked since). A
+later establishment does not revive it. No store outside the journal stands between a deployment
+and its processes, so a store's outage can delay none. The manager reads the account once, from
+the deployment's record, and rule 66 keeps one `account_ref` for the life of a connection, so the
+account the manager runs for a deployment never changes while it runs. That it is the account the
+agent's own document names rests on rule 200, which the writer and §9.2's mapping judge, never the
+manager; mandate spec V-031 keeps every later version on the same connection. A mismatched record
+that reached the stream anyway fails closed (§9.24 rule 200).
+
 **Which fact is a restart.** A `ProcessStartIssued` whose `cause` is `restart`. The crash-loop
 bound of design §3.4 (Proposed: five restarts within ten minutes) counts the `recorded_at` of the
 slot's restarts since its `deployed` start, never the orchestrator's count, which resets when a
@@ -4802,6 +4850,134 @@ with none, a think result with no code, an index after a refused call of the sam
 record with verdicts and action calls, an `explain` run per approval, a late turn record after a
 `deadline` end).
 
+### 9.24 The deployment's connection ([DEC-1171](../project/decisions/DEC-1171.md))
+
+The deployment manager (§9.21) learns a deployment's account from the control stream alone. The
+cell has no artifact store it shares with the workspace services, so the manager cannot read the
+mandate document an `AgentDeployed` names. Version 2 of `AgentDeployed` restates that document's
+connection, and the manager reads the account from that connection's own version-2
+`ConnectionEstablished` on the same stream, as it already reads a connection kill switch's scope.
+`AgentStopped` already names its connection the same way (§9.2). §9.2's conventions apply: every
+member is present, none is nullable, and any other member is refused. Version 1 stays registered,
+replayable, and unchanged (§8). The rules here are numbered 200 and 201; the numbers between
+§9.23's rules and 200 are left to other changes.
+
+**`AgentDeployed` version 2** on the control stream: version 1's members, then:
+
+| Member | Type | Meaning |
+|---|---|---|
+| `agent_id`, `mandate_version`, `record_ref` | As version 1's | Rule 22 applies unchanged |
+| `connection_id` | `id` | The `connection_id` of the stored mandate document `mandate_version` names ([mandate spec §3](mandate.md#3-structure)), which no later version of that mandate changes (V-031): rules 200 and 201 |
+
+The connection, environment, allocation, and pinned instruments are still the document's. Version
+2 restates the connection only, so that a reader without the document can find the account; a
+reader that reads the document still takes every one of them from it.
+
+**Who writes which version.** A writer that deploys a stored version (the CLI's `agent deploy`
+and the workspace API's deployment, which judge it the same way) writes version 2, taking
+`connection_id` from the document it deploys, exactly when rule 201 holds, and version 1 otherwise.
+Until those writers move, in the code change that
+follows this one, they write version 1, and the deployment manager starts nothing for it (below):
+a writer that has not moved fails closed, never open.
+
+**Consistency rule**, judged where the document is read:
+
+200. `AgentDeployed` version 2: `connection_id` equals the `connection_id` of the stored mandate
+     document `mandate_version` names. It is judged in two places, and by nothing else:
+     - **By the writer, before `append`.** Each writer of version 2 (the CLI's `agent deploy` and
+       the workspace API's deployment) already holds the stored document it deploys and validates
+       it; it takes `connection_id` from that document and refuses the draft, appending nothing,
+       when the two differ.
+     - **By §9.2's mapping.** Where the mapping reads the document for `AgentVersionActive`, a
+       version-2 record whose `connection_id` differs from the document's is refused as malformed
+       at `payload.connection_id`, as a record whose document is not stored is refused, never
+       skipped. So every reader that folds the control stream through `ValidationContext::from_journal`
+       (the writers' V-rule checks, the runner's control fold, replay, §8) refuses the whole
+       control stream from that record on, and the fact the mapping gives, when it gives one, is
+       the same for both versions.
+
+     **`append` does not judge it**: it reads a stored object only for a configuration reference
+     (§9, rules 21a and 21b), and a mandate document is not one, so a version-2 draft passes
+     `Draft::parse` whichever connection it names. **§11 does not see it either**: its checks read
+     the chain and the anchors, never a mandate document's members (check 6 only re-hashes the
+     stored bytes). **The deployment manager does not judge it**: it acts on the record alone
+     (§9.21). If a mismatch were stored anyway, the manager would start an executor for the
+     record's connection's account, and a runtime for the agent, and that is fail-closed: the
+     runtime reads its deployment through §9.2's mapping (today the runner's control fold, through
+     `ValidationContext::from_journal`), which refuses it, so the runtime never starts trading and the agent proposes no intent for any
+     executor; the executor started holds only what its own account stream already holds, adds no exposure,
+     and is one slot per account, so it never runs beside another executor of that account. What is
+     lost is the deployment itself, which does not run until the mismatch is corrected by a new
+     deployment.
+
+**Stream rule** (connections spec §3), held and checked as rules 66 to 68 are: the writer checks it
+against its own fold of the stream before appending, and writes version 1 instead of a version-2
+draft that would fail it, and §11's
+`connection_lifecycle_mismatch` checks it on every range, from the range's connection anchor, which
+already holds each id's first establishment and its latest establishment or revocation, or failing
+closed without one:
+
+201. Control stream, `AgentDeployed` version 2: an earlier `ConnectionEstablished` version 2 on the
+     stream names its `connection_id`, and the latest earlier `ConnectionEstablished` or
+     `ConnectionRevoked` of that id is a `ConnectionEstablished` (`payload.connection_id`). So the
+     connection was established on this workspace's control stream with an `account_ref`, and not
+     since revoked, when the agent was deployed. By rule 66 every establishment of an id whose first
+     is version 2 is version 2 with the same `account_ref`, and a version-1 first establishment is
+     never established again, so a deployment's account is one `account_ref`, fixed for the life of
+     its connection. A version-1 `AgentDeployed` is not judged, so every stream written before
+     v0.54 still verifies.
+
+**A writer writes version 2 exactly when rule 201 holds, and version 1 otherwise.** Rule 201
+judges only version 2, which adds risk, so it never holds a risk reduction (`AGENTS.md` rule 13),
+and a version-2 draft it would refuse is never written: the writer writes version 1, which the
+manager does not start (fail closed). Not every deployment written today meets it:
+
+- **Live.** The CLI's `admitted()` already requires, for a live mandate, that the connection's
+  latest `ConnectionEstablished` or `ConnectionRevoked` be a version-2 establishment, with an
+  `account_ref`, that `connection record` committed ([DEC-529](../project/decisions/DEC-529.md)
+  item 3). A live deployment the CLI writes meets rule 201 already.
+- **Paper.** `admitted()` returns early for a paper mandate and never reads the connection. When no
+  establishment or revocation names the connection, the CLI's V-rule check clears the connection's
+  environment, so V-001 does not fire, and it tolerates V-002; Phase 1's paper connections journal
+  no `ConnectionEstablished` (`mandate-spec`'s `unrecorded_stop_limit_asset_classes`). So the CLI's
+  `agent deploy` deploys a paper agent today on a connection the stream records nothing about. The
+  workspace API's deployment clears the environment the same way, though it refuses V-002 for a
+  deployment. Such a paper deployment is written as version 1, as today, and is never refused for
+  rule 201; the manager starts nothing for it until the owner records the connection (with
+  `connection record`, which needs the connect sequence's `ConnectionChecked`) and deploys under a
+  new agent id: the CLI refuses a second deployment of an active agent, and §9.21 reads its
+  `AgentStopped` as final (the backlog's E21-33 follow-ups on reusing agent ids).
+  The CLI changes in the code change that follows only in writing version 2 when rule 201
+  holds.
+- **Revoked.** A connection whose latest record is a revocation is known to the fold, so V-001
+  refuses a paper deployment on it (no environment, read as `live`), and `admitted()` a live one.
+
+A revocation after the deployment is not judged here: what it stops is §9.10's and the kill
+switch's, unchanged.
+
+**Every reader of `AgentDeployed`**, by version:
+
+| Reader | Version 1 | Version 2 |
+|---|---|---|
+| `append` (`Draft::parse`) | §9.2's schema and rule 22 | Version 2's schema and rule 22. Rule 200 is not judged (above) |
+| §9.2's mapping, so `ValidationContext::from_journal`, the writers' V-rule folds, and replay | `AgentVersionActive` from the stored document, as before | The same fact from the same document; a `connection_id` that differs from the document's is refused (rule 200) |
+| The writers' stream rules and §11's `connection_lifecycle_mismatch` | Not judged | Rule 201 |
+| §9.21's deployment manager | Names no account: it starts nothing for the deployment, and never reads the document to find one | The account is the `account_ref` of that connection's version-2 `ConnectionEstablished` earlier on the stream; a deployment rule 201 refuses starts nothing |
+| The folds that read only `agent_id` and `mandate_version` (the runner's control fold, the workspace API's and CLI's active-deployment reads, §9.4's binding of a thesis to the agent's version, §9.17's first deployment, §9.18's go-live record) | Unchanged | The same two members; `connection_id` is not read |
+
+**Vectors.** A new generated `agent_deployed` section holds base drafts of both versions with the
+stored documents they name; an invalid draft for every member type of version 2 and for rule 22 at
+version 2; valid drafts for the cases a rule might be misread to refuse, a mismatch rule 200 leaves
+to the mapping among them; mapping cases for rule 200; control streams for rule 201, judged from
+the stream's start, from a connection anchor, and with none; and the deployment manager's reading of
+each stream. No other section changes, so the vectors stay version 3.
+
+**Order of the changes (ES-22).** Spec and vectors first. One code change follows:
+`mandate-journal` registers version 2, the mapping in `mandate-spec` refuses rule 200, the CLI and
+the workspace API write version 2 and check rule 201, §11's verifier judges it, and the deployment
+manager reads the account from the record and its connection's establishment instead of a resolver
+over stored mandates (DEC-1170 items 5 and 9, superseded there by DEC-1171).
+
 ## 10. Anchoring
 
 - **Frequency:** every 5 minutes (configurable) and at each end of day.
@@ -4901,8 +5077,8 @@ On an agent stream ([§9.1](#91-agent-stream-payload-schemas-dec-177)):
 
 On a control or account stream ([§9.8](#98-connection-records-dec-800)):
 
-- `connection_lifecycle_mismatch` — a record that breaks stream rule 66, 67, 68, or 131, reported
-  at that record. A `ConnectionRequested` still open at the range's end is a connect in progress,
+- `connection_lifecycle_mismatch` — a record that breaks stream rule 66, 67, 68, 131, or 201
+  (§9.24), reported at that record. A `ConnectionRequested` still open at the range's end is a connect in progress,
   not a mismatch. **The check anchors on the stored chain, not on the range**
   ([DEC-885](../project/decisions/DEC-885.md)): those rules read records a range can begin after (an
   establishment, a revocation, a request, a binding copy, a check, a state), so the verifier is
@@ -4916,8 +5092,8 @@ On a control or account stream ([§9.8](#98-connection-records-dec-800)):
   unanchored run judges (below). A control-stream `ConnectionRevoked` of another stream is never
   judged ([DEC-885](../project/decisions/DEC-885.md) I6); an account-stream one is
   ([DEC-888](../project/decisions/DEC-888.md)). An empty prefix's anchor (`from_seq` 1) takes its
-  stream from the range's first judged record. On a control stream it holds each id's first establishment, its
-  latest establishment or revocation, and its latest scopes; each `account_ref`'s holder; the open
+  stream from the range's first judged record. On a control stream it holds each id's first establishment (with its
+  version, which rule 201 reads), its latest establishment or revocation, and its latest scopes; each `account_ref`'s holder; the open
   requests with their members; every `account_ref` a request named; rule 67's ids whose latest
   revocation closed a request and ids revoked by one that closed none; and whether the stream holds
   a request. On an account stream it holds the owning `connection_id`; the latest copy of the
@@ -4932,9 +5108,9 @@ On a control or account stream ([§9.8](#98-connection-records-dec-800)):
     stream alone and the full chain report the same first record and rule.
   - **No anchor**, because the caller cannot read the chain before the range, or the fold breaks a
     rule before it (which the full-chain run reports): the range fails closed at its first record
-    that rule 66, 67, 68, or 131 judges, a `ConnectionRequested`, `ConnectionEstablished`,
-    `ConnectionCredentialRotated`, or `ConnectionRefused` on a control stream or any connection
-    record on an account stream, since a record before the range can break each. It is reported
+    that rule 66, 67, 68, 131, or 201 judges, a `ConnectionRequested`, `ConnectionEstablished`,
+    `ConnectionCredentialRotated`, `ConnectionRefused`, or version-2 `AgentDeployed` on a control
+    stream or any connection record on an account stream, since a record before the range can break each. It is reported
     at that record as `connection_lifecycle_mismatch`, as having no anchor (cause `unanchored`,
     not a rule), as `held_mismatch` reports its own; records before it are not judged. A
     `ConnectionRevoked` on a control stream is never judged, so it never fails closed. One on an
