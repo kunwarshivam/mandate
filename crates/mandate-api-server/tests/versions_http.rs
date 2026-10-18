@@ -20,13 +20,19 @@ use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Sessions};
-use mandate_api_server::stepup::{Action, StepUp, Unbound};
+use mandate_api_server::stepup::{Action, Judged, StepUp, Unbound};
 use mandate_api_server::token::{FixedKeys, Issuer};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_canon::{Digest, Value, parse, to_canonical};
-use mandate_identity::{MembershipEvent, MembershipRecord, PrincipalId, Role, StepUpActionKind};
+use mandate_identity::MembershipState::Active;
+use mandate_identity::SessionKind::Full;
+use mandate_identity::{
+    Authorized, MembershipEvent, MembershipRecord, OrgId, Permission, Principal, PrincipalId, Role,
+    Scope, SessionRef, StepUpActionKind, WorkspaceId, authorize,
+};
 use mandate_identity_seal::Seal;
+use mandate_identity_testkit::{StaticLookup, membership, session};
 use mandate_journal::{ArtifactRef, Draft, StoredEvent, get_artifact};
 use mandate_time::UtcNanos;
 
@@ -67,8 +73,7 @@ impl StepUp for Accepting {
         &self,
         _evidence: &StepUpEvidence,
         action: &Action,
-        _principal: PrincipalId,
-        _now: UtcNanos,
+        _judged: &Judged<'_>,
     ) -> Result<(), ProblemCode> {
         self.0
             .lock()
@@ -1169,8 +1174,29 @@ fn the_unbound_port_counts_no_evidence() {
         kind: StepUpActionKind::Deploy,
         digest: Digest::ZERO,
     };
+    let scope = Scope::Workspace {
+        org: OrgId(1),
+        workspace: WorkspaceId(2),
+    };
+    let held = membership(alice(), scope, Active, &[(Role::Operator, at(T0 - 1))]);
+    let tenant = match authorize(
+        &StaticLookup(vec![held.clone()]),
+        &Principal::User { id: alice() },
+        &session(SessionRef(3), Full, vec![held]),
+        scope,
+        Permission::Deploy,
+        at(T0),
+    ) {
+        Ok(Authorized::Workspace { tenant, .. }) => tenant,
+        other => panic!("the operator may deploy: {other:?}"),
+    };
+    let judged = Judged {
+        tenant: &tenant,
+        control: &[],
+        now: at(T0),
+    };
     assert_eq!(
-        Unbound.verify(&evidence, &action, alice(), at(T0)),
+        Unbound.verify(&evidence, &action, &judged),
         Err(ProblemCode::StepUpMissing)
     );
 }

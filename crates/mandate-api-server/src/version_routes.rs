@@ -35,7 +35,7 @@ use crate::reads::account_ref;
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
-use crate::stepup::{Action, journaled};
+use crate::stepup::{Action, Judged, journaled};
 use crate::versions::{
     CONFIRMED, CREATED, DEPLOYED, FIRST_VERSION, Pending, Refusal, active, check, confirm_digest,
     deploy_digest, envelope_paths, instruments, last_confirmed, latest, object, reference, screen,
@@ -288,13 +288,13 @@ fn stepped_up(
     action: &Action,
 ) -> Result<(), Answer> {
     let evidence = evidence.ok_or(Answer::step_up(ProblemCode::StepUpRequired))?;
+    let judged = Judged {
+        tenant: &admitted.reader.tenant,
+        control: &admitted.reader.control,
+        now: admitted.gate.now,
+    };
     app.step_up
-        .verify(
-            evidence,
-            action,
-            admitted.gate.admitted.principal,
-            admitted.gate.now,
-        )
+        .verify(evidence, action, &judged)
         .map_err(Answer::step_up)
 }
 

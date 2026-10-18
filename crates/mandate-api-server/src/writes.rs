@@ -39,7 +39,7 @@ use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
-use crate::stepup::{Action, journaled};
+use crate::stepup::{Action, Judged, journaled};
 
 /// The `Idempotency-Key` request header (§3.4).
 const IDEMPOTENCY_KEY: &str = "idempotency-key";
@@ -647,9 +647,12 @@ async fn stepped(
                 kind: forwarded.kind,
                 digest,
             };
-            app.step_up
-                .verify(evidence, &action, gate.admitted.principal, gate.now)
-                .is_ok()
+            let judged = Judged {
+                tenant: &reader.tenant,
+                control: &reader.control,
+                now: gate.now,
+            };
+            app.step_up.verify(evidence, &action, &judged).is_ok()
         }
         _ => false,
     };
