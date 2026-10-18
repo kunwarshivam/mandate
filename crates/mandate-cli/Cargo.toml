@@ -34,6 +34,7 @@ mandate-modelhost.workspace = true
 mandate-num.workspace = true
 mandate-spec.workspace = true
 mandate-time.workspace = true
+mandate-vault.workspace = true
 mandate-vault-local.workspace = true
 secrecy.workspace = true
 serde.workspace = true
