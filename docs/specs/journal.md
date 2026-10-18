@@ -5322,8 +5322,14 @@ agent's account stream, the request as well as the acknowledgment. Each copy is 
 payload unchanged, with `causation_id` naming the control-stream original, and is copied at most
 once. A copy has its own `event_id`, so on the account stream an acknowledgment copy's `request`
 (the control-stream request's `event_id`) is matched to the request copy whose `causation_id`
-equals it. The executor's fold holds every input it judges from, so a replay of the account stream
-decides the same way.
+equals it. The executor's fold holds every input it judges from but one, so a replay of the
+account stream decides the same way. The exception is the reuse check of §6.1: an assertion is
+spent by any earlier `ApprovalResponseSubmitted`, `OwnerCommandIssued`,
+`OwnerAcknowledgmentRequested`, or `OwnerAcknowledged` on the control stream, before the copy's
+original. So the executor judges reuse from the control stream it copies from, up to that
+original's position, which is also fixed on replay. An acknowledgment that lifts its limit is
+followed by the executor's `RiskLimitLifted` (§9.27, reason `owner_acknowledged`), so it
+supersedes its own trigger for every later acknowledgment (check 2).
 
 It judges an acknowledgment copy in this order, and at the first check that fails it records
 `OwnerCommandRefused` with `command` `acknowledge`, the reason shown, and `causation_id` naming the
