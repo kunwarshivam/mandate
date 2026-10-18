@@ -437,7 +437,6 @@ fn an_unreadable_stream_refuses_and_never_admits() {
 /// setting off, a run whose agent stream cannot be read refuses `not_internal_paper`, not the
 /// journal's error; with it on, the same run answers the journal's error.
 #[test]
-#[ignore = "pending E17-8"]
 fn the_gate_runs_before_any_agent_stream_is_read() {
     let mut world = World::new();
     let mut store = std::mem::take(&mut world.store);
