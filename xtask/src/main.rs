@@ -50,9 +50,10 @@ commands:
   live-feature          check that only the runner may build `live`, and CI only compiles it or
                         tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
-  trial <branch>        merge origin/<branch> into origin/main in target/trial, then cargo check
-                        --workspace --all-targets and the selected crates' nextest run
-  trial --main <since>  the same checks on origin/main itself, selecting what changed since <since>
+  trial <pr|branch>     merge a pull request (refs/pull/<n>/head) or origin/<branch> into
+                        origin/main in target/trial, then cargo check --workspace --all-targets and
+                        the selected crates' nextest run; a conflict names the conflicting paths
+  trial --main <commit> the same checks on origin/main itself, selecting what changed since <commit>
   release tools         install the release build's pinned tools under $CARGO_HOME
   release build <out>   build the release binaries reproducibly into <out>, with SHA256SUMS and an
                         SBOM each, and print digest=<sha256 of SHA256SUMS> (E21-8)

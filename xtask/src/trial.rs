@@ -1,4 +1,5 @@
-//! `cargo xtask trial`: a pull request's branch merged into current `main` in a scratch worktree,
+//! `cargo xtask trial`: a pull request, by number or by branch, merged into current `main` in a
+//! scratch worktree,
 //! then `cargo check --workspace --all-targets` and the nextest run of the crates the merge
 //! selects (DEC-1190), so a change can be checked against the `main` it will land on before it
 //! lands. `trial --main <since>` checks `main` itself, selecting what changed since `<since>`.
@@ -31,29 +32,93 @@ const WORKTREE: &str = "target/trial";
 /// The trial's own target directory, under the checkout.
 const TARGET: &str = "target/trial-build";
 
-/// What a trial checks: a branch merged into `main`, or `main` itself since a commit.
+/// What a trial merges into `main`: a pull request by number, fetched from `origin`'s
+/// `refs/pull/<n>/head`, so a pull request is tried without its branch's name (a fork's included),
+/// or a branch by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Change {
+    PullRequest(u64),
+    Branch(String),
+}
+
+impl Change {
+    /// Digits name a pull request (no leading zero); anything else must be a plain branch name,
+    /// which cannot reach git as an option, a revision expression or a range.
+    pub(crate) fn parse(argument: &str) -> Result<Self> {
+        if !argument.is_empty() && argument.bytes().all(|b| b.is_ascii_digit()) {
+            return match argument.parse::<u64>() {
+                Ok(number) if number > 0 && !argument.starts_with('0') => {
+                    Ok(Self::PullRequest(number))
+                }
+                _ => bail!("`{argument}` is not a pull request number"),
+            };
+        }
+        let plain = argument
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_./".contains(&b));
+        if argument.is_empty()
+            || !plain
+            || argument.starts_with(['-', '/', '.'])
+            || argument.ends_with(['/', '.'])
+            || argument.contains("..")
+            || argument.contains("//")
+            || argument.ends_with(".lock")
+        {
+            bail!("`{argument}` is neither a pull request number nor a plain branch name");
+        }
+        Ok(Self::Branch(argument.to_owned()))
+    }
+
+    /// What `git fetch origin` takes to bring the change into `origin/...`.
+    fn refspec(&self) -> String {
+        match self {
+            Self::PullRequest(number) => {
+                format!("+refs/pull/{number}/head:refs/remotes/origin/pr/{number}")
+            }
+            Self::Branch(name) => name.clone(),
+        }
+    }
+
+    /// The remote-tracking ref the fetch leaves the change at, which the trial merges.
+    fn merged(&self) -> String {
+        match self {
+            Self::PullRequest(number) => format!("origin/pr/{number}"),
+            Self::Branch(name) => format!("origin/{name}"),
+        }
+    }
+}
+
+/// What a trial checks: a change merged into `main`, or `main` itself since a commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Trial {
-    /// `origin/<branch>` merged into `origin/main`; the selection base is `main`'s tip.
-    Merge(String),
+    /// The change merged into `origin/main`; the selection base is `main`'s tip.
+    Merge(Change),
     /// `origin/main` as it is; the selection base is the commit given.
     Main(String),
 }
 
 impl Trial {
-    /// Reads `trial <branch>` or `trial --main <since>`.
+    /// Reads `trial <pull request number | branch>` or `trial --main <since>`, where `<since>` is
+    /// a commit's hex name, so neither reaches git as an option or an expression.
     pub(crate) fn parse(args: &[&str]) -> Result<Self> {
         match args {
-            ["--main", since] => Ok(Self::Main((*since).to_owned())),
-            [branch] if !branch.starts_with('-') => Ok(Self::Merge((*branch).to_owned())),
-            _ => bail!("usage: cargo xtask trial <branch> | trial --main <since>"),
+            ["--main", since]
+                if (4..=40).contains(&since.len())
+                    && since.bytes().all(|b| b.is_ascii_hexdigit()) =>
+            {
+                Ok(Self::Main((*since).to_owned()))
+            }
+            [change] => Ok(Self::Merge(Change::parse(change)?)),
+            _ => bail!(
+                "usage: cargo xtask trial <pull request number | branch> | trial --main <commit>"
+            ),
         }
     }
 
-    /// The refs to fetch from `origin` before the worktree is made.
+    /// The refspecs to fetch from `origin` before the worktree is made.
     pub(crate) fn fetched(&self) -> Vec<String> {
         match self {
-            Self::Merge(branch) => vec!["main".to_owned(), branch.clone()],
+            Self::Merge(change) => vec!["main".to_owned(), change.refspec()],
             Self::Main(_) => vec!["main".to_owned()],
         }
     }
@@ -107,6 +172,30 @@ fn git(dir: &Path, args: &[&str]) -> Result<String> {
 
 /// Runs `trial` from the checkout at `root`.
 pub(crate) fn run(root: &Path, trial: &Trial) -> Result<()> {
+    let (dir, main) = prepare(root, trial)?;
+    let base = trial.base(&main);
+    let target = root.join(TARGET);
+    for (args, vars) in checks(&base) {
+        eprintln!("    $ cargo {}", args.join(" "));
+        let status = Command::new("cargo")
+            .current_dir(&dir)
+            .args(&args)
+            .env("CARGO_TARGET_DIR", &target)
+            .env("CARGO_INCREMENTAL", "0")
+            .envs(vars.iter().map(|(name, value)| (*name, value.as_str())))
+            .status()
+            .context("starting cargo")?;
+        if !status.success() {
+            bail!("trial: `cargo {}` failed with {status}", args.join(" "));
+        }
+    }
+    eprintln!("    trial: passed against main {main}");
+    Ok(())
+}
+
+/// Fetches what `trial` needs from `origin`, puts the worktree at `main`'s tip and, for a merge,
+/// merges the change there: the worktree and `main`'s tip, or the conflicting paths.
+fn prepare(root: &Path, trial: &Trial) -> Result<(PathBuf, String)> {
     for reference in trial.fetched() {
         git(root, &["fetch", "--quiet", "origin", &reference])?;
     }
@@ -130,7 +219,7 @@ pub(crate) fn run(root: &Path, trial: &Trial) -> Result<()> {
             ],
         )?;
     }
-    if let Trial::Merge(branch) = trial {
+    if let Trial::Merge(change) = trial {
         let merged = git(
             &dir,
             &[
@@ -138,61 +227,220 @@ pub(crate) fn run(root: &Path, trial: &Trial) -> Result<()> {
                 "user.name=xtask trial",
                 "-c",
                 "user.email=trial@invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
                 "merge",
                 "--no-ff",
                 "--no-edit",
-                &format!("origin/{branch}"),
+                &change.merged(),
             ],
         );
-        if let Err(err) = merged {
+        if merged.is_err() {
+            let paths = git(&dir, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
             let _ = git(&dir, &["merge", "--abort"]);
-            bail!("{branch} does not merge cleanly into main {main}: {err:#}");
+            bail!(
+                "{} does not merge cleanly into main {main}; conflicts in: {}",
+                change.merged(),
+                paths.lines().collect::<Vec<_>>().join(", ")
+            );
         }
     }
-    let base = trial.base(&main);
-    let target = root.join(TARGET);
-    for (args, vars) in checks(&base) {
-        eprintln!("    $ cargo {}", args.join(" "));
-        let status = Command::new("cargo")
-            .current_dir(&dir)
-            .args(&args)
-            .env("CARGO_TARGET_DIR", &target)
-            .env("CARGO_INCREMENTAL", "0")
-            .envs(vars.iter().map(|(name, value)| (*name, value.as_str())))
-            .status()
-            .context("starting cargo")?;
-        if !status.success() {
-            bail!("trial: `cargo {}` failed with {status}", args.join(" "));
-        }
-    }
-    eprintln!("    trial: passed against main {main}");
-    Ok(())
+    Ok((dir, main))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::fs;
+
     use super::*;
 
     #[test]
     fn a_trial_is_a_branch_or_main_since_a_commit() -> Result<()> {
         assert_eq!(
             Trial::parse(&["claude/x"])?,
-            Trial::Merge("claude/x".to_owned())
+            Trial::Merge(Change::Branch("claude/x".to_owned()))
+        );
+        assert_eq!(
+            Trial::parse(&["1714"])?,
+            Trial::Merge(Change::PullRequest(1714))
         );
         assert_eq!(
             Trial::parse(&["--main", "abc123"])?,
             Trial::Main("abc123".to_owned())
         );
-        for args in [&[][..], &["--main"], &["--x"], &["a", "b"]] {
+        for args in [
+            &[][..],
+            &["--main"],
+            &["--x"],
+            &["a", "b"],
+            &["--main", "main~3"],
+            &["--main", "--all"],
+            &["--main", "abc"],
+        ] {
             assert!(Trial::parse(args).is_err(), "{args:?}");
         }
         Ok(())
     }
 
     #[test]
+    fn a_change_is_a_pull_request_number_or_a_plain_branch_name() -> Result<()> {
+        assert_eq!(Change::parse("1714")?.merged(), "origin/pr/1714");
+        assert_eq!(
+            Change::parse("1714")?.refspec(),
+            "+refs/pull/1714/head:refs/remotes/origin/pr/1714"
+        );
+        assert_eq!(Change::parse("a/b-c_1.2")?.merged(), "origin/a/b-c_1.2");
+        for bad in [
+            "",
+            "0",
+            "012",
+            "-x",
+            "--upload-pack=x",
+            "a..b",
+            "main~1",
+            "a b",
+            "/a",
+            "a/",
+            ".a",
+            "a.",
+            "a//b",
+            "a.lock",
+            "a:b",
+            "a^",
+            "@{1}",
+            "+a",
+        ] {
+            assert!(Change::parse(bad).is_err(), "{bad:?} is refused");
+        }
+        Ok(())
+    }
+
+    /// An `origin` with `main`, a branch `clean` that adds a file, a branch `clash` that changes
+    /// the line `main` changed after both branched, and pull request 7's head at `clean`; and a
+    /// clone of it to run trials from.
+    struct Origin {
+        origin: PathBuf,
+        checkout: PathBuf,
+    }
+
+    impl Origin {
+        fn new(name: &str) -> Result<Self> {
+            let top = env::temp_dir().join(format!("mandate-trial-{name}-{}", std::process::id()));
+            if top.exists() {
+                fs::remove_dir_all(&top)?;
+            }
+            let origin = top.join("origin");
+            fs::create_dir_all(&origin)?;
+            let commit = |path: &str, text: &str, message: &str| -> Result<()> {
+                fs::write(origin.join(path), text)?;
+                git(&origin, &["add", path])?;
+                git(
+                    &origin,
+                    &[
+                        "-c",
+                        "user.name=t",
+                        "-c",
+                        "user.email=t@invalid",
+                        "-c",
+                        "commit.gpgsign=false",
+                        "commit",
+                        "--quiet",
+                        "-m",
+                        message,
+                    ],
+                )?;
+                Ok(())
+            };
+            git(&origin, &["init", "--quiet", "--initial-branch=main"])?;
+            commit("shared.txt", "one\n", "base")?;
+            git(&origin, &["branch", "clean"])?;
+            git(&origin, &["branch", "clash"])?;
+            commit("shared.txt", "two\n", "main moves")?;
+            git(&origin, &["checkout", "--quiet", "clean"])?;
+            commit("added.txt", "new\n", "clean change")?;
+            git(&origin, &["update-ref", "refs/pull/7/head", "clean"])?;
+            git(&origin, &["checkout", "--quiet", "clash"])?;
+            commit("shared.txt", "three\n", "clashing change")?;
+            git(&origin, &["checkout", "--quiet", "main"])?;
+            let checkout = top.join("checkout");
+            git(
+                &top,
+                &[
+                    "clone",
+                    "--quiet",
+                    &origin.display().to_string(),
+                    "checkout",
+                ],
+            )?;
+            Ok(Self { origin, checkout })
+        }
+    }
+
+    impl Drop for Origin {
+        fn drop(&mut self) {
+            if let Some(top) = self.origin.parent() {
+                fs::remove_dir_all(top).ok();
+            }
+        }
+    }
+
+    #[test]
+    fn a_pull_request_or_branch_merges_onto_mains_tip() -> Result<()> {
+        let fx = Origin::new("clean")?;
+        let main = git(&fx.origin, &["rev-parse", "main"])?;
+        let head = git(&fx.origin, &["rev-parse", "clean"])?;
+        for argument in ["7", "clean"] {
+            let (dir, at) = prepare(&fx.checkout, &Trial::parse(&[argument])?)?;
+            assert_eq!(at, main, "{argument}: main's tip");
+            assert_eq!(
+                git(&dir, &["rev-parse", "HEAD^1", "HEAD^2"])?,
+                format!("{main}\n{head}"),
+                "{argument}: the change merged onto main's tip"
+            );
+            assert_eq!(fs::read_to_string(dir.join("shared.txt"))?, "two\n");
+            assert_eq!(fs::read_to_string(dir.join("added.txt"))?, "new\n");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_conflicting_change_names_its_paths_and_leaves_the_worktree_reusable() -> Result<()> {
+        let fx = Origin::new("clash")?;
+        let err = prepare(&fx.checkout, &Trial::parse(&["clash"])?)
+            .err()
+            .context("a change to the line main changed conflicts")?;
+        assert!(
+            err.to_string().contains("conflicts in: shared.txt"),
+            "{err:#}"
+        );
+        let (dir, _) = prepare(&fx.checkout, &Trial::parse(&["clean"])?)?;
+        assert_eq!(
+            fs::read_to_string(dir.join("added.txt"))?,
+            "new\n",
+            "the next trial reuses the worktree the conflict left"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_change_origin_does_not_hold_fails_at_the_fetch() -> Result<()> {
+        let fx = Origin::new("missing")?;
+        assert!(prepare(&fx.checkout, &Trial::parse(&["nope"])?).is_err());
+        assert!(prepare(&fx.checkout, &Trial::parse(&["8"])?).is_err());
+        Ok(())
+    }
+
+    #[test]
     fn a_merge_selects_against_main_and_main_against_its_since() {
-        let merge = Trial::Merge("b".to_owned());
+        let merge = Trial::Merge(Change::Branch("b".to_owned()));
         assert_eq!(merge.fetched(), ["main", "b"]);
+        assert_eq!(
+            Trial::Merge(Change::PullRequest(3)).fetched(),
+            ["main", "+refs/pull/3/head:refs/remotes/origin/pr/3"]
+        );
         assert_eq!(merge.base("m"), "m");
         let main = Trial::Main("s".to_owned());
         assert_eq!(main.fetched(), ["main"]);
