@@ -1049,7 +1049,9 @@ fn point_api(workspace: &str) -> Result<()> {
 
 /// What the cell's API answers `check` with through the demo's port-forward, its status and
 /// whole reply, or why it cannot be asked. A sign-in first asks the stub issuer for a token; a
-/// stub that gives none reads as an API that could not be asked.
+/// stub that gives none reads as an API that could not be asked. A session check whose sign-in sets no
+/// cookie answers with that sign-in's reply, which the verdict fails as a wrong answer, never as
+/// an API that could not be asked.
 fn api_answer(check: &ApiCheck) -> Result<Result<(u16, String), String>> {
     if let Some(why) = api_unaskable()? {
         return Ok(Err(why));
@@ -1060,16 +1062,16 @@ fn api_answer(check: &ApiCheck) -> Result<Result<(u16, String), String>> {
         Ask::SignIn => open_session(&stub_token()?),
         Ask::Session => {
             let (status, reply) = open_session(&stub_token()?)?;
-            let cookie = session_cookie(&reply).with_context(|| {
-                format!("POST /v1/sessions answered {status} without the session cookie")
-            })?;
-            http(
-                API_LOCAL_PORT,
-                "GET",
-                &check.path,
-                &[("Cookie", &cookie)],
-                "",
-            )
+            match session_cookie(&reply) {
+                Some(cookie) => http(
+                    API_LOCAL_PORT,
+                    "GET",
+                    &check.path,
+                    &[("Cookie", &cookie)],
+                    "",
+                ),
+                None => Ok((status, reply)),
+            }
         }
     }))
 }
@@ -1519,6 +1521,18 @@ mod tests {
         );
         let (word, said, fails) = api_verdict(&reply(r#"{"agents":[]}"#), &wanting, false);
         assert_eq!((word, fails), ("failed", true), "{said}");
+        let refused = "HTTP/1.1 401 Unauthorized\r\n\r\n".to_owned();
+        for answer in [
+            Ok((401, refused)),
+            Ok((204, "HTTP/1.1 204 No Content\r\n\r\n".into())),
+        ] {
+            let (word, said, fails) = api_verdict(&answer, &wanting, false);
+            assert_eq!(
+                (word, fails),
+                ("failed", true),
+                "a sign-in with no cookie is a wrong answer, never not run: {said}"
+            );
+        }
     }
 
     /// The session cookie's pair is read from the reply's headers only, by its own name.
