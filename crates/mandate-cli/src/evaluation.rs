@@ -6,6 +6,10 @@
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use clap::{Args, Subcommand};
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_evaluation::{
@@ -14,6 +18,7 @@ use mandate_evaluation::{
 };
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactStore, StoredEvent, get_artifact};
 use mandate_time::UtcNanos;
+use secrecy::SecretString;
 
 use crate::backtest::{is_id, rule_set};
 use crate::control::{
@@ -278,4 +283,86 @@ fn put_checked(store: &mut dyn ArtifactStore, bytes: &[u8]) -> Result<String, Co
         return Err(refused("artifact_corrupt"));
     }
     Ok(reference.to_string())
+}
+
+#[derive(Debug, Subcommand)]
+pub enum EvaluationCommand {
+    /// Run the forward-paper evaluation of an internal paper workspace's thesis records and journal
+    /// it as the `evaluator` system (DEC-2244): `--inputs` holds `decision.json`, `closes.json`,
+    /// `cost.json` and `baselines.json`; `MANDATE_INTERNAL_PAPER_WORKSPACE` must be `true`. Prints
+    /// the evaluation id, the report reference, whether it passed, and the event.
+    Run(RunArgs),
+}
+
+/// There is no `--user` and no `--environment`: the record's actor is the `evaluator` system, and
+/// an evaluation is never live.
+#[derive(Debug, Args)]
+pub struct RunArgs {
+    /// The internal paper workspace whose thesis records are evaluated.
+    #[arg(long, value_name = "ID")]
+    pub workspace: String,
+    /// The directory holding the four input files.
+    #[arg(long, value_name = "DIR")]
+    pub inputs: PathBuf,
+    /// The id `GET /evaluations/{id}` will name it by.
+    #[arg(long, value_name = "ID")]
+    pub evaluation_id: String,
+    /// The instant the evaluation reads up to, RFC 3339 UTC.
+    #[arg(long, value_name = "INSTANT")]
+    pub cut_off: String,
+    /// The workspace journal's Postgres DSN, without a password (set PGPASSWORD or ~/.pgpass).
+    #[arg(long, value_name = "DSN")]
+    pub journal: SecretString,
+    /// The artifact store's root; `MANDATE_ARTIFACTS` when not given. Neither refuses
+    /// `artifacts_unset`.
+    #[arg(long, value_name = "DIR", visible_alias = "artifacts")]
+    pub store: Option<PathBuf>,
+}
+
+/// The paper workspace `workspace` names, with no user: the record's actor is the evaluator.
+///
+/// # Errors
+/// [`ControlError::Refused`] with `owner_workspace_invalid` for an id that is not a stream id's.
+pub fn evaluator_owner(workspace: &str) -> Result<Owner, ControlError> {
+    let _ = workspace;
+    Err(ControlError::Unimplemented { story: "E17-8" })
+}
+
+/// The four input files under `dir`, in [`mandate_evaluation::INPUT_FILE_NAMES`]' order.
+///
+/// # Errors
+/// [`ControlError::Refused`] with `input_invalid` when one cannot be read.
+pub fn read_inputs(dir: &Path) -> Result<[Vec<u8>; 4], ControlError> {
+    let _ = dir;
+    Err(ControlError::Unimplemented { story: "E17-8" })
+}
+
+/// The cut-off `text` names, RFC 3339 UTC.
+///
+/// # Errors
+/// [`ControlError::Refused`] with `cut_off_invalid` for any other text.
+pub fn cut_off(text: &str) -> Result<UtcNanos, ControlError> {
+    let _ = text;
+    Err(ControlError::Unimplemented { story: "E17-8" })
+}
+
+/// `evaluation_id=`, `report=`, `passed=`, then the event's id and `seq`.
+///
+/// # Errors
+/// When `report` cannot be written.
+pub fn print_evaluated(report: &mut impl Write, evaluated: &Evaluated) -> std::io::Result<()> {
+    let _ = (report, evaluated);
+    Err(std::io::Error::other(ControlError::Unimplemented {
+        story: "E17-8",
+    }))
+}
+
+/// Runs `evaluation run` on the workspace's Postgres journal and store, and prints the outcome.
+///
+/// # Errors
+/// `owner_workspace_invalid`, `cut_off_invalid`, `artifacts_unset`, `internal_paper_setting` or
+/// `input_invalid` before the journal is opened, then [`run`]'s; no message names the DSN.
+pub fn run_command(args: &RunArgs, now: Now, report: &mut impl Write) -> anyhow::Result<Evaluated> {
+    let _ = (args, now, report);
+    Err(ControlError::Unimplemented { story: "E17-8" }.into())
 }

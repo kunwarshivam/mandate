@@ -108,4 +108,8 @@ pub enum Command {
     /// Journal a backtest the backtest runner stored, as the `backtest_runner` system.
     #[command(subcommand)]
     Backtest(backtest::BacktestCommand),
+    /// Run and journal the forward-paper evaluation of an internal paper workspace, as the
+    /// `evaluator` system.
+    #[command(subcommand)]
+    Evaluation(evaluation::EvaluationCommand),
 }
