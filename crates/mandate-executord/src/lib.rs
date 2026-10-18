@@ -30,6 +30,8 @@
 //! only: [`ExecutorProcess::start`] refuses any other environment before it takes the stream.
 
 pub mod alpaca;
+pub mod connect;
+pub mod fixture;
 pub mod follow;
 pub mod paper;
 mod process;
