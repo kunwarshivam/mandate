@@ -15,7 +15,7 @@ is not built (§11).
 
 - **v0.5 ([DEC-2207](../project/decisions/DEC-2207.md); E19-13, delivery slice 2 of ADR-0005):**
   §3.3's `meter_unavailable` and §3.6's meter-writer bullets cover the deployment meter stream,
-  `dmeter:{deployment_id}` (journal spec v0.51 §9.19), that §7.3's deployment cap folds from: the
+  `dmeter:{deployment_id}` (journal spec v0.53 §9.19), that §7.3's deployment cap folds from: the
   workspace's caps are checked, then the deployment's writer checks and appends, then the workspace
   appends; each writer admits one reservation at a time. A workspace append that fails after the
   deployment's is an orphan, counted at its maximum and alerted, the one refusal that leaves a meter

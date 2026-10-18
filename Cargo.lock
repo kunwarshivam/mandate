@@ -1695,6 +1695,7 @@ dependencies = [
  "mandate-identity-seal",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-release",
  "mandate-spec",
  "mandate-time",
  "reqwest",
@@ -1808,6 +1809,7 @@ dependencies = [
  "mandate-num",
  "mandate-spec",
  "mandate-time",
+ "mandate-vault-local",
  "proptest",
  "secrecy",
  "serde",
@@ -1888,10 +1890,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-deploy-manager"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-process",
+ "mandate-time",
+ "proptest",
+ "reqwest",
+ "rustls",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-dispatcher"
 version = "0.0.0"
 dependencies = [
+ "aes-gcm",
  "base64ct",
+ "hkdf",
  "mandate-canon",
  "mandate-journal",
  "mandate-journal-pg",
@@ -1899,8 +1918,11 @@ dependencies = [
  "mandate-push-relay",
  "mandate-time",
  "mandate-webpush",
+ "p256",
  "proptest",
  "ring",
+ "secrecy",
+ "sha2 0.11.0",
  "sqlx",
  "thiserror",
  "tokio",
@@ -2512,9 +2534,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-vault"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "mandate-connections",
+ "mandate-time",
+ "mandate-vault-local",
+ "proptest",
+ "reqwest",
+ "ring",
+ "rustls",
+ "secrecy",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-vault-local"
 version = "0.0.0"
 dependencies = [
+ "mandate-connections",
+ "proptest",
+ "ring",
  "secrecy",
  "thiserror",
 ]

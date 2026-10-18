@@ -2,17 +2,17 @@
 
 | | |
 |---|---|
-| **Status** | v0.51 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 adds the agent stream's invalidation verdict, `ThesisInvalidated`, [DEC-2202](../project/decisions/DEC-2202.md); v0.50 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md); v0.51 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.53 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 adds the agent stream's invalidation verdict, `ThesisInvalidated`, [DEC-2202](../project/decisions/DEC-2202.md); v0.50 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md); v0.51 closes the control stream's `NotificationAddressChanged` and adds `NoticeAttempted` version 3, which names the web-push address an attempt went to, [DEC-2505](../project/decisions/DEC-2505.md); v0.52 types `EvaluationRunRecorded`'s `theses_head` as record hashes, [DEC-1142](../project/decisions/DEC-1142.md); v0.53 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `model_gateway` section of §9.19, `deployment_manager` section of §9.21, and `thesis_invalidation` section of §9.22; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `backtest_records` section of §9.18, `model_gateway` section of §9.19, `deployment_manager` section of §9.21, and `thesis_invalidation` section of §9.22; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
-- **v0.51 ([DEC-2207](../project/decisions/DEC-2207.md); E19-13, delivery slice 2 of ADR-0005):**
+- **v0.53 ([DEC-2207](../project/decisions/DEC-2207.md); E19-13, delivery slice 2 of ADR-0005):**
   §2 and §9.19 add the deployment meter stream, `dmeter:{deployment_id}`, so the deployment's
   model-spend cap (a deployment setting, the founder's clarification of DEC-997 item 3) folds across
   every workspace. It holds a copy of every workspace's `MeterReserved` and `MeterSettled`, with the
@@ -21,9 +21,60 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   appended to it before the workspace's own stream, so a failure between them leaves an orphan
   that only over-counts; inference spec §3.3 and §3.6 say so in the same change. Agent-accepted
   under DEC-176: it only refuses more.
-  - **Versions.** v0.49 (DEC-2202) and v0.50 (DEC-2203, §9.23) are on main; this change takes
-    v0.51 and adds no rule number. Lane EX's explainer change follows whichever lands first.
+  - **Versions.** v0.49 (DEC-2202) to v0.52 (DEC-1142) are on main; this change takes
+    v0.53 and adds no rule number. Lane EX's explainer change follows whichever lands first.
 
+- **v0.52 ([DEC-1142](../project/decisions/DEC-1142.md); E17-8, DEC-1002 item 7):** §9.18 types
+  `EvaluationRunRecorded`'s `theses_head` as `[digest]`, not `[ref]`. Each entry is the `hash`
+  (§3) of the last thesis record the evaluation read on one agent stream: a journal record's hash,
+  which names no stored artifact. As a `ref` it had to be listed in `artifact_refs` and stored
+  under its digest for §11 check 6, which no evaluator could meet without storing record hashes
+  as artifacts; as a `digest` it stays out of `artifact_refs`, and a verifier checks it against
+  the journal itself. It removes a requirement no record could meet and adds no risk (DEC-176).
+  - **Vectors.** The test vectors' `backtest_records` section, generated with the writer reading
+    of [DEC-1141](../project/decisions/DEC-1141.md), holds a base draft of each §9.18 record, the
+    stored artifacts they name, an invalid draft for every member type and rule (among them a
+    `sha256:`-prefixed head and a head listed in `artifact_refs`), and valid drafts for the cases
+    a rule might be misread to refuse.
+- **v0.51 ([DEC-2505](../project/decisions/DEC-2505.md); E8-14, E8-10, DEC-2502 item 5):** §9.15
+  closes the control stream's `NotificationAddressChanged` at schema version 1 and adds
+  `NoticeAttempted` version 3, with rules 210 to 216. Both were owed: workspace API §4.11 and §5.7
+  write the first ([DEC-795](../project/decisions/DEC-795.md) item 5), and
+  [DEC-2502](../project/decisions/DEC-2502.md) item 5 makes one send and one record per web-push
+  address, which a record that names no address cannot hold. Until now `append` refused
+  `NotificationAddressChanged` as `unknown_event_type`, and the dispatcher makes no web-push attempt
+  (notifications spec §4.6). Agent-accepted under DEC-176: it admits the records accepted decisions
+  already require, each with the shape they name, and every reading it adds only refuses more.
+  - **`NotificationAddressChanged`.** Exactly workspace API §5.7's and identity spec §12.1's
+    members: `member` (the user principal's ULID), `channel` (`web_push`), `action` (`added`,
+    `removed`), `address_ref`, and `step_up`. An `added`'s `address_ref` is its own `event_id`, and
+    `pii_refs` is exactly `[address_ref]` (rules 210 and 211). No member can hold an endpoint, a
+    key, a push service's host, or a hash of any of them (NT-2, API-11); the VAPID `key_id` of
+    [DEC-2503](../project/decisions/DEC-2503.md) item 5 stays in the vault entry with them.
+  - **Who writes it, and with what.** An `added`, and a `removed` with step-up, are the member's own,
+    by a `user` actor who is the `member`, with step-up valid as rule 102 reads it (rules 212 and
+    213). A `removed` with `null` step-up rides a deactivation: rule 214, a batch rule, holds it to a
+    `MemberDeactivated` or `MemberRemoved` of the same member by the same actor in its batch, with no
+    alert, and holds every request's record to its `OwnerAlertSent` (`notification_address_changed`)
+    in one batch, a replacement's `removed` to the `added` it rides with, and every such alert to a
+    request's record.
+  - **`NoticeAttempted` version 3.** Version 2's members in their order, then `address_ref`,
+    non-null exactly when `channel` is `web_push` and then listed as the event's only `pii_refs`
+    entry (rule 215), and the stop `address_retired`, only `abandoned` and only on web push
+    (rule 216). A terminal attempt, a mark, and `address_missing`'s one report are per address.
+  - **Versions.** From v0.51 `append` refuses `NoticeAttempted` at versions 1 and 2 as
+    `unknown_schema` at `payload`, as v0.40 refused version 1: a version-2 record on web push names
+    no address, and one shape per fact keeps a writer from choosing the shape that says less. Both
+    still replay, with `address_ref` read as `null`. No deployment holds a web-push `NoticeAttempted`
+    at any version.
+  - **Vectors.** None: `reference/journal` models neither record. `crates/mandate-journal/tests/notices.rs`
+    pins §9.15 (DEC-720 item 7), and the tests, the registration, and the dispatcher's and the
+    workspace API's writers follow in their own code changes (ES-22). The vectors stay version 3.
+  - **Numbering.** Rule numbers are reserved in blocks per lane (AH 171 to 183, I2 184 to 189, EX
+    190 to 199, D1 200 to 209, L3 210 to 219); this change takes rules 210 to 216 from L3's block and
+    adds no section. Versions go to the change that lands first, so v0.51 here is renumbered at merge
+    if another lands before it; v0.48 and rules 165 to 168 are
+    [DEC-1170](../project/decisions/DEC-1170.md)'s.
 - **v0.50 ([DEC-2203](../project/decisions/DEC-2203.md); E19-13):** §9.23 closes the agentic
   research run's five records at schema version 1, with rules 171 to 183, before anything writes
   them: `RunStarted`, `ToolCallRecorded`, `ToolResultRecorded`, `RunSummaryRecorded`, and `RunEnded`
@@ -1258,7 +1309,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `ClientConnected`, `ClientRevoked` | — | An owner-connected client issued or revoked ([identity spec §12.1](identity.md)): client, user, scopes, agents, step-up; closed in §9.10 |
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
 | `OwnerAlertSent` | — | Written by the owner of the subject event's stream, in that stream and in the subject's batch, on the agent, account, or control stream ([notifications spec §5.5](notifications.md#55-records)): subject event, kind (notifications spec §3.2), and for a kill switch the owner command it carries out, if any. It records that an alert was raised; delivery is the notice stream's. Closed in §9.15 |
-| `NotificationAddressChanged` | — | A member set or removed one of their own push addresses ([workspace API spec §4.11, §5.7](workspace-api.md), [DEC-795](../project/decisions/DEC-795.md) item 5): member (opaque), channel (`web_push`), action (`added`, `removed`), `address_ref` (the `added` event's own id, listed in `pii_refs`), and step-up evidence (assertion ID, authentication time, method), `null` only for a `removed` that rides a deactivation's commit; written with its `OwnerAlertSent` (`notification_address_changed`) in one batch. The endpoint and keys stay in the vault. Payload schema closed with E8-14 |
+| `NotificationAddressChanged` | — | A member set or removed one of their own push addresses ([workspace API spec §4.11, §5.7](workspace-api.md), [DEC-795](../project/decisions/DEC-795.md) item 5): member (opaque), channel (`web_push`), action (`added`, `removed`), `address_ref` (the `added` event's own id, listed in `pii_refs`), and step-up evidence (assertion ID, authentication time, method), `null` only for a `removed` that rides a deactivation's commit; written with its `OwnerAlertSent` (`notification_address_changed`) in one batch. The endpoint and keys stay in the vault. Closed in §9.15 (v0.51, [DEC-2505](../project/decisions/DEC-2505.md)) |
 | `OwnerAcknowledged` | — | user (opaque), the user who requested the lift (opaque) and the independence requirement as it stood when the lift was requested, carried so the executor applies the stricter of it and the overlay at processing ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), authentication method, step-up evidence (assertion ID, authentication time, method) |
 | `ApprovalResponseSubmitted` | — | The owner's answer to an approval ([mandate spec §6.4](mandate.md#64-approvals)): agent, approval, verdict (`approved`, `skipped`), content hash, `submitted_at`, step-up evidence (assertion ID, authentication time, method) or null, responder (opaque) and role |
 | `OwnerRequestSubmitted` | — | An owner's request for an order (workspace API §4.6): agent, instrument, side, optional size, who asked; closed in §9.9 |
@@ -1288,9 +1339,10 @@ spec v0.22 ([DEC-671](../project/decisions/DEC-671.md)). The
 credential, session, service-account, host-CLI, and break-glass records are listed with the members
 the identity spec names and close in their own change, as §9.2's other records do; until then
 `append` refuses them as `unknown_event_type`. `ScopeHalted` and `ScopeReenabled` are not catalogued: they
-exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4). Nor is
-`NotificationAddressChanged`: its row and schema come with the notification records' change
-([DEC-720](../project/decisions/DEC-720.md), [DEC-795](../project/decisions/DEC-795.md)).
+exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4).
+`NotificationAddressChanged`, the identity spec's row for a member's own push address, is closed in
+§9.15 with the notification records (v0.51, [DEC-2505](../project/decisions/DEC-2505.md),
+[DEC-795](../project/decisions/DEC-795.md)).
 
 **Scheduler stream:** `StreamOpened`, `ClockAdvanced`, `TradingDayStarted`, `ClockOffsetRecorded`,
 `ClockToleranceExceeded`; closed in §9.20.
@@ -1316,7 +1368,7 @@ exist only if DEC-437 item 21 (Proposed) is accepted (identity spec §4.4). Nor 
 |---|---|---|
 | `StreamOpened` | — | stream type, workspace; closed in §9.15 |
 | `NoticeIssued` | — | notice id (random, notifications spec §4.2), kind, class, cause (the `OwnerAlertSent`, `ApprovalRequested`, or (for `channel_lost`) `NoticeAttempted` it answers, with its stream), recipients (opaque); closed in §9.15 |
-| `NoticeAttempted` | — | notice id, recipient (opaque), channel, attempt, status (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), reason, provider message id, `coalesced_into`; closed in §9.15, whose version 2 adds a `failed` attempt's `verdict` ([DEC-706](../project/decisions/DEC-706.md)) |
+| `NoticeAttempted` | — | notice id, recipient (opaque), channel, attempt, status (`delivered`, `failed`, `suppressed_quiet_hours`, `deferred_quiet_hours`, `abandoned`), reason, provider message id, `coalesced_into`; closed in §9.15, whose version 2 adds a `failed` attempt's `verdict` ([DEC-706](../project/decisions/DEC-706.md)) and version 3 the web-push `address_ref` and the `address_retired` stop ([DEC-2505](../project/decisions/DEC-2505.md)) |
 
 ### 9.1 Agent-stream payload schemas ([DEC-177](../project/04-decision-log.md#decisions))
 
@@ -3512,14 +3564,18 @@ over stored rows ([DEC-893](../project/decisions/DEC-893.md), [DEC-895](../proje
 ### 9.15 Alert and notice records ([DEC-720](../project/decisions/DEC-720.md))
 
 The notice stream of §2 and v0.12, and the records that feed it ([notifications spec §5.5](notifications.md#55-records)):
-the subject stream owner's `OwnerAlertSent`, and the dispatcher's `StreamOpened`, `NoticeIssued`,
-and `NoticeAttempted` on `ntf:{workspace_id}`. Each is closed at schema version 1, and
-`NoticeAttempted` also at version 2 (v0.40, [DEC-706](../project/decisions/DEC-706.md)), as §9.6
+the subject stream owner's `OwnerAlertSent`, the dispatcher's `StreamOpened`, `NoticeIssued`,
+and `NoticeAttempted` on `ntf:{workspace_id}`, and the control stream's
+`NotificationAddressChanged`, which says which web-push addresses a member holds (v0.51,
+[DEC-2505](../project/decisions/DEC-2505.md)). Each is closed at schema version 1, and
+`NoticeAttempted` also at versions 2 (v0.40, [DEC-706](../project/decisions/DEC-706.md)) and 3
+(v0.51, DEC-2505), as §9.6
 closes its records: every listed member is present, `null` only where the type is nullable, and any other
-member is `schema` at that member. §9.1's types and report order apply. None of the four holds free
+member is `schema` at that member. §9.1's types and report order apply. None of the five holds free
 text: every string is an identifier, a closed vocabulary, or a provider's opaque token, so nothing
 about an order, a position, a mandate, or an address can reach them (`AGENTS.md` rule 6,
-notifications spec NT-1 and NT-2).
+notifications spec NT-1 and NT-2). A web-push address is named only by its `address_ref`, an opaque
+vault reference listed in the envelope's `pii_refs` (§3).
 
 **Streams.** `OwnerAlertSent` is catalogued on the agent, account, and control streams, written by
 that stream's owner in the subject's own batch (notifications spec §3.2, §5.1); on the scheduler and
@@ -3527,13 +3583,18 @@ notice streams it is `wrong_stream` at `event_type`. It names no configuration a
 input, so it carries no `risk_clock`. The notice stream admits only its `StreamOpened`,
 `NoticeIssued`, and `NoticeAttempted`; every other catalogued type is `wrong_stream` there, so no
 stream owner copies a fact from it and the dispatcher writes nothing else.
+`NotificationAddressChanged` is catalogued on the control stream only, and is `wrong_stream` at
+`event_type` on every other: workspace services write it for a member's own request (workspace API
+§5.7), and for a deactivation inside the deactivation's own batch (identity spec §5.2 step 3). It
+names no configuration and is not a risk input, so it carries no `risk_clock`, and no trading path
+reads it (NT-9).
 
 **Types**, beside §9.1's:
 
 | Type | Values | Refused as |
 |---|---|---|
 | `notice_id` | Exactly 32 lowercase hexadecimal digits: notifications spec §4.2's random notice id. Never an event id, which is a `ulid` and carries its creation time | As `id` |
-| `stream_id` | A stream id in §2's grammar, of one of the seven stream types (the meter stream's since v0.46, the deployment meter stream's since v0.51, §9.19) | As `id` |
+| `stream_id` | A stream id in §2's grammar, of one of the seven stream types (the meter stream's since v0.46, the deployment meter stream's since v0.53, §9.19) | As `id` |
 | `opaque` | 1 to 256 characters, each U+0021 to U+007E: a provider's message id, which has no space and so cannot carry a sentence | As `id` |
 | `kind` | Notifications spec §3.2's closed set of 33 kinds, below | As `id` |
 
@@ -3552,6 +3613,38 @@ stream owner copies a fact from it and the dispatcher writes nothing else.
 | `subject` | `ulid` | The subject event: rules 119 and 130 |
 | `kind` | `kind`, except `approval_requested`, `approval_reminder`, and `channel_lost` | No alert causes those three (notifications spec §3.4); any of them is `non_canonical` at `payload.kind` |
 | `owner_command` | `ulid?` | For a user's kill switch, the `OwnerCommandIssued` it carries out, on which the dispatcher de-duplicates (notifications spec §3.4): rule 120 |
+
+**`NotificationAddressChanged`** (control stream; a member set or removed one of their own web-push
+addresses, [workspace API spec §4.11, §5.7](workspace-api.md), [DEC-795](../project/decisions/DEC-795.md)
+item 5). Its members are exactly workspace API §5.7's and identity spec §12.1's.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `member` | `ulid` | The user principal whose address it is (identity spec §3.1), as §9.12's `member`. On the notice stream that principal's recipient is `p_` and this ULID in lowercase ([DEC-2502](../project/decisions/DEC-2502.md) item 3) |
+| `channel` | `web_push` | The one push channel whose addresses a member sets in the workspace (notifications spec §4.6) |
+| `action` | `added` \| `removed` | |
+| `address_ref` | `ulid` | The address: the `added` event's own `event_id`, naming the vault entry that holds the endpoint, the keys, and the VAPID `key_id` (DEC-2502 item 1, [DEC-2503](../project/decisions/DEC-2503.md) item 5); never derived from the address: rules 210 and 211 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}?` | §9.2's step-up evidence, bound to the request's digest (workspace API §5.7, API-17); `null` only for a `removed` that rides a deactivation: rules 212 to 214 |
+
+**No part of an address.** The endpoint, `p256dh`, `auth`, the push service or its host, and a hash
+of any of them are not members, so the closed schema refuses each as `schema` at that member (NT-2,
+workspace API API-11), and the step-up digest's inputs are never journaled. Nor is the VAPID
+`key_id`: it names the workspace's key, not the member's address, and it is the vault entry's, read
+with the entry for each send (DEC-2503 item 5). A planned rotation's "no active address names it"
+joins this record's active set to the entries by `address_ref`; it never lists the vault to find
+addresses.
+
+**The active set** (workspace API §4.11, notifications spec §4.6, DEC-2502 item 2). Folding the
+control stream in `seq` order, an address is active from its `added` until the first later `removed`
+that names its `address_ref` with the same `member`. A `removed` that names an `address_ref` that is
+not active, or that another member added, changes nothing: workspace services never commit one
+(workspace API §5.7, removing step 2), and reading it as a removal would let one record silence
+another member's address. The set is never read from the vault, and a vault entry with no committed
+`added` is never active. The limit of 10 active addresses, an endpoint already held, and a
+deactivation's removal of every active address of the member are workspace services' checks across
+records (workspace API §5.7, identity spec §5.2 step 3), not `append`'s; a fold that meets more than
+10 active addresses sends to each, since sending to more addresses drops no notice. Whether an
+address is `unreachable` is the notice stream's (below), never this record's.
 
 **`StreamOpened`** on the notice stream. As on the agent stream (§9.1), the schema is chosen by the
 stream type of `stream_id`.
@@ -3572,19 +3665,21 @@ stream type of `stream_id`.
 | `cause_stream` | `stream_id` | The stream `cause` is on: rule 125 |
 | `recipients` | `[id]` | Opaque user ids (NT-2): rule 123 |
 
-**`NoticeAttempted`** (notice stream, one attempt's outcome on one push channel)
+**`NoticeAttempted`** (notice stream, one attempt's outcome on one push channel, and on web push at
+one address)
 
 | Member | Type | Meaning |
 |---|---|---|
 | `notice` | `notice_id` | |
 | `recipient` | `id` | The opaque user id; never an address (NT-2) |
 | `channel` | `email` \| `phone` \| `slack` \| `sms` \| `telegram` \| `web_push` | The mandate schema's push channels (notifications spec §4.1). The pull channels are never attempted: `ApprovalDelivered` and the journal itself are their record |
-| `attempt` | `integer` | 1 for the first attempt on the channel: rule 126 |
+| `attempt` | `integer` | 1 for the first attempt on the channel, and at version 3 on web push for the first at the address: rule 126 |
 | `status` | `delivered` \| `failed` \| `suppressed_quiet_hours` \| `deferred_quiet_hours` \| `abandoned` | `delivered` means the provider accepted the message, not that anyone read it |
-| `reason` | `timeout` \| `rate_limited` \| `provider_error` \| `address_rejected` \| `auth_failed` \| `too_large` \| `recipient_not_permitted` \| `address_missing` \| `bounced` \| `complained` \| `unsubscribed` \| `not_pending` \| `retry_window_ended` (nullable) | Notifications spec §5.2's closed enum, with the receipts `bounced`, `complained`, and `unsubscribed` (§5.6) and the dispatcher's own `address_missing` (§5.1, [DEC-795](../project/decisions/DEC-795.md) item 7), then §5.3's two stops: rule 127 |
+| `reason` | `timeout` \| `rate_limited` \| `provider_error` \| `address_rejected` \| `auth_failed` \| `too_large` \| `recipient_not_permitted` \| `address_missing` \| `bounced` \| `complained` \| `unsubscribed` \| `not_pending` \| `retry_window_ended` \| `address_retired` (nullable; `address_retired` from version 3) | Notifications spec §5.2's closed enum, with the receipts `bounced`, `complained`, and `unsubscribed` (§5.6) and the dispatcher's own `address_missing` (§5.1, [DEC-795](../project/decisions/DEC-795.md) item 7), then §5.3's stops, `address_retired` from version 3 only (at versions 1 and 2 it is `non_canonical` at `payload.reason`): rules 127 and 216 |
 | `provider_message_id` | `opaque?` | The provider's id for the accepted message, which a later receipt names: rule 128 |
 | `coalesced_into` | `opaque?` | For a notice combined into one message (notifications spec §5.4), that message's provider id: rule 129 |
 | `verdict` | `retryable` \| `permanent` (nullable) | Version 2. For a `failed` attempt, the provider's verdict of notifications spec §5.2, which decides whether that channel is tried again for the notice ([DEC-725](../project/decisions/DEC-725.md) item 6.3); `null` for every other status: rule 134 |
+| `address_ref` | `ulid?` | Version 3. On web push, the address the attempt went to: the `address_ref` of a `NotificationAddressChanged` (DEC-2502 items 4 and 5); `null` on every other channel, where a recipient has one address per channel: rule 215 |
 
 **Versions.** Version 2 (v0.40, [DEC-706](../project/decisions/DEC-706.md)) is version 1's
 members in their order, and `verdict` last, so a reader of the notice stream alone, the dispatcher
@@ -3596,19 +3691,42 @@ items 4, 5, 7, and 8), so `reason` cannot say which. The verdict is the outcome 
 returned: `permanent { reason }` is `permanent`; `retryable { reason }`, and a timeout with no
 answer (the caller's `retryable { timeout }`), are `retryable`. A receipt's `failed` record is
 `permanent`. `delivered`, `suppressed_quiet_hours`, `deferred_quiet_hours`, and `abandoned` carry
-none. Every writer appends version 2, and from v0.40 `append` refuses `NoticeAttempted` at version
-1 as `unknown_schema` at `payload`, so no writer can leave the verdict out by writing the older
-shape. Version 1 is not edited (§8) and still replays: a stored version-1 `failed` attempt reads as
-`permanent`, so that channel is finished for that notice and nothing is sent again on a guess. No
-deployment holds one: before v0.40 only the dispatcher's own step tests appended `NoticeAttempted`,
-and no dispatcher process runs yet (E8-10).
+none. From v0.40 to v0.51 every writer appended version 2, and `append` refused `NoticeAttempted`
+at version 1 as `unknown_schema` at `payload`, so no writer could leave the verdict out by writing
+the older shape. Version 1 is not edited (§8) and still replays: a stored version-1 `failed` attempt
+reads as `permanent`, so that channel is finished for that notice and nothing is sent again on a
+guess. No deployment holds one: before v0.40 only the dispatcher's own step tests appended
+`NoticeAttempted`, and no dispatcher process runs yet (E8-10).
+
+Version 3 (v0.51, [DEC-2505](../project/decisions/DEC-2505.md)) is version 2's members in their
+order, and `address_ref` last. On web push one handle fans out to each of the recipient's active
+addresses, each with its own send, idempotency key, and retry schedule (notifications spec §4.6,
+§5.1, §5.3), so each outcome must name its address, or a verdict on one browser would mark them all
+or be lost (DEC-2502 item 5). Version 3 also admits `address_retired`, the dispatcher's stop for a
+web-push send whose address was removed, or marked `unreachable` by another attempt, before its
+next attempt (notifications spec §5.3); DEC-795's one last send to a removed address is never
+retired, and keeps `retry_window_ended` when its entry is already gone (§5.1). Every writer appends
+version 3, and from v0.51 `append` refuses `NoticeAttempted` at versions 1 and 2 as
+`unknown_schema` at `payload`. A version-2 record on a channel with no address says what version 3
+says with a `null` `address_ref`, but admitting version 2 would also admit one on web push that
+names no address, which nothing could then attribute to an address; one shape per fact keeps a
+writer from choosing the shape that says less, as v0.40 did for the verdict. Version 2 is not edited
+(§8) and still replays, as version 1 does, with `address_ref` read as `null`. No deployment holds a
+web-push `NoticeAttempted` at any version: the dispatcher makes no web-push attempt until version 3
+exists and web push is turned on (notifications spec §4.6, §5.9,
+[DEC-2504](../project/decisions/DEC-2504.md)), and no dispatcher process runs yet. A stored
+version-1 or version-2 web-push attempt, were one read, is the attempt of no address: it ends no
+address's sends and marks none, so nothing is marked on a guess and no address the fold makes active
+loses a send.
 
 A `NoticeAttempted` whose `reason` is `address_rejected`, `auth_failed`, `bounced`, `complained`, or
 `unsubscribed` is the record that marks the address on that channel `unreachable` (notifications
-spec §5.6) and causes its `channel_lost` notice; one whose `reason` is `address_missing` causes a
-`channel_lost` notice once per address and marks nothing. Neither needs a member of its own, since a
-separate flag could only disagree with the reason. `recipient_not_permitted` marks nothing and
-causes nothing (§5.2).
+spec §5.6), on web push only the one its `address_ref` names and never the member's other
+addresses (DEC-2502 item 6), and causes its `channel_lost` notice; one whose `reason` is
+`address_missing` causes a `channel_lost` notice once per address, on web push once per
+`address_ref`, and marks nothing. Neither needs a member of its own, since a separate flag could only
+disagree with the reason. `recipient_not_permitted` marks nothing and causes nothing (§5.2), and nor
+does `address_retired`, which records only that the address left the set.
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
 
@@ -3633,7 +3751,8 @@ causes nothing (§5.2).
      `abandoned` attempt's reason is a stop: `not_pending` (an `action` notice whose approval
      stopped being pending) or `retry_window_ended` (a `safety` notice's 24 hours or an `info`
      notice's 6 hours ran out, or the one last send to a removed address whose vault entry is
-     gone; notifications spec §5.1, §5.3); a `failed` one's is any other (`payload.reason`).
+     gone; notifications spec §5.1, §5.3), and at version 3 also `address_retired` (rule 216); a
+     `failed` one's is any other (`payload.reason`).
 128. `NoticeAttempted`: `provider_message_id` is non-null exactly when `status` is `delivered` or
      `reason` is a receipt, `bounced`, `complained`, or `unsubscribed`
      (`payload.provider_message_id`).
@@ -3654,22 +3773,89 @@ causes nothing (§5.2).
      `unsubscribed`, and `retryable` for `timeout` and `rate_limited`. `provider_error` and
      `too_large` take either, as the adapter answered. So a record never marks an address
      `unreachable` while its channel is still retried, and never stops a channel on a timeout or a
-     rate limit.
+     rate limit. It holds at version 3 unchanged.
+
+Rules 210 to 216 ([DEC-2505](../project/decisions/DEC-2505.md), v0.51) number on after rule 191,
+which open changes hold, and renumber none:
+
+210. `NotificationAddressChanged`: `address_ref` equals the envelope's `event_id` when `action` is
+     `added`, and differs from it when `action` is `removed` (`payload.address_ref`), so an address
+     is named by the record that added it and a removal names an earlier one.
+211. `NotificationAddressChanged`: `pii_refs` is exactly `[address_ref]` (`pii_refs`), so redaction
+     and erasure reach the vault entry (workspace API §5.7) and the record lists no other personal
+     data.
+212. `NotificationAddressChanged`: `step_up` is non-null when `action` is `added`
+     (`payload.step_up`). Non-null evidence is valid at the envelope's `event_time` as rule 102
+     reads it: its method is `passkey` in a `live` envelope and `passkey` or `cli_confirm`
+     otherwise (`payload.step_up.method`), and 0 ≤ `event_time` − `authenticated_at` ≤ 300 seconds
+     (`payload.step_up.authenticated_at`). That the assertion was never used before is workspace
+     services' check across records (API-17); a replacement's `removed` repeats its `added`'s
+     evidence, one request's evidence written twice and not a second use (rule 214).
+213. `NotificationAddressChanged`: the actor. With a non-null `step_up` it is a `user`
+     (`actor.kind`) whose `id` equals `member` (`payload.member`): a member sets and removes only
+     their own addresses (workspace API §4.11, API-6). With a `null` `step_up`, a `removed` riding a
+     deactivation, it is a `user` or `system` (`actor.kind`), as rule 98 has the deactivation's. A
+     `client` actor is refused before the payload is read (rule 83).
+214. **Batch rule** (workspace API §4.11, §5.7; identity spec §5.2 step 3). In one `append` batch:
+     (a) the `NotificationAddressChanged` records with a non-null `step_up` are one request's: at
+     most one `added` and at most one `removed`, with one `member` and equal `step_up`; one of each
+     is a replacement (of an `unreachable` address, or of one subscribed under a retired key,
+     workspace API §5.7, DEC-2503 item 7); (b) each `added`, and a `removed` with a non-null
+     `step_up` in a batch with no `added`, is the `subject` of an `OwnerAlertSent` whose `kind` is
+     `notification_address_changed`, and a replacement's `removed` is the subject of none, since the
+     member is told once, by the `added`'s alert; (c) a `removed` with a `null` `step_up` rides a
+     `MemberDeactivated` or `MemberRemoved` in the batch whose `member` equals its `member` and whose
+     `actor` equals its `actor`, is the subject of no `OwnerAlertSent`, and shares its batch with no
+     `NotificationAddressChanged` that has a non-null `step_up`; (d) no two `removed` records name
+     one `address_ref`, and no `removed` names the `address_ref` of an `added` in the batch; and
+     (e) an `OwnerAlertSent` whose `kind` is `notification_address_changed` names as its `subject` a
+     `NotificationAddressChanged` that (b) gives an alert. A break of (a) to (d) is reported at the
+     first `NotificationAddressChanged` in the batch that breaks one (`payload.address_ref`), and of
+     (e) at the first such alert (`payload.subject`).
+215. `NoticeAttempted` version 3: `address_ref` is non-null exactly when `channel` is `web_push`
+     (`payload.address_ref`), and `pii_refs` is `[address_ref]` when it is non-null and empty when
+     it is `null` (`pii_refs`).
+216. `NoticeAttempted` version 3: `reason` `address_retired` is on an `abandoned` attempt on
+     `web_push` only (`payload.reason`). At version 3 rule 127's stops are `not_pending`,
+     `retry_window_ended`, and `address_retired`, so rule 127 already refuses `address_retired` on a
+     `failed` attempt; this rule refuses it on any other channel, which has no address set to leave.
 
 The first violation is reported in §9.1's order: unlisted members, the listed members in the order
-given, then rules 119, 120, 122 to 124, 126 to 129, and at version 2 rule 134 (only on a
-well-typed payload), then `artifact_refs` and `pii_refs`, then the subject rules 121 and 125. Rule 130 spans a batch, so it is
-checked once every draft in the batch passes these, as rule 10's second clause is.
+given, then rules 119, 120, 122 to 124, 126 to 129, at versions 2 and 3 rule 134, at version 3
+rules 215 and 216, and rules 210 to 213 (only on a well-typed payload), then `artifact_refs` and
+`pii_refs`, then the subject rules 121 and 125. Rule 130 spans a batch, so it is
+checked once every draft in the batch passes these, as rule 10's second clause is, and rule 214
+after it.
 
 **Lifecycle.** A cause is issued once: a cause that already has a `NoticeIssued` is skipped, and on
 restart the dispatcher issues every cause without one and attempts again every notice that has no
-terminal attempt (notifications spec §5.1). On a recipient's channel, an attempt is terminal when it
+terminal attempt (notifications spec §5.1). Attempts are judged per notice, recipient, channel, and
+`address_ref` (`null` off web push), each address numbered from attempt 1. At each of them, an
+attempt is terminal when it
 is `delivered`, `suppressed_quiet_hours`, or `abandoned`, or `failed` with the verdict `permanent`
 (a version-1 `failed` reads as `permanent`); a `deferred_quiet_hours` attempt, or a `failed` one
-with the verdict `retryable`, leaves that channel due (notifications spec §7's diagram,
-[DEC-706](../project/decisions/DEC-706.md)). A later receipt for a delivered message is a new
-`NoticeAttempted` naming the same `provider_message_id`; it never retracts the earlier `delivered`
-(notifications spec §5.5). Nothing on the notice stream is a risk input, and no trading path waits on it (NT-9).
+with the verdict `retryable`, leaves that address due (notifications spec §7's diagram,
+[DEC-706](../project/decisions/DEC-706.md), DEC-2502 item 5). On web push the addresses due for a
+notice are those active and not `unreachable` at the step that makes the channel's first attempt for
+it, and the address a `notification_address_changed` notice's own `added` names (notifications spec
+§4.6); NT-8's oracle reads the same set from the journal alone.
+
+An address's life, from these records: an `added` makes it active, and its alert's notice reaches it
+with the member's other addresses; a `removed` ends it, a send still due to it is `abandoned`
+`address_retired` at its next step, and only the removal's own notice is sent to it once more
+(DEC-795); a re-add of the same endpoint is a new `address_ref`, whose marks and `address_missing`
+report start afresh; a replacement removes and adds in one batch, and sends nothing more to the old
+address; a deactivation removes every active address in its own batch, with no alert and no last
+send, and a send still due to any of them is `address_retired`; a `failed` `address_rejected`, or
+any of the five marking reasons, marks that address `unreachable`, so a send still due to it is
+`address_retired` and later notices skip it, while it stays active, listed, and counted until the
+member removes or replaces it (workspace API §4.11); and
+a retired VAPID key changes no record here: a send to an address whose key the dispatcher no longer
+holds is `failed` `provider_error` with the verdict `permanent`, which marks nothing (DEC-2503 items
+5 and 7).
+
+A later receipt for a delivered message is a new `NoticeAttempted` naming the same
+`provider_message_id`; it never retracts the earlier `delivered` (notifications spec §5.5). Nothing on the notice stream is a risk input, and no trading path waits on it (NT-9).
 
 ### 9.16 The broker's order id ([DEC-869](../project/decisions/DEC-869.md))
 
@@ -3895,7 +4081,10 @@ Both records are on the workspace control stream, at `schema_version` 1, and bot
 by artifact (§6.3): the canonical JSON object of the report, stored under `sha256:` of its bytes,
 before the record is appended (§5.2). The figures live in the report; the record holds what
 reproduces it. §9.2's conventions and types apply: every member present on every record (§4.2),
-`null` only where the type is nullable, any other member refused.
+`null` only where the type is nullable, any other member refused. Workspace services write
+both; the envelope's `actor` is the `user` who asked for the run or the `system` runner or evaluator
+that ran it, and any other kind is refused `schema` at `actor.kind`
+([DEC-1141](../project/decisions/DEC-1141.md)).
 
 **`BacktestRunRecorded`**: one backtest of a mandate version through its own decision path
 ([DEC-1000](../project/decisions/DEC-1000.md)).
@@ -3924,7 +4113,7 @@ stream of one of the team's internal paper workspaces (DEC-103).
 | `cut_off` | `timestamp` | The instant the evaluation reads up to: no thesis whose horizon ends after it is scored |
 | `theses` | `ref` | The digest of the `ThesisProposed` and `ThesisRevised` records read |
 | `theses_from`, `theses_to` | `[text]` | Per agent stream read, in stream order, `stream_id:seq` of the first and of the last record read; equal lengths |
-| `theses_head` | `[ref]` | Per agent stream read, the hash of the last record read, in the same order |
+| `theses_head` | `[digest]` | Per agent stream read, the `hash` (§3) of the last record read, in the same order |
 | `closes`, `cost_model` | `ref` | The digests of the close series and the round-trip cost model |
 | `code_build` | `ref` | The evaluator's build digest |
 | `report` | `ref` | The evaluation report artifact (`report_version` 1) |
@@ -3939,6 +4128,12 @@ stream of one of the team's internal paper workspaces (DEC-103).
      (`payload.mandate_version`).
 145. `EvaluationRunRecorded`: `theses_from`, `theses_to`, and `theses_head` have one entry per
      agent stream read, the same length, and are not empty (`payload.theses_from`).
+
+`theses_head` is a `digest` (§9.13): a journal record's hash names no stored artifact, so it is
+not listed in `artifact_refs` and §11 check 6 does not read it; every other digest member here is
+a `ref` to a stored object ([DEC-1142](../project/decisions/DEC-1142.md)). The test vectors'
+`backtest_records` section holds a base draft of each record, an invalid draft for every member
+type and rule, and valid drafts for the cases a rule might be misread to refuse.
 
 **No mapping to `JournaledFact`.** No fold reads either record: they are what the backtest and
 evaluation produced, and the go-live record names a backtest by its id (`AgentDeployed`). The rule

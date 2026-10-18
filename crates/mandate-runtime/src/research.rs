@@ -91,22 +91,33 @@ pub trait RecordCatalog {
     fn registers(&self, record: ResearchRecord) -> bool;
 }
 
-/// `mandate-journal`'s own catalogue. The candidates' verdicts are registered once the agent
-/// stream's `ModelInvocationRecorded` is closed with its `verdicts` (journal spec §9.19, E15-8); no
-/// invalidation verdict is registered until E19-5 adds the record, so no research run starts in any
-/// deployment until then.
-pub struct JournalCatalog;
+/// Which closed agent-stream records register the research records, read through a catalogue's
+/// `closes`: the candidates' verdicts are registered once the agent stream's
+/// `ModelInvocationRecorded` is closed with its `verdicts` (journal spec §9.19, E15-8), and the
+/// invalidation verdict once `ThesisInvalidated` is (§9.22, E19-5). The shell passes
+/// [`JournalCatalog::JOURNAL`], `mandate-journal`'s own catalogue.
+#[derive(Clone, Copy)]
+pub struct JournalCatalog {
+    closes: fn(&str, u64, mandate_journal::StreamType) -> bool,
+}
+
+impl JournalCatalog {
+    /// `mandate-journal`'s own catalogue.
+    pub const JOURNAL: Self = Self::over(mandate_journal::closes);
+
+    /// The research records as registered by a catalogue whose `closes` answers as `closes` does.
+    pub const fn over(closes: fn(&str, u64, mandate_journal::StreamType) -> bool) -> Self {
+        Self { closes }
+    }
+}
 
 impl RecordCatalog for JournalCatalog {
     fn registers(&self, record: ResearchRecord) -> bool {
-        match record {
-            ResearchRecord::CandidateVerdicts => mandate_journal::closes(
-                "ModelInvocationRecorded",
-                1,
-                mandate_journal::StreamType::Agent,
-            ),
-            ResearchRecord::InvalidationVerdict => false,
-        }
+        let (event_type, version) = match record {
+            ResearchRecord::CandidateVerdicts => ("ModelInvocationRecorded", 1),
+            ResearchRecord::InvalidationVerdict => ("ThesisInvalidated", 1),
+        };
+        (self.closes)(event_type, version, mandate_journal::StreamType::Agent)
     }
 }
 
@@ -822,11 +833,14 @@ fn called(
         }
         _ => Judged::default(),
     };
-    let (body, theses) = match invocation(record, &judged.verdicts) {
-        Ok(body) => (body, judged.theses),
-        Err(_) => (invocation(record, &[])?, Vec::new()),
+    let (body, invalidations, theses) = match invocation(record, &judged.verdicts) {
+        Ok(body) => (body, judged.invalidations, judged.theses),
+        Err(_) => (invocation(record, &[])?, Vec::new(), Vec::new()),
     };
     let id = batch.journal("ModelInvocationRecorded", None, body)?;
+    for invalidation in invalidations {
+        batch.journal("ThesisInvalidated", Some(id.clone()), invalidation)?;
+    }
     for thesis in theses {
         let thesis_record = batch.journal(thesis.event_type, Some(id.clone()), thesis.body)?;
         if let Some(output) = thesis.output {

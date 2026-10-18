@@ -10,6 +10,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
+use mandate_release::startup::Tier;
+
 /// The session signing key's file name under `$CREDENTIALS_DIRECTORY` (`deploy/systemd`).
 pub const SESSION_KEY_FILE: &str = "session-signing-key";
 
@@ -120,6 +122,29 @@ where
     }
     Ok(())
 }
+
+/// Refuses a key set fetched over anything but `https` outside dev and CI (E21-53, DEC-2100 item
+/// 9), so a staging or production server never trusts a loopback issuer, such as the local stub,
+/// even when its settings name one. In dev and CI an `http` key set is admitted here; the key-set
+/// client still takes `http` only on loopback.
+///
+/// # Errors
+/// [`StartRefusal::Setting`] naming `MANDATE_API_JWKS_URL`.
+pub fn check_key_set_tier(url: &str, tier: Tier) -> Result<(), StartRefusal> {
+    let https = url
+        .get(..HTTPS.len())
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case(HTTPS));
+    if https || matches!(tier, Tier::Dev | Tier::Ci) {
+        Ok(())
+    } else {
+        Err(StartRefusal::Setting {
+            name: "MANDATE_API_JWKS_URL",
+        })
+    }
+}
+
+/// The one scheme a key set is fetched with outside dev and CI.
+const HTTPS: &str = "https://";
 
 /// Refuses a database connection string that carries a password, in a URL's user information or
 /// as a `password` keyword, in either libpq form (a URL or `key=value` pairs). The string is read

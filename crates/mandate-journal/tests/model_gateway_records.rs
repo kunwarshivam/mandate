@@ -337,7 +337,6 @@ fn the_catalogue_answers_for_the_agent_streams_own_records() {
     assert!(!closes("ObservationRecorded", 2, StreamType::Agent));
     assert!(!closes("ObservationRecorded", 1, StreamType::Control));
     assert!(closes("ApprovalRequested", 2, StreamType::Agent));
-    assert!(!closes("ThesisInvalidated", 1, StreamType::Agent));
 }
 
 /// `append` reads a stream's earlier records exactly when a draft of the batch is one rules 153
