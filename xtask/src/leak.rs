@@ -11,6 +11,17 @@
 //! - **L3, contexts:** `toJSON(` of a whole context, `secrets[`, `secrets: inherit`, and
 //!   `secrets.` anywhere but an `env:` block, so a secret reaches a step only as a variable and is
 //!   never pasted into its script.
+//! - **L5, artifacts:** each `upload-artifact` path is one of [`ARTIFACT_PATHS`], none names deploy
+//!   state, a plan, a key, a secret, a token, a kubeconfig, an `.env` or auth, and none uploads
+//!   hidden files.
+//! - **L6, caches:** no cache is restored or saved in a secret job, a job with an `environment:` or
+//!   a `secrets.` read, so nothing a pull request wrote runs beside a secret.
+//! - **L7, curl and tools:** no verbose, traced or header-dumping `curl`, no `-H` or `-u` value but
+//!   an `@file`, no `--aws-sigv4`, no `docker login -p`, and no `--password` but `--password-stdin`.
+//! - **L8, runner files:** a secret job, and a script it runs, writes no `GITHUB_ENV`,
+//!   `GITHUB_PATH`, `GITHUB_OUTPUT` or `GITHUB_STEP_SUMMARY` and issues no `::` workflow command;
+//!   and nothing anywhere issues `::add-mask::` but a reviewed line that escapes its value first
+//!   (`%` to `%25`, then CR to `%0D` and LF to `%0A`).
 
 use std::fs;
 use std::path::Path;
@@ -24,6 +35,8 @@ const GUARDED_DIRS: [&str; 2] = [".github/workflows", ".github/scripts"];
 /// byte for byte:
 /// - `no-credentials.sh` lists the environment's names, never its values, and prints only the
 ///   names that look like a credential's (DEC-964).
+/// - `release.yml`'s build jobs upload `images/test-key/cosign.pub`, the public half of an
+///   ephemeral test key made for the run's drill (E21-35), which signs nothing that ships.
 /// - `merge.yml`'s `RUN_PRS` is the JSON list of the pull request numbers a `workflow_run` names,
 ///   which the event holds in public.
 const ALLOWED: &[(&str, &str, &str)] = &[
@@ -33,10 +46,57 @@ const ALLOWED: &[(&str, &str, &str)] = &[
         "found=$(compgen -e | grep -E -i 'KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|ALPACA|APCA|ROBINHOOD' || true)",
     ),
     (
+        "L5",
+        ".github/workflows/release.yml",
+        "images/test-key/cosign.pub",
+    ),
+    (
         "L3",
         ".github/workflows/merge.yml",
         "RUN_PRS: ${{ toJSON(github.event.workflow_run.pull_requests.*.number) }}",
     ),
+];
+
+/// Every path an `upload-artifact` step may upload, by workflow and path, matched exactly (L5):
+/// the mutation cost reports, the release build's binaries, SBOMs, images and their test-key
+/// signatures, what each publish wrote, the release to sign and its signatures, and the
+/// Playwright traces of a failed end-to-end run.
+const ARTIFACT_PATHS: &[(&str, &str)] = &[
+    (".github/workflows/ci.yml", "target/mutant-cost.json"),
+    (
+        ".github/workflows/ci.yml",
+        "target/mutant-costs/mutant-costs.json",
+    ),
+    (".github/workflows/release.yml", "dist/"),
+    (".github/workflows/release.yml", "images/IMAGES"),
+    (".github/workflows/release.yml", "images/images/"),
+    (".github/workflows/release.yml", "images/signatures/"),
+    (
+        ".github/workflows/release.yml",
+        "images/test-key/cosign.pub",
+    ),
+    (".github/workflows/release.yml", "published/PUBLISHED"),
+    (".github/workflows/release.yml", "published/IMAGES"),
+    (".github/workflows/release.yml", "published/CHARTS"),
+    (".github/workflows/release.yml", "dist/SHA256SUMS"),
+    (".github/workflows/release.yml", "dist/bin/"),
+    (".github/workflows/release.yml", "signatures/"),
+    (".github/workflows/web-e2e.yml", "web/test-results/"),
+];
+
+/// The words no artifact path may hold (L5).
+const ARTIFACT_WORDS: [&str; 11] = [
+    "deploy/tofu",
+    ".terraform",
+    "plan",
+    "state",
+    "key",
+    "secret",
+    "token",
+    "kubeconfig",
+    ".env",
+    "auth",
+    "credential",
 ];
 
 /// One file the guard reads: its path from the root, and its text.
@@ -110,7 +170,44 @@ pub(crate) fn guard_in(root: &Path) -> Result<()> {
 /// Every refused line of `sources`, less the [`ALLOWED`] ones.
 pub(crate) fn findings(sources: &[Source]) -> Vec<Finding> {
     let mut found = Vec::new();
+    let secret_scripts: Vec<String> = sources
+        .iter()
+        .filter(|source| source.path.contains("/workflows/"))
+        .flat_map(|source| {
+            jobs(&source.text)
+                .into_iter()
+                .filter(|job| job.secret)
+                .flat_map(|job| {
+                    job.lines
+                        .iter()
+                        .flat_map(|(_, line)| script_paths(line))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let mut push = |rule: &'static str, path: &str, line: usize, text: &str, why: &'static str| {
+        if !ALLOWED.contains(&(rule, path, text.trim())) {
+            found.push(Finding {
+                rule,
+                path: path.to_owned(),
+                line,
+                why,
+            });
+        }
+    };
     for source in sources {
+        if source.path.contains("/workflows/") {
+            for (rule, number, text, why) in job_findings(&source.path, &source.text) {
+                push(rule, &source.path, number, &text, why);
+            }
+        } else if secret_scripts.contains(&source.path) {
+            for (index, line) in source.text.lines().enumerate() {
+                if let Some(why) = runner_file(line) {
+                    push("L8", &source.path, index.saturating_add(1), line, why);
+                }
+            }
+        }
         let mut env_block: Option<usize> = None;
         for (index, raw) in source.text.lines().enumerate() {
             let trimmed = raw.trim();
@@ -128,6 +225,14 @@ pub(crate) fn findings(sources: &[Source]) -> Vec<Finding> {
                 for words in segments(trimmed) {
                     hits.extend(dump(&words).map(|why| ("L1", why)));
                     hits.extend(trace(&words).map(|why| ("L2", why)));
+                    hits.extend(tool(&words).map(|why| ("L7", why)));
+                }
+                if trimmed.contains("::add-mask::") {
+                    hits.push((
+                        "L8",
+                        "`::add-mask::` must escape its value first (`%` to `%25`, CR, LF) and be \
+                         a reviewed line",
+                    ));
                 }
                 hits.extend(line_dump(trimmed).map(|why| ("L1", why)));
                 hits.extend(line_trace(trimmed).map(|why| ("L2", why)));
@@ -136,14 +241,7 @@ pub(crate) fn findings(sources: &[Source]) -> Vec<Finding> {
                 );
             }
             for (rule, why) in hits {
-                if !ALLOWED.contains(&(rule, source.path.as_str(), trimmed)) {
-                    found.push(Finding {
-                        rule,
-                        path: source.path.clone(),
-                        line: index.saturating_add(1),
-                        why,
-                    });
-                }
+                push(rule, &source.path, index.saturating_add(1), trimmed, why);
             }
             if opens_env {
                 env_block = Some(indent);
@@ -337,6 +435,254 @@ fn context(line: &str, in_env: bool) -> Option<&'static str> {
     None
 }
 
+/// One job of a workflow: its lines with their 1-based numbers, and whether it holds a secret
+/// (an `environment:` or a `secrets.` read).
+struct Job {
+    lines: Vec<(usize, String)>,
+    secret: bool,
+}
+
+/// The jobs of a workflow's text: each key two spaces in under the top-level `jobs:`, up to the
+/// next such key or the next top-level line.
+fn jobs(text: &str) -> Vec<Job> {
+    let mut out: Vec<Job> = Vec::new();
+    let mut in_jobs = false;
+    for (index, raw) in text.lines().enumerate() {
+        let trimmed = raw.trim();
+        let indent = raw.len().saturating_sub(raw.trim_start().len());
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            if let Some(job) = out.last_mut().filter(|_| in_jobs) {
+                job.lines.push((index.saturating_add(1), raw.to_owned()));
+            }
+            continue;
+        }
+        if indent == 0 {
+            in_jobs = trimmed == "jobs:";
+            continue;
+        }
+        if !in_jobs {
+            continue;
+        }
+        if indent == 2 && trimmed.ends_with(':') {
+            out.push(Job {
+                lines: Vec::new(),
+                secret: false,
+            });
+        }
+        if let Some(job) = out.last_mut() {
+            if trimmed.starts_with("environment:") || trimmed.contains("secrets.") {
+                job.secret = true;
+            }
+            job.lines.push((index.saturating_add(1), raw.to_owned()));
+        }
+    }
+    out
+}
+
+/// The `.github/scripts/` files a line runs.
+fn script_paths(line: &str) -> Vec<String> {
+    line.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | ';' | '|' | '&'))
+        .filter_map(|word| {
+            let at = word.find(".github/scripts/")?;
+            word.get(at..).map(str::to_owned)
+        })
+        .collect()
+}
+
+/// L8 for a line of a secret job or of a script one runs.
+fn runner_file(line: &str) -> Option<&'static str> {
+    let trimmed = line.trim();
+    if trimmed.starts_with('#') {
+        return None;
+    }
+    if [
+        "GITHUB_ENV",
+        "GITHUB_PATH",
+        "GITHUB_OUTPUT",
+        "GITHUB_STEP_SUMMARY",
+    ]
+    .iter()
+    .any(|name| trimmed.contains(name))
+    {
+        return Some(
+            "a secret job writes none of the runner's files, which later steps and logs read",
+        );
+    }
+    workflow_command(trimmed)
+        .filter(|name| *name != "add-mask")
+        .map(|_| "a secret job issues no `::` workflow command but `::add-mask::`")
+}
+
+/// The name of the first `::name ...::` workflow command in a line: one that starts the line, a
+/// word or a quoted string, so a Rust path such as `std::env::var` is not one.
+fn workflow_command(line: &str) -> Option<&str> {
+    let mut rest = line;
+    while let Some(at) = rest.find("::") {
+        let before = rest.get(..at).and_then(|head| head.chars().next_back());
+        let after = rest.get(at.saturating_add(2)..).unwrap_or_default();
+        if before.is_some_and(|c| !(c.is_whitespace() || c == '"' || c == '\'')) {
+            rest = after;
+            continue;
+        }
+        let name_len = after
+            .find(|c: char| !(c.is_ascii_lowercase() || c == '-'))
+            .unwrap_or(after.len());
+        let name = after.get(..name_len).unwrap_or_default();
+        let tail = after.get(name_len..).unwrap_or_default();
+        if !name.is_empty()
+            && (tail.starts_with("::") || (tail.starts_with(' ') && tail.contains("::")))
+        {
+            return Some(name);
+        }
+        rest = after;
+    }
+    None
+}
+
+/// L5, L6 and L8 for a workflow: what its jobs and steps hold, by rule, line number, text and why.
+fn job_findings(path: &str, text: &str) -> Vec<(&'static str, usize, String, &'static str)> {
+    let mut out = Vec::new();
+    for job in jobs(text) {
+        let mut in_upload: Option<usize> = None;
+        let mut paths_from: Option<usize> = None;
+        for (number, raw) in &job.lines {
+            let trimmed = raw.trim();
+            let indent = raw.len().saturating_sub(raw.trim_start().len());
+            if trimmed.starts_with('#') || trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.starts_with("- ") {
+                in_upload = None;
+                paths_from = None;
+            }
+            if trimmed.contains("actions/upload-artifact") {
+                in_upload = Some(indent);
+            }
+            if job.secret {
+                if trimmed.contains("actions/cache")
+                    || trimmed.contains("rust-cache")
+                    || trimmed.starts_with("cache:")
+                    || trimmed.starts_with("cache-dependency-path:")
+                {
+                    out.push((
+                        "L6",
+                        *number,
+                        trimmed.to_owned(),
+                        "a secret job restores or saves no cache, which a pull request could have written",
+                    ));
+                }
+                if let Some(why) = runner_file(trimmed) {
+                    out.push(("L8", *number, trimmed.to_owned(), why));
+                }
+            }
+            if in_upload.is_none() {
+                continue;
+            }
+            if trimmed == "include-hidden-files: true" {
+                out.push((
+                    "L5",
+                    *number,
+                    trimmed.to_owned(),
+                    "an artifact uploads no hidden files",
+                ));
+            }
+            if let Some(from) = paths_from {
+                if indent > from {
+                    out.extend(artifact_path(path, *number, trimmed));
+                    continue;
+                }
+                paths_from = None;
+            }
+            if let Some(value) = trimmed.strip_prefix("path:") {
+                let value = value.trim();
+                if value == "|" || value == ">" || value.is_empty() {
+                    paths_from = Some(indent);
+                } else {
+                    out.extend(artifact_path(path, *number, value));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// L5 for one artifact path entry.
+fn artifact_path(
+    path: &str,
+    number: usize,
+    entry: &str,
+) -> Vec<(&'static str, usize, String, &'static str)> {
+    let mut out = Vec::new();
+    let lower = entry.to_ascii_lowercase();
+    if ARTIFACT_WORDS.iter().any(|word| lower.contains(word)) {
+        out.push((
+            "L5",
+            number,
+            entry.to_owned(),
+            "an artifact path names deploy state, a plan, a key, a secret, a token, a kubeconfig, \
+             an `.env` or auth",
+        ));
+    }
+    if !ARTIFACT_PATHS.contains(&(path, entry)) {
+        out.push((
+            "L5",
+            number,
+            entry.to_owned(),
+            "an artifact path is not one of xtask/src/leak.rs's ARTIFACT_PATHS",
+        ));
+    }
+    out
+}
+
+/// L7 for one command.
+fn tool(words: &[String]) -> Option<&'static str> {
+    let args = words.get(1..).unwrap_or_default();
+    if args
+        .iter()
+        .any(|a| a.starts_with("--password") && a != "--password-stdin")
+    {
+        return Some("a password is given only on standard input (`--password-stdin`)");
+    }
+    match program(words) {
+        "curl" => {
+            for (at, arg) in args.iter().enumerate() {
+                let next = args.get(at.saturating_add(1)).map(String::as_str);
+                let long = matches!(
+                    arg.as_str(),
+                    "--verbose" | "--include" | "--dump-header" | "--aws-sigv4"
+                ) || arg.starts_with("--trace")
+                    || arg.starts_with("--aws-sigv4=");
+                let short = short_flag(arg)
+                    && arg.chars().skip(1).all(|c| c.is_ascii_alphabetic())
+                    && arg.contains(['v', 'i', 'D']);
+                if long || short {
+                    return Some(
+                        "`curl` writes no verbose output, trace, headers or signed request",
+                    );
+                }
+                let valued = match arg.as_str() {
+                    "-H" | "--header" | "-u" | "--user" => next,
+                    other => other
+                        .strip_prefix("-H")
+                        .or(other.strip_prefix("--header="))
+                        .or(other.strip_prefix("--user="))
+                        .filter(|value| !value.is_empty()),
+                };
+                if valued.is_some_and(|value| !value.starts_with('@')) {
+                    return Some(
+                        "a `curl` header or user is read from an `@file`, never written inline",
+                    );
+                }
+            }
+            None
+        }
+        "docker" if args.iter().any(|a| a == "login") && args.iter().any(|a| a == "-p") => {
+            Some("`docker login -p` puts the password in the command line")
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,6 +732,20 @@ mod tests {
         ("L3", "    secrets: inherit"),
         ("L3", "        run: deploy --token ${{ secrets.TOKEN }}"),
         ("L3", "        if: secrets.TOKEN != ''"),
+        ("L7", "curl -v https://example.com"),
+        ("L7", "curl -sSfLv https://example.com"),
+        ("L7", "curl --trace-ascii log https://example.com"),
+        ("L7", "curl -i https://example.com"),
+        ("L7", "curl -D headers.txt https://example.com"),
+        (
+            "L7",
+            "curl -H \"Authorization: Bearer $TOKEN\" https://example.com",
+        ),
+        ("L7", "curl -u \"user:$PASSWORD\" https://example.com"),
+        ("L7", "curl --aws-sigv4 aws:amz https://example.com"),
+        ("L7", "docker login -u me -p \"$TOKEN\" ghcr.io"),
+        ("L7", "helm registry login --password \"$TOKEN\" ghcr.io"),
+        ("L8", "echo \"::add-mask::$TOKEN\""),
     ];
 
     /// Lines each rule must let through.
@@ -407,6 +767,10 @@ mod tests {
         "# never run printenv or set -x here",
         "echo 'the secrets are in the vault'",
         "export PATH=\"$HOME/bin:$PATH\"",
+        "curl -sSfL --retry 5 -o x.tgz https://example.com/x.tgz",
+        "curl -H @headers.txt https://example.com",
+        "echo \"$TOKEN\" | docker login -u me --password-stdin ghcr.io",
+        "run: cargo xtask ci select >> \"$GITHUB_OUTPUT\"",
     ];
 
     #[test]
@@ -445,6 +809,98 @@ mod tests {
             [("L3", 7)],
             "{found:?}"
         );
+    }
+
+    /// A workflow with a job that holds a secret and one that does not.
+    fn workflow(secret_steps: &str, open_steps: &str) -> String {
+        format!(
+            "on: push\njobs:\n  open:\n    runs-on: ubuntu-24.04\n    steps:\n{open_steps}\
+             \n  deploy:\n    environment: production\n    steps:\n{secret_steps}\n"
+        )
+    }
+
+    /// L6 and L8: a cache or a runner-file write is refused in the secret job and let through in
+    /// the open one.
+    #[test]
+    fn a_secret_job_restores_no_cache_and_writes_no_runner_file() {
+        let steps = "      - uses: Swatinem/rust-cache@0123456789012345678901234567890123456789\n\
+                     \x20     - uses: actions/setup-node@0123456789012345678901234567890123456789\n\
+                     \x20       with:\n          cache: npm\n\
+                     \x20     - run: echo \"x=1\" >> \"$GITHUB_OUTPUT\"\n\
+                     \x20     - run: echo \"::warning ::done\"";
+        let found = rules(WORKFLOW, &workflow(steps, steps));
+        assert_eq!(found, ["L6", "L6", "L8", "L8"], "{found:?}");
+    }
+
+    /// L8 reaches a script a secret job runs, and only such a script.
+    #[test]
+    fn a_script_a_secret_job_runs_writes_no_runner_file() {
+        let flow = workflow(
+            "      - run: .github/scripts/sign.sh",
+            "      - run: .github/scripts/open.sh",
+        );
+        let text = "#!/usr/bin/env bash\necho \"x=1\" >> \"$GITHUB_OUTPUT\"\n";
+        let found = findings(&[
+            Source {
+                path: WORKFLOW.to_owned(),
+                text: flow,
+            },
+            Source {
+                path: ".github/scripts/sign.sh".to_owned(),
+                text: text.to_owned(),
+            },
+            Source {
+                path: ".github/scripts/open.sh".to_owned(),
+                text: text.to_owned(),
+            },
+        ]);
+        assert_eq!(
+            found
+                .iter()
+                .map(|f| (f.rule, f.path.as_str()))
+                .collect::<Vec<_>>(),
+            [("L8", ".github/scripts/sign.sh")],
+            "{found:?}"
+        );
+    }
+
+    /// L5: an unreviewed path, a path naming a key or state, and hidden files are refused; a
+    /// reviewed path passes, inline or in a block.
+    #[test]
+    fn an_artifact_uploads_only_a_reviewed_path() {
+        let upload = |with: &str| {
+            format!(
+                "      - uses: actions/upload-artifact@0123456789012345678901234567890123456789\n\
+                 \x20       with:\n          name: x\n{with}"
+            )
+        };
+        let path = ".github/workflows/ci.yml";
+        let reviewed = workflow("", &upload("          path: target/mutant-cost.json"));
+        assert_eq!(rules(path, &reviewed), Vec::<&str>::new());
+        let block = upload(
+            "          path: |\n            target/mutant-cost.json\n            deploy/tofu/plan.out",
+        );
+        assert_eq!(rules(path, &workflow("", &block)), ["L5", "L5"]);
+        let unlisted = upload("          path: out/report.json");
+        assert_eq!(rules(path, &workflow("", &unlisted)), ["L5"]);
+        let hidden =
+            upload("          path: target/mutant-cost.json\n          include-hidden-files: true");
+        assert_eq!(rules(path, &workflow("", &hidden)), ["L5"]);
+    }
+
+    #[test]
+    fn a_workflow_command_is_found_by_its_name() {
+        assert_eq!(workflow_command("echo \"::warning ::x\""), Some("warning"));
+        assert_eq!(
+            workflow_command("echo \"::add-mask::$V\""),
+            Some("add-mask")
+        );
+        assert_eq!(
+            workflow_command("echo '::error file=a.rs::boom'"),
+            Some("error")
+        );
+        assert_eq!(workflow_command("rustc --print=cfg std::env::var"), None);
+        assert_eq!(workflow_command("a::b"), None);
     }
 
     /// A finding names its file and its 1-based line.
@@ -491,6 +947,35 @@ mod tests {
                 );
             }
         }
+        Ok(())
+    }
+
+    /// The seeded-bug check for the job rules on the real secret workflows: a cache and a
+    /// runner-file write in `r2-lockcheck.yml`'s secret job, and a key in `release.yml`'s signed
+    /// artifact, are each refused.
+    #[test]
+    fn the_real_secret_jobs_refuse_a_seeded_cache_write_and_artifact() -> Result<()> {
+        let root = repo_root()?;
+        let read = |path: &str| fs::read_to_string(root.join(path));
+        let lockcheck = ".github/workflows/r2-lockcheck.yml";
+        let release = ".github/workflows/release.yml";
+        let steps = "    steps:\n";
+        for (seed, rule) in [
+            (
+                "      - uses: actions/cache@0123456789012345678901234567890123456789\n",
+                "L6",
+            ),
+            ("      - run: echo \"k=v\" >> \"$GITHUB_ENV\"\n", "L8"),
+        ] {
+            let text = read(lockcheck)?.replacen(steps, &format!("{steps}{seed}"), 1);
+            assert!(rules(lockcheck, &text).contains(&rule), "{rule} {seed:?}");
+        }
+        let signed = read(release)?.replacen(
+            "            signatures/\n",
+            "            signatures/\n            cosign.key\n",
+            1,
+        );
+        assert!(rules(release, &signed).contains(&"L5"));
         Ok(())
     }
 
