@@ -12,8 +12,8 @@ mod common;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use common::now;
-use mandate_canon::{Key, Object, ParseErrorKind, Value, parse, to_canonical};
+use common::{edit, now};
+use mandate_canon::{Digest, Key, Object, ParseErrorKind, Value, parse, to_canonical};
 use mandate_journal::{
     AppendOutcome, Draft, InvalidReason, MemoryJournal, StreamId, TrustedStart, verify_events,
 };
@@ -21,6 +21,9 @@ use mandate_journal::{
 const ACCOUNT: &str = "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1";
 const T: &str = "2026-09-22T14:30:00.000000000Z";
 const OPENED: &str = "01J8Z4R0A000000000000000Z0";
+/// The mandate version the appended drafts name, stored so that §11 check 6 re-hashes it: the
+/// vectors' own `mandate_version` is a placeholder digest no stored object hashes to.
+const MANDATE: &[u8] = br#"{"mandate":"bound"}"#;
 
 /// Each base draft of the section, by name, and the record it is.
 const BASES: [(&str, &str); 9] = [
@@ -188,7 +191,14 @@ fn the_risk_limit_records_append_on_the_account_stream_and_the_stream_verifies()
         matches!(outcome, AppendOutcome::Committed(_)),
         "{outcome:?}"
     );
-    let drafts: Vec<Vec<u8>> = APPENDED.iter().map(|n| base(&section, n)).collect();
+    let bound = format!(
+        r#"{{"mandate_version":"sha256:{}"}}"#,
+        Digest::of(MANDATE).to_hex()
+    );
+    let drafts: Vec<Vec<u8>> = APPENDED
+        .iter()
+        .map(|n| edit(&base(&section, n), "config_refs", Some(&bound)))
+        .collect();
     let refs: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
     let outcome = journal.append(&account(), 1, epoch, now(), &refs);
     assert!(
@@ -196,6 +206,7 @@ fn the_risk_limit_records_append_on_the_account_stream_and_the_stream_verifies()
         "§9.27's records commit on the account stream: {outcome:?}"
     );
     let rows = journal.rows(&account());
+    let artifacts = BTreeMap::from([(Digest::of(MANDATE), MANDATE.to_vec())]);
     let types: Vec<&str> = rows.iter().skip(1).map(|r| r.event_type.as_str()).collect();
     let want: Vec<&str> = APPENDED
         .iter()
@@ -203,7 +214,7 @@ fn the_risk_limit_records_append_on_the_account_stream_and_the_stream_verifies()
         .collect();
     assert_eq!(types, want);
     assert_eq!(
-        verify_events(rows, TrustedStart::GENESIS, &BTreeMap::new()).map(|v| v.next_seq),
+        verify_events(rows, TrustedStart::GENESIS, &artifacts).map(|v| v.next_seq),
         Ok(APPENDED.len() as u64 + 2),
         "§11's per-event checks pass over the risk-limit records"
     );
