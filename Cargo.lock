@@ -2037,6 +2037,7 @@ dependencies = [
  "mandate-store",
  "mandate-time",
  "proptest",
+ "tokio",
 ]
 
 [[package]]
