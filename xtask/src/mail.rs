@@ -22,9 +22,6 @@ pub(crate) const GUARD: &str = "xtask/mail-guard.toml";
 /// The trait whose implementors are guarded.
 const TRAIT: &str = "MailTransport";
 
-/// The words that may stand before an implementor's type name and are not it.
-const KEYWORDS: [&str; 5] = ["crate", "dyn", "mut", "self", "super"];
-
 #[derive(Deserialize)]
 pub(crate) struct Guard {
     spec: String,
@@ -64,8 +61,9 @@ struct Locked {
 pub(crate) fn guard_in(root: &Path) -> Result<()> {
     eprintln!("    mail-guard: checking that no mail can reach anyone but the founder (DEC-2511)");
     let home = repo_root()?;
-    let guard: Guard = toml::from_str(&fs::read_to_string(home.join(GUARD))?)
-        .with_context(|| format!("parsing {GUARD}"))?;
+    let config =
+        fs::read_to_string(home.join(GUARD)).with_context(|| format!("reading {GUARD}"))?;
+    let guard: Guard = toml::from_str(&config).with_context(|| format!("parsing {GUARD}"))?;
     let spec = fs::read_to_string(home.join(&guard.spec))
         .with_context(|| format!("reading {}", guard.spec))?;
     if !spec.contains(&guard.placeholder) {
@@ -96,27 +94,42 @@ pub(crate) fn guard_in(root: &Path) -> Result<()> {
     report(problems, "mail-guard")
 }
 
-/// Every `impl ... MailTransport for <Type>` in `sources`, each `(crate, path, source)`, whose type
-/// is not one [`Guard`] allows in that crate. A blanket or generic impl names a type parameter,
-/// which no entry allows, so it fails too.
+/// Every way `sources`, each `(crate, path, source)`, could reach a transport [`Guard`] does not
+/// allow: an `impl ... MailTransport for <Type>` whose self type is not exactly an allowed type's
+/// path in that type's crate (a reference, a tuple, a generic, or a type parameter fails), the
+/// trait imported or re-exported under another name, and an allowed type's name given to anything
+/// else by `type` or `as`.
 fn transport_problems(guard: &Guard, sources: &[(String, String, String)]) -> Vec<String> {
+    let names: BTreeSet<&str> = guard.transport.iter().map(|a| a.ty.as_str()).collect();
     let mut problems = Vec::new();
     for (krate, path, src) in sources {
         let toks = tokens(src);
         for (i, (tok, line)) in toks.iter().enumerate() {
-            let implements = matches!(tok, Token::Ident(name) if name == TRAIT)
-                && matches!(toks.get(i + 1), Some((Token::Ident(word), _)) if word == "for");
-            if !implements {
+            let Token::Ident(word) = tok else {
+                continue;
+            };
+            let next = match toks.get(i + 1) {
+                Some((Token::Ident(next), _)) => Some(next.as_str()),
+                _ => None,
+            };
+            if word == TRAIT && next == Some("as") {
+                problems.push(format!(
+                    "{path}:{line}: `{TRAIT}` is imported or re-exported under another name in \
+                     `{krate}`; the guard reads the trait by its own name ({GUARD})"
+                ));
+            }
+            if let Some(name) =
+                next.filter(|n| (word == "type" || word == "as") && names.contains(n))
+            {
+                problems.push(format!(
+                    "{path}:{line}: `{name}` is given to another type by `{word}` in `{krate}`; an \
+                     allowed transport's name may name only that type ({GUARD})"
+                ));
+            }
+            if word != TRAIT || next != Some("for") {
                 continue;
             }
-            let ty = toks
-                .get(i + 2..)
-                .unwrap_or_default()
-                .iter()
-                .find_map(|(t, _)| match t {
-                    Token::Ident(name) if !KEYWORDS.contains(&name.as_str()) => Some(name.as_str()),
-                    _ => None,
-                });
+            let ty = self_type(toks.get(i + 2..).unwrap_or_default());
             let allowed = guard
                 .transport
                 .iter()
@@ -126,12 +139,41 @@ fn transport_problems(guard: &Guard, sources: &[(String, String, String)]) -> Ve
                     "{path}:{line}: `{TRAIT}` is implemented for `{}` in `{krate}`; while the \
                      general footer is unresolved only the recorded fixture and the founder-only \
                      transport may be ({GUARD})",
-                    ty.unwrap_or("?")
+                    ty.unwrap_or("a type that is not a plain path")
                 ));
             }
         }
     }
     problems
+}
+
+/// The last segment of an impl's self type, read from the tokens after `for` up to `{` or
+/// `where`, when that type is a plain path (`Name` or `a::b::Name`); `None` for any other type,
+/// so a reference, a tuple, a generic, a `dyn`, or a leading `::` never passes as an allowed one.
+fn self_type(toks: &[(Token, usize)]) -> Option<&str> {
+    let (mut last, mut expect) = (None, Expect::Segment);
+    for (tok, _) in toks {
+        match (tok, expect) {
+            (Token::Punct('{'), Expect::Separator) => return last,
+            (Token::Ident(word), Expect::Separator) if word == "where" => return last,
+            (Token::Ident(word), Expect::Segment) if word != "dyn" => {
+                last = Some(word.as_str());
+                expect = Expect::Separator;
+            }
+            (Token::Punct(':'), Expect::Separator) => expect = Expect::SecondColon,
+            (Token::Punct(':'), Expect::SecondColon) => expect = Expect::Segment,
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// What [`self_type`] may read next.
+#[derive(Clone, Copy)]
+enum Expect {
+    Segment,
+    Separator,
+    SecondColon,
 }
 
 /// Every denied crate a workspace member other than the founder-only transport's crate depends on
@@ -250,33 +292,78 @@ mod tests {
             (
                 "mandate-dispatcher",
                 "impl MailTransport for SmtpTransport { }",
-                "SmtpTransport",
+                "`SmtpTransport`",
             ),
             (
                 "mandate-api",
                 "impl MailTransport for RecordedTransport { }",
-                "RecordedTransport",
+                "`RecordedTransport`",
             ),
             (
                 "mandate-dispatcher",
                 "impl<T: Send> MailTransport for T { }",
-                "T",
+                "`T`",
             ),
             (
                 "mandate-dispatcher",
                 "impl MailTransport for Box<dyn Send> { }",
-                "Box",
+                "not a plain path",
             ),
             (
                 "mandate-dispatcher",
-                "impl MailTransport for &mut RecordedFake { }",
-                "RecordedFake",
+                "impl MailTransport for &mut RecordedTransport { }",
+                "not a plain path",
+            ),
+            (
+                "mandate-dispatcher",
+                "impl MailTransport for (RecordedTransport, E) { }",
+                "not a plain path",
+            ),
+            (
+                "mandate-dispatcher",
+                "impl MailTransport for dyn Send { }",
+                "not a plain path",
+            ),
+            (
+                "mandate-dispatcher",
+                "impl MailTransport for ::evil::RecordedTransport { }",
+                "not a plain path",
             ),
         ];
-        for (krate, src, ty) in cases {
+        for (krate, src, named) in cases {
             let problems = transport_problems(&guard(), &[source(krate, src)]);
-            assert_eq!(problems.len(), 1, "{src}");
-            assert!(problems[0].contains(&format!("`{ty}`")), "{problems:?}");
+            assert_eq!(problems.len(), 1, "{src}: {problems:?}");
+            assert!(problems[0].contains(named), "{src}: {problems:?}");
+        }
+    }
+
+    #[test]
+    fn an_allowed_path_or_where_clause_still_passes() {
+        let sources = [
+            source(
+                "mandate-dispatcher",
+                "impl MailTransport for crate::email::RecordedTransport { }",
+            ),
+            source(
+                "mandate-dispatcher",
+                "impl MailTransport for RecordedTransport where Self: Sized { }",
+            ),
+        ];
+        assert_eq!(transport_problems(&guard(), &sources), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_renamed_trait_or_a_borrowed_name_fails() {
+        let cases = [
+            "use mandate_dispatcher::MailTransport as Transport;",
+            "pub use email::{MailTransport as Sender};",
+            "type RecordedTransport = Evil;",
+            "use evil::Evil as RecordedTransport;",
+            "pub type FounderSmtpTransport = lettre::SmtpTransport;",
+        ];
+        for src in cases {
+            let problems = transport_problems(&guard(), &[source("mandate-dispatcher", src)]);
+            assert_eq!(problems.len(), 1, "{src}: {problems:?}");
         }
     }
 
