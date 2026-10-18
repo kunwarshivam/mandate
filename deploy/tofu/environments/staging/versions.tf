@@ -30,7 +30,11 @@ terraform {
 
   encryption {
     key_provider "pbkdf2" "state" {
-      passphrase = var.state_passphrase
+      passphrase    = var.state_passphrase
+      hash_function = "sha512"
+      iterations    = 600000
+      salt_length   = 32
+      key_length    = 32
     }
 
     method "aes_gcm" "state" {

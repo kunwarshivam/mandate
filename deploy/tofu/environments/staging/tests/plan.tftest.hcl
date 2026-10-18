@@ -41,7 +41,7 @@ run "staging_plans_under_its_cap" {
   }
 
   assert {
-    condition     = output.journal_archive_bucket == "mandate-journal-archive-staging"
+    condition     = output.archive_bucket == "mandate-journal-archive-staging"
     error_message = "The archive bucket is staging's."
   }
 }
