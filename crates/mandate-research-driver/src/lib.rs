@@ -26,6 +26,7 @@ mod driver;
 mod trigger;
 
 pub use driver::{
-    AppendFailure, Core, Driver, DriverError, JournalWriter, RuntimeCore, Stepped, Worker,
+    AppendFailure, Core, Driver, DriverError, JournalWriter, RuntimeCore, StepBatch, Stepped,
+    Worker,
 };
 pub use trigger::{Offered, QueueConfig, Trigger, TriggerQueue};
