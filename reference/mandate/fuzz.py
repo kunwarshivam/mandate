@@ -64,6 +64,19 @@ def rand_steps(cls, n, start):
         elif k < 0.88:
             steps.append({"event": "owner_acknowledged", "at": at, "session": sess,
                           "restriction": rng.choice(["drawdown_ladder", "daily_loss", "lifetime_floor"])})
+        elif k < 0.92 and cls == "us_equity" and sess == "after_hours" and qty > 0:
+            new, old = rng.choice([(2, 1), (3, 2), (1, 3), (1, 10)])
+            frac = rng.random() < 0.5
+            q_raw = qty * new / old
+            qty = q_raw.quantize(D("1e-9"), rounding=ROUND_DOWN) if frac else q_raw.to_integral_value(rounding=ROUND_DOWN)
+            px = max((px * old / new).quantize(D("0.01")), D(1))
+            steps.append({"event": "corporate_action_split", "at": at, "session": sess, "new": new, "old": old,
+                          "fractionable": frac, "cash_in_lieu_price": norm(px)})
+        elif k < 0.93 and cls == "us_equity" and sess == "after_hours":
+            steps.append({"event": "corporate_action_dividend", "at": at, "session": sess,
+                          "per_share": rng.choice(["0.01", "0.255", "1.5"])})
+        elif k < 0.94 and cls == "us_equity":
+            steps.append({"event": rng.choice(["cash_in_lieu_posted", "dividend_paid"]), "at": at, "session": sess})
         elif k < 0.95 and qty > 0:
             q = qty if rng.random() < 0.5 else (qty / 2).quantize(D("0.0001"))
             qty -= q
@@ -76,7 +89,7 @@ def rand_steps(cls, n, start):
             steps.append({"event": "floor_loosened", "at": at, "session": sess, "new_max_loss_from_allocation": rng.choice(["0.15", "0.3", "0.5"]),
                           "independent_approval": rng.random() < 0.5, "confirmed_at": fmt(t - timedelta(hours=rng.choice([1, 30, 60])))})
         else:
-            q = D(10 if cls == "us_equity" else "0.01")
+            q = max(D(1), (D(1000) / px).to_integral_value(rounding=ROUND_DOWN)) if cls == "us_equity" else D("0.01")
             qty += q
             steps.append({"event": "fill", "at": at, "session": sess, "side": "buy", "qty": norm(q), "price": norm(px.quantize(D("0.01")))})
     return steps
@@ -118,6 +131,12 @@ def run(m, cls, steps, start, L="0"):
         before = copy.deepcopy((rs.restrictions, {k: v["active"] for k, v in rs.scale.items()}, dict(rs.latched), rs.daily))
         pre = (rs.equity(), rs.H, rs.E0, rs.C, rs.L, rs.f)
         qty_before = rs.qty
+        n_before = rs.net_contributed
+        mark_before = rs.mark
+        tick = None
+        if s["event"] == "corporate_action_split":
+            twin = copy.deepcopy(rs)
+            tick = twin.step({"event": "clock", "at": s["at"], "session": s["session"]})
         o = rs.step(s)
         outs.append(o)
         types = [e["type"] for e in o["journal"]]
@@ -134,6 +153,31 @@ def run(m, cls, steps, start, L="0"):
             check((E1 - E01) / E01 <= (E - E0) / E0, "MI-2 daily loss fraction not lowered", (s, o))
             check((E1 - C1) / C1 <= (E - C) / C, "MI-2 return not raised", (s, o))
             check((E1 - C1 * (1 - f) - rs.L) / E1 <= (E - C * (1 - f) - Lp) / E, "MI-2 floor headroom not raised", (s, o))
+        # MI-33: a corporate action moves E only by its cash, recomputed here from the step and the state before it
+        E_pre, H_pre, E0_pre, C_pre, L_pre, _ = pre
+        E_now = D(o["agent_equity"])
+        if s["event"] == "corporate_action_split" and "error" not in o:
+            new_, old_ = D(s["new"]), D(s["old"])
+            q_raw = qty_before * new_ / old_
+            q2 = q_raw.quantize(D("1e-9"), rounding=ROUND_DOWN) if s["fractionable"] else q_raw.to_integral_value(rounding=ROUND_DOWN)
+            mark2 = (mark_before * old_ / new_).quantize(D("1e-12"), rounding=ROUND_HALF_EVEN)
+            cash = ((q_raw - q2) * D(s["cash_in_lieu_price"] or 0)).quantize(D("0.01"), rounding=ROUND_HALF_EVEN)
+            check(abs((E_now - E_pre) - (cash - (q_raw - q2) * mark2)) <= abs(q_raw) * D("5e-13"),
+                  "MI-33 a split moves E by its cash in lieu less the residual at the new mark", (s, o))
+            if q2 == q_raw:
+                limits = lambda out: [j for j in out["journal"] if j["type"] in ("RiskLimitTriggered", "RiskLimitLifted")]
+                check(limits(o) == limits(tick),
+                      "MI-33 a split with no residual triggers and lifts only what a tick at its instant would", (s, o, tick))
+        if s["event"] in ("corporate_action_split", "corporate_action_dividend") and "error" not in o:
+            check(D(o["day_start_equity"]) == E0_pre and D(o["capital_base"]) == C_pre and rs.L == L_pre
+                  and rs.net_contributed == n_before,
+                  "MI-33 an action moves no day start, capital base, contributed dollars or carry", (s, o))
+        if s["event"] == "corporate_action_dividend" and "error" not in o:
+            check(E_now - E_pre == (qty_before * D(s["per_share"])).quantize(D("0.01"), rounding=ROUND_HALF_EVEN),
+                  "MI-33 a dividend is income of round(Q x d, 2) on the ex-date", (s, o))
+        if s["event"] in ("cash_in_lieu_posted", "dividend_paid") and "error" not in o:
+            check(E_now == E_pre and D(o["high_water_mark"]) == H_pre,
+                  "MI-33 posting a receivable moves no USD measure", (s, o))
         # MI-3
         if s["event"] == "risk_day_started" and last_daily_trigger is not None:
             day_after = True

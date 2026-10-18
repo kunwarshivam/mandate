@@ -11,6 +11,14 @@ import pathlib, shutil, subprocess, sys, tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 MUTANTS = {
+    "a split leaves the mark unadjusted": ("        self.mark = r12(self.mark * old / new)\n", "        pass\n"),
+    "a split drops its cash in lieu": ("        cash = cents((q_raw - q2) * D(cash_in_lieu_price or 0))",
+                                       "        cash = D(0)"),
+    "a dividend is not income": ("            self.realized += cents(self.qty * D(s[\"per_share\"]))",
+                                 "            pass"),
+    "posting a receivable counts it again": (
+        '        elif kind in ("cash_in_lieu_posted", "dividend_paid"):\n            pass',
+        '        elif kind in ("cash_in_lieu_posted", "dividend_paid"):\n            self.realized += D("0.01")'),
     "V-008 and W-002 read crypto, not the profile": (
         '    return any(c in classes for c in m["universe"]["asset_classes"])',
         '    return "crypto" in m["universe"]["asset_classes"]'),

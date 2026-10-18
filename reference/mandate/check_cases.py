@@ -139,6 +139,19 @@ req("MC-R24", all(any(j["type"] == "InstrumentRestrictionChanged" and j["restric
                       and j["reason"] == x["reason"] for j in x["expect"]["journal"])
                   for x in C["MC-R24"]["steps"] if x["event"] == "universe_changed"),
     "the restriction event names removed_instrument with the universe reason, not stale_mark")
+LIMITS = ("RiskLimitTriggered", "RiskLimitLifted", "KillSwitchActivated", "AgentModeApplied")
+s = steps("MC-R27")
+req("MC-R27", all(s[1][k] == s[0][k] for k in ("agent_equity", "high_water_mark", "day_start_equity", "capital_base",
+                                                 "drawdown", "restrictions", "agent_mode"))
+    and not any(j["type"] in LIMITS for j in s[1]["journal"]), "a 2:1 split moves no USD measure and journals no limit")
+s = steps("MC-R28")
+req("MC-R28", s[1]["agent_equity"] == s[0]["agent_equity"] and s[2]["agent_equity"] == s[1]["agent_equity"]
+    and not any(j["type"] in LIMITS for x in s for j in x["journal"]),
+    "the residual's cash in lieu keeps E whole, and posting it moves nothing")
+s = steps("MC-R29")
+req("MC-R29", Decimal(s[1]["agent_equity"]) - Decimal(s[0]["agent_equity"]) == Decimal("25.5")
+    and s[3]["agent_equity"] == s[2]["agent_equity"] and s[3]["high_water_mark"] == s[2]["high_water_mark"],
+    "the dividend is income on the ex-date, and its payment moves nothing")
 s = steps("MC-R13")
 req("MC-R13", s[2]["agent_equity"] == s[1]["agent_equity"] and s[2]["instrument_restrictions"] == [] and
     s[3]["instrument_restrictions"] == ["stale_mark"] and s[4]["instrument_restrictions"] == [] and s[5]["instrument_restrictions"] == ["stale_mark"],

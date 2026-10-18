@@ -1,4 +1,4 @@
-"""Generates docs/specs/reference-cases/mandate.yaml for mandate spec v0.7."""
+"""Generates docs/specs/reference-cases/mandate.yaml for mandate spec v0.8."""
 import copy, json
 from collections import Counter
 import yaml
@@ -6,7 +6,7 @@ from ref import *  # noqa: F401,F403
 from ref import D, ROOT
 from bases import *  # noqa: F401,F403
 
-doc = {"version": 4, "spec": "docs/specs/mandate.md (v0.7)",
+doc = {"version": 4, "spec": "docs/specs/mandate.md (v0.8)",
        "schemas": ["schemas/mandate.schema.json", "schemas/policy.schema.json"],
        "harness_defaults": {"mark_max_age_s": 120, "hard_trigger_multiple": "1.25", "stagger_window_s": 900},
        "bases": {n: {"mandate": m, "canonical_sha256": version(m)} for n, m in BASES.items()},
@@ -488,6 +488,36 @@ risk_case("MC-R24", "A removed instrument is exits-only in that instrument; re-a
             "reason": "thesis_admitted", "session": "regular"}],
           note="A universe change is an account-stream risk input (DEC-97). Removal restricts only that instrument: "
                "protection stays and exits are never denied (MI-1, MI-19).")
+def split(t, new, old, fractionable=False, price=None):
+    return {"event": "corporate_action_split", "at": t, "session": "after_hours", "new": new, "old": old,
+            "fractionable": fractionable, "cash_in_lieu_price": price}
+
+risk_case("MC-R27", "A 2:1 split moves no USD measure: E, H, E0 and C are unchanged, and nothing triggers or lifts",
+          "two_stock_swing", WIDE + FAST + ISO, "100", "100", "us_equity", at(14, 0),
+          [mk(at(14, 1), "99"), split(at(0, 0, day=22), 2, 1), mk(at(13, 35, day=22), "49.5"), mk(at(13, 36, day=22), "49.4")],
+          note="Applied at 20:00 New York time before the ex-date (trading spec 8.5). Q 100 -> 200, B unchanged, the mark "
+               "99 -> 49.5 exactly, so E stays 9900 and the drawdown stays 1%: the split journals no limit (MI-33); its "
+               "stale_mark is the overnight gap since the last regular-session mark, as for any input. The next day's "
+               "marks move E as any mark does.")
+risk_case("MC-R28", "A 1:3 reverse split removes the residual's basis, and its cash in lieu is in E until posted",
+          "two_stock_swing", WIDE + FAST + ISO, "100", "100.01", "us_equity", at(14, 0),
+          [mk(at(14, 1), "100.01"), split(at(0, 0, day=22), 1, 3, price="300.03"),
+           {"event": "cash_in_lieu_posted", "at": at(13, 35, day=22), "session": "regular"},
+           mk(at(13, 36, day=22), "300.03")],
+          note="Q_raw = 100 / 3; whole shares give Q' = 33 and a residual of 1/3 share. R = round(10001 x (100 - 99) / 100, "
+               "12) = 100.01 is removed from B; cash in lieu = round(1/3 x 300.03, 2) = 100.01, so realized moves by 0 and E "
+               "by cash in lieu - f x mark' = 100.01 - 100.01 = 0. The mark is replaced by 300.03. CashInLieuPosted moves "
+               "the receivable to cash and leaves E unchanged.")
+risk_case("MC-R29", "A cash dividend is income on the ex-date; its payment moves no USD measure",
+          "two_stock_swing", WIDE + FAST + ISO, "100", "100", "us_equity", at(14, 0),
+          [mk(at(14, 1), "100"),
+           {"event": "corporate_action_dividend", "at": at(0, 0, day=22), "session": "after_hours", "per_share": "0.255"},
+           mk(at(13, 35, day=22), "99.745"),
+           {"event": "dividend_paid", "at": at(13, 36, day=22), "session": "regular"}],
+          note="The receivable is round(100 x 0.255, 2) = 25.5, income on the ex-date (trading spec 8.5), so E rises to "
+               "10025.5 and H with it. The ex-date's mark, lower by the dividend, returns E to 10000, leaving a drawdown of "
+               "the dividend's share of H: the receivable is counted before the mark falls, which only tightens. "
+               "DividendPaid only moves the receivable to cash.")
 
 # =========================================================== E. risk day boundaries
 for cid, title, instant in [

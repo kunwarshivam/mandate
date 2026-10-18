@@ -1,6 +1,6 @@
 {
  "version": 4,
- "spec": "docs/specs/mandate.md (v0.7)",
+ "spec": "docs/specs/mandate.md (v0.8)",
  "schemas": [
   "schemas/mandate.schema.json",
   "schemas/policy.schema.json"
@@ -13450,6 +13450,490 @@
     }
    ],
    "note": "A universe change is an account-stream risk input (DEC-97). Removal restricts only that instrument: protection stays and exits are never denied (MI-1, MI-19)."
+  },
+  {
+   "id": "MC-R27",
+   "kind": "risk_state",
+   "title": "A 2:1 split moves no USD measure: E, H, E0 and C are unchanged, and nothing triggers or lifts",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/risk/max_position_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_position_fraction",
+     "value": "1"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_gross_exposure_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/breach_confirm_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/scale_lift_after_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/daily_breach_min_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_daily_loss",
+     "value": "0.5"
+    }
+   ],
+   "initial": {
+    "position_qty": "100",
+    "avg_cost": "100",
+    "asset_class": "us_equity",
+    "at": "2026-09-21T14:00:00.000000000Z",
+    "inherited_loss_usd": "0"
+   },
+   "steps": [
+    {
+     "event": "mark",
+     "at": "2026-09-21T14:01:00.000000000Z",
+     "bid": "99",
+     "session": "regular",
+     "sane": true,
+     "expect": {
+      "agent_equity": "9900",
+      "high_water_mark": "10000",
+      "drawdown": "0.01",
+      "day_start_equity": "10000",
+      "daily_pnl": "-100",
+      "daily_pnl_fraction": "-0.01",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": []
+     }
+    },
+    {
+     "event": "corporate_action_split",
+     "at": "2026-09-22T00:00:00.000000000Z",
+     "session": "after_hours",
+     "new": 2,
+     "old": 1,
+     "fractionable": false,
+     "cash_in_lieu_price": null,
+     "expect": {
+      "agent_equity": "9900",
+      "high_water_mark": "10000",
+      "drawdown": "0.01",
+      "day_start_equity": "10000",
+      "daily_pnl": "-100",
+      "daily_pnl_fraction": "-0.01",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [
+       "stale_mark"
+      ],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": [
+       {
+        "type": "InstrumentRestrictionChanged",
+        "restriction": "stale_mark",
+        "reason": "no_sane_mark",
+        "active": true
+       }
+      ]
+     }
+    },
+    {
+     "event": "mark",
+     "at": "2026-09-22T13:35:00.000000000Z",
+     "bid": "49.5",
+     "session": "regular",
+     "sane": true,
+     "expect": {
+      "agent_equity": "9900",
+      "high_water_mark": "10000",
+      "drawdown": "0.01",
+      "day_start_equity": "10000",
+      "daily_pnl": "-100",
+      "daily_pnl_fraction": "-0.01",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": [
+       {
+        "type": "InstrumentRestrictionChanged",
+        "restriction": "stale_mark",
+        "reason": "sane_mark",
+        "active": false
+       }
+      ]
+     }
+    },
+    {
+     "event": "mark",
+     "at": "2026-09-22T13:36:00.000000000Z",
+     "bid": "49.4",
+     "session": "regular",
+     "sane": true,
+     "expect": {
+      "agent_equity": "9880",
+      "high_water_mark": "10000",
+      "drawdown": "0.012",
+      "day_start_equity": "10000",
+      "daily_pnl": "-120",
+      "daily_pnl_fraction": "-0.012",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": []
+     }
+    }
+   ],
+   "note": "Applied at 20:00 New York time before the ex-date (trading spec 8.5). Q 100 -> 200, B unchanged, the mark 99 -> 49.5 exactly, so E stays 9900 and the drawdown stays 1%: the split journals no limit (MI-33); its stale_mark is the overnight gap since the last regular-session mark, as for any input. The next day's marks move E as any mark does."
+  },
+  {
+   "id": "MC-R28",
+   "kind": "risk_state",
+   "title": "A 1:3 reverse split removes the residual's basis, and its cash in lieu is in E until posted",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/risk/max_position_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_position_fraction",
+     "value": "1"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_gross_exposure_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/breach_confirm_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/scale_lift_after_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/daily_breach_min_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_daily_loss",
+     "value": "0.5"
+    }
+   ],
+   "initial": {
+    "position_qty": "100",
+    "avg_cost": "100.01",
+    "asset_class": "us_equity",
+    "at": "2026-09-21T14:00:00.000000000Z",
+    "inherited_loss_usd": "0"
+   },
+   "steps": [
+    {
+     "event": "mark",
+     "at": "2026-09-21T14:01:00.000000000Z",
+     "bid": "100.01",
+     "session": "regular",
+     "sane": true,
+     "expect": {
+      "agent_equity": "10000",
+      "high_water_mark": "10000",
+      "drawdown": "0",
+      "day_start_equity": "10000",
+      "daily_pnl": "0",
+      "daily_pnl_fraction": "0",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": []
+     }
+    },
+    {
+     "event": "corporate_action_split",
+     "at": "2026-09-22T00:00:00.000000000Z",
+     "session": "after_hours",
+     "new": 1,
+     "old": 3,
+     "fractionable": false,
+     "cash_in_lieu_price": "300.03",
+     "expect": {
+      "agent_equity": "10000",
+      "high_water_mark": "10000",
+      "drawdown": "0",
+      "day_start_equity": "10000",
+      "daily_pnl": "0",
+      "daily_pnl_fraction": "0",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [
+       "stale_mark"
+      ],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": [
+       {
+        "type": "InstrumentRestrictionChanged",
+        "restriction": "stale_mark",
+        "reason": "no_sane_mark",
+        "active": true
+       }
+      ]
+     }
+    },
+    {
+     "event": "cash_in_lieu_posted",
+     "at": "2026-09-22T13:35:00.000000000Z",
+     "session": "regular",
+     "expect": {
+      "agent_equity": "10000",
+      "high_water_mark": "10000",
+      "drawdown": "0",
+      "day_start_equity": "10000",
+      "daily_pnl": "0",
+      "daily_pnl_fraction": "0",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [
+       "stale_mark"
+      ],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": []
+     }
+    },
+    {
+     "event": "mark",
+     "at": "2026-09-22T13:36:00.000000000Z",
+     "bid": "300.03",
+     "session": "regular",
+     "sane": true,
+     "expect": {
+      "agent_equity": "10000",
+      "high_water_mark": "10000",
+      "drawdown": "0",
+      "day_start_equity": "10000",
+      "daily_pnl": "0",
+      "daily_pnl_fraction": "0",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": [
+       {
+        "type": "InstrumentRestrictionChanged",
+        "restriction": "stale_mark",
+        "reason": "sane_mark",
+        "active": false
+       }
+      ]
+     }
+    }
+   ],
+   "note": "Q_raw = 100 / 3; whole shares give Q' = 33 and a residual of 1/3 share. R = round(10001 x (100 - 99) / 100, 12) = 100.01 is removed from B; cash in lieu = round(1/3 x 300.03, 2) = 100.01, so realized moves by 0 and E by cash in lieu - f x mark' = 100.01 - 100.01 = 0. The mark is replaced by 300.03. CashInLieuPosted moves the receivable to cash and leaves E unchanged."
+  },
+  {
+   "id": "MC-R29",
+   "kind": "risk_state",
+   "title": "A cash dividend is income on the ex-date; its payment moves no USD measure",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/risk/max_position_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_position_fraction",
+     "value": "1"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_gross_exposure_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/breach_confirm_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/scale_lift_after_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/daily_breach_min_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_daily_loss",
+     "value": "0.5"
+    }
+   ],
+   "initial": {
+    "position_qty": "100",
+    "avg_cost": "100",
+    "asset_class": "us_equity",
+    "at": "2026-09-21T14:00:00.000000000Z",
+    "inherited_loss_usd": "0"
+   },
+   "steps": [
+    {
+     "event": "mark",
+     "at": "2026-09-21T14:01:00.000000000Z",
+     "bid": "100",
+     "session": "regular",
+     "sane": true,
+     "expect": {
+      "agent_equity": "10000",
+      "high_water_mark": "10000",
+      "drawdown": "0",
+      "day_start_equity": "10000",
+      "daily_pnl": "0",
+      "daily_pnl_fraction": "0",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": []
+     }
+    },
+    {
+     "event": "corporate_action_dividend",
+     "at": "2026-09-22T00:00:00.000000000Z",
+     "session": "after_hours",
+     "per_share": "0.255",
+     "expect": {
+      "agent_equity": "10025.5",
+      "high_water_mark": "10025.5",
+      "drawdown": "0",
+      "day_start_equity": "10000",
+      "daily_pnl": "25.5",
+      "daily_pnl_fraction": "0.00255",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [
+       "stale_mark"
+      ],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": [
+       {
+        "type": "InstrumentRestrictionChanged",
+        "restriction": "stale_mark",
+        "reason": "no_sane_mark",
+        "active": true
+       }
+      ]
+     }
+    },
+    {
+     "event": "mark",
+     "at": "2026-09-22T13:35:00.000000000Z",
+     "bid": "99.745",
+     "session": "regular",
+     "sane": true,
+     "expect": {
+      "agent_equity": "10000",
+      "high_water_mark": "10025.5",
+      "drawdown": "0.002543514039",
+      "day_start_equity": "10000",
+      "daily_pnl": "0",
+      "daily_pnl_fraction": "0",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": [
+       {
+        "type": "InstrumentRestrictionChanged",
+        "restriction": "stale_mark",
+        "reason": "sane_mark",
+        "active": false
+       }
+      ]
+     }
+    },
+    {
+     "event": "dividend_paid",
+     "at": "2026-09-22T13:36:00.000000000Z",
+     "session": "regular",
+     "expect": {
+      "agent_equity": "10000",
+      "high_water_mark": "10025.5",
+      "drawdown": "0.002543514039",
+      "day_start_equity": "10000",
+      "daily_pnl": "0",
+      "daily_pnl_fraction": "0",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": []
+     }
+    }
+   ],
+   "note": "The receivable is round(100 x 0.255, 2) = 25.5, income on the ex-date (trading spec 8.5), so E rises to 10025.5 and H with it. The ex-date's mark, lower by the dividend, returns E to 10000, leaving a drawdown of the dividend's share of H: the receivable is counted before the mark falls, which only tightens. DividendPaid only moves the receivable to cash."
   },
   {
    "id": "MC-T01",
