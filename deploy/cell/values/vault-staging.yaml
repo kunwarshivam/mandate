@@ -1,7 +1,8 @@
 # The workspace vault in staging on DOKS (DEC-2011), paper only: it unseals itself from the key in
 # the Secret `vault-seal-key`, which the founder's `cargo xtask gitops bootstrap staging` creates
-# from the founder's terminal (DEC-2605 row 10, DEC-2021, DEC-2015). The key is never in git, a value, or a log; `keyId` only
-# names it. DigitalOcean's block storage is 1 GiB at the least, which raft needs far less of.
+# from the founder's terminal (DEC-2605 row 10, DEC-2021, DEC-2015). The key is never in git, a
+# value, or a log; `keyId` only names it. DigitalOcean's block storage is 1 GiB at the least, which
+# raft needs far less of.
 environment: staging
 workspace: ws1
 seal:
