@@ -503,6 +503,31 @@ fn image_tag() -> Result<String> {
 /// The backtest runner (DEC-1144), built with the CLI and copied into its image.
 const RUNNER: &str = "mandate-backtest-runner";
 
+/// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
+/// them.
+const BUILT_PACKAGES: [&str; 5] = [
+    "mandate-cli",
+    RUNNER,
+    "mandate-api-server",
+    "mandate-daemon",
+    "mandate-deployd",
+];
+
+/// The stub issuer's package, which [`build_binary`] adds once [`stub_ready`].
+const STUB_PACKAGE: &str = "mandate-stub-issuer";
+
+/// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
+/// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
+/// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
+pub const IMAGE_PACKAGES: [&str; 6] = [
+    BUILT_PACKAGES[0],
+    BUILT_PACKAGES[1],
+    BUILT_PACKAGES[2],
+    BUILT_PACKAGES[3],
+    BUILT_PACKAGES[4],
+    STUB_PACKAGE,
+];
+
 /// The cell's `api` image, this checkout's build of `mandate-api-server`: none when the cell pulls
 /// its `mandate` image, since no published API image exists yet, so the chart leaves the API out.
 fn api_image_tag() -> Result<Option<String>> {
@@ -877,22 +902,12 @@ const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 /// assertions are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes
 /// (DEC-464): it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
-    let mut args = vec![
-        "build",
-        "--locked",
-        "--package",
-        "mandate-cli",
-        "--package",
-        RUNNER,
-        "--package",
-        "mandate-api-server",
-        "--package",
-        "mandate-daemon",
-        "--package",
-        "mandate-deployd",
-    ];
+    let mut args = vec!["build", "--locked"];
+    for package in BUILT_PACKAGES {
+        args.extend(["--package", package]);
+    }
     if stub_ready(Path::new(".")) {
-        args.extend(["--package", "mandate-stub-issuer"]);
+        args.extend(["--package", STUB_PACKAGE]);
     }
     args.extend(["--target", STATIC_TRIPLE, "--target-dir", STATIC_TARGET]);
     eprintln!(
