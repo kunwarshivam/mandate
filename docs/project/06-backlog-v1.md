@@ -2778,8 +2778,9 @@ enables `live` (ES-23, OPS-5).
 - **E21-30 (Proposed, M8; SC; lane P3)** As an owner, I want my agent's runtime and my account's
   executor run as long-running processes in the cell, so that the agent trades unattended within
   its mandate (design §3.1, §3.4). E21-2's criteria, met in the local cell (E21-37). *Accepted
-  when:* a new crate `mandate-daemon` runs one runtime per agent deployment and one executor per
-  account over the existing crates, using `mandate-shell` and `mandate-paper` only through their
+  when:* a new crate `mandate-daemon` runs one runtime per agent deployment, and a new crate
+  `mandate-executord` one executor per account ([DEC-2003](decisions/DEC-2003.md) item 1), over
+  the existing crates, using `mandate-shell` and `mandate-paper` only through their
   public items; each loop tails its inputs from the journal with `LISTEN`/`NOTIFY` only as a wake-up
   hint, and a test that drops every notification changes no outcome; kill-switch and risk-exit
   inputs are read before any other (ES-06); killing either process at each step of submission
@@ -2787,6 +2788,11 @@ enables `live` (ES-23, OPS-5).
   but still applies the kill switch and, once replayed, risk exits; the runtime has no broker
   credential and no route to a broker; the executor's broker in CI is a fixture, never a broker
   host; and each image is built without the `live` feature, except the one E21-48 adds.
+  *Left (lane X, [DEC-2003](decisions/DEC-2003.md) item 6):* a prerequisite before the executor
+  process runs anywhere beyond the dev and CI cell: E7-4's flatten-intent body and its account and
+  workspace kill-switch scopes, so a kill switch reaches the executor from the control stream
+  without the runtime (design §3.6, `AGENTS.md` rule 13). Until then it reaches the executor only
+  through the runtime's copy.
 - **E21-31 (Proposed, M8; SC; lane A1)** As a workspace member, I want the workspace API served by
   its own process in the cell, so that the web app and the CLI reach my deployment the same way
   (design §3.1, §9; the API server, "A2" in `deploy/README.md`). *Accepted when:* a new crate

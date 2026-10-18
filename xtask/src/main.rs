@@ -9996,6 +9996,7 @@ mod tests {
                 "mandate-alpaca",
                 "mandate-daemon",
                 "mandate-executor",
+                "mandate-executord",
                 "mandate-mcp",
                 "mandate-paper",
                 "mandate-robinhood",
