@@ -129,7 +129,9 @@ agent needs the same correction twice, put the rule on the highest rung that can
    report (`cargo xtask ci pending`), a pending test a macro generates rather than a plain
    function, a saved proptest failure seed, tracked or not (DEC-381), feature-map drift, and
    mutants on the diff of safety-critical crates, an `Unimplemented` stub body in a crate whose
-   tests are still pending aside.
+   tests are still pending aside, and, while the general email footer is unresolved, the mail
+   guard (`cargo xtask mail-guard`: no mail transport but the recorded fixture and the founder's,
+   and no mail-sending crate elsewhere; DEC-2511).
 3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
 4. **Reviewed:** the PR template and the independent review agent, the last resort, not the plan.
 

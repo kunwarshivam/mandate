@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 mod cell;
 mod image;
+mod mail;
 mod release;
 
 const USAGE: &str = "\
@@ -267,6 +268,7 @@ fn run() -> Result<()> {
         ["deps", "--used-by"] => deps_used_by(),
         ["decisions"] => decision_numbers(Path::new(".")),
         ["live-feature"] => live_feature_in(Path::new(".")),
+        ["mail-guard"] => mail::guard_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
         ["release", "tools"] => {
@@ -1402,6 +1404,7 @@ fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()
     shellcheck_scripts(&root.join("scripts"))?;
     actionlint_workflows(&root.join(".github/workflows"))?;
     live_feature_in(root)?;
+    mail::guard_in(root)?;
     workspace_checks()
 }
 
