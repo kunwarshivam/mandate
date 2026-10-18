@@ -27,6 +27,7 @@
 //! environment variable: OpenBao's AppRole secret ids come in as values the caller read from a
 //! mounted file.
 
+pub mod credentials;
 pub mod error;
 pub mod lease;
 pub mod local;
