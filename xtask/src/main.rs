@@ -295,6 +295,7 @@ fn run() -> Result<()> {
                     .chain(cell::JOURNAL_DRILLS)
                     .chain(cell::FAILOVER_DRILLS)
                     .chain(cell::KILL_SWITCH_DRILLS)
+                    .chain(cell::VAULT_DRILLS)
                     .collect()
             } else {
                 names
@@ -334,7 +335,10 @@ fn ci(job: &str) -> Result<()> {
         "cell-demo" => cell::scenario::ci(),
         "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
-        "cell-kill-switch" => cell::ci_drills(job, &cell::KILL_SWITCH_DRILLS),
+        "cell-kill-switch" => cell::ci_drills(
+            job,
+            &[cell::KILL_SWITCH_DRILLS, cell::VAULT_DRILLS].concat(),
+        ),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;

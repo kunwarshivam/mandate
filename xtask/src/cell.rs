@@ -151,6 +151,11 @@ pub enum Drill {
     /// archived, and Barman's own tools, reading the store with the archive's key, list the backup
     /// and fetch the segment back (E21-41).
     Archive,
+    /// `mandate vault provision` sets the cell's vault up, then each AppRole logs in from a pod
+    /// labelled as the executor and reads only what DEC-977 item 2's table gives it: a runtime
+    /// nothing, an executor exactly its own connection's token, the model gateway its key; and
+    /// no policy of the cell's holds a wildcard (E21-32, DEC-2022 item 3).
+    Vault,
 }
 
 pub const DRILLS: [Drill; 4] = [Drill::Boot, Drill::Journal, Drill::Egress, Drill::Compose];
@@ -167,6 +172,10 @@ pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 /// of its own so `ci cell` stays within its ten minutes (DEC-464, DEC-2602).
 pub const KILL_SWITCH_DRILLS: [Drill; 1] = [Drill::KillSwitch];
 
+/// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-kill-switch` runs after the
+/// kill switch's, on that job's cell, so `ci cell` stays within its ten minutes (DEC-464).
+pub const VAULT_DRILLS: [Drill; 1] = [Drill::Vault];
+
 impl Drill {
     pub fn name(self) -> &'static str {
         match self {
@@ -178,6 +187,7 @@ impl Drill {
             Self::KillSwitch => "kill-switch",
             Self::StandbyDown => "standby-down",
             Self::Archive => "archive",
+            Self::Vault => "vault",
         }
     }
 
@@ -187,6 +197,7 @@ impl Drill {
             .chain(JOURNAL_DRILLS)
             .chain(FAILOVER_DRILLS)
             .chain(KILL_SWITCH_DRILLS)
+            .chain(VAULT_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
     }
@@ -212,6 +223,9 @@ impl Drill {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
             }
             Self::Archive => "the archive pointed at another bucket of the same store",
+            Self::Vault => {
+                "the runtime's policy rewritten to read every connection's token through a wildcard"
+            }
         }
     }
 }
@@ -229,6 +243,7 @@ impl Drill {
             Self::KillSwitch => "no kill_switch of scope connection",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
+            Self::Vault => "wildcard in mandate-runtime",
         }
     }
 }
@@ -1321,6 +1336,232 @@ fn vault() -> Result<()> {
     Ok(())
 }
 
+/// The connections the vault drill provisions: the cell's demo connection and one other, so an
+/// executor's reach to a connection not its own is tried.
+const VAULT_DRILL_CONNECTIONS: [&str; 2] = ["demo-paper", "drill-other"];
+
+/// The vault drill's checks, `<role> <path>`, each with whether DEC-977 item 2's table (and
+/// DEC-2020's rows) lets that role read that KV path. Written out here, not read from the crate.
+const VAULT_DRILL_READS: [(&str, &str, bool); 10] = [
+    ("runtime", "connections/demo-paper/token", false),
+    ("runtime", "connections/drill-other/token", false),
+    ("runtime", "platform/alpaca-oauth-client-secret", false),
+    ("executor-demo-paper", "connections/demo-paper/token", true),
+    (
+        "executor-demo-paper",
+        "connections/drill-other/token",
+        false,
+    ),
+    (
+        "executor-demo-paper",
+        "platform/alpaca-oauth-client-secret",
+        false,
+    ),
+    (
+        "executor-drill-other",
+        "connections/drill-other/token",
+        true,
+    ),
+    (
+        "executor-drill-other",
+        "connections/demo-paper/token",
+        false,
+    ),
+    ("model-gateway", "platform/model-provider-key", true),
+    ("model-gateway", "connections/demo-paper/token", false),
+];
+
+/// What a vault drill's check lines must say: `<role> <path> allowed` or `denied` for each of
+/// [`VAULT_DRILL_READS`], and no `wildcard in` line. A missing line is a problem too.
+fn vault_drill_problems(logs: &str) -> Vec<String> {
+    let mut problems: Vec<String> = logs
+        .lines()
+        .filter(|l| l.starts_with("wildcard in "))
+        .map(String::from)
+        .collect();
+    for (role, path, allowed) in VAULT_DRILL_READS {
+        let want = format!(
+            "{role} {path} {}",
+            if allowed { "allowed" } else { "denied" }
+        );
+        if !logs.lines().any(|l| l == want) {
+            let got = logs
+                .lines()
+                .find(|l| l.starts_with(&format!("{role} {path} ")))
+                .unwrap_or("no answer");
+            problems.push(format!("want `{want}`, got `{got}`"));
+        }
+    }
+    problems
+}
+
+/// The drill's script, run by the vault's own image: it puts a fake value at each path tried,
+/// as the operator, then logs in as each role from the files `mandate vault provision` wrote and
+/// prints one line per read, and one per policy of the cell's that holds `*` or `+`. Seeded, it
+/// first rewrites the runtime's policy to read every connection's token through `+`.
+fn vault_drill_script(seeded: bool) -> String {
+    let mut reads = String::new();
+    for (role, path, _) in VAULT_DRILL_READS {
+        reads.push_str(&format!("check {role} {path}\n"));
+    }
+    let mut puts = String::new();
+    for path in [
+        "connections/demo-paper/token",
+        "connections/drill-other/token",
+        "platform/alpaca-oauth-client-secret",
+        "platform/model-provider-key",
+    ] {
+        puts.push_str(&format!(
+            "BAO_TOKEN=\"$op\" bao kv put -mount=mandate {path} value=ZHJpbGwtZmFrZQ== >/dev/null\n"
+        ));
+    }
+    let plant = if seeded {
+        "printf 'path \"mandate/data/connections/+/token\" {\\n  capabilities = [\"read\"]\\n}\\n' \
+         | BAO_TOKEN=\"$op\" bao policy write mandate-runtime - >/dev/null\n"
+    } else {
+        ""
+    };
+    format!(
+        "set -eu\n\
+         op=$(cat /work/token)\n\
+         {puts}{plant}\
+         check() {{\n\
+           t=$(bao write -field=token auth/approle/login role_id=@/work/creds/$1.role-id secret_id=@/work/creds/$1.secret-id)\n\
+           if out=$(BAO_TOKEN=\"$t\" bao kv get -mount=mandate -field=value \"$2\" 2>&1 >/dev/null); then echo \"$1 $2 allowed\"\n\
+           elif echo \"$out\" | grep -q 'permission denied'; then echo \"$1 $2 denied\"\n\
+           else echo \"$1 $2 error\"; fi\n\
+         }}\n\
+         {reads}\
+         for p in $(BAO_TOKEN=\"$op\" bao policy list); do\n\
+           case \"$p\" in mandate-*) BAO_TOKEN=\"$op\" bao policy read \"$p\" | grep -q '[*+]' && echo \"wildcard in $p\" || true;; esac\n\
+         done\n"
+    )
+}
+
+/// The vault drill (E21-32, DEC-2022 item 3). A Job labelled as the executor, so its egress
+/// reaches the vault and the vault admits it: the vault's image copies the cell's fake operator
+/// token into a file only the pod's user reads, `mandate vault provision` writes every role's
+/// credentials, and the vault's image then logs in as each and reads (see
+/// [`vault_drill_script`]). The operator token is the local cell's fake root token, put in a
+/// Secret for the drill and deleted after it.
+fn vault_drill(seeded: bool) -> Result<Verdict> {
+    let init = fs::read_to_string(state()?.join(VAULT_INIT))
+        .context("the vault drill needs the cell's vault-init.json; run `cargo xtask cell up`")?;
+    let init: Value = serde_json::from_str(&init).context("reading the vault's init")?;
+    let root = init["root_token"]
+        .as_str()
+        .context("the vault's init holds no root token")?;
+    let secret = json!({
+        "apiVersion": "v1", "kind": "Secret",
+        "metadata": {"name": "vault-drill-operator"},
+        "type": "Opaque",
+        "stringData": {"token": root}
+    });
+    let rendered = render(&[], None)?;
+    let mandate = rendered
+        .iter()
+        .find(|o| o["kind"] == "Job" && o["metadata"]["name"] == "migrate")
+        .and_then(|j| j["spec"]["template"]["spec"]["containers"][0]["image"].as_str())
+        .context("the migration Job did not render, so there is no mandate image")?
+        .to_string();
+    let bao = kubectl(&[
+        "get",
+        "statefulset",
+        "vault",
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.spec.template.spec.containers[0].image}",
+    ])?;
+    let executor = processes()?
+        .into_iter()
+        .find(|p| p["name"] == "executor")
+        .context("processes.json has no executor")?;
+    let id = run_id()?;
+    let mut pod = probe_pod(&executor, &id, bao.trim(), &vault_drill_script(seeded))?;
+    let hardened = pod["spec"]["containers"][0]["securityContext"].clone();
+    let env = json!([
+        {"name": "BAO_ADDR", "value": format!("https://vault.{NAMESPACE}.svc:8200")},
+        {"name": "BAO_CACERT", "value": "/ca/ca.crt"},
+        {"name": "HOME", "value": "/tmp"}
+    ]);
+    let mounts = json!([
+        {"name": "work", "mountPath": "/work"},
+        {"name": "ca", "mountPath": "/ca", "readOnly": true},
+        {"name": "tmp", "mountPath": "/tmp"}
+    ]);
+    let small = json!({"limits": {"cpu": "100m", "memory": "64Mi"}, "requests": {"cpu": "50m", "memory": "32Mi"}});
+    let mut provision = vec![
+        "vault".to_owned(),
+        "provision".to_owned(),
+        "--address".to_owned(),
+        format!("https://vault.{NAMESPACE}.svc:8200"),
+        "--ca".to_owned(),
+        "/ca/ca.crt".to_owned(),
+        "--operator-token-file".to_owned(),
+        "/work/token".to_owned(),
+        "--out".to_owned(),
+        "/work/creds".to_owned(),
+    ];
+    for c in VAULT_DRILL_CONNECTIONS {
+        provision.extend(["--connection".to_owned(), c.to_owned()]);
+    }
+    let spec = &mut pod["spec"];
+    spec["securityContext"]["fsGroup"] = json!(65532);
+    spec["initContainers"] = json!([
+        {
+            "name": "operator-token",
+            "image": bao.trim(),
+            "command": ["sh", "-c", "umask 077 && cp /operator/token /work/token"],
+            "securityContext": hardened, "resources": small,
+            "volumeMounts": [{"name": "work", "mountPath": "/work"}, {"name": "operator", "mountPath": "/operator", "readOnly": true}]
+        },
+        {
+            "name": "provision",
+            "image": mandate,
+            "args": provision,
+            "securityContext": hardened, "resources": small,
+            "volumeMounts": mounts
+        }
+    ]);
+    spec["containers"][0]["env"] = env;
+    spec["containers"][0]["command"] = json!(["sh", "-c", vault_drill_script(seeded)]);
+    spec["containers"][0]["volumeMounts"] = mounts;
+    spec["volumes"] = json!([
+        {"name": "work", "emptyDir": {}},
+        {"name": "tmp", "emptyDir": {}},
+        {"name": "ca", "configMap": {"name": "vault-ca"}},
+        {"name": "operator", "secret": {"secretName": "vault-drill-operator", "defaultMode": 0o440}}
+    ]);
+    let template = json!({"metadata": {"labels": pod["metadata"]["labels"].clone()}, "spec": pod["spec"].clone()});
+    let job = json!({
+        "apiVersion": "batch/v1", "kind": "Job",
+        "metadata": {"name": format!("vault-drill-{id}")},
+        "spec": {"backoffLimit": 0, "template": template}
+    });
+    let ran = run_job(vec![secret, job]);
+    let _ = kubectl(&[
+        "delete",
+        "secret",
+        "vault-drill-operator",
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+    ]);
+    let (finished, logs) = ran?;
+    if !finished {
+        return Ok(Verdict::Broken(format!(
+            "the vault drill's Job failed:\n{logs}"
+        )));
+    }
+    let problems = vault_drill_problems(&logs);
+    if problems.is_empty() {
+        Ok(Verdict::Held)
+    } else {
+        Ok(Verdict::Broken(problems.join("\n")))
+    }
+}
+
 fn sha256(file: &str) -> Result<String> {
     let out = output("sha256sum", &[file]).or_else(|_| output("shasum", &["-a", "256", file]))?;
     out.split_whitespace()
@@ -1431,6 +1672,7 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::KillSwitch => kill_switch(seeded),
             Drill::StandbyDown => standby_down(seeded),
             Drill::Archive => archive(seeded),
+            Drill::Vault => vault_drill(seeded),
         };
         if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
             restore()?;
@@ -4235,6 +4477,45 @@ fn sh_in(dir: &str, program: &str, args: &[&str]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The vault drill passes only the table's answers: every read as written out, no wildcard,
+    /// and no line missing; the seeded symptom is the runtime policy's wildcard.
+    #[test]
+    fn the_vault_drill_judges_each_read_and_every_wildcard() {
+        let held: String = VAULT_DRILL_READS
+            .iter()
+            .map(|(role, path, allowed)| {
+                format!(
+                    "{role} {path} {}\n",
+                    if *allowed { "allowed" } else { "denied" }
+                )
+            })
+            .collect();
+        assert!(vault_drill_problems(&held).is_empty());
+        let leaked = held.replace(
+            "runtime connections/demo-paper/token denied",
+            "runtime connections/demo-paper/token allowed",
+        );
+        let wildcard = format!("{leaked}wildcard in mandate-runtime\n");
+        let found = vault_drill_problems(&wildcard).join("\n");
+        assert!(found.contains(Drill::Vault.seeded_symptom()), "{found}");
+        assert!(
+            found.contains("want `runtime connections/demo-paper/token denied`"),
+            "{found}"
+        );
+        let missing = held.replace("model-gateway platform/model-provider-key allowed\n", "");
+        assert_eq!(
+            vault_drill_problems(&missing),
+            ["want `model-gateway platform/model-provider-key allowed`, got `no answer`"]
+        );
+        let errored = held.replace(
+            "executor-demo-paper connections/demo-paper/token allowed",
+            "executor-demo-paper connections/demo-paper/token error",
+        );
+        assert_eq!(vault_drill_problems(&errored).len(), 1);
+        assert!(vault_drill_script(true).contains("mandate-runtime"));
+        assert!(!vault_drill_script(false).contains("policy write"));
+    }
 
     /// The cell judges the vault's status as the client judges `sys/seal-status`: uninitialized,
     /// sealed or unsealed on raft, and a dev server's in-memory storage refused whatever its seal.
