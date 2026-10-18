@@ -56,6 +56,10 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN: ${{ vars.NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN }}
+          # The public site and the one app origin that serves sign-in and every app screen (DEC-2405).
+          NEXT_PUBLIC_OWLHEAD_SITE_ORIGIN: "https://owlhead.ai"
+          NEXT_PUBLIC_OWLHEAD_APP_ORIGIN: "https://app.owlhead.ai"
       - run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run
       - run: node scripts/workers.mjs size .wrangler/dry-run
       - run: npx wrangler deploy

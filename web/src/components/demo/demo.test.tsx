@@ -7,6 +7,7 @@ import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { isPublicPath } from "@/lib/auth-routes";
 import { pageFor, pathsFor } from "@/test/app-routes";
+import { BySource } from "@/components/api-screens/api-screens";
 import { DemoApp } from "./demo-app";
 import { DEMO_PATH, DEMO_SOURCE, addressPath, isDemoCommand, isDemoReport } from "./demo-messages";
 import { demoPath, demoScreen, inMessages } from "./demo-routes";
@@ -23,8 +24,13 @@ function shape(node: ReactNode): unknown {
   return { type: node.type, props, children: Array.isArray(children) ? children.map(shape) : shape(children) };
 }
 
-/** A page as Next renders it: its component called, down to the screen it returns. */
+/**
+ * A page as Next renders it over the fixtures: its component called, down to the screen it returns. A
+ * page that picks its screen by the data source (DEC-1096) shows its fixture screen here, as `/demo`'s
+ * fixture runtime does.
+ */
 async function rendered(node: ReactNode): Promise<ReactNode> {
+  if (isValidElement(node) && node.type === BySource) return rendered((node.props as { fixtures: ReactNode }).fixtures);
   if (isValidElement(node) && typeof node.type === "function" && node.type.name.endsWith("Page"))
     return rendered(await (node.type as (p: unknown) => ReactNode | Promise<ReactNode>)(node.props));
   return node;

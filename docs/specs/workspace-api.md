@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 item 2 lets a `dev` or `ci` cell point the issuer settings at the local stub issuer (E21-52; [DEC-2100](../project/decisions/DEC-2100.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2101](../project/decisions/DEC-2101.md), [DEC-2102](../project/decisions/DEC-2102.md), agent readings) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -103,7 +103,7 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 
 | ID | Invariant | How it is tested |
 |---|---|---|
-| **API-1** | **Authenticated.** Every call except the liveness probe and a CORS preflight (§3.3 item 5) carries a valid session or token. Without one the API returns 401, reveals no data, and says nothing about whether the resource exists | A route table test: every registered route, called without credentials, returns 401 with the same body |
+| **API-1** | **Authenticated.** Every call except the liveness probe and a CORS preflight (§3.3 item 5) carries a valid session or token; `POST /v1/sessions` carries the access token it exchanges (§3.11). Without one the API returns 401, reveals no data, and says nothing about whether the resource exists. The three browser-only session routes of §4.10 check `Origin` and `X-Mandate-Request` first, and refuse a failure 403 `forbidden` before any cookie or token is read | A route table test: every registered route, called without credentials, returns 401 with the same body; the three session routes return that 403 without `Origin` and the same 401 with it |
 | **API-2** | **Authorized on the server.** Each operation checks the principal's role in the workspace (§3.7) and, for a client, its scope (§3.8), on the server, before any read or write. The web app's role checks (`web/src/lib/roles.tsx`) are never authority | A matrix test: every route × every role and client scope, with the expected 403 or success from §3.7, computed from the table, not from the handler |
 | **API-3** | **Journal before effect.** Every call that can change what an agent, connection, policy, member, client, or approval may do commits its control-stream event (`Committed` or `AlreadyCommitted`, journal spec §5.1), with the caller's identity in `actor`, before it reports success and before anything acts on it. The API writes no agent or account stream | Fault injection: fail the append at every step; no stream owner ever sees an effect without its control-stream cause, and no response says `recorded` without a committed event |
 | **API-4** | **Idempotent.** Every mutating call carries an `Idempotency-Key`. The same principal, operation, and key always resolve to the same control-stream event. A repeat with the same body returns the first outcome; a different body returns 409 `idempotency_conflict`. Nothing is committed twice | Fuzz: random retries, duplicate submits, lost responses, and concurrent repeats; an independent counter of control-stream events per key never exceeds one |
@@ -181,6 +181,8 @@ Owned by the [identity spec](identity.md). What the API requires of it:
      write.
    - A call authenticated by a sender-constrained token (item 2: the CLI, a client, a service
      account) sends no `Origin` and is not checked; a cross-site page cannot produce its proof.
+   - The browser-only session routes of §3.11 have no such caller: they check first, refuse a
+     missing `Origin`, and refuse 403 before reading a cookie or token.
    - The check applies to the API-7 operations too. A cookie call that fails it is not the owner's
      authenticated call, so its refusal is API-7's "failed authentication", not a new reason
      (DEC-682 item 19).
@@ -277,7 +279,7 @@ Errors are RFC 9457 problem documents with these members:
 | `invalid` | 422 | Schema, canonical form, or a value out of range |
 | `idempotency_conflict` | 409 | Same key, different body |
 | `stale_base` | 409 | The draft or version base moved (API-19); the body names the current base |
-| `classification_changed` | 409 | The server's classification differs from the one the confirmation screen showed |
+| `classification_changed` | 409 | The server's classification differs from the one the confirmation screen showed, or the screen's `screen_digest` is no longer the server's (§3.11 item 11); the client reloads the screen |
 | `step_up_required` | 401 | A call that needs step-up presents no evidence at all (§3.6, DEC-686) |
 | `step_up_missing` | 401 | Evidence is presented but does not count: its challenge is unknown, its credential is not the principal's or is in its enrolment cool-off, or its assertion does not verify (identity spec §7.2 steps 4 and 6) |
 | `step_up_stale` | 401 | The challenge has expired, or is presented before its `issued_at` |
@@ -295,7 +297,7 @@ Errors are RFC 9457 problem documents with these members:
 | `membership_unavailable` | 503 | The membership read, or the membership-index read of `GET /v1/me/workspaces` (§4.10), failed on an operation outside identity spec §4.5's risk-reducing set (API-7's operations, revoking a client, and tightening a policy); nothing was authorized; `retryable`. Never sent for an operation in that set |
 | `outcome_unknown` | 503 | The append's outcome could not be confirmed (an ambiguous commit, or `Fenced` during an upgrade, §7); `effect: unknown`, the derived `event_id` given, `retryable: false`. The client polls §5.5 with that `event_id` and never resends with a new key. A resend with the same key is still safe (API-4: it resolves to the original outcome), so `retryable: false` is a rule for the UI, not for correctness |
 | `address_limit` | 409 | **(planned: E8-14)** A member already holds 10 notification addresses on the channel (§4.11). `effect: none`, `retryable: false`; title "Too many notification addresses". An endpoint already held is not an error: §5.7 answers `200` |
-| `busy` | 503 | **(planned: E8-14)** The control stream moved under the call 5 times in a row (the expected-head retry of §5.7). `effect: none`, `retryable: true`; title "Try again" |
+| `busy` | 503 | **(planned: E8-14)** The control stream moved under the call 5 times in a row (the expected-head retry of §5.7), or the process is draining and the call is not an API-7 operation (§3.11). `effect: none`, `retryable: true`, with `Retry-After`; title "Try again" |
 | `fold_unavailable` | 503 | **(planned: E10-13)** An ordinary revoke (§4.5) whose journal fold of the connection's agents or of their positions cannot answer: it is unavailable, stale, or behind its watermark, its `seq` for a stream it needs being behind that stream's head as read in the same request ([DEC-693](../project/decisions/DEC-693.md) items 6 and 7). Nothing is assumed stopped or flat. `effect: none`, `retryable: false`; title "Account state unavailable". The owner sends a new request later, or revokes on compromise (§5.6), which never reads a fold |
 | `positions_held` | 409 | **(planned: E10-13)** An ordinary revoke (§4.5) while the positions fold answers that an agent on the connection holds positions (DEC-693 item 6). `effect: none`, `retryable: false`; title "Positions still held" |
 | `agents_not_stopped` | 409 | **(planned: E10-13)** An ordinary revoke (§4.5) while the agents fold answers that an agent on the connection is not `stopped` (DEC-693 item 6). `effect: none`, `retryable: false`; title "Agents not stopped" |
@@ -423,7 +425,7 @@ How the API's operations map onto those rows:
 
 | API operation | Matrix row |
 |---|---|
-| Read models (§4.7), the approvals inbox and content (§4.3) | View agents, positions, decisions |
+| Read models (§4.7), the approvals inbox and content (§4.3) | View agents, positions, decisions; an `owner` run's transcript and records only to the member who asked, under the chat row (§4.6.1) |
 | Journal, trace, timeline, gate decisions, exports, verification (§4.8) | Read records, verification; export |
 | Drafts, compile, validate, create a version (§4.1) | Draft a mandate version |
 | Confirm (§5.1) | Confirm a version, by the server's own classification |
@@ -437,6 +439,7 @@ How the API's operations map onto those rows:
 | One's own notification channels (a push subscription): set, remove | Add or remove one's own notification address |
 | One's own notification channels: list | List one's own notification addresses |
 | Owner request, dry run, chat (§4.6) | Make an owner request; dry run of a request; chat thread with the agent. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
+| The desk: send; read one's own thread, its cited and fallback records, and an owner run's transcript (§4.6.1) | Chat thread with the agent, the asking member only. An approval's explanation, its cited records, and an explain run's transcript: View agents, positions, decisions. (An ideation or monitoring run's transcript is §4.7's read model row.) |
 
 Separation of duties is enforced where the specs already enforce it: by the runtime at approval
 (check 7) and by the executor at acknowledgment (mandate spec §5.8), with a client counted as its
@@ -479,9 +482,249 @@ shedding applies to the API-7 operations, which run on the reserved pool of API-
 
 ---
 
+### 3.11 The server process (E21-31)
+
+The API is served by one binary, `mandate-api-server`, behind the cell's one ingress
+([DEC-978](../project/decisions/DEC-978.md)). It holds no route of its own: it serves the
+operations of §4 as their stories land. Until sessions live in Postgres it runs as **one replica**
+per workspace deployment (item 6).
+
+1. **Bind.** `--bind <ip>:<port>`, the API's listener, and `--probe-bind <ip>:<port>`, the probes'
+   listener, must each be a loopback address or equal `--pod-address`, the pod's own address. The
+   unspecified addresses and every other address refuse the start. The ingress routes only the API
+   listener; the probes are never on it.
+2. **Environment.** Settings come from named variables: `MANDATE_API_DATABASE_URL`,
+   `MANDATE_API_ISSUER`, `MANDATE_API_AUDIENCE`, `MANDATE_API_JWKS_URL`, `MANDATE_API_APP_ORIGIN`,
+   and `MANDATE_API_WORKSPACE` and `MANDATE_API_ORG`: the one
+   workspace this deployment hosts and its organization, as ULIDs. Every other workspace in a path
+   is absent (API-9's 404), and the organization is what `authorize` checks the pair against;
+   journal spec §9.12's records name neither. `MANDATE_DEPLOYMENT_TIER` is the deployment tier, read as every
+   process reads it (`dev`, `ci`, `staging`, or `production`; no value or any other is
+   `production`). Outside `dev` and `ci`, an `http` `MANDATE_API_JWKS_URL` refuses the start
+   (E21-53, [DEC-2100](../project/decisions/DEC-2100.md) item 9). `MANDATE_API_ARTIFACTS`, optional, is the
+   content-addressed store's directory, read, and written only by item 11's routes, from which the agent reads take the mandate
+   document the journal names by digest ([DEC-1020](../project/decisions/DEC-1020.md)). As a guard against a secret placed in the environment (DEC-822
+   item 4), a variable whose name contains `SECRET`, `PASSWORD`, `TOKEN`, or `KEY` (ASCII
+   case-insensitive) refuses the start, and so does a database URL that carries a password: the
+   API reaches Postgres over its local socket by peer authentication, or with a credential file.
+   The guard reads names, not values. The session signing key is the file
+   `$CREDENTIALS_DIRECTORY/session-signing-key`: at least 32 bytes, refused when group- or
+   world-readable. In a `dev` or `ci` cell only, the three issuer settings may name the local stub
+   issuer ([DEC-2100](../project/decisions/DEC-2100.md)), which runs on loopback with a key it
+   makes at each start, so a cell without the managed issuer can open a session. The server reads
+   them the same way, and the stub refuses to run in any other tier.
+3. **Probes.** On the probes' listener only, `GET /livez` and `GET /readyz`, unauthenticated and
+   reading no data. The body is `{"status": "live"}`, `{"status": "ready"}`, or, with 503,
+   `{"status": "not_ready"}`; any other request there is 404 with no body. Readiness is the
+   process lifecycle's (E21-28); until that lands, the process is ready once serving and not
+   draining. A process that is not ready still serves every API-7 operation.
+4. **Drain.** On SIGTERM the process reports `not_ready`, finishes what is in flight, and answers
+   each new authenticated call that is not an API-7 operation with `busy`; an unauthenticated call
+   still gets the one 401 first (API-1). API-7 operations are served until it exits. It exits when
+   nothing is in flight, or at its drain bound, Proposed 90 seconds by analogy with infrastructure
+   §7.3. A kill switch still in flight at the bound has either committed or not; its client
+   resolves it by §5.5 and the same key (API-4, API-13).
+5. **Opening a browser session** (identity spec §6.2). `POST /v1/sessions` takes `{access_token}`,
+   the managed issuer's access token, which the web app's sign-in client already holds on the app
+   origin (DEC-211); the API adds no token storage of its own.
+   - It is a browser-only route: `Origin` must equal the app origin and `X-Mandate-Request: 1`
+     must be present, or the call is refused 403 `forbidden` before the token is read (§3.3 item
+     1's login half; a missing `Origin` is refused too).
+   - The token is verified as identity spec §6.1 says: the one configured issuer and audience, its
+     published keys by `kid`, ES256 only for the managed issuer. The subject maps to a user
+     principal through the subject link (item 7). Any failure is the one 401.
+   - The server opens a session record with identity spec §6.2's business limits for every
+     session (idle 1 hour, absolute 12 hours), the strictest, until the organization's kind is
+     read from its store. It sets the §3.3 item 5 cookie, `__Host-mandate_session`: an opaque
+     session id and a fresh 32-byte secret, authenticated with HMAC-SHA256 under the session
+     signing key. The record keeps only the secret's digest. A cookie presented with the call ends
+     that earlier session (`sign_out`) and is replaced, never reused (no fixation).
+   - At most 16 sessions per principal: opening a 17th ends the oldest (`sign_out`).
+6. **Keeping it.** The record's access lifetime is five minutes. `POST /v1/sessions/refresh`, with
+   the cookie, `Origin`, and `X-Mandate-Request`, takes `{access_token}` or `{access_token: null}`:
+   - a token that verifies, for the session's subject: a granted refresh; the secret rotates and a
+     new cookie is set;
+   - `null`, sent when the web app's sign-in client could not reach the provider; the server
+     holding no fetched key set, or none with the token's `kid` (a key rotation the next fetch
+     brings); or the subject-link file unreadable or exposed (an operator fault): an outage
+     (identity spec §6.4 route 1). The session keeps
+     only pause and the kill switch until its absolute lifetime ends or a later refresh is granted.
+     The caller can only narrow its own session this way;
+   - a token that does not verify, names another subject, or whose subject the link file no longer
+     maps to the session's principal: a failed refresh, which ends the session (`refresh_failed`);
+   - a rotated secret presented again ends the session (`refresh_reuse`), on any route, with one
+     exception ([DEC-1022](../project/decisions/DEC-1022.md), Proposed). For the 30 seconds
+     after a granted refresh, the secret it rotated away still serves a pause and a kill switch,
+     so a risk-reducing command in flight across the refresh lands; any other call with it then
+     gets the one 401 and the session is kept. The refresh route treats it as reuse even then.
+
+   - A pause or a kill switch on a full session whose access has lapsed with no refresh is not
+     refused for it: the server records an outage refresh itself (route 1) and serves the call, so
+     risk reduction never waits on the web app (API-7). Any other call on it gets the one 401.
+
+   So a session's full reach never outlasts the last access token it was given by more than five
+   minutes. `DELETE /v1/sessions/current` ends it (`sign_out`) and clears the cookie; a cookie naming no live
+   session gets the one 401 with the cookie cleared too. Records live
+   in the process until a Postgres store exists: a restart, a deploy included, ends every session.
+   The user signs in again; with the identity provider down, pause and the kill switch remain
+   through the host CLI (identity spec §6.4 route 3) until route 2's reduction-only sessions are
+   served.
+7. **The subject link** (interim, for the demo cell's paper workspace only). Identity spec §3.3 keeps
+   IdP subjects in the personal-data vault; until that store serves links, the server reads the
+   file `/etc/mandate/subject-links`, a fixed path and no setting
+   ([DEC-1023](../project/decisions/DEC-1023.md)), at each sign-in, refused like the signing key when
+   the path does not itself name the file opened (a symlink there included), or the file is group-
+   or world-writable or not owned by the process's user or root. One line per link: `sha256:<hex>` of
+   the canonical `{"issuer", "subject"}` object, a space, and the principal's ULID. It holds no raw
+   subject. A removed line takes effect at the next sign-in or refresh.
+8. **Memberships.** Each request folds journal §9.12's records from the workspace's control stream
+   (identity spec ID-3, uncached). A failed read is a failed membership read, never "no
+   membership".
+9. **Not journaled yet.** Identity spec §6.2 commits `SessionOpened` at every sign-in, which drives
+   the new-device notice (ID-14). The journal does not register `SessionOpened` or `SessionRevoked`
+   yet; until it does, these routes journal nothing and no new-device notice is sent (DEC-978
+   item 10, Proposed).
+10. **Pause and the kill switch** ([DEC-1007](../project/decisions/DEC-1007.md)). The server
+    commits §4.2's `OwnerCommandIssued` with journal spec §9.11's members, as the CLI writes them,
+    under the operation names `pause` and `kill_switch`.
+    - It forwards no step-up until it verifies one. `step_up` is `null`, and `step_up_status` is
+      `missing` or `unbound`, so a kill switch through the API runs without the owner-exit
+      privilege.
+    - `record`, `environment_shown`, and `owner_exit` are kept but not journaled, and idempotency
+      compares what is journaled.
+    - A scope id must be an agent an `AgentDeployed` names, or a connection a control-stream
+      event names, or the request is 404.
+    - An append that does not settle in 5 attempts answers `outcome_unknown` after an ambiguous
+      commit, else `journal_unavailable`.
+    - Readiness and drain never gate these routes.
+    - Until sessions keep a roles snapshot, a failed membership read answers
+      `membership_unavailable` for them too (DEC-1007 item 8, Proposed); the host CLI's kill
+      switch is unaffected.
+    - Holding new openings is not served yet: the runtime does not fold `hold_openings`, and a
+      hold it could not read would stop it at that event, the kill switch behind it included.
+    - An approval's Skip (§5.2) is recorded as the CLI records it, as `ApprovalResponseSubmitted`
+      with `step_up: null`; the runtime judges the deadline, the state, the content hash, and the
+      approvers. An `approved` is refused `step_up_required` or `step_up_missing` until step-up
+      is bound (DEC-1007 item 10).
+11. **Versions, confirmation, and deployment** ([DEC-2101](../project/decisions/DEC-2101.md),
+    E10-11, E10-12). The server serves five routes of §4.1 and §4.2, with these operation names for
+    §3.4: `POST /mandate-versions` (`create_version`), `GET
+    /mandate-versions/{mandate_version}/confirmation`, `POST
+    /mandate-versions/{mandate_version}/confirm` (`confirm_version`), `POST /agents` (`deploy`),
+    and `POST /agents/{agent_id}/go-live` (`go_live`). Each mutating route is checked in item 10's
+    order (the session, the CSRF mark, `Idempotency-Key`, then the body, decoded strictly), then
+    authorized by its matrix row for a **user** principal only (a client's "propose only" cell
+    is not served, so no client-authored value is ever recorded `user_entered`), and commits its one control-stream event, as the CLI writes it
+    (`mandate version create`, `version confirm`, `agent deploy`), before its answer.
+    - **The step-up port.** The server judges step-up through one port, bound to an action's kind
+      and digest (§3.6). Until E9-4 binds it, the port verifies nothing: a call that needs step-up
+      and carries none is refused `step_up_required`, and one that carries evidence is refused
+      `step_up_missing`, with nothing committed. So through the API, every confirmation that
+      §9.2 classifies as risk-increasing, and every deployment, is refused until E9-4; the CLI
+      stays the path for both.
+    - **Creating a version.** Drafts and the compiler are not served yet. The body is the mandate
+      document itself, as `mandate version create` reads it from a file. It must parse as a
+      mandate (mandate spec §3) in the control stream's environment: `paper`. A `live` document is
+      refused `live_unavailable`, and any other environment, or one unlike the stream's,
+      `invalid`. It must pass every V-rule but V-002 as if every envelope path were confirmed
+      (the confirmation's own check), and every pinned instrument must be registered, as the CLI
+      checks at confirmation; a failure is `invalid` with each V-code in `violations`. The server
+      stores the canonical document under its version (mandate spec §9.1) and the CLI's record,
+      then commits `MandateVersionCreated` version 1 with every envelope path's provenance
+      `user_entered`. Answer: `202` `commands/version-created`, with the version and the
+      warnings' codes; a version the control stream already records answers `200` with that event
+      and commits nothing. A repeat whose key's event is stored is compared before anything is
+      validated again, and either answer carries the warnings as validated now.
+    - **The confirmation screen.** The read the confirm binds (§5.1's `screen_digest`), for a new
+      mandate only: the stored document, `agent_id` and `base_version` both `null`, the server's
+      classification (a first version is `risk_increasing`: no earlier version bounds it, mandate
+      spec §9.2), the envelope paths V-020 requires, the warnings' codes, whether step-up is
+      required, and `screen_digest`, the SHA-256 of the canonical object of those members but the
+      document, in journal spec §4's canonical form, written `sha256:<hex>`
+      (`read-models/confirmation`). Exactly those seven members are digested; a member added
+      later joins the digest only with a new version of this read. The warnings depend on the
+      journal and the validation date, so the digest can move between the read and the confirm,
+      which is then refused `classification_changed` and the client reloads. The read takes the
+      "Draft a mandate version" row, users only. Worst-case figures, the unasked dollars, provenance
+      badges, and the crypto gap disclosure are not served yet.
+    - **Confirm** (§5.1), for a new mandate only. `MandateConfirmed` version 1 has no agent link
+      (version 2 is E10-15's), so a confirmation naming an `agent_id` is refused `invalid` at
+      `/agent_id`, and a `base_version` with no agent `invalid` at `/base_version`. Then, in
+      order: the version is recorded and stored, else `not_found`; `classification_shown` is the
+      server's, else `classification_changed`; `confirmed_paths` is exactly the envelope paths,
+      and the version passes the V-rules as if confirmed, else `invalid` (V-020 among them);
+      `warnings_acknowledged` holds every warning the screen showed, else `invalid`; the
+      `screen_digest` is the screen's now, else `classification_changed`; and step-up is bound to
+      §5.1's digest. A version the control stream's last `MandateConfirmed` already names answers
+      `200` with that event and commits nothing. The record keeps the CLI's members, the verified
+      step-up, and the request's `record`, `screen_digest`, and `warnings_acknowledged`. The
+      journal has no freeze yet (journal spec §11), so `control_stream_frozen` is not sent.
+    - **Deploy** (§4.2). The body, decoded strictly, is `agent_id`, `mandate_version`,
+      `backtest_id` (an id or `null`: backtests are not served, and the id is recorded, never
+      read), `record`, and `step_up`; its request schema lands with its `mandate-api` type. The checks are the CLI's, in its order: an agent id that
+      names no agent stream is `invalid`; a version not recorded or not stored `not_found`; one
+      never confirmed `invalid` at `/mandate_version`; one the control stream has confirmed a
+      later version over `stale_base`, naming the latest; an agent already deployed with the same
+      version answers `200` with its `AgentDeployed`, and with another version `invalid` at
+      `/agent_id`; every V-rule for the agent (V-002, V-006, and V-032 included) and the pinned
+      instruments, else `invalid` with the V-codes. V-002 reads the account's equity from the
+      latest `AccountSnapshotRecorded` on the account stream of the document's connection; with
+      none, the equity is 0 and V-002 refuses (a tightening of the CLI, which leaves V-002 to the
+      executor); then step-up, bound to the SHA-256 of the
+      canonical `{agent_id, mandate_version}`, kind `deploy`. It commits `AgentDeployed` version 1
+      with `config_refs.mandate_version`. A refusal commits nothing: `DeploymentRejected` is not
+      written until the deployment manager journals its own refusals. Its `202`, and the `200`
+      of an agent already deployed with the version, are `commands/command-accepted`.
+    - **Go live** answers `409` `live_unavailable` to every principal the deploy row authorizes,
+      after item 10's checks and before the body is read (B5, rule 8).
+    - The content-addressed store (item 2) is written only by these routes, and only by adding an
+      object under its own digest. Without `MANDATE_API_ARTIFACTS`, they answer
+      `journal_unavailable`.
+12. **Resume, Stop, owner exit, acknowledgment, and command status**
+    ([DEC-2102](../project/decisions/DEC-2102.md), E10-12). `POST /agents/{agent_id}/resume`
+    (`resume`), `…/stop` (`stop`), `…/exits` (`owner_exit`), `…/acknowledgments`
+    (`acknowledge`), and `GET /commands/{event_id}`. The acknowledgment route is mounted only once
+    `mandate-journal` registers `OwnerAcknowledged`'s payload on the control stream (journal spec
+    §9.2's members): until then the journal refuses its draft, so the route answers the one 401
+    of a route not landed, and the CLI's acknowledgment stays the path. Each command is checked as item 10 orders, the
+    agent found as item 10 finds it, and recorded as the CLI records it (`mandate agent resume`,
+    `stop`, `exit`, `acknowledge`).
+    - **Resume and Stop** commit `OwnerCommandIssued` with §9.11's members. A Stop with `release`
+      must name, as `warning_shown`, the content reference of the CLI's release warning text, else
+      `invalid` at `/warning_shown`, so the journal names only a warning the platform defines.
+    - **An owner exit** is an API-7 operation, decoded leniently (§5): `instrument` is kept
+      strictly, and the bid confirmation all or nothing. It commits `OwnerCommandIssued`
+      (`owner_exit`) with scope `instrument`, the asset as `subject`, and the confirmed `bid`,
+      `bid_size`, and `floor`; `quoted_at`, `record`, and `step_up` are kept but not journaled, as
+      item 10's are.
+    - **An acknowledgment** commits `OwnerAcknowledged` with `agent`, the acknowledged `event`,
+      `user`, `risk_clock` and `submitted_at` at receipt, and `step_up`. The executor judges the
+      event, the step-up, and independence (mandate spec §5.8).
+    - **Step-up is forwarded only once verified.** Resume, Stop, and acknowledgment carry the port's
+      verified evidence as `step_up`, or `null`. Until E9-4 binds the port that is always `null`,
+      so the runtime or executor refuses each with `OwnerCommandRefused` `step_up_missing`, the
+      refusal journaled where the specs put it (§5.4); the client renders that refusal from
+      §5.5, never "stopped". Under `independent_approval_required` an acknowledgment also fails
+      closed (`not_independent`), since `OwnerAcknowledged` does not yet carry its requester. An owner exit forwards `null` too, so it
+      loses only the owner-exit privilege (mandate spec §6.1).
+    - **Command status** (§5.5) finds the event by equality with a control-stream event id, else
+      `not_found`. Its steps are the events on each deployed agent's stream and each account
+      stream the control stream names whose `causation_id` is the command, in stream then `seq`
+      order, with the payload's `reason`, or `null`. The phase is `refused` for an
+      `OwnerCommandRefused`, an `ApprovalResponded` `refused`, or a `MandateVersionApplied`
+      `rejected`; else `applied` for an `AgentModeChanged`, an `AgentModeApplied`, a
+      `KillSwitchActivated`, a `MandateVersionApplied` `applied`, or an `ApprovalRevalidated`
+      `act`; else `ended` for an `ApprovalRevalidated` `skip`, an `ApprovalTimedOut`, or an
+      `ApprovalCanceled`; else `taken` for any step; and `recorded` with none. Only direct
+      causation counts: an order a kill switch canceled names its own cause. The read takes the
+      "View agents, positions, decisions" row, users only until client tokens land (E10-14).
+    - The hold and its lift wait for the runtime, as item 10 says.
+
+---
+
 ## 4. Resources and operations
 
-Every path is under `/v1/workspaces/{workspace_id}` except those §4.10 lists: `/v1/me/*`, `/v1/reduction-sessions*`, and the OAuth callback of §4.5. "Event" names the control-stream event the call
+Every path is under `/v1/workspaces/{workspace_id}` except those §4.10 lists: `/v1/me/*`, `/v1/sessions*`, `/v1/reduction-sessions*`, and the OAuth callback of §4.5; the probes of §3.11 are on their own listener. "Event" names the control-stream event the call
 commits (journal spec §9). **Journal change** marks an event or member the journal spec does not
 define yet; §11's E10-15 adds them before the operation ships.
 
@@ -520,6 +763,20 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Re-enable a halted scope | **None in v0.1** | — | The halted state is Proposed (DEC-437 item 21; interim: no halted state), so a kill switch leaves no scope halted and there is nothing to re-enable. If the founder accepts item 21, this spec adds a route, a step-up kind, and the events `ScopeHalted` and `ScopeReenabled` (identity spec §12.1) in its own change |
 | Command status | `GET /commands/{event_id}` | — | §5.5 |
 
+`GET /backtests/{id}` returns `read-models/backtest` ([DEC-1001](../project/decisions/DEC-1001.md)):
+the backtest's id, its mandate version, `state` (`running` until `BacktestRunRecorded` commits,
+then `completed` or `refused`), the run's stable `refusal` code when refused, and for a completed
+run `report_ref` (the report artifact, journal spec §6.3) and `report`, the artifact's object. The
+report is a run of the version's own decision path (the risk state, the order builder, the gate's
+dry run, autonomy, and the executor's protection, over historical bars, on recorded model outputs
+and theses only; [DEC-1000](../project/decisions/DEC-1000.md)). It holds FR-4.2's figures for the
+version and for buy-and-hold of the same instrument, one row per decision with its outcome and
+reason, the limits that latched, the equity per period, and two closed lists: `limitations`, the
+codes for what the run cannot know or does not model, and `disclosures`, placeholder names only
+([DEC-1003](../project/decisions/DEC-1003.md)). It holds no thesis-quality figure for any version
+(DEC-99). A backtest is the owner's own strategy's simulated history: the read answers only in the
+workspace that ran it, and no route aggregates backtests across workspaces.
+
 ### 4.3 Approvals (approval service)
 
 | Operation | Method and path | Event | Notes |
@@ -529,6 +786,21 @@ define yet; §11's E10-15 adds them before the operation ships.
 | Delegation preview | `POST /approvals/{id}/delegation-previews` | — | §5.3. Offered only where mandate spec §6.4 allows a scope |
 | Respond | `POST /approvals/{id}/responses` | `ApprovalResponseSubmitted` | §5.2. Users only |
 | Resolve a notice | `GET /notices/{notice_id}` | `RecordsAccessed` | §3.9 |
+
+The inbox and the single read return `read-models/approvals` and `read-models/approval`
+([DEC-979](../project/decisions/DEC-979.md)): each approval's id, agent, state, `requested_at`,
+`deadline` (the journaled risk-clock seconds), and `content_hash`; the single read adds `content`.
+The state is folded from the agent stream, and the first terminal event wins: `pending` until
+re-validation acts (`acted`) or the approval ends `skipped` (by the owner's Skip or by
+re-validation), `timed_out`, or `canceled`. An admitted grant still awaiting re-validation, and a
+`refused` or `counted` answer, leave it `pending`; so does a deadline that has passed before the
+runtime journals `ApprovalTimedOut`, and a response to it then is refused `late` by the runtime.
+The inbox lists every pending approval by deadline, then the 100 most recently requested resolved
+ones; `state` other than `pending` or `resolved` is `invalid`. Both reads carry `order`, the order
+the approval binds ([DEC-1021](../project/decisions/DEC-1021.md)): `content.action`'s instrument,
+asset class, side, quantity, limit, order dollars, and purpose, and version 2's
+`content.execution` time in force and protection (`null` for a version-1 request), as journaled.
+"The grants so far", and the rest of D5 and D6, are planned as optional members.
 
 ### 4.4 Delegations and autonomy
 
@@ -577,6 +849,76 @@ revoke on compromise (§5.6) reads no fold and is refused by none of them.
 | Dry run | `POST /agents/{id}/dry-run` | `RecordsAccessed` | DEC-190: the decision (`auto`, `ask`, `deny`) and the gate's reason code for a described order, with the client ceiling for a client. Places nothing, creates no approval |
 | Owner request | `POST /agents/{id}/requests` | `OwnerRequestSubmitted` (journal spec §9.9) | An instrument, side, and optional size the owner or client asks for. The runtime copies it to its builder, which sizes, clips, and classifies it as for any proposal (rule 4); `requested_by` from the channel (API-6) |
 | Chat | `POST /agents/{id}/chat`, `GET .../chat` | The model call, on the agent stream | A reply is quoted model output (API-18). When a message asks for an action, deterministic code returns a card: an owner request with the builder's proposal, gate verdict, and autonomy outcome, or a draft version that opens A6. Sending the card is a separate call carrying its `card_digest` (D14, DEC-192) |
+| The desk | `POST /agents/{id}/desk/messages`, `GET /agents/{id}/desk`, `GET /agents/{id}/desk/messages/{message_id}` | `OwnerQuestionSubmitted` (journal spec §9.25); the answer is an `owner` run on the agent stream | §4.6.1. A question about the agent's own records, answered with citations by an `owner` run ([agent harness spec §15](agent-harness.md#15-owner-and-explain-runs-the-desk)); read only in slice 1, never advice (E12-5, E19-15) |
+
+### 4.6.1 The desk and the transcript view ([DEC-2240](../project/decisions/DEC-2240.md))
+
+The desk's routes ([agent harness spec §15](agent-harness.md#15-owner-and-explain-runs-the-desk)).
+In slice 1 nothing here changes what an agent, connection, policy, member, client, or approval may
+do. A desk message is owner input, so it is journaled first and copied by the runtime (API-3's
+pattern); the answer is the runtime's, from the agent stream.
+
+- **Send.** `POST /agents/{id}/desk/messages` with `{"question": text}` and an `Idempotency-Key`
+  (API-4). Authorized by the *Chat thread with the agent* row (§3.7); a client has no chat and is
+  refused `forbidden`. An agent of another workspace, or none, is the same `not_found` (API-9). A
+  question over 1,000 characters is `invalid`; past agent harness spec §15.7's per-member rate it
+  is `rate_limited`; both journal nothing. Otherwise the server runs the gateway's guard on the
+  question alone (inference §8.3), commits `OwnerQuestionSubmitted`, and returns `202` with the
+  message id (its `event_id`) and `state: "waiting"` (API-13: `unknown` on an ambiguous append).
+- **Read the thread.** `GET /agents/{id}/desk` returns `read-models/desk`: the asking member's own
+  50 most recent messages to that agent, newest first, each with its state: `refused` when the guard refused it (no run starts); `waiting` until the
+  runtime's copy starts a run; `running`; then `answered` or `unavailable`. A question no run has
+  started within 60 s of its `recorded_at`, and one whose run ended without a shown answer, is
+  `unavailable`, with the fallback computed at read time (agent harness spec §15.5); a run that
+  starts late overrides it. Other members' messages are never served at
+  the desk; *Read records* holders see them in the journal like every record (§4.8).
+- **Clients.** The desk, the cited-record read, the run routes, and the transcript view are
+  outside every client scope (§3.8): a client token is refused `forbidden` on each.
+- **Read one.** `GET /agents/{id}/desk/messages/{message_id}`, the asking member's only (another
+  member's id is the same `not_found`): the question as typed (never for a refused one), the
+  state, the run's ref, and for `answered` the answer: each segment as `{"text": quoted model
+  text, "author": "agent", "cites": [ref]}`, the `not_recorded` codes with their template text, `written_after_reading` (the refs of the untrusted results in the run's context when it was written, each a link; agent harness spec §15.4), and `disclaimer`
+  (`NOTE-EXPLAINER-NOT-ADVICE`, a named placeholder, DEC-2241). `records` lists each cited ref, or
+  for `unavailable` holds the fallback records of agent harness spec §15.5 inline, in the
+  projections below; a cited ref carries its record type and the path of the cited-record read
+  below. No member holds an action (API-18). `as_of` names
+  the control and agent streams' watermarks (API-14).
+- **Read a cited record.** `GET /agents/{id}/runs/{run_id}/records/{ref}` serves a record a run
+  returned, through one projection per citable type (agent harness spec §15.4): exactly the fields
+  that tool returns, plus the figures the redacted projection kept from the model.
+
+  | Type | Fields |
+  |---|---|
+  | Decision | Time, instrument, side, purpose, autonomy outcome and its rule or delegation, the dry run's verdict and reason code, `requested_by`, whether an owner request caused it, the refs of its thesis, approval, and order; figures: quantity, limit, combined conviction |
+  | Approval | Time requested, instrument, asset class, side, purpose, `decided_by`, deadline, state and outcome (§4.3's folded state), the refs of its decision and thesis; figures: §4.3's `order` (quantity, limit, order dollars) |
+  | Order | Time, instrument, side, state, fill time, and for a refused one the binding gate's verdict and first reason code; figures: quantity, limit, fill price. Never the gate view's checks, rule-set version, quotes, or marks (§4.8, J6) |
+  | Position | Instrument, removed or not; figures: ledger quantity, cost basis, risk mark |
+  | Universe entry | Instrument, state, reason, the thesis's ref |
+  | Thesis | Instrument, direction, conviction and confidence (labelled self-reported and uncalibrated), `as_of`, `expires_at`, state, admission verdict, text and invalidation as quoted research-agent text, its run's ref |
+  | Run | Kind, trigger, start, end reason, structured summary |
+  | Mode | Effective mode; each restriction that binds the agent, what it blocks, and how it lifts |
+  | Mandate | Version, goal type, asset classes, `max_instruments`, autonomy rules by name, limit kinds; figures: each limit's value, allocation, floor |
+
+  Who may read it follows the run (agent harness spec §15.3): an `owner` run's records only the
+  member who asked, under the chat row; an `explain` run's under *View agents, positions,
+  decisions*, whose menu holds only approval, thesis, universe-entry, and mode rows: §4.3's and
+  §4.7's fields plus refs and the admission verdict, within that row's "decisions". Any other ref, and any ref to anyone else, is the same
+  `not_found`. A fold's record is served as of the stream watermarks read, stamped as `as_of`
+  (API-14), so a record cited earlier may show its later state. It never serves the raw journal event, which stays *Read records* (§4.8).
+- **Transcript view.** §4.7's *Runs and transcripts* row serves it (`GET /agents/{id}/runs`,
+  `GET /agents/{id}/runs/{run_id}`), and for the desk's two run kinds this section adds who reads
+  what: an `owner` run only to the member who asked, under the chat row, and to nobody else (the
+  list omits it and a read of it is `not_found`); an `explain` run under *View agents, positions,
+  decisions*, like the approval it explains. Their tool results are shown through the projections
+  above.
+- **The approval's explanation.** `GET /approvals/{id}` (§4.3) gains `explanation`: its state
+  (`none`, `running`, `shown`, `unavailable`) and, when `shown`, the answer in the shape above,
+  under the approval's own row, never through a client's `read` scope (§3.8). The read starts nothing and never waits (agent harness spec EX-9);
+  the explanation is outside `content` and `content_hash` (API-12). Until DEC-2241 item 3 is
+  decided it is served only where both deployment flags `desk.model_answers` and
+  `desk.approval_explanations` are on.
+- **Never in a notice.** No notice, push payload, title, or URL carries a question, answer text, or
+  a cited record's content (API-10).
 
 ### 4.7 Read models
 
@@ -588,10 +930,41 @@ revoke on compromise (§5.6) reads no fold and is refused by none of them.
 | P&L | `GET /agents/{id}/pnl` | Realized and unrealized from the ledger fold; disclosures named by document and version, never drafted text (rule 9) |
 | Universe and theses | `GET /agents/{id}/universe` | D4: active, removed, and refused instruments with reasons; each thesis as platform-authored quoted content with confidence labeled uncalibrated |
 | Plan view | `GET /agents/{id}/plan` | D12: what it watches, what it would do next and under which rule, whether that would run, ask, or be denied, and what would stop it. Writes nothing |
+| Runs and transcripts | `GET /agents/{id}/runs`, `GET /agents/{id}/runs/{run_id}` | The transcript view ([agent harness spec §10.4](agent-harness.md#104-surfaces), [DEC-2203](../project/decisions/DEC-2203.md)): each agentic run from its `RunStarted` to its `RunEnded` (kind, trigger, why it ended), and for one run every turn, tool call, tool result, and verdict in journal order, with the model's text as quoted model content. Model-visible codes as the model saw them, and the precise reasons from the records they map from. Licensed text only as the journal keeps it, no provider's hidden reasoning, and the run's configured cost ceiling as its only money figure. Writes nothing |
 | Daily brief | `GET /agents/{id}/briefs/{date}` | D13: counts and sources only; no profit or outcome claims |
 | Scorecards | `GET /agents/{id}/scorecards` | FR-8.4: the user's own results only. Never embedded in an approval, the model picker, or another workspace's view |
+| Forward-paper evaluation | `GET /evaluations/{id}` | E17-8, E15-3: the founder's evaluation of the research agent's theses, one scorecard per signal model beside the baselines. Only in the team's internal paper workspaces (DEC-103); elsewhere `not_found`. Never an owner's scorecard ([DEC-1002](../project/decisions/DEC-1002.md) item 6) |
 | Alerts | `GET /alerts` | G5, from `OwnerAlertSent` and the events it names |
 | Health | `GET /health` | The status strip (G1): market data, broker, deployment, relay, each with its last observation time |
+
+The first shapes served are `read-models/agents` and `read-models/agent`
+([DEC-979](../project/decisions/DEC-979.md)): each agent `AgentDeployed` names on the control stream,
+with its environment, deployed mandate version, `deployed_at`, `mode` (the last `AgentModeChanged`'s
+`to`, `stopped` after `AgentStopped`, `null` before either: not reported, never read as `normal`),
+and `pending_approvals`. An owner's hold shows as the mode it sets, `exits_only`.
+[DEC-1020](../project/decisions/DEC-1020.md) adds, from the mandate document the deployed version
+names in the content-addressed store (checked against its digest), the agent's `label` (the
+document's `name`) and `mandate`, its envelope as the document states it (allocation and floor,
+goal type and end date, asset classes, and the position, order, daily-loss, and drawdown limits);
+both are `null` when the store does not hold the document, or holds it encrypted. The single read
+adds the account's holdings at its last reconciliation as `account_positions`, the latest
+`BrokerPositionObserved` per instrument on the account stream of the connection the document
+names (model and broker quantities, the mismatch flag, and when observed), `null` when that stream
+is not found. They are the account's, not the agent's: no journaled fold attributes holdings per
+agent yet. The account stream's watermark joins `as_of`. Limit usage (the ladder's rung, the day-trade count, headroom) is not
+journaled yet and is not served; it joins with E6-4's risk records. The rest of D2 (restrictions,
+the floor, the universe) is planned as optional members.
+
+`GET /evaluations/{id}` returns `read-models/evaluation` ([DEC-1002](../project/decisions/DEC-1002.md)):
+the evaluation's id, `report_ref`, and `report`, the artifact `EvaluationRunRecorded` names. The
+report echoes the registered decision (DEC-122's window, minimum, and `z`), the cut-off, the input
+digests, and the baselines, then one group per signal model, keyed by model id, version, and
+content hash: how many of its theses were closed, still open, and outside the window, and either
+its scorecard (`mandate_research::score::Scorecard`, member for member) or the scorer's refusal
+code, never both. `passed` is true only when at least one group was scored and every scored group
+passed. Its one disclosure is the placeholder `NOTE-FORWARD-PAPER-INTERNAL` (DEC-1003). Until
+counsel answers compliance question 35, nothing here reaches an owner, an approval, or the model
+picker.
 
 ### 4.8 Journal and audit (audit explorer backend)
 
@@ -1105,6 +1478,14 @@ Owed to the identity spec's lanes, and listed so the prefix rule above is comple
 `POST /v1/reduction-sessions/challenges`, and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
 they sit outside the matrix, DEC-816 item 7). Every failure of the last is the one answer, 401 `unauthenticated` (§3.5), with no distinguishing timing, and `GET /v1/oauth/alpaca/callback` (§4.5).
 
+| Operation | Method and path | Event | Notes |
+|---|---|---|---|
+| Open a browser session | `POST /v1/sessions` | — | §3.11 item 5. Body `{access_token}`; answers 204 with the session cookie. A failed `Origin` or `X-Mandate-Request` check is 403 `forbidden`; every other refusal is the one 401 |
+| Refresh it | `POST /v1/sessions/refresh` | — | §3.11 item 6. The cookie and `{access_token}` for the same subject, or `null` on a provider outage; 204, with the rotated cookie on a grant |
+| Sign out | `DELETE /v1/sessions/current` | — | §3.11 item 6. Ends the session; 204 and the cookie cleared |
+
+`SessionOpened` and `SessionRevoked` (identity spec §12.1) are journaled once the journal registers them (§3.11 item 9).
+
 ### 4.11 Notification addresses (web push)
 
 A member's own push address: where the dispatcher sends their opaque notices (notifications spec
@@ -1238,7 +1619,9 @@ Application is the executor's `MandateVersionApplied`, which may still reject (f
 | `delegation` | `null` or `{preview_id, mandate_version}` | The shape chosen on the card (§5.3); always `null` for `skipped` (a Skip naming one has it dropped, below) |
 
 The API refuses only: an unauthenticated or non-user principal, a user who is not listed in
-`autonomy.approval.approvers` and holding an approving role (§3.7), an unknown approval, and, for
+`autonomy.approval.approvers` and holding an approving role (§3.7; until the server can read the
+mandate, a Skip is recorded for the approving role alone and the runtime refuses a non-approver's,
+[DEC-1007](../project/decisions/DEC-1007.md) item 10, Proposed), an unknown approval, and, for
 `approved` only, missing or unbound step-up: bound to the content hash, or with a delegation to the
 preview's `step_up_digest` (§5.3), else 401 with the step-up code §3.5 names. It does not judge the deadline, the quorum,
 independence, or re-validation: the runtime does (checks 1 to 12). A `skipped` is never refused for
@@ -1595,14 +1978,16 @@ risk-reducing call never consults one (API-7, API-8).
 | Approval content, hash, and admission (`mandate-approval`) | **Exists** (pure core) |
 | Mandate validation and classification (`mandate-spec`) | **Exists**; §4.1 calls it |
 | The web app's screens on recorded fixtures (`web/`) | **Exists**; §4.9 maps fixtures to resources |
-| The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10) |
-| Drafts, compile, versions, confirm endpoints | **Planned** (E10-11) |
-| Deployment manager endpoints and the reserved kill-switch path | **Planned** (E10-12) |
+| The API process, routes, authentication middleware, idempotency, errors, change stream | **Planned** (E10-10); the process, its sessions, the first reads of §4.3 and §4.7, pause and the kill switch, and an approval's Skip by E21-31 (§3.11) |
+| Drafts, compile, versions, confirm endpoints | **Partly served** (E10-11): creating a version from a document, the confirmation screen, and a new mandate's confirm (§3.11 item 11, DEC-2101); drafts, compile, validate, diffs, and an agent's later versions are planned |
+| Deployment manager endpoints and the reserved kill-switch path | **Partly served** (E10-12): pause, the kill switch, and Skip (§3.11 item 10); deploy and go-live (item 11, DEC-2101); resume, Stop, owner exit, acknowledgment, and command status (item 12, DEC-2102); the hold, its lift, and backtests are planned |
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
 | Read-model projections | **Planned** (E11-9) |
 | Journal queries, trace, exports over the API | **Planned** (E12-6); contracts in §4.8.1, served by the pure crate `mandate-audit` |
+| The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
+| The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |
 | Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.21 §9.9, DEC-670); `mandate-journal` registration planned (E10-15) |
 | The `client` actor, `ConnectionRevoked`'s reason, and the client events | **Specified** (journal spec v0.22 §3 and §9.10, DEC-671); `mandate-journal` registration planned (E10-15) |
 | `hold_openings` and `lift_hold` | **Specified** (journal spec v0.23 §9.11, DEC-672); `mandate-journal` registration planned (E10-15) |
@@ -1649,6 +2034,13 @@ the workspace and `compromised`, an ordinary revoke is refused from the journal'
 when they cannot answer, and its refusals come in one fixed order, step-up first (§4.5).
 `fold_unavailable` is `retryable: false`: [DEC-681](../project/decisions/DEC-681.md) item 9 names
 the only retryable codes, and the owner's retry is a new request.
+
+[DEC-2101](../project/decisions/DEC-2101.md) and [DEC-2102](../project/decisions/DEC-2102.md)
+(agent-accepted under DEC-79 and DEC-176, each the reading that adds no risk) settle how the server
+serves versions, confirmation, deployment, and the remaining owner commands (§3.11 items 11 and 12):
+step-up through one port that verifies nothing until E9-4, a version created from the document
+itself until drafts land, confirmation for a new mandate only until `MandateConfirmed` carries its
+agent, and evidence forwarded to the stream owners only once verified.
 
 ---
 

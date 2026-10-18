@@ -10,12 +10,21 @@
  * release's warning) it is the SHA-256 of the lines the screen showed, in their order.
  */
 import type { WorkspaceClient } from "./client";
+import type { Classification } from "./confirm";
 import type { JsonObject, PreparedCommand } from "./types";
-import type { Approval, ContentRef, Workspace } from "@/fixtures/types";
-import type { ApprovalRecord, CommandKind, CommandRecord } from "@/lib/mock-runtime";
+import type { AgentMode, ContentRef, ShownEnvironment } from "@/fixtures/types";
+import type { ApprovalRecord, CommandKind, CommandRecord, ConfirmRecord } from "@/lib/mock-runtime";
 import { sha256Hex } from "@/lib/sha256";
 
 export type Prepared = { ok: true; commands: PreparedCommand[] } | { ok: false; reason: string };
+
+/** What a command needs from the last workspace read: the agents and their modes, the connection, and the environment the screen showed. */
+export interface CommandScope {
+  agents: ReadonlyArray<{ agent_id: string; mode: AgentMode | null }>;
+  /** `""` when no connection has been read. */
+  connectionId: string;
+  environment: ShownEnvironment;
+}
 
 /** Names the web app's build in every record it sends (spec §5, mandate spec §10). */
 export const UI_BUILD = "owlhead-web/E11-9";
@@ -23,13 +32,13 @@ export const UI_BUILD = "owlhead-web/E11-9";
 const ref = (text: string): ContentRef => `sha256:${sha256Hex(text)}`;
 
 /** The spec §5 `record`: the rendered screen as a content ref, and the build that rendered it. */
-export function recordRef(record: CommandRecord | ApprovalRecord): { artifact: ContentRef; ui_build: ContentRef } {
+export function recordRef(record: CommandRecord | ApprovalRecord | ConfirmRecord): { artifact: ContentRef; ui_build: ContentRef } {
   return { artifact: ref(JSON.stringify(record)), ui_build: ref(UI_BUILD) };
 }
 
 const one = (command: PreparedCommand): Prepared => ({ ok: true, commands: [command] });
 
-export function prepareOwnerCommand(client: WorkspaceClient, ws: Workspace, kind: CommandKind, agentId: string | null, record?: CommandRecord): Prepared {
+export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, kind: CommandKind, agentId: string | null, record?: CommandRecord): Prepared {
   const agentCommand = (operation: "pause" | "resume" | "stop", body: JsonObject): Prepared =>
     agentId ? one(client.prepare(operation, { agent: agentId }, body)) : { ok: false, reason: "no_agent" };
   switch (kind) {
@@ -44,7 +53,7 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: Workspace, kind
       return agentCommand("stop", { release: true, warning_shown: ref(JSON.stringify(record.shown)), record: null, step_up: null });
     case "kill":
       if (!agentId) return { ok: false, reason: "no_agent" };
-      return one(client.prepareKillSwitch({ scope: { kind: "agent", id: agentId }, environment_shown: ws.environment, owner_exit: null, record: null, step_up: null }));
+      return one(client.prepareKillSwitch({ scope: { kind: "agent", id: agentId }, environment_shown: ws.environment === "unknown" ? null : ws.environment, owner_exit: null, record: null, step_up: null }));
     case "pause_all": {
       const live = ws.agents.filter((a) => a.mode !== "stopped");
       if (live.length === 0) return { ok: false, reason: "no_agents" };
@@ -52,8 +61,8 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: Workspace, kind
     }
     case "stop_all":
     case "close_all": {
-      const scope = ws.connection.connection_id ? { kind: "connection" as const, id: ws.connection.connection_id } : { kind: "workspace" as const, id: null };
-      return one(client.prepareKillSwitch({ scope, environment_shown: ws.environment, owner_exit: null, record: null, step_up: null }));
+      const scope = ws.connectionId ? { kind: "connection" as const, id: ws.connectionId } : { kind: "workspace" as const, id: null };
+      return one(client.prepareKillSwitch({ scope, environment_shown: ws.environment === "unknown" ? null : ws.environment, owner_exit: null, record: null, step_up: null }));
     }
     default: {
       const unhandled: never = kind;
@@ -62,7 +71,7 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: Workspace, kind
   }
 }
 
-export function prepareApprovalResponse(client: WorkspaceClient, approval: Approval, response: "approve" | "skip", record: ApprovalRecord): Prepared {
+export function prepareApprovalResponse(client: WorkspaceClient, approval: { approval_id: string; content_hash?: ContentRef }, response: "approve" | "skip", record: ApprovalRecord): Prepared {
   if (!approval.content_hash) return { ok: false, reason: "no_content_hash" };
   return one(
     client.prepare(
@@ -70,5 +79,48 @@ export function prepareApprovalResponse(client: WorkspaceClient, approval: Appro
       { approval: approval.approval_id },
       { verdict: response === "approve" ? "approved" : "skipped", content_hash: approval.content_hash, record: recordRef(record), step_up: null, delegation: null },
     ),
+  );
+}
+
+/** What `GET /mandate-versions/{hash}/confirmation` serves for the screen to render and the confirm to bind (spec §4.1). */
+export interface ServedConfirmation {
+  screen_digest: ContentRef;
+  classification: Classification;
+}
+
+/**
+ * What a confirm binds (spec §5.1): the version, the agent and base it is for (`null` for a new agent),
+ * the A5 record, and the confirmation screen's values exactly as the server served them.
+ */
+export interface ConfirmInput {
+  version: ContentRef;
+  agentId: string | null;
+  base: ContentRef | null;
+  record: ConfirmRecord;
+  served: ServedConfirmation;
+}
+
+/**
+ * `POST /mandate-versions/{hash}/confirm`, its body exactly as `confirm-request.schema.json` requires
+ * it: every required member and no other. `screen_digest` and `classification_shown` are the served
+ * confirmation's, passed through and never computed here: the digest proves the screen rendered the
+ * server's data, which only the server's own value can. `warnings_acknowledged` is empty: the summary
+ * shows no warning to acknowledge. `step_up` is `null` until E9-4.
+ */
+export function prepareConfirm(client: WorkspaceClient, input: ConfirmInput): PreparedCommand {
+  const { record, served } = input;
+  return client.prepare(
+    "confirm_version",
+    { version: input.version },
+    {
+      agent_id: input.agentId,
+      base_version: input.base,
+      confirmed_paths: record.paths,
+      warnings_acknowledged: [],
+      classification_shown: served.classification,
+      screen_digest: served.screen_digest,
+      record: recordRef(record),
+      step_up: null,
+    },
   );
 }

@@ -48,8 +48,10 @@ mod error;
 mod escalation;
 mod payload;
 mod ports;
+mod research;
 mod state;
 mod step;
+mod tail;
 mod types;
 
 pub use error::{JsonError, RuntimeError};
@@ -57,8 +59,15 @@ pub use mandate_approval::{ActorKind, LiveBroker, LiveScope, OpaqueUser};
 pub use ports::{
     FlattenPlanner, GateDryRun, IdGen, IntentSink, OrderPlan, Ports, SinkError, TimerSource,
 };
+pub use research::{
+    ActiveThesis, AgenticConfig, DispatchRequest, DispatchedResult, ItemFacts, JournalCatalog,
+    Preconditions, RecordCatalog, ResearchConfig, ResearchContext, ResearchInput, ResearchRecord,
+    ResearchRequest, ResearchState, ResearchStep, RetrievedObservation, TurnRef, TurnRequest,
+    abandon_refused_research, handle_research,
+};
 pub use state::{FOLD_VERSION, PendingApproval, RuntimeState, UnresolvedAppend, fold};
 pub use step::handle;
+pub use tail::{TailError, tailed};
 pub use types::{
     AgentId, ApprovalSettings, Autonomy, Classified, Command, ConnectionId, DecisionClip,
     Deployment, DryRunVerdict, Effect, EventDraft, EventId, ExitOrigin, FlattenLeg, FlattenPlan,

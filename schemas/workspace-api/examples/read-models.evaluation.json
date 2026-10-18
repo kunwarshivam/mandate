@@ -1,0 +1,104 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-17T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-17T14:30:00.000000000Z"
+    }
+  ],
+  "evaluation": {
+    "evaluation_id": "ev_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+    "report_ref": "sha256:3434343434343434343434343434343434343434343434343434343434343434",
+    "report": {
+      "kind": "forward_paper_evaluation",
+      "report_version": 1,
+      "decision": {
+        "decision_id": "DEC-122",
+        "window_from": "2026-10-01T00:00:00.000000000Z",
+        "window_to": "2027-01-01T00:00:00.000000000Z",
+        "minimum_scoreable": 0,
+        "z": "1.645"
+      },
+      "cut_off": "2026-12-01T00:00:00.000000000Z",
+      "inputs": {
+        "theses": "sha256:0505050505050505050505050505050505050505050505050505050505050505",
+        "closes": "sha256:0606060606060606060606060606060606060606060606060606060606060606",
+        "cost_model": "sha256:0707070707070707070707070707070707070707070707070707070707070707"
+      },
+      "baselines": {
+        "basket": [
+          "8ccae427-5dd0-45b3-b5fe-7c0c3a8ee5c4"
+        ],
+        "index": "1f0e8c2a-6c0b-4d4e-9f3a-2b6d7e8f9a0b"
+      },
+      "groups": [
+        {
+          "signal_model": {
+            "model_id": "research.thin_slice",
+            "model_version": "1.0.0",
+            "content_hash": "sha256:0808080808080808080808080808080808080808080808080808080808080808"
+          },
+          "closed": 2,
+          "open": 3,
+          "outside_window": 0,
+          "refusal": null,
+          "scorecard": {
+            "theses": [
+              {
+                "thesis_id": "th_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+                "lineage_id": "ln_01JB3K6F0C9R2V7N4M8Q1T5W3Z",
+                "revision": 0,
+                "instrument": "8ccae427-5dd0-45b3-b5fe-7c0c3a8ee5c4",
+                "entry": "100",
+                "exit": "110",
+                "round_trip_cost": "0.002",
+                "net_return": "0.098",
+                "excess_over_basket": "0.048",
+                "excess_over_index": "0.058"
+              }
+            ],
+            "unscoreable": [
+              {
+                "thesis_id": "th_01JB3K6F0C9R2V7N4M8Q1T5W40",
+                "reason": "no_exit_close"
+              }
+            ],
+            "scoreable_count": 1,
+            "z": "1.645",
+            "excess_sum_basket": "0.048",
+            "excess_sum_index": "0.058",
+            "mean_excess_basket": "0.048",
+            "mean_excess_index": "0.058",
+            "sample_variance_basket": null,
+            "sample_variance_index": null,
+            "margin_basket": "0",
+            "margin_index": "0",
+            "lower_bound_basket": "0.048",
+            "lower_bound_index": "0.058",
+            "passed": true
+          }
+        },
+        {
+          "signal_model": {
+            "model_id": "research.thin_slice",
+            "model_version": "1.1.0",
+            "content_hash": "sha256:0909090909090909090909090909090909090909090909090909090909090909"
+          },
+          "closed": 0,
+          "open": 1,
+          "outside_window": 0,
+          "refusal": "empty_scoreable_set",
+          "scorecard": null
+        }
+      ],
+      "passed": true,
+      "disclosures": [
+        "NOTE-FORWARD-PAPER-INTERNAL"
+      ]
+    }
+  }
+}

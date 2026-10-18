@@ -81,8 +81,13 @@ jobs:
       # DEC-750: every pending test fails at its stub when un-skipped.
       - run: npm run pending
         if: steps.app.outputs.present == 'true'
+      # With sign-in on, as the deploy builds it: the postbuild guard must see /v1 answer 404 and
+      # ?scenario= ignored behind the sign-in middleware too. The Supabase values are inert stubs.
       - run: npm run cf:build
         if: steps.app.outputs.present == 'true'
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: "https://stub-project.supabase.invalid"
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_ci_stub"
       - run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run
         if: steps.app.outputs.present == 'true'
         env:

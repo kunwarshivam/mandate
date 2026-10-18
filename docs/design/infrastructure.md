@@ -160,6 +160,7 @@ journal returns.
 | **Agent runtime** (`mandate-runtime` inside the shell; see `docs/specs/agent-harness.md`) | One per agent deployment (DEC-08) | Its agent stream | No broker credential (rule 12) | Postgres; model gateway; artifact store. No broker, no internet | Reads the workspace's data service |
 | **Account executor** (`mandate-executor` plus a connector) | One per broker account | That account's stream (journal §2) | A vault lease for that one connection. Never the platform's OAuth client secret | Postgres; vault (its one connection's lease, and while `connecting` one write: the broker account id into the personal-data vault under the pending connection's path); that connection's broker hosts only. A paper connection's executor reaches paper hosts only: no executor's egress contains a live host ([DEC-821](../project/decisions/DEC-821.md) item 4) | Reads the workspace's data service |
 | **Token-exchange process** (paper Alpaca OAuth only, [DEC-821](../project/decisions/DEC-821.md) item 2) | One per code exchange, started by the connection manager for one `connecting` connection; it stops when the exchange ends | Nothing: no journal stream, no writer epoch | The single-use grant on the platform's OAuth client secret; while it runs, the code, the PKCE verifier, and the token it receives, as `secrecy` values. No order client, no connector, and no token lease | Vault (redeem the grant; read once the code and verifier under the pending connection's path; write the token there and delete the code). One network destination: `api.alpaca.markets` on 443, for the one call `POST /oauth/token` that its dedicated client can make. Residual, disclosed: allow lists work on addresses, not paths, so at the network level it can reach the whole live API; the client type is the only barrier in this process ([DEC-821](../project/decisions/DEC-821.md) item 4; [connections spec](../specs/connections.md) §5.2) | None |
+| **Workspace API server** (`mandate-api-server`, [workspace API spec](../specs/workspace-api.md) §3.11, [DEC-978](../project/decisions/DEC-978.md)) | One replica per workspace deployment, until sessions live in Postgres | The control stream: owner commands and approval answers, exactly as the CLI writes them | Its session signing key, made in its pod's memory at each start; the subject links, a read-only file at `/etc/mandate/subject-links` (DEC-1023) | Postgres; the identity provider's published key set. It listens on its pod's loopback only, until the cell's tunnel routes to it | None |
 | **Scheduler** | One per workspace | The scheduler stream (`clock:`) | Nothing secret | Postgres; time sources | None |
 | **Workspace control services** (Phase 1: the founder's CLI) | One set per workspace deployment | The control stream | Session keys for the identity provider; an OAuth authorization code only in transit, during the callback ([connections spec](../specs/connections.md) §5.2). Never the client secret or a token | Postgres; identity provider; users; vault, with these named capabilities and no read: write and delete under pending connections' credential paths (not the personal-data vault, whose entries end only by the retention erasure of journal §6.4); issue and revoke of the token-exchange process's single-use client-secret grant; and the keyed fingerprint computation, which returns only the result ([connections spec](../specs/connections.md) §3.1, §5.2 steps 3, 5, and 6) | None |
 | **Model gateway** ([inference spec](../specs/inference.md)) | One per workspace deployment, replicated; exactly one replica holds the meter writer role per workspace (inference spec §3.6; see below) | Each workspace's meter stream, `meter:{workspace_id}` (proposed, E15-8), by the holder only. The call record itself, `ModelInvocationRecorded`, is appended by the caller | Provider keys | Postgres; vault; the meter holder (other replicas); allowed model providers only | None |
@@ -249,11 +250,30 @@ to the journal.
 |---|---|---|
 | **Liveness** | The process loop has handled an input or a heartbeat within its bound | The orchestrator restarts it |
 | **Readiness** | The process holds its writer epoch, has replayed its stream to the head, and its last reconciliation passed (executor) or its mode is known (runtime) | It is not ready: it takes no new openings, and the deployment manager reports the agent as `Recovering`. A runtime that is not ready still forwards kill-switch commands; an executor that is not ready still runs risk exits and protective re-placement once its own replay is done |
-| **Start-up checks** | Signed build (OPS-15), environment matches the stream (ES-23), Postgres durability settings (OPS-2), object lock mode (journal §6.2, hybrid and on-prem), clock offset (journal §5.4) | The process refuses to start trading and alerts |
+| **Start-up checks** | Signed build (OPS-15), environment matches the stream (ES-23), Postgres durability settings (OPS-2), object lock mode (journal §6.2, hybrid and on-prem), clock offset (journal §5.4) | The process refuses to start trading and alerts. For the clock offset, the scheduler measures and journals it and keeps ticking, and an executor takes no new opening while the workspace's last measurement is out of tolerance, older than 15 minutes, or before the first; risk exits, protective orders, and the kill switch are never held by it (journal §9.20, DEC-1010) |
 
 Restart policy: always restart, with exponential back-off. After a crash loop (Proposed: five
 restarts in ten minutes), the deployment manager leaves the agent `Paused` and alerts; it does not
 keep restarting a process that crashes during recovery (HLD lifecycle: `Recovering` → `Paused`).
+The deployment manager starts every process itself (the orchestrator never restarts one), and
+journals each start, stop and crash loop on the control stream before acting (journal spec §9.21,
+[DEC-1170](../project/decisions/DEC-1170.md)): a restart is a `ProcessStartIssued` with `cause`
+`restart`, which the bound counts, and the pause is `ProcessCrashLooped`. A kill switch never
+makes it stop a process, and a process the switch covers that is down is started at once.
+In the cell it is its own process, `mandate-deployd` ([DEC-1172](../project/decisions/DEC-1172.md)),
+the one pod with a service-account token. Its namespaced Role creates, reads, lists and deletes
+pods and nothing else, only its pod may reach the API server, and its egress gate proves its policy
+by probing a destination that policy denies. Creating pods is itself powerful, so a
+ValidatingAdmissionPolicy, matched to the manager's ServiceAccount alone and failing closed, admits
+only pods shaped like the chart's templates: no service-account token and no account but
+`default`; nothing of the host; every container unprivileged with no privilege escalation; only the
+templates' images; only memory and the templates' Secrets (the started processes' roles and the
+journal's CA), and no Secret through the environment; the manager's, a templated process's and the
+workspace's labels; and exactly that process's egress labels. What it does not check (command,
+resources, placement, pod-level user and capabilities) remains a pod running a template's image with
+that process's role. The runtime's and executor's pods are the chart's
+templates, which it reads; each gets its identity as `MANDATE_WORKSPACE`, `MANDATE_PROCESS`,
+`MANDATE_SUBJECT` and `MANDATE_GENERATION`, as §3.5 says a process starts.
 
 **At most one writer is the fence's job.** The orchestrator may briefly run two copies of a
 process (a partition, a slow termination, a manual mistake). Safety does not depend on it: a new
@@ -575,10 +595,15 @@ range's `cause` `token_unverifiable`; any `anchor_unstamped` fails the drill (DE
 2. **Build.** A release job builds from a `main` commit with `--locked`: static Linux binaries
    (rustls only, ES-17), container images pinned by digest, and from M6 a reproducible build
    (`SOURCE_DATE_EPOCH`, a double-build diff) with an SBOM and cargo-auditable metadata (ES-14,
-   ES-17).
+   ES-17). Built by `cargo xtask release build` and proved by `release.yml`'s two builds of each
+   `main` commit on two runners ([DEC-972](../project/decisions/DEC-972.md)); the build digest is
+   the binary's SHA-256, as `SHA256SUMS` lists it.
 3. **Sign.** From M11 or the first external install, images and bundles are signed with cosign
    under the founder's hardware key, with build provenance (ES-17). Every process checks its own
-   signature at start (OPS-15) and journals its build digest (`actor.build`).
+   signature at start (OPS-15) and journals its build digest (`actor.build`). The images, the
+   check and the publish job are [DEC-971](../project/decisions/DEC-971.md): CI signs only with
+   an ephemeral test key; outside dev and CI only a compiled-in release key is trusted, and none
+   is wired until the founder's hardware key is (item 7).
 4. **Promote.** `main` → staging automatically; staging → production by the founder's approval
    while live money is involved (DEC-79). Production rolls out one cell at a time, starting with a
    canary cell of internal workspaces (Proposed).
@@ -753,8 +778,9 @@ are authoritative; a few come from metrics.
   advisories, licenses, and sources; the founder-owned dependency registry
   (`docs/dependencies.md`); gitleaks per PR and over full history weekly; workflow actions pinned by
   commit SHA with `permissions: {}` and no secrets in PR jobs (ES-12, ES-14).
-- **Supply chain, deferred with triggers:** SBOM, cargo-vet, and cargo-auditable at M6; signing and
-  provenance at M11 (ES-14, ES-17).
+- **Supply chain, deferred with triggers:** cargo-vet at M6; signing and provenance at M11 (ES-14,
+  ES-17). The SBOM and cargo-auditable metadata are in the release build
+  ([DEC-972](../project/decisions/DEC-972.md)).
 - **Host hardening:** distroless images, a read-only root filesystem, no shell in production images,
   and non-root users (ES-17 at M11).
 - **Threat model ([draft v0.1](../security/threat-model.md), E21-10, DEC-439):** per process type and per deployment mode, with the

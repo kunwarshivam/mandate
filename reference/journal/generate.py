@@ -34,13 +34,18 @@ from pathlib import Path
 import account
 import approval
 import audit
+import backtest_records
 import canceled
 import control_plane
+import deployed
+import deployment_manager
 import connections
 import clients
 import cold
 import control
+import gateway
 import holds
+import invalidation
 import membership
 import membership_fold
 import requests
@@ -3833,6 +3838,7 @@ def render(
     requests_section: dict,
     cancel_section: dict,
     control_plane_section: dict,
+    deployment_manager_section: dict,
     broker_profile: dict,
     connections_section: dict,
     request_section: dict,
@@ -3847,6 +3853,10 @@ def render(
     cold_section: dict,
     verification_section: dict,
     rows_section: dict,
+    gateway_section: dict,
+    backtest_section: dict,
+    invalidation_section: dict,
+    deployed_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3864,6 +3874,7 @@ def render(
             "approval_requests": requests_section,
             "approval_cancellations": cancel_section,
             "control_plane": control_plane_section,
+            "deployment_manager": deployment_manager_section,
             "broker_profile": broker_profile,
             "connections": connections_section,
             "connection_requests": request_section,
@@ -3878,6 +3889,10 @@ def render(
             "cold_records": cold_section,
             "verification_runs": verification_section,
             "segment_rows": rows_section,
+            "model_gateway": gateway_section,
+            "backtest_records": backtest_section,
+            "thesis_invalidation": invalidation_section,
+            "agent_deployed": deployed_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3926,6 +3941,7 @@ def main(argv: list[str] | None = None) -> int:
     requests_section = requests.build_section()
     cancel_section = canceled.build_section()
     control_plane_section = control_plane.build_section()
+    deployment_manager_section = deployment_manager.build_section()
     broker_profile = build_broker_profile_section(control_section)
     connections_section = connections.build_section()
     request_section = connections.build_request_section()
@@ -3940,6 +3956,10 @@ def main(argv: list[str] | None = None) -> int:
     cold_section = cold.build_section(v3)
     verification_section = verification.build_section()
     rows_section = segment_rows.build_section(account_section["chain"])
+    gateway_section = gateway.build_section()
+    backtest_section = backtest_records.build_section()
+    invalidation_section = invalidation.build_section()
+    deployed_section = deployed.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3967,6 +3987,16 @@ def main(argv: list[str] | None = None) -> int:
     problems += canceled.run_mutants(cancel_section)
     problems += control_plane.check_section(control_plane_section)
     problems += control_plane.run_mutants(control_plane_section)
+    problems += gateway.check_section(gateway_section)
+    problems += gateway.run_mutants(gateway_section)
+    problems += backtest_records.check_section(backtest_section)
+    problems += backtest_records.run_mutants(backtest_section)
+    problems += deployment_manager.check_section(deployment_manager_section)
+    problems += deployment_manager.run_mutants(deployment_manager_section)
+    problems += invalidation.check_section(invalidation_section)
+    problems += invalidation.run_mutants(invalidation_section)
+    problems += deployed.check_section(deployed_section)
+    problems += deployed.run_mutants(deployed_section)
     problems += check_broker_profile(broker_profile)
     problems += run_broker_profile_mutants(broker_profile)
     problems += connections.check_section(connections_section)
@@ -4015,6 +4045,7 @@ def main(argv: list[str] | None = None) -> int:
         requests_section,
         cancel_section,
         control_plane_section,
+        deployment_manager_section,
         broker_profile,
         connections_section,
         request_section,
@@ -4029,6 +4060,10 @@ def main(argv: list[str] | None = None) -> int:
         cold_section,
         verification_section,
         rows_section,
+        gateway_section,
+        backtest_section,
+        invalidation_section,
+        deployed_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -4044,6 +4079,7 @@ def main(argv: list[str] | None = None) -> int:
         or timeouts.check_section(reread["approval_timeouts"])
         or canceled.check_section(reread["approval_cancellations"])
         or control_plane.check_section(reread["control_plane"])
+        or deployment_manager.check_section(reread["deployment_manager"])
         or requests.check_section(reread["approval_requests"])
         or check_broker_profile(reread["broker_profile"])
         or connections.check_section(reread["connections"])
@@ -4059,6 +4095,10 @@ def main(argv: list[str] | None = None) -> int:
         or cold.check_section(reread["cold_records"], v3)
         or verification.check_section(reread["verification_runs"])
         or segment_rows.check_section(reread["segment_rows"])
+        or gateway.check_section(reread["model_gateway"])
+        or backtest_records.check_section(reread["backtest_records"])
+        or invalidation.check_section(reread["thesis_invalidation"])
+        or deployed.check_section(reread["agent_deployed"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -4117,6 +4157,26 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(control_plane_section['invalid_drafts'])} invalid and {len(control_plane_section['valid_drafts'])} valid "
         f"control-plane drafts, {len(control_plane.VALIDATOR_MUTANTS)} validator and "
         f"{len(control_plane.vector_mutants(control_plane_section))} vector mutants caught; "
+        f"{len(gateway_section['invalid_drafts'])} invalid and {len(gateway_section['valid_drafts'])} valid "
+        f"model-gateway drafts, {len(gateway_section['agent_streams'])} agent and {len(gateway_section['streams'])} meter streams, "
+        f"{len(gateway_section['folds'])} spend folds, {gateway_section['fuzz']['runs']} fuzzed meter streams, "
+        f"{len(gateway.VALIDATOR_MUTANTS)} validator and {len(gateway.vector_mutants(gateway_section))} vector mutants caught; "
+        f"{len(backtest_section['invalid_drafts'])} invalid and {len(backtest_section['valid_drafts'])} valid "
+        f"backtest and evaluation drafts, {len(backtest_records.VALIDATOR_MUTANTS)} validator and "
+        f"{len(backtest_records.vector_mutants(backtest_section))} vector mutants caught; "
+        f"{len(deployment_manager_section['invalid_drafts'])} invalid and "
+        f"{len(deployment_manager_section['valid_drafts'])} valid deployment-manager drafts, "
+        f"{len(deployment_manager.VALIDATOR_MUTANTS)} validator and "
+        f"{len(deployment_manager.vector_mutants(deployment_manager_section))} vector mutants caught; "
+        f"{len(invalidation_section['invalid_drafts'])} invalid and {len(invalidation_section['valid_drafts'])} valid "
+        f"thesis-invalidation drafts, {len(invalidation_section['batches'])} rule-186 batches and "
+        f"{len(invalidation_section['streams'])} rule-187 streams, {len(invalidation.VALIDATOR_MUTANTS)} validator and "
+        f"{len(invalidation.vector_mutants(invalidation_section))} vector mutants caught; "
+        f"{len(deployed_section['invalid_drafts'])} invalid and {len(deployed_section['valid_drafts'])} valid "
+        f"agent-deployed drafts, {len(deployed_section['mappings'])} rule-200 mappings, "
+        f"{len(deployed_section['streams'])} rule-201 streams with their processes and "
+        f"{len(deployed_section['ranges'])} ranges, {len(deployed.VALIDATOR_MUTANTS)} validator and "
+        f"{len(deployed.vector_mutants(deployed_section))} vector mutants caught; "
         f"{len(broker_profile['invalid_drafts'])} invalid broker-profile registrations and "
         f"{len(broker_profile['invalid_artifacts'])} invalid profiles, 2 validator and 3 vector mutants caught; "
         f"{len(connections_section['drafts'])} connection drafts, {len(connections_section['invalid_drafts'])} invalid and "

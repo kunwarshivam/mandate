@@ -22,7 +22,9 @@ export function healthItems(ws: Workspace, now: string): Item[] {
     return [{ key: "loading", state: "loading", text: "Connecting to your deployment…" }];
   }
   const md: Item =
-    h.market_data.state === "ok"
+    h.market_data.as_of === null
+      ? { key: "market", state: "stale", text: "Market data not reported" }
+      : h.market_data.state === "ok"
       ? { key: "market", state: "ok", text: `Market data as of ${clock(h.market_data.as_of)}` }
       : {
           key: "market",
@@ -33,18 +35,29 @@ export function healthItems(ws: Workspace, now: string): Item[] {
             </>
           ),
         };
+  const deploymentAt = h.deployment.as_of;
   const deployment: Item =
-    h.deployment.state === "ok"
-      ? { key: "deployment", state: "ok", text: `Deployment answered at ${clock(h.deployment.as_of)}` }
-      : { key: "deployment", state: "down", text: `Deployment unreachable since ${clock(h.deployment.as_of)}; agent data hidden` };
+    deploymentAt === null
+      ? h.deployment.state === "down"
+        ? { key: "deployment", state: "down", text: "Deployment unreachable; agent data hidden" }
+        : { key: "deployment", state: "stale", text: "Deployment health not reported" }
+      : h.deployment.state === "ok"
+        ? { key: "deployment", state: "ok", text: `Deployment answered at ${clock(deploymentAt)}` }
+        : { key: "deployment", state: "down", text: `Deployment unreachable since ${clock(deploymentAt)}; agent data hidden` };
+  const brokerAt = h.broker.as_of;
   const broker: Item =
-    h.broker.state === "ok"
-      ? { key: "broker", state: "ok", text: `Broker as of ${clock(h.broker.as_of)}` }
-      : { key: "broker", state: h.broker.state, text: `Broker last seen ${clock(h.broker.as_of)}` };
+    brokerAt === null
+      ? { key: "broker", state: "stale", text: "Broker not reported" }
+      : h.broker.state === "ok"
+        ? { key: "broker", state: "ok", text: `Broker as of ${clock(brokerAt)}` }
+        : { key: "broker", state: h.broker.state, text: `Broker last seen ${clock(brokerAt)}` };
+  const relayAt = h.relay.as_of;
   const relay: Item =
-    h.relay.state === "ok"
-      ? { key: "relay", state: "ok", text: `Push relay as of ${clock(h.relay.as_of)}` }
-      : { key: "relay", state: h.relay.state, text: "Push relay down: no notifications; this screen still updates" };
+    relayAt === null
+      ? { key: "relay", state: "stale", text: "Push relay not reported" }
+      : h.relay.state === "ok"
+        ? { key: "relay", state: "ok", text: `Push relay as of ${clock(relayAt)}` }
+        : { key: "relay", state: h.relay.state, text: "Push relay down: no notifications; this screen still updates" };
   return [md, deployment, broker, relay];
 }
 

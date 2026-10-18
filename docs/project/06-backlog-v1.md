@@ -30,7 +30,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E15 Signal models: LLM and fast models, scorecards | M5 (LLM research, scorecards); Phase 3 (fast models) | 6.3, 6.5 | Must (E15-1, E15-3, E15-6 to E15-10); Should |
 | E16 Kraken Derivatives US connector | Phase 3 | 6.2 (FR-2.5) | Should |
 | E17 Research agent and dynamic universe | M5 | 6.3 (FR-3.9), 6.5 | Must |
-| E19 Agent harness | M5 (construction, the research loop, the bench); before live trading (E19-8) | 6.3 (FR-3.9), 6.5 (FR-5.1) | Must (E19-1 to E19-6, E19-8, E19-10); Should |
+| E19 Agent harness | M5 (construction, the research loop, the bench); before live trading (E19-8) | 6.3 (FR-3.9), 6.5 (FR-5.1) | Must (E19-1 to E19-6, E19-8, E19-10, E19-13); Should |
 
 ## Stories
 
@@ -113,6 +113,25 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `xtask/src`, as a shard within DEC-464's ten-minute budget, and fails on any missed mutant; the
   mutants of `xtask` code that predates the job are either caught or listed, each with its reason,
   in a follow-up story, so the job starts green.
+- **E1-8 (Should)** As an engineer, I want parallel PRs not to collide on DEC numbers or on shared
+  lists, so that about twenty lanes can land at once without a merge conflict or an extra CI cycle
+  each ([DEC-2600](decisions/DEC-2600.md), claim #1494).
+  *Accepted when:* DEC numbers come from per-category ranges of 100 from DEC-2000; a check run by
+  both CI paths refuses two decision files with one number; the registry's cargo "Used by" lists
+  are derived from `cargo metadata`; CODEOWNERS' crate lines are checked sorted; and no check is
+  weaker.
+- **E1-9 (Must)** As a builder sharing GitHub's free runners with sixteen others, I want each
+  PR's CI scoped to what its diff can break, so that finished PRs stop waiting 30 to 60 minutes in
+  the queue without any gate weakening (the founder's "Gate by risk", 2026-10-17; DEC-1190).
+  *Accepted when:* `cargo xtask ci select` computes the changed crates, the crates naming a
+  changed path in their sources, and every reverse dependent of those; tests, doctests, pending
+  tests and the rehearsal and Postgres runs cover that set; `fast-python`, `fast-portable`,
+  `fast-rh-sim-live`, `full-checks` and `schema-mutants` start only when their inputs change;
+  build inputs, CI, xtask, any manifest and unknown paths select everything; mutants on the diff
+  are unchanged; `fast` and `full` stay required and accept a skip only where the selection
+  asked for one; the nightly runs everything on main and opens an opaque issue on failure; and
+  tests cover the selector, its reverse-dependent property, and a seeded break caught through a
+  dependency. Claim #1481.
 
 ### E2 Market data
 
@@ -248,6 +267,39 @@ the spec invariants (DP-n) its tests cover.
   (merged), then the implementation PR, which replaces the stub's body, adds the call, retires the
   stub's `SimError::Unimplemented`, deletes only the pending tests' `#[ignore]` lines, and adds one
   assertion each on the reason code and the message ([DEC-386](decisions/DEC-386.md)).
+- **E4-4 (Must, M5; SC)** As an owner, I want to backtest my mandate version through the same
+  decision path my agent runs, so that the report shows what this version would have done, not
+  what a baseline strategy did ([DEC-1000](decisions/DEC-1000.md); PRD FR-4.1, FR-4.2, FR-4.5).
+  *Accepted when:* the run calls the risk state, the order builder, the gate's dry run, autonomy,
+  and the executor's protection prices, in mandate spec §6.2's order, over historical bars; model
+  outputs and theses are replayed from records and visible only from their receive time; the run
+  has no model port; an ASK resolves as a timeout (`skip`, no order); a record before its data, an
+  unpinned output, a record for another instrument, and a corporate action in range each refuse
+  the run by a named code; property tests with independent oracles show the report is a pure
+  function of its inputs (byte-identical) and that no fill lies outside its bar, each oracle shown
+  to fail on a seeded bug; zero missed mutants. *Slice 2:* corporate actions through the
+  accounting fold, several instruments at once, and one shared mapping from a mandate document to
+  the gate's mandate for the backtest and the shell.
+- **E4-5 (Must, M5)** As an owner, I want my backtest report kept as a record with a stable shape,
+  so that the go-live screen and the web app show exactly the report that was produced
+  ([DEC-1001](decisions/DEC-1001.md)). *Accepted when:* the report is canonical JSON at
+  `report_version` 2 with the members DEC-1001 item 2 lists and validates against
+  `schemas/workspace-api/read-models/backtest.schema.json`; `BacktestRunRecorded` (journal spec
+  §9.18) is registered in `mandate-journal` with vectors for rules 143 and 144; `GET
+  /backtests/{id}` serves `read-models/backtest` in the workspace that ran it only; disclosures
+  stay DEC-1003's placeholder names.
+  *Registration landed* (claim [#1463](https://github.com/kunwarshivam/mandate/issues/1463), lane
+  I4): `mandate-journal` registers `BacktestRunRecorded` (`src/backtest_records.rs`) with rules 143
+  and 144, `rule` and `man` required, written by a `user` or `system` actor only
+  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors. *The
+  run's append landed* ([DEC-1144](decisions/DEC-1144.md)): `mandate-backtest-runner run` runs a
+  version over JSON inputs and stores the report, its input objects and the payload as artifacts,
+  and `mandate backtest record` re-checks them and journals the record as the `backtest_runner`
+  system. *Route ([DEC-1143](decisions/DEC-1143.md)):* `mandate-api-server` serves `GET
+  /backtests/{id}` from the control stream's one `BacktestRunRecorded` naming the id, under the view
+  row; a completed run's report comes from the store, digest-checked, and one the store lacks or
+  that fails its check is `journal_unavailable`, as is a duplicate id; `running` is not served until
+  `POST /backtests` journals a run in flight. `POST /backtests` and the local cell's Job remain.
 
 ### E5 Journal
 
@@ -1467,6 +1519,19 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   a kill switch without step-up is recorded and stops (DEC-158 (c)); go-live returns
   `live_unavailable`; status moves `recorded` → `taken` → `applied` or `refused` from the owning
   streams' events only.
+  **Specified for the server (lane A2, [DEC-2101](decisions/DEC-2101.md), [DEC-2102](decisions/DEC-2102.md)):**
+  versions from a document, a new mandate's confirmation screen and confirm, deploy, go-live,
+  resume, Stop, owner exit, acknowledgment, and command status (workspace API spec §3.11 items 11
+  and 12), with step-up through a port that refuses until E9-4 binds it. **Still owed:** drafts,
+  compile, validate, diffs, and an agent's later versions (with `MandateConfirmed` version 2,
+  E10-15); the confirmation screen's worst-case figures, unasked dollars, and provenance badges;
+  `DeploymentRejected`; the acknowledgment route, until `mandate-journal` registers
+  `OwnerAcknowledged` on the control stream (DEC-2102 item 7); when E9-4 binds the step-up port,
+  an owner command's append made conditional on the `control_head` its evidence names (DEC-279
+  item 1's digest binds the head read before step-up is judged, and the append does not yet check
+  it); the hold and its lift (after the runtime folds them, DEC-1007 item 1); and
+  the deploy request's schema with its `mandate-api` type, which must land together (DEC-2101
+  item 6).
 - **E10-13 (Must, M8, with the connections spec; SC)** As a workspace admin, I want to connect and
   revoke broker accounts through the API without any credential ever coming back (spec §4.5).
   *Accepted when:* responses match a schema with no secret-shaped member and canary-secret scans of
@@ -2091,6 +2156,20 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   gives index 0 a real figure or removes it. *Done* on `agent/j3-e17-8-basket-nit`: the oracle
   now takes the expected excess from a closed match on the basket's size (`0.2` for one member,
   `0.15` for two). Any other size fails the case rather than defaulting a figure.
+  *Harness ([DEC-1002](decisions/DEC-1002.md), claim
+  [#1463](https://github.com/kunwarshivam/mandate/issues/1463)):* the harness reads the internal
+  paper workspaces' `ThesisProposed` and `ThesisRevised` records, checks each with
+  `check_thesis_record`, scores every closed thesis (admitted or not) by `score::evaluate`, one
+  scorecard per research-agent `(model_id, model_version, content_hash)` (E15-3), costs each
+  thesis against itself, and writes the report artifact and `EvaluationRunRecorded` (journal spec
+  §9.18, rule 145). `GET /evaluations/{id}` serves it in an internal paper workspace only.
+  *Registration landed* (lane I4): `mandate-journal` registers `EvaluationRunRecorded` with rule
+  145, `rule` required, written by a `user` or `system` actor only
+  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors.
+  *Route ([DEC-1143](decisions/DEC-1143.md)):* `mandate-api-server` serves it only with
+  `MANDATE_API_INTERNAL_PAPER_WORKSPACE=true`, which start refuses unless the hosted control stream
+  is paper throughout; otherwise every evaluation id is the 404 an absent one gets. The harness
+  remains.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -2236,6 +2315,76 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   - a burst of events never starts more runs than the caps allow, tested over random event
     sequences;
   - a run still produces opinions only (rule 4) and never sizes or places an order.
+- **E19-13 (Must, M5, before the 2026-10-26 demo runs the loop; SC; spec first)** As the founder, I
+  want the research run to be a bounded agent loop, "like Claude Code for trading", so that the
+  product is an agent harness for trading ([ADR-0005](../adr/0005-agentic-harness.md),
+  [DEC-2203](decisions/DEC-2203.md); agent harness spec v0.2 §6.9 to §6.13, inference spec v0.4,
+  journal spec v0.50 §9.23; claim [#1534](https://github.com/kunwarshivam/mandate/issues/1534)).
+  *Accepted when:*
+  - `mandate-gateway` takes `turns`, the run's menu as `tools`, and `spend_ceiling_usd`, sends only
+    the pinned declarations, keeps every `single_call` hash and request digest unchanged, pins the
+    reasoning mode and effort and `top_p`, keeps the stable prompt order, and returns a final output
+    or validated tool calls, refusing anything else `schema_invalid`, with the reported identity read
+    before any tool call is parsed (INF-5's new test; lane I1's slice 2);
+  - `mandate-research-run` holds the loop's state as a pure fold of the run's records, the declared
+    read and think tools over read-only ports with §6.10's scope, item keys, and caps, the menus per
+    run kind, and §6.11's bounds, each ending the run except result size;
+  - the `final_output` path runs end to end: the runtime core (lane I2's E19-3 side) judges the final
+    output once, as a single call's; `action_tools` (`propose_thesis`, `invalidate` with verdict
+    feedback, theses committed only at a normal end, DEC-2203 item 25) follows in its own slice;
+  - `mandate-journal` registers the five §9.23 records with a draft for every rule 171 to 183;
+  - HI-1, HI-2, HI-3, HI-4, HI-8, HI-9, HI-10, HI-11, HI-22, HI-23, HI-24, HI-25 (its action half once `action_tools` is declared), and HI-28 hold as
+    property tests with independent oracles, each shown to catch a seeded bug, against an adaptive
+    compromised model at pass^k and random crashes, and INF-7's fuzz covers the run ceiling; HI-26
+    and HI-27 hold vacuously until §15's owner runs and `ask_owner` land, and get their tests then;
+  - E19-6's adversarial bench and a §8.3 regression evaluation on recorded-fake scenarios are built
+    inside this story's loop slice and pass on the agentic entry by about 10/24, so the demo agents
+    may pin it;
+  - recorded multi-turn fixtures run the loop in CI and the demo with no network (HI-3);
+  - no agent pins an agentic entry before E19-6's bench and a §8.3 regression evaluation pass on it
+    (DEC-2203 item 13).
+- **E19-14 (Should; SC; spec first)** As an owner, I want the agentic loop's follow-ups
+  ([DEC-2203](decisions/DEC-2203.md) items 12, 14, 15, 17, 20). *Accepted when:* `propose_exit` has
+  its structured record with the instrument, a fourth `DecisionMade.exit_origin` (journal spec §9.1,
+  rule 8), mandate spec §8.3's builder branch for a stored request (the whole position less working
+  exits, working openings cancelled first, the same collar), and trading-domain spec §9.1's origin,
+  so an `action_tools` entry may declare it; `ask_owner` has its
+  journaled question and answer records and its delivery (in-app, with an email ping of generic text
+  only), so an entry may declare it; `propose_mandate_change` has its record and its draft path to the
+  owner (always ASK, the diff with its classification, step-up, expiry, rate limit; a `monitor` run
+  only risk-reducing changes); event triggers and a monitoring interval exist as envelope fields with
+  their debounce and rate limit (mandate spec change); the longer strategy brief exists, with the
+  validator's warning where it contradicts the envelope; and a journaled turn start lets a restart
+  resume a run within its deadline without losing a reservation from the ceiling's fold.
+
+- **E19-15 (Should, for the 2026-10-26 demo; SC: tenant isolation, roles; claim
+  [#1536](https://github.com/kunwarshivam/mandate/issues/1536), lane EX)** As an owner, I want to
+  ask my agent at the desk "why did you buy X?", "why did you ask me?", "what are you watching?", or
+  "why was this refused?" and get an answer from my own records, each claim linked to the record it
+  rests on, a plain-language explanation under each approval ask, and a transcript of every desk and explain run, so
+  that I understand what my agent did without reading the journal
+  ([agent harness spec §15](../specs/agent-harness.md#15-owner-and-explain-runs-the-desk),
+  [DEC-2240](decisions/DEC-2240.md); implements E12-5 and DEC-192 as `owner` and `explain` runs).
+  *Depends on:* E19-13 (lane AH): the loop, its run records, and the tool contract, which it reuses
+  and does not duplicate; E15-6 to E15-10 (the gateway); E21-31 (the API server). *Accepted when:*
+  - the owner and explain tool sets are read, `note`, and `answer` only, and every stream after any
+    run holds only that run's records more than before, under a compromised model (EX-1);
+  - cross-tenant and cross-agent reads: a property test over two workspaces and several agents with
+    canaries finds no foreign canary in any tool result, prompt, answer, or record, and identical
+    refusals (`unknown_item` to the model, `not_found` at the API) for foreign and absent refs (EX-2, EX-3), its oracle shown to catch a seeded
+    scope bug; and an API-2 matrix test of the desk, cited-record, transcript, and approval routes;
+  - no answer with an uncited segment, an unread citation, or a fixture advice phrase is shown
+    (EX-4, EX-5); no prompt holds a record's numeric field or a number from the question (EX-6);
+  - every shown answer's `written_after_reading` and every turn's menu are recomputed by an oracle
+    from the run's records (EX-12); every returned field is servable to the reader's row by the cited-record projections workspace API §4.6.1 defines (EX-13);
+  - spend is reserved against the agent's, workspace's, and deployment's configured budgets, never a
+    constant (EX-7); answers are journaled before shown (EX-8); approvals, exits, and kill switches
+    are byte-identical with the explain run absent, stalled, or failing (EX-9);
+  - CI and the demo use recorded fakes only; the disclaimer is the placeholder until DEC-2241, and
+    approval explanations stay behind both `desk.model_answers` and `desk.approval_explanations` until its item 3 is decided.
+  *Slice 2 (planned, spec §15.12):* desk actions become proposal cards built by deterministic code
+  through E19-13's action tools and sent only by the owner's own call with step-up (HI-26, lane SU);
+  its own spec change and DEC first.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 
@@ -2332,6 +2481,9 @@ with the founder (DEC-440 items 13 to 17); no story here buys a service or touch
   all four kinds (license, release manifest, catalog entry, data bundle); `cp-agent` reaches the site
   only through a port it declares and workspace services implement; a test shows `cp-agent` never
   takes a writer epoch, and the kill switch commits with `cp-agent` hung.
+  *Follow-up (DEC-983):* a stateful fuzz of message sequences through `cp-agent` into
+  `mandate-cp-site` that also asserts every effect follows its own record (today's fuzz checks one
+  message at a time and the record types only).
 - **E20-4 (Proposed, M8; SC; mandate spec change first)** As an org owner, I want licenses
   verified on site, with states `valid`, `renewal_due`, `grace`, and `lapsed`, where after grace a
   lapsed license refuses only new deployments and new openings; it never blocks an exit, a
@@ -2438,6 +2590,11 @@ items 13 to 20); no story here buys a service or touches live money.
   reproducible, carry an SBOM, and from M11 are signed with my hardware key and checked at start
   (ES-14, ES-17, OPS-15). *Accepted when:* two builds of one commit are byte-identical; each process
   journals its build digest; and outside dev and CI an unsigned binary refuses to start.
+  *Status:* the reproducible build, its SBOMs, the CI double build and `mandate-release`'s
+  `BuildDigest` land with DEC-972. **After R0:** `crates/mandate-shell/src/envelope.rs` and
+  `crates/mandate-cli/src/control.rs` still name a placeholder `build` (a digest of the crate's
+  name and version); switching both to `BuildDigest::running()` is this row's last slice, blocked
+  on R0 closing (DEC-967 item 2, DEC-972 item 7). Signing and the start-up check are E21-35's.
 - **E21-9 (Proposed, M8; SC)** As an owner, I want my broker credential held in the workspace vault,
   leased only to the executor for my connection, and checked for scope, environment, and account at
   every start, so that no other process can use it (design §5). *Accepted when:* a runtime's
@@ -2631,7 +2788,40 @@ enables `live` (ES-23, OPS-5).
   an agent the control stream does not deploy, and a property test over random event sequences
   with an independent oracle shows it; after the crash-loop bound the agent is left `Paused`, the
   pause is journaled and an opaque alert raised; it holds no broker credential and sends no order;
-  and its own outage stops no running process and no kill switch (OPS-4).
+  and its own outage stops no running process and no kill switch (OPS-4). *Slice 1* ([DEC-1170](decisions/DEC-1170.md)): journal spec v0.48 §9.21's records, the
+  crate's fold, driver, fake and Kubernetes adapter, with the property test. *Slice 2*
+  ([DEC-1172](decisions/DEC-1172.md)): the process crate `mandate-deployd` (loop, exec probes,
+  drain, the Postgres journal port) and the cell's `deploy-manager` process: its image, its
+  ServiceAccount and a Role over pods alone, bounded by a ValidatingAdmissionPolicy to pods shaped
+  like its templates, its `kube-api` egress and an egress gate that probes a denied destination, the
+  runtime's and executor's pod templates, which mount no service-account token, and the
+  `mandate.dev/subject-key` label. *Left:* reading the account from `AgentDeployed`
+  version 2 ([DEC-1171](decisions/DEC-1171.md)), until which the process starts nothing for a
+  deployment; the Compose adapter; the restart drill through `cargo xtask cell drill`; the owner's
+  resume lifting a crash-loop pause once the runtime copies the pause (E21-30); alerts through the
+  cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting exited pods; the
+  CLI and the workspace API writing version 2, and the writers' checks of rules 200 and 201 (a
+  writer writes version 2 exactly when rule 201 holds, and version 1 otherwise, as today). From
+  slice 2's review, minors left under the freeze rule:
+  - The manager's egress gate reads any connection failure on port 9153 as filtered, so a dead or
+    restarting resolver fails open; a positive control first (TCP 53 on the same address) would
+    close it.
+  - The gate probes only the first `nameserver` of the pod's `/etc/resolv.conf`.
+  - The chart test of the gate seeds no 9153 allow in the manager's policy.
+  - `PgControl`'s `rows_after` reads the whole control stream on every pass.
+  - `pg.rs` has no competing-writer test for the writer epoch taken for each append.
+  Follow-ups from DEC-1171's review (minors, freeze rule):
+  - m1: the CLI lets a stopped agent's id be deployed again, while §9.21 reads `AgentStopped` as
+    final; decide whether agent ids are reused.
+  - m2: add a vector for a version-1 deployment, a stop, then a version-2 deployment of the same
+    agent; the Rust manager must treat that stop as final (code change).
+  - m3: a manager must not ship into a workspace holding version-1 deployments; say how an existing
+    one is retired or redeployed at version 2.
+  - m4: the `agent_deployed` oracle's case of a revocation after the deployment cannot fail a
+    mutant; and no vector shows an account-stream copy against rule 201.
+  - m5: the §9 catalogue row for `AgentDeployed` does not mention version 2.
+  - m6: `docs/specs/workspace-api.md` (near line 673) and `docs/design/infrastructure.md` (near line
+    277) still describe version 1; the code change updates them.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
@@ -2641,6 +2831,11 @@ enables `live` (ES-23, OPS-5).
   run` with only the journal's role; a local-cell test with the API, the deployment manager, the
   metrics exporter, the model gateway and the control plane all unreachable shows each scope's
   `KillSwitchActivated` in every stream owner; and the runbook RB-03 names the command.
+  *Status:* slice 1 (DEC-2000): `pause` and `kill` in the binary at each scope (`brake.rs`), run as
+  the chart's `control` Job and `docker compose run control`. The `kill-switch` drill commits and
+  verifies each scope's kill switch and a pause with the five processes down. RB-03 is written.
+  **Open:** each stream owner's `KillSwitchActivated` in the cell waits on the runtime and executor
+  running there and on the executor's connection and workspace scopes (E7-4).
 - **E21-35 (Proposed, M8 then M11; SC; lane RL2)** As the founder, I want the cell's images built
   from `main` by digest, signed, and checked at start, so that only a release I can identify runs
   against a broker (design §7.1, OPS-15, ES-17). *Accepted when:* images hold E21-8's static
@@ -2650,6 +2845,11 @@ enables `live` (ES-23, OPS-5).
   does; CI signs with an ephemeral test key, and only the founder's hardware key signs an image for a
   hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
   never from a branch; and a test shows an unsigned and a wrongly signed image both refused.
+  *Status:* the images, the start-up check in `mandate-agentd`, the CI test-key drill and the
+  `main`-only publish to GHCR land with DEC-971; images for amd64 and arm64, each built natively,
+  under one signed multi-arch index, with DEC-1060. **After R0:** the CLI runs the check (with
+  E21-8's last slice). **Founder:** the hardware key's public half in `RELEASE_KEYS` (H8), until
+  which nothing starts outside dev and CI (DEC-971 item 7). Staging promotion waits on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
@@ -2837,6 +3037,48 @@ enables `live` (ES-23, OPS-5).
   then migrated by the command ends with each file applied once; no process applies a migration at
   start, shown by the existing xtask lint; and the chart's migration Job (E21-36), E21-41 and the
   CI cell (E21-37) all run it.
+- **E21-52 (Proposed, M8; SC; lane SI)** As an operator of a `dev` or `ci` cell, I want a local stub
+  token issuer, so that `cargo xtask cell demo` can open an API session without the managed issuer
+  (DEC-2100; the E2E lane's gap 1). *Accepted when:* the tool crate `mandate-stub-issuer`, which no
+  crate may depend on, serves one ES256 key set on loopback and signs access tokens the API server
+  verifies unchanged through `MANDATE_API_ISSUER`, `MANDATE_API_AUDIENCE` and `MANDATE_API_JWKS_URL`;
+  its key is made at each start and never stored; tests show that it refuses to start with
+  `stub_issuer_tier` in every tier but `dev` and `ci`, and with `stub_issuer_bind` for an address
+  that is not a loopback IP literal, port 0, or a port in use, each before any key is made; a test
+  builds it with `--release`, runs it, and sees only `stub_issuer_not_built` and exit 2; xtask's
+  profile check refuses debug assertions in `release` and every profile inheriting it; tests show
+  a wrong `Host` gets 421 and a `POST /token` without `application/json` gets 415; a test signs in
+  through `POST /v1/sessions` with a stub token for a linked subject, and is refused for a subject
+  linked under another issuer; and the E2E lane's `cell demo` runs it in the server's network
+  namespace, started before the server, once E21-53 is on `main`. Lane R1's image build (E21-8)
+  fails when `RUSTFLAGS` or `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` is set (DEC-2100 item 2).
+- **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
+  key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
+  issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
+  reads `MANDATE_DEPLOYMENT_TIER` with `mandate_release::startup::Tier::from_setting` (§3.11 item
+  2), and refuses to start with its `MANDATE_API_JWKS_URL` setting refusal when the URL is `http`
+  and the tier is anything but `dev` or `ci` (no value included), shown by a test for each tier;
+  and it still starts with an `https` URL in every tier.
+- **E21-54 (Proposed, M8, for the 2026-10-26 demo; lane E2E; claim #1528; DEC-2002)** As the
+  founder, I want the demo's whole story run end to end on the local cell by one command, so that
+  every link the demo needs is either proven or named by the PR or story that closes it.
+  *Accepted when:* `cargo xtask cell demo --scenario demo` runs on the local cell, with paper and
+  demo data only and no credential, the six steps in order: (1) the owner signs in to `web/` and
+  sees their workspace through the workspace API; (2) deploys an agent with a confirmed mandate
+  envelope; (3) the research loop reads news and filings and calls the model through
+  mandate-gateway, the recorded fake by default; (4) deterministic code sizes the order, the risk
+  gate and autonomy rules ask, the ask shows in `web/`, the owner approves it, the paper order
+  fills on a fixture broker and the protective stop goes out; (5) a backtest of the same mandate
+  version is shown; (6) the kill switch from `web/` stops the agent. Each gesture whose pieces are
+  on `main` runs in the cell and is checked by what it prints; each missing link is printed as a
+  gap naming its PR or story, never faked, and a test refuses a gap that names neither; the run
+  ends with the workspace's control stream exported and verified by journal spec §11; and a CI
+  job that is not a required check runs the scenario on every change so its ready steps stay
+  green. Slice 1 runs steps 1 and 2 through the CLI and names every other link; later slices
+  replace each gap as its PR lands: E21-52's local-cell token issuer for the API's sign-in, the
+  API's image (A1), its version and deploy routes (A2), the runtime's image (P), the executor (X),
+  the research driver (I2), step-up (SU), the backtest's API read and `web/` screen (I4, W2), the
+  kill switch's CLI (O4) and the deployment manager (D1).
 
 ## Won't (v1)
 
@@ -5202,3 +5444,42 @@ From the Robinhood connector correctness follow-ups ([DEC-956](decisions/DEC-956
   refuses every order of an instrument with no registered ticker, exits included; the live wiring
   that builds `RobinhoodConnector` must pass the run's `(asset_id, symbol)` pairs, with a startup
   check that the pinned instrument has one.
+- **Journal the API's sign-ins (DEC-978 item 10, E9-7).** The workspace API server (E21-31) opens
+  and ends browser sessions without journaling them, because the journal registers neither
+  `SessionOpened` nor `SessionRevoked` (identity spec §12.1). Register both, with test vectors, in
+  a journal spec change, then journal each sign-in and end, with `first_seen_device`, so the
+  new-device notice (ID-14) is sent; workspace API spec §3.11 item 9.
+- **Sessions in Postgres (DEC-978 item 6).** The API holds session records in its process, so it
+  runs as one replica and a restart ends every session. Move them to a Postgres store with the
+  workspace's row-level security before a second replica is deployed.
+- **Read models as projections (DEC-979 item 7).** The API's agent and approval reads fold every
+  deployed agent's stream on each request, which is unbounded. Project them per stream with
+  watermarks, woken by `LISTEN`/`NOTIFY` (workspace API spec §6.1), before an agent's stream grows
+  past what one request can read.
+- **Limit usage in the API's agent read (DEC-1020 item 5).** The drawdown rung, the day-trade
+  count, and headroom are not journaled, so the agent read serves none. Once E6-4 journals
+  `RiskLimitTriggered` and `RiskLimitLifted`, and the gate journals its checks' inputs, add them as
+  members folded from those rows.
+- **Per-agent positions (DEC-1020 item 4).** The API's agent read shows the account's holdings at
+  reconciliation. A per-agent view needs the executor's attribution journaled, or a fold of
+  `FillApplied` joined through `OrderRequestRecorded.agent_id` that matches the executor's
+  accounting.
+- **The runtime folds the owner's hold, then the API serves it (DEC-191, DEC-1007 item 1).**
+  Journal spec §9.11 closes `hold_openings` and `lift_hold`, but the runtime's command fold refuses
+  any command it does not know, so a hold would stop it at that event. Fold both into
+  `AgentModeChanged` version 2 (`held`, rules 93 to 95), with tests, then mount the API's
+  `POST /agents/{id}/hold`.
+- **A roles snapshot on each API session (DEC-1007 item 8, before the demo).** The API refuses
+  pause and the kill switch with `membership_unavailable` when the membership read fails, because its
+  sessions keep no roles snapshot. Take the snapshot at sign-in and at each granted refresh, cleared
+  in the same step as a deactivation, so these calls are authorized from it as API-7 and identity
+  spec §4.5 require.
+- **Bind step-up on the API's owner commands and grants (DEC-1007 items 3 and 10).** The API
+  forwards no step-up, so a kill switch through it never carries the owner-exit privilege and an
+  `approved` is refused. Verify the passkey assertion locally (identity spec §3.3), forward it
+  bound, with `step_up_status: bound`, and serve `approved` after checking the mandate's
+  `approvers` (§5.2).
+- **Journal the API-7 members with no place (DEC-1007 item 4).** `record`, `environment_shown`, and
+  a kill switch's `owner_exit` are kept but not written. Close the remaining `OwnerCommandIssued`
+  commands in a journal spec change with these members, then write them and compare them on a
+  repeat.

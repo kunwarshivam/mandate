@@ -1,0 +1,20 @@
+[package]
+name = "mandate-cp-site"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Workspace control services' side of the control-plane link: judge each verified instruction against the journaled sequence, journal its §9.17 record, then apply it (control-plane design CP-5, CP-9; backlog E20-3)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-cp-agent.workspace = true
+mandate-time.workspace = true
+
+[dev-dependencies]
+mandate-journal.workspace = true
+proptest.workspace = true
+ring.workspace = true

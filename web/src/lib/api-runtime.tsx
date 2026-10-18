@@ -1,9 +1,12 @@
 "use client";
 
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
 import { prepareApprovalResponse, prepareOwnerCommand } from "@/api/commands";
-import { emptyWorkspace, loadWorkspace } from "@/api/reads";
+import { type ApiView, loadApi } from "@/api/read-models";
+import { emptyWorkspace } from "@/api/reads";
+import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, PreparedCommand } from "@/api/types";
 import type { Iso, Workspace } from "@/fixtures/types";
 import type { ApiSource } from "./data-source";
@@ -14,10 +17,10 @@ import {
   type Command,
   type CommandKind,
   type CommandRecord,
-  type Deployment,
   type MandateChangeRequest,
   type Runtime,
   RuntimeContext,
+  type SetUp,
 } from "./mock-runtime";
 
 /** How many times an unanswered command is sent again, with the same key and body (API-4), before it is called unknown. */
@@ -45,6 +48,8 @@ export function ApiRuntimeProvider({
   refreshMs = 5000,
   statusPollMs = 1000,
   retryMs = 1000,
+  session,
+  keepAliveMs = REFRESH_EVERY_MS,
 }: {
   source: Pick<ApiSource, "origin" | "workspaceId">;
   children: ReactNode;
@@ -52,23 +57,31 @@ export function ApiRuntimeProvider({
   refreshMs?: number;
   statusPollMs?: number;
   retryMs?: number;
+  /** The API session (§3.11 items 5 and 6); none in the e2e build, whose mock API reads no cookie. */
+  session?: SessionKeeper;
+  keepAliveMs?: number;
 }) {
-  const client = useMemo(
-    () => createWorkspaceClient({ workspaceId: source.workspaceId, baseUrl: source.origin, fetch: fetch ?? ((input, init) => window.fetch(input, init)) }),
-    [source.workspaceId, source.origin, fetch],
-  );
+  /** Reads wait while a refresh rotates the cookie; commands never wait (API-7). */
+  const client = useMemo(() => {
+    const send: Fetch = fetch ?? ((input, init) => window.fetch(input, init));
+    const guarded: Fetch = (input, init) => ((init.method ?? "GET") === "GET" && session ? session.guard(() => send(input, init)) : send(input, init));
+    return createWorkspaceClient({ workspaceId: source.workspaceId, baseUrl: source.origin, fetch: guarded });
+  }, [source.workspaceId, source.origin, fetch, session]);
+  /** Whether an API session is open; with no keeper the API's own cookie is the caller's business. */
+  const signedIn = useRef<SessionState | null>(session ? null : "open");
   const [ws, setWs] = useState<Workspace>(() => emptyWorkspace("loading", new Date().toISOString()));
   const [now, setNow] = useState<Iso>(ws.now);
   const [commands, setCommands] = useState<Command[]>([]);
   const [responses, setResponses] = useState<Record<string, ApprovalResponse>>({});
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [mandateChanges, setMandateChanges] = useState<MandateChangeRequest[]>([]);
   const wsRef = useRef(ws);
   /**
    * The last workspace the reads gave. Commands are prepared from it while the reads fail, so pause-all
    * still reaches every agent last seen and stop-all its connection (API-8, rule 13); nothing is shown from it.
    */
-  const lastRead = useRef<Workspace | null>(null);
+  const lastRead = useRef<{ ws: Workspace; view: ApiView } | null>(null);
+  /** The read models as last served; `null` whenever the screens must show none (loading, unreachable, signed out). */
+  const [view, setView] = useState<ApiView | null>(null);
   /** Each refresh's number: an answer to an older one never overwrites a newer one. */
   const reads = useRef(0);
   const nowRef = useRef(now);
@@ -77,14 +90,43 @@ export function ApiRuntimeProvider({
   const counter = useRef(0);
   const mounted = useRef(true);
 
+  /** Opens the API session; a workspace that cannot be read for want of one says so and shows nothing. */
+  const opening = useRef<Promise<boolean> | null>(null);
+  const openSession = useCallback((): Promise<boolean> => {
+    if (!session) return Promise.resolve(true);
+    opening.current ??= session
+      .open()
+      .then((state) => {
+        signedIn.current = state;
+        return state === "open";
+      })
+      .finally(() => {
+        opening.current = null;
+      });
+    return opening.current;
+  }, [session]);
+
   const refresh = useCallback(async () => {
     reads.current += 1;
     const read = reads.current;
-    const loaded = await loadWorkspace(client);
+    if (signedIn.current !== "open" && signedIn.current !== "outage") await openSession();
+    if (signedIn.current !== "open" && signedIn.current !== "outage") {
+      if (!mounted.current || read !== reads.current) return;
+      wsRef.current = emptyWorkspace(signedIn.current === "unreachable" ? "unreachable" : "signed_out", nowRef.current);
+      setWs(wsRef.current);
+      setView(null);
+      return;
+    }
+    let loaded = await loadApi(client);
+    if (!loaded.ok && loaded.error.code === "unauthenticated" && session && (await openSession())) loaded = await loadApi(client);
     if (!mounted.current || read !== reads.current) return;
-    if (loaded.ok) {
+    if (!loaded.ok && loaded.error.code === "unauthenticated" && session) {
+      wsRef.current = emptyWorkspace("signed_out", nowRef.current);
+    } else if (!loaded.ok && loaded.error.code === "membership_unavailable") {
+      wsRef.current = { ...emptyWorkspace("membership_unavailable", nowRef.current), environment: lastRead.current?.ws.environment ?? "unknown" };
+    } else if (loaded.ok) {
       served.current = { at: loaded.ws.now, local: Date.now() };
-      lastRead.current = loaded.ws;
+      lastRead.current = { ws: loaded.ws, view: loaded.view };
       wsRef.current = loaded.ws;
     } else {
       const last = wsRef.current;
@@ -92,12 +134,19 @@ export function ApiRuntimeProvider({
       wsRef.current = last.status === "ready" ? { ...down, environment: last.environment, health: { ...last.health, deployment: { state: "down", as_of: last.health.deployment.as_of } } } : down;
     }
     setWs(wsRef.current);
-  }, [client]);
+    setView(loaded.ok && wsRef.current === loaded.ws ? loaded.view : null);
+  }, [client, openSession, session]);
 
   useEffect(() => {
     mounted.current = true;
     void refresh();
     const poll = window.setInterval(() => void refresh(), refreshMs);
+    const keep = session
+      ? window.setInterval(() => {
+          if (signedIn.current === "open" || signedIn.current === "outage" || signedIn.current === "unreachable")
+            void session.refresh().then((state) => (signedIn.current = state === "unreachable" && signedIn.current !== "unreachable" ? signedIn.current : state));
+        }, keepAliveMs)
+      : null;
     const clock = window.setInterval(() => {
       const base = served.current;
       const next = base ? later(Date.now() - base.local, base.at) : new Date().toISOString();
@@ -107,9 +156,10 @@ export function ApiRuntimeProvider({
     return () => {
       mounted.current = false;
       window.clearInterval(poll);
+      if (keep !== null) window.clearInterval(keep);
       window.clearInterval(clock);
     };
-  }, [refresh, refreshMs]);
+  }, [refresh, refreshMs, session, keepAliveMs]);
 
   /** Sends one prepared gesture until the API answers, with the same key and body each time (API-4, API-13). */
   const deliver = useCallback(
@@ -153,7 +203,11 @@ export function ApiRuntimeProvider({
       const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}) };
       const update = (patch: Partial<Command>) => setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, ...patch } : c)));
       setCommands((list) => [...list, command]);
-      const prepared = prepareOwnerCommand(client, wsRef.current.status === "ready" ? wsRef.current : (lastRead.current ?? wsRef.current), kind, agentId, record);
+      const last = lastRead.current;
+      const scope = last
+        ? { agents: last.view.agents, connectionId: last.ws.connection.connection_id, environment: last.ws.environment }
+        : { agents: [], connectionId: "", environment: wsRef.current.environment };
+      const prepared = prepareOwnerCommand(client, scope, kind, agentId, record);
       void (async () => {
         if (!prepared.ok) return update({ phase: "undelivered" });
         const delivered = await Promise.all(prepared.commands.map(deliver));
@@ -178,7 +232,7 @@ export function ApiRuntimeProvider({
       const entry: ApprovalResponse = { approvalId, response, phase: "sent", sentAt: nowRef.current, record };
       const update = (patch: Partial<ApprovalResponse>) => setResponses((map) => ({ ...map, [approvalId]: { ...entry, ...map[approvalId], ...patch } }));
       setResponses((map) => ({ ...map, [approvalId]: entry }));
-      const approval = wsRef.current.approvals.find((a) => a.approval_id === approvalId);
+      const approval = lastRead.current?.view.approvals.find((a) => a.approval_id === approvalId);
       const prepared = approval ? prepareApprovalResponse(client, approval, response, record) : ({ ok: false, reason: "not_found" } as const);
       void (async () => {
         if (!prepared.ok) return update({ phase: "undelivered", reason: prepared.reason });
@@ -198,15 +252,7 @@ export function ApiRuntimeProvider({
     [client, deliver, follow],
   );
 
-  /** Set-up and mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
-  const deploy = useCallback<Runtime["deploy"]>((request, record) => {
-    counter.current += 1;
-    const deployment: Deployment = { id: `dep-${counter.current}`, phase: "sent", sentAt: nowRef.current, agentId: "", version: mandateVersion(request.mandate), record };
-    setDeployments((list) => [...list, deployment]);
-    window.setTimeout(() => setDeployments((list) => list.map((d) => (d.id === deployment.id ? { ...d, phase: "undelivered", reason: "not_sent" } : d))), 0);
-    return deployment;
-  }, []);
-
+  /** Mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
   const changeMandate = useCallback<Runtime["changeMandate"]>((proposal, origin, record) => {
     counter.current += 1;
     const request: MandateChangeRequest = { id: `chg-${counter.current}`, agentId: proposal.agentId, version: proposal.version, number: proposal.number, phase: "sent", sentAt: nowRef.current, origin, record };
@@ -215,9 +261,70 @@ export function ApiRuntimeProvider({
     return request;
   }, []);
 
+  const [setUps, setSetUps] = useState<SetUp[]>([]);
+  const setUpsRef = useRef<SetUp[]>([]);
+  const patchSetUp = useCallback((id: string, patch: (s: SetUp) => SetUp) => {
+    setUpsRef.current = setUpsRef.current.map((s) => (s.id === id ? patch(s) : s));
+    setSetUps(setUpsRef.current);
+  }, []);
+
+  /**
+   * Step 1 (`POST /mandate-drafts/{id}/versions`) has no request schema yet, so nothing is sent and
+   * nothing is invented: the step answers `not_sent`, and no version exists (DEC-2401 item 4).
+   */
+  const createVersion = useCallback<Runtime["createVersion"]>((request) => {
+    counter.current += 1;
+    const setUp: SetUp = {
+      id: `set-${counter.current}`,
+      agentId: "",
+      version: mandateVersion(request.mandate),
+      created: { phase: "sent", sentAt: nowRef.current, base: null, classification: null, validated: false },
+      confirmed: null,
+      deployed: null,
+    };
+    setUpsRef.current = [...setUpsRef.current, setUp];
+    setSetUps(setUpsRef.current);
+    window.setTimeout(() => patchSetUp(setUp.id, (s) => ({ ...s, created: { ...s.created, phase: "undelivered", reason: "not_sent" } })), 0);
+    return setUp;
+  }, [patchSetUp]);
+
+  /**
+   * Step 2, `POST /mandate-versions/{hash}/confirm` (§5.1), is not sent either: its `screen_digest` and
+   * `classification_shown` are the served `GET .../confirmation`'s, which this client does not read yet,
+   * and a digest computed here would claim a screen the server never served. A version not created is
+   * refused first; otherwise the step answers `not_sent`. No step-up is recorded, since none was sent
+   * (DEC-2401 item 4).
+   */
+  const confirmVersion = useCallback<Runtime["confirmVersion"]>(
+    (setUpId, record) => {
+      const setUp = setUpsRef.current.find((s) => s.id === setUpId);
+      if (!setUp) return;
+      const reason = setUp.created.phase === "recorded" ? "not_sent" : "not_created";
+      patchSetUp(setUpId, (s) => ({ ...s, confirmed: { phase: "sent", sentAt: nowRef.current, record, stepUp: null } }));
+      window.setTimeout(() => patchSetUp(setUpId, (s) => ({ ...s, confirmed: s.confirmed ? { ...s.confirmed, phase: "undelivered", reason } : null })), 0);
+    },
+    [patchSetUp],
+  );
+
+  /** Step 3 (`POST /agents`) has no request schema yet either: not sent, and no agent exists. */
+  const deployVersion = useCallback<Runtime["deployVersion"]>(
+    (setUpId, record) => {
+      if (!setUpsRef.current.some((s) => s.id === setUpId)) return;
+      patchSetUp(setUpId, (s) => ({ ...s, deployed: { phase: "sent", sentAt: nowRef.current, record } }));
+      window.setTimeout(() => patchSetUp(setUpId, (s) => ({ ...s, deployed: s.deployed ? { ...s.deployed, phase: "undelivered", reason: "not_sent" } : null })), 0);
+    },
+    [patchSetUp],
+  );
+
+  /** No route lists a version's backtests (DEC-2400), so the deploy step shows none over the API. */
+  const backtestFor = useCallback<Runtime["backtestFor"]>(() => null, []);
+
+  /** `GET /backtests/{id}` (DEC-2400): read when a screen asks, not with the workspace's refresh, since no list names them. */
+  const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
+
   const value = useMemo<Runtime>(
-    () => ({ source: "api", ws, now, reachable: ws.status !== "unreachable", commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate }),
-    [ws, now, commands, responses, deployments, mandateChanges, send, respond, deploy, changeMandate],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

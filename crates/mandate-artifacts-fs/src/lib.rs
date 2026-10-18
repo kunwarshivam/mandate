@@ -52,6 +52,18 @@ impl FsArtifactStore {
         Ok(Self { root })
     }
 
+    /// Opens the store at `root` to read, creating nothing: `Unavailable` unless its object directory
+    /// already exists. A reader of a read-only mount, such as a runtime process (DEC-1016), opens a
+    /// store this way, so a wrong root is refused rather than made into an empty store.
+    pub fn open_existing(root: impl Into<PathBuf>) -> Result<Self, ArtifactError> {
+        let root = root.into();
+        if root.join(OBJECTS_DIR).is_dir() {
+            Ok(Self { root })
+        } else {
+            Err(ArtifactError::Unavailable)
+        }
+    }
+
     /// Where the object for `reference` lives.
     pub fn object_path(&self, reference: &ArtifactRef) -> PathBuf {
         let hex = reference.digest().to_hex();

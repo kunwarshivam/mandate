@@ -22,16 +22,23 @@ use mandate_time::UtcNanos;
 
 mod agent;
 mod artifact;
+mod backtest_records;
 mod catalogue;
 mod connection_fold;
 mod connections;
 mod control;
+mod control_plane;
 mod control_verify;
+mod deployment;
 mod draft;
+mod gateway;
+mod invalidation;
 mod membership;
 mod merkle;
 mod notices;
 mod records;
+mod runs;
+mod scheduler;
 mod schema;
 mod start;
 mod verify;
@@ -42,6 +49,92 @@ pub use agent::{
     verify_agent_stream, verify_agent_stream_anchored,
 };
 
+/// Whether the journal closes `event_type` at `schema_version` on `stream`: the catalogue admits it
+/// there and a schema is registered for it, so a draft is judged member by member rather than
+/// refused `unknown_schema`. `mandate-runtime`'s `JournalCatalog` reads its answer for the agent
+/// stream's `ModelInvocationRecorded` (agent harness spec §6.2's verdicts precondition, E15-8).
+pub fn closes(event_type: &str, schema_version: u64, stream: StreamType) -> bool {
+    catalogue::lookup(event_type).is_some_and(|entry| entry.streams.contains(&stream))
+        && (control::closed_schema(event_type, schema_version, stream).is_some()
+            || (stream == StreamType::Agent && agent::closes(event_type, schema_version)))
+}
+
+/// The event types the stream rules read: §9.19's rules 153 and 158, the invalidation's rule 187,
+/// and the run records' rules 173 to 183.
+pub const STREAM_RULE_TYPES: [&str; 11] = [
+    "ModelInvocationRecorded",
+    "MeterReserved",
+    "MeterSettled",
+    "ThesisInvalidated",
+    "ThesisProposed",
+    "ThesisRevised",
+    "RunStarted",
+    "ToolCallRecorded",
+    "ToolResultRecorded",
+    "RunSummaryRecorded",
+    "RunEnded",
+];
+
+/// Whether a draft of `batch` is judged by a stream rule (journal spec §9.19 rules 153 and 158,
+/// the invalidation's rule 187, the run records' rules 173 to 183), so `append` reads the stream's
+/// earlier records of [`STREAM_RULE_TYPES`] to judge it.
+pub fn reads_stream(batch: &[Draft]) -> bool {
+    batch.iter().any(|draft| {
+        matches!(
+            (draft.event_type(), draft.stream_id().stream_type()),
+            (
+                "ModelInvocationRecorded"
+                    | "ThesisInvalidated"
+                    | "RunStarted"
+                    | "ToolCallRecorded"
+                    | "ToolResultRecorded"
+                    | "RunSummaryRecorded"
+                    | "RunEnded",
+                StreamType::Agent
+            ) | ("MeterReserved" | "MeterSettled", StreamType::Meter)
+        )
+    })
+}
+
+/// The stream rules over one stream, from its start: `earlier` are the stream's records already
+/// stored, in order, and `batch` the drafts appended after them. The first draft of `batch` that
+/// breaks one is reported by its index in `batch`, with the member that names the break. Only
+/// `earlier` records and drafts of the same stream as the draft judged are read, so a record of the
+/// same call or thesis on another stream never counts.
+///
+/// - 153: an agent stream's `ModelInvocationRecorded` names a `call_id` no earlier one names.
+/// - 158: a `MeterReserved` names a `call_id` no earlier one names; a `MeterSettled` names as its
+///   `reservation` an earlier `MeterReserved` of the same `call_id` that no earlier `MeterSettled`
+///   names, the first that fails.
+/// - 187: a `ThesisInvalidated` names a thesis no earlier invalidation names, that an earlier
+///   admitted thesis record names with the same lineage and instrument, and that is still the
+///   latest admitted thesis for its instrument.
+/// - 173 to 183: a run starts once, its records follow its start and precede its end, a tool call
+///   names its run's answered research turn and a tool on its menu, in reply order, a result names
+///   its call once and fits its class, a summary and an end are canonical, and no turn record
+///   follows its run's end unless the run was cancelled and the record judges nothing.
+pub fn check_stream(earlier: &[Draft], batch: &[Draft]) -> Result<(), (usize, Invalid)> {
+    for (i, draft) in batch.iter().enumerate() {
+        let before: Vec<&Draft> = earlier
+            .iter()
+            .chain(batch.get(..i).unwrap_or_default())
+            .filter(|d| d.stream_id() == draft.stream_id())
+            .collect();
+        gateway::stream_rule(&before, draft).map_err(|error| (i, error))?;
+        invalidation::stream_rule(&before, draft).map_err(|error| (i, error))?;
+        runs::stream_rule(&before, draft).map_err(|error| (i, error))?;
+    }
+    Ok(())
+}
+
+/// The stream's stored records a stream rule reads, as drafts for [`check_stream`], in order.
+pub fn stream_rule_records(rows: &[StoredEvent]) -> Vec<Draft> {
+    rows.iter()
+        .filter(|row| STREAM_RULE_TYPES.contains(&row.event_type.as_str()))
+        .filter_map(|row| stored_draft(row).and_then(|bytes| Draft::parse(&bytes).ok()))
+        .collect()
+}
+
 /// A batch's cross-draft checks: §9.1's rule 10 clause on the agent stream, §9.5's rule 45 on the
 /// account stream (DEC-446 item 3), §9.10's rule 84 clause on the control stream (DEC-671), then
 /// §9.15's alert rule 130 (DEC-720). Each draft has already passed `Draft::parse`.
@@ -49,7 +142,8 @@ pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     agent::check_batch(drafts)?;
     control::check_batch(drafts)?;
     workspace::check_batch(drafts)?;
-    notices::check_batch(drafts)
+    notices::check_batch(drafts)?;
+    invalidation::check_batch(drafts)
 }
 pub use artifact::{
     ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, check_artifact, get_artifact,
@@ -102,7 +196,7 @@ impl Environment {
     }
 }
 
-/// The five stream types of journal spec §2.
+/// The stream types of journal spec §2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StreamType {
     Account,
@@ -112,10 +206,14 @@ pub enum StreamType {
     /// `ntf:{workspace_id}`, whose single writer is the workspace's notification dispatcher
     /// (journal spec v0.12 §2, §9.15, DEC-720).
     Notice,
+    /// `meter:{workspace_id}`, whose single writer is the workspace's model gateway meter (journal
+    /// spec v0.46 §2, §9.19, DEC-998 item 3).
+    Meter,
 }
 
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,
-/// `clock:{workspace_id}`, or `ntf:{workspace_id}`, each segment `[A-Za-z0-9_-]+` (journal spec §2).
+/// `clock:{workspace_id}`, `ntf:{workspace_id}`, or `meter:{workspace_id}`, each segment
+/// `[A-Za-z0-9_-]+` (journal spec §2).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StreamId {
     text: String,
@@ -131,6 +229,7 @@ impl StreamId {
             ["ctl", _] => StreamType::Control,
             ["clock", _] => StreamType::Scheduler,
             ["ntf", _] => StreamType::Notice,
+            ["meter", _] => StreamType::Meter,
             _ => return None,
         };
         parts
@@ -678,6 +777,12 @@ impl MemoryJournal {
                 actual_seq: head.seq,
                 actual_hash: head.hash,
             };
+        }
+        if reads_stream(&batch) {
+            let earlier = stream_rule_records(self.rows(stream));
+            if let Err((draft, error)) = check_stream(&earlier, &batch) {
+                return AppendOutcome::Invalid { draft, error };
+            }
         }
 
         let mut environment = self

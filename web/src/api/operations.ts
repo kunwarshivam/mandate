@@ -22,28 +22,22 @@ export interface DocumentedOperation {
 
 export type ReadId =
   | "health"
-  | "dashboard"
   | "agents"
   | "agent"
-  | "agent_positions"
-  | "agent_orders"
-  | "agent_timeline"
   | "approvals"
   | "approval"
   | "connections"
+  | "backtest"
   | "command_status";
 
 const READS: ReadonlyArray<DocumentedOperation & { id: ReadId }> = [
   { id: "health", method: "GET", route: "/health", query: [], section: "§4.7" },
-  { id: "dashboard", method: "GET", route: "/dashboard", query: [], section: "§4.7" },
   { id: "agents", method: "GET", route: "/agents", query: [], section: "§4.2" },
   { id: "agent", method: "GET", route: "/agents/{agent}", query: [], section: "§4.7" },
-  { id: "agent_positions", method: "GET", route: "/agents/{agent}/positions", query: [], section: "§4.7" },
-  { id: "agent_orders", method: "GET", route: "/agents/{agent}/orders", query: [], section: "§4.7" },
-  { id: "agent_timeline", method: "GET", route: "/agents/{agent}/timeline", query: [], section: "§4.8" },
   { id: "approvals", method: "GET", route: "/approvals", query: ["state"], section: "§4.3" },
   { id: "approval", method: "GET", route: "/approvals/{approval}", query: [], section: "§4.3" },
   { id: "connections", method: "GET", route: "/connections", query: [], section: "§4.5" },
+  { id: "backtest", method: "GET", route: "/backtests/{backtest}", query: [], section: "§4.2" },
   { id: "command_status", method: "GET", route: "/commands/{event}", query: [], section: "§5.5" },
 ];
 

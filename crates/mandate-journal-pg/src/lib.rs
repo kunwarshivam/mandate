@@ -15,7 +15,7 @@
 //! serialize and can neither fork the chain nor reuse a `seq`.
 //!
 //! The database enforces the rest itself, through the forward-only migrations in `migrations/`
-//! applied by [`migrator`] under [`OWNER_ROLE`]: the body is `bytea` with
+//! applied by [`migrate()`] under [`OWNER_ROLE`]: the body is `bytea` with
 //! `CHECK (hash = sha256(body))`, every event links to its predecessor, heads only advance, and the
 //! event tables reject UPDATE, DELETE, and TRUNCATE by both privilege ([`APP_ROLE`] has INSERT and
 //! SELECT) and trigger. Every read re-checks the stored bytes (§11 checks 1 to 5) before returning
@@ -26,50 +26,28 @@ use std::collections::BTreeMap;
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_journal::{
     AppendOutcome, ArtifactSource, Draft, Environment, EventCheck, EventFailure, Head, Invalid,
-    InvalidReason, StoredEvent, StreamId, TrustedStart, check_batch, config_artifact_refusal, seal,
-    verify_events,
+    InvalidReason, STREAM_RULE_TYPES, StoredEvent, StreamId, TrustedStart, check_batch,
+    check_stream, config_artifact_refusal, reads_stream, seal, stream_rule_records, verify_events,
 };
 use mandate_time::UtcNanos;
-use sqlx::migrate::{Migration, MigrationType, Migrator};
 use sqlx::postgres::{PgDatabaseError, PgPoolOptions, PgRow, PgSeverity};
-use sqlx::{PgPool, Postgres, Row, SqlSafeStr, Transaction};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 
-/// The migration-only role that owns the journal tables (journal spec §6.1). Deployments create it
-/// before the first migration; no application connects as it.
+pub mod migrate;
+
+pub use migrate::{
+    MigrateError, Migration, MigrationReport, Recorded, applied_prefix, migrate, migrate_dsn,
+    migrate_known, migrations,
+};
+
+/// The migration-only role that owns the journal tables (journal spec §6.1). [`migrate()`] creates
+/// it `NOLOGIN` when it is missing; no application connects as it.
 pub const OWNER_ROLE: &str = "mandate_journal_owner";
 
 /// The application role: INSERT and SELECT on `events` and `event_ids`, and on `stream_heads` the
-/// UPDATE that advances a head or takes ownership. Deployments create it before the first
-/// migration, which grants it exactly these privileges.
+/// UPDATE that advances a head or takes ownership. [`migrate()`] creates it `NOLOGIN` when it is
+/// missing, and the first migration grants it exactly these privileges.
 pub const APP_ROLE: &str = "mandate_journal_app";
-
-/// `migrations/`, in order. A new migration is a new file and a new entry, never an edit.
-const MIGRATIONS: [(i64, &str, &str); 1] = [(
-    1,
-    "journal",
-    include_str!("../../../migrations/0001_journal.sql"),
-)];
-
-/// The journal schema's migrations, embedded at build time: versioned, forward-only (no down
-/// migrations), and applied only by the migration command under [`OWNER_ROLE`], never at startup
-/// (ADR-0001 ES-08). Running it again is a no-op; a changed or unknown applied migration is an
-/// error.
-pub fn migrator() -> Migrator {
-    Migrator::with_migrations(
-        MIGRATIONS
-            .iter()
-            .map(|&(version, description, sql)| {
-                Migration::new(
-                    version,
-                    description.into(),
-                    MigrationType::Simple,
-                    sql.into_sql_str(),
-                    false,
-                )
-            })
-            .collect(),
-    )
-}
 
 /// Stored bytes failed re-verification on read: something changed the database outside the append
 /// path. Nothing is repaired in place (journal spec §11); the caller treats it as an integrity
@@ -368,6 +346,9 @@ impl Request<'_> {
                 actual_hash: head.hash,
             })));
         }
+        if let Some(step) = self.stream_rules(tx).await? {
+            return Ok(step);
+        }
 
         let mut environment = None;
         if head.seq > 0 {
@@ -418,6 +399,37 @@ impl Request<'_> {
             .await?;
         }
         Ok(Step::Commit(sealed.rows))
+    }
+
+    /// Journal spec v0.46 §9.19's stream rules 153 and 158, as `MemoryJournal::append` judges them:
+    /// when a draft of the batch is judged by one, the stream's earlier records of the types they
+    /// read, under the locked head, each checked as a stored row first.
+    async fn stream_rules(
+        &self,
+        tx: &mut Transaction<'static, Postgres>,
+    ) -> Result<Option<Step>, sqlx::Error> {
+        if !reads_stream(self.batch) {
+            return Ok(None);
+        }
+        let rows = sqlx::query(sql(format!(
+            "SELECT {COLUMNS} FROM events WHERE stream_id = $1 AND event_type = ANY($2) ORDER BY seq"
+        )))
+        .bind(self.stream.as_str())
+        .bind(STREAM_RULE_TYPES.as_slice())
+        .fetch_all(&mut **tx)
+        .await?
+        .iter()
+        .map(decode_event)
+        .collect::<Result<Vec<_>, _>>()?;
+        for row in &rows {
+            if let Err(e) = check_row(row) {
+                return Ok(Some(Step::Done(Err(e))));
+            }
+        }
+        let earlier = stream_rule_records(&rows);
+        Ok(check_stream(&earlier, self.batch)
+            .err()
+            .map(|(draft, error)| Step::Done(Ok(AppendOutcome::Invalid { draft, error }))))
     }
 
     /// The stream rules and sealing of `MemoryJournal::append`, from the locked head.

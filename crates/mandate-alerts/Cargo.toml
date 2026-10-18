@@ -1,0 +1,19 @@
+[package]
+name = "mandate-alerts"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The infrastructure design's §8.2 operator alerts raised from journal events and signals, with opaque payloads (E21-4, OPS-10)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-journal.workspace = true
+mandate-notify.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

@@ -83,7 +83,11 @@ const COMPANION: &str = "OrderRequestRecorded";
 
 /// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
-    if crate::notices::governs(stream, event_type) {
+    if crate::notices::governs(stream, event_type)
+        || crate::gateway::governs(stream, event_type)
+        || crate::invalidation::governs(event_type)
+        || crate::runs::governs(event_type)
+    {
         return true;
     }
     match stream.stream_type() {
@@ -92,7 +96,10 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || crate::connections::CONTROL.contains(&event_type)
                 || crate::workspace::CONTROL.contains(&event_type)
                 || crate::records::CONTROL.contains(&event_type)
+                || crate::control_plane::CONTROL.contains(&event_type)
+                || crate::backtest_records::CONTROL.contains(&event_type)
                 || crate::membership::CONTROL.contains(&event_type)
+                || crate::deployment::CONTROL.contains(&event_type)
         }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
@@ -103,8 +110,32 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || RISK_STATE.contains(&event_type)
                 || EXECUTOR.contains(&event_type)
         }
-        StreamType::Scheduler | StreamType::Notice => false,
+        StreamType::Scheduler | StreamType::Notice | StreamType::Meter => false,
     }
+}
+
+/// The closed schema §9.2 and its later sections register for `event_type` at `schema_version` on
+/// `stream`, or `None`.
+pub(crate) fn closed_schema(
+    event_type: &str,
+    schema_version: u64,
+    stream_type: StreamType,
+) -> Option<&'static Ty> {
+    crate::workspace::schema(event_type, schema_version, stream_type)
+        .or_else(|| crate::connections::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::records::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::control_plane::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::deployment::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::backtest_records::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::notices::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::membership::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::gateway::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::invalidation::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::runs::schema(event_type, schema_version, stream_type))
+        .or_else(|| match (event_type, stream_type) {
+            ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
+            _ => schema(event_type, schema_version),
+        })
 }
 
 /// The payload normalized against its §9.2 schema, then consistency rules 17 to 24 in number order
@@ -120,6 +151,7 @@ pub(crate) fn payload(
         config_refs,
         actor,
         causation_id,
+        correlation_id,
         pii_refs,
         event_time,
     } = envelope;
@@ -130,21 +162,14 @@ pub(crate) fn payload(
         return open;
     }
     let stream_type = stream.stream_type();
-    let schema = crate::workspace::schema(event_type, schema_version, stream_type)
-        .or_else(|| crate::connections::schema(event_type, schema_version, stream_type))
-        .or_else(|| crate::records::schema(event_type, schema_version, stream_type))
-        .or_else(|| crate::notices::schema(event_type, schema_version, stream_type))
-        .or_else(|| crate::membership::schema(event_type, schema_version, stream_type))
-        .or_else(|| match (event_type, stream_type) {
-            ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
-            _ => schema(event_type, schema_version),
-        })
+    let schema = closed_schema(event_type, schema_version, stream_type)
         .ok_or_else(|| Invalid::new(InvalidReason::UnknownSchema, "payload"))?;
     let payload = crate::schema::normalize(schema, payload, "payload")?;
     crate::connections::rules(event_type, schema_version, &payload, causation_id, pii_refs)?;
     crate::workspace::rules(
         event_type,
         schema_version,
+        stream_type,
         &payload,
         config_refs,
         actor,
@@ -158,6 +183,12 @@ pub(crate) fn payload(
         actor,
         causation_id,
     )?;
+    crate::control_plane::rules(event_type, &payload, actor)?;
+    crate::deployment::rules(event_type, &payload, actor)?;
+    crate::gateway::rules(event_type, stream_type, &payload, config_refs, actor)?;
+    crate::invalidation::rules(event_type, stream_type, &payload, actor, causation_id)?;
+    crate::runs::rules(event_type, &payload, actor, correlation_id)?;
+    crate::backtest_records::rules(event_type, &payload, config_refs, actor)?;
     crate::notices::rules(event_type, &payload, causation_id)?;
     crate::membership::rules(event_type, &payload, actor, event_time)?;
     let p = Payload(&payload);
@@ -320,6 +351,7 @@ pub(crate) struct Envelope<'a> {
     pub(crate) config_refs: Option<&'a Value>,
     pub(crate) actor: Option<&'a Value>,
     pub(crate) causation_id: Option<&'a Value>,
+    pub(crate) correlation_id: Option<&'a Value>,
     pub(crate) pii_refs: Option<&'a Value>,
     pub(crate) event_time: Option<&'a Value>,
 }
@@ -334,6 +366,9 @@ pub(crate) fn subject_and_copy(
 ) -> Result<(), Invalid> {
     if crate::notices::governs(stream, event_type) {
         return crate::notices::subject(event_type, stream, payload);
+    }
+    if crate::gateway::governs(stream, event_type) {
+        return crate::gateway::subject(event_type, stream, payload);
     }
     let p = Payload(payload);
     if event_type == "StreamOpened" {
@@ -350,7 +385,7 @@ pub(crate) fn subject_and_copy(
     let allowed: &[&str] = match stream.stream_type() {
         StreamType::Account => &["acknowledge"],
         StreamType::Agent => &["resume", "stop", "lift_hold"],
-        StreamType::Control | StreamType::Scheduler | StreamType::Notice => &[],
+        StreamType::Control | StreamType::Scheduler | StreamType::Notice | StreamType::Meter => &[],
     };
     ensure(
         allowed.contains(&p.text("command")),

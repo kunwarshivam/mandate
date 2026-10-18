@@ -1,0 +1,33 @@
+[package]
+name = "mandate-daemon"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The agent runtime as a long-running process: journal tailing with the kill switch read first, a wake hint that never decides an outcome, one writer epoch, and mandate-process's lifecycle (E21-30, DEC-1012)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-artifacts-fs.workspace = true
+mandate-canon.workspace = true
+mandate-journal.workspace = true
+mandate-process.workspace = true
+mandate-research.workspace = true
+mandate-research-driver.workspace = true
+mandate-research-run.workspace = true
+mandate-runtime.workspace = true
+mandate-spec.workspace = true
+mandate-store.workspace = true
+mandate-time.workspace = true
+tokio = { workspace = true, features = ["rt", "signal"] }
+
+[dev-dependencies]
+mandate-gateway.workspace = true
+mandate-journal-pg.workspace = true
+mandate-num.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }

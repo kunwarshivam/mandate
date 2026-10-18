@@ -1,0 +1,164 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { ApiAgent, ApiAgents, ApiApproval, ApiApprovals, ApiHome, BySource } from "./api-screens";
+import { type Fetch } from "@/api/client";
+import { createMockServer } from "@/api/mock-server";
+import { Providers } from "@/components/providers";
+import { WorkspaceGate } from "@/components/screens/common";
+import type { Scenario } from "@/fixtures/types";
+import { buildWorkspace } from "@/fixtures/workspace";
+import { ApiRuntimeProvider } from "@/lib/api-runtime";
+import { RoleProvider } from "@/lib/roles";
+
+const WS = "ws_01J9ZQ4M0000000000000000AB";
+const ORIGIN = "https://api.owlhead.ai";
+
+type Tamper = (route: string, body: Record<string, unknown>) => Record<string, unknown>;
+
+function mount(node: React.ReactNode, scenario: Scenario = "approvals", tamper?: Tamper) {
+  const server = createMockServer({ workspaceId: WS, scenario });
+  const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const fetch: Fetch = async (input, init) => {
+    const url = new URL(input);
+    const route = url.pathname.slice(`/v1/workspaces/${WS}`.length);
+    if (init.method === "POST") posts.push({ path: route, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+    const answer = await server.fetch(input, init);
+    if (!tamper || init.method !== "GET" || !answer.ok) return answer;
+    return new Response(JSON.stringify(tamper(route, (await answer.json()) as Record<string, unknown>)), { status: answer.status });
+  };
+  render(
+    <RoleProvider>
+      <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={fetch} refreshMs={60_000} statusPollMs={5} retryMs={5}>
+        {node}
+      </ApiRuntimeProvider>
+    </RoleProvider>,
+  );
+  return { posts };
+}
+
+const fixture = buildWorkspace("approvals");
+const agentOf = (id: string) => fixture.agents.find((a) => a.agent_id === id)!;
+/** The API names an approval by its event id, a bare ULID; the fixtures prefix theirs with `apr_`. */
+const pending = fixture.approvals.filter((a) => a.status === "delivered").map((a) => ({ ...a, approval_id: a.approval_id.replace(/^apr_/, "") }));
+
+afterEach(() => {
+  cleanup();
+});
+
+describe("the screens over the workspace API's read models (DEC-1096)", () => {
+  it("Home lists each waiting request by the agent's name and the order it binds, and every agent with its mode", async () => {
+    mount(<ApiHome />);
+    const needs = await screen.findByRole("region", { name: /^Needs you/ });
+    for (const approval of pending) {
+      const name = agentOf(approval.agent_id).mandate.name;
+      expect(within(needs).getByRole("link", { name: new RegExp(`^${name} asks to buy ${approval.bound.qty.replace(".", "\\.")} ${approval.bound.symbol.replace("/", "\\/")}`) }).getAttribute("href")).toBe(`/approvals/${approval.approval_id}`);
+    }
+    const agents = screen.getByRole("region", { name: "Agents" });
+    for (const agent of fixture.agents) expect(within(agents).getByRole("link", { name: agent.mandate.name }).getAttribute("href")).toBe(`/agents/${agent.agent_id}`);
+    expect(document.querySelector("[data-slot=fixture-tag]")).toBeNull();
+  });
+
+  it("names what the API does not report as not reported, and never fills it in", async () => {
+    const blank: Tamper = (route, body) => {
+      if (route === "/agents") return { ...body, agents: (body.agents as object[]).map((a) => ({ ...a, label: null, mode: null })) };
+      if (/^\/agents\/[^/]+$/.test(route)) return { ...body, agent: { ...(body.agent as object), label: null, mode: null, mandate: null, account_positions: null } };
+      return body;
+    };
+    mount(<ApiHome />, "approvals", blank);
+    const agents = await screen.findByRole("region", { name: "Agents" });
+    expect(within(agents).getAllByText("Name not reported")).toHaveLength(fixture.agents.length);
+    expect(within(agents).getAllByText("Mode not reported")).toHaveLength(fixture.agents.length);
+    cleanup();
+    mount(<ApiAgent agentId={fixture.agents[0].agent_id} />, "approvals", blank);
+    expect(await screen.findByText("Mandate not reported")).toBeTruthy();
+    expect(screen.getByText("Account positions not reported")).toBeTruthy();
+    expect(screen.queryByText(/\$10,000/)).toBeNull();
+  });
+
+  it("an agent shows its mandate's envelope, its account's positions, and limit usage as not reported yet", async () => {
+    const agent = fixture.agents[1];
+    mount(<ApiAgent agentId={agent.agent_id} />);
+    expect(await screen.findByRole("heading", { level: 1, name: agent.mandate.name })).toBeTruthy();
+    const mandate = screen.getByRole("region", { name: "Mandate" });
+    expect(within(mandate).getByText("$10,000.00")).toBeTruthy();
+    const positions = screen.getByRole("region", { name: "Account positions" });
+    for (const p of agent.positions) expect(within(positions).getByText(p.instrument.symbol)).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Limit usage" })).getByText(/not reported/i)).toBeTruthy();
+    expect(screen.queryByText(/[+−]\$/)).toBeNull();
+  });
+
+  it("an agent the API does not know says so", async () => {
+    mount(<ApiAgent agentId="agt_01JB3K8Y4N7QW2M6R9T5V0ZZZZ" />);
+    expect(await screen.findByRole("heading", { name: "Agent not found" })).toBeTruthy();
+  });
+
+  it("the inbox lists waiting requests by deadline, then resolved ones with how they ended", async () => {
+    mount(<ApiApprovals />);
+    const waiting = await screen.findByRole("region", { name: /^Waiting/ });
+    const links = within(waiting).getAllByRole("link").map((l) => l.getAttribute("href"));
+    const byDeadline = [...pending].sort((a, b) => Date.parse(a.deadline) - Date.parse(b.deadline)).map((a) => `/approvals/${a.approval_id}`);
+    expect(links).toEqual(byDeadline);
+  });
+
+  it("a request shows the order it binds, and Skip sends its content hash through the responses route", async () => {
+    const approval = pending[0];
+    const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />);
+    expect(await screen.findByText(new RegExp(`^Buy ${approval.bound.qty} ${approval.bound.symbol.replace("/", "\\/")} at a limit of`))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0].path).toBe(`/approvals/${approval.approval_id}/responses`);
+    expect(posts[0].body).toMatchObject({ verdict: "skipped", content_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/), step_up: null });
+    expect(await screen.findByText(/Recorded in the journal/)).toBeTruthy();
+  });
+
+  it("a request names its agent's environment, and says not reported, never paper, when the agent is not served (DEC-1096)", async () => {
+    const approval = pending[0];
+    mount(<ApiApproval approvalId={approval.approval_id} />);
+    await screen.findByRole("button", { name: "Skip" });
+    expect(screen.getByText("PAPER")).toBeTruthy();
+    cleanup();
+    mount(<ApiApproval approvalId={approval.approval_id} />, "approvals", (route, body) => (route === "/agents" ? { ...body, agents: [] } : body));
+    await screen.findByRole("button", { name: "Skip" });
+    expect(screen.getByText("ENVIRONMENT NOT REPORTED")).toBeTruthy();
+    expect(screen.queryByText("PAPER")).toBeNull();
+  });
+
+  it("an approve the deployment cannot take without step-up says nothing was approved", async () => {
+    const approval = pending[0];
+    mount(<ApiApproval approvalId={approval.approval_id} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(await screen.findByText(/nothing was approved/)).toBeTruthy();
+    expect(screen.queryByText(/^Approved/)).toBeNull();
+  });
+
+  it("the agents screen lists every agent the API serves", async () => {
+    mount(<ApiAgents />);
+    const list = await screen.findByRole("region", { name: "Agents" });
+    expect(within(list).getAllByRole("link")).toHaveLength(fixture.agents.length);
+  });
+
+  it("a fixture screen over the API says it is not available yet, and shows nothing", async () => {
+    mount(
+      <WorkspaceGate>
+        <p data-testid="fixture-screen">figures</p>
+      </WorkspaceGate>,
+    );
+    expect(await screen.findByRole("heading", { name: "Not available from your deployment yet" })).toBeTruthy();
+    expect(screen.queryByTestId("fixture-screen")).toBeNull();
+  });
+
+  it("picks the screen by the source: the API's over the API, the fixture screen over the fixtures", async () => {
+    mount(<BySource fixtures={<p>fixture screen</p>} api={<p>api screen</p>} />);
+    expect(await screen.findByText("api screen")).toBeTruthy();
+    cleanup();
+    await act(async () => {
+      render(
+        <Providers workspace={buildWorkspace("normal")} tick={false}>
+          <BySource fixtures={<p>fixture screen</p>} api={<p>api screen</p>} />
+        </Providers>,
+      );
+    });
+    expect(screen.getByText("fixture screen")).toBeTruthy();
+    expect(screen.queryByText("api screen")).toBeNull();
+  });
+});

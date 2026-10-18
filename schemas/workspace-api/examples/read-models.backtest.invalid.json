@@ -1,0 +1,909 @@
+[
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "an empty as_of",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a missing backtest",
+    "remove": [
+      "/backtest"
+    ]
+  },
+  {
+    "label": "an unknown backtest member",
+    "set": {
+      "/backtest/extra": 1
+    }
+  },
+  {
+    "label": "an unknown state",
+    "set": {
+      "/backtest/state": "mutant_value"
+    }
+  },
+  {
+    "label": "a malformed refusal code",
+    "set": {
+      "/backtest/state": "refused",
+      "/backtest/report_ref": null,
+      "/backtest/report": null,
+      "/backtest/refusal": "Not A Code"
+    }
+  },
+  {
+    "label": "a completed run with a refusal",
+    "set": {
+      "/backtest/refusal": "no_bars"
+    }
+  },
+  {
+    "label": "a completed run with no report_ref",
+    "set": {
+      "/backtest/report_ref": null
+    }
+  },
+  {
+    "label": "a completed run with no report",
+    "set": {
+      "/backtest/report": null
+    }
+  },
+  {
+    "label": "a refused run with no refusal",
+    "set": {
+      "/backtest/state": "refused",
+      "/backtest/report_ref": null,
+      "/backtest/report": null
+    }
+  },
+  {
+    "label": "a refused run with a report_ref",
+    "set": {
+      "/backtest/state": "refused",
+      "/backtest/refusal": "no_bars",
+      "/backtest/report": null
+    }
+  },
+  {
+    "label": "a refused run with a report",
+    "set": {
+      "/backtest/state": "refused",
+      "/backtest/refusal": "no_bars",
+      "/backtest/report_ref": null
+    }
+  },
+  {
+    "label": "a running run with a refusal",
+    "set": {
+      "/backtest/state": "running",
+      "/backtest/refusal": "no_bars",
+      "/backtest/report_ref": null,
+      "/backtest/report": null
+    }
+  },
+  {
+    "label": "a running run with a report_ref",
+    "set": {
+      "/backtest/state": "running",
+      "/backtest/report": null
+    }
+  },
+  {
+    "label": "a running run with a report",
+    "set": {
+      "/backtest/state": "running",
+      "/backtest/report_ref": null
+    }
+  },
+  {
+    "label": "another kind",
+    "set": {
+      "/backtest/report/kind": "backtest_report_mutant"
+    }
+  },
+  {
+    "label": "report_version 1",
+    "set": {
+      "/backtest/report/report_version": 1
+    }
+  },
+  {
+    "label": "report_version 3",
+    "set": {
+      "/backtest/report/report_version": 3
+    }
+  },
+  {
+    "label": "another subject",
+    "set": {
+      "/backtest/report/subject": "platform"
+    }
+  },
+  {
+    "label": "an unknown report member",
+    "set": {
+      "/backtest/report/hit_rate": "0.6"
+    }
+  },
+  {
+    "label": "an unknown input digest",
+    "set": {
+      "/backtest/report/inputs/extra": "sha256:0505050505050505050505050505050505050505050505050505050505050505"
+    }
+  },
+  {
+    "label": "an unknown metric",
+    "set": {
+      "/backtest/report/strategy/expected_return": "0.1"
+    }
+  },
+  {
+    "label": "an unknown decisions member",
+    "set": {
+      "/backtest/report/decisions/extra": 1
+    }
+  },
+  {
+    "label": "an unknown outcome count",
+    "set": {
+      "/backtest/report/decisions/outcomes/mutant_value": 1
+    }
+  },
+  {
+    "label": "a negative outcome count",
+    "set": {
+      "/backtest/report/decisions/outcomes/submitted": -1
+    }
+  },
+  {
+    "label": "a count past the safe integer",
+    "set": {
+      "/backtest/report/decisions/count": 9007199254740992
+    }
+  },
+  {
+    "label": "a malformed gate reason",
+    "set": {
+      "/backtest/report/decisions/gate_reasons/Not-A-Code": 1
+    }
+  },
+  {
+    "label": "a negative gate reason count",
+    "set": {
+      "/backtest/report/decisions/gate_reasons/position_cap": -1
+    }
+  },
+  {
+    "label": "an unknown row member",
+    "set": {
+      "/backtest/report/decisions/rows/0/extra": 1
+    }
+  },
+  {
+    "label": "an unknown outcome",
+    "set": {
+      "/backtest/report/decisions/rows/0/outcome": "mutant_value"
+    }
+  },
+  {
+    "label": "an unknown purpose",
+    "set": {
+      "/backtest/report/decisions/rows/0/purpose": "mutant_value"
+    }
+  },
+  {
+    "label": "a malformed decided_by",
+    "set": {
+      "/backtest/report/decisions/rows/0/decided_by": "Rule Small"
+    }
+  },
+  {
+    "label": "a malformed reason",
+    "set": {
+      "/backtest/report/decisions/rows/1/reason": "At Target"
+    }
+  },
+  {
+    "label": "a malformed date",
+    "set": {
+      "/backtest/report/decisions/rows/0/date": "2026-13-01"
+    }
+  },
+  {
+    "label": "an unknown risk member",
+    "set": {
+      "/backtest/report/risk/extra": 1
+    }
+  },
+  {
+    "label": "a malformed latched limit",
+    "set": {
+      "/backtest/report/risk/limits_latched": [
+        "drawdown_ladder"
+      ]
+    }
+  },
+  {
+    "label": "a repeated latched limit",
+    "set": {
+      "/backtest/report/risk/limits_latched": [
+        "max_daily_loss",
+        "max_daily_loss"
+      ]
+    }
+  },
+  {
+    "label": "an unknown mode",
+    "set": {
+      "/backtest/report/risk/most_restrictive_mode": "mutant_value"
+    }
+  },
+  {
+    "label": "an unknown equity member",
+    "set": {
+      "/backtest/report/equity/extra": []
+    }
+  },
+  {
+    "label": "an unknown equity point member",
+    "set": {
+      "/backtest/report/equity/strategy/0/extra": 1
+    }
+  },
+  {
+    "label": "no limitations",
+    "set": {
+      "/backtest/report/limitations": []
+    }
+  },
+  {
+    "label": "an unknown limitation",
+    "set": {
+      "/backtest/report/limitations": [
+        "mutant_value"
+      ]
+    }
+  },
+  {
+    "label": "a repeated limitation",
+    "set": {
+      "/backtest/report/limitations": [
+        "single_instrument",
+        "single_instrument"
+      ]
+    }
+  },
+  {
+    "label": "no disclosures",
+    "set": {
+      "/backtest/report/disclosures": []
+    }
+  },
+  {
+    "label": "drafted disclosure text",
+    "set": {
+      "/backtest/report/disclosures": [
+        "Past performance is no guarantee"
+      ]
+    }
+  },
+  {
+    "label": "a repeated disclosure",
+    "set": {
+      "/backtest/report/disclosures": [
+        "LEGEND-HYPOTHETICAL",
+        "LEGEND-HYPOTHETICAL"
+      ]
+    }
+  },
+  {
+    "label": "an unknown sharpe sign",
+    "set": {
+      "/backtest/report/strategy/sharpe_sign": "mutant_value"
+    }
+  },
+  {
+    "label": "an unknown absence reason",
+    "set": {
+      "/backtest/report/strategy/absent": "mutant_value"
+    }
+  },
+  {
+    "label": "zero periods per year",
+    "set": {
+      "/backtest/report/strategy/periods_per_year": 0
+    }
+  },
+  {
+    "label": "367 periods per year",
+    "set": {
+      "/backtest/report/strategy/periods_per_year": 367
+    }
+  },
+  {
+    "label": "a negative fill count",
+    "set": {
+      "/backtest/report/strategy/fill_count": -1
+    }
+  },
+  {
+    "label": "a malformed hold reason",
+    "set": {
+      "/backtest/report/decisions/hold_reasons/Not-A-Code": 1
+    }
+  },
+  {
+    "label": "an unknown disclosure name",
+    "set": {
+      "/backtest/report/disclosures": [
+        "mutant_value"
+      ]
+    }
+  },
+  {
+    "label": "a missing backtest backtest_id",
+    "remove": [
+      "/backtest/backtest_id"
+    ]
+  },
+  {
+    "label": "a missing backtest mandate_version",
+    "remove": [
+      "/backtest/mandate_version"
+    ]
+  },
+  {
+    "label": "a missing backtest state",
+    "remove": [
+      "/backtest/state"
+    ]
+  },
+  {
+    "label": "a missing backtest refusal",
+    "remove": [
+      "/backtest/refusal"
+    ]
+  },
+  {
+    "label": "a missing backtest report_ref",
+    "remove": [
+      "/backtest/report_ref"
+    ]
+  },
+  {
+    "label": "a missing backtest report",
+    "remove": [
+      "/backtest/report"
+    ]
+  },
+  {
+    "label": "a missing report kind",
+    "remove": [
+      "/backtest/report/kind"
+    ]
+  },
+  {
+    "label": "a missing report report_version",
+    "remove": [
+      "/backtest/report/report_version"
+    ]
+  },
+  {
+    "label": "a missing report subject",
+    "remove": [
+      "/backtest/report/subject"
+    ]
+  },
+  {
+    "label": "a missing report mandate_version",
+    "remove": [
+      "/backtest/report/mandate_version"
+    ]
+  },
+  {
+    "label": "a missing report instrument",
+    "remove": [
+      "/backtest/report/instrument"
+    ]
+  },
+  {
+    "label": "a missing report research_agent",
+    "remove": [
+      "/backtest/report/research_agent"
+    ]
+  },
+  {
+    "label": "a missing report inputs",
+    "remove": [
+      "/backtest/report/inputs"
+    ]
+  },
+  {
+    "label": "a missing report strategy",
+    "remove": [
+      "/backtest/report/strategy"
+    ]
+  },
+  {
+    "label": "a missing report benchmark",
+    "remove": [
+      "/backtest/report/benchmark"
+    ]
+  },
+  {
+    "label": "a missing report excess_total_return",
+    "remove": [
+      "/backtest/report/excess_total_return"
+    ]
+  },
+  {
+    "label": "a missing report decisions",
+    "remove": [
+      "/backtest/report/decisions"
+    ]
+  },
+  {
+    "label": "a missing report risk",
+    "remove": [
+      "/backtest/report/risk"
+    ]
+  },
+  {
+    "label": "a missing report equity",
+    "remove": [
+      "/backtest/report/equity"
+    ]
+  },
+  {
+    "label": "a missing report limitations",
+    "remove": [
+      "/backtest/report/limitations"
+    ]
+  },
+  {
+    "label": "a missing report disclosures",
+    "remove": [
+      "/backtest/report/disclosures"
+    ]
+  },
+  {
+    "label": "a missing input bars",
+    "remove": [
+      "/backtest/report/inputs/bars"
+    ]
+  },
+  {
+    "label": "a missing input model_outputs",
+    "remove": [
+      "/backtest/report/inputs/model_outputs"
+    ]
+  },
+  {
+    "label": "a missing input theses",
+    "remove": [
+      "/backtest/report/inputs/theses"
+    ]
+  },
+  {
+    "label": "a missing input config",
+    "remove": [
+      "/backtest/report/inputs/config"
+    ]
+  },
+  {
+    "label": "a missing metric period_count",
+    "remove": [
+      "/backtest/report/strategy/period_count"
+    ]
+  },
+  {
+    "label": "a missing metric first_date",
+    "remove": [
+      "/backtest/report/strategy/first_date"
+    ]
+  },
+  {
+    "label": "a missing metric last_date",
+    "remove": [
+      "/backtest/report/strategy/last_date"
+    ]
+  },
+  {
+    "label": "a missing metric starting_equity",
+    "remove": [
+      "/backtest/report/strategy/starting_equity"
+    ]
+  },
+  {
+    "label": "a missing metric ending_equity",
+    "remove": [
+      "/backtest/report/strategy/ending_equity"
+    ]
+  },
+  {
+    "label": "a missing metric net_pnl",
+    "remove": [
+      "/backtest/report/strategy/net_pnl"
+    ]
+  },
+  {
+    "label": "a missing metric total_return",
+    "remove": [
+      "/backtest/report/strategy/total_return"
+    ]
+  },
+  {
+    "label": "a missing metric return_sum",
+    "remove": [
+      "/backtest/report/strategy/return_sum"
+    ]
+  },
+  {
+    "label": "a missing metric return_sum_of_squares",
+    "remove": [
+      "/backtest/report/strategy/return_sum_of_squares"
+    ]
+  },
+  {
+    "label": "a missing metric mean_return",
+    "remove": [
+      "/backtest/report/strategy/mean_return"
+    ]
+  },
+  {
+    "label": "a missing metric variance",
+    "remove": [
+      "/backtest/report/strategy/variance"
+    ]
+  },
+  {
+    "label": "a missing metric volatility",
+    "remove": [
+      "/backtest/report/strategy/volatility"
+    ]
+  },
+  {
+    "label": "a missing metric periods_per_year",
+    "remove": [
+      "/backtest/report/strategy/periods_per_year"
+    ]
+  },
+  {
+    "label": "a missing metric variance_annualized",
+    "remove": [
+      "/backtest/report/strategy/variance_annualized"
+    ]
+  },
+  {
+    "label": "a missing metric volatility_annualized",
+    "remove": [
+      "/backtest/report/strategy/volatility_annualized"
+    ]
+  },
+  {
+    "label": "a missing metric risk_free_per_period",
+    "remove": [
+      "/backtest/report/strategy/risk_free_per_period"
+    ]
+  },
+  {
+    "label": "a missing metric sharpe_squared",
+    "remove": [
+      "/backtest/report/strategy/sharpe_squared"
+    ]
+  },
+  {
+    "label": "a missing metric sharpe_sign",
+    "remove": [
+      "/backtest/report/strategy/sharpe_sign"
+    ]
+  },
+  {
+    "label": "a missing metric sharpe",
+    "remove": [
+      "/backtest/report/strategy/sharpe"
+    ]
+  },
+  {
+    "label": "a missing metric sharpe_squared_annualized",
+    "remove": [
+      "/backtest/report/strategy/sharpe_squared_annualized"
+    ]
+  },
+  {
+    "label": "a missing metric sharpe_annualized",
+    "remove": [
+      "/backtest/report/strategy/sharpe_annualized"
+    ]
+  },
+  {
+    "label": "a missing metric max_drawdown",
+    "remove": [
+      "/backtest/report/strategy/max_drawdown"
+    ]
+  },
+  {
+    "label": "a missing metric max_drawdown_usd",
+    "remove": [
+      "/backtest/report/strategy/max_drawdown_usd"
+    ]
+  },
+  {
+    "label": "a missing metric max_drawdown_peak_period",
+    "remove": [
+      "/backtest/report/strategy/max_drawdown_peak_period"
+    ]
+  },
+  {
+    "label": "a missing metric max_drawdown_trough_period",
+    "remove": [
+      "/backtest/report/strategy/max_drawdown_trough_period"
+    ]
+  },
+  {
+    "label": "a missing metric buy_notional",
+    "remove": [
+      "/backtest/report/strategy/buy_notional"
+    ]
+  },
+  {
+    "label": "a missing metric sell_notional",
+    "remove": [
+      "/backtest/report/strategy/sell_notional"
+    ]
+  },
+  {
+    "label": "a missing metric traded_notional",
+    "remove": [
+      "/backtest/report/strategy/traded_notional"
+    ]
+  },
+  {
+    "label": "a missing metric fill_count",
+    "remove": [
+      "/backtest/report/strategy/fill_count"
+    ]
+  },
+  {
+    "label": "a missing metric turnover",
+    "remove": [
+      "/backtest/report/strategy/turnover"
+    ]
+  },
+  {
+    "label": "a missing metric fees_total",
+    "remove": [
+      "/backtest/report/strategy/fees_total"
+    ]
+  },
+  {
+    "label": "a missing metric fees_charged",
+    "remove": [
+      "/backtest/report/strategy/fees_charged"
+    ]
+  },
+  {
+    "label": "a missing metric fees_accrued",
+    "remove": [
+      "/backtest/report/strategy/fees_accrued"
+    ]
+  },
+  {
+    "label": "a missing metric fees_asset",
+    "remove": [
+      "/backtest/report/strategy/fees_asset"
+    ]
+  },
+  {
+    "label": "a missing metric submitted_qty",
+    "remove": [
+      "/backtest/report/strategy/submitted_qty"
+    ]
+  },
+  {
+    "label": "a missing metric filled_qty",
+    "remove": [
+      "/backtest/report/strategy/filled_qty"
+    ]
+  },
+  {
+    "label": "a missing metric absent",
+    "remove": [
+      "/backtest/report/strategy/absent"
+    ]
+  },
+  {
+    "label": "a missing decisions count",
+    "remove": [
+      "/backtest/report/decisions/count"
+    ]
+  },
+  {
+    "label": "a missing decisions outcomes",
+    "remove": [
+      "/backtest/report/decisions/outcomes"
+    ]
+  },
+  {
+    "label": "a missing decisions gate_reasons",
+    "remove": [
+      "/backtest/report/decisions/gate_reasons"
+    ]
+  },
+  {
+    "label": "a missing decisions hold_reasons",
+    "remove": [
+      "/backtest/report/decisions/hold_reasons"
+    ]
+  },
+  {
+    "label": "a missing decisions rows",
+    "remove": [
+      "/backtest/report/decisions/rows"
+    ]
+  },
+  {
+    "label": "a missing outcome count submitted",
+    "remove": [
+      "/backtest/report/decisions/outcomes/submitted"
+    ]
+  },
+  {
+    "label": "a missing outcome count builder_hold",
+    "remove": [
+      "/backtest/report/decisions/outcomes/builder_hold"
+    ]
+  },
+  {
+    "label": "a missing outcome count builder_refused",
+    "remove": [
+      "/backtest/report/decisions/outcomes/builder_refused"
+    ]
+  },
+  {
+    "label": "a missing outcome count gate_deny",
+    "remove": [
+      "/backtest/report/decisions/outcomes/gate_deny"
+    ]
+  },
+  {
+    "label": "a missing outcome count gate_defer",
+    "remove": [
+      "/backtest/report/decisions/outcomes/gate_defer"
+    ]
+  },
+  {
+    "label": "a missing outcome count gate_hold",
+    "remove": [
+      "/backtest/report/decisions/outcomes/gate_hold"
+    ]
+  },
+  {
+    "label": "a missing outcome count autonomy_deny",
+    "remove": [
+      "/backtest/report/decisions/outcomes/autonomy_deny"
+    ]
+  },
+  {
+    "label": "a missing outcome count ask_unanswered",
+    "remove": [
+      "/backtest/report/decisions/outcomes/ask_unanswered"
+    ]
+  },
+  {
+    "label": "a missing outcome count order_working",
+    "remove": [
+      "/backtest/report/decisions/outcomes/order_working"
+    ]
+  },
+  {
+    "label": "a missing row at",
+    "remove": [
+      "/backtest/report/decisions/rows/0/at"
+    ]
+  },
+  {
+    "label": "a missing row date",
+    "remove": [
+      "/backtest/report/decisions/rows/0/date"
+    ]
+  },
+  {
+    "label": "a missing row purpose",
+    "remove": [
+      "/backtest/report/decisions/rows/0/purpose"
+    ]
+  },
+  {
+    "label": "a missing row outcome",
+    "remove": [
+      "/backtest/report/decisions/rows/0/outcome"
+    ]
+  },
+  {
+    "label": "a missing row reason",
+    "remove": [
+      "/backtest/report/decisions/rows/0/reason"
+    ]
+  },
+  {
+    "label": "a missing row decided_by",
+    "remove": [
+      "/backtest/report/decisions/rows/0/decided_by"
+    ]
+  },
+  {
+    "label": "a missing row qty",
+    "remove": [
+      "/backtest/report/decisions/rows/0/qty"
+    ]
+  },
+  {
+    "label": "a missing row limit",
+    "remove": [
+      "/backtest/report/decisions/rows/0/limit"
+    ]
+  },
+  {
+    "label": "a missing row outputs_used",
+    "remove": [
+      "/backtest/report/decisions/rows/0/outputs_used"
+    ]
+  },
+  {
+    "label": "a missing risk limits_latched",
+    "remove": [
+      "/backtest/report/risk/limits_latched"
+    ]
+  },
+  {
+    "label": "a missing risk risk_exits",
+    "remove": [
+      "/backtest/report/risk/risk_exits"
+    ]
+  },
+  {
+    "label": "a missing risk most_restrictive_mode",
+    "remove": [
+      "/backtest/report/risk/most_restrictive_mode"
+    ]
+  },
+  {
+    "label": "a missing equity strategy",
+    "remove": [
+      "/backtest/report/equity/strategy"
+    ]
+  },
+  {
+    "label": "a missing equity benchmark",
+    "remove": [
+      "/backtest/report/equity/benchmark"
+    ]
+  },
+  {
+    "label": "a missing equity point date",
+    "remove": [
+      "/backtest/report/equity/strategy/0/date"
+    ]
+  },
+  {
+    "label": "a missing equity point equity",
+    "remove": [
+      "/backtest/report/equity/strategy/0/equity"
+    ]
+  }
+]

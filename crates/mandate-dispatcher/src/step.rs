@@ -1,7 +1,10 @@
 //! The dispatcher's step over the journal, its outbox (notifications spec §5.1, NT-3, NT-8; E8-10
 //! slice D2, DEC-701 item 3, DEC-704). A [`step`] reads the committed `OwnerAlertSent` events of
-//! its subject streams, journals one `NoticeIssued` per cause before any send, sends each notice
-//! once to each recipient's push channel, and journals each outcome as `NoticeAttempted`. Every
+//! its subject streams and the `ApprovalRequested` events of their agent streams (slice D7a,
+//! DEC-2501), journals one `NoticeIssued` per cause before any send, sends each notice
+//! to each recipient's push channel and again on §5.3's schedule while it fails `retryable`
+//! ([`crate::due`], slice D4, DEC-707), and journals each outcome, and each send abandoned at its
+//! window's end, as `NoticeAttempted`. Every
 //! append goes through a [`NoticeWriter`], which holds only an `ntf:` stream id, so the
 //! dispatcher cannot name an agent, account, or control stream. An append that does not commit
 //! stops the step before its next send. Every `NoticeAttempted` is journaled at schema version 2,
@@ -12,12 +15,13 @@ use std::collections::BTreeSet;
 use mandate_canon::{Int, Key, Object, Value, encode_ulid, parse, to_canonical};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId, StreamType};
 use mandate_notify::{
-    AddressHandle, Alert, IdempotencyKey, NoticeId, NoticeKind, Notification, NotifyError, Origin,
-    Outcome, Provider, PushChannel, Recipient, SecureRandom, notice_keys,
+    AddressHandle, Alert, NoticeId, NoticeKind, Notification, NotifyError, Origin, Outcome,
+    Provider, PushChannel, SecureRandom, notice_keys,
 };
 use mandate_time::UtcNanos;
 
-use crate::DispatchError;
+use crate::due::{Pending, pending};
+use crate::{DispatchError, Next};
 
 /// The `NoticeAttempted` schema version `append` admits (journal spec v0.40 §9.15, DEC-706): every
 /// attempt is journaled at version 2, its `verdict` last, so no writer leaves the verdict out.
@@ -64,7 +68,12 @@ impl NoticeWriter {
 /// What the dispatcher reads and writes: the committed rows of a stream in `seq` order, and one
 /// all-or-nothing append to a [`NoticeWriter`]'s stream at its epoch.
 pub trait Journal {
-    fn committed(&self, stream: &StreamId) -> Vec<StoredEvent>;
+    /// The committed rows of `stream` in `seq` order (DEC-2500 item 3).
+    ///
+    /// # Errors
+    /// [`DispatchError::JournalUnavailable`] when the store cannot answer. A failed read is never
+    /// an empty stream: read as one, it would re-open the notice stream and re-issue every cause.
+    fn committed(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError>;
     fn append_notices(
         &mut self,
         writer: &NoticeWriter,
@@ -78,7 +87,8 @@ pub trait Journal {
 #[derive(Debug, Clone, Copy)]
 pub struct Config<'a> {
     pub writer: &'a NoticeWriter,
-    /// The workspace's agent, account, and control streams, whose alerts are causes.
+    /// The workspace's agent, account, and control streams, whose alerts, and the agent streams'
+    /// approval requests, are causes (DEC-2501 item 1).
     pub subjects: &'a [StreamId],
     /// The push channels, by opaque recipient id, every notice goes to until roles exist (E9-2;
     /// spec §3.3, DEC-704 item 4).
@@ -89,8 +99,9 @@ pub struct Config<'a> {
     pub build: &'a str,
 }
 
-/// A committed `OwnerAlertSent` as the step reads it: its event id and stream, its kind, its
-/// owner command, and whether it is on a control stream (DEC-705).
+/// A committed `OwnerAlertSent` or `ApprovalRequested` as the step reads it: its event id and
+/// stream, its kind, its owner command (none for a request), and whether it is on a control stream
+/// (DEC-705, DEC-2501).
 struct Cause {
     event: String,
     stream: String,
@@ -108,34 +119,48 @@ impl Cause {
 }
 
 /// A `NoticeIssued` as the notice stream holds it.
-struct Issued {
-    notice: String,
-    kind: String,
+pub(crate) struct Issued {
+    pub(crate) notice: String,
+    pub(crate) kind: String,
     cause: String,
-    recipients: Vec<String>,
+    pub(crate) recipients: Vec<String>,
 }
 
-/// One send as its `NoticeAttempted` names it: notice id, recipient, and channel.
-type Send = (String, String, String);
+/// A `NoticeAttempted` as the notice stream holds it: the send it names (notice id, recipient,
+/// and channel), its number, status, and verdict (`None` when `null` or, at version 1, absent),
+/// and its record's own `event_time`.
+pub(crate) struct Attempted {
+    pub(crate) notice: String,
+    pub(crate) recipient: String,
+    pub(crate) channel: String,
+    pub(crate) attempt: Option<u64>,
+    pub(crate) status: String,
+    pub(crate) verdict: Option<String>,
+    pub(crate) event_time: String,
+}
 
-/// The notice stream as one read finds it: its head, its notices in `seq` order, and every send
-/// already attempted.
+/// The notice stream as one read finds it: its head, its notices in `seq` order, and every
+/// attempt in `seq` order.
 #[derive(Default)]
-struct Notices {
+pub(crate) struct Notices {
     head: u64,
-    issued: Vec<Issued>,
-    attempted: BTreeSet<Send>,
+    pub(crate) issued: Vec<Issued>,
+    pub(crate) attempted: Vec<Attempted>,
 }
 
 /// One pass of the dispatcher at `now` (spec §5.1 steps 1 to 4, DEC-704 items 2 and 3, DEC-705).
 /// Every new cause's `NoticeIssued` is one batch, opened by `StreamOpened` on an empty stream, that
-/// commits before any send; then each send not yet attempted is made once, and its outcome is
-/// journaled before the next send.
+/// commits before any send. Then each send [`crate::due`] lists gets at most one record in this
+/// step (DEC-707 item 5): a due attempt is made under the send's one key and its outcome journaled
+/// as that attempt, before the next send; a send whose window has ended is journaled `abandoned`
+/// with `retry_window_ended` and a `null` verdict, with no send; a waiting send gets nothing.
 ///
 /// # Errors
 /// [`DispatchError::Fenced`] when a newer dispatcher owns the notice stream and
 /// [`DispatchError::NotCommitted`] for any other append that does not commit, each before the
-/// next send; [`DispatchError::Notify`] when the random source fails.
+/// next send; [`DispatchError::Notify`] when the random source fails; and
+/// [`DispatchError::JournalUnavailable`] when a read fails, which ends the step before it issues,
+/// sends, or appends anything more (DEC-2500 item 3).
 pub fn step(
     config: &Config<'_>,
     journal: &mut dyn Journal,
@@ -144,8 +169,8 @@ pub fn step(
     now: UtcNanos,
 ) -> Result<(), DispatchError> {
     let stream = config.writer.stream()?;
-    let before = notices(journal, stream);
-    let alerts = causes(journal, config.subjects);
+    let before = notices_of(&read(journal, stream)?);
+    let alerts = causes(journal, config.subjects)?;
     let fresh = fresh(&alerts, &before.issued)?;
     if !fresh.is_empty() {
         let recipients: BTreeSet<&str> = config.audience.iter().map(|&(r, _)| r).collect();
@@ -182,87 +207,125 @@ pub fn step(
         }
         append(journal, config.writer, before.head, now, &drafts)?;
     }
-    let notices = notices(journal, stream);
-    let audience: BTreeSet<(&str, PushChannel)> = config.audience.iter().copied().collect();
-    let mut head = notices.head;
-    for issued in &notices.issued {
-        let text_key = match kind(&issued.kind) {
-            Some(kind) => kind.text_key()?,
-            None => None,
-        };
-        let Some(text_key) = text_key else { continue };
-        let notice = NoticeId::parse(&issued.notice)?;
-        let notification = Notification {
-            notice,
-            text: text_key,
-        };
-        for recipient in &issued.recipients {
-            for &(_, channel) in audience.iter().filter(|(r, _)| r == recipient) {
-                let send = (
-                    issued.notice.clone(),
-                    recipient.clone(),
-                    channel.key()?.to_owned(),
-                );
-                if notices.attempted.contains(&send) {
-                    continue;
-                }
-                let address = AddressHandle {
-                    recipient: Recipient::parse(recipient)?,
-                    channel,
+    let rows = read(journal, stream)?;
+    let mut head = notices_of(&rows).head;
+    for pending in pending(&rows, config.audience, now)? {
+        let due = &pending.due;
+        let record = match &due.next {
+            Next::Attempt { attempt, key } => {
+                let notification = Notification {
+                    notice: due.notice,
+                    text: pending.text,
                 };
-                let key = IdempotencyKey::of(&notice, &address)?;
-                let outcome = provider.send(config.origin, &notification, &address, &key)?;
-                let payload = attempt(&send, &outcome)?;
-                let attempted = draft(
-                    config,
-                    random,
-                    now,
-                    "NoticeAttempted",
-                    None,
-                    ATTEMPTED_VERSION,
-                    payload,
-                )?;
-                head = append(journal, config.writer, head, now, &[attempted])?;
+                let address = AddressHandle {
+                    recipient: due.recipient.clone(),
+                    channel: due.channel,
+                };
+                let outcome = provider.send(config.origin, &notification, &address, key)?;
+                Record::of(*attempt, outcome)?
             }
-        }
+            Next::Abandon { attempt } => Record {
+                attempt: *attempt,
+                status: "abandoned",
+                reason: Some("retry_window_ended"),
+                message: None,
+                verdict: None,
+            },
+            Next::Wait { .. } => continue,
+        };
+        let payload = record.payload(&pending)?;
+        let attempted = draft(
+            config,
+            random,
+            now,
+            "NoticeAttempted",
+            None,
+            ATTEMPTED_VERSION,
+            payload,
+        )?;
+        head = append(journal, config.writer, head, now, &[attempted])?;
     }
     Ok(())
 }
 
-/// The `NoticeAttempted` payload of a first attempt's `outcome` (spec §5.5, DEC-704 item 2,
-/// DEC-706): `accepted` is `delivered` with the provider's message id and no verdict, and
-/// `retryable` and `permanent` are `failed` with the reason and the verdict of their own variant,
-/// never a reading of the reason, which rule 134 holds to §5.2 to §5.4.
-fn attempt(send: &Send, outcome: &Outcome) -> Result<Value, DispatchError> {
-    let (status, reason, message, verdict) = match outcome {
-        Outcome::Accepted {
-            provider_message_id,
-        } => ("delivered", None, Some(provider_message_id.as_str()), None),
-        Outcome::Retryable { reason } => ("failed", Some(reason.key()?), None, Some("retryable")),
-        Outcome::Permanent { reason } => ("failed", Some(reason.key()?), None, Some("permanent")),
-    };
-    let (notice, recipient, channel) = send;
-    let first = Int::new(1).ok_or(NotifyError::Unrepresentable { what: "attempt" })?;
-    object([
-        ("notice", text(notice)),
-        ("recipient", text(recipient)),
-        ("channel", text(channel)),
-        ("attempt", Value::Int(first)),
-        ("status", text(status)),
-        ("reason", reason.map_or(Value::Null, text)),
-        ("provider_message_id", message.map_or(Value::Null, text)),
-        ("coalesced_into", Value::Null),
-        ("verdict", verdict.map_or(Value::Null, text)),
-    ])
+/// One `NoticeAttempted` the step journals for a send: its attempt number, status, reason,
+/// provider message id, and verdict.
+struct Record {
+    attempt: u32,
+    status: &'static str,
+    reason: Option<&'static str>,
+    message: Option<String>,
+    verdict: Option<&'static str>,
 }
 
-/// The committed `OwnerAlertSent` of the subject streams, the streams in the order given and each
-/// in `seq` order. A batch the journal refused, a fenced one included, has no row, so it is no
-/// cause (spec §5.1 step 1, NT-8).
-fn causes(journal: &dyn Journal, subjects: &[StreamId]) -> Vec<Cause> {
+impl Record {
+    /// Attempt `attempt`'s `outcome` (spec §5.5, DEC-704 item 2, DEC-706): `accepted` is
+    /// `delivered` with the provider's message id and no verdict, and `retryable` and `permanent`
+    /// are `failed` with the reason and the verdict of their own variant, never a reading of the
+    /// reason, which rule 134 holds to §5.2 to §5.4.
+    fn of(attempt: u32, outcome: Outcome) -> Result<Self, DispatchError> {
+        let (status, reason, message, verdict) = match outcome {
+            Outcome::Accepted {
+                provider_message_id,
+            } => ("delivered", None, Some(provider_message_id), None),
+            Outcome::Retryable { reason } => {
+                ("failed", Some(reason.key()?), None, Some("retryable"))
+            }
+            Outcome::Permanent { reason } => {
+                ("failed", Some(reason.key()?), None, Some("permanent"))
+            }
+        };
+        Ok(Self {
+            attempt,
+            status,
+            reason,
+            message,
+            verdict,
+        })
+    }
+
+    /// The record's payload for `pending`'s send.
+    fn payload(&self, pending: &Pending) -> Result<Value, DispatchError> {
+        let due = &pending.due;
+        let attempt = Int::new(u64::from(self.attempt))
+            .ok_or(NotifyError::Unrepresentable { what: "attempt" })?;
+        object([
+            ("notice", text(&due.notice.hex()?)),
+            ("recipient", text(&pending.recipient)),
+            ("channel", text(due.channel.key()?)),
+            ("attempt", Value::Int(attempt)),
+            ("status", text(self.status)),
+            ("reason", self.reason.map_or(Value::Null, text)),
+            (
+                "provider_message_id",
+                self.message.as_deref().map_or(Value::Null, text),
+            ),
+            ("coalesced_into", Value::Null),
+            ("verdict", self.verdict.map_or(Value::Null, text)),
+        ])
+    }
+}
+
+/// The committed causes of the subject streams, the streams in the order given and each in `seq`
+/// order: every `OwnerAlertSent`, and every `ApprovalRequested` on an agent stream, read by its
+/// envelope alone and never its payload (DEC-2501 items 1 and 5). An `ApprovalRequested` on any
+/// other stream is no cause, so rule 125 never refuses the batch it would join. A batch the
+/// journal refused, a fenced one included, has no row, so it is no cause (spec §5.1 step 1, NT-8).
+/// A subject stream that cannot be read ends the step.
+fn causes(journal: &dyn Journal, subjects: &[StreamId]) -> Result<Vec<Cause>, DispatchError> {
     let mut alerts = Vec::new();
     for stream in subjects {
-        for row in journal.committed(stream) {
+        for row in read(journal, stream)? {
+            if row.event_type == "ApprovalRequested" && stream.stream_type() == StreamType::Agent {
+                alerts.push(Cause {
+                    event: row.event_id,
+                    stream: stream.as_str().to_owned(),
+                    kind: "approval_requested".to_owned(),
+                    command: None,
+                    control: false,
+                });
+                continue;
+            }
             let alert = payload(&row).filter(|_| row.event_type == "OwnerAlertSent");
             let Some(alert) = alert else { continue };
             alerts.push(Cause {
@@ -277,7 +340,14 @@ fn causes(journal: &dyn Journal, subjects: &[StreamId]) -> Vec<Cause> {
             });
         }
     }
-    alerts
+    Ok(alerts)
+}
+
+/// One read of `stream`'s committed rows; a read that fails ends the step with the store's closed
+/// [`DispatchError::JournalUnavailable`], so nothing more is issued, sent, or appended, and the
+/// failure is never read as an empty stream (DEC-2500 item 3).
+fn read(journal: &dyn Journal, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
+    journal.committed(stream)
 }
 
 /// One cause per notice key that has no `NoticeIssued` yet, in first-read order: the key's
@@ -304,18 +374,21 @@ fn fresh<'a>(alerts: &'a [Cause], issued: &[Issued]) -> Result<Vec<&'a Cause>, D
     Ok(fresh)
 }
 
-/// The notice stream as it stands: its head, its `NoticeIssued`, and its `NoticeAttempted`.
-fn notices(journal: &dyn Journal, stream: &StreamId) -> Notices {
-    let rows = journal.committed(stream);
+/// The notice stream as its committed `rows` stand: its head, its `NoticeIssued`, and its
+/// `NoticeAttempted`.
+pub(crate) fn notices_of(rows: &[StoredEvent]) -> Notices {
     let mut read = Notices {
         head: rows.last().map_or(0, |r| r.seq),
         ..Notices::default()
     };
-    for row in &rows {
-        let Some(payload) = payload(row) else {
+    for row in rows {
+        let Some(body) = parse(&row.body).ok() else {
             continue;
         };
-        let at = |name: &str| member(&payload, name).to_owned();
+        let Some(payload) = body.get("payload") else {
+            continue;
+        };
+        let at = |name: &str| member(payload, name).to_owned();
         match row.event_type.as_str() {
             "NoticeIssued" => read.issued.push(Issued {
                 notice: at("notice"),
@@ -330,10 +403,18 @@ fn notices(journal: &dyn Journal, stream: &StreamId) -> Notices {
                     .map(str::to_owned)
                     .collect(),
             }),
-            "NoticeAttempted" => {
-                read.attempted
-                    .insert((at("notice"), at("recipient"), at("channel")));
-            }
+            "NoticeAttempted" => read.attempted.push(Attempted {
+                notice: at("notice"),
+                recipient: at("recipient"),
+                channel: at("channel"),
+                attempt: payload.get("attempt").and_then(Value::as_int),
+                status: at("status"),
+                verdict: payload
+                    .get("verdict")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                event_time: member(&body, "event_time").to_owned(),
+            }),
             _ => {}
         }
     }
@@ -430,7 +511,7 @@ fn member<'a>(payload: &'a Value, name: &str) -> &'a str {
 }
 
 /// The kind a record names, by its key.
-fn kind(key: &str) -> Option<NoticeKind> {
+pub(crate) fn kind(key: &str) -> Option<NoticeKind> {
     NoticeKind::ALL
         .into_iter()
         .find(|kind| kind.key() == Ok(key))

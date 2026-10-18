@@ -66,7 +66,11 @@ impl InputDigests {
     /// came from the same inputs while their fills differed.
     pub fn of(input: &BacktestInput<'_>) -> Result<Self, BacktestError> {
         Ok(Self {
-            bars: Digest::of(&mandate_canon::to_canonical(&bar_input(input)?)),
+            bars: Digest::of(&mandate_canon::to_canonical(&bar_input(
+                input.bars,
+                input.coverage_start,
+                input.first_bar_volumes,
+            )?)),
             config: Digest::of(&mandate_canon::to_canonical(&configuration(input.config)?)),
         })
     }
@@ -124,7 +128,7 @@ impl Report {
 
 /// One metric block, every decimal as the canonical text its `Display` produces, every count as an
 /// integer, and every undefined figure as `Null` beside the reason it is absent (DEC-127 item 7).
-fn metrics(block: &Metrics) -> Result<Value, BacktestError> {
+pub fn metrics(block: &Metrics) -> Result<Value, BacktestError> {
     object(vec![
         ("period_count", int(block.period_count)?),
         ("first_date", decimal(block.first_date)),
@@ -190,20 +194,22 @@ fn metrics(block: &Metrics) -> Result<Value, BacktestError> {
 /// bar from (DEC-106 item 4), and the median volume it would read at each bar's start, `null` where
 /// there is none (spec §6.4 rule 3). The medians are taken for every bar rather than only for the
 /// bars that open a session, so this digest does not restate the model's rule for which bars ask.
-fn bar_input(input: &BacktestInput<'_>) -> Result<Value, BacktestError> {
-    let rows = input
-        .bars
+pub fn bar_input(
+    bars: &[SimBar],
+    coverage_start: mandate_time::UtcNanos,
+    first_bar_volumes: &dyn mandate_sim::FirstBarVolumes,
+) -> Result<Value, BacktestError> {
+    let rows = bars
         .iter()
         .map(bar_row)
         .collect::<Result<Vec<Value>, BacktestError>>()?;
-    let medians = input
-        .bars
+    let medians = bars
         .iter()
-        .map(|bar| optional(input.first_bar_volumes.median_at(bar.start)))
+        .map(|bar| optional(first_bar_volumes.median_at(bar.start)))
         .collect();
     object(vec![
         ("rows", Value::Array(rows)),
-        ("coverage_start", decimal(input.coverage_start)),
+        ("coverage_start", decimal(coverage_start)),
         ("first_bar_medians", Value::Array(medians)),
     ])
 }
@@ -281,7 +287,7 @@ fn configuration(config: &RunConfig) -> Result<Value, BacktestError> {
     ])
 }
 
-fn sim(config: &SimConfig) -> Result<Value, BacktestError> {
+pub fn sim(config: &SimConfig) -> Result<Value, BacktestError> {
     let latency = |nanos: u64| -> Result<Value, BacktestError> {
         Int::new(nanos)
             .map(Value::Int)
@@ -324,7 +330,7 @@ fn sim(config: &SimConfig) -> Result<Value, BacktestError> {
 /// The fee configuration as the digest sees it. `fee_rounding` appears only when it is
 /// `per_fee_per_fill`: absent means `daily_total` (spec §6.2, DEC-960), so every report under the
 /// default keeps the digest it had before the field existed.
-fn fees(config: &FeeConfig) -> Result<Value, BacktestError> {
+pub fn fees(config: &FeeConfig) -> Result<Value, BacktestError> {
     let mut equities = vec![
         ("sec_rate", decimal(config.equities.sec_rate)),
         ("taf_per_share", decimal(config.equities.taf_per_share)),
@@ -350,7 +356,7 @@ fn fees(config: &FeeConfig) -> Result<Value, BacktestError> {
     object(vec![("equities", equities), ("crypto", crypto)])
 }
 
-fn tick(rule: TickRule) -> Result<Value, BacktestError> {
+pub fn tick(rule: TickRule) -> Result<Value, BacktestError> {
     match rule {
         TickRule::RegNmsEquity => object(vec![("rule", text("reg_nms_equity"))]),
         TickRule::Increment(increment) => object(vec![
@@ -383,7 +389,7 @@ fn strategy(strategy: Strategy) -> Result<Value, BacktestError> {
 
 /// An object of `members`, or `not_canonical` for a key outside the canonical key grammar, which
 /// none of this crate's literal keys is (journal spec §4.1).
-fn object(members: Vec<(&str, Value)>) -> Result<Value, BacktestError> {
+pub fn object(members: Vec<(&str, Value)>) -> Result<Value, BacktestError> {
     members
         .into_iter()
         .map(|(name, value)| {
@@ -395,21 +401,21 @@ fn object(members: Vec<(&str, Value)>) -> Result<Value, BacktestError> {
         .map(Value::Object)
 }
 
-fn text(value: &str) -> Value {
+pub fn text(value: &str) -> Value {
     Value::Str(value.to_owned())
 }
 
 /// A decimal, a date, or an instant as the canonical text its `Display` produces (spec §2.1).
-fn decimal<T: fmt::Display>(value: T) -> Value {
+pub fn decimal<T: fmt::Display>(value: T) -> Value {
     Value::Str(value.to_string())
 }
 
 /// An absent figure is `Null`; a present one is its canonical text.
-fn optional<T: fmt::Display>(value: Option<T>) -> Value {
+pub fn optional<T: fmt::Display>(value: Option<T>) -> Value {
     value.map_or(Value::Null, decimal)
 }
 
-fn int(count: u32) -> Result<Value, BacktestError> {
+pub fn int(count: u32) -> Result<Value, BacktestError> {
     Int::new(u64::from(count))
         .map(Value::Int)
         .ok_or(BacktestError::Num(NumError::Overflow))

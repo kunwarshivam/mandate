@@ -755,6 +755,14 @@ per-deployment configuration, never code: the managed deployment's values are RP
 and a hybrid or on-prem deployment configures its own, with exactly one accepted origin whose host
 the RP ID matches.
 
+**The stub issuer** ([DEC-2100](../project/decisions/DEC-2100.md)): a `dev` or `ci` cell may
+configure, as its one issuer, the local stub `mandate-stub-issuer`. It runs on loopback only, signs
+ES256 access tokens with a P-256 key it makes at each start and never stores, and refuses to start
+in any other tier or in any build without debug assertions. The server verifies its tokens through
+the same issuer settings and checks as any other issuer's, and refuses its `http` key-set URL
+outside `dev` and `ci`. Because a subject link is the digest of the issuer and the subject together,
+a link made for it never signs in through another issuer.
+
 ### 6.2 Sessions
 
 A session is the workspace deployment's record that a principal authenticated through a method at
@@ -775,7 +783,12 @@ bound to the workspaces its credential covers. It is held server side; the brows
   workspace's own store, uncached, so the 5-minute token lifetime never extends access after a
   deactivation.
 - **Refresh tokens rotate** on use; reusing a rotated refresh token revokes the whole session
-  family (stolen-token detection).
+  family (stolen-token detection). The workspace API's browser cookie carries its session's refresh
+  secret ([workspace API spec](workspace-api.md) §3.11 item 6). For the 30 seconds after a granted
+  refresh, the secret it rotated away still serves pause and the kill switch, and any other call
+  with it is refused with the session kept, so a command in flight across the refresh is not lost.
+  After that, the rotated secret presented on any route revokes the session as here. This is
+  [DEC-1022](../project/decisions/DEC-1022.md), Proposed.
 - **Sign-out and revocation** end the session server side at once; the user can end any listed
   session.
 - **New device notice.** Every sign-in commits `SessionOpened` (§12.1), whose `first_seen_device`

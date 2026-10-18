@@ -39,10 +39,13 @@ The founder runs everything here; agents never get host access. The order of the
   `mandate-journal-pg` describes, reached through membership. It can read and append the journal
   tables and nothing else: it cannot update or delete events, create tables, or read the `deploy`
   schema. `PUBLIC` may not connect to `postgres` or `template1`.
-- **Migrations are tracked in `deploy.migrations`,** with each file's SHA-256. An applied file
-  whose content later changes stops the bootstrap, since a migration is never edited.
-  `mandate-journal-pg`'s embedded sqlx migrator keeps its own table. When a migration command
-  that uses it ships, it must take over from this table rather than run beside it.
+- **Migrations are tracked in `deploy.migrations`,** with each file's SHA-256, until
+  `mandate db migrate` first runs on the host. An applied file whose content later changes stops
+  the bootstrap, since a migration is never edited. The command takes this table's rows over into
+  its own ledger, `journal.schema_migrations`, applying nothing again, and from then on the
+  bootstrap skips its migration loop and leaves migrations to the command (E21-50,
+  [DEC-1180](../docs/project/decisions/DEC-1180.md)). Run it as `postgres`:
+  `sudo -u postgres mandate db migrate --journal "postgresql://postgres@localhost/owlhead?host=/var/run/postgresql"`.
 - **Secrets are systemd credentials, never environment variables** (DEC-822 item 4). Exactly three
   kinds live outside the vault, each a root:root 0600 file under `/etc/owlhead/credentials/`
   (0700):
@@ -151,24 +154,21 @@ The web app's pause and kill switch go through Cloudflare. The fallback needs on
 
 ```bash
 ssh owlhead_admin@<IP>
-sudo -u owlhead_api mandate agent pause <AGENT> --workspace <WORKSPACE> --user <USER> \
+sudo -u owlhead_api mandate agent kill --agent <AGENT> --workspace <WORKSPACE> --user <USER> \
   --journal 'postgresql://owlhead_api@localhost/owlhead?host=/var/run/postgresql' \
   --store /var/lib/owlhead/artifacts
-sudo -u owlhead_api mandate agent kill --help     # the scope flags: agent, connection, or workspace
+# or --connection <CONNECTION>, or --workspace-wide; `agent pause` takes the same scope flags
 ```
 
-The CLI commits one control-stream event per command ([the CLI module](../crates/mandate-cli/src/agent.rs):
-`pause` needs no code; a kill switch is never refused for a missing code). The login is by peer
+A kill switch is one control-stream event of its scope; a pause is one agent-scoped event per agent
+it reaches ([the CLI module](../crates/mandate-cli/src/brake.rs), DEC-2000). Neither needs a code,
+and a kill switch is never refused. The runbook is
+[RB-03](../docs/runbooks/RB-03-kill-switches.md). The login is by peer
 authentication on the Unix socket as `owlhead_api`, so no password is involved. FOUNDER-STEPS step 16
 rehearses it once.
 
 ## Deferred
 
-- **The CLI's `pause` and `kill` subcommands are not in the binary yet.** `crates/mandate-cli` has
-  the code (`agent.rs`) but its `agent` subcommand offers only `deploy` today. The fallback above is
-  documented as the intended path, and step 16 fails closed: the rehearsal does not pass until
-  `mandate agent --help` lists `pause` and `kill`. The exact flags of `kill` are then read from
-  `--help`, not from this file. Nothing in this PR can rehearse it, because agents have no host.
 - **Egress by name or port** (see *Egress*): not expressible in systemd units.
 - **A live deployment** needs a new decision for the kill switch and for Cloudflare's place in
   front of the API (DEC-822 item 6).

@@ -13,7 +13,9 @@ use mandate_journal::{
     ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, Environment, StoredEvent,
     get_artifact,
 };
-use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, Membership};
+use mandate_spec::context::{
+    AgentId, ContextArgs, JournaledFact, Membership, unrecorded_stop_limit_asset_classes,
+};
 use mandate_spec::validate::validate;
 use mandate_spec::{Mandate, MandateVersion, Pointer, ValidationContext, Violation};
 
@@ -157,6 +159,10 @@ pub(crate) struct Row {
 impl Row {
     pub(crate) fn member(&self, name: &str) -> Option<&str> {
         self.payload.get(name).and_then(Value::as_str)
+    }
+
+    pub(crate) fn payload(&self) -> &Value {
+        &self.payload
     }
 
     pub(crate) fn submitted(&self) -> Submitted {
@@ -365,6 +371,7 @@ pub(crate) fn check_rules(
     });
     if !known {
         context.connection_environment = None;
+        context.stop_limit_asset_classes = unrecorded_stop_limit_asset_classes(mandate);
     }
     let report = validate(mandate, &context).map_err(invalid)?;
     if report.violations.iter().any(|v| *v != Violation::V002) {

@@ -39,6 +39,12 @@ pub fn handle(
     if let Input::Started(epoch) = &input {
         return started(state, *epoch, ports);
     }
+    if matches!(input, Input::Research(_)) {
+        return Err(RuntimeError::NotInterpreted {
+            what: "a research input outside handle_research".to_owned(),
+            story: "E19-3",
+        });
+    }
     if !state.has_started() {
         return Err(RuntimeError::NotStarted);
     }
@@ -183,7 +189,7 @@ fn applied(
             batch.journal("ModelOutputRecorded", None, modelled(output)?)?;
             Ok(())
         }
-        Input::Journal(_) | Input::Started(_) | Input::Command(_) => Ok(()),
+        Input::Journal(_) | Input::Started(_) | Input::Command(_) | Input::Research(_) => Ok(()),
     }
 }
 
@@ -299,6 +305,7 @@ fn commanded(
                 initiator: *initiator,
                 confirmation: confirmation.as_ref(),
                 step_up: None,
+                user: None,
                 cause: None,
             },
             ports,
@@ -320,6 +327,9 @@ pub(crate) struct Switching<'s> {
     pub(crate) initiator: Initiator,
     pub(crate) confirmation: Option<&'s OwnerConfirmation>,
     pub(crate) step_up: Option<(&'static str, &'s Value)>,
+    /// The owner who issued a control-stream switch, recorded whether or not a bid was confirmed
+    /// (journal spec §9 rule 12).
+    pub(crate) user: Option<&'s str>,
     pub(crate) cause: Option<EventId>,
 }
 
@@ -338,6 +348,7 @@ pub(crate) fn switched(
         initiator,
         confirmation,
         step_up,
+        user,
         cause,
     } = switching;
     if !state.deployment().in_scope(scope) {
@@ -355,7 +366,7 @@ pub(crate) fn switched(
         batch.journal(
             "OwnerExitRequested",
             cause.clone(),
-            owner_exit(scope, *confirmation, *step_up)?,
+            owner_exit(scope, *confirmation, *step_up, *user)?,
         )?;
     }
     let switch = batch.journal(
@@ -545,8 +556,10 @@ fn decide(
 
 /// The dry run of one proposal at `now`. An opening or increase the connection's checks do not
 /// cover is denied `account_restricted` before the gate is asked, as trading spec §7.3 row 5
-/// denies one on a connection that is not usable; every other proposal, and every exit whatever
-/// the checks say, is the gate's to judge (`AGENTS.md` rule 13, DEC-969 item 4).
+/// denies one on a connection that is not usable, and one in an instrument where an opening this
+/// runtime proposed still works is denied `working_order_limit` (trading spec §5.3 rule 6,
+/// DEC-1150 item 5); every other proposal, and every exit whatever either says, is the gate's to
+/// judge (`AGENTS.md` rule 13, DEC-969 item 4).
 pub(crate) fn dry_run(
     state: &RuntimeState,
     ports: &Ports<'_>,
@@ -556,6 +569,11 @@ pub(crate) fn dry_run(
     if proposal.purpose.adds_risk() && !state.connection_admits_openings(now) {
         return DryRunVerdict::Deny {
             reason_code: payload::ACCOUNT_RESTRICTED.to_owned(),
+        };
+    }
+    if proposal.purpose.adds_risk() && state.opening_works_in(&proposal.instrument) {
+        return DryRunVerdict::Deny {
+            reason_code: payload::WORKING_ORDER_LIMIT.to_owned(),
         };
     }
     ports.gate.check(proposal)
@@ -770,32 +788,30 @@ fn owner_exit(
     scope: &KillScope,
     confirmation: Option<&OwnerConfirmation>,
     step_up: Option<(&'static str, &Value)>,
+    issued_by: Option<&str>,
 ) -> Result<Value, RuntimeError> {
     let (kind, subject) = match scope {
         KillScope::Agent(agent) => ("agent", agent.0.clone()),
         KillScope::Connection(connection) => ("connection", connection.0.clone()),
         KillScope::Workspace(workspace) => ("workspace", workspace.0.clone()),
     };
-    let shown = confirmation.map(|confirmed| {
-        (
-            confirmed.bid.to_string(),
-            confirmed.bid_size.to_string(),
-            confirmed.floor.to_string(),
-            confirmed.user.clone(),
-            confirmed.step_up.clone(),
-        )
-    });
-    let (bid, bid_size, floor, user, assertion) = shown.unwrap_or_default();
+    let shown = |member: fn(&OwnerConfirmation) -> String| {
+        confirmation.map_or(Value::Null, |confirmed| payload::text(&member(confirmed)))
+    };
+    let user = issued_by
+        .or(confirmation.map(|confirmed| confirmed.user.as_str()))
+        .unwrap_or_default();
+    let assertion = confirmation.map_or("", |confirmed| confirmed.step_up.as_str());
     let mut members = vec![
         ("scope", payload::text(kind)),
         ("subject", payload::text(&subject)),
-        ("bid", payload::text(&bid)),
-        ("bid_size", payload::text(&bid_size)),
-        ("floor", payload::text(&floor)),
-        ("user", payload::text(&user)),
+        ("bid", shown(|c| c.bid.to_string())),
+        ("bid_size", shown(|c| c.bid_size.to_string())),
+        ("floor", shown(|c| c.floor.to_string())),
+        ("user", payload::text(user)),
         (
             "step_up",
-            step_up.map_or_else(|| payload::text(&assertion), |(_, e)| e.clone()),
+            step_up.map_or_else(|| payload::text(assertion), |(_, e)| e.clone()),
         ),
         ("confirmed", Value::Bool(confirmation.is_some())),
     ];
@@ -839,7 +855,7 @@ fn activated(
 /// cut-off as a §4.7 timestamp and the data as the stored artifact's digest (DEC-503 item 7). An
 /// empty `source`, which §9.1's `text` refuses, is refused here rather than at append, where the batch
 /// would go into doubt and hold every later input, the kill switch included, until restart.
-fn observed(observation: &Observation) -> Result<Value, RuntimeError> {
+pub(crate) fn observed(observation: &Observation) -> Result<Value, RuntimeError> {
     if observation.source.is_empty() {
         return Err(payload::non_canonical("source"));
     }
@@ -871,15 +887,15 @@ pub(crate) struct Batch<'a> {
     epoch: WriterEpoch,
     head: Seq,
     ordinal: u32,
-    drafts: Vec<EventDraft>,
-    effects: Vec<Effect>,
+    pub(crate) drafts: Vec<EventDraft>,
+    pub(crate) effects: Vec<Effect>,
     /// The approvals this batch has already cancelled, so one approval cannot be both cancelled and
     /// timed out by a single step: two records of one removal, where the journal should carry one.
     pub(crate) resolved: BTreeSet<EventId>,
 }
 
 impl<'a> Batch<'a> {
-    fn new(ids: &'a dyn IdGen, epoch: WriterEpoch, head: Seq) -> Self {
+    pub(crate) fn new(ids: &'a dyn IdGen, epoch: WriterEpoch, head: Seq) -> Self {
         Self {
             ids,
             epoch,
@@ -910,6 +926,18 @@ impl<'a> Batch<'a> {
         Ok(event_id)
     }
 
+    /// An id derived at `ordinal` of this batch's head, for an id that is not a draft's own (a run's,
+    /// a call's, a thesis's). The caller takes ordinals far above any draft's, so the two never
+    /// meet.
+    pub(crate) fn id_at(&self, ordinal: u32) -> EventId {
+        self.ids.event_id(self.epoch, self.head, ordinal)
+    }
+
+    /// The head this batch is built against.
+    pub(crate) fn head(&self) -> Seq {
+        self.head
+    }
+
     pub(crate) fn hand(&mut self, handoff: IntentHandoff) {
         self.effects.push(Effect::Intent(handoff));
     }
@@ -918,7 +946,7 @@ impl<'a> Batch<'a> {
         self.effects.push(Effect::Timer(request));
     }
 
-    fn notify(&mut self, reference: NotificationRef) {
+    pub(crate) fn notify(&mut self, reference: NotificationRef) {
         self.effects.push(Effect::Notify(reference));
     }
 

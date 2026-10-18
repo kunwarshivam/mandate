@@ -60,6 +60,17 @@ pub fn spy_mandate(content: &str) -> String {
     mandate.replace(&Digest::of(E7_7_MODEL).to_hex(), &pinned)
 }
 
+/// `mandate` made `live`, with the stop-limit offset V-008 asks for on the Robinhood connection a
+/// live stream records (DEC-539 item 2, DEC-1152 item 1).
+pub fn live_mandate(mandate: &str) -> String {
+    mandate
+        .replace(r#""environment": "paper""#, r#""environment": "live""#)
+        .replace(
+            r#""crypto_stop_limit_offset": null"#,
+            r#""crypto_stop_limit_offset": "0.01""#,
+        )
+}
+
 /// The control stream of a deployed SPY version, and the store of every object it names, each
 /// stored as written so its reference is the hash of those bytes.
 pub struct Stream {
@@ -129,8 +140,7 @@ impl Stream {
     /// The same live deployment with `fee` registered as its fee schedule.
     pub fn live_priced(fee: &str) -> Self {
         let content = model();
-        let mandate =
-            spy_mandate(&content).replace(r#""environment": "paper""#, r#""environment": "live""#);
+        let mandate = live_mandate(&spy_mandate(&content));
         let mut stream = Self {
             records: Vec::new(),
             store: BTreeMap::new(),

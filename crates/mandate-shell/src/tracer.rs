@@ -456,13 +456,13 @@ pub(crate) enum Door {
 pub(crate) fn door(
     holding: bool,
     held: bool,
-    submitted: bool,
+    opened: bool,
     purpose: mandate_executor::Purpose,
 ) -> Door {
     if !(holding && purpose.adds_risk()) {
         return Door::Pass;
     }
-    if held || submitted {
+    if held || opened {
         return Door::Second;
     }
     Door::Hold
@@ -567,6 +567,9 @@ pub(crate) struct Session<'s> {
     holding: bool,
     /// The risk-adding submission held while `holding`, sent only by [`AskedCycle::submit`].
     held: Option<mandate_executor::SubmitOrder>,
+    /// The one risk-adding submission this run sent, which the watch watches (FT-1): a
+    /// protective order or an exit beside it is never counted against it (`AGENTS.md` rule 13).
+    opening: Option<mandate_executor::ClientOrderId>,
     pub(crate) report: Report,
     /// The time every record this session appends carries: the run's clock, then each wake's
     /// during a watch (DEC-858 item 3).
@@ -601,6 +604,7 @@ impl<'s> Session<'s> {
             cycle_open: false,
             holding: false,
             held: None,
+            opening: None,
             report: Report::default(),
             event_time: setup.now,
         };
@@ -941,8 +945,9 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
-    /// E1b's watch over the run's one submission (DEC-858 items 3 to 5). Each wake pauses, moves
-    /// the event time to the clock, and reads the entry back by its client order id, then ticks the
+    /// E1b's watch over the run's one risk-adding submission (DEC-858 items 3 to 5). Each wake
+    /// pauses, moves the event time to the clock, and reads the entry back ([`entry_read`]: by its client order
+    /// id, or by the profile's listing where it cannot query by it, DEC-1150 item 3), then ticks the
     /// executor; the first wake at or past the bound hands the executor `CancelOpenings` in place
     /// of the read. Every wake asks the run's LT-10 question ([`watch_may_end`], DEC-912 item 3),
     /// in place of the bare terminal read the watch kept before E7-26 (DEC-858 item 4, DEC-914
@@ -960,11 +965,9 @@ impl<'s> Session<'s> {
         watch: &Watch<P>,
         end: MayEnd<'_>,
     ) -> Result<(), ShellError> {
-        let Some(entry) = self.report.submitted.first() else {
+        let Some(entry) = self.opening.clone() else {
             return Ok(());
         };
-        let entry = mandate_executor::ClientOrderId::parse(entry)
-            .map_err(|error| refused(Stage::Executor)(Cause::Executor(error)))?;
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -976,6 +979,10 @@ impl<'s> Session<'s> {
         let agent = mandate_executor::AgentId(self.setup.deployment.agent.0.clone());
         let mut cancel_handed = false;
         let mut read: Option<String> = None;
+        let queryable = match self.stages.connector.profile() {
+            Ok(profile) => profile.idempotency().query_by_client_order_id,
+            Err(..) => true,
+        };
         loop {
             runtime.block_on(watch.pause.pause(watch.interval));
             let now = watch.pause.now();
@@ -993,25 +1000,14 @@ impl<'s> Session<'s> {
                 ))?;
                 continue;
             }
-            let answer = self
-                .stages
-                .connector
-                .call(&BrokerRequest::GetOrderByClientId(entry.clone()));
-            read = match &answer {
-                Ok(BrokerOutcome::Order(order)) => Some(order.status.clone()),
-                Ok(BrokerOutcome::Submitted(..))
-                | Ok(BrokerOutcome::DuplicateClientOrderId { .. })
-                | Ok(BrokerOutcome::Rejected(..))
-                | Ok(BrokerOutcome::Absent { .. })
-                | Ok(BrokerOutcome::OpenOrders(..))
-                | Ok(BrokerOutcome::Positions(..))
-                | Ok(BrokerOutcome::Account(..))
-                | Ok(BrokerOutcome::Activities { .. })
-                | Ok(BrokerOutcome::CancelAccepted { .. })
-                | Ok(BrokerOutcome::AccountWideAccepted)
-                | Ok(BrokerOutcome::Listed { .. }) => None,
-                Err(..) => None,
-            };
+            let request = entry_read(
+                queryable,
+                &entry,
+                instrument,
+                mandate_executor::RiskClock::from_secs(self.setup.now.secs()),
+            );
+            let answer = self.stages.connector.call(&request);
+            read = entry_status(&answer, &entry);
             self.step_watched(map::broker_input(answer).map_err(refused(Stage::Connector))?)?;
             self.step_watched(mandate_executor::Input::Tick(
                 mandate_executor::RiskClock::from_secs(now.secs()),
@@ -1234,8 +1230,9 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
-    /// Step 13. A submission goes out only when its `OrderSubmitted` committed in this run, only
-    /// when the operator asked for an order, and only once per run.
+    /// Step 13. A submission goes out only when its `OrderSubmitted` committed in this run, and
+    /// only when the operator asked for an order. One that adds risk goes out once per run; a
+    /// protective order or an exit always goes out (`AGENTS.md` rule 13, DEC-1151 item 5).
     fn broker(
         &mut self,
         request: &BrokerRequest,
@@ -1256,7 +1253,7 @@ impl<'s> Session<'s> {
             match door(
                 self.holding,
                 self.held.is_some(),
-                !self.report.submitted.is_empty(),
+                self.opening.is_some(),
                 order.purpose,
             ) {
                 Door::Second => return Err(ShellError::SecondSubmission),
@@ -1266,8 +1263,11 @@ impl<'s> Session<'s> {
                 }
                 Door::Pass => {}
             }
-            if !self.report.submitted.is_empty() {
-                return Err(ShellError::SecondSubmission);
+            if order.purpose.adds_risk() {
+                if self.opening.is_some() {
+                    return Err(ShellError::SecondSubmission);
+                }
+                self.opening = Some(order.client_order_id.clone());
             }
             self.report
                 .submitted
@@ -1454,6 +1454,65 @@ impl<'s> Session<'s> {
     }
 }
 
+/// The watch's read of its entry (DEC-1150 item 3): by its client order id where the connector's
+/// profile can query by it, and otherwise by the profile's own listing of the agent's orders in the
+/// instrument created since `since` less DEC-862 item 2's margin, so the watch never sends a query
+/// the connector refuses unsent.
+fn entry_read(
+    queryable: bool,
+    entry: &mandate_executor::ClientOrderId,
+    instrument: &InstrumentId,
+    since: mandate_executor::RiskClock,
+) -> BrokerRequest {
+    if queryable {
+        return BrokerRequest::GetOrderByClientId(entry.clone());
+    }
+    BrokerRequest::ListOrders(mandate_executor::OrderListing {
+        client_order_id: entry.clone(),
+        instrument: instrument.clone(),
+        origin: mandate_executor::OrderOrigin::Agentic,
+        created_since: mandate_executor::RiskClock::from_secs(
+            since.secs().saturating_sub(WATCH_LISTING_MARGIN_S),
+        ),
+    })
+}
+
+/// DEC-862 item 2's margin: a listing starts this long before the order could have been placed.
+const WATCH_LISTING_MARGIN_S: i64 = 300;
+
+/// The entry's broker status in `answer`, which the run's LT-10 question reads (DEC-912 item 3):
+/// the order an order query answered, or, from a listing, the one record that names the entry by
+/// its own id. A listing with none or several such records reads nothing, so the watch never
+/// takes another order's status for the entry's.
+fn entry_status(
+    answer: &Result<BrokerOutcome, mandate_executor::ConnectorError>,
+    entry: &mandate_executor::ClientOrderId,
+) -> Option<String> {
+    match answer {
+        Ok(BrokerOutcome::Order(order)) => Some(order.status.clone()),
+        Ok(BrokerOutcome::Listed { orders, .. }) => {
+            let mut named = orders
+                .iter()
+                .filter(|record| record.order.client_order_id.as_deref() == Some(entry.as_str()));
+            match (named.next(), named.next()) {
+                (Some(one), None) => Some(one.order.status.clone()),
+                (Some(_), Some(_)) | (None, Some(_)) | (None, None) => None,
+            }
+        }
+        Ok(BrokerOutcome::Submitted(..))
+        | Ok(BrokerOutcome::DuplicateClientOrderId { .. })
+        | Ok(BrokerOutcome::Rejected(..))
+        | Ok(BrokerOutcome::Absent { .. })
+        | Ok(BrokerOutcome::OpenOrders(..))
+        | Ok(BrokerOutcome::Positions(..))
+        | Ok(BrokerOutcome::Account(..))
+        | Ok(BrokerOutcome::Activities { .. })
+        | Ok(BrokerOutcome::CancelAccepted { .. })
+        | Ok(BrokerOutcome::AccountWideAccepted) => None,
+        Err(..) => None,
+    }
+}
+
 fn consecutive_executor_journals(
     first: mandate_executor::EventDraft,
     effects: &mut VecDeque<mandate_executor::Effect>,
@@ -1487,7 +1546,100 @@ mod tests {
     use mandate_executor::{Effect, EventDraft, EventId, NotificationRef};
     use mandate_journal::StoredEvent;
 
-    use super::{consecutive_executor_journals, planned_request_version, with_environment};
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_executor::{
+        BrokerOrder, BrokerOutcome, BrokerRequest, ClientOrderId, ListedOrder, OrderListing,
+        OrderOrigin, OrderType, RiskClock, TimeInForce,
+    };
+    use mandate_num::Qty;
+
+    use super::{
+        consecutive_executor_journals, entry_read, entry_status, planned_request_version,
+        with_environment,
+    };
+
+    fn entry() -> Result<ClientOrderId, String> {
+        ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ0").map_err(|e| e.to_string())
+    }
+
+    fn instrument() -> Result<InstrumentId, String> {
+        InstrumentId::new("5f0c3c1e-7d1a-4c8e-9b0a-2e6f1d3a9c41").map_err(|e| e.to_string())
+    }
+
+    /// DEC-1150 item 3: a profile that queries by client order id is asked by it; one that cannot
+    /// is asked by its listing of the agent's orders in the instrument from five minutes before
+    /// the run, the margin DEC-862 item 2 sets.
+    #[test]
+    fn the_watch_reads_its_entry_the_way_the_profile_offers() -> Result<(), String> {
+        let (entry, instrument) = (entry()?, instrument()?);
+        let since = RiskClock::from_secs(1_000);
+        assert_eq!(
+            entry_read(true, &entry, &instrument, since),
+            BrokerRequest::GetOrderByClientId(entry.clone())
+        );
+        assert_eq!(
+            entry_read(false, &entry, &instrument, since),
+            BrokerRequest::ListOrders(OrderListing {
+                client_order_id: entry.clone(),
+                instrument,
+                origin: OrderOrigin::Agentic,
+                created_since: RiskClock::from_secs(700),
+            })
+        );
+        Ok(())
+    }
+
+    fn record(client_order_id: Option<&str>, status: &str) -> Result<ListedOrder, String> {
+        Ok(ListedOrder {
+            order: BrokerOrder {
+                broker_order_id: "rh-sim-000001".to_owned(),
+                client_order_id: client_order_id.map(str::to_owned),
+                instrument: instrument()?,
+                side: Side::Buy,
+                qty: Qty::parse("1").map_err(|e| e.to_string())?,
+                filled_qty: Qty::ZERO,
+                limit_price: None,
+                stop_price: None,
+                status: status.to_owned(),
+                reject_code: None,
+                replaced_by_broker_order_id: None,
+                legs: Vec::new(),
+                created_on: None,
+            },
+            order_type: OrderType::Limit,
+            tif: TimeInForce::Day,
+        })
+    }
+
+    /// The status the LT-10 question reads comes only from the one listed record naming the
+    /// entry by its own id: never from a look-alike, another order, or a listing naming it twice.
+    #[test]
+    fn the_watch_reads_the_status_of_the_one_record_naming_its_entry() -> Result<(), String> {
+        let entry = entry()?;
+        let listed = |orders: Vec<ListedOrder>| {
+            Ok(BrokerOutcome::Listed {
+                client_order_id: entry.as_str().to_owned(),
+                orders,
+            })
+        };
+        let ours = entry.as_str();
+        let answer = listed(vec![
+            record(None, "canceled")?,
+            record(Some("ref_id someone-else"), "canceled")?,
+            record(Some(ours), "filled")?,
+        ]);
+        assert_eq!(entry_status(&answer, &entry), Some("filled".to_owned()));
+        let twice = listed(vec![
+            record(Some(ours), "filled")?,
+            record(Some(ours), "filled")?,
+        ]);
+        assert_eq!(entry_status(&twice, &entry), None);
+        let none = listed(vec![record(None, "filled")?]);
+        assert_eq!(entry_status(&none, &entry), None);
+        let order = Ok(BrokerOutcome::Order(record(Some(ours), "accepted")?.order));
+        assert_eq!(entry_status(&order, &entry), Some("accepted".to_owned()));
+        Ok(())
+    }
 
     fn draft(id: &str, event_type: &str, schema_version: u64) -> EventDraft {
         EventDraft {

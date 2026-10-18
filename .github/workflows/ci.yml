@@ -7,10 +7,19 @@
 # over the non-mutation full checks, the mutation plan, every deterministic mutation shard the plan
 # sized to the diff (DEC-538), and the workspace API schemas' mutation sweep (DEC-688). Run
 # `cargo xtask check` locally for the same complete set, unsharded. main itself is covered by the
-# nightly workflow. A documentation-only change takes the short path in every job (DEC-112): no
-# toolchain, just typos, the spec guard, and the trailer check (`.github/scripts/docs-checks.sh`)
-# in `fast-lint`. So does a change that touches only documentation and `web/`, whose checks run in
-# `web.yml` (DEC-200).
+# nightly workflow, which dispatches this workflow on main every night (DEC-1190).
+# DEC-1190 scopes the jobs to the diff: `select` runs `cargo xtask ci select`, which takes the
+# changed paths, the crates owning them or naming them in their sources, and every crate built on
+# those, and says which jobs the diff needs. `fast-test`, `fast-pending`, `fast-python`,
+# `fast-portable`, `fast-rh-sim-live`, `full-checks` and `schema-mutants` start only when it says
+# so, and inside them xtask runs only the selected crates' tests. `fast-lint`, the mutation plan
+# and its shards run on every ready pull request as before. A build input, CI, xtask, any
+# manifest, an unknown path, and a run with no diff base select everything. A skipped job starts
+# no runner; `fast` and `full` still pass or fail, and accept a skip only where `select` asked for
+# it, printing its reasons in their summaries. A documentation-only change still takes the short
+# path in `fast-lint` (DEC-112): no toolchain, just typos, the spec guard, and the trailer check
+# (`.github/scripts/docs-checks.sh`). So does a change that touches only documentation and
+# `web/`, whose checks run in `web.yml` (DEC-200).
 # Every diff-based check compares against the first parent of the merge commit a `pull_request`
 # run checks out, main's tip the PR was merged onto: xtask's `choose_base` and
 # `.github/scripts/base-ref.sh` read `GITHUB_EVENT_NAME` for it, and `fetch-depth: 0` keeps both
@@ -53,10 +62,40 @@ env:
   KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
 
 jobs:
+  # DEC-1190. The affected-set selection every scoped job follows: one boolean a job, and the
+  # one-line reasons `fast` and `full` print. It builds only xtask.
+  select:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tests: ${{ steps.select.outputs.tests }}
+      python: ${{ steps.select.outputs.python }}
+      portable: ${{ steps.select.outputs.portable }}
+      rh_sim_live: ${{ steps.select.outputs.rh_sim_live }}
+      full_checks: ${{ steps.select.outputs.full_checks }}
+      schema_mutants: ${{ steps.select.outputs.schema_mutants }}
+      reasons: ${{ steps.select.outputs.reasons }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: select
+      - name: Select the jobs this diff needs (DEC-1190)
+        id: select
+        run: cargo xtask ci select >> "$GITHUB_OUTPUT"
+
   # DEC-871. `fast`'s parts run in parallel jobs, so each stays under ten minutes (DEC-464):
   # `cargo xtask ci fast` in one job took 13 to 14.6 minutes. `fast-lint` runs lint and the spec
-  # guard, and the documentation-only short path (DEC-112); the other jobs report success on a
-  # documentation-only change without a toolchain.
+  # guard, and the documentation-only short path (DEC-112); the other jobs start only when `select`
+  # says the diff needs them (DEC-1190).
   fast-lint:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
@@ -114,7 +153,8 @@ jobs:
   # shard saves.
   fast-test:
     name: fast-test (${{ matrix.shard }})
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.tests == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -128,23 +168,14 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
-        if: steps.change.outputs.docs_only != 'true'
         with:
           tool: cargo-nextest@0.9.146,typos@1.50.2,shellcheck@0.11.0
       - name: Install actionlint (checksum-verified)
-        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum --check
@@ -152,21 +183,17 @@ jobs:
       # xtask's own tests drive the whole mutation gate over a fixture repository, so the jobs that
       # run them need the tool the gate calls as well (DEC-139).
       - name: Install cargo-mutants (checksum-verified)
-        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
           echo "${CARGO_MUTANTS_SHA256}  cargo-mutants.tgz" | sha256sum --check
           tar xzf cargo-mutants.tgz cargo-mutants && sudo install cargo-mutants /usr/local/bin/ && rm cargo-mutants cargo-mutants.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
         with:
           shared-key: fast-test
           save-if: ${{ matrix.shard == '1/3' }}
       - run: cargo xtask ci test-nextest
-        if: steps.change.outputs.docs_only != 'true'
         env:
           MANDATE_TEST_PARTITION: ${{ matrix.shard }}
 
@@ -174,7 +201,8 @@ jobs:
   # build's tests of `mandate-mcp` and `mandate-paper` (DEC-922, DEC-963): all need the test
   # profile the `fast-test` shards build, and run in seconds once it is built.
   fast-pending:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.tests == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -184,23 +212,14 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
-        if: steps.change.outputs.docs_only != 'true'
         with:
           tool: cargo-nextest@0.9.146,typos@1.50.2,shellcheck@0.11.0
       - name: Install actionlint (checksum-verified)
-        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum --check
@@ -208,30 +227,25 @@ jobs:
       # xtask's own tests drive the whole mutation gate over a fixture repository, so the jobs that
       # run them need the tool the gate calls as well (DEC-139).
       - name: Install cargo-mutants (checksum-verified)
-        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
           echo "${CARGO_MUTANTS_SHA256}  cargo-mutants.tgz" | sha256sum --check
           tar xzf cargo-mutants.tgz cargo-mutants && sudo install cargo-mutants /usr/local/bin/ && rm cargo-mutants cargo-mutants.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
         with:
           shared-key: fast-test
           save-if: false
       - run: cargo xtask ci pending
-        if: steps.change.outputs.docs_only != 'true'
       - run: cargo xtask ci test-doc
-        if: steps.change.outputs.docs_only != 'true'
       - run: cargo xtask ci test-rh-sim
-        if: steps.change.outputs.docs_only != 'true'
 
   # DEC-871. The Python tests, which took about two and a half minutes inside `test`; this job
   # builds only xtask.
   fast-python:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.python == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -241,35 +255,24 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
         with:
           shared-key: fast-python
       # The workspace chart's invariants (deploy/tests/test_cell.py) render it with helm, so the
       # required `fast` check holds them; without helm they would skip (DEC-993 item 10).
       - name: Install helm (checksum-verified)
-        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
           echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
           tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
           sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
       - run: cargo xtask ci test-python
-        if: steps.change.outputs.docs_only != 'true'
         env:
           MANDATE_CELL_HELM_REQUIRED: "1"
 
@@ -278,7 +281,8 @@ jobs:
   # fails the required `fast` check. A cross-check from Linux cannot build `ring`'s C for Apple
   # without the macOS SDK, so it runs on a macOS runner.
   fast-portable:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.portable == 'true'
     runs-on: macos-14
     timeout-minutes: 10
     permissions:
@@ -288,21 +292,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
         with:
           shared-key: fast-portable
       - run: cargo xtask ci portable
-        if: steps.change.outputs.docs_only != 'true'
 
   # DEC-964 (narrowing DEC-529 item 3). The runner's tests in the `live,rh-sim` build, the build
   # the R0 rehearsal runs: `rh-sim` wins over `live`, so it holds no Robinhood host and dials only
@@ -312,7 +307,8 @@ jobs:
   # exactly this run, in this job, besides its compile-only check. It is a job of its own, not a
   # step of `fast-pending`, so neither nears ten minutes (DEC-464).
   fast-rh-sim-live:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.rh_sim_live == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -322,38 +318,36 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
-        if: steps.change.outputs.docs_only != 'true'
         with:
           tool: cargo-nextest@0.9.146
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
         with:
           shared-key: fast-rh-sim-live
       - run: .github/scripts/no-credentials.sh && cargo nextest run --locked --no-tests=fail --package mandate-paper --features live,rh-sim
-        if: steps.change.outputs.docs_only != 'true'
 
   fast:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
     if: ${{ always() && !github.event.pull_request.draft }}
-    needs: [fast-lint, fast-test, fast-pending, fast-python, fast-portable, fast-rh-sim-live]
-    # DEC-871. The required `fast` verdict: every part must succeed, and a matrix succeeds only when
-    # every shard did. A failed, cancelled or skipped part fails it. xtask's tests run this script
-    # over every combination of the six results.
+    needs: [select, fast-lint, fast-test, fast-pending, fast-python, fast-portable, fast-rh-sim-live]
+    # DEC-871, DEC-1190. The required `fast` verdict: `select` and `fast-lint` must succeed, and
+    # each scoped part must have succeeded where `select` selected it and been skipped where it did
+    # not; a matrix succeeds only when every shard did. A failed or cancelled part, a skip `select`
+    # did not ask for, and a part that ran when it should not have all fail it. xtask's tests run
+    # this script over every combination of the results and switches.
     steps:
-      - name: Require lint and the spec guard, every test shard, the pending tests and doctests, pytest, the macOS runner check, and the rehearsal build's tests
+      - name: Require the selection, lint and the spec guard, and every part the selection named
         env:
+          SELECT_RESULT: ${{ needs.select.result }}
+          REASONS: ${{ needs.select.outputs.reasons }}
+          TESTS_SELECTED: ${{ needs.select.outputs.tests }}
+          PYTHON_SELECTED: ${{ needs.select.outputs.python }}
+          PORTABLE_SELECTED: ${{ needs.select.outputs.portable }}
+          RH_SIM_LIVE_SELECTED: ${{ needs.select.outputs.rh_sim_live }}
           LINT_RESULT: ${{ needs.fast-lint.result }}
           TEST_RESULT: ${{ needs.fast-test.result }}
           PENDING_RESULT: ${{ needs.fast-pending.result }}
@@ -361,15 +355,18 @@ jobs:
           PORTABLE_RESULT: ${{ needs.fast-portable.result }}
           RH_SIM_LIVE_RESULT: ${{ needs.fast-rh-sim-live.result }}
         run: |
+          printf 'Affected-set selection (DEC-1190): %s\n' "$REASONS" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$SELECT_RESULT" = success
           test "$LINT_RESULT" = success
-          test "$TEST_RESULT" = success
-          test "$PENDING_RESULT" = success
-          test "$PYTHON_RESULT" = success
-          test "$PORTABLE_RESULT" = success
-          test "$RH_SIM_LIVE_RESULT" = success
+          test "$TESTS_SELECTED:$TEST_RESULT" = true:success || test "$TESTS_SELECTED:$TEST_RESULT" = false:skipped
+          test "$TESTS_SELECTED:$PENDING_RESULT" = true:success || test "$TESTS_SELECTED:$PENDING_RESULT" = false:skipped
+          test "$PYTHON_SELECTED:$PYTHON_RESULT" = true:success || test "$PYTHON_SELECTED:$PYTHON_RESULT" = false:skipped
+          test "$PORTABLE_SELECTED:$PORTABLE_RESULT" = true:success || test "$PORTABLE_SELECTED:$PORTABLE_RESULT" = false:skipped
+          test "$RH_SIM_LIVE_SELECTED:$RH_SIM_LIVE_RESULT" = true:success || test "$RH_SIM_LIVE_SELECTED:$RH_SIM_LIVE_RESULT" = false:skipped
 
   full-checks:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.full_checks == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -377,48 +374,49 @@ jobs:
     env:
       MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
       MANDATE_PG_REQUIRED: "1"
+      MANDATE_OPENBAO_REQUIRED: "1"
+      MANDATE_OPENBAO_ADDR: https://127.0.0.1:8200
+      MANDATE_OPENBAO_CA: /tmp/openbao/ca.pem
+      MANDATE_OPENBAO_OPERATOR_TOKEN_FILE: /tmp/openbao/token
+      MANDATE_S3_URL: http://127.0.0.1:9000
+      MANDATE_S3_ACCESS_KEY_ID: mandate-test
+      MANDATE_S3_SECRET_ACCESS_KEY: mandate-test-only
+      MANDATE_S3_REQUIRED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       # The Postgres journal tests run here, not in `fast` (DEC-109): the supported version, ES-08.
       - name: Start PostgreSQL 18 (digest-pinned)
-        if: steps.change.outputs.docs_only != 'true'
         run: .github/scripts/start-postgres.sh
+      # mandate-vault's conformance suite against OpenBao in dev mode, fake secrets only (DEC-977).
+      - name: Start OpenBao 2.7.1 (digest-pinned, dev mode)
+        run: .github/scripts/start-openbao.sh
+      # The object store's conformance suite runs here too (E21-40, DEC-973), as `objectstore`.
+      - name: Start the S3 test store (digest-pinned)
+        run: .github/scripts/start-minio.sh
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
-        if: steps.change.outputs.docs_only != 'true'
         with:
           tool: cargo-deny@0.20.2,cargo-nextest@0.9.146
       - name: Install gitleaks (checksum-verified)
-        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
           tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
       - run: cargo xtask ci full
-        if: steps.change.outputs.docs_only != 'true'
 
   # E21-36, E21-37 (DEC-993): the local cell on the runner. `cargo xtask ci cell` lints and renders
   # both charts, runs the chart's invariant tests, brings up a k3d cluster, installs the chart from
-  # the image this change built, runs every drill, runs every drill again with its bug planted,
-  # which each must catch, and ends with `cell demo --no-web`, an upgrade of every release in place. Not yet in `full` (DEC-993 item 10); the chart's invariants are in
+  # the image this change built, runs its drills, runs each again with its bug planted, which
+  # each must catch (the journal's drills run in `cell-journal` and `cell-failover`, below), and ends with `cell demo --no-web`, an upgrade of every release in place. Not yet in `full` (DEC-993 item 10); the chart's invariants are in
   # `fast-python`.
   cell:
     if: ${{ !github.event.pull_request.draft }}
@@ -466,6 +464,163 @@ jobs:
           shared-key: cell
           cache-on-failure: true
       - run: cargo xtask ci cell
+        if: steps.change.outputs.docs_only != 'true'
+
+  # E21-54 (DEC-2002): the demo's scenario on the runner's cell. `cargo xtask ci cell-demo` brings
+  # up the cell, runs every gesture of the demo's six steps that is on main and names each missing
+  # link by its PR or story, then verifies the workspace's control stream. No required check needs
+  # it; it keeps the ready steps green.
+  cell-demo:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_CELL_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - name: Install k3d, helm and kubeconform (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          shared-key: cell-demo
+          cache-on-failure: true
+      - run: cargo xtask ci cell-demo
+        if: steps.change.outputs.docs_only != 'true'
+
+  # E21-41 (DEC-1050 item 7): the journal's own drills on the same cell, in a job of their own so
+  # each cell job stays within its ten minutes (DEC-464). `cargo xtask ci cell-journal` brings the
+  # cell up and runs the `standby-down` and `archive` drills, plain and seeded. Not required, as
+  # `cell` is not (DEC-993 item 10). It restores `cell`'s cache and saves none of its own.
+  cell-journal:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_CELL_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - name: Install k3d, helm and kubeconform (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          shared-key: cell
+          save-if: false
+          cache-on-failure: true
+      - run: cargo xtask ci cell-journal
+        if: steps.change.outputs.docs_only != 'true'
+
+  # E21-41 (DEC-1050 item 7): the restart drill, which with a synchronous standby is a failover and
+  # the old primary's rejoin, on its own cell so each cell job stays within ten minutes (DEC-464).
+  # Not required, as `cell` is not. It restores `cell`'s cache and saves none of its own.
+  cell-failover:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_CELL_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - name: Install k3d, helm and kubeconform (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
+        with:
+          shared-key: cell
+          save-if: false
+          cache-on-failure: true
+      - run: cargo xtask ci cell-failover
         if: steps.change.outputs.docs_only != 'true'
 
   # DEC-538. Sizes the mutation matrix to the diff: `cargo xtask ci mutants --plan` lists, without
@@ -540,6 +695,14 @@ jobs:
       MANDATE_MUTANTS_PLANNED: ${{ needs.mutants-plan.outputs.mutants }}
       MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
       MANDATE_PG_REQUIRED: "1"
+      MANDATE_OPENBAO_REQUIRED: "1"
+      MANDATE_OPENBAO_ADDR: https://127.0.0.1:8200
+      MANDATE_OPENBAO_CA: /tmp/openbao/ca.pem
+      MANDATE_OPENBAO_OPERATOR_TOKEN_FILE: /tmp/openbao/token
+      MANDATE_S3_URL: http://127.0.0.1:9000
+      MANDATE_S3_ACCESS_KEY_ID: mandate-test
+      MANDATE_S3_SECRET_ACCESS_KEY: mandate-test-only
+      MANDATE_S3_REQUIRED: "1"
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_PROFILE_DEV_OPT_LEVEL: "1"
@@ -551,6 +714,10 @@ jobs:
           persist-credentials: false
       - name: Start PostgreSQL 18 (digest-pinned)
         run: .github/scripts/start-postgres.sh
+      - name: Start OpenBao 2.7.1 (digest-pinned, dev mode)
+        run: .github/scripts/start-openbao.sh
+      - name: Start the S3 test store (digest-pinned)
+        run: .github/scripts/start-minio.sh
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: cargo-nextest@0.9.146
@@ -571,7 +738,8 @@ jobs:
   # also run inside `full-checks`.
   schema-mutants:
     name: schema-mutants (${{ matrix.shard }})
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.schema_mutants == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -585,24 +753,14 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
       - run: cargo xtask ci schema-mutants
-        if: steps.change.outputs.docs_only != 'true'
         env:
           MANDATE_SCHEMA_SHARD: ${{ matrix.shard }}
 
@@ -611,26 +769,55 @@ jobs:
     timeout-minutes: 1
     permissions: {}
     if: ${{ always() && !github.event.pull_request.draft }}
-    needs: [full-checks, mutants-plan, mutants, schema-mutants]
+    needs: [select, full-checks, mutants-plan, mutants, schema-mutants]
     # DEC-538. A plan of zero mutants launches no shard, so `mutants` is skipped, and that skip
     # passes only beside a plan that succeeded and reported zero. A failed or cancelled plan, a
     # count that is not a number, a skipped matrix beside a plan that counted mutants, and a matrix
     # that ran beside a plan of zero all fail. xtask's tests run this script over that table.
     # `schema-mutants` must succeed, which a matrix does only when every shard succeeded (DEC-688).
+    # DEC-1190: `full-checks` and `schema-mutants` must have run and succeeded where `select`
+    # selected them and been skipped where it did not, beside a `select` that succeeded.
     steps:
-      - name: Require every full check, the mutation plan, every shard it sized, and schema-mutants
+      - name: Require the selection, every full check it named, the mutation plan, every shard it sized, and schema-mutants where named
         env:
+          SELECT_RESULT: ${{ needs.select.result }}
+          REASONS: ${{ needs.select.outputs.reasons }}
+          FULL_CHECKS_SELECTED: ${{ needs.select.outputs.full_checks }}
+          SCHEMA_MUTANTS_SELECTED: ${{ needs.select.outputs.schema_mutants }}
           FULL_CHECKS_RESULT: ${{ needs.full-checks.result }}
           PLAN_RESULT: ${{ needs.mutants-plan.result }}
           PLANNED_MUTANTS: ${{ needs.mutants-plan.outputs.mutants }}
           MUTANTS_RESULT: ${{ needs.mutants.result }}
           SCHEMA_MUTANTS_RESULT: ${{ needs.schema-mutants.result }}
         run: |
-          test "$FULL_CHECKS_RESULT" = success
-          test "$SCHEMA_MUTANTS_RESULT" = success
+          printf 'Affected-set selection (DEC-1190): %s\n' "$REASONS" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$SELECT_RESULT" = success
+          test "$FULL_CHECKS_SELECTED:$FULL_CHECKS_RESULT" = true:success || test "$FULL_CHECKS_SELECTED:$FULL_CHECKS_RESULT" = false:skipped
+          test "$SCHEMA_MUTANTS_SELECTED:$SCHEMA_MUTANTS_RESULT" = true:success || test "$SCHEMA_MUTANTS_SELECTED:$SCHEMA_MUTANTS_RESULT" = false:skipped
           test "$PLAN_RESULT" = success
           case "$PLANNED_MUTANTS" in
             '' | *[!0-9]* | 0?*) exit 1 ;;
             0) test "$MUTANTS_RESULT" = skipped ;;
             *) test "$MUTANTS_RESULT" = success ;;
           esac
+
+  # DEC-1190 item 5. The nightly dispatches this workflow on main, where `select` has no diff base
+  # and selects everything; when that run fails, this opens an issue naming only the run and the
+  # verdicts, never a log line. A run cancelled by a newer dispatch reports nothing, nor does a
+  # dispatch on any other branch.
+  report-main:
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || needs.full.result == 'failure') }}
+    needs: [fast, full]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      issues: write
+    steps:
+      - name: Open an issue for the failed run on main (opaque)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAST_RESULT: ${{ needs.fast.result }}
+          FULL_RESULT: ${{ needs.full.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="nightly: ci on main failed at ${GITHUB_SHA}" -f body="The nightly ci run on main failed (fast ${FAST_RESULT}, full ${FULL_RESULT}): ${RUN_URL} (DEC-1190)"
