@@ -171,6 +171,26 @@ fn an_agent_never_deployed_or_since_stopped_is_refused() {
     assert!(world.resolved().is_ok(), "a redeployment runs again");
 }
 
+/// A stop is decided by its type, never by the members it carries: a stop record that also
+/// names a version still stops the agent.
+#[test]
+fn a_stop_naming_a_version_still_stops_the_agent() {
+    let mut world = World::default();
+    let version = world.version(("user", "user-author"), |_| {});
+    world.deployed(AGENT, &version, "paper");
+    let payload =
+        format!(r#"{{"agent_id":"{AGENT}","mandate_version":"{version}","reason":"owner_stop"}}"#);
+    let seq = world.next();
+    world.control.push(row(
+        seq,
+        "AgentStopped",
+        "paper",
+        ("user", "user-owner"),
+        &payload,
+    ));
+    assert_eq!(world.resolved(), Err("agent_not_deployed"));
+}
+
 #[test]
 fn a_document_missing_corrupt_or_invalid_is_refused() {
     let mut world = World::default();
