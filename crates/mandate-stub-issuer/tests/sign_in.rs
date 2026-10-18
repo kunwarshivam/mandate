@@ -159,7 +159,6 @@ fn stub_token(stub: std::net::SocketAddr) -> String {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_stub_token_signs_in_a_subject_linked_under_the_stubs_issuer() {
     let (stub, stub_addr) = common::serve("authenticated");
     let api = api("linked", &stub, &stub.issuer, "authenticated");
@@ -178,7 +177,6 @@ fn a_stub_token_signs_in_a_subject_linked_under_the_stubs_issuer() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_subject_linked_under_another_issuer_is_the_one_401() {
     let (stub, stub_addr) = common::serve("authenticated");
     let api = api("elsewhere", &stub, MANAGED, "authenticated");
@@ -188,7 +186,6 @@ fn a_subject_linked_under_another_issuer_is_the_one_401() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_stub_token_for_another_audience_is_the_one_401() {
     let (stub, stub_addr) = common::serve("mandate-demo");
     let api = api("audience", &stub, &stub.issuer, "authenticated");
