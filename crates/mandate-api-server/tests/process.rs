@@ -51,6 +51,7 @@ fn command(args: &[&str], extra: &[(&str, &str)]) -> Command {
         )
         .env("MANDATE_API_WORKSPACE", "01JB3K6F0C9R2V7N4M8Q1T5W3Y")
         .env("MANDATE_API_ORG", "01JB3K6F0C9R2V7N4M8Q1T5W3X")
+        .env("MANDATE_DEPLOYMENT_TIER", "ci")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -132,6 +133,32 @@ fn a_password_in_the_database_url_is_refused_and_never_printed() {
     assert_eq!(code, Some(2), "{text}");
     assert!(text.contains("password"), "{text}");
     assert!(!text.contains("canary-pw-93c1"), "{text}");
+}
+
+/// E21-53: the binary reads its tier itself, and an `http` key set outside dev and CI, no tier
+/// included, refuses the start by naming the setting; an `https` one starts in production.
+#[test]
+fn an_http_key_set_outside_dev_and_ci_refuses_the_start() {
+    for tier in [None, Some("staging"), Some("production"), Some("Dev")] {
+        let mut outside = command(&LOCAL, &[]);
+        match tier {
+            Some(tier) => outside.env("MANDATE_DEPLOYMENT_TIER", tier),
+            None => outside.env_remove("MANDATE_DEPLOYMENT_TIER"),
+        };
+        let (code, text) = refused(outside);
+        assert_eq!(code, Some(2), "{tier:?}: {text}");
+        assert!(text.contains("MANDATE_API_JWKS_URL"), "{tier:?}: {text}");
+    }
+    let (mut running, api, _) = start(&[
+        ("MANDATE_DEPLOYMENT_TIER", "production"),
+        (
+            "MANDATE_API_JWKS_URL",
+            "https://issuer.test/auth/v1/.well-known/jwks.json",
+        ),
+    ]);
+    assert_eq!(get(api, "/v1/workspaces/ws_1/agents").status, 401);
+    terminate(&running.0);
+    assert_eq!(wait(&mut running.0, Duration::from_secs(10)), Some(0));
 }
 
 #[test]

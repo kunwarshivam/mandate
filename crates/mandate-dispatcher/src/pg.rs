@@ -13,15 +13,14 @@
 //! stream's head row, and the newer dispatcher's next append would wait on that lock forever:
 //! fencing would deadlock the very writer it hands the stream to (DEC-2500 item 3, NT-8). The one
 //! worker keeps driving spawned tasks between calls, so the rollback lands and the lock is freed.
-//! The implementation adds tokio's `rt-multi-thread` feature to this crate's normal dependencies
-//! (its tests already enable it) and updates the `tokio` row of `docs/dependencies.md` to match.
 
 use std::time::Duration;
 
 use mandate_journal::{AppendOutcome, StoredEvent, StreamId};
 use mandate_journal_pg::PgJournal;
 use mandate_time::UtcNanos;
-use tokio::runtime::Runtime;
+use tokio::runtime::{Builder, Runtime};
+use tokio::time::timeout;
 
 use crate::DispatchError;
 use crate::step::{Journal, NoticeWriter};
@@ -33,10 +32,6 @@ pub const READ_DEADLINE: Duration = Duration::from_secs(5);
 
 /// The Postgres journal as the dispatcher reads and appends to it, with the one-worker multi-thread
 /// runtime that drives it (see the module docs for why it is never a current-thread runtime).
-#[allow(
-    dead_code,
-    reason = "the tests PR's stubs read no field; the implementation reads both (DEC-77, E8-10 D10a)"
-)]
 pub struct PgNotices {
     journal: PgJournal,
     runtime: Runtime,
@@ -50,8 +45,17 @@ impl PgNotices {
     /// # Errors
     /// [`DispatchError::JournalUnavailable`] when the runtime cannot start or the DSN does not
     /// parse; the error never carries the DSN, a credential (`AGENTS.md` rule 7).
-    pub fn connect(_dsn: &str) -> Result<Self, DispatchError> {
-        Err(DispatchError::Unimplemented { story: "E8-10" })
+    pub fn connect(dsn: &str) -> Result<Self, DispatchError> {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .map_err(|_| DispatchError::JournalUnavailable)?;
+        let journal = {
+            let _entered = runtime.enter();
+            PgJournal::from_dsn(dsn).map_err(|_| DispatchError::JournalUnavailable)?
+        };
+        Ok(Self { journal, runtime })
     }
 
     /// Takes `stream`'s next writer epoch, fencing every older writer, and returns the one
@@ -60,8 +64,14 @@ impl PgNotices {
     /// # Errors
     /// [`DispatchError::NotANoticeStream`] for any stream that is not a notice stream, before
     /// anything is written; [`DispatchError::JournalUnavailable`] when the store cannot answer.
-    pub fn take(&mut self, _stream: StreamId) -> Result<NoticeWriter, DispatchError> {
-        Err(DispatchError::Unimplemented { story: "E8-10" })
+    pub fn take(&mut self, stream: StreamId) -> Result<NoticeWriter, DispatchError> {
+        let unwritten = NoticeWriter::new(stream, 0)?;
+        let stream = unwritten.stream()?;
+        let epoch = self
+            .runtime
+            .block_on(self.journal.take_ownership(stream))
+            .map_err(|_| DispatchError::JournalUnavailable)?;
+        NoticeWriter::new(stream.clone(), epoch)
     }
 }
 
@@ -69,8 +79,12 @@ impl Journal for PgNotices {
     /// One short read, bounded by [`READ_DEADLINE`]; an unreachable database, a refused statement,
     /// a lapsed deadline, and stored bytes that fail re-verification are each
     /// [`DispatchError::JournalUnavailable`].
-    fn committed(&self, _stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
-        Err(DispatchError::Unimplemented { story: "E8-10" })
+    fn committed(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, DispatchError> {
+        let bounded = async { timeout(READ_DEADLINE, self.journal.rows(stream)).await };
+        match self.runtime.block_on(bounded) {
+            Ok(Ok(rows)) => Ok(rows),
+            Ok(Err(_)) | Err(_) => Err(DispatchError::JournalUnavailable),
+        }
     }
 
     /// One append at `writer`'s epoch: `Fenced` once a newer dispatcher took the stream, and
@@ -79,11 +93,19 @@ impl Journal for PgNotices {
     /// why that runtime must keep driving between calls.
     fn append_notices(
         &mut self,
-        _writer: &NoticeWriter,
-        _expected_head: u64,
-        _recorded_at: UtcNanos,
-        _drafts: &[&[u8]],
+        writer: &NoticeWriter,
+        expected_head: u64,
+        recorded_at: UtcNanos,
+        drafts: &[&[u8]],
     ) -> AppendOutcome {
-        AppendOutcome::Unavailable
+        let (Ok(stream), Ok(epoch)) = (writer.stream(), writer.epoch()) else {
+            return AppendOutcome::Unavailable;
+        };
+        self.runtime
+            .block_on(
+                self.journal
+                    .append(stream, expected_head, epoch, recorded_at, drafts),
+            )
+            .unwrap_or(AppendOutcome::Unavailable)
     }
 }

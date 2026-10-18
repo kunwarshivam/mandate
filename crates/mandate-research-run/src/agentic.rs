@@ -760,7 +760,7 @@ impl RunState {
 
     /// The code a read is refused before it runs, if any: a symbol outside the run's frozen scope,
     /// or an item the run never received of the kind the tool takes (§6.10). Arguments the
-    /// gateway's schema check should already have refused (unparseable, a member missing or of the
+    /// gateway's schema check should already have refused (unparsable, a member missing or of the
     /// wrong type, no symbol) prove nothing in scope, so they are refused the same way.
     fn screen(&self, call: &ToolCall) -> Option<Code> {
         let arguments = mandate_canon::parse(call.arguments.as_bytes()).ok();

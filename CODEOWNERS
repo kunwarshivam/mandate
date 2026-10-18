@@ -43,6 +43,7 @@
 /crates/mandate-cp/         @kunwarshivam
 /crates/mandate-daemon/     @kunwarshivam
 /crates/mandate-dataservice/ @kunwarshivam
+/crates/mandate-deploy-manager/ @kunwarshivam
 /crates/mandate-dispatcher/ @kunwarshivam
 /crates/mandate-domain/     @kunwarshivam
 /crates/mandate-evaluation/ @kunwarshivam
@@ -82,8 +83,10 @@
 /crates/mandate-sources/    @kunwarshivam
 /crates/mandate-spec/       @kunwarshivam
 /crates/mandate-store/      @kunwarshivam
+/crates/mandate-stub-issuer/ @kunwarshivam
 /crates/mandate-tenant/     @kunwarshivam
 /crates/mandate-time/       @kunwarshivam
 /crates/mandate-vault-local/ @kunwarshivam
+/crates/mandate-vault/      @kunwarshivam
 /crates/mandate-version-backtest/ @kunwarshivam
 /crates/mandate-webpush/    @kunwarshivam

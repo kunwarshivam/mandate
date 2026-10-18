@@ -1,0 +1,348 @@
+//! The manager's fold and its decision (infrastructure design §3.4; DEC-1170). It reads no clock:
+//! every time arrives with its input, so the same inputs give the same decisions.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::Duration;
+
+use mandate_process::{CRASH_LOOP_WINDOW, crash_loop};
+use mandate_time::UtcNanos;
+
+use crate::control::{Cause, Fact, Process, Scope, Slot};
+use crate::orchestrator::{CRASH_LOOP, Effect, Instance};
+use crate::record::Record;
+
+/// The first restart's back-off; each restart counted in the crash-loop window doubles it.
+pub const BACKOFF_BASE: Duration = Duration::from_secs(1);
+/// The longest back-off.
+pub const BACKOFF_CAP: Duration = Duration::from_secs(300);
+
+/// The wait before a restart, after `restarts` restarts within the crash-loop window: exponential
+/// from [`BACKOFF_BASE`], capped at [`BACKOFF_CAP`] (design §3.4).
+pub fn backoff(restarts: usize) -> Duration {
+    u32::try_from(restarts)
+        .ok()
+        .and_then(|n| 1_u32.checked_shl(n))
+        .and_then(|factor| BACKOFF_BASE.checked_mul(factor))
+        .map_or(BACKOFF_CAP, |wait| wait.min(BACKOFF_CAP))
+}
+
+/// One step for one slot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Decision {
+    /// Journal the record, then perform its effect.
+    Journal(Record),
+    /// Perform an effect whose record is already journaled: a start or stop the orchestrator has
+    /// not yet carried out.
+    Retry(Effect),
+}
+
+#[derive(Debug, Clone)]
+struct Agent {
+    account: String,
+    stopped: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SlotState {
+    generation: u64,
+    restarts: Vec<UtcNanos>,
+    looped: bool,
+    kill_switches: BTreeSet<String>,
+    /// The kill switches a start already answered, so a row read again never asks for another.
+    answered: BTreeSet<String>,
+    stopping: BTreeSet<u64>,
+    /// This manager journaled the current generation's start and the orchestrator has not yet
+    /// carried it out. Never set by a replay: after a restart, a generation the orchestrator does
+    /// not list counts as exited, so its next start is journaled and counted.
+    awaiting_launch: bool,
+    /// This manager raised the crash-loop alert for the slot.
+    alerted: bool,
+    down_since: Option<UtcNanos>,
+}
+
+/// One workspace's deployment manager: the control stream folded, and what it has asked of the
+/// orchestrator since it started.
+#[derive(Debug, Clone, Default)]
+pub struct Manager {
+    environment: Option<String>,
+    agents: BTreeMap<String, Agent>,
+    connections: BTreeMap<String, String>,
+    slots: BTreeMap<Slot, SlotState>,
+}
+
+impl Manager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The control stream's environment, once its `StreamOpened` is folded.
+    pub fn environment(&self) -> Option<&str> {
+        self.environment.as_deref()
+    }
+
+    /// Folds one control-stream fact. Each is idempotent, so a record folded when it commits and
+    /// again when it is read back changes nothing the second time.
+    pub fn fold(&mut self, fact: &Fact) {
+        match fact {
+            Fact::Opened { environment } => self.environment = Some(environment.clone()),
+            Fact::Connected {
+                connection,
+                account,
+            } => {
+                self.connections
+                    .entry(connection.clone())
+                    .or_insert_with(|| account.clone());
+            }
+            Fact::Deployed { agent, account } => {
+                if !self.agents.contains_key(agent) {
+                    let executor = Slot::executor(account);
+                    if !self.desired(&executor) {
+                        self.resume(&executor);
+                    }
+                    self.agents.insert(
+                        agent.clone(),
+                        Agent {
+                            account: account.clone(),
+                            stopped: false,
+                        },
+                    );
+                    self.slots.entry(Slot::runtime(agent)).or_default();
+                    self.slots.entry(Slot::executor(account)).or_default();
+                }
+            }
+            Fact::Stopped { agent } => {
+                let account = self.agents.get_mut(agent).map(|known| {
+                    known.stopped = true;
+                    known.account.clone()
+                });
+                if let Some(account) = account {
+                    let executor = Slot::executor(&account);
+                    if !self.desired(&executor) {
+                        self.resume(&executor);
+                    }
+                }
+            }
+            Fact::KillSwitch { event_id, scope } => {
+                let covered: Vec<Slot> = self
+                    .slots
+                    .keys()
+                    .filter(|slot| self.covers(scope, slot))
+                    .cloned()
+                    .collect();
+                for slot in covered {
+                    if let Some(state) = self.slots.get_mut(&slot)
+                        && !state.answered.contains(event_id)
+                    {
+                        state.kill_switches.insert(event_id.clone());
+                    }
+                }
+            }
+            Fact::Started {
+                slot,
+                generation,
+                cause,
+                at,
+            } => {
+                let state = self.slots.entry(slot.clone()).or_default();
+                if *generation > state.generation {
+                    state.generation = *generation;
+                    let answered = std::mem::take(&mut state.kill_switches);
+                    state.answered.extend(answered);
+                    state.awaiting_launch = false;
+                    state.down_since = None;
+                    match cause {
+                        Cause::Deployed => state.restarts.clear(),
+                        Cause::Restart => state.restarts.push(*at),
+                        Cause::KillSwitch => {}
+                    }
+                }
+            }
+            Fact::StopIssued { slot, generation } => {
+                self.slots
+                    .entry(slot.clone())
+                    .or_default()
+                    .stopping
+                    .insert(*generation);
+            }
+            Fact::CrashLooped { slot } => self.slots.entry(slot.clone()).or_default().looped = true,
+        }
+    }
+
+    /// Ends an executor's crash-loop pause once no agent wants it: every agent of its account is
+    /// stopped (DEC-1170 item 3).
+    fn resume(&mut self, executor: &Slot) {
+        if let Some(state) = self.slots.get_mut(executor) {
+            state.looped = false;
+            state.alerted = false;
+            state.restarts.clear();
+        }
+    }
+
+    /// Records that this manager journaled the start of `generation` of `slot` and is about to ask
+    /// the orchestrator for it.
+    pub fn issued(&mut self, slot: &Slot, generation: u64) {
+        if let Some(state) = self.slots.get_mut(slot)
+            && state.generation == generation
+        {
+            state.awaiting_launch = true;
+        }
+    }
+
+    /// Records that the orchestrator carried out the start of `generation` of `slot`.
+    pub fn launched(&mut self, slot: &Slot, generation: u64) {
+        if let Some(state) = self.slots.get_mut(slot)
+            && state.generation == generation
+        {
+            state.awaiting_launch = false;
+        }
+    }
+
+    /// Whether the control stream wants `slot` running: a runtime for an agent deployed and not
+    /// stopped, and an executor for an account with such an agent.
+    pub fn desired(&self, slot: &Slot) -> bool {
+        match slot.process {
+            Process::Runtime => self
+                .agents
+                .get(&slot.subject)
+                .is_some_and(|agent| !agent.stopped),
+            Process::Executor => self
+                .agents
+                .values()
+                .any(|agent| !agent.stopped && agent.account == slot.subject),
+        }
+    }
+
+    /// Whether a kill switch of `scope` covers `slot`.
+    pub fn covers(&self, scope: &Scope, slot: &Slot) -> bool {
+        let account_of = |agent: &str| self.agents.get(agent).map(|a| a.account.as_str());
+        let connected = |connection: &str| self.connections.get(connection).map(String::as_str);
+        match (scope, slot.process) {
+            (Scope::Workspace, _) => true,
+            (Scope::Agent(agent), Process::Runtime) => *agent == slot.subject,
+            (Scope::Agent(agent), Process::Executor) => {
+                account_of(agent) == Some(slot.subject.as_str())
+            }
+            (Scope::Connection(connection), Process::Executor) => {
+                connected(connection) == Some(slot.subject.as_str())
+            }
+            (Scope::Connection(connection), Process::Runtime) => {
+                account_of(&slot.subject).is_some_and(|a| connected(connection) == Some(a))
+            }
+        }
+    }
+
+    /// Whether `slot` is left down after a crash loop.
+    pub fn paused(&self, slot: &Slot) -> bool {
+        self.slots.get(slot).is_some_and(|state| state.looped)
+    }
+
+    /// At most one step per slot, from what the orchestrator lists at `now`. A slot with a live
+    /// instance is never started again and, while desired, never stopped: neither readiness nor a
+    /// kill switch stops a process.
+    pub fn decide(&mut self, observed: &[Instance], now: UtcNanos) -> Vec<Decision> {
+        let slots: Vec<Slot> = self.slots.keys().cloned().collect();
+        slots
+            .into_iter()
+            .filter_map(|slot| {
+                let desired = self.desired(&slot);
+                let state = self.slots.get_mut(&slot)?;
+                let instances: Vec<&Instance> =
+                    observed.iter().filter(|i| i.slot == slot).collect();
+                step(&slot, state, desired, &instances, now)
+            })
+            .collect()
+    }
+}
+
+fn step(
+    slot: &Slot,
+    state: &mut SlotState,
+    desired: bool,
+    instances: &[&Instance],
+    now: UtcNanos,
+) -> Option<Decision> {
+    let live = instances.iter().find(|i| i.phase.live());
+    if !desired {
+        let generation = live?.generation;
+        return Some(if state.stopping.contains(&generation) {
+            Decision::Retry(Effect::Stop {
+                slot: slot.clone(),
+                generation,
+            })
+        } else {
+            Decision::Journal(Record::Stop {
+                slot: slot.clone(),
+                generation,
+            })
+        });
+    }
+    if live.is_some() {
+        state.down_since = None;
+        return None;
+    }
+    let listed = instances.iter().any(|i| i.generation == state.generation);
+    if state.generation == 0 {
+        return Some(start(slot, 1, Cause::Deployed, None));
+    }
+    if !listed && state.awaiting_launch {
+        return Some(Decision::Retry(Effect::Start {
+            slot: slot.clone(),
+            generation: state.generation,
+        }));
+    }
+    let down_since = *state.down_since.get_or_insert(now);
+    let next = state.generation.checked_add(1)?;
+    if let Some(kill_switch) = state.kill_switches.iter().next() {
+        return Some(start(
+            slot,
+            next,
+            Cause::KillSwitch,
+            Some(kill_switch.clone()),
+        ));
+    }
+    if state.looped {
+        if state.alerted {
+            return None;
+        }
+        state.alerted = true;
+        return Some(Decision::Retry(Effect::Alert(CRASH_LOOP)));
+    }
+    if crash_loop(state.restarts.iter().copied(), now) {
+        state.alerted = true;
+        let restarts = within_window(&state.restarts, now);
+        return Some(Decision::Journal(Record::CrashLooped {
+            slot: slot.clone(),
+            generation: state.generation,
+            restarts: u64::try_from(restarts).unwrap_or(u64::MAX),
+        }));
+    }
+    let wait = backoff(within_window(&state.restarts, now));
+    (elapsed(down_since, now) >= wait).then(|| start(slot, next, Cause::Restart, None))
+}
+
+fn start(slot: &Slot, generation: u64, cause: Cause, kill_switch: Option<String>) -> Decision {
+    Decision::Journal(Record::Start {
+        slot: slot.clone(),
+        generation,
+        cause,
+        kill_switch,
+    })
+}
+
+/// The restarts at or after `now` less the crash-loop window, as `crash_loop` counts them.
+fn within_window(restarts: &[UtcNanos], now: UtcNanos) -> usize {
+    let window = i128::try_from(CRASH_LOOP_WINDOW.as_nanos()).unwrap_or(i128::MAX);
+    let since = nanos(now).saturating_sub(window);
+    restarts.iter().filter(|r| nanos(**r) >= since).count()
+}
+
+fn elapsed(since: UtcNanos, now: UtcNanos) -> Duration {
+    let span = nanos(now).saturating_sub(nanos(since));
+    u64::try_from(span).map_or(Duration::ZERO, Duration::from_nanos)
+}
+
+fn nanos(at: UtcNanos) -> i128 {
+    i128::from(at.secs())
+        .saturating_mul(1_000_000_000)
+        .saturating_add(i128::from(at.nanos()))
+}
