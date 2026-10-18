@@ -203,27 +203,28 @@ the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecti
 |---|---|---|
 | `boot` | The migration hook succeeded, and every object of the release, each network policy included, is in the cell | The default-deny policy deleted |
 | `journal` | The CLI opens a control stream in the cell's journal, and a Job exports it and verifies it by journal spec §11 | One byte of the segment changed before it is verified |
-| `compose` | The Compose file on the host's docker: Postgres initializes the roles, the migration applies, the CLI opens a control stream, and its export verifies | The first event's hash changed before it is verified |
+| `compose` | The Compose file on the host's docker: Postgres initializes the roles, the migration applies, the CLI opens a control stream and commits each scope's kill switch and an agent pause through `docker compose run control agent …` (E21-34), and its export verifies and holds every one | The first event's hash changed before it is verified |
 | `restart` | A control stream written before the journal's Postgres primary pod is deleted still exports and verifies by journal spec §11 once CloudNativePG has the cluster Ready again | A stream id the restart never held is verified, which must read as lost (`export_stream_empty`): it proves the drill sees a lost stream, not a loss the restart itself caused |
-| `kill-switch` | Skipped, by name, until P1's runtime and executor images and O4's `mandate agent kill` are on `main` (OPS-4) | None until it runs |
+| `kill-switch` | With every pod of `api`, `deploy-manager`, `exporter`, `model-gateway` and `control-plane` gone (scaled to zero, then back), `mandate agent kill` at agent, connection and workspace scope and `mandate agent pause` commit through one-off `control` Jobs, and the control stream exports, verifies and holds each (OPS-4, E21-34). Each stream owner's `KillSwitchActivated` is reported `skipped` until the runtime and executor run in the cell ([DEC-2000](../../docs/project/decisions/DEC-2000.md) item 6) | The connection-scope kill switch never committed: the check must name `no kill_switch of scope connection` |
 | `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
 | `standby-down` | With the synchronous standby fenced, an append neither commits nor becomes visible on the primary, and its Job ends on its deadline; once the standby is back and streams synchronously, a new append commits and every stream written verifies by journal spec §11 (OPS-2, E21-41) | The cluster's durability set to `preferred`, so the primary commits alone: `committed with the standby fenced` |
 | `archive` | A closed WAL segment is reported archived by Postgres, a base backup completes, and Barman's own tools, reading the store with the archive's key, list the backup and fetch the segment back (E21-41) | The archive pointed at another bucket of the same store, which Postgres cannot tell: `not in the archive` |
 
 A seeded run counts as caught only when its report names the planted bug's own symptom
-(`rehash_mismatch`, a live host reached, the deleted policy missing, `export_stream_empty`, a commit
-with the standby fenced, a segment not in the archive), never any failure. `standby-down` and
-`archive` run in CI's `cell-journal` job and `restart`, which with the synchronous standby is a
-failover and the old primary's rejoin, in `cell-failover`, each beside `cell`, so each stays within
-ten minutes (DEC-464). A skipped drill is reported as skipped, never as held. In the
+(`rehash_mismatch`, a live host reached, the deleted policy missing, `export_stream_empty`, the
+missing kill switch, a commit with the standby fenced, a segment not in the archive), never any
+failure. `standby-down` and `archive` run in CI's `cell-journal` job and `restart`, which with the
+synchronous standby is a failover and the old primary's rejoin, in `cell-failover`, each beside
+`cell`, so each stays within ten minutes (DEC-464). A part of a drill that cannot run yet is reported
+as skipped, never as held. In the
 seeded egress run, with the workspace's policies deleted, the probes open TCP connections to the
 live trading hosts from the runner, to prove the drill can see a leak; they send no byte, so no
 request reaches a broker (AGENTS.md rule 8).
 
-The kill switch run with the exporter, API and deployment manager down (OPS-4), kills at each step of
-submission, two executors for one account (OPS-3), the upgrade drill (OPS-7), and E21-41's
-point-in-time restore (OPS-8) and failover with intents in flight (DEC-434 item 15) join as their
-processes and slices land (DEC-1050 item 8).
+These join as their processes and slices land: each stream owner's `KillSwitchActivated` in the
+kill-switch drill, kills at each step of submission, two executors for one account (OPS-3), the
+upgrade drill (OPS-7), and E21-41's point-in-time restore (OPS-8) and failover with intents in
+flight (DEC-434 item 15) (DEC-1050 item 8).
 
 Residuals of the local cell, disclosed: its two journal instances share its one node, so the
 standby is no second failure domain (the Cluster says so); and its archive's traffic to the test
