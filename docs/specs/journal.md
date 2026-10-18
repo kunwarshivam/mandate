@@ -5003,9 +5003,12 @@ lifetime floor as it was: the loss carry is the connection's (mandate spec §5.7
 `AgentStopped.loss_added` adds to the connection's carry, and V-032 reads it), and the high-water
 mark starts from the deployment under either id (§5.5). The per-agent daily and conduct state does
 restart with a new agent id, as it does for any other agent deployed on the connection: the
-`max_daily_loss` latch and its E₀ (§5.4), the drawdown ladder's latches (§5.5, §5.8), the re-entry
-cooldown, the order-rate, order-to-fill and `max_orders_per_day` limits (trading spec §9.7), and
-the per-agent ask caps. That is bounded by the lifetime floor and by a deployment being the owner's
+`max_daily_loss` latch and its E₀ (§5.4), the drawdown ladder's latches (§5.5, §5.8), the
+tripwire windows and a fired tripwire's latch (restriction `tripwire`, §5.8, §5.9, §6.7), the
+`goal_complete` restriction, the re-entry cooldown, the order-to-fill limit (trading spec §9.6),
+the per-agent part of the order-rate limit and `max_orders_per_day` (§9.7), and MI-25's per-agent
+ask caps with their `skipped_today` and `recent_timeout` suppressions. The order-rate limit's
+per-account part does not restart. That is bounded by the lifetime floor and by a deployment being the owner's
 stepped-up gesture ([DEC-1173](../project/decisions/DEC-1173.md) item 6 leaves keying them by
 connection to the founder). `append` does not judge it: it reads no stream.
 
