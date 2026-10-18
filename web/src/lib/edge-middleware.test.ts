@@ -196,6 +196,35 @@ describe("the edge middleware with sign-in off", () => {
   });
 });
 
+describe("the dev-only routes under /dev/ (DEC-2406)", () => {
+  const PATHS = ["/dev", "/dev/stub-token"];
+
+  it("answers 404 outside next dev, before sign-in or the host routing reads anything", async () => {
+    for (const nodeEnv of ["production", "test"]) {
+      vi.stubEnv("NODE_ENV", nodeEnv);
+      for (const auth of [false, true]) {
+        session.auth = auth;
+        for (const path of PATHS) expect((await middleware(request(path))).status, `${nodeEnv} ${path}`).toBe(404);
+      }
+    }
+    expect(session.calls).toBe(0);
+    vi.unstubAllEnvs();
+  });
+
+  it("leaves them to next dev, and leaves a path that only begins with the letters alone", async () => {
+    session.auth = false;
+    vi.stubEnv("NODE_ENV", "development");
+    for (const path of PATHS) expect((await middleware(request(path))).status, path).not.toBe(404);
+    vi.stubEnv("NODE_ENV", "production");
+    for (const path of ["/devices", "/developer"]) expect((await middleware(request(path))).status, path).not.toBe(404);
+    vi.unstubAllEnvs();
+  });
+
+  it("is matched by the middleware", () => {
+    for (const path of PATHS) expect(matched(path), path).toBe(true);
+  });
+});
+
 describe("the mock workspace API at /v1 (DEC-975 item 10)", () => {
   const PATHS = ["/v1", "/v1/workspaces/ws_probe/health", "/v1/workspaces/ws_probe/approvals/01JBH3BTZ8K2M4N6P8R0S2T4V6/responses"];
 
