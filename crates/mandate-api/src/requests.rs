@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::envelope::{Record, StepUpEvidence};
+use crate::envelope::{Record, StepUpAction, StepUpEvidence};
 use crate::responses::Classification;
 use crate::wire::{Asset, Check, Decimal, EventId, Id, Ref, Rules, Timestamp, is_pointer};
 
@@ -56,6 +56,14 @@ pub struct ResumeRequest {
     pub step_up: Option<StepUpEvidence>,
 }
 
+/// `POST /step-up/challenges` (§3.6, DEC-2103 item 1): the one action the challenge binds. The
+/// workspace and principal are the session's, so the body names neither.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self", deny_unknown_fields)]
+pub struct StepUpChallengeRequest {
+    pub action: StepUpAction,
+}
+
 /// `POST /agents/{agent_id}/acknowledgments` (§4.2): the event acknowledged, declared after the
 /// nullable members so serde names a missing one of them first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,7 +96,7 @@ pub enum Side {
 }
 
 crate::wire::rules!(none: PauseRequest, HoldRequest, EndDelegationRequest, LiftHoldRequest);
-crate::wire::rules!(none: ResumeRequest, AcknowledgeRequest, OwnerRequest);
+crate::wire::rules!(none: ResumeRequest, AcknowledgeRequest, OwnerRequest, StepUpChallengeRequest);
 
 /// `POST /mandate-versions/{mandate_version}/confirm` (§5.1): each confirmed path is a pointer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -329,5 +337,6 @@ crate::wire::object_only!(
     Scope,
     BidConfirmation,
     OwnerExitRequest,
-    RevokeRequest
+    RevokeRequest,
+    StepUpChallengeRequest
 );

@@ -257,7 +257,7 @@ impl RetrievedItem {
     }
 }
 
-fn text(value: &str) -> Value {
+pub(crate) fn text(value: &str) -> Value {
     Value::Str(value.to_owned())
 }
 

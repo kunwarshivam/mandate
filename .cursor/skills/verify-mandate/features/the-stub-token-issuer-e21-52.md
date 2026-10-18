@@ -12,4 +12,10 @@
   refusals), `http.rs` (421, 415, 400, 413, 404, no CORS), `process.rs` (each refusal alone on
   standard error with exit 2, the announced issuer, SIGTERM), and `sign_in.rs` (`POST /v1/sessions`
   on `mandate-api-server` with the stub's key set fetched over loopback).
-- **Run:** `cargo nextest run -p mandate-stub-issuer`.
+- **Release build (DEC-2100 item 2):** `xtask/src/main.rs`'s `stub_release` (`cargo xtask ci
+  stub-release`, a part of `ci full`) builds the stub with `--release` when the diff selects it,
+  and requires exit 2 with `stub_issuer_not_built` alone; its tests
+  `the_release_stub_check_accepts_only_the_lone_refusal` and
+  `release_builds_keep_debug_assertions_off` (no `release` profile, or one inheriting it, turns
+  debug assertions on in `Cargo.toml` or `.cargo/config.toml`).
+- **Run:** `cargo nextest run -p mandate-stub-issuer` and `cargo xtask ci stub-release`.

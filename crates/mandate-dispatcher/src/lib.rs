@@ -39,16 +39,22 @@
 //! random source, signing with a [`RingVapidSigner`] (DEC-2503). [`WebPushSwitch`] keeps web push
 //! off until DEC-2504 is decided.
 //!
+//! [`EmailProvider`] is the email channel adapter (E8-11, DEC-2510): it mails the founder alone,
+//! through a [`MailTransport`] bound to the founder's address, and refuses every other recipient as
+//! `permanent { recipient_not_permitted }` before the transport is called (spec §4.4).
+//!
 //! Every entry point returns a `Result`, so a stub reports [`DispatchError::Unimplemented`]
 //! (DEC-77).
 
 mod due;
+mod email;
 mod os;
 mod pg;
 mod step;
 mod webpush;
 
 pub use due::{Due, Next, due};
+pub use email::{EmailProvider, MailFailure, MailTransport, RecordedTransport, Submitted};
 pub use os::{Entropy, EntropyUnavailable, OsRandom, System};
 pub use pg::{PgNotices, READ_DEADLINE};
 pub use step::{Config, Journal, NoticeWriter, step};

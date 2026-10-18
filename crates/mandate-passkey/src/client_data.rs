@@ -3,8 +3,6 @@
 //! object is refused; other members are ignored, as the standard requires, duplicates included
 //! (DEC-660 item 4.5).
 
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Deserialize;
 
 use crate::{Challenge, Refusal, RelyingParty};
@@ -49,7 +47,7 @@ pub(crate) fn check(
     if data.kind != ceremony.kind() {
         return Err(Refusal::ClientDataType);
     }
-    if data.challenge != URL_SAFE_NO_PAD.encode(&challenge.0) {
+    if data.challenge != challenge.base64url() {
         return Err(Refusal::ChallengeMismatch);
     }
     if data.origin != rp.origin {

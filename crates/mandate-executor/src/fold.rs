@@ -423,8 +423,17 @@ fn kill_switch_activated(
     };
     let mut instruments = named("closes")?;
     instruments.extend(named("deferred")?);
+    let cancels = match payload.get("cancels") {
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| ClientOrderId::parse(item.as_str().ok_or_else(|| refused("cancels"))?))
+            .collect::<Result<BTreeSet<_>, _>>()?,
+        _ => return Err(refused("cancels")),
+    };
     let switch = Switch {
+        cancels,
         agent: AgentId(required_text(payload, "subject")?.to_owned()),
+        copied_from: optional_text(payload, "copied_from").map(|id| EventId(id.to_owned())),
         purpose: purpose_of(required_text(payload, "purpose")?)?,
         floor: optional_price(payload, "floor")?,
         pending: instruments.iter().cloned().collect(),

@@ -50,6 +50,7 @@
 pub mod agentic;
 mod backend;
 mod call;
+mod dispatch;
 mod entry;
 mod error;
 mod item;
@@ -66,6 +67,7 @@ pub use call::{
     Answer, CallContext, CallInputs, CallPlan, MemoryThesis, ResearchCall, Treatment,
     UntrustedItem, call, render_inputs, treatment,
 };
+pub use dispatch::{Dispatch, DispatchScope, Dispatched, dispatch};
 pub use entry::{RESEARCH_INPUTS, ResearchEntry, output_schema};
 pub use error::ResearchRunError;
 pub use item::{
