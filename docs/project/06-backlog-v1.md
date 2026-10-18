@@ -2609,7 +2609,7 @@ items 13 to 20); no story here buys a service or touches live money.
   mid-hand-over shows no protective order canceled by the deploy, every unprotected interval within
   `max_unprotected_s`, the kill switch applied by the new process, and zero duplicates.
 - **E21-8 (Proposed, M6 then M11)** As the founder, I want release builds from `main` that are
-  reproducible, carry an SBOM, and from M11 are signed with my hardware key and checked at start
+  reproducible, carry an SBOM, and from M11 are signed with the release key (DEC-2024) and checked at start
   (ES-14, ES-17, OPS-15). *Accepted when:* two builds of one commit are byte-identical; each process
   journals its build digest; and outside dev and CI an unsigned binary refuses to start.
   *Status:* the reproducible build, its SBOMs, the CI double build and `mandate-release`'s
@@ -2864,14 +2864,16 @@ enables `live` (ES-23, OPS-5).
   binaries on an empty base, run as non-root with a read-only root filesystem and no shell; each is
   signed with cosign and its digest and signature recorded; a process outside dev and CI refuses to
   start when its signature does not verify, and journals its build digest (`actor.build`) when it
-  does; CI signs with an ephemeral test key, and only the founder's hardware key signs an image for a
-  hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
+  does; CI signs with an ephemeral test key, and only the release key, on the founder's approval
+  (DEC-2024), signs an image for a hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
   never from a branch; and a test shows an unsigned and a wrongly signed image both refused.
   *Status:* the images, the start-up check in `mandate-agentd`, the CI test-key drill and the
   `main`-only publish to GHCR land with DEC-971; images for amd64 and arm64, each built natively,
   under one signed multi-arch index, with DEC-1060. **After R0:** the CLI runs the check (with
-  E21-8's last slice). **Founder:** the hardware key's public half in `RELEASE_KEYS` (H8), until
-  which nothing starts outside dev and CI (DEC-971 item 7). Staging promotion waits on H1.
+  E21-8's last slice). **Release key** (DEC-2024; DEC-2605 rows 8 and 9, no hardware key): the
+  `release-signing` job signs each binary and `SHA256SUMS` on a dispatch from `main` the founder
+  approves; **founder:** the key pair and its public half in `RELEASE_KEYS`
+  ([runbook](../runbooks/release-signing-key.md)), until which nothing starts outside dev and CI. Staging promotion waits on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
@@ -3016,7 +3018,7 @@ enables `live` (ES-23, OPS-5).
   founder, I want my agent to place real orders through my Robinhood agentic account from cell #1,
   on the same path every broker uses, so that the first hosted version trades for real (DEC-967
   item 15). *Accepted when:* the cell's Robinhood executor image is the only image built with
-  `live`, signed with the founder's hardware key, and refuses to start unsigned (OPS-15);
+  `live`, signed with the release key (DEC-2024), and refuses to start unsigned (OPS-15);
   `xtask/layers.toml` marks `mandate-daemon` as the one crate besides `mandate-paper` that may
   declare `live`, `cargo xtask live-feature` and its tests allow exactly those two, and CI still
   only compiles `live` (DEC-529 item 3 as item 15 narrows it), with `mandate-paper` untouched; that executor alone has egress to

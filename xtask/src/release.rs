@@ -487,8 +487,8 @@ const REPOSITORY: &str = "kunwarshivam/mandate";
 /// `<out>/images/<binary>`, with `<out>/IMAGES` listing each image's digest. With `--test-sign`,
 /// an ephemeral test key made here signs each binary (`<out>/signatures/<binary>.sig`, also the
 /// image's second layer); its private half is deleted once the binaries are signed and its public
-/// half kept as `<out>/test-key/cosign.pub`. Only the founder's hardware key signs a release for a
-/// hosted cell, and it is never here.
+/// half kept as `<out>/test-key/cosign.pub`. Only the release key signs a release for a hosted
+/// cell, in [`sign_release`] (DEC-2024), and it is never here.
 pub(crate) fn images(root: &Path, dist: &Path, out: &Path, test_sign: bool) -> Result<()> {
     let arch = Arch::host()?;
     let paths = Paths::from_env(root)?;
@@ -690,8 +690,8 @@ impl Registry {
 
 /// `cargo xtask release publish <dist> <out>` (E21-35, DEC-1060): only from a push to `main`,
 /// where CI's per-arch `publish` jobs run it (ES-12), each on a runner of its own arch. Builds the
-/// host arch's images of `dist` without a binary signature (the founder's hardware key is not
-/// wired, so no binary is release-signed and none starts outside dev and CI), pushes each to GHCR
+/// host arch's images of `dist` without a binary signature (a push signs nothing with the release
+/// key, so no published binary starts outside dev and CI; DEC-2024), pushes each to GHCR
 /// as `main-<commit>-<arch>`, checks the registry reports the image's own digest, signs each
 /// image's digest keyless with cosign (the run's GitHub OIDC identity) and attaches its SBOM as a
 /// CycloneDX attestation, and writes `<out>/PUBLISHED`.
@@ -820,11 +820,16 @@ fn new_key(tools: &Path, dir: &Path) -> Result<PathBuf> {
     Ok(dir.join("cosign.key"))
 }
 
-/// Signs `file` with the cosign key `key` into `signature`, offline: no transparency log, the
-/// signature file cosign's `--output-signature` writes.
+/// Signs `file` with the ephemeral, passwordless cosign key `key` into `signature`.
 fn sign(tools: &Path, key: &Path, file: &Path, signature: &Path) -> Result<()> {
-    run(Command::new(tools.join("cosign"))
-        .env("COSIGN_PASSWORD", "")
+    run(sign_blob(tools, key, file, signature).env("COSIGN_PASSWORD", ""))
+}
+
+/// The command that signs `file` with the cosign key `key` into `signature`, offline: no
+/// transparency log, the signature file cosign's `--output-signature` writes.
+fn sign_blob(tools: &Path, key: &Path, file: &Path, signature: &Path) -> Command {
+    let mut command = Command::new(tools.join("cosign"));
+    command
         .args([
             "sign-blob",
             "--yes",
@@ -836,7 +841,102 @@ fn sign(tools: &Path, key: &Path, file: &Path, signature: &Path) -> Result<()> {
         .arg(key)
         .arg("--output-signature")
         .arg(signature)
-        .arg(file))
+        .arg(file);
+    command
+}
+
+/// The variable a `release-signing` run hands the release key's private half in (DEC-2024): the
+/// encrypted `cosign.key` the founder stored as the environment's secret. Its password reaches
+/// cosign as `COSIGN_PASSWORD`, straight from the job's environment, never through xtask.
+const SIGNING_KEY_VAR: &str = "RELEASE_SIGNING_KEY";
+const SIGNING_PASSWORD_VAR: &str = "COSIGN_PASSWORD";
+
+/// `cargo xtask release sign <dist> <out>` (DEC-2024, as the founder decided in DEC-2605 rows 8
+/// and 9): run only by CI's `release-signing` job, on a manual dispatch from `main` once the founder
+/// approves its environment. Signs each binary `SHA256SUMS` lists, checked against its line, and
+/// `SHA256SUMS` itself with the release key, into `<out>/signatures/<name>.sig`. The key is written
+/// only to a 0600 file in a 0700 directory, deleted once signed whatever the outcome. Then
+/// [`DRILLED`], unpacked from its image with its new signature beside it, must start at tier
+/// `production`: a key whose public half is not in the binary's compiled-in `RELEASE_KEYS` fails
+/// the job rather than sign a release nothing would run.
+pub(crate) fn sign_release(root: &Path, dist: &Path, out: &Path) -> Result<()> {
+    let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
+    let sums_file = dist.join("SHA256SUMS");
+    let sums = parse_sums(
+        &fs::read_to_string(&sums_file)
+            .with_context(|| format!("reading {}", sums_file.display()))?,
+    )?;
+    let private =
+        env::var(SIGNING_KEY_VAR).with_context(|| format!("{SIGNING_KEY_VAR} is not set"))?;
+    ensure!(
+        env::var_os(SIGNING_PASSWORD_VAR).is_some(),
+        "{SIGNING_PASSWORD_VAR} is not set"
+    );
+    let signatures = out.join("signatures");
+    fs::create_dir_all(&signatures)
+        .with_context(|| format!("creating {}", signatures.display()))?;
+    let secrets = out.join("key");
+    fs::create_dir_all(&secrets).context("creating the key directory")?;
+    fs::set_permissions(&secrets, fs::Permissions::from_mode(0o700))?;
+    let key = secrets.join("cosign.key");
+    let signed = write_secret(&key, &private).and_then(|()| {
+        for (name, hex) in &sums {
+            let binary = dist.join("bin").join(name);
+            ensure!(
+                sha256(&binary)? == *hex,
+                "{name} is not the binary SHA256SUMS lists"
+            );
+            sign_with_release_key(
+                &tools,
+                &key,
+                &binary,
+                &signatures.join(format!("{name}.sig")),
+            )?;
+        }
+        sign_with_release_key(&tools, &key, &sums_file, &signatures.join("SHA256SUMS.sig"))
+    });
+    fs::remove_dir_all(&secrets).context("deleting the release key")?;
+    signed?;
+    drill_release_signed(dist, &signatures, &out.join("drill"))
+}
+
+/// Signs with the release key, whose password cosign reads from the job's own environment; the
+/// private half's variable is not handed on to cosign.
+fn sign_with_release_key(tools: &Path, key: &Path, file: &Path, signature: &Path) -> Result<()> {
+    run(sign_blob(tools, key, file, signature).env_remove(SIGNING_KEY_VAR))
+}
+
+/// Runs [`DRILLED`] as its release-signed image would run, at tier `production`, and requires it
+/// to start.
+fn drill_release_signed(dist: &Path, signatures: &Path, drill: &Path) -> Result<()> {
+    let binary = dist.join("bin").join(DRILLED);
+    let bytes = fs::read(&binary).with_context(|| format!("reading {}", binary.display()))?;
+    let signature = fs::read(signatures.join(format!("{DRILLED}.sig")))
+        .context("reading the release signature")?;
+    let _ = fs::remove_dir_all(drill);
+    let layout = image::layout(
+        DRILLED,
+        Arch::host()?.oci(),
+        &bytes,
+        Some(&signature),
+        "release",
+    );
+    image::write(&layout, &drill.join("layout"))?;
+    image::unpack(&layout, &drill.join("layout"), &drill.join("rootfs"))?;
+    let output = Command::new(drill.join("rootfs").join(DRILLED))
+        .env_clear()
+        .env("MANDATE_DEPLOYMENT_TIER", "production")
+        .output()
+        .context("running the release-signed image")?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    ensure!(
+        output.status.code() == Some(2) && stderr.trim_end() == ADMITTED,
+        "the release-signed {DRILLED} did not start at tier production ({stderr:?}): the key's \
+         public half is not in RELEASE_KEYS (docs/runbooks/release-signing-key.md)"
+    );
+    eprintln!("    sign: the release-signed {DRILLED} starts at tier production");
+    Ok(())
 }
 
 /// The SHA-256 of the file at `path`, as `sha256sum` prints it.
@@ -1201,6 +1301,45 @@ mod tests {
             index.contains("needs: [publish-amd64, publish-arm64]"),
             "{index}"
         );
+        Ok(())
+    }
+
+    /// Only `release-signing` reads a secret or names an environment, and it runs only on a manual
+    /// dispatch from `main`, under the `release-signing` environment the founder approves, with
+    /// nothing but `contents: read`, and signs only after the release it rebuilt compared
+    /// (DEC-2024; DEC-2605 rows 8 and 9).
+    #[test]
+    fn only_the_dispatched_signing_job_holds_the_release_key() -> Result<()> {
+        let jobs = release_jobs()?;
+        for (name, body) in &jobs {
+            let holds = body.contains("secrets.") || body.contains("environment:");
+            assert_eq!(holds, name == "release-signing", "{name}");
+        }
+        let job = jobs
+            .get("release-signing")
+            .context("release.yml has no release-signing")?;
+        for line in [
+            "    needs: [build-a-amd64, build-a-arm64, compare]\n",
+            "    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}\n",
+            "    environment: release-signing\n",
+            "    permissions:\n      contents: read\n    defaults:\n",
+            "          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}\n",
+            "          COSIGN_PASSWORD: ${{ secrets.RELEASE_SIGNING_PASSWORD }}\n",
+            "        run: cargo xtask release sign dist signed\n",
+        ] {
+            assert!(job.contains(line), "release-signing lacks {line:?}");
+        }
+        let first_secret = job.find("secrets.").context("no secret")?;
+        for before in [
+            "release build dist",
+            "!= needs[format('build-a-{0}'",
+            "release tools",
+        ] {
+            assert!(
+                job.find(before).is_some_and(|at| at < first_secret),
+                "release-signing must run {before:?} before the key is in its environment"
+            );
+        }
         Ok(())
     }
 

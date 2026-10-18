@@ -58,6 +58,9 @@ commands:
                         ephemeral test key with --test-sign (E21-35)
   release drill <dist> <out>
                         run the signed, unsigned and wrongly signed images' start-up check
+  release sign <dist> <out>
+                        sign each binary and SHA256SUMS with the release key, then require the
+                        signed agentd to start at tier production (release-signing job only)
   release publish <dist> <out>
                         push this arch's images to GHCR, sign them keyless and attest their SBOMs
                         (main only, from CI)
@@ -273,6 +276,9 @@ fn run() -> Result<()> {
             release::images(&root, Path::new(dist), Path::new(out), true)
         }
         ["release", "drill", dist, out] => release::drill(&root, Path::new(dist), Path::new(out)),
+        ["release", "sign", dist, out] => {
+            release::sign_release(&root, Path::new(dist), Path::new(out))
+        }
         ["release", "publish", dist, out] => {
             release::publish(&root, Path::new(dist), Path::new(out))
         }
@@ -3706,12 +3712,14 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// reports' `RUN_URL` and `VERDICTS` (DEC-1190), `merge.yml` the merge inputs, `web.yml` and
 /// `web-e2e.yml` the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and
 /// `web-deploy.yml` the build's public Supabase values and the deploy step's Cloudflare token and
-/// account (DEC-1005).
+/// account (DEC-1005), and `release.yml`'s `release-signing` step the release key and its password
+/// (DEC-2024).
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
     "CLOUDFLARE_ACCOUNT_ID",
     "CLOUDFLARE_API_TOKEN",
+    "COSIGN_PASSWORD",
     "DOCS_ONLY",
     "DO_NOT_TRACK",
     "EVENT",
@@ -3767,6 +3775,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "PYTHON_RESULT",
     "PYTHON_SELECTED",
     "REASONS",
+    "RELEASE_SIGNING_KEY",
     "RH_SIM_LIVE_RESULT",
     "RH_SIM_LIVE_SELECTED",
     "RUN_PRS",

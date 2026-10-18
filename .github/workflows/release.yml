@@ -11,8 +11,11 @@
 # `build-a`'s digest, pushes that arch's images to GHCR by digest, signs each keyless with the
 # run's OIDC identity and attests its SBOM; then `publish-index` pushes and signs the multi-arch
 # index a cell pulls on any arch. A pull request that changes the release build runs the builds and
-# the drills and keeps and publishes nothing (ES-12). Nothing here builds a feature, so no release
-# build holds `live` (DEC-529 item 3).
+# the drills and keeps and publishes nothing (ES-12). On a manual dispatch from `main` only,
+# `release-signing` waits for the founder to approve its `release-signing` environment, then signs
+# each arch's binaries and SHA256SUMS with the release key that environment's secrets hold
+# (DEC-2024, as the founder decided in DEC-2605 rows 8 and 9). Nothing here builds a feature, so
+# no release build holds `live` (DEC-529 item 3).
 name: release
 
 on:
@@ -301,5 +304,59 @@ jobs:
         with:
           name: published-${{ github.sha }}
           path: published/PUBLISHED
+          if-no-files-found: error
+          retention-days: 90
+
+  # A manual dispatch from `main` only, never a push or a pull request, and only once the founder,
+  # the `release-signing` environment's required reviewer, approves the run (DEC-2024; DEC-2605
+  # rows 8 and 9). The only job that reads a secret: the release key's encrypted private half and
+  # its password, handed to the signing step alone, after xtask and the release tools are built,
+  # so no build script runs while they are in the environment. The rebuild must print its
+  # build-a's digest, so what is signed is what `compare` proved reproducible.
+  release-signing:
+    needs: [build-a-amd64, build-a-arm64, compare]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    environment: release-signing
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Rebuild the release
+        id: build
+        run: cargo xtask release build dist | tee -a "$GITHUB_OUTPUT"
+      - name: The rebuild differs from build-a
+        if: steps.build.outputs.digest != needs[format('build-a-{0}', matrix.arch)].outputs.digest
+        run: |
+          echo "the signing job's rebuild is not the release build-a built and compare proved"
+          exit 1
+      - name: Install the release tools before the key is in the environment
+        run: cargo xtask release tools
+      - name: Sign the release with the release key, and drill it at tier production
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.RELEASE_SIGNING_PASSWORD }}
+        run: cargo xtask release sign dist signed
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-signatures-${{ github.sha }}-${{ matrix.arch }}
+          path: |
+            dist/SHA256SUMS
+            signed/signatures/
           if-no-files-found: error
           retention-days: 90
