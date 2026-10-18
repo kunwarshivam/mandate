@@ -9,18 +9,29 @@
 //! is the server's memory: a challenge it does not hold can only make a step-up count as missing.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::body::Body;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
-use axum::http::HeaderMap;
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
-use mandate_identity::{AssertionId, TenantContext};
-use mandate_passkey::stepup::{self, ChallengeRecord};
+use mandate_api::envelope::StepUpAction;
+use mandate_api::problem::ProblemCode;
+use mandate_api::requests::StepUpChallengeRequest;
+use mandate_api::wire::{decode, encode};
+use mandate_authn::Request;
+use mandate_canon::{Digest, Value};
+use mandate_identity::{AssertionId, StepUpActionKind, TenantContext};
+use mandate_passkey::stepup::{
+    self, ChallengeRecord, IssueRefusal, issue_challenge, permission_for,
+};
 use mandate_time::UtcNanos;
 
-use crate::http::App;
+use crate::http::{App, invalid, problem, problem_body};
+use crate::routes::{Refused, Unreadable, authorized, enveloped, path_refused, string};
+use crate::writes::{derived_for, json_string, ref_text, strict};
 
 /// §3.4's operation name for the route (DEC-2103 item 1).
 pub const OPERATION: &str = "step_up_challenge";
@@ -47,10 +58,6 @@ pub enum Withheld {
 /// The challenges the server has issued and not yet seen expire, by challenge id, with the most
 /// one principal and all of them may hold.
 #[derive(Debug)]
-#[expect(
-    dead_code,
-    reason = "the store's fields are read by `issue`, which the implementation fills in (DEC-77)"
-)]
 pub struct Challenges {
     held: Mutex<BTreeMap<String, ChallengeRecord>>,
     per_principal: usize,
@@ -81,31 +88,141 @@ impl Challenges {
     ///
     /// # Errors
     /// [`Withheld`], with nothing held changed but the expired dropped.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn issue(
         &self,
-        _context: &TenantContext,
-        _action: stepup::Action,
-        _id: AssertionId,
-        _now: UtcNanos,
+        context: &TenantContext,
+        action: stepup::Action,
+        id: AssertionId,
+        now: UtcNanos,
     ) -> Result<ChallengeRecord, Withheld> {
-        todo!()
+        let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        held.retain(|_, record| now < record.expires_at());
+        if let Some(record) = held.get(&id.0) {
+            let same = record.principal_id() == &context.principal()
+                && record.workspace_id() == &context.workspace()
+                && record.action() == action;
+            return if same {
+                Ok(record.clone())
+            } else {
+                Err(Withheld::Conflict)
+            };
+        }
+        let principal = context.principal();
+        let theirs = held
+            .values()
+            .filter(|record| record.principal_id() == &principal)
+            .count();
+        if theirs >= self.per_principal || held.len() >= self.in_all {
+            return Err(Withheld::Full);
+        }
+        let issued =
+            issue_challenge(context, action, id, now).map_err(|refusal| match refusal {
+                IssueRefusal::Refused(_) => Withheld::Refused,
+                IssueRefusal::Issue(_) => Withheld::OutOfRange,
+            })?;
+        let record = issued.record().clone();
+        held.insert(record.challenge_id().0.clone(), record.clone());
+        Ok(record)
     }
 }
 
 /// `POST /v1/workspaces/{ws}/step-up/challenges` (DEC-2103 items 1 to 4).
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub async fn challenge(
-    State(_app): State<Arc<App>>,
-    _headers: HeaderMap,
-    _path: Result<Path<String>, PathRejection>,
-    _body: Body,
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<String>, PathRejection>,
+    body: Body,
 ) -> Response {
-    todo!()
+    let Ok(Path(workspace)) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let (gate, body) = match strict(&app, &headers, body).await {
+        Ok(admitted) => admitted,
+        Err(refusal) => return refusal.response(),
+    };
+    let request = match decode::<StepUpChallengeRequest>(&body) {
+        Ok(request) => request,
+        Err(mandate_api::wire::Refused::Invalid { violations }) => return invalid(violations),
+    };
+    let Some(action) = action_of(&request.action) else {
+        return Refused::Invalid.response();
+    };
+    let reader = match authorized(
+        &app,
+        &gate.admitted,
+        gate.now,
+        &workspace,
+        permission_for(action.kind),
+        Unreadable::Command,
+    )
+    .await
+    {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let paper = reader
+        .control
+        .first()
+        .is_some_and(|row| row.environment == "paper");
+    if !paper {
+        return problem(
+            StatusCode::CONFLICT,
+            problem_body(ProblemCode::LiveUnavailable),
+        );
+    }
+    let Some((_, id)) = derived_for(&gate, &reader.workspace, OPERATION) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let issued = app
+        .challenges
+        .issue(&reader.tenant, action, AssertionId(id), gate.now);
+    match issued {
+        Ok(record) => answered(&record, &request.action, gate.now),
+        Err(Withheld::Refused) => Refused::Forbidden.response(),
+        Err(Withheld::Conflict) => problem(
+            StatusCode::CONFLICT,
+            problem_body(ProblemCode::IdempotencyConflict),
+        ),
+        Err(Withheld::Full) => problem(
+            StatusCode::TOO_MANY_REQUESTS,
+            problem_body(ProblemCode::RateLimited),
+        ),
+        Err(Withheld::OutOfRange) => Refused::JournalUnavailable.response(),
+    }
+}
+
+/// The request's action as `mandate-passkey` binds it: the kind of the same wire name and the
+/// digest the reference names.
+fn action_of(action: &StepUpAction) -> Option<stepup::Action> {
+    let name = json_string(&encode(&action.kind).ok()?)?;
+    let kind = StepUpActionKind::ALL
+        .into_iter()
+        .find(|kind| kind.code() == name)?;
+    let reference = ref_text(&action.digest)?;
+    let digest = Digest::from_hex(reference.strip_prefix("sha256:")?)?;
+    Some(stepup::Action { kind, digest })
+}
+
+/// The `201` (DEC-2103 item 3): the record's id, the challenge the authenticator signs, the
+/// action as requested, and the record's instants; it reads no stream, so `as_of` is empty.
+fn answered(record: &ChallengeRecord, action: &StepUpAction, now: UtcNanos) -> Response {
+    let (Ok(challenge), Ok(action)) = (record.webauthn_challenge(), encode(action)) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let Ok(action) = mandate_canon::parse(&action) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let members = vec![
+        ("challenge_id", string(&record.challenge_id().0)),
+        ("webauthn_challenge", string(&challenge.base64url())),
+        ("action", action),
+        ("issued_at", string(&record.issued_at().to_string())),
+        ("expires_at", string(&record.expires_at().to_string())),
+        ("as_of", Value::Array(Vec::new())),
+    ];
+    let mut response = enveloped(StatusCode::CREATED, now, members);
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
