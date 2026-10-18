@@ -106,9 +106,10 @@ cargo xtask cell up               # build the image, start k3d, install the oper
 cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch, standby-down, archive
 cargo xtask cell drill --seeded   # each drill with its bug planted; fails if one still holds
 cargo xtask cell down
-cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills
+cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills, demo --no-web
 cargo xtask ci cell-journal       # and beside it: up, then standby-down and archive, plain and seeded
 cargo xtask ci cell-failover      # and beside it: up, then restart (a failover with the standby), plain and seeded
+cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch, plain and seeded (DEC-2602)
 ```
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one

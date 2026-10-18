@@ -16,4 +16,5 @@
   (`the_brake_check_names_each_missing_brake`, `the_brakes_reach_each_scope_once`).
 - **Run:** `cargo nextest run -p mandate-cli --test brake`; `MANDATE_PG_URL=postgres://… cargo
   nextest run -p mandate-cli --test brake_pg`; `cargo xtask cell drill kill-switch compose` (and
-  with `--seeded`) in the local cell.
+  with `--seeded`) in the local cell; CI runs the drill as `cargo xtask ci cell-kill-switch`
+  (DEC-2602).
