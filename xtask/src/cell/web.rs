@@ -13,7 +13,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
-use super::{DEMO_APP_ORIGIN, DEMO_SUBJECT, DEMO_WORKSPACE, LOCAL_ISSUER, WEB_URL, state};
+use super::{DEMO_APP_ORIGIN, DEMO_SUBJECT, LOCAL_ISSUER, WEB_URL, state};
 
 /// The local API as `web/` reaches it: `localhost`, so its `SameSite=Strict` cookie is same-site
 /// with the app origin [`DEMO_APP_ORIGIN`] (DEC-2406).
@@ -30,7 +30,7 @@ pub struct WebRun {
     pub env: Vec<(&'static str, String)>,
 }
 
-pub fn web_run(signed_in: bool) -> WebRun {
+pub fn web_run(signed_in: bool, workspace: &str) -> WebRun {
     if !signed_in {
         return WebRun {
             script: "dev",
@@ -44,7 +44,7 @@ pub fn web_run(signed_in: bool) -> WebRun {
         env: vec![
             ("OWLHEAD_DATA_SOURCE", "api".to_string()),
             ("OWLHEAD_API_ORIGIN", WEB_API_ORIGIN.to_string()),
-            ("OWLHEAD_WORKSPACE_ID", DEMO_WORKSPACE.to_string()),
+            ("OWLHEAD_WORKSPACE_ID", workspace.to_string()),
             ("OWLHEAD_STUB_ISSUER", LOCAL_ISSUER.to_string()),
             ("OWLHEAD_STUB_SUBJECT", DEMO_SUBJECT.to_string()),
         ],
@@ -136,11 +136,12 @@ fn answers(program: &str, arg: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Step 6 from `web/`: starts `next dev` against the cell's API as the demo owner, signs in through
+/// Step 6 from `web/`, in `workspace`, the one the cell's API hosts (the scenario passes its own run's,
+/// never a fixed id): starts `next dev` against the cell's API as the demo owner, signs in through
 /// the stub, opens Stop and presses one listed agent's kill switch, and returns what the API
 /// recorded. An `Err` is the gap the scenario prints: a missing tool, no agent to kill, or a run
 /// that failed or ran past [`GESTURE_POLLS`] (its log is named).
-pub fn kill_switch_from_web() -> Result<WebGesture> {
+pub fn kill_switch_from_web(workspace: &str) -> Result<WebGesture> {
     if let Some(why) = gesture_missing(
         answers("npm", "--version"),
         Path::new("web/node_modules").exists(),
@@ -183,7 +184,12 @@ pub fn kill_switch_from_web() -> Result<WebGesture> {
     let mut child = Command::new("npx")
         .current_dir("web")
         .args(["playwright", "test", "-c", "playwright.cell.config.ts"])
-        .envs(web_run(true).env.iter().map(|(n, v)| (*n, v.as_str())))
+        .envs(
+            web_run(true, workspace)
+                .env
+                .iter()
+                .map(|(n, v)| (*n, v.as_str())),
+        )
         .env("OWLHEAD_CELL_TLS_KEY", &key)
         .env("OWLHEAD_CELL_TLS_CERT", &cert)
         .env("OWLHEAD_CELL_RESULT", &result)
@@ -231,18 +237,18 @@ mod tests {
     use anyhow::{Context, Result};
     use serde_json::Value;
 
-    use super::super::{API_LOCAL_PORT, STUB_PORT};
+    use super::super::{API_LOCAL_PORT, DEMO_WORKSPACE, STUB_PORT};
     use super::*;
 
     #[test]
     fn web_reads_the_cells_api_as_the_demo_owner_only_once_sign_in_is_ready() -> Result<()> {
-        let fixtures = web_run(false);
+        let fixtures = web_run(false, DEMO_WORKSPACE);
         assert_eq!(
             (fixtures.script, fixtures.url, fixtures.env.len()),
             ("dev", WEB_URL, 0),
             "without sign-in web/ runs on its own fixtures"
         );
-        let cell = web_run(true);
+        let cell = web_run(true, DEMO_WORKSPACE);
         assert_eq!(
             cell.url, DEMO_APP_ORIGIN,
             "web/ serves at the one origin the API's CORS and CSRF checks admit"

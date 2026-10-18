@@ -3705,7 +3705,7 @@ pub fn demo(web: bool) -> Result<()> {
             wanted.trim()
         );
     }
-    let run = web_run(signin_ready);
+    let run = web_run(signin_ready, DEMO_WORKSPACE);
     eprintln!(
         "==> web/ at {} (Ctrl-C stops it; the cell keeps running)",
         run.url
