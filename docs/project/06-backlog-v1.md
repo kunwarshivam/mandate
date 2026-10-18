@@ -2900,8 +2900,9 @@ enables `live` (ES-23, OPS-5).
   *Status:* the images, the start-up check in `mandate-agentd`, the CI test-key drill and the
   `main`-only publish to GHCR land with DEC-971; images for amd64 and arm64, each built natively,
   under one signed multi-arch index, with DEC-1060. **After R0:** the CLI runs the check (with
-  E21-8's last slice). **Founder:** the hardware key's public half in `RELEASE_KEYS` (H8), until
-  which nothing starts outside dev and CI (DEC-971 item 7). Staging promotion waits on H1.
+  E21-8's last slice). **Founder:** the release key's public half is in `RELEASE_KEYS`
+  (`crates/mandate-release/release-keys/cosign.pub`), the CI key the founder chose over a hardware
+  key (DEC-2605 rows 8 and 9). Staging promotion waits on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
