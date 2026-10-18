@@ -8,7 +8,6 @@ use crate::WebPushSwitch;
 use mandate_notify::PushChannel;
 
 #[test]
-#[ignore = "pending E8-10"]
 fn with_web_push_off_a_step_makes_no_web_push_attempt_and_journals_none() -> Checked {
     let journal = world()?;
     alerts(&journal, A1, 1, &[(1, "risk_limit"), (2, "agent_held")])?;
