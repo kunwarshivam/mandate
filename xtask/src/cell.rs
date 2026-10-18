@@ -794,12 +794,12 @@ pub fn up() -> Result<()> {
     for set in &sets {
         install.extend(["--set", set.as_str()]);
     }
-    install.extend(["--wait", "--wait-for-jobs", "--timeout", "5m"]);
-    let installed = helm(&install);
     let egress = egress_sets()?;
     for set in &egress {
         install.extend(["--set-json", set.as_str()]);
     }
+    install.extend(["--wait", "--wait-for-jobs", "--timeout", "5m"]);
+    let installed = helm(&install);
     if installed.is_err() && api.is_some() {
         api_diagnosis();
     }
@@ -3554,6 +3554,11 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
             .iter()
             .any(|p| p["name"] == name && p["built"] == true)
     };
+    let started_by_built = |name: &str| {
+        processes
+            .iter()
+            .any(|p| p["name"] == name && p["started_by"].as_str().is_some_and(&built))
+    };
     let lane = |ready: bool, why: &str| (!ready).then(|| why.to_string());
     vec![
         DemoPart {
@@ -3573,10 +3578,18 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
         },
         DemoPart {
             name: "the agent runtime, on the deny-all wiring until the post-R0 hook (DEC-1013)",
-            skipped: lane(
-                built("runtime"),
-                "the runtime image is not on main yet (lane P3, E21-30)",
-            ),
+            skipped: if started_by_built("runtime") {
+                Some(
+                    "the deployment manager starts it, once it reads a deployment's account from \
+                     `AgentDeployed` version 2 (DEC-1171); until then it starts none"
+                        .to_string(),
+                )
+            } else {
+                lane(
+                    built("runtime"),
+                    "the runtime image is not on main yet (lane P3, E21-30)",
+                )
+            },
         },
         DemoPart {
             name: "a paper agent on rh-sim and recorded Alpaca fixtures, no credential",
@@ -4324,6 +4337,26 @@ mod tests {
             unbuilt
                 .iter()
                 .any(|p| p.name.starts_with("the agent runtime") && p.skipped.is_some())
+        );
+    }
+
+    /// A runtime the built deployment manager starts is not called ready: the manager starts none
+    /// until it reads a deployment's account (DEC-1171), so no runtime pod runs in the cell yet.
+    #[test]
+    fn a_runtime_the_built_manager_starts_is_not_called_ready() {
+        let runtime = json!({"name": "runtime", "built": true, "started_by": "deploy-manager"});
+        let ready = |manager_built: bool| {
+            let list = [runtime.clone(), process("deploy-manager", manager_built)];
+            demo_parts(&list, "", false)
+                .into_iter()
+                .find(|p| p.name.starts_with("the agent runtime"))
+                .map(|p| p.skipped.is_none())
+        };
+        assert_eq!(ready(true), Some(false));
+        assert_eq!(
+            ready(false),
+            Some(true),
+            "without the manager, the runtime is a Deployment"
         );
     }
 

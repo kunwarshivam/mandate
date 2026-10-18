@@ -6,11 +6,13 @@ verb, and no cluster scope. Creating a pod is itself powerful (a pod can mount a
 namespace, name any account, claim any egress label, or run privileged), so the admission policy
 below bounds every pod the manager makes to one shaped like its templates: no token and no account
 but `default`; no host namespace or host path; every container unprivileged, without privilege
-escalation; only the templates' images; only memory and the templates' Secrets, and none through the
+escalation; only the templates' images; only memory, the templates' Secrets and, read-only, the
+claims they mount read-only (the artifact store's, DEC-1016), and no Secret through the
 environment or a pull secret; the manager's, a templated process's and this workspace's labels; and
 exactly that process's egress labels. Residual: what it does not check (command and arguments,
-resources, node placement, pod-level user, capabilities, other labels), so a pod inside the bound
-can still do what that process's image and role can. Every runtime and executor it starts is a bare pod from the templates
+resources, node placement, pod-level user, capabilities, other labels, and which of its processes
+mounts an allowed claim, since the images, Secrets and claims are the policy's whole lists, not per
+process), so a pod inside the bound can still do what that process's image and role can. Every runtime and executor it starts is a bare pod from the templates
 below, which are exactly the pods the chart would build for those processes (their security
 context, egress gate, credentials, colocation, and the labels their network policies select), so
 the manager adds only a pod's name, its own labels, `restartPolicy: Never` and the process's
