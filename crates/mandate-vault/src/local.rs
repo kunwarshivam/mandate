@@ -145,6 +145,7 @@ impl LocalSource {
             SecretPath::ClientSecret => Entry::client_secret(
                 KeyRef::new(ALPACA_CLIENT_SECRET_KEY_REF).map_err(|_| SourceError::Config)?,
             ),
+            SecretPath::Platform(_) => return Err(SourceError::Unimplemented { story: "E21-32" }),
         })
     }
 
