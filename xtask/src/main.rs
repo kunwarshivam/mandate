@@ -14626,9 +14626,14 @@ mod tests {
             ),
             "a newer run of the same ref cancels the older one"
         );
-        let report = "if: ${{ always() && github.event_name == 'workflow_dispatch' && \
-                      github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || \
-                      needs.full.result == 'failure') }}";
+        assert!(
+            workflow.contains("  push:\n    branches: [main]\n"),
+            "every push to main runs CI after the merge, and a push to any other branch does not \
+             (DEC-2610)"
+        );
+        let report = "if: ${{ always() && (github.event_name == 'workflow_dispatch' || \
+                      github.event_name == 'push') && github.ref == 'refs/heads/main' && \
+                      (needs.fast.result == 'failure' || needs.full.result == 'failure') }}";
         for (job, guard) in [
             ("select", "if: ${{ !github.event.pull_request.draft }}"),
             ("fast-lint", "if: ${{ !github.event.pull_request.draft }}"),
@@ -16976,6 +16981,24 @@ jq -r "$filter" "$src"
 "##;
 
     const APPROVED_HEAD: &str = "1111111111111111111111111111111111111111";
+
+    /// DEC-2610: a merge `merge.yml` makes pushes with its own token, which starts no workflow, so
+    /// it dispatches `ci` on `main` once after any merge, and only then, with the one right that
+    /// takes.
+    #[test]
+    fn the_merge_workflow_runs_ci_on_main_after_a_merge_it_made() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/merge.yml"))?;
+        let dispatch = "gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/\
+                        dispatches\" -f ref=main";
+        assert_eq!(workflow.matches(dispatch).count(), 1, "one dispatch");
+        let guarded = workflow
+            .split_once("if [ \"$merged\" = 1 ]; then")
+            .map(|(_, after)| after.trim_start().starts_with(dispatch));
+        assert_eq!(guarded, Some(true), "the dispatch runs only after a merge");
+        assert!(workflow.contains("if printf '%s\\n' \"$out\" | grep -q '^merged as '; then"));
+        assert!(workflow.contains("      actions: write\n"));
+        Ok(())
+    }
 
     #[test]
     fn merge_workflow_supplies_the_authorized_coordinator_identities() -> Result<()> {

@@ -8,7 +8,10 @@
 # so that an event GitHub drops (a pending run replaced in its concurrency group, mergeability
 # still being computed) never leaves an approved pull request waiting for good.
 # Nothing here checks out or runs the pull request's code: `pull_request_target`, `workflow_run`
-# and `schedule` run this file and the script as they are on the default branch.
+# and `schedule` run this file and the script as they are on the default branch. A merge made
+# here pushes to `main` with this workflow's own token, which starts no workflow, so after any
+# merge it dispatches `ci` on `main` once, the post-merge run every other merge gets from its push
+# (DEC-2610; `actions: write` is for that dispatch alone).
 name: merge
 
 on:
@@ -38,6 +41,7 @@ jobs:
       group: merge-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
       cancel-in-progress: false
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     env:
@@ -63,7 +67,19 @@ jobs:
             prs=$(jq -r '.[]' <<<"$RUN_PRS")
           fi
           failed=0
+          merged=0
           for pr in $prs; do
-            .github/scripts/merge-approved.sh "$pr" || failed=1
+            if out=$(.github/scripts/merge-approved.sh "$pr"); then
+              printf '%s\n' "$out"
+            else
+              printf '%s\n' "$out"
+              failed=1
+            fi
+            if printf '%s\n' "$out" | grep -q '^merged as '; then
+              merged=1
+            fi
           done
+          if [ "$merged" = 1 ]; then
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" -f ref=main
+          fi
           exit "$failed"
