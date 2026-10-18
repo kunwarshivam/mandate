@@ -1,0 +1,16 @@
+# No pod reaches the droplet metadata service (169.254.169.254), which serves the droplet's user
+# data, the ops tunnel's first token among it (DEC-2001 item 4). The rule sits in the raw table's
+# PREROUTING, ahead of every chain k3s and its policy controller program, and matches the pod
+# bridge, so the host itself (cloud-init, the droplet agent) still reads its metadata.
+[Unit]
+Description=Block pod access to the droplet metadata service
+Before=k3s.service
+After=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/cell1-metadata-block
+
+[Install]
+WantedBy=multi-user.target
