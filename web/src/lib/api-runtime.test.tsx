@@ -259,7 +259,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
   });
 
   it("confirms bound to the served screen, with no step-up until E9-4, and shows the server's step_up_required with nothing recorded", async () => {
-    const { posts } = mount();
+    const { posts, server } = mount();
     await ready();
     const agent = buildWorkspace("approvals").agents[0];
     let id = "";
@@ -268,13 +268,16 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     });
     const setUp = () => current().setUps.find((s) => s.id === id)!;
     await waitFor(() => expect(setUp().created.phase).toBe("recorded"));
+    expect(server.servedDigests()).toHaveLength(1);
     act(() => current().confirmVersion(id, CONFIRM_RECORD, confirmStepUpDigest(setUp().version, null, null)));
     expect(setUp().confirmed).toMatchObject({ phase: "sent", record: CONFIRM_RECORD, stepUp: null });
     await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "undelivered", reason: "step_up_required", stepUp: null }));
     const confirm = posts().at(-1);
     expect(new URL(confirm?.url ?? "").pathname).toBe(`/v1/workspaces/${WS}/mandate-versions/${encodeURIComponent(setUp().version)}/confirm`);
     expect(JSON.parse(confirm?.body ?? "{}")).toMatchObject({ classification_shown: "risk_increasing", step_up: null, agent_id: null, base_version: null });
-    expect(JSON.parse(confirm?.body ?? "{}").screen_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    const [atCreate, atConfirm] = server.servedDigests();
+    expect(atConfirm).not.toBe(atCreate);
+    expect(JSON.parse(confirm?.body ?? "{}").screen_digest).toBe(atConfirm);
   });
 
   it("refuses a confirm before its version is recorded, and a set-up it never made, sending nothing", async () => {
