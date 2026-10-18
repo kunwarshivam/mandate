@@ -19,7 +19,8 @@ use common::{
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_cli::agent::Scope;
 use mandate_cli::brake::{
-    self, AgentCommand, Paused, ReachArgs, killed_line, pause, paused_lines, reached,
+    self, AgentCommand, Paused, ReachArgs, killed_line, pause, paused_lines, pauses_settled,
+    reached,
 };
 use mandate_cli::control::{ControlError, Submitted};
 use mandate_cli::gestures;
@@ -403,6 +404,77 @@ fn a_pause_prints_one_line_per_agent() {
             "pause agent-b not committed: the journal: unavailable".to_owned(),
         ]
     );
+}
+
+/// DEC-2000 item 3: `agent pause` exits non-zero exactly when a pause did not commit, naming how
+/// many, so a partly committed brake never reads as done.
+#[test]
+fn a_pause_exits_non_zero_exactly_when_a_pause_did_not_commit() {
+    let committed = |agent: &str, seq: u64| Paused {
+        agent: agent.to_owned(),
+        outcome: Ok(Submitted {
+            event_id: format!("ev{seq}"),
+            seq,
+        }),
+    };
+    let failed = |agent: &str| Paused {
+        agent: agent.to_owned(),
+        outcome: Err(ControlError::Journal("unavailable".to_owned())),
+    };
+    assert!(
+        pauses_settled(&[]).is_ok(),
+        "no agent in scope is no failure"
+    );
+    assert!(
+        pauses_settled(&[committed(AGENT, 7), committed(OTHER_AGENT, 8)]).is_ok(),
+        "every pause committed"
+    );
+    let one = pauses_settled(&[committed(AGENT, 7), failed(OTHER_AGENT)]);
+    assert_eq!(
+        one.map_err(|e| e.to_string()),
+        Err("1 pauses did not commit".to_owned())
+    );
+    let two = pauses_settled(&[failed(AGENT), failed(OTHER_AGENT)]);
+    assert_eq!(
+        two.map_err(|e| e.to_string()),
+        Err("2 pauses did not commit".to_owned())
+    );
+}
+
+/// Rule 3: a pause the owner's flags refuse fails before it opens a journal or a store, and prints
+/// nothing, so it never reads as a brake that held.
+#[test]
+fn a_pause_refused_at_its_owner_opens_nothing_and_prints_nothing() {
+    let store = std::env::temp_dir().join(format!("mandate-brake-refused-{}", std::process::id()));
+    let store_text = store.to_string_lossy().into_owned();
+    let cli = Cli::try_parse_from([
+        "mandate",
+        "agent",
+        "pause",
+        "--workspace-wide",
+        "--workspace",
+        "ws1",
+        "--user",
+        OWNER,
+        "--environment",
+        "staging",
+        "--journal",
+        "postgres://journal@localhost/mandate",
+        "--store",
+        &store_text,
+    ])
+    .expect("a workspace-wide pause parses");
+    let Command::Agent(AgentCommand::Pause(args)) = cli.command else {
+        panic!("parsed as {:?}", cli.command);
+    };
+    let mut printed = Vec::new();
+    let outcome = brake::run_pause(&args, at(ASKED_AT), &mut printed);
+    let refusal = outcome
+        .expect_err("an unknown environment is refused")
+        .to_string();
+    assert!(refusal.contains("environment_invalid"), "{refusal}");
+    assert!(printed.is_empty(), "{}", String::from_utf8_lossy(&printed));
+    assert!(!store.exists(), "no store is created for a refused pause");
 }
 
 fn parsed(args: &[&str]) -> Result<Cli, clap::Error> {

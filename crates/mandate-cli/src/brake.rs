@@ -213,6 +213,15 @@ pub fn run_pause(args: &BrakeArgs, now: Now, report: &mut impl Write) -> anyhow:
     for line in paused_lines(&paused) {
         writeln!(report, "{line}")?;
     }
+    pauses_settled(&paused)
+}
+
+/// `agent pause`'s exit once every agent was tried (DEC-2000 item 3): success only when every
+/// pause committed, so an operator never reads a partly committed brake as done.
+///
+/// # Errors
+/// How many pauses did not commit, when any did not.
+pub fn pauses_settled(paused: &[Paused]) -> anyhow::Result<()> {
     let failed = paused.iter().filter(|p| p.outcome.is_err()).count();
     if failed > 0 {
         bail!("{failed} pauses did not commit");
