@@ -215,12 +215,12 @@ The run's own report is the up-to-date list; on 2026-10-18, after slice 5, it re
 
 | Step | Today | Runs | Waits on |
 |---|---|---|---|
-| 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found` for the demo owner; the cell's API refusing a read of the run's workspace with no session (the one 401); the demo owner's sign-in through the stub issuer (204 and its cookie) | A1 (E21-31): the API reads memberships through `control_entry`, without which every signed-in read answers `membership_unavailable`; W2: the same in `web/` |
-| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy`, each code shown then typed | A1 and W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
+| 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found` for the demo owner; the cell's API refusing a read of the run's workspace with no session (the one 401); the demo owner's sign-in through the stub issuer (204 and its cookie) | MB (E21-31), the membership parser: the API reads memberships through `control_entry`, without which every signed-in read answers `membership_unavailable`; W2: the same in `web/` |
+| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy`, each code shown then typed | MB and W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
 | 3. Research, through the gateway's recorded fake | skipped | Nothing yet | D1: the runtime started; I2 (E19-2): a deployment's research configured (DEC-2208); AH (E19-13): the agentic loop over its state (#1551, #1561, #1566, #1569 on `main`) |
 | 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
-| 5. A backtest of the same version | skipped | Nothing yet | E2E: run the runner and `mandate backtest record` (#1581) in the gestures' pod; A1: the API read with a session |
-| 6. The kill switch | partial | `agent kill --agent demo-spy` (agent scope), recorded before the closing export and verify | A1 and W2: from `web/`; D1 and X: the processes stop on it |
+| 5. A backtest of the same version | skipped | Nothing yet | E2E: run the runner and `mandate backtest record` (#1581) in the gestures' pod; MB: the API read with a session |
+| 6. The kill switch | partial | `agent kill --agent demo-spy` (agent scope), recorded before the closing export and verify | MB and W2: from `web/`; D1 and X: the processes stop on it |
 
 The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
 every opening asked, protection on. CI's `cell-demo` job, which no required check depends on, runs

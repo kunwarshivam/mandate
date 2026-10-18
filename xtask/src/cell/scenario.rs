@@ -168,13 +168,13 @@ pub fn by_lane(steps: &[Step]) -> BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>>
 
 /// The waits several gaps share: the API's membership read, the agent's runtime started by the
 /// deployment manager, web/ driven against the cell, and the executor in the cell.
-const A1_MEMBERS: Wait = Wait {
-    lane: "A1",
+const MB_MEMBERS: Wait = Wait {
+    lane: "MB",
     story: "E21-31",
     pr: None,
-    lands: "the API reads memberships through `control_entry`; until then its `until_parser` \
-            fails every signed-in read and command closed with `membership_unavailable` \
-            (DEC-978 item 8)",
+    lands: "the membership parser: the API reads memberships through `control_entry`; until \
+            then its `until_parser` fails every signed-in read and command closed with \
+            `membership_unavailable` (DEC-978 item 8)",
 };
 const D1_RUNTIME: Wait = Wait {
     lane: "D1",
@@ -345,12 +345,12 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     on_main: "sign-in through the stub issuer (#1591), the API hosting the run's \
                               workspace founded for the demo owner, and \
                               `mandate_identity::control_entry`",
-                    waits: vec![A1_MEMBERS],
+                    waits: vec![MB_MEMBERS],
                 }),
                 Part::Gap(Gap {
                     what: "the same sign-in and read in web/",
                     on_main: "web/'s sign-in to a dev cell (#1588) and the stub issuer (#1591)",
-                    waits: vec![A1_MEMBERS, W2_WEB],
+                    waits: vec![MB_MEMBERS, W2_WEB],
                 }),
             ],
         },
@@ -404,7 +404,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     on_main: "the API's version, confirm and deploy routes (#1552) in the cell \
                               (#1554), web/'s set-up (#1557), its sign-in to a dev cell \
                               (#1588) and the stub issuer (#1591)",
-                    waits: vec![A1_MEMBERS, W2_WEB],
+                    waits: vec![MB_MEMBERS, W2_WEB],
                 }),
                 Part::Gap(Gap {
                     what: "the agent's runtime started from AgentDeployed",
@@ -518,7 +518,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                         "this scenario runs the runner, records it in the gestures' pod and \
                          reads it through the API with the owner's session",
                     ),
-                    A1_MEMBERS,
+                    MB_MEMBERS,
                 ],
             })],
         },
@@ -531,7 +531,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     on_main: "POST /v1/workspaces/{ws}/kill-switch in the cell (#1457, #1554), \
                               web/'s kill switch sent through the API, its sign-in to a dev cell \
                               (#1588) and the stub issuer (#1591)",
-                    waits: vec![A1_MEMBERS, W2_WEB],
+                    waits: vec![MB_MEMBERS, W2_WEB],
                 }),
                 gesture(
                     "the owner's kill switch for the agent, through the CLI (agent scope)",
@@ -1134,7 +1134,7 @@ mod tests {
 
     /// Step 1 checks the API twice, as main can serve it: a read of the run's own workspace with
     /// no session must be refused with the one 401, and the demo owner's sign-in must open a
-    /// session (204); the read with that session stays a gap until the API reads memberships.
+    /// session (204); the read with that session stays a gap until the API reads memberships (lane MB).
     #[test]
     fn step_one_checks_the_refusal_and_the_sign_in_and_names_the_signed_in_read() {
         let ws = workspace_of("0123456789");
@@ -1157,11 +1157,11 @@ mod tests {
         );
         let waits_on_members = steps[0].parts.iter().any(|p| {
             matches!(p, Part::Gap(g) if g.what.contains("with that session")
-                && g.waits.iter().any(|w| w.lane == "A1"))
+                && g.waits.iter().any(|w| w.lane == "MB"))
         });
         assert!(
             waits_on_members,
-            "the signed-in read is named, waiting on A1"
+            "the signed-in read is named, waiting on MB"
         );
     }
 
