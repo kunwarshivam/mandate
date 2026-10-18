@@ -6,12 +6,13 @@
 mod common;
 
 use common::{
-    Captured, Checked, Journal, Manager, accounts, at, block_on, deployed, identity, kill, manager,
-    owner_command, redeployed, restart, stopped,
+    Captured, Checked, Journal, Manager, accounts, at, block_on, connection_of, deployed,
+    deployed_v1, established, identity, kill, manager, owner_command, redeployed, restart, revoked,
+    stopped,
 };
 use mandate_canon::Value;
 use mandate_deploy_manager::fake::Call;
-use mandate_deploy_manager::orchestrator::CRASH_LOOP;
+use mandate_deploy_manager::orchestrator::{CRASH_LOOP, DEPLOYMENT_UNREAD};
 use mandate_deploy_manager::{
     Cause, ControlJournal, Deployer, Halt, Identity, Record, Slot, backoff,
 };
@@ -72,7 +73,7 @@ fn clean(m: &mut Manager) {
 
 /// Deploys `agent` on `account` and brings both processes up.
 fn deploy(journal: &Journal, m: &mut Manager, agent: &str, secs: i64) {
-    journal.services(&deployed(agent), at(secs));
+    journal.services(&journal.deployed(agent), at(secs));
     tick(m, secs);
 }
 
@@ -97,17 +98,93 @@ fn a_deployed_agent_gets_its_runtime_and_executor_each_journaled_first() {
 }
 
 #[test]
-fn nothing_starts_for_an_agent_the_control_stream_does_not_deploy() {
+fn nothing_starts_for_a_deployment_that_names_no_established_connection() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[]));
     tick(&mut m, 1);
-    journal.services(&deployed("agent_unresolved"), at(2));
+    journal.services(&deployed_v1("agent_v1"), at(2));
+    journal.services(
+        &deployed("agent_elsewhere", "01J8Z2ACCT00000000000000Z9"),
+        at(2),
+    );
     tick(&mut m, 2);
+    tick(&mut m, 3);
     assert!(
         m.orchestrator().fake.calls().is_empty(),
-        "an account it cannot resolve starts nothing"
+        "a version-1 deployment, or one on a connection the stream never established, starts nothing"
     );
     assert!(journal.records().is_empty());
+    assert_eq!(
+        m.alerts().0,
+        vec![DEPLOYMENT_UNREAD],
+        "the version-1 deployment is reported once"
+    );
+}
+
+#[test]
+fn a_revocation_stops_nothing_but_a_deployment_after_it_starts_nothing() {
+    let journal = Journal::new();
+    let mut m = manager(
+        &journal,
+        accounts(&[
+            ("agent_a", "01J8Z2ACCT00000000000000A1"),
+            ("agent_b", "01J8Z2ACCT00000000000000A1"),
+        ]),
+    );
+    deploy(&journal, &mut m, "agent_a", 1);
+    journal.services(&revoked("conn_01J8Z2ACCT00000000000000A1"), at(2));
+    journal.services(&journal.deployed("agent_b"), at(2));
+    for s in 2..5 {
+        tick(&mut m, s);
+    }
+    assert_eq!(
+        starts(&mut m, &rt("agent_a")),
+        vec![1],
+        "agent_a keeps running"
+    );
+    assert!(stops(&mut m).is_empty(), "a revocation stops nothing");
+    assert!(
+        starts(&mut m, &rt("agent_b")).is_empty(),
+        "rule 201 refuses agent_b"
+    );
+    clean(&mut m);
+}
+
+#[test]
+fn a_version_1_record_of_an_agent_already_running_is_not_reported() {
+    let journal = Journal::new();
+    let mut m = manager(
+        &journal,
+        accounts(&[("agent_a", "01J8Z2ACCT00000000000000A1")]),
+    );
+    deploy(&journal, &mut m, "agent_a", 1);
+    journal.services(&deployed_v1("agent_a"), at(2));
+    tick(&mut m, 2);
+    assert!(
+        m.alerts().0.is_empty(),
+        "the agent runs from its version-2 deployment"
+    );
+    assert_eq!(starts(&mut m, &rt("agent_a")), vec![1]);
+}
+
+#[test]
+fn a_stop_of_a_deployment_the_manager_never_read_is_final() {
+    let journal = Journal::new();
+    let mut m = manager(
+        &journal,
+        accounts(&[("agent_a", "01J8Z2ACCT00000000000000A1")]),
+    );
+    journal.services(&deployed_v1("agent_a"), at(1));
+    journal.services(&stopped("agent_a", "01J8Z2ACCT00000000000000A1"), at(1));
+    journal.services(&journal.deployed("agent_a"), at(2));
+    for s in 1..5 {
+        tick(&mut m, s);
+    }
+    assert!(m.orchestrator().fake.calls().is_empty());
+    assert!(
+        m.alerts().0.is_empty(),
+        "a stopped deployment is not reported"
+    );
 }
 
 #[test]
@@ -451,7 +528,10 @@ fn a_stopped_agent_is_stopped_once_journaled_first_and_never_started_again() {
     );
     let (_, draft) = kill("agent", "agent_a", 1);
     journal.services(&draft, at(3));
-    journal.services(&redeployed("agent_a", 1), at(3));
+    journal.services(
+        &redeployed("agent_a", "01J8Z2ACCT00000000000000A1", 1),
+        at(3),
+    );
     for s in 3..30 {
         tick(&mut m, s);
     }
@@ -557,7 +637,7 @@ fn nothing_is_done_while_the_journal_is_unavailable() {
         &journal,
         accounts(&[("agent_a", "01J8Z2ACCT00000000000000A1")]),
     );
-    journal.services(&deployed("agent_a"), at(1));
+    journal.services(&journal.deployed("agent_a"), at(1));
     *journal.unavailable.borrow_mut() = true;
     assert_eq!(block_on(m.tick(at(1))), Err(Halt::Journal));
     assert!(m.orchestrator().fake.calls().is_empty());
@@ -657,7 +737,7 @@ fn a_start_the_orchestrator_refused_is_retried_without_a_second_record() {
         &journal,
         accounts(&[("agent_a", "01J8Z2ACCT00000000000000A1")]),
     );
-    journal.services(&deployed("agent_a"), at(1));
+    journal.services(&journal.deployed("agent_a"), at(1));
     m.orchestrator().fake.refuse_effects = true;
     tick(&mut m, 1);
     assert_eq!(journal.records().len(), 2);
@@ -687,9 +767,10 @@ fn a_journal_refusal_halts_the_pass_before_any_effect() {
         journal.clone(),
         Checked::new(journal.clone()),
         Captured::default(),
-        accounts(&[("agent_a", "01J8Z2ACCT00000000000000A1")]),
     );
-    journal.services(&deployed("agent_a"), at(1));
+    let account = "01J8Z2ACCT00000000000000A1";
+    journal.services(&established(&connection_of(account), account), at(1));
+    journal.services(&deployed("agent_a", account), at(1));
     let halted = block_on(m.tick(at(1)));
     assert!(matches!(halted, Err(Halt::Refused { .. })), "{halted:?}");
     assert!(m.orchestrator().fake.calls().is_empty());
@@ -702,7 +783,7 @@ fn an_orchestrator_that_cannot_list_decides_nothing() {
         &journal,
         accounts(&[("agent_a", "01J8Z2ACCT00000000000000A1")]),
     );
-    journal.services(&deployed("agent_a"), at(1));
+    journal.services(&journal.deployed("agent_a"), at(1));
     m.orchestrator().fake.unavailable = true;
     assert_eq!(block_on(m.tick(at(1))), Err(Halt::Orchestrator));
     assert!(journal.records().is_empty());
@@ -866,76 +947,6 @@ fn an_owner_command_other_than_the_kill_switch_starts_nothing_early() {
 }
 
 #[test]
-fn a_resolver_outage_defers_only_the_deployment_and_never_holds_a_kill_switch() {
-    let journal = Journal::new();
-    let resolver = accounts(&[
-        ("agent_a", "01J8Z2ACCT00000000000000A1"),
-        ("agent_b", "01J8Z2ACCT00000000000000A2"),
-    ]);
-    let outage = resolver.unavailable.clone();
-    let mut m = manager(&journal, resolver);
-    deploy(&journal, &mut m, "agent_a", 1);
-    m.orchestrator()
-        .fake
-        .crash(&ex("01J8Z2ACCT00000000000000A1"));
-    tick(&mut m, 2);
-    *outage.borrow_mut() = true;
-    journal.services(&deployed("agent_b"), at(2));
-    journal.services(
-        &kill("connection", "conn_01J8Z2ACCT00000000000000A1", 1).1,
-        at(2),
-    );
-    assert_eq!(block_on(m.tick(at(2))), Err(Halt::Resolver));
-    assert_eq!(
-        starts(&mut m, &ex("01J8Z2ACCT00000000000000A1")),
-        vec![1, 2],
-        "the switch acted through the outage"
-    );
-    assert!(
-        starts(&mut m, &rt("agent_b")).is_empty(),
-        "the deployment waits"
-    );
-    *outage.borrow_mut() = false;
-    tick(&mut m, 3);
-    assert_eq!(starts(&mut m, &rt("agent_b")), vec![1]);
-    assert_eq!(
-        starts(&mut m, &ex("01J8Z2ACCT00000000000000A1")),
-        vec![1, 2],
-        "the switch read again asks for nothing more"
-    );
-    assert_eq!(
-        causes(&journal)
-            .iter()
-            .filter(|c| *c == "kill_switch")
-            .count(),
-        1
-    );
-    clean(&mut m);
-}
-
-#[test]
-fn a_deferred_deployment_and_its_stop_fold_in_order_once_the_resolver_answers() {
-    let journal = Journal::new();
-    let resolver = accounts(&[
-        ("agent_a", "01J8Z2ACCT00000000000000A1"),
-        ("agent_b", "01J8Z2ACCT00000000000000A2"),
-    ]);
-    let outage = resolver.unavailable.clone();
-    let mut m = manager(&journal, resolver);
-    tick(&mut m, 1);
-    *outage.borrow_mut() = true;
-    journal.services(&deployed("agent_b"), at(2));
-    journal.services(&stopped("agent_b", "01J8Z2ACCT00000000000000A2"), at(2));
-    assert_eq!(block_on(m.tick(at(2))), Err(Halt::Resolver));
-    *outage.borrow_mut() = false;
-    tick(&mut m, 3);
-    assert!(
-        m.orchestrator().fake.calls().is_empty(),
-        "a stopped agent is never started"
-    );
-}
-
-#[test]
 fn a_kill_switch_on_a_connection_the_stream_never_established_covers_nothing() {
     let journal = Journal::new();
     let mut m = manager(
@@ -999,7 +1010,7 @@ fn an_executor_pause_ends_when_every_agent_of_its_account_has_stopped() {
     tick(&mut m, second);
     assert!(!m.manager.paused(&ex("01J8Z2ACCT00000000000000A1")));
     let mut m = restart(m);
-    journal.services(&deployed("agent_b"), at(second + 1));
+    journal.services(&journal.deployed("agent_b"), at(second + 1));
     tick(&mut m, second + 1);
     tick(&mut m, second + 3);
     assert_eq!(
@@ -1021,7 +1032,7 @@ fn a_start_whose_agent_is_stopped_while_it_is_journaled_is_not_carried_out() {
         accounts(&[("agent_a", "01J8Z2ACCT00000000000000A1")]),
     );
     tick(&mut m, 0);
-    journal.services(&deployed("agent_a"), at(1));
+    journal.services(&journal.deployed("agent_a"), at(1));
     journal
         .after_append
         .borrow_mut()
@@ -1057,29 +1068,4 @@ fn a_second_agent_on_a_crash_looped_executors_account_leaves_it_paused() {
         "only every agent stopped ends it"
     );
     assert_eq!(starts(&mut m, &ex("01J8Z2ACCT00000000000000A1")).len(), 6);
-}
-
-#[test]
-fn a_deployment_the_resolver_cannot_read_during_the_pass_is_still_reported() {
-    let journal = Journal::new();
-    let resolver = accounts(&[
-        ("agent_a", "01J8Z2ACCT00000000000000A1"),
-        ("agent_b", "01J8Z2ACCT00000000000000A2"),
-    ]);
-    let outage = resolver.unavailable.clone();
-    let mut m = manager(&journal, resolver);
-    deploy(&journal, &mut m, "agent_a", 1);
-    m.orchestrator().fake.crash(&rt("agent_a"));
-    tick(&mut m, 2);
-    *outage.borrow_mut() = true;
-    journal.after_append.borrow_mut().push(deployed("agent_b"));
-    assert_eq!(
-        block_on(m.tick(at(3))),
-        Err(Halt::Resolver),
-        "the restart's re-read deferred it"
-    );
-    assert_eq!(starts(&mut m, &rt("agent_a")), vec![1, 2]);
-    *outage.borrow_mut() = false;
-    tick(&mut m, 4);
-    assert_eq!(starts(&mut m, &rt("agent_b")), vec![1]);
 }

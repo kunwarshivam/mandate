@@ -8,7 +8,7 @@ use mandate_process::{CRASH_LOOP_WINDOW, crash_loop};
 use mandate_time::UtcNanos;
 
 use crate::control::{Cause, Fact, Process, Scope, Slot};
-use crate::orchestrator::{CRASH_LOOP, Effect, Instance};
+use crate::orchestrator::{CRASH_LOOP, DEPLOYMENT_UNREAD, Effect, Instance};
 use crate::record::Record;
 
 /// The first restart's back-off; each restart counted in the crash-loop window doubles it.
@@ -66,7 +66,17 @@ struct SlotState {
 pub struct Manager {
     environment: Option<String>,
     agents: BTreeMap<String, Agent>,
+    /// Each connection's account, from its first version-2 establishment: a kill switch's scope
+    /// reads it whether or not the connection is revoked since.
     connections: BTreeMap<String, String>,
+    /// The connections whose latest establishment or revocation is an establishment: the ones a
+    /// deployment can start on (journal spec §9.24 rule 201).
+    established: BTreeSet<String>,
+    /// Every agent an `AgentStopped` names, read or not: a stop is final (§9.21, DEC-1173 item 2).
+    stopped: BTreeSet<String>,
+    /// The version-1 deployments of agents not stopped and never read, which the manager cannot
+    /// run, and whether it has reported each (DEC-1173 item 3).
+    unread: BTreeMap<String, bool>,
     slots: BTreeMap<Slot, SlotState>,
 }
 
@@ -92,25 +102,45 @@ impl Manager {
                 self.connections
                     .entry(connection.clone())
                     .or_insert_with(|| account.clone());
+                self.established.insert(connection.clone());
             }
-            Fact::Deployed { agent, account } => {
-                if !self.agents.contains_key(agent) {
-                    let executor = Slot::executor(account);
+            Fact::Revoked { connection } => {
+                self.established.remove(connection);
+            }
+            Fact::DeployedUnread { agent } => {
+                if !self.agents.contains_key(agent) && !self.stopped.contains(agent) {
+                    self.unread.entry(agent.clone()).or_insert(false);
+                }
+            }
+            Fact::Deployed { agent, connection } => {
+                let account = self
+                    .established
+                    .contains(connection)
+                    .then(|| self.connections.get(connection).cloned())
+                    .flatten();
+                if let Some(account) = account
+                    && !self.agents.contains_key(agent)
+                    && !self.stopped.contains(agent)
+                {
+                    self.unread.remove(agent);
+                    let executor = Slot::executor(&account);
                     if !self.desired(&executor) {
                         self.resume(&executor);
                     }
+                    self.slots.entry(Slot::runtime(agent)).or_default();
+                    self.slots.entry(Slot::executor(&account)).or_default();
                     self.agents.insert(
                         agent.clone(),
                         Agent {
-                            account: account.clone(),
+                            account,
                             stopped: false,
                         },
                     );
-                    self.slots.entry(Slot::runtime(agent)).or_default();
-                    self.slots.entry(Slot::executor(account)).or_default();
                 }
             }
             Fact::Stopped { agent } => {
+                self.stopped.insert(agent.clone());
+                self.unread.remove(agent);
                 let account = self.agents.get_mut(agent).map(|known| {
                     known.stopped = true;
                     known.account.clone()
@@ -236,12 +266,13 @@ impl Manager {
         self.slots.get(slot).is_some_and(|state| state.looped)
     }
 
-    /// At most one step per slot, from what the orchestrator lists at `now`. A slot with a live
-    /// instance is never started again and, while desired, never stopped: neither readiness nor a
-    /// kill switch stops a process.
+    /// At most one step per slot, from what the orchestrator lists at `now`, then one operator
+    /// alert for each unread deployment not yet reported. A slot with a live instance is never
+    /// started again and, while desired, never stopped: neither readiness nor a kill switch stops a
+    /// process.
     pub fn decide(&mut self, observed: &[Instance], now: UtcNanos) -> Vec<Decision> {
         let slots: Vec<Slot> = self.slots.keys().cloned().collect();
-        slots
+        let mut decisions: Vec<Decision> = slots
             .into_iter()
             .filter_map(|slot| {
                 let desired = self.desired(&slot);
@@ -250,7 +281,12 @@ impl Manager {
                     observed.iter().filter(|i| i.slot == slot).collect();
                 step(&slot, state, desired, &instances, now)
             })
-            .collect()
+            .collect();
+        for reported in self.unread.values_mut().filter(|reported| !**reported) {
+            *reported = true;
+            decisions.push(Decision::Retry(Effect::Alert(DEPLOYMENT_UNREAD)));
+        }
+        decisions
     }
 }
 
