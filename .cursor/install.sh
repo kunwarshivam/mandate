@@ -29,7 +29,8 @@ TOOLS=(
   "actionlint 1.7.12 https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 actionlint"
 )
 
-# The local cell's tools (D-4, DEC-969; `cargo xtask cell`), with the versions in ci.yml. k3d is a
+# The local cell's tools (D-4, DEC-969; `cargo xtask cell`), with the versions in ci.yml, and flux
+# for the founder's bootstrap of a hosted cluster (`cargo xtask gitops`, E21-58, DEC-2018). k3d is a
 # bare binary; helm publishes its binaries only on get.helm.sh (DEC-993 item 3), so it is fetched
 # best effort, like PostgreSQL below: without it the cell's checks skip.
 K3D_VERSION="5.9.0"
@@ -38,6 +39,7 @@ HELM_VERSION="4.3.0"
 HELM_SHA256="86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"
 TOOLS+=(
   "kubeconform 0.8.0 https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883 kubeconform"
+  "flux 2.9.6 https://github.com/fluxcd/flux2/releases/download/v2.9.6/flux_2.9.6_linux_amd64.tar.gz b4d22673e9246cbd628881f1a9ef3b090085dced291e42d804555cee8e8d42c5 flux"
 )
 
 installed_version() {
@@ -48,6 +50,7 @@ installed_version() {
     gitleaks) gitleaks version 2>/dev/null ;;
     shellcheck) shellcheck --version 2>/dev/null | awk '/version:/ {print $2}' ;;
     actionlint) actionlint -version 2>/dev/null | awk 'NR==1 {print $1}' ;;
+    flux) flux version --client 2>/dev/null | awk '{sub(/^v/, "", $2); print $2}' ;;
     cargo-mutants) cargo-mutants mutants --version 2>/dev/null | awk '{print $2}' ;;
     kubeconform) kubeconform -v 2>/dev/null | sed 's/^v//' ;;
   esac
