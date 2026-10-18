@@ -240,6 +240,10 @@ pub enum Ask {
 /// `taken`, `applied` or `ended`; never `refused` (the workspace API's command status).
 const COMMAND_PHASES: [&str; 4] = ["recorded", "taken", "applied", "ended"];
 
+/// Set where a job must run the web gesture (CT's `cell-demo-web`): there a machine without
+/// `web/`'s tools fails the run, as [`CELL_REQUIRED_ENV`] makes a missing cell fail it.
+pub const WEB_REQUIRED_ENV: &str = "MANDATE_DEMO_WEB_REQUIRED";
+
 /// What the answer's JSON body must hold besides its status: nothing, an `agents` list naming an
 /// agent, string members at JSON pointers, or a command, by id, read from a stream in an accepted
 /// phase.
@@ -999,7 +1003,10 @@ pub fn run(name: &str) -> Result<()> {
                     } else {
                         web_outcome(check, &workspace)?
                     };
-                    let required = env::var_os(CELL_REQUIRED_ENV).is_some();
+                    let required = Required {
+                        cell: env::var_os(CELL_REQUIRED_ENV).is_some(),
+                        web: env::var_os(WEB_REQUIRED_ENV).is_some(),
+                    };
                     let (word, said, fails) = web_verdict(&outcome, check, &workspace, required);
                     eprintln!("    {word:<8} {}: {said}", check.shows);
                     if fails {
@@ -1248,20 +1255,29 @@ pub fn command_read(workspace: &str, command: &str) -> ApiCheck {
     }
 }
 
+/// What a run requires: the cell ([`CELL_REQUIRED_ENV`]) and the web gesture
+/// ([`WEB_REQUIRED_ENV`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Required {
+    pub cell: bool,
+    pub web: bool,
+}
+
 /// How a web check reads: `ran` only when the gesture acted on its own agent in `workspace` and
 /// the command reads back from the control stream, accepted; `failed` for a gesture that
-/// failed, acted elsewhere, or reads back wrong, and for an API that cannot be asked where CI
-/// requires the cell; `not run` on a machine without `web/`'s tools, which the cell does not
-/// require. Returns the word, what to print after it, and whether the run fails.
+/// failed, acted elsewhere, or reads back wrong, for an API that cannot be asked where the cell
+/// is required, and for a machine without `web/`'s tools where the web gesture is; otherwise
+/// `not run`. Returns the word, what to print after it, and whether the run fails.
 pub fn web_verdict(
     outcome: &WebOutcome,
     check: &WebCheck,
     workspace: &str,
-    required: bool,
+    required: Required,
 ) -> (&'static str, String, bool) {
     match outcome {
         WebOutcome::AfterFailure => ("not run", "an earlier part failed".into(), false),
-        WebOutcome::Unaskable(why) if required => ("failed", why.clone(), true),
+        WebOutcome::Unaskable(why) if required.cell => ("failed", why.clone(), true),
+        WebOutcome::NoTools(why) if required.web => ("failed", why.clone(), true),
         WebOutcome::Unaskable(why) | WebOutcome::NoTools(why) => ("not run", why.clone(), false),
         WebOutcome::Failed(why) => ("failed", why.clone(), true),
         WebOutcome::Recorded {
@@ -1768,7 +1784,8 @@ mod tests {
                 read,
             };
         let ctl = format!("ctl:{ws}");
-        for required in [false, true] {
+        for cell in [false, true] {
+            let required = Required { cell, web: false };
             for phase in COMMAND_PHASES {
                 let ran = recorded(WEB_AGENT, ws, Ok((200, body("C1", &ctl, phase))));
                 assert_eq!(web_verdict(&ran, &check, ws, required).0, "ran", "{phase}");
@@ -1797,9 +1814,26 @@ mod tests {
             );
         }
         let unaskable = WebOutcome::Unaskable("no kubectl".into());
-        assert!(!web_verdict(&unaskable, &check, ws, false).2);
-        assert!(web_verdict(&unaskable, &check, ws, true).2);
-        for required in [false, true] {
+        let only = |cell, web| Required { cell, web };
+        assert!(!web_verdict(&unaskable, &check, ws, only(false, false)).2);
+        assert!(web_verdict(&unaskable, &check, ws, only(true, false)).2);
+        assert!(
+            !web_verdict(&unaskable, &check, ws, only(false, true)).2,
+            "the web switch alone does not require the cell"
+        );
+        let no_tools = WebOutcome::NoTools("no npm".into());
+        assert_eq!(
+            web_verdict(&no_tools, &check, ws, only(false, false)),
+            ("not run", "no npm".into(), false)
+        );
+        for cell in [false, true] {
+            assert_eq!(
+                web_verdict(&no_tools, &check, ws, only(cell, true)),
+                ("failed", "no npm".into(), true),
+                "where the web gesture is required, a machine without its tools fails"
+            );
+        }
+        for required in [only(false, false), only(true, true)] {
             assert_eq!(
                 web_verdict(&WebOutcome::AfterFailure, &check, ws, required),
                 ("not run", "an earlier part failed".into(), false),
