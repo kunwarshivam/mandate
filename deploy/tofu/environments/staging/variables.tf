@@ -38,3 +38,14 @@ variable "adopt_state_bucket" {
   type        = bool
   default     = true
 }
+
+variable "api_origin" {
+  description = "Where cloudflared sends the API host's requests: the API's loopback listener, with cloudflared as a sidecar in the API pod (lane GO, E21-58)."
+  type        = string
+  default     = "http://127.0.0.1:8080"
+
+  validation {
+    condition     = can(regex("^http://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+(\\.[a-z0-9-]+)*\\.svc\\.cluster\\.local):[0-9]{1,5}$", var.api_origin))
+    error_message = "The API origin is a loopback or in-cluster Service address with a port, never a public host."
+  }
+}

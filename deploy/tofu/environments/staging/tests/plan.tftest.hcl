@@ -45,6 +45,11 @@ run "staging_plans_under_its_cap" {
     condition     = output.archive_bucket == "mandate-journal-archive-staging"
     error_message = "The archive bucket is staging's."
   }
+
+  assert {
+    condition     = output.archive_destination_path == "s3://mandate-journal-archive-staging/journal-db" && output.archive_jurisdiction == "default" && output.cloudflare_account_id == var.cloudflare_account_id
+    error_message = "Lane GO's archive inputs: the destination path, the default jurisdiction and the account id."
+  }
 }
 
 run "refuses_a_short_passphrase" {
@@ -55,4 +60,14 @@ run "refuses_a_short_passphrase" {
   }
 
   expect_failures = [var.state_passphrase]
+}
+
+run "refuses_a_public_api_origin" {
+  command = plan
+
+  variables {
+    api_origin = "https://api.example.com"
+  }
+
+  expect_failures = [var.api_origin]
 }
