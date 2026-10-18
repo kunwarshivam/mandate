@@ -15,6 +15,9 @@ claim issue or the decision file, not here.
   branch, never by a mention (DEC-344).
 - A pending test must fail on its stubs, and fail with the stub's own report (DEC-110, DEC-137).
 - A diff mutation gate can pass while testing nothing; a planted-bug table is the evidence.
+- A merge of `main` that keeps both sides of a registry row leaves two rows, which `cargo xtask
+  deps` refuses only in `full-checks`; after every merge run `deps` and gitleaks, not only the
+  crate's tests (#1555, #1560).
 - One checkout, one work stream: parallel builders each take their own worktree; background gates
   own the tree until they finish; reviewers read branches by ref.
 - A three-dot diff against a stale merge-base fails the spec guard; rebuild on `main`'s tip.
@@ -27,6 +30,19 @@ claim issue or the decision file, not here.
 
 ## Sessions
 
+- **2026-10-18, taking over the orphaned PRs.** The founder's other coordinating account ran out
+  of tokens with 23 PRs open; this session took them over (merging `main` in, never rebasing).
+  Merged on a Sonnet review each: #1566 `9942eec5`, #1572 `a34b2874`, #1583 `9befec7a`, #1547
+  `4d28c47b` (journal spec v0.53), #1570 `63352551`, #1522 `2373d8d5`, #1565 `9b1931b6` and #1580
+  `36a2d669` (renumbered to v0.54 at merge, vectors regenerated); #1448 closed, its content already
+  on `main` through #1458. Approved and waiting on CI: #1555 and #1560 (each re-approved after
+  `full-checks` found a doubled `serde_json` or `tokio` row the merge kept), #1581 (retargeted
+  to `main` once #1570 landed) and #1558 (Cursor's gate decision ledger, marked ready). In review:
+  #1569 (retargeted after #1566) and #1578 (its first review). Sequenced behind them: #1537,
+  #1582 (gitleaks' two false positives allowed by path and value, as the other test allowlists
+  are), #1576 and #1577 after #1560, since all four rewrite `xtask/src/cell.rs`; #1575 after
+  #1569; #1545 after #1580, as v0.55. Waiting on the founder: #1539 and #1501 (above, in the
+  tracker).
 - **2026-10-13 and 10-14, the two coordinator sessions: nine merges, the live path's R0-gap rows
   closed.** The recorded docs sweep of the #1295/#1315 review notes landed split, the spec guard
   refusing spec and code in one PR (#1323 `29d0914c`, the agent-harness line alone in #1324
