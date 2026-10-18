@@ -81,7 +81,7 @@ fn server(script: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<Seen>>>) {
 
 fn template() -> Value {
     json!({
-        "metadata": {"labels": {"app.kubernetes.io/name": "runtime"}},
+        "metadata": {"labels": {"app.kubernetes.io/name": "runtime", "mandate.dev/workspace": "ws1"}},
         "spec": {
             "restartPolicy": "Always",
             "containers": [{"name": "runtime", "image": "runtime@sha256:00", "env": [{"name": "X", "value": "1"}]}]
@@ -179,7 +179,7 @@ fn a_pod_list_reads_as_instances_and_a_pod_being_deleted_may_still_run() {
             .path
             .contains("app.kubernetes.io%2Fmanaged-by%3Dmandate-deploy-manager")
     );
-    assert!(seen[0].path.contains("mandate.dev%2Fworkspace%3D"));
+    assert!(seen[0].path.contains("mandate.dev%2Fworkspace-key%3D"));
     assert_eq!(seen[0].authorization, "Bearer token-xyz");
 }
 
@@ -258,7 +258,14 @@ fn a_start_creates_a_bare_pod_the_orchestrator_never_restarts() {
     assert_eq!(labels["mandate.dev/process"], "runtime");
     assert_eq!(labels["mandate.dev/generation"], "7");
     let key = |text: &str| Digest::of(text.as_bytes()).to_hex()[..16].to_owned();
-    assert_eq!(labels["mandate.dev/workspace"], key("ws_01J8Z2").as_str());
+    assert_eq!(
+        labels["mandate.dev/workspace-key"],
+        key("ws_01J8Z2").as_str()
+    );
+    assert_eq!(
+        labels["mandate.dev/workspace"], "ws1",
+        "the chart's workspace label, which its network policies select, is kept"
+    );
     assert_eq!(
         labels["mandate.dev/subject-key"],
         key("Agent_A").as_str(),

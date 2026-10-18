@@ -18,7 +18,9 @@ use crate::orchestrator::{Instance, Orchestrator, Phase, Unavailable};
 
 const MANAGED_BY: &str = "app.kubernetes.io/managed-by";
 const MANAGER: &str = "mandate-deploy-manager";
-const WORKSPACE: &str = "mandate.dev/workspace";
+/// The manager's own key for its workspace. The chart's `mandate.dev/workspace` label, which the
+/// network policies and the colocation affinity select, is the template's and is kept as it is.
+const WORKSPACE: &str = "mandate.dev/workspace-key";
 const PROCESS: &str = "mandate.dev/process";
 const GENERATION: &str = "mandate.dev/generation";
 const SUBJECT: &str = "mandate.dev/subject";

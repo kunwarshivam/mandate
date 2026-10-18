@@ -16,3 +16,9 @@ api:
   appOrigin: https://localhost:4317
   tier: dev
   subjectLinks: ""
+# The deployment manager's one route to the API server (`egress.kube-api`, DEC-1172) is not written
+# here: docker picks the k3d network's subnet when the cluster is made, so the server node's address
+# is known only then. `cargo xtask cell up` reads the `kubernetes` Service's endpoints from the cell
+# and sets each as a /32, with their port (6443, k3s's API server behind the 443 Service), which is
+# what a policy sees once the Service's address is translated. Left empty, the manager reaches
+# nothing and never becomes ready (fail closed).

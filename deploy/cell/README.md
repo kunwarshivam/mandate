@@ -14,13 +14,17 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 | `compose/compose.json` | The same processes for one host (infrastructure §3.2, hybrid), generated: `cargo xtask cell generate --write` |
 | `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ |
 | `images/mandate.Dockerfile` | The interim `mandate` image the cell builds from the change; lane R2 (E21-35) replaces it |
+| `images/deploy-manager.Dockerfile` | The deployment manager's image (`mandate-deployd`, DEC-1172), built beside it the same way |
 | `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
 
 ## What the chart guarantees
 
 Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci cell`:
 
-- one pod per process type, and a process renders only when its image is named;
+- one pod per process type, and a process renders only when its image is named; once the
+  deployment manager's image is named, the runtime and the executor are not Deployments but its pod
+  templates (a ConfigMap mounted read-only), the pods the chart would otherwise build, which only
+  the manager starts (DEC-1170, DEC-1172);
 - the runtime, the executor and the data service share a node by required pod affinity on the
   workspace (§3.2), since the market-data channel is host-local;
 - every container has CPU and memory limits, and the executor's and the scheduler's requests
@@ -28,12 +32,19 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
 - a namespace-wide default-deny policy, then exactly each process type's §3.1 egress: DNS, the
   journal's Postgres, the vault and the model gateway by pod label, and each external target's
   CIDRs from values, empty by default; DEC-821's token host only for the token-exchange process;
+  the API server (`kube-api`, its endpoint addresses and `kubeApiPort`) only for the deployment
+  manager, which `cargo xtask cell up` points at the cell's own endpoint;
 - every pod starts behind an `egress-gate` init container: nothing of the process runs until the
   pod's own egress is shown filtered, since k3s's policy controller programs a new pod only seconds
-  after it starts, and the gate fails closed after a minute (DEC-993 item 8);
+  after it starts, and the gate fails closed after a minute (DEC-993 item 8); the deployment
+  manager's policy allows the API server every other gate waits on, so its gate waits on the
+  cluster resolver's metrics port (9153), which its policy denies;
 - no inbound connection to the data plane; only the model gateway accepts its callers;
 - non-root, a read-only root filesystem, no capability, no privilege escalation, the runtime's
-  seccomp profile, and no service-account token, in every container;
+  seccomp profile, and no service-account token, in every container but the deployment manager's;
+- the deployment manager alone holds an API token, its own ServiceAccount's, whose one Role in the
+  namespace creates, gets, lists and deletes pods and nothing else: no Secret, no exec, no
+  ClusterRole or cluster scope; the pod templates it starts mount no token;
 - secrets only as mounted files: no Secret in the chart, no secret in any values file, no
   environment variable from a Secret, and no password in a DSN (DEC-822 item 4);
 - migrations as a pre-install and pre-upgrade hook Job under the migration-owner role, never at a
@@ -177,6 +188,9 @@ first-start script and each process can read the same files.
 `MANDATE_DEPLOYMENT_TIER`, and `secrets/api-session-signing-key`: at least 32 random bytes, owned by
 uid 999 with mode 0600. It listens on its container's loopback and mounts no subject links, so
 every sign-in is refused there until a later change adds both.
+
+The deployment manager is not in the Compose file (`"compose": false` in `processes.json`): it
+drives Kubernetes only (DEC-1172), so on one host the runtime and executor are Compose services.
 
 `docker compose run` of `control` or `journal-verify` needs a writable `/work`, given with
 `-v <dir>:/work`, as `cargo xtask cell drill compose` does.

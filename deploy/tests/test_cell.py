@@ -46,7 +46,13 @@ SECTION_3_1 = {
     },
     "exporter": {("postgres", "TCP", 5432), ("object-storage", "TCP", 443), ("timestamping", "TCP", 443)},
     "data": {("market-data", "TCP", 443)},
+    "deploy-manager": {("postgres", "TCP", 5432), ("kube-api", "TCP", 6443)},
 }
+# The API server's endpoint the tests give the deployment manager (DEC-1172), as `cargo xtask cell
+# up` gives it the cell's own; the manager is the one process that may reach it.
+KUBE_API = "192.0.2.200/32"
+MANAGER = "deploy-manager"
+TEMPLATES = "deploy-manager-templates"
 HOOK = "pre-install,pre-upgrade"
 
 if shutil.which("helm") is None:
@@ -96,6 +102,8 @@ def render_all(*extra: str) -> list[dict]:
         "verify.id=t1",
         "--set-json",
         'verify.streams=["ctl:ws9","ctl:ws8"]',
+        "--set-json",
+        f'egress.kube-api=["{KUBE_API}"]',
         *extra,
     )
 
@@ -104,8 +112,31 @@ def process(name: str) -> dict:
     return next(p for p in PROCESSES if p["name"] == name)
 
 
+def managed_pod(name: str, pod: dict) -> dict:
+    """A pod template of the manager's ConfigMap as a workload, so every pod check reads it too."""
+    return {
+        "kind": "Pod",
+        "metadata": {"name": name, "labels": pod["metadata"]["labels"]},
+        "spec": {"template": pod},
+    }
+
+
+def managed_pods(docs: list[dict]) -> list[dict]:
+    """The pods the deployment manager starts: its ConfigMap's `<process>.json` entries (DEC-1170)."""
+    maps = [d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == TEMPLATES]
+    return [
+        managed_pod(key.removesuffix(".json"), json.loads(text))
+        for m in maps
+        for key, text in sorted((m.get("data") or {}).items())
+    ]
+
+
 def workloads(docs: list[dict]) -> list[dict]:
-    return [d for d in docs if d["kind"] in ("Deployment", "Job")]
+    return [d for d in docs if d["kind"] in ("Deployment", "Job")] + managed_pods(docs)
+
+
+def is_manager(workload: dict) -> bool:
+    return workload["kind"] == "Deployment" and workload["metadata"]["name"] == MANAGER
 
 
 def pod_spec(workload: dict) -> dict:
@@ -126,14 +157,18 @@ def policies(docs: list[dict]) -> dict[str, dict]:
 
 
 def one_workload_per_process(docs: list[dict]) -> list[str]:
-    """Every process type renders exactly one Deployment (a service) or Job, and nothing else."""
+    """Every process type renders exactly one Deployment (a service) or Job, and nothing else; once
+    the deployment manager renders, the runtime and the executor are only its pod templates, which
+    it alone starts (DEC-1170)."""
     kinds = {"service": "Deployment", "migration": "Job", "run": "Job", "verify": "Job"}
+    manager = any(is_manager(w) for w in workloads(docs))
     problems = []
     for p in PROCESSES:
         found = [
             w for w in workloads(docs) if w["metadata"]["labels"].get("mandate.dev/process") == p["name"]
         ]
-        if [w["kind"] for w in found] != [kinds[p["kind"]]]:
+        want = "Pod" if manager and p["name"] in ("runtime", "executor") else kinds[p["kind"]]
+        if [w["kind"] for w in found] != [want]:
             problems.append(f"{p['name']}: {[w['kind'] for w in found]}")
     return problems
 
@@ -221,7 +256,7 @@ def egress_exact(docs: list[dict], cidrs: dict[str, str] | None = None) -> list[
     """Each process's egress is exactly its §3.1 column (SECTION_3_1): DNS when it has a
     destination, each in-cluster one by label and port, each external one only through the CIDRs
     values give it; and it accepts no ingress (E21-1, OPS-5)."""
-    cidrs = cidrs or {}
+    cidrs = {"kube-api": KUBE_API, **(cidrs or {})}
     names = {c: t for t, c in cidrs.items()}
     problems = []
     found = policies(docs)
@@ -272,17 +307,23 @@ def no_ingress(docs: list[dict]) -> list[str]:
 
 
 def hardened(docs: list[dict]) -> list[str]:
-    """Every pod non-root with the runtime's seccomp profile and no service-account token; every
+    """Every pod non-root with the runtime's seccomp profile and no service-account token, but the
+    deployment manager's, which mounts its own service account's and nothing else (DEC-1172); every
     container read-only, unprivileged, with every capability dropped."""
     problems = []
     for w in workloads(docs):
         spec = pod_spec(w)
         sc = spec.get("securityContext", {})
+        token = (
+            {"automountServiceAccountToken": True, "serviceAccountName": MANAGER}
+            if is_manager(w)
+            else {"automountServiceAccountToken": False, "serviceAccountName": None}
+        )
         if not (
             sc.get("runAsNonRoot") is True
             and sc.get("runAsUser", 0) != 0
             and sc.get("seccompProfile") == {"type": "RuntimeDefault"}
-            and spec.get("automountServiceAccountToken") is False
+            and all(spec.get(k) == v for k, v in token.items())
             and not any(spec.get(k) for k in ("hostNetwork", "hostPID", "hostIPC"))
             and not any("hostPath" in v for v in spec.get("volumes", []))
         ):
@@ -302,14 +343,19 @@ def hardened(docs: list[dict]) -> list[str]:
 
 def gated(docs: list[dict]) -> list[str]:
     """Every pod's first container is the egress gate, which lets the process start only once the
-    pod's own egress is shown filtered, and fails closed after a minute (AGENTS.md rule 3)."""
+    pod's own egress is shown filtered, and fails closed after a minute (AGENTS.md rule 3). The gate
+    waits on the API server, but the deployment manager's, whose policy allows the API server: it
+    waits on the cluster resolver's metrics port, which its policy denies (DEC-1172)."""
     problems = []
     for w in workloads(docs):
         first = (pod_spec(w).get("initContainers") or [{}])[0]
         script = " ".join(first.get("command", []))
+        waits_on_api = "KUBERNETES_SERVICE_HOST" in script
+        waits_on_resolver = "/etc/resolv.conf" in script and "/9153" in script
         if (
             first.get("name") != "egress-gate"
-            or "KUBERNETES_SERVICE_HOST" not in script
+            or (waits_on_api if is_manager(w) else not waits_on_api)
+            or (not waits_on_resolver if is_manager(w) else waits_on_resolver)
             or "exit 1" not in script
         ):
             problems.append(f"{w['metadata']['name']} starts before its egress is shown filtered")
@@ -383,7 +429,7 @@ def migration_first(docs: list[dict]) -> list[str]:
     return problems
 
 
-ALLOWED_APIS = {"v1", "apps/v1", "batch/v1", "networking.k8s.io/v1"}
+ALLOWED_APIS = {"v1", "apps/v1", "batch/v1", "networking.k8s.io/v1", "rbac.authorization.k8s.io/v1"}
 
 
 def portable(docs: list[dict]) -> list[str]:
@@ -432,12 +478,14 @@ def compose_matches(compose: dict) -> list[str]:
     read-only, no capability, no new privileges, secrets as files, the internal network only unless
     it has an external target, and the executor's and scheduler's reservations equal to limits."""
     services = compose["services"]
-    built = {p["name"] for p in PROCESSES if p["built"]}
+    built = {p["name"] for p in PROCESSES if p["built"] and p.get("compose", True)}
     problems = (
         []
         if set(services) - {"postgres"} == built
         else [f"services {sorted(services)}, built {sorted(built)}"]
     )
+    if MANAGER in services:
+        problems.append("the deployment manager is in the Compose file, which it has no adapter for")
     if compose["networks"]["journal"] != {"internal": True}:
         problems.append("the journal network routes out")
     for name in sorted(built & set(services)):
@@ -495,11 +543,14 @@ def test_each_external_target_reaches_only_its_processes():
     names += ["artifact-store", "identity-provider"]
     cidrs = {t: f"192.0.2.{i}/32" for i, t in enumerate(names, start=1)}
     cidrs["market-data"] = "198.51.100.1/32"
+    cidrs["kube-api"] = "198.51.100.2/32"
     extra = [arg for t, c in cidrs.items() for arg in ("--set-json", f'egress.{t}=["{c}"]')]
     docs = render_all(*extra)
     assert egress_exact(docs, cidrs) == []
     token = [n for n, p in policies(docs).items() if "192.0.2.2/32" in json.dumps(p)]
     assert token == ["egress-token-exchange"], "DEC-821's token host is the token-exchange process's alone"
+    api = [n for n, p in policies(docs).items() if "198.51.100.2/32" in json.dumps(p)]
+    assert api == [f"egress-{MANAGER}"], "the API server is the deployment manager's alone (DEC-1172)"
 
 
 def test_no_ingress():
@@ -591,6 +642,164 @@ def test_api_contained():
     for refused in ("api.org=", "api.workspace=", "api.jwksUrl=http://issuer.example/jwks", "api.tier=live"):
         args = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", refused]
         assert helm(CHART, *args).returncode != 0, refused
+
+
+POD_RULE = {"apiGroups": [""], "resources": ["pods"], "verbs": ["create", "delete", "get", "list"]}
+TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+
+def mounts_token(spec: dict) -> bool:
+    """Whether a pod gets a service-account token: Kubernetes mounts one unless the pod says not to."""
+    return spec.get("automountServiceAccountToken") is not False or bool(spec.get("serviceAccountName"))
+
+
+def deploy_manager_contained(docs: list[dict]) -> list[str]:
+    """The deployment manager is the one pod with access to the API server (DEC-1172): one Role in
+    its namespace whose single rule creates, reads, lists and deletes pods in the core group; no
+    cluster-scoped grant; one binding, of that Role to its own ServiceAccount alone; no other pod,
+    and none of the pod templates it starts, mounts a service-account token; no other policy reaches
+    the API server; its gate waits on a destination its policy denies, never the API server; and it
+    reads its templates from its ConfigMap, read-only."""
+    problems = []
+    for kind in ("ClusterRole", "ClusterRoleBinding"):
+        problems += [f"{kind} {d['metadata']['name']}" for d in docs if d["kind"] == kind]
+    managers = [w for w in workloads(docs) if is_manager(w)]
+    if not managers:
+        grants = [d for d in docs if d["kind"] in ("ServiceAccount", "Role", "RoleBinding")]
+        problems += [f"{d['kind']} {d['metadata']['name']} without the manager" for d in grants]
+    roles = [d for d in docs if d["kind"] == "Role"]
+    bindings = [d for d in docs if d["kind"] == "RoleBinding"]
+    accounts = [d for d in docs if d["kind"] == "ServiceAccount"]
+    if managers:
+        rules = [{k: sorted(v) for k, v in r.items()} for role in roles for r in role.get("rules") or []]
+        if [r["metadata"]["name"] for r in roles] != [MANAGER] or rules != [POD_RULE]:
+            problems.append(f"the manager's Role is not exactly pods' create, get, list, delete: {rules}")
+        if [a["metadata"]["name"] for a in accounts] != [MANAGER]:
+            problems.append(f"service accounts {[a['metadata']['name'] for a in accounts]}")
+        binds = [(b.get("roleRef"), b.get("subjects")) for b in bindings]
+        want = (
+            {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": MANAGER},
+            [{"kind": "ServiceAccount", "name": MANAGER, "namespace": "ws-ws1"}],
+        )
+        if binds != [want]:
+            problems.append(f"role bindings {binds}")
+    for w in workloads(docs):
+        spec = pod_spec(w)
+        name = f"{w['kind']} {w['metadata']['name']}"
+        if is_manager(w):
+            if (
+                spec.get("automountServiceAccountToken") is not True
+                or spec.get("serviceAccountName") != MANAGER
+            ):
+                problems.append(f"{name} does not mount its own service account's token")
+        elif mounts_token(spec):
+            problems.append(f"{name} mounts a service-account token")
+        if any(
+            m["mountPath"].startswith(TOKEN_PATH) for c in containers(w) for m in c.get("volumeMounts", [])
+        ):
+            problems.append(f"{name} mounts a token by hand")
+        labels = w["spec"]["template"]["metadata"]["labels"]
+        if labels.get("mandate.dev/egress-kube-api") and not is_manager(w):
+            problems.append(f"{name} is labelled for the API server")
+    for policy_name, policy in policies(docs).items():
+        for rule in policy["spec"].get("egress") or []:
+            api = [
+                peer
+                for peer in rule.get("to") or [{}]
+                if peer.get("ipBlock", {}).get("cidr") == KUBE_API or not peer
+            ]
+            if api and policy_name != f"egress-{MANAGER}":
+                problems.append(f"{policy_name} reaches the API server: {rule}")
+    for w in managers:
+        spec = pod_spec(w)
+        gate = (spec.get("initContainers") or [{}])[0]
+        script = " ".join(gate.get("command", []))
+        probed = re.findall(r"/dev/tcp/\$([A-Za-z_]+)/(\$?[A-Za-z_0-9]+)", script)
+        allowed = set().union(
+            *(
+                rule_destinations(r, {KUBE_API: "kube-api"})
+                for r in policies(docs)[f"egress-{MANAGER}"]["spec"]["egress"]
+            )
+        )
+        resolver = 'awk \'$1 == "nameserver"' in script and "/etc/resolv.conf" in script
+        if (
+            gate.get("name") != "egress-gate"
+            or probed != [("dns", "9153")]
+            or not resolver
+            or ("dns", "TCP", 9153) in allowed
+            or "KUBERNETES_SERVICE" in script
+        ):
+            problems.append(f"the manager's gate does not wait on a destination its policy denies: {probed}")
+        main = spec["containers"][0]
+        templates = [m for m in main.get("volumeMounts", []) if m["mountPath"] == "/etc/mandate/templates"]
+        volumes = {v["name"]: v for v in spec.get("volumes", [])}
+        source = volumes.get(templates[0]["name"], {}) if templates else {}
+        if not (
+            templates
+            and templates[0].get("readOnly") is True
+            and source.get("configMap", {}).get("name") == TEMPLATES
+        ):
+            problems.append(
+                f"the manager's templates are not its ConfigMap, read-only: {templates}, {source}"
+            )
+        if main.get("args") != [
+            "run",
+            "--workspace",
+            "01KDEM0000000000000000000W",
+            "--probe",
+            "/tmp/process.sock",
+            "--templates",
+            "/etc/mandate/templates",
+        ]:
+            problems.append(f"the manager runs {main.get('args')}")
+    return problems
+
+
+def test_deploy_manager_contained():
+    docs = render_all()
+    assert deploy_manager_contained(docs) == []
+    assert sorted(w["metadata"]["name"] for w in managed_pods(docs)) == ["executor", "runtime"]
+    for pod in managed_pods(docs):
+        spec = pod_spec(pod)
+        command = first_container(pod)["command"]
+        assert command == ["mandate-daemon", "run", "--probe", "/tmp/process.sock"], command
+        assert spec["restartPolicy"] == "Never" and spec["automountServiceAccountToken"] is False
+        assert "serviceAccountName" not in spec
+        probes = [first_container(pod)[k]["exec"]["command"][:3] for k in ("livenessProbe", "readinessProbe")]
+        assert probes == [["mandate-daemon", "probe", "livez"], ["mandate-daemon", "probe", "readyz"]]
+    only_runtime = render_all("--set", "images.executor=")
+    assert [w["metadata"]["name"] for w in managed_pods(only_runtime)] == ["runtime"]
+    assert deploy_manager_contained(only_runtime) == []
+
+
+def test_without_the_manager_the_runtime_and_executor_are_deployments():
+    docs = render_all("--set", f"images.{MANAGER}=")
+    kinds = {w["metadata"]["name"]: w["kind"] for w in workloads(docs)}
+    assert kinds["runtime"] == kinds["executor"] == "Deployment" and MANAGER not in kinds
+    assert not [
+        d
+        for d in docs
+        if d["kind"] in ("ServiceAccount", "Role", "RoleBinding", "ConfigMap")
+        and d["metadata"]["name"] != "migrations"
+    ]
+    for check in (hardened, gated, deploy_manager_contained):
+        assert check(docs) == [], check.__name__
+
+
+def test_the_api_server_is_narrow_and_empty_by_default():
+    plain = render(
+        "-f", str(CELL / "values" / "k3d.yaml"), "--set", f"images.{MANAGER}={PLACEHOLDER.format(MANAGER)}"
+    )
+    rules = policies(plain)[f"egress-{MANAGER}"]["spec"]["egress"]
+    assert not [r for r in rules if any("ipBlock" in p for p in r.get("to", []))], (
+        "no API address until values give one"
+    )
+    for cidr in ("0.0.0.0/0", "10.0.0.0/8", "192.0.2.1"):
+        assert helm(CHART, "--set-json", f'egress.kube-api=["{cidr}"]').returncode != 0, cidr
+    assert helm(CHART, "--set", "egress.kubeApiPort=0").returncode != 0
+    port = render_all("--set", "egress.kubeApiPort=443")
+    rule = [r for r in policies(port)[f"egress-{MANAGER}"]["spec"]["egress"] if "ipBlock" in r["to"][0]]
+    assert rule == [{"to": [{"ipBlock": {"cidr": KUBE_API}}], "ports": [{"protocol": "TCP", "port": 443}]}]
 
 
 def owner_workload(docs: list[dict]) -> dict:
@@ -702,7 +911,15 @@ def test_compose_matches():
 
 
 def mutate(docs: list[dict], name: str, kind: str, change) -> list[dict]:
+    """`docs` with `change` made to one object; kind `Pod` names a pod template of the manager's
+    ConfigMap, changed where it is rendered, in that ConfigMap's entry."""
     docs = copy.deepcopy(docs)
+    if kind == "Pod":
+        templates = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == TEMPLATES)
+        workload = managed_pod(name, json.loads(templates["data"][f"{name}.json"]))
+        change(workload)
+        templates["data"][f"{name}.json"] = json.dumps(workload["spec"]["template"])
+        return docs
     target = next(d for d in docs if d["metadata"]["name"] == name and d["kind"] == kind)
     change(target)
     return docs
@@ -712,9 +929,27 @@ def first_container(w: dict) -> dict:
     return pod_spec(w)["containers"][0]
 
 
+def relabel(workload: dict, process_name: str) -> dict:
+    """A copy of `workload` labelled as process `process_name`'s, as a second workload for it."""
+    workload = copy.deepcopy(workload)
+    workload["metadata"].update(
+        name=process_name, labels={**workload["metadata"]["labels"], "mandate.dev/process": process_name}
+    )
+    return workload
+
+
+def migrate_gate(docs: list[dict]) -> dict:
+    job = next(d for d in docs if d["kind"] == "Job" and d["metadata"]["name"] == "migrate")
+    return copy.deepcopy(pod_spec(job)["initContainers"][0])
+
+
+def manager_gate(docs: list[dict]) -> dict:
+    return copy.deepcopy(pod_spec(next(w for w in workloads(docs) if is_manager(w)))["initContainers"][0])
+
+
 SEEDED = [
     (one_workload_per_process, lambda d: [x for x in d if x["metadata"]["name"] != "scheduler"]),
-    (colocated, lambda d: mutate(d, "executor", "Deployment", lambda w: pod_spec(w).pop("affinity"))),
+    (colocated, lambda d: mutate(d, "executor", "Pod", lambda w: pod_spec(w).pop("affinity"))),
     (
         guaranteed,
         lambda d: mutate(
@@ -764,9 +999,7 @@ SEEDED = [
     ),
     (
         hardened,
-        lambda d: mutate(
-            d, "executor", "Deployment", lambda w: pod_spec(w)["securityContext"].update(runAsUser=0)
-        ),
+        lambda d: mutate(d, "executor", "Pod", lambda w: pod_spec(w)["securityContext"].update(runAsUser=0)),
     ),
     (
         hardened,
@@ -784,7 +1017,7 @@ SEEDED = [
         lambda d: mutate(
             d,
             "runtime",
-            "Deployment",
+            "Pod",
             lambda w: first_container(w)["env"].append(
                 {"name": "PGPASSWORD", "valueFrom": {"secretKeyRef": {"name": "s", "key": "password"}}}
             ),
@@ -795,7 +1028,7 @@ SEEDED = [
         lambda d: mutate(
             d,
             "executor",
-            "Deployment",
+            "Pod",
             lambda w: first_container(w)["env"][0].update(value="postgres://u:pw@h/db"),
         ),
     ),
@@ -810,9 +1043,7 @@ SEEDED = [
     ),
     (
         migration_first,
-        lambda d: mutate(
-            d, "executor", "Deployment", lambda w: first_container(w).update(args=["db", "migrate"])
-        ),
+        lambda d: mutate(d, "executor", "Pod", lambda w: first_container(w).update(args=["db", "migrate"])),
     ),
     (
         portable,
@@ -841,8 +1072,110 @@ SEEDED = [
     ),
     (
         portable,
+        lambda d: mutate(d, "executor", "Pod", lambda w: pod_spec(w).update(nodeSelector={"node": "pool-1"})),
+    ),
+    (
+        one_workload_per_process,
+        lambda d: [
+            *d,
+            relabel(next(x for x in d if x["metadata"]["name"] == "scheduler"), "runtime"),
+        ],
+    ),
+    (
+        gated,
         lambda d: mutate(
-            d, "executor", "Deployment", lambda w: pod_spec(w).update(nodeSelector={"node": "pool-1"})
+            d, MANAGER, "Deployment", lambda w: pod_spec(w)["initContainers"].__setitem__(0, migrate_gate(d))
+        ),
+    ),
+    (
+        gated,
+        lambda d: mutate(
+            d, "runtime", "Pod", lambda w: pod_spec(w)["initContainers"].__setitem__(0, manager_gate(d))
+        ),
+    ),
+    (
+        hardened,
+        lambda d: mutate(
+            d, MANAGER, "Deployment", lambda w: pod_spec(w).update(serviceAccountName="default")
+        ),
+    ),
+    (
+        deploy_manager_contained,
+        lambda d: mutate(d, MANAGER, "Role", lambda r: r["rules"][0]["resources"].append("secrets")),
+    ),
+    (
+        deploy_manager_contained,
+        lambda d: mutate(d, MANAGER, "Role", lambda r: r["rules"][0]["verbs"].append("patch")),
+    ),
+    (
+        deploy_manager_contained,
+        lambda d: mutate(
+            d,
+            MANAGER,
+            "Role",
+            lambda r: r["rules"].append({"apiGroups": [""], "resources": ["pods/exec"], "verbs": ["create"]}),
+        ),
+    ),
+    (
+        deploy_manager_contained,
+        lambda d: [
+            *d,
+            {
+                "kind": "ClusterRole",
+                "apiVersion": "rbac.authorization.k8s.io/v1",
+                "metadata": {"name": MANAGER},
+                "rules": [POD_RULE],
+            },
+        ],
+    ),
+    (
+        deploy_manager_contained,
+        lambda d: mutate(
+            d,
+            MANAGER,
+            "RoleBinding",
+            lambda b: b["subjects"].append(
+                {"kind": "ServiceAccount", "name": "default", "namespace": "ws-ws1"}
+            ),
+        ),
+    ),
+    (
+        deploy_manager_contained,
+        lambda d: mutate(
+            d, "scheduler", "Deployment", lambda w: pod_spec(w).update(automountServiceAccountToken=True)
+        ),
+    ),
+    (
+        deploy_manager_contained,
+        lambda d: mutate(
+            d,
+            "egress-scheduler",
+            "NetworkPolicy",
+            lambda p: p["spec"]["egress"].append(
+                {"to": [{"ipBlock": {"cidr": KUBE_API}}], "ports": [{"protocol": "TCP", "port": 6443}]}
+            ),
+        ),
+    ),
+    (
+        deploy_manager_contained,
+        lambda d: mutate(
+            d, MANAGER, "Deployment", lambda w: pod_spec(w)["initContainers"].__setitem__(0, migrate_gate(d))
+        ),
+    ),
+    (
+        deploy_manager_contained,
+        lambda d: mutate(
+            d, "runtime", "Pod", lambda w: pod_spec(w).update(automountServiceAccountToken=True)
+        ),
+    ),
+    (
+        deploy_manager_contained,
+        lambda d: mutate(d, "executor", "Pod", lambda w: pod_spec(w).update(serviceAccountName=MANAGER)),
+    ),
+    (
+        deploy_manager_contained,
+        lambda d: mutate(
+            d, MANAGER, "Deployment", lambda w: first_container(w)["volumeMounts"][-1].update(readOnly=False)
         ),
     ),
 ]
@@ -871,6 +1204,7 @@ def test_roles_and_compose_seeded_bugs_are_caught():
         lambda c: c["networks"].update(journal={}),
         lambda c: c["services"].pop("journal-verify"),
         lambda c: c["services"]["api"]["environment"].update(MANDATE_API_SECRET="x"),
+        lambda c: c["services"].update({MANAGER: copy.deepcopy(c["services"]["api"])}),
     ):
         compose = copy.deepcopy(COMPOSE)
         change(compose)

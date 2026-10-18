@@ -1,0 +1,111 @@
+{{- /*
+The deployment manager (journal spec §9.21, infrastructure design §3.4, DEC-1170, DEC-1172): one
+replica per workspace, the one pod that holds an API token. Its ServiceAccount's one Role, in this
+namespace only, creates, reads, lists and deletes pods: no Secret, no exec, no other resource or
+verb, and no cluster scope. Every runtime and executor it starts is a bare pod from the templates
+below, which are exactly the pods the chart would build for those processes (their security
+context, egress gate, credentials, colocation, and the labels their network policies select), so
+the manager adds only a pod's name, its own labels, `restartPolicy: Never` and the process's
+identity. A template holds no service-account token: only the manager's own pod mounts one.
+*/ -}}
+{{- define "mandate.deployManagerAccount" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .p.name | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+{{- end -}}
+{{- define "mandate.deployManagerRole" -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .p.name | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "delete"]
+{{- end -}}
+{{- define "mandate.deployManagerBinding" -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .p.name | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .p.name | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .p.name | quote }}
+    namespace: {{ .root.Release.Namespace | quote }}
+{{- end -}}
+{{- /* The pod of process `p` the manager starts, as JSON: the runtime's and, mirroring it, the
+executor's container runs `mandate-daemon run`, which reads its identity from the variables the
+manager adds. */ -}}
+{{- define "mandate.managedPod" -}}
+{{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "command" (list "mandate-daemon" "run" "--probe" "/tmp/process.sock") "probe" "mandate-daemon") }}
+{{- fromYaml (include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container)) | toJson }}
+{{- end -}}
+{{- define "mandate.deployManagerTemplates" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-templates" .p.name | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+data:{{ if not .templates }} {}{{ end }}
+  {{- range $file, $pod := .templates }}
+  {{ $file }}: {{ $pod | quote }}
+  {{- end }}
+{{- end -}}
+{{- define "mandate.deployManager" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .p.name | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "mandate.selector" . | nindent 6 }}
+  template:
+    {{- $args := list "run" "--workspace" (required "api.workspace, the hosted workspace's ULID whose control stream the manager reads, is required with images.deploy-manager" .root.Values.api.workspace) "--probe" "/tmp/process.sock" "--templates" "/etc/mandate/templates" }}
+    {{- $mounts := "- {name: templates, mountPath: /etc/mandate/templates, readOnly: true}" }}
+    {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" $args "mounts" $mounts "probe" "mandate-deployd") }}
+    {{- $volumes := printf "- {name: templates, configMap: {name: %q, defaultMode: 292}}" (printf "%s-templates" .p.name) }}
+    {{- $annotations := dict "mandate.dev/templates-sha256" (toJson .templates | sha256sum) }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container "volumes" $volumes "serviceAccount" .p.name "annotations" $annotations) | nindent 4 }}
+{{- end -}}
+{{- $root := . }}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
+{{- if eq .name "deploy-manager" }}
+{{- $manager := . }}
+{{- $templates := dict }}
+{{- range (include "mandate.processes" $root | fromJsonArray) }}
+{{- if and (eq (.started_by | default "") $manager.name) (index $root.Values.images .image) }}
+{{- $_ := set $templates (printf "%s.json" .name) (include "mandate.managedPod" (dict "root" $root "p" .)) }}
+{{- end }}
+{{- end }}
+{{- $ctx := dict "root" $root "p" . "templates" $templates }}
+---
+{{ include "mandate.emit" (include "mandate.deployManagerAccount" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.deployManagerRole" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.deployManagerBinding" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.deployManagerTemplates" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.deployManager" $ctx) }}
+{{- end }}
+{{- end }}

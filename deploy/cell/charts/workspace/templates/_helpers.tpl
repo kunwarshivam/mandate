@@ -28,6 +28,22 @@ tests (deploy/tests/test_cell.py) and the drills (`cargo xtask cell drill`) read
 {{- $out | toJson -}}
 {{- end -}}
 
+{{/*
+"true" when process `p` is started by another process (its `started_by`) whose image is named: it
+then renders no Deployment of its own, only its pod in that process's templates (DEC-1170).
+*/}}
+{{- define "mandate.startedElsewhere" -}}
+{{- $root := .root -}}
+{{- with .p.started_by -}}
+{{- $by := . -}}
+{{- range (include "mandate.processes" $root | fromJsonArray) -}}
+{{- if and (eq .name $by) (index $root.Values.images .image) -}}
+true
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "mandate.labels" -}}
 app.kubernetes.io/name: mandate-workspace
 app.kubernetes.io/instance: {{ .root.Release.Name | quote }}
@@ -109,6 +125,12 @@ nothing of the process runs until the pod's own egress is shown filtered: the Ku
 which no policy here allows, must stop answering. Still answering after a minute, the pod fails and
 never starts (AGENTS.md rule 3). Residual: an API server that is down at the same moment reads as
 filtered.
+The deployment manager's policy allows the API server (`kube-api`, DEC-1172), so its gate probes a
+destination that policy denies and that answers whenever nothing filters: the cluster resolver's
+metrics port, 9153, at the address in the pod's resolv.conf (CoreDNS's `kube-dns` Service serves it;
+every policy here allows the resolver on port 53 only). The vault has no pod in the local cell and
+the journal's Service exposes 5432 alone, so a probe of either would read as filtered at once.
+Residual: a resolver that serves no metrics port reads as filtered at once.
 */}}
 {{- define "mandate.egressGate" -}}
 - name: egress-gate
@@ -117,6 +139,21 @@ filtered.
   command:
     - bash
     - -c
+    {{- if has "kube-api" .p.egress }}
+    - |
+      dns=$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf)
+      [ -n "$dns" ] || { echo "no cluster resolver address: refusing to start" >&2; exit 1; }
+      for _ in $(seq 1 60); do
+        if timeout 2 bash -c "exec 3<>/dev/tcp/$dns/9153" 2>/dev/null; then
+          sleep 1
+        else
+          echo "egress filtered"
+          exit 0
+        fi
+      done
+      echo "egress still open after a minute: refusing to start" >&2
+      exit 1
+    {{- else }}
     - |
       [ -n "${KUBERNETES_SERVICE_HOST:-}" ] && [ -n "${KUBERNETES_SERVICE_PORT:-}" ] || { echo "no API server address: refusing to start" >&2; exit 1; }
       for _ in $(seq 1 60); do
@@ -129,6 +166,7 @@ filtered.
       done
       echo "egress still open after a minute: refusing to start" >&2
       exit 1
+    {{- end }}
   securityContext:
     {{- include "mandate.containerSecurity" . | nindent 4 }}
   resources:
@@ -137,7 +175,8 @@ filtered.
 {{- end -}}
 
 {{/*
-The pod around a process's containers. Secrets are files: the role's pgpass is mounted group-
+The pod around a process's containers. Only the deployment manager's passes `serviceAccount`, the
+one pod given an API token (DEC-1172); every other pod mounts none. Secrets are files: the role's pgpass is mounted group-
 readable for fsGroup, and libpq and sqlx refuse a pgpass any group can read, so an init container
 copies it to a memory-backed directory as 0600 under the process's own user.
 */}}
@@ -147,8 +186,17 @@ copies it to a memory-backed directory as 0600 under the process's own user.
 metadata:
   labels:
     {{- include "mandate.labels" . | nindent 4 }}
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
+  {{- with .serviceAccount }}
+  serviceAccountName: {{ . | quote }}
+  automountServiceAccountToken: true
+  {{- else }}
   automountServiceAccountToken: false
+  {{- end }}
   enableServiceLinks: false
   restartPolicy: {{ .restartPolicy }}
   securityContext:
@@ -225,7 +273,8 @@ spec:
     {{- end }}
 {{- end -}}
 
-{{/* One container of process `p`: name, image, args, and optional extra mounts. */}}
+{{/* One container of process `p`: name, image, command, args, optional extra mounts, and, with
+`probe` naming its binary, `exec` liveness and readiness probes on its socket (DEC-994 item 5). */}}
 {{- define "mandate.container" -}}
 - name: {{ .name | quote }}
   image: {{ index .root.Values.images .p.image | quote }}
@@ -238,6 +287,19 @@ spec:
   {{- end }}
   env:
     {{- include "mandate.env" . | nindent 4 }}
+  {{- with .probe }}
+  livenessProbe:
+    exec:
+      command: [{{ . | quote }}, "probe", "livez", "--probe", "/tmp/process.sock"]
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+  readinessProbe:
+    exec:
+      command: [{{ . | quote }}, "probe", "readyz", "--probe", "/tmp/process.sock"]
+    periodSeconds: 5
+    timeoutSeconds: 5
+  {{- end }}
   securityContext:
     {{- include "mandate.containerSecurity" . | nindent 4 }}
   resources:
@@ -251,7 +313,9 @@ spec:
 
 {{/*
 The egress allowed to process `p`: DNS when it has any target, each in-cluster target by pod
-label and port, and each external target's CIDRs from values (an empty list allows nothing).
+label and port, and each external target's CIDRs from values (an empty list allows nothing). The
+API server (`kube-api`, the deployment manager's alone) is an external-style target: its CIDRs and
+its port from values, since a policy cannot select it by pod label.
 */}}
 {{- define "mandate.egressRules" -}}
 {{- $root := .root -}}
@@ -284,6 +348,16 @@ label and port, and each external target's CIDRs from values (an empty list allo
           mandate.dev/process: vault
   ports:
     - {protocol: TCP, port: 8200}
+{{- else if eq . "kube-api" }}
+{{- with (index $v.egress "kube-api") }}
+- to:
+    {{- range . }}
+    - ipBlock:
+        cidr: {{ . | quote }}
+    {{- end }}
+  ports:
+    - {protocol: TCP, port: {{ $v.egress.kubeApiPort }}}
+{{- end }}
 {{- else if eq . "model-gateway" }}
 - to:
     - podSelector:
