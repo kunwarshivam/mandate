@@ -1,8 +1,8 @@
 # The environment's only ingress (DEC-2012 item 6, DEC-967 item 6): a remotely managed tunnel,
 # whose token becomes the workspace chart's cloudflared-tunnel Secret (lane GO places it); one
 # proxied DNS record for the API's hostname pointing at the tunnel; one Access application on that
-# hostname that admits only members of the founder's own Cloudflare account, so no email is
-# configured anywhere; and the journal's WAL and base-backup archive, an R2 bucket whose one lock
+# hostname that admits only the named emails, or in staging, where none are named, only members
+# of the founder's own Cloudflare account (DEC-2030 item 2); and the journal's WAL and base-backup archive, an R2 bucket whose one lock
 # rule keeps every key for at least the archive's retention (DEC-973 item 6,
 # DEC-2012 item 9); and Barman's token for that bucket alone, Object Read and Write, minted here
 # (DEC-2029) and handed on only as sensitive outputs.
@@ -51,6 +51,17 @@ variable "api_origin" {
   validation {
     condition     = can(regex("^https?://", var.api_origin))
     error_message = "The API origin must be a web URL, plain or over TLS."
+  }
+}
+
+variable "access_allowed_emails" {
+  description = "The only identities Access admits to the API host. Empty admits the members of the founder's own Cloudflare account instead, which only staging's root does (DEC-2030 item 2)."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for email in var.access_allowed_emails : can(regex("^[^@[:space:]*]+@[^@[:space:]*]+[.][^@[:space:]*]+$", email))])
+    error_message = "Each Access email is a full address; a wildcard or a domain alone is refused."
   }
 }
 
@@ -114,7 +125,7 @@ resource "cloudflare_zero_trust_access_policy" "operators" {
   name             = "${var.name}-operators"
   decision         = "allow"
   session_duration = "24h"
-  include = [
+  include = length(var.access_allowed_emails) > 0 ? [for email in var.access_allowed_emails : { email = { email = email } }] : [
     {
       cloudflare_account_member = {
         account_id = var.account_id
