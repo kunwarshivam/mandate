@@ -13,18 +13,22 @@ use clap::{Args, Subcommand};
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_evaluation::{
-    Baselines, EvaluationError, EvaluationRecord, EvaluationRequest, InputFiles, ThesisRecord,
-    decode, evaluate, evaluation_run_recorded, input_objects,
+    Baselines, EvaluationError, EvaluationRecord, EvaluationRequest, INPUT_FILE_NAMES, InputFiles,
+    ThesisRecord, decode, evaluate, evaluation_run_recorded, input_objects,
 };
-use mandate_journal::{ArtifactError, ArtifactRef, ArtifactStore, StoredEvent, get_artifact};
+use mandate_journal::{
+    ArtifactError, ArtifactRef, ArtifactStore, Environment, StoredEvent, get_artifact,
+};
 use mandate_time::UtcNanos;
 use secrecy::SecretString;
 
-use crate::backtest::{is_id, rule_set};
+use crate::backtest::{ARTIFACTS_VAR, is_id, rule_set, store_root};
 use crate::control::{
     Confirmation, ControlError, ControlJournal, Decision, EVALUATION_TYPE, Now, Owner, Repeat,
     Shape, Submitted, agent_stream, commit_evaluation, control_stream, decide,
 };
+use crate::postgres::JournalArgs;
+use crate::register::open;
 use crate::version::{refused, rows};
 
 /// The agent-stream records the evaluation reads (journal spec §9.4).
@@ -325,8 +329,13 @@ pub struct RunArgs {
 /// # Errors
 /// [`ControlError::Refused`] with `owner_workspace_invalid` for an id that is not a stream id's.
 pub fn evaluator_owner(workspace: &str) -> Result<Owner, ControlError> {
-    let _ = workspace;
-    Err(ControlError::Unimplemented { story: "E17-8" })
+    let owner = Owner {
+        workspace: workspace.to_owned(),
+        user: String::new(),
+        environment: Environment::Paper,
+    };
+    control_stream(&owner).map_err(|_| refused("owner_workspace_invalid"))?;
+    Ok(owner)
 }
 
 /// The four input files under `dir`, in [`mandate_evaluation::INPUT_FILE_NAMES`]' order.
@@ -334,8 +343,9 @@ pub fn evaluator_owner(workspace: &str) -> Result<Owner, ControlError> {
 /// # Errors
 /// [`ControlError::Refused`] with `input_invalid` when one cannot be read.
 pub fn read_inputs(dir: &Path) -> Result<[Vec<u8>; 4], ControlError> {
-    let _ = dir;
-    Err(ControlError::Unimplemented { story: "E17-8" })
+    let [decision, closes, cost, baselines] = INPUT_FILE_NAMES
+        .map(|name| std::fs::read(dir.join(name)).map_err(|_| refused("input_invalid")));
+    Ok([decision?, closes?, cost?, baselines?])
 }
 
 /// The cut-off `text` names, RFC 3339 UTC.
@@ -343,8 +353,7 @@ pub fn read_inputs(dir: &Path) -> Result<[Vec<u8>; 4], ControlError> {
 /// # Errors
 /// [`ControlError::Refused`] with `cut_off_invalid` for any other text.
 pub fn cut_off(text: &str) -> Result<UtcNanos, ControlError> {
-    let _ = text;
-    Err(ControlError::Unimplemented { story: "E17-8" })
+    UtcNanos::parse_rfc3339(text).map_err(|_| refused("cut_off_invalid"))
 }
 
 /// `evaluation_id=`, `report=`, `passed=`, then the event's id and `seq`.
@@ -352,10 +361,11 @@ pub fn cut_off(text: &str) -> Result<UtcNanos, ControlError> {
 /// # Errors
 /// When `report` cannot be written.
 pub fn print_evaluated(report: &mut impl Write, evaluated: &Evaluated) -> std::io::Result<()> {
-    let _ = (report, evaluated);
-    Err(std::io::Error::other(ControlError::Unimplemented {
-        story: "E17-8",
-    }))
+    writeln!(report, "evaluation_id={}", evaluated.evaluation_id)?;
+    writeln!(report, "report={}", evaluated.report)?;
+    writeln!(report, "passed={}", evaluated.passed)?;
+    let Submitted { event_id, seq } = &evaluated.submitted;
+    writeln!(report, "recorded as event {event_id} at seq {seq}")
 }
 
 /// Runs `evaluation run` on the workspace's Postgres journal and store, and prints the outcome.
@@ -364,6 +374,26 @@ pub fn print_evaluated(report: &mut impl Write, evaluated: &Evaluated) -> std::i
 /// `owner_workspace_invalid`, `cut_off_invalid`, `artifacts_unset`, `internal_paper_setting` or
 /// `input_invalid` before the journal is opened, then [`run`]'s; no message names the DSN.
 pub fn run_command(args: &RunArgs, now: Now, report: &mut impl Write) -> anyhow::Result<Evaluated> {
-    let _ = (args, now, report);
-    Err(ControlError::Unimplemented { story: "E17-8" }.into())
+    let owner = evaluator_owner(&args.workspace)?;
+    let cut_off = cut_off(&args.cut_off)?;
+    let target = JournalArgs {
+        journal: args.journal.clone(),
+        store: store_root(args.store.as_deref(), std::env::var_os(ARTIFACTS_VAR))?,
+    };
+    let setting = internal_paper_setting(std::env::var_os(INTERNAL_PAPER_VAR))?;
+    let [decision, closes, cost, baselines] = read_inputs(&args.inputs)?;
+    let request = Request {
+        files: InputFiles {
+            decision: &decision,
+            closes: &closes,
+            cost: &cost,
+            baselines: &baselines,
+        },
+        evaluation_id: &args.evaluation_id,
+        cut_off,
+    };
+    let (mut journal, mut store) = open(&target)?;
+    let evaluated = run(&mut journal, &mut store, &owner, setting, &request, now)?;
+    print_evaluated(report, &evaluated)?;
+    Ok(evaluated)
 }
