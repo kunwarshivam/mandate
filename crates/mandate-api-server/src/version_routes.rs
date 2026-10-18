@@ -29,13 +29,13 @@ use mandate_journal::{StoredEvent, StreamId};
 use mandate_spec::Mandate;
 
 use crate::commands::{Event, Settled, Writer, envelope};
-use crate::http::{App, browser, problem, problem_body};
+use crate::http::{App, browser, invalid, problem, problem_body};
 use crate::objects::ObjectStore;
 use crate::reads::account_ref;
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
-use crate::stepup::Action;
+use crate::stepup::{Action, journaled};
 use crate::versions::{
     CONFIRMED, CREATED, DEPLOYED, FIRST_VERSION, Pending, Refusal, active, check, confirm_digest,
     deploy_digest, envelope_paths, instruments, last_confirmed, latest, object, reference, screen,
@@ -69,15 +69,7 @@ impl Answer {
         match self {
             Self::Refused(refused) => refused.response(),
             Self::Code(status, code) => problem(status, problem_body(code)),
-            Self::Invalid(violations) => {
-                let body = Problem::of(ProblemCode::Invalid, Effect::None, None, None)
-                    .ok()
-                    .map(|problem| Problem {
-                        violations,
-                        ..problem
-                    });
-                problem(StatusCode::UNPROCESSABLE_ENTITY, encoded(body.as_ref()))
-            }
+            Self::Invalid(violations) => invalid(violations),
             Self::Stale(current) => {
                 let body = Ref::try_from(current).ok().and_then(|current| {
                     let base = Some(CurrentBase::Ref(current));
@@ -196,14 +188,6 @@ fn confirming(paths: &[String]) -> Pending<'_> {
 /// A record member as the journal's canonical value.
 fn record_value(record: &Record) -> Option<Value> {
     parse(&encode(record).ok()?).ok()
-}
-
-/// Step-up evidence as the journal's canonical value (journal spec §9.2), or `null`.
-fn evidence_value(evidence: Option<&StepUpEvidence>) -> Option<Value> {
-    match evidence {
-        Some(evidence) => parse(&encode(evidence).ok()?).ok(),
-        None => Some(Value::Null),
-    }
 }
 
 /// `record`'s canonical bytes, and the event naming it and `version` with `members`.
@@ -582,7 +566,7 @@ async fn confirmed(
         ("screen_digest", text(&shown_digest)),
         (
             "step_up",
-            evidence_value(request.step_up.as_ref()).ok_or(Refused::JournalUnavailable)?,
+            journaled(request.step_up.as_ref()).ok_or(Refused::JournalUnavailable)?,
         ),
         ("user", text(&admitted.principal)),
         (
@@ -789,7 +773,7 @@ async fn deployed(
         ("record", request.record.clone()),
         (
             "step_up",
-            evidence_value(request.step_up.as_ref()).ok_or(Refused::JournalUnavailable)?,
+            journaled(request.step_up.as_ref()).ok_or(Refused::JournalUnavailable)?,
         ),
         ("user", text(&admitted.principal)),
     ])
