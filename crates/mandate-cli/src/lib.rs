@@ -37,6 +37,7 @@ pub mod control;
 pub mod db;
 pub mod deploy;
 pub mod download;
+pub mod evaluation;
 pub mod gestures;
 pub mod identity;
 pub mod inbox;
@@ -108,4 +109,8 @@ pub enum Command {
     /// Journal a backtest the backtest runner stored, as the `backtest_runner` system.
     #[command(subcommand)]
     Backtest(backtest::BacktestCommand),
+    /// Run and journal the forward-paper evaluation of an internal paper workspace, as the
+    /// `evaluator` system.
+    #[command(subcommand)]
+    Evaluation(evaluation::EvaluationCommand),
 }

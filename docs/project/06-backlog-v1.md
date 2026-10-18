@@ -2203,6 +2203,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   `MANDATE_API_INTERNAL_PAPER_WORKSPACE=true`, which start refuses unless the hosted control stream
   is paper throughout; otherwise every evaluation id is the 404 an absent one gets. The harness
   remains.
+  *Debt (DEC-2244 slice (b), #1609):* `crates/mandate-evaluation/src/inputs.rs`'s `fee_config`
+  (about line 230) and its helpers `fields`, `text`, `parsed`, `list`, `date` and `word` repeat
+  `crates/mandate-backtest-runner/src/inputs.rs`'s (about line 598), because nothing may depend on
+  the runner. One shared strict parser of `mandate_accounting::Config`, in a crate below both,
+  replaces the two copies.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -2620,7 +2625,7 @@ items 13 to 20); no story here buys a service or touches live money.
   mid-hand-over shows no protective order canceled by the deploy, every unprotected interval within
   `max_unprotected_s`, the kill switch applied by the new process, and zero duplicates.
 - **E21-8 (Proposed, M6 then M11)** As the founder, I want release builds from `main` that are
-  reproducible, carry an SBOM, and from M11 are signed with my hardware key and checked at start
+  reproducible, carry an SBOM, and from M11 are signed with the release key (DEC-2024) and checked at start
   (ES-14, ES-17, OPS-15). *Accepted when:* two builds of one commit are byte-identical; each process
   journals its build digest; and outside dev and CI an unsigned binary refuses to start.
   *Status:* the reproducible build, its SBOMs, the CI double build and `mandate-release`'s
@@ -2628,6 +2633,8 @@ items 13 to 20); no story here buys a service or touches live money.
   `crates/mandate-cli/src/control.rs` still name a placeholder `build` (a digest of the crate's
   name and version); switching both to `BuildDigest::running()` is this row's last slice, blocked
   on R0 closing (DEC-967 item 2, DEC-972 item 7). Signing and the start-up check are E21-35's.
+  The release build refuses rustflags, compiler, wrapper and profile overrides from its
+  environment or any cargo configuration it reads (DEC-2027, for E21-52).
 - **E21-9 (Proposed, M8; SC)** As an owner, I want my broker credential held in the workspace vault,
   leased only to the executor for my connection, and checked for scope, environment, and account at
   every start, so that no other process can use it (design §5). *Accepted when:* a runtime's
@@ -2819,9 +2826,13 @@ enables `live` (ES-23, OPS-5).
   #1458): the crate, both backends, one conformance suite, the policies, leases and grants.
   *Slice 2* ([DEC-2019](decisions/DEC-2019.md)): the cell's OpenBao chart, in server mode on raft
   over TLS 1.3, reached only by the processes whose egress names it, initialized and unsealed by
-  `cargo xtask cell up`. *Left:* provisioning the policies and roles in the cell, each process's
-  secret id as a mounted file, and the egress drill's vault probe; the audit device; the metrics
-  and journal parts of the canary scan once either carries a vault operation.
+  `cargo xtask cell up`. *Slice 3a* ([DEC-2021](decisions/DEC-2021.md)): staging unseals itself
+  with the static seal from a mounted, bootstrap-created key (DEC-2605 row 10); the cell and
+  production stay unsealed by hand. *Left:* the chart's `previous_key` for one restart, which
+  staging's seal-key rotation needs (deploy/cell/README.md, "The vault"); provisioning the policies
+  and roles in the cell, each process's secret id as a mounted file, and the egress drill's vault
+  probe; the audit device; the metrics and journal parts of the canary scan once either carries a
+  vault operation.
 - **E21-33 (Proposed, M8; SC; lane D1; journal spec first if needed)** As an owner, I want a
   deployment manager that keeps each deployed agent's processes running and leaves a crash-looping
   agent paused, so that my agent is managed without anyone watching (design §3.4, §11 "Bad
@@ -2855,18 +2866,20 @@ enables `live` (ES-23, OPS-5).
   - The chart test of the gate seeds no 9153 allow in the manager's policy.
   - `PgControl`'s `rows_after` reads the whole control stream on every pass.
   - `pg.rs` has no competing-writer test for the writer epoch taken for each append.
-  Follow-ups from DEC-1171's review (minors, freeze rule):
-  - m1: the CLI lets a stopped agent's id be deployed again, while §9.21 reads `AgentStopped` as
-    final; decide whether agent ids are reused.
-  - m2: add a vector for a version-1 deployment, a stop, then a version-2 deployment of the same
-    agent; the Rust manager must treat that stop as final (code change).
-  - m3: a manager must not ship into a workspace holding version-1 deployments; say how an existing
-    one is retired or redeployed at version 2.
-  - m4: the `agent_deployed` oracle's case of a revocation after the deployment cannot fail a
-    mutant; and no vector shows an account-stream copy against rule 201.
-  - m5: the §9 catalogue row for `AgentDeployed` does not mention version 2.
-  - m6: `docs/specs/workspace-api.md` (near line 673) and `docs/design/infrastructure.md` (near line
-    277) still describe version 1; the code change updates them.
+  Follow-ups from DEC-1171's review (minors, freeze rule), decided in
+  [DEC-1173](decisions/DEC-1173.md) and specified in journal spec v0.56:
+  - m1 (decided, writers to build): an agent id is deployed once, so a writer refuses an agent an
+    `AgentStopped` names; the CLI's `agent_stopped` and the workspace API's refusal land with the
+    writers.
+  - m2 (done in the vectors; the manager to build): a stop is final even for a deployment the
+    manager never read.
+  - m3 (decided; the manager to build): a version-1 deployment is retired before the manager runs
+    its workspace, and the manager raises `deployment_unread` for one it finds.
+  - m4 (done): the oracle's revocation-after-deployment case now fails two seeded bugs, and a
+    vector shows rule 201 refusing an account stream's copy.
+  - m5 (done): the §9 catalogue row names version 2.
+  - m6 (half done): `docs/specs/workspace-api.md` states the version its deployment writes;
+    `docs/design/infrastructure.md` changes with the manager's code.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
@@ -2887,14 +2900,17 @@ enables `live` (ES-23, OPS-5).
   binaries on an empty base, run as non-root with a read-only root filesystem and no shell; each is
   signed with cosign and its digest and signature recorded; a process outside dev and CI refuses to
   start when its signature does not verify, and journals its build digest (`actor.build`) when it
-  does; CI signs with an ephemeral test key, and only the founder's hardware key signs an image for a
-  hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
+  does; CI signs with an ephemeral test key, and only the release key, on the founder's approval
+  (DEC-2024), signs an image for a hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
   never from a branch; and a test shows an unsigned and a wrongly signed image both refused.
   *Status:* the images, the start-up check in `mandate-agentd`, the CI test-key drill and the
   `main`-only publish to GHCR land with DEC-971; images for amd64 and arm64, each built natively,
   under one signed multi-arch index, with DEC-1060. **After R0:** the CLI runs the check (with
-  E21-8's last slice). **Founder:** the hardware key's public half in `RELEASE_KEYS` (H8), until
-  which nothing starts outside dev and CI (DEC-971 item 7). Staging promotion waits on H1.
+  E21-8's last slice). **Release key** (DEC-2024; DEC-2605 rows 8 and 9, no hardware key): its
+  public half is in `RELEASE_KEYS` (`crates/mandate-release/release-keys/cosign.pub`), and the
+  `release-signing` job signs each binary and `SHA256SUMS` with it on a dispatch from `main`
+  the founder approves ([runbook](../runbooks/release-signing-key.md)). Staging promotion waits
+  on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
@@ -3039,7 +3055,7 @@ enables `live` (ES-23, OPS-5).
   founder, I want my agent to place real orders through my Robinhood agentic account from cell #1,
   on the same path every broker uses, so that the first hosted version trades for real (DEC-967
   item 15). *Accepted when:* the cell's Robinhood executor image is the only image built with
-  `live`, signed with the founder's hardware key, and refuses to start unsigned (OPS-15);
+  `live`, signed with the release key (DEC-2024), and refuses to start unsigned (OPS-15);
   `xtask/layers.toml` marks `mandate-daemon` as the one crate besides `mandate-paper` that may
   declare `live`, `cargo xtask live-feature` and its tests allow exactly those two, and CI still
   only compiles `live` (DEC-529 item 3 as item 15 narrows it), with `mandate-paper` untouched; that executor alone has egress to
@@ -3114,6 +3130,9 @@ enables `live` (ES-23, OPS-5).
   linked under another issuer; and the E2E lane's `cell demo` runs it in the server's network
   namespace, started before the server, once E21-53 is on `main`. Lane R1's image build (E21-8)
   fails when `RUSTFLAGS` or `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` is set (DEC-2100 item 2).
+  *Status:* done. The tests (#1565), the cell wiring (#1572), the stub (#1591), xtask's release
+  check and profile guard (#1620), and the release build's refusal of rustflags, compiler, wrapper
+  and profile overrides from its environment or any cargo configuration it reads (DEC-2027).
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
   issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
@@ -3153,6 +3172,43 @@ enables `live` (ES-23, OPS-5).
   environment other than the stream's each fail the whole lookup closed, never skipping the row;
   a revoked member is refused; and a property test folds random grant, revoke and role-change
   histories against an independent oracle that catches each seeded bug.
+- **E21-56 (Proposed, M8, staging for the 2026-10-26 demo; lane IAC; claim #1634; DEC-2011,
+  DEC-2012; ADR-0006)** As the founder, I want the hosted staging and production environments made
+  by OpenTofu from the repository, so that cell #1's infrastructure is reviewed code applied only
+  with my approval, never a script run by hand and never a token an agent holds (DEC-2011).
+  *Accepted when:* `deploy/tofu/` has one module per concern (network: a VPC and a firewall; DOKS:
+  one pool of two nodes, the Kubernetes version pinned and auto-upgrade off; Spaces: OpenTofu's
+  state bucket, versioned, and nothing else; Cloudflare: the tunnel, the API host's DNS record, its
+  Access application, and the R2 bucket for E21-41's WAL archive and base backups with a lock rule
+  over every key for at least the archive's 30-day retention (DEC-973 item 6); the budget: an
+  estimate the plan refuses past $65 per environment) and one root per environment (`staging`,
+  `production`), with state in Spaces, encrypted on the client, and the providers pinned by a
+  committed lock file; every pull request touching `deploy/tofu/` runs `tofu fmt -check`,
+  `tofu validate`, tflint and `tofu test` against mocked providers as the policy check (no public
+  firewall source, the state bucket private, the archive locked, no load balancer, the cap), with
+  no credential, selected by `cargo xtask ci select` (DEC-1190); `.github/workflows/infra.yml`
+  runs `plan` and `apply` only from `main` by manual dispatch, under the environments `infra-staging` and `infra-production`
+  with the founder as required reviewer (ES-12, DEC-1005); and the runbook names every token,
+  key, environment and secret the founder creates, each with the least permissions the plan
+  needs. It stops at a reachable, empty cluster with its buckets, DNS and Access: add-ons and
+  applications are lane GO's.
+- **E21-58 (Proposed, M8, staging by 2026-10-26; lane GO; claim #1635; DEC-2015 to DEC-2018; after
+  E21-56's empty DOKS cluster from lane IAC, DEC-2011)** As the founder, I want staging and production
+  on DOKS reconciled by GitOps from `main`, so that what runs is exactly what `main` says and
+  production moves only by a reviewed pull request. *Accepted when:* `deploy/gitops/` holds one
+  overlay per environment (`staging`, `production`), reconciled by Flux read-only from `main`
+  (DEC-2015), that installs, from `deploy/cell/charts/` and `deploy/hosted/values/` unforked, the
+  CloudNativePG operator and its Barman Cloud plugin, the journal's two instances on separate nodes
+  archiving to the journal archive bucket (Cloudflare R2 with bucket lock, DEC-2605 row 4) through
+  an egress rule that fails closed, the workspace chart, and cloudflared for the tunnel; staging
+  tracks the signed image digests `release.yml` publishes from `main` through a bot pull request,
+  and production changes only by a pull request that copies staging's digests; every image of the
+  repository's is signature-checked at admission (E21-35); CI renders every overlay with no
+  credential, checks it with kubeconform, and refuses an overlay that sets the stub tier (`dev` or
+  `ci`, DEC-2005) or `live`, or names an image not pinned by digest, selected by `cargo xtask ci
+  select` (DEC-1190); and the founder's one bootstrap, from an address the cluster's API firewall
+  admits, installs Flux and creates the workload secrets (the tunnel token and the archive key)
+  from lane IAC's outputs, never committed and never by an agent, until E21-32's vault holds them.
 
 ## Won't (v1)
 

@@ -1,7 +1,8 @@
-# The workspace vault on a managed cluster (staging on DOKS, DEC-2011): the chart's defaults but the
-# volume's class. DigitalOcean's block storage is 1 GiB at the least, which raft needs far less of.
-# The vault is unsealed by hand after every restart of its pod (DEC-977 item 5); the operator steps
-# are in deploy/cell/README.md, "The vault".
+# The workspace vault on a managed cluster outside staging (production): the chart's defaults but
+# the environment and the volume's class. It unseals by hand after every restart of its pod (DEC-977
+# item 5); the schema refuses the static seal here (DEC-2021). The operator steps are in
+# deploy/cell/README.md, "The vault".
+environment: production
 workspace: ws1
 storage:
   size: 1Gi

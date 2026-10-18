@@ -755,7 +755,7 @@ forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "ma
 layer = 8
 safety_critical = true
 pure = false
-allowed_external = []
+allowed_external = ["tokio"]
 forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mandate-paper", "mandate-mcp", "mandate-cli", "mandate-rh-sim", "mandate-robinhood"]
 
 # The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over

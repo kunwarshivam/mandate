@@ -23,9 +23,9 @@ const PEM_BEGIN: &str = "-----BEGIN PUBLIC KEY-----";
 const PEM_END: &str = "-----END PUBLIC KEY-----";
 
 /// The release keys a process outside dev and CI trusts, as cosign's PEM public keys: the
-/// founder's hardware key (ES-17, H8) once it exists. None is wired yet, so no binary passes the
-/// check in staging or production until the founder adds the key's public half here.
-pub const RELEASE_KEYS: &[&str] = &[];
+/// founder's release signing key, whose private half lives only in the protected `release-signing`
+/// GitHub environment and signs in CI after the founder approves (DEC-2605 rows 8 and 9, DEC-2024).
+pub const RELEASE_KEYS: &[&str] = &[include_str!("../release-keys/cosign.pub")];
 
 /// Names the deployment tier: `dev`, `ci`, `staging` or `production`.
 pub const TIER_VAR: &str = "MANDATE_DEPLOYMENT_TIER";

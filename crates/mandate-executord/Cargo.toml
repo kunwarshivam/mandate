@@ -11,7 +11,9 @@ workspace = true
 
 [dependencies]
 mandate-accounting.workspace = true
+mandate-alpaca.workspace = true
 mandate-canon.workspace = true
+mandate-connections.workspace = true
 mandate-domain.workspace = true
 mandate-executor.workspace = true
 mandate-journal.workspace = true
@@ -19,7 +21,7 @@ mandate-num.workspace = true
 mandate-process.workspace = true
 mandate-store.workspace = true
 mandate-time.workspace = true
+tokio = { workspace = true, features = ["rt", "time"] }
 
 [dev-dependencies]
-mandate-alpaca.workspace = true
 proptest.workspace = true

@@ -29,7 +29,11 @@
 //! port. In CI it is a fixture, never a broker host, and this crate names no host (X2). Paper
 //! only: [`ExecutorProcess::start`] refuses any other environment before it takes the stream.
 
+pub mod alpaca;
+pub mod connect;
+pub mod fixture;
 pub mod follow;
+pub mod paper;
 mod process;
 
 pub use process::{Alert, Broker, Config, ExecutorProcess, VERSION, Wiring};

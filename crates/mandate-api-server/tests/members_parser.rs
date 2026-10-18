@@ -7,15 +7,16 @@ mod common;
 
 use std::collections::BTreeMap;
 
+use common::control::OTHER_WORKSPACE;
 use common::control::{
     Rows, T0, activated, activation, change, hosted_stream, member, membership, other_stream,
     query, reactivation, record, roles, scope,
 };
 use common::{at, hosted};
-use mandate_api_server::members::{ControlLookup, RowsRefused, membership_records};
+use mandate_api_server::members::{ControlLookup, RowsRefused, control_parser, membership_records};
 use mandate_identity::{
     LookupFailed, MembershipEvent, MembershipState, Permission, Principal, PrincipalId, Refusal,
-    Role, Session, SessionKind, SessionRef, authorize,
+    Role, Session, SessionKind, SessionRef, WorkspaceId, authorize,
 };
 use mandate_identity_seal::Seal;
 use serde_json::json;
@@ -24,7 +25,6 @@ const ALICE: PrincipalId = PrincipalId(7);
 const BOB: PrincipalId = PrincipalId(8);
 
 #[test]
-#[ignore = "pending E21-55"]
 fn grants_revokes_and_role_changes_fold_in_stream_order() {
     let mut rows = Rows::opened();
     let owner = [Role::Operator, Role::WorkspaceAdmin];
@@ -96,7 +96,6 @@ fn grants_revokes_and_role_changes_fold_in_stream_order() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn rows_of_other_workspaces_environments_and_types_are_ignored() {
     let mut rows = Rows::opened();
     let admin = roles(&[Role::WorkspaceAdmin]);
@@ -167,7 +166,6 @@ fn granted_then(last: impl FnOnce(&mut Rows)) -> Rows {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn an_unreadable_membership_row_fails_the_whole_lookup_and_is_never_skipped() {
     let unread = granted_then(|rows| {
         rows.edited("MemberDeactivated", T0 - 50, |e| {
@@ -281,7 +279,6 @@ fn authorized(lookup: &ControlLookup, principal: PrincipalId, now: i64) -> Resul
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn a_revoked_member_is_refused() {
     let mut rows = Rows::opened();
     let viewer = roles(&[Role::Viewer]);
@@ -320,7 +317,6 @@ fn a_revoked_member_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn the_time_base_is_the_lookups_now() {
     let mut rows = Rows::opened();
     let granted = [Role::Operator, Role::Viewer];
@@ -347,4 +343,109 @@ fn the_time_base_is_the_lookups_now() {
     );
     let revoked = membership(ALICE, MembershipState::Deactivated, &[], T0 + 200);
     assert_eq!(at_now(T0 + 200), Ok(vec![revoked]));
+}
+
+#[test]
+fn a_membership_row_of_another_environment_fails_the_lookup_closed() {
+    let viewer = roles(&[Role::Viewer]);
+    let revoke = granted_then(|rows| {
+        rows.push(
+            &hosted_stream(),
+            "live",
+            "MemberDeactivated",
+            T0 - 50,
+            member(ALICE),
+        );
+    });
+    let grant = granted_then(|rows| {
+        let payload = activation(BOB, &viewer, T0 - 50);
+        rows.push(
+            &hosted_stream(),
+            "live",
+            "MemberActivated",
+            T0 - 50,
+            payload,
+        );
+    });
+    for (rows, what) in [(revoke, "a revoke"), (grant, "a grant")] {
+        let refused = Err(RowsRefused::OtherEnvironment { seq: 3 });
+        assert_eq!(
+            rows.parsed(),
+            refused,
+            "{what} in live on a paper stream (DEC-2110 item 5)"
+        );
+        assert_eq!(query(&rows.failed(T0), ALICE), Err(LookupFailed));
+        assert_eq!(query(&rows.failed(T0), BOB), Err(LookupFailed));
+    }
+}
+
+#[test]
+fn the_deployments_parser_answers_every_refusal_as_a_failed_lookup() {
+    let parse = control_parser(hosted().workspace);
+    let granted = granted_then(|_| {});
+    let records = vec![activated(2, T0 - 100, ALICE, &[Role::Operator], T0 - 100)];
+    let answered = granted.parsed();
+    assert_eq!(
+        parse(&granted.rows),
+        Ok(records),
+        "membership_records answers {answered:?}"
+    );
+    let elsewhere = control_parser(WorkspaceId::from_ulid_text(OTHER_WORKSPACE).expect("a ULID"));
+    assert_eq!(
+        elsewhere(&granted.rows),
+        Ok(vec![]),
+        "another workspace's parser reads none"
+    );
+    let unreadable = granted_then(|rows| {
+        rows.edited("MemberRemoved", T0 - 50, |e| e["payload"] = json!({}));
+    });
+    let live = granted_then(|rows| {
+        rows.push(
+            &hosted_stream(),
+            "live",
+            "MemberDeactivated",
+            T0 - 50,
+            member(ALICE),
+        );
+    });
+    let mut unopened = granted_then(|_| {});
+    unopened.rows.remove(0);
+    for refused in [unreadable, live, unopened] {
+        assert_eq!(parse(&refused.rows), Err(LookupFailed), "DEC-2110 item 7");
+    }
+}
+
+#[test]
+fn only_a_membership_record_of_the_workspace_must_be_at_version_1() {
+    let passed_over = granted_then(|rows| {
+        rows.edited("AgentDeployed", T0 - 60, |e| e["schema_version"] = json!(7));
+        rows.edited("MemberDeactivated", T0 - 50, |e| {
+            e["stream_id"] = json!(other_stream());
+            e["payload"] = member(ALICE);
+            e["schema_version"] = json!(2);
+        });
+    });
+    assert_eq!(
+        passed_over.parsed(),
+        Ok(vec![activated(
+            2,
+            T0 - 100,
+            ALICE,
+            &[Role::Operator],
+            T0 - 100
+        )]),
+        "a later version of another record, or of another workspace's revoke, says nothing here"
+    );
+    let live_unknown = granted_then(|rows| {
+        rows.edited("MemberDeactivated", T0 - 50, |e| {
+            e["environment"] = json!("live");
+            e["payload"] = member(ALICE);
+            e["schema_version"] = json!(2);
+        });
+    });
+    assert!(
+        live_unknown.parsed().is_err(),
+        "it is still the workspace's own revoke"
+    );
+    assert_eq!(query(&live_unknown.failed(T0), ALICE), Err(LookupFailed));
 }
