@@ -69,12 +69,28 @@ pub struct RecordedNews {
     pub licensed: bool,
 }
 
-/// The recorded data plane. It returns no filings, and stamps every item at its age before the
-/// cut-off of the read it answers; `retrieve` filters the answer again.
+/// One recorded filing, known `age_s` and filed `filed_age_s` seconds before the read's cut-off
+/// (DEC-2211).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedFiling {
+    pub item_id: ItemId,
+    pub source: SourceId,
+    pub symbol: Symbol,
+    pub form: String,
+    pub age_s: u32,
+    pub filed_age_s: u32,
+    pub excerpt: String,
+    pub licensed: bool,
+}
+
+/// The recorded data plane. It stamps every item at its age before the cut-off of the read it
+/// answers; `retrieve` filters the answer again. The cell's recording holds no filings (DEC-2210
+/// item 2, DEC-2211).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedPlane {
     pub bars: Vec<RecordedBar>,
     pub news: Vec<RecordedNews>,
+    pub filings: Vec<RecordedFiling>,
     pub instruments: Vec<InstrumentFact>,
 }
 
@@ -94,6 +110,7 @@ pub struct Bundle {
 const RESEARCH: &str = "research.json";
 const BARS: &str = "bars.json";
 const NEWS: &str = "news.json";
+const FILINGS: &str = "filings.json";
 const INSTRUMENTS: &str = "instruments.json";
 
 impl Bundle {
@@ -168,6 +185,11 @@ impl Bundle {
                     .rows()?
                     .iter()
                     .map(news)
+                    .collect::<Result<_, _>>()?,
+                filings: Doc::read(dir, FILINGS)?
+                    .rows()?
+                    .iter()
+                    .map(filing)
                     .collect::<Result<_, _>>()?,
                 instruments: Doc::read(dir, INSTRUMENTS)?
                     .rows()?
@@ -262,8 +284,27 @@ impl NewsReader for RecordedPlane {
 }
 
 impl FilingReader for RecordedPlane {
-    fn filings(&self, _query: &TextQuery) -> Result<Vec<Filing>, ReadError> {
-        Ok(Vec::new())
+    fn filings(&self, query: &TextQuery) -> Result<Vec<Filing>, ReadError> {
+        Ok(self
+            .filings
+            .iter()
+            .filter_map(|item| {
+                Some(Filing {
+                    item_id: item.item_id.clone(),
+                    source: item.source.clone(),
+                    symbol: item.symbol.clone(),
+                    form: item.form.clone(),
+                    knowledge_at: before(query.cut_off, item.age_s)?,
+                    filed_at: before(query.cut_off, item.filed_age_s)?,
+                    excerpt: item.excerpt.clone(),
+                    content_hash: Digest::of_parts(&[
+                        item.form.as_bytes(),
+                        item.excerpt.as_bytes(),
+                    ]),
+                    licensed: item.licensed,
+                })
+            })
+            .collect())
     }
 }
 
@@ -383,6 +424,19 @@ fn bar(row: &Doc<'_>) -> Result<RecordedBar, BundleError> {
         low: row.price("low")?,
         close: row.price("close")?,
         volume: Qty::parse(row.text("volume")?).map_err(|_| row.malformed("volume"))?,
+    })
+}
+
+fn filing(row: &Doc<'_>) -> Result<RecordedFiling, BundleError> {
+    Ok(RecordedFiling {
+        item_id: ItemId::new(row.text("item_id")?).map_err(|_| row.malformed("item_id"))?,
+        source: SourceId::new(row.text("source")?).map_err(|_| row.malformed("source"))?,
+        symbol: Symbol::new(row.text("symbol")?).map_err(|_| row.malformed("symbol"))?,
+        form: row.text("form")?.to_owned(),
+        age_s: row.small("age_s")?,
+        filed_age_s: row.small("filed_age_s")?,
+        excerpt: row.text("excerpt")?.to_owned(),
+        licensed: row.flag("licensed")?,
     })
 }
 
