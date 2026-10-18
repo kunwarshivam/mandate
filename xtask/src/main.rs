@@ -65,6 +65,9 @@ commands:
   release publish-index <out>
                         push and sign the multi-arch index over every arch's published images
                         (main only, from CI, after each arch's publish)
+  release publish-charts <out>
+                        package the hosted clusters' charts, push them to GHCR and sign each
+                        digest keyless (main only, from CI; E21-58)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
   cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
@@ -282,6 +285,7 @@ fn run() -> Result<()> {
             release::publish(&root, Path::new(dist), Path::new(out))
         }
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
+        ["release", "publish-charts", out] => release::publish_charts(&root, Path::new(out)),
         ["cell", "up"] => cell::up(),
         ["cell", "down"] => cell::down(),
         ["cell", "hosted"] => cell::hosted(),

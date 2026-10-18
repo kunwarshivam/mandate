@@ -306,3 +306,24 @@ async fn an_expired_grant_is_refused_before_any_login() {
         "the refusal spent nothing"
     );
 }
+
+/// DEC-2020: the platform's own secrets, on OpenBao. The table is checked first, so a run with
+/// no server still fails until it holds.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn a_platform_secret_is_written_by_import_and_read_by_its_one_process() {
+    conformance::the_platform_secrets_have_their_holders();
+    if let Some(bao) = Bao::new().await {
+        conformance::a_platform_secret_is_written_by_import_and_read_by_its_one_process(&bao).await;
+    }
+}
+
+/// DEC-2020: no output shows a platform secret, on OpenBao.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn no_debug_or_refusal_shows_a_platform_secret() {
+    conformance::the_platform_secrets_have_their_holders();
+    if let Some(bao) = Bao::new().await {
+        conformance::no_debug_or_refusal_shows_a_platform_secret(&bao).await;
+    }
+}
