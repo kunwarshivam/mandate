@@ -272,14 +272,16 @@ In `deploy/tests/test_vault.py`:
 - sealed is not ready, and no probe restarts it, since a restart seals it;
 - hardened as the workspace's pods are, its image by digest, and no secret in a value or the
   environment;
-- the workspace chart's vault egress selects exactly its pods and port.
+- the workspace chart's vault egress selects exactly its pods and port, and the processes it admits
+  are exactly those whose egress names the vault;
+- no seal block and no seal key outside staging, and staging's static seal reads its key from a
+  read-only mounted file, never the environment (DEC-2021).
 
 `cargo xtask cell up` installs it, initializes it once with one unseal key, kept with the root
 token in `target/cell/vault-init.json` (mode 0600; this cell holds fake secrets only), unseals it,
 and refuses a vault on any storage but raft. `cell down` discards both.
 
-A hosted cell, staging included, is initialized and unsealed by the founder, by hand (DEC-977 item
-5):
+A production cell is initialized and unsealed by the founder, by hand (DEC-977 item 5):
 
 ```bash
 helm upgrade --install vault deploy/cell/charts/vault -n ws-ws1 -f deploy/cell/values/vault-managed.yaml
@@ -288,9 +290,23 @@ kubectl exec -it -n ws-ws1 vault-0 -- bao operator unseal    # twice, two differ
 ```
 
 The shares and the root token are kept offline, never in the repository, CI, a file the cluster can
-read, or an environment variable. After every restart of `vault-0`, it is unsealed again. The chart
-keeps its TLS pair by Helm's `lookup`, so it is installed by Helm itself (or Flux's
-helm-controller), not rendered by `helm template` (DEC-2019, residuals).
+read, or an environment variable. After every restart of `vault-0`, it is unsealed again.
+
+Staging (paper only) unseals itself (DEC-2605 row 10, [DEC-2021](../../docs/project/decisions/DEC-2021.md)):
+the staging bootstrap creates the Secret `vault-seal-key` (its `key` entry, from the
+`infra-staging` GitHub environment) before the chart's first install, and the chart mounts it as a
+file. Once, after that install:
+
+```bash
+helm upgrade --install vault deploy/cell/charts/vault -n ws-ws1 -f deploy/cell/values/vault-staging.yaml
+kubectl exec -it -n ws-ws1 vault-0 -- bao operator init -recovery-shares=3 -recovery-threshold=2
+```
+
+The recovery keys and the root token are kept offline as the shares are; they are needed only to
+make a root token or rotate the seal, never to unseal. The schema refuses `seal.type: static`
+anywhere but `environment: staging`. The chart keeps its TLS pair by Helm's `lookup`, so it is
+installed by Helm itself (or Flux's helm-controller), not rendered by `helm template` (DEC-2019,
+residuals).
 
 Not yet: provisioning policies and roles in the cell and handing each process its secret id as a
 mounted file, the egress drill's vault probe, and the vault's audit device.
