@@ -10,7 +10,9 @@ mod owner;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
-use mandate_num::{Price, Qty, Ratio, Rounding, Usd};
+use mandate_num::{
+    MarkPrice, Price, Qty, Ratio, Rounding, ShareIncrement, SignedQty, SplitRatio, Usd,
+};
 use mandate_time::UtcNanos;
 
 use self::daily::{DailyLatch, Rollover};
@@ -27,6 +29,12 @@ use crate::validate::ValidatedMandate;
 
 /// The places §5.2 reports the drawdown and the daily P&L fraction at, rounded half to even.
 const REPORTED_RATIO_PLACES: u32 = 12;
+
+/// The places a split's adjusted mark is rounded to, half to even, once (§5.2, trading spec §8.5).
+const MARK_PLACES: u32 = 12;
+
+/// Cash in lieu and a dividend are cents, rounded half to even (§5.2, trading spec §8.5).
+const CENT_PLACES: u32 = 2;
 
 /// Everything the fold carries between inputs. The clock is not here: it is the caller's calendar,
 /// not state, so two folds of the same inputs are equal whichever clock each counted on.
@@ -47,7 +55,8 @@ pub(super) struct Fold {
     /// (trading spec §8.1) never reaches E.
     cash: Usd,
     qty: Qty,
-    mark: Price,
+    /// A mark, not a price: a split's adjusted mark has up to 12 places (§5.2).
+    mark: MarkPrice,
     /// The peak of E since the state opened (§5.5). It starts at the allocation, which the schema makes
     /// positive, and only rises in this slice, so it is always positive.
     high_water: Usd,
@@ -182,7 +191,7 @@ impl Fold {
             allocation,
             cash: opening.position_qty.notional(opening.avg_cost)?.negated(),
             qty: opening.position_qty,
-            mark: opening.avg_cost,
+            mark: MarkPrice::from(opening.avg_cost),
             high_water: allocation,
             day_start: allocation,
             capital: allocation,
@@ -339,7 +348,12 @@ impl Fold {
         Ok(self
             .allocation
             .checked_add(self.cash)?
-            .checked_add(self.qty.notional(self.mark)?)?)
+            .checked_add(self.market_value()?)?)
+    }
+
+    /// Q × mark, the position's value at the risk mark.
+    fn market_value(&self) -> Result<Usd, SpecError> {
+        Ok(SignedQty::from(self.qty).value_at_mark(self.mark)?)
     }
 
     /// E, then H = max(H, E) (§5.2), as the five figures the conditions read.
@@ -423,9 +437,19 @@ impl Fold {
                 self.complete_goal(journal)?;
                 None
             }
-            Input::Split { .. } | Input::CashDividend { .. } | Input::ReceivablePosted => {
-                return Err(SpecError::Unimplemented);
+            Input::Split {
+                ratio,
+                increment,
+                cash_in_lieu_price,
+            } => {
+                self.split(*ratio, *increment, *cash_in_lieu_price)?;
+                None
             }
+            Input::CashDividend { per_share } => {
+                self.pay_dividend(*per_share)?;
+                None
+            }
+            Input::ReceivablePosted => None,
         };
         Ok((Read::Nothing, refused))
     }
@@ -446,7 +470,7 @@ impl Fold {
         if !counts {
             Read::Nothing
         } else if sane {
-            self.mark = bid;
+            self.mark = MarkPrice::from(bid);
             self.mark_age_s = 0;
             self.instrument_restrictions
                 .remove(&InstrumentRestriction::StaleMark);
@@ -482,6 +506,36 @@ impl Fold {
             change,
             reason,
         });
+    }
+
+    /// A split by trading spec §8.5's rule (§5.2, MI-33). E is A + cash + Q × mark, so the residual's
+    /// basis, which moves realized P&L and the basis alike, never reaches it: Q' and the adjusted mark
+    /// carry the position, and the cash in lieu (none when no price is posted) joins the cash as the
+    /// receivable it is. An action is not a quote, so the mark's age runs on.
+    fn split(
+        &mut self,
+        ratio: SplitRatio,
+        increment: ShareIncrement,
+        cash_in_lieu_price: Option<Price>,
+    ) -> Result<(), SpecError> {
+        let split = ratio.split(SignedQty::from(self.qty), increment)?;
+        if let Some(price) = cash_in_lieu_price {
+            let in_lieu = split.cash_in_lieu(price, CENT_PLACES, Rounding::HalfEven)?;
+            self.cash = self.cash.checked_add(in_lieu)?;
+        }
+        self.qty = split.after().abs();
+        self.mark = ratio.mark(self.mark, MARK_PLACES, Rounding::HalfEven)?;
+        Ok(())
+    }
+
+    /// A cash dividend's receivable, round(Q × d, 2), is income on the ex-date (§5.2, MI-33).
+    fn pay_dividend(&mut self, per_share: Price) -> Result<(), SpecError> {
+        let receivable = self
+            .qty
+            .notional(per_share)?
+            .round(CENT_PLACES, Rounding::HalfEven)?;
+        self.cash = self.cash.checked_add(receivable)?;
+        Ok(())
     }
 
     /// A fill moves the sub-ledger in any session (§5.2). A sale of more than the agent holds would be

@@ -3476,7 +3476,6 @@ const ACTION_AT: &str = "2026-09-22T00:00:00.000000000Z";
 /// time as the tick does and moves nothing itself. Without the split, 100 × 46.4 would be 4640 of
 /// stock, not 9280.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_split_with_no_residual_moves_no_usd_measure_and_journals_what_a_tick_would()
 -> Result<(), String> {
     let mandate = swing(&[("/risk/max_daily_loss", Some(s("0.5")))])?;
@@ -3548,7 +3547,6 @@ fn a_split_with_no_residual_moves_no_usd_measure_and_journals_what_a_tick_would(
 /// 10001 × (100 − 99) ÷ 100 = 100.01, cash in lieu = round(⅓ × 300.03, 2) = 100.01, so E stays
 /// 10000. A later bid of 300 reads 33 shares: −10001 + 100.01 + 33 × 300 = −0.99, so E is 9999.01.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_reverse_split_removes_the_residual_and_its_cash_in_lieu_is_in_equity_until_posted()
 -> Result<(), String> {
     let mandate = ladder_only(&[])?;
@@ -3591,7 +3589,6 @@ fn a_reverse_split_removes_the_residual_and_its_cash_in_lieu_is_in_equity_until_
 /// adjusted mark: ⅓ × 300.03 = 100.01, from 10000 to 9899.99, a drawdown of 0.010001 that the ladder
 /// reads as it reads any fall (§5.2, MI-33).
 #[test]
-#[ignore = "pending E4-4"]
 fn a_residual_with_no_posted_price_leaves_equity_by_its_value_at_the_adjusted_mark()
 -> Result<(), String> {
     let mandate = ladder_only(&[])?;
@@ -3621,7 +3618,6 @@ fn a_residual_with_no_posted_price_leaves_equity_by_its_value_at_the_adjusted_ma
 /// 33.333333333, whose residual's cash in lieu rounds to 0 at the cent, and E is
 /// 33.333333333 × 300.03 = 10000.99999989999. In whole shares it would be 33 × 300.03 + 100.01.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_fractionable_split_truncates_to_a_billionth_of_a_share() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let outcomes = walk(
@@ -3655,7 +3651,6 @@ fn a_fractionable_split_truncates_to_a_billionth_of_a_share() -> Result<(), Stri
 /// 300 shares are worth 9999.9999999999, a change of −10⁻¹⁰ within I3's bound of 300 × 5 × 10⁻¹³,
 /// and the drawdown it leaves rounds to 0 (§5.2, MI-33).
 #[test]
-#[ignore = "pending E4-4"]
 fn a_split_mark_is_rounded_once_at_twelve_places() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let outcomes = walk(
@@ -3681,7 +3676,6 @@ fn a_split_mark_is_rounded_once_at_twelve_places() -> Result<(), String> {
 /// mark, lower by the dividend, returns E to 10000 and leaves a drawdown of 25.5 ÷ 10025.5, and the
 /// payment moves nothing (MC-R29, MI-33).
 #[test]
-#[ignore = "pending E4-4"]
 fn a_cash_dividend_is_income_on_the_ex_date_and_its_payment_moves_nothing() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let outcomes = walk(
@@ -3715,7 +3709,6 @@ fn a_cash_dividend_is_income_on_the_ex_date_and_its_payment_moves_nothing() -> R
 /// The dividend is rounded half to even at the cent: one share at 0.125 is 0.12, not 0.13, and at
 /// 0.135 it is 0.14 (§5.2, trading spec §8.5).
 #[test]
-#[ignore = "pending E4-4"]
 fn a_dividend_is_rounded_half_to_even_at_the_cent() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let outcomes = walk(
@@ -3746,7 +3739,6 @@ fn a_dividend_is_rounded_half_to_even_at_the_cent() -> Result<(), String> {
 /// a split 10 s after the first quote at the hard level leaves the breach pending, and only the next
 /// quote at the hard level, at the adjusted price, latches both rungs.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_corporate_action_is_not_a_quote_so_it_never_completes_a_hard_breach() -> Result<(), String> {
     let mandate = swing(&[
         ("/risk/max_daily_loss", Some(s("0.5"))),
@@ -3964,7 +3956,6 @@ fn corporate_actions_move_the_risk_state_only_by_their_cash(
 }
 
 #[test]
-#[ignore = "pending E4-4"]
 fn corporate_actions_move_the_risk_state_only_by_their_cash_against_an_independent_oracle() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 512,
