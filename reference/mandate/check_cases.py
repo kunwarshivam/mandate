@@ -149,9 +149,23 @@ req("MC-R28", s[1]["agent_equity"] == s[0]["agent_equity"] and s[2]["agent_equit
     and not any(j["type"] in LIMITS for x in s for j in x["journal"]),
     "the residual's cash in lieu keeps E whole, and posting it moves nothing")
 s = steps("MC-R29")
-req("MC-R29", Decimal(s[1]["agent_equity"]) - Decimal(s[0]["agent_equity"]) == Decimal("25.5")
+req("MC-R29", s[1]["agent_equity"] == s[0]["agent_equity"] and s[1]["high_water_mark"] == s[0]["high_water_mark"]
+    and Decimal(s[2]["agent_equity"]) == Decimal("99.745") * 100 + Decimal("25.5")
     and s[3]["agent_equity"] == s[2]["agent_equity"] and s[3]["high_water_mark"] == s[2]["high_water_mark"],
-    "the dividend is income on the ex-date, and its payment moves nothing")
+    "the dividend joins E with the ex-date's first mark, and its application and payment move nothing")
+s = steps("MC-R30")
+req("MC-R30", s[0]["size_factor"] == "0.5" and s[1]["size_factor"] == "0.5" and s[2]["size_factor"] == "0.5"
+    and not any(j["type"] in LIMITS for x in s[1:] for j in x["journal"])
+    and Decimal(s[2]["agent_equity"]) == Decimal("95.7") * 100 + Decimal("120"),
+    "a dividend applied before the ex-date's mark lifts no rung")
+s = steps("MC-R31")
+req("MC-R31", Decimal(s[1]["agent_equity"]) <= Decimal(s[0]["agent_equity"])
+    and not any(j["type"] == "RiskLimitLifted" for j in s[1]["journal"])
+    and any(j["type"] == "RiskLimitTriggered" and j.get("action") == "exits_only" for j in s[2]["journal"]),
+    "the split at the boundary never raises E, so the tick confirms the exits_only rung")
+s = steps("MC-R32")
+req("MC-R32", Decimal(s[1]["agent_equity"]) == Decimal(s[0]["agent_equity"]) - 200 and s[2]["agent_equity"] == s[1]["agent_equity"],
+    "Q' = 0 with no price removes the position at 0, and the posting adds nothing")
 s = steps("MC-R13")
 req("MC-R13", s[2]["agent_equity"] == s[1]["agent_equity"] and s[2]["instrument_restrictions"] == [] and
     s[3]["instrument_restrictions"] == ["stale_mark"] and s[4]["instrument_restrictions"] == [] and s[5]["instrument_restrictions"] == ["stale_mark"],
