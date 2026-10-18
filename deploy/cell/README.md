@@ -15,7 +15,7 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 | `charts/vault/` | The workspace vault: OpenBao, pinned by digest, in server mode on raft storage over TLS 1.3, reached only by the processes whose egress names it, unsealed by hand ([DEC-2019](../../docs/project/decisions/DEC-2019.md)). Installed before the workspace chart |
 | `charts/archive-store/` | The local cell's stand-in for the S1 endpoint the journal archives to: the pinned test store, in its own namespace, reachable only by the journal's archive clients (DEC-1050 item 5). Never in cell #1 |
 | `compose/compose.json` | The same processes for one host (infrastructure §3.2, hybrid), generated: `cargo xtask cell generate --write` |
-| `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ |
+| `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ ; cell #1's own settings on top of `k3s.yaml`, and its bring-up, are in [`../hosted/`](../hosted/README.md) |
 | `images/mandate.Dockerfile` | The interim `mandate` image the cell builds from the change; lane R2 (E21-35) replaces it |
 | `images/deploy-manager.Dockerfile` | The deployment manager's image (`mandate-deployd`, DEC-1172), built beside it the same way |
 | `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
@@ -60,6 +60,9 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   process's start (OPS-13);
 - `environment` is `paper` or `backtest` only, and every image is pinned by digest or is the
   cell's own `mandate.local/` build;
+- `MANDATE_DEPLOYMENT_TIER` on every process comes from the `deploymentTier` value alone:
+  `production` unless a values file says otherwise, `ci` in the local cell, `dev` on hosted cell #1
+  (DEC-971 item 2, [DEC-2001](../../docs/project/decisions/DEC-2001.md) item 6);
 - the cell's one ingress is a `cloudflared` pod dialing out to Cloudflare's tunnel edge, off in the
   local cell: no Service, NodePort, LoadBalancer or Ingress, and the tunnel token a mounted file;
 - no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and
@@ -206,19 +209,25 @@ there is one, and what the lane still has to land. A gap never fails the run and
 Each step's heading reads `ready`, `partial` or `skipped` with the lanes it waits on, and the
 report closes with every wait grouped by lane. The run ends, in the same pod, by exporting the
 workspace's control stream and verifying it by journal spec §11 against the artifact store its
-gestures wrote, so every artifact a record names is checked. Each run uses a fresh workspace,
-`demo<run id>`.
+gestures wrote, so every artifact a record names is checked. Each run uses a fresh workspace, a
+ULID made from the run id (`01KDEM<run id>000000000D`), founded for the demo owner, the member the
+stub issuer's `demo-owner` subject is linked to; before the gestures, the scenario points the API
+and the deployment manager at it (`helm upgrade --reuse-values --set api.workspace=…`) and waits
+for both to roll out, so every step, through the CLI, the API or `web/`, acts on one workspace
+(DEC-2010). Step 5 registers the run's settings as the rule set, runs
+`mandate-backtest-runner` on its committed demo inputs and records the payload it stores, in the
+same pod, so the closing verify checks the record's report (DEC-2023).
 
-The run's own report is the up-to-date list; on 2026-10-18, after slice 4, it read:
+The run's own report is the up-to-date list; on 2026-10-18, after slice 7, it read:
 
 | Step | Today | Runs | Waits on |
 |---|---|---|---|
-| 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found`; the cell's API refusing a read with no session (the one 401) | SI (E21-52, #1591): the stub issuer's entry point; E2E (E21-54): sign in and read the API's own workspace |
-| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy`, each code shown then typed | SI and W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
+| 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found` for the demo owner; the cell's API refusing a read of the run's workspace with no session (the one 401); the demo owner's sign-in through the stub issuer (204 and its cookie); and the read with that session, whose agents list the demo's agent (200) | W2: the same in `web/` |
+| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy`, each code shown then typed | W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
 | 3. Research, through the gateway's recorded fake | skipped | Nothing yet | D1: the runtime started; I2 (E19-2): a deployment's research configured (DEC-2208); AH (E19-13): the agentic loop over its state (#1551, #1561, #1566, #1569 on `main`) |
-| 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4, #1592) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
-| 5. A backtest of the same version | skipped | Nothing yet | E2E: run the runner and `mandate backtest record` (#1581) in the gestures' pod; SI: the API read with a session |
-| 6. The kill switch | partial | `agent kill --agent demo-spy` (agent scope), recorded before the closing export and verify | SI and W2: from `web/`; D1 and X: the processes stop on it |
+| 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
+| 5. A backtest of the same version | partial | `config register --kind rule_set` (the run's settings), `mandate-backtest-runner run` on its committed demo inputs, `backtest record` of the payload it stores, which the closing verify checks, and the owner's signed-in read of it through the API (completed, with the stored report) | W2: web/'s report screen |
+| 6. The kill switch | partial | `agent kill --agent demo-spy` (agent scope), recorded before the closing export and verify | W2: from `web/`; D1 and X: the processes stop on it |
 
 The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
 every opening asked, protection on. CI's `cell-demo` job, which no required check depends on, runs
@@ -309,6 +318,18 @@ make a root token or rotate the seal, never to unseal. The schema refuses `seal.
 anywhere but `environment: staging`. The chart keeps its TLS pair by Helm's `lookup`, so it is
 installed by Helm itself (or Flux's helm-controller), not rendered by `helm template` (DEC-2019,
 residuals).
+
+Rotating staging's seal key (DEC-2021 item 5) is a one-off with the founder at the terminal; the
+chart refuses a second key today, so it waits on a chart change that renders OpenBao's
+`previous_key` for one restart (backlog, E21-32 *Left*). Its steps then:
+
+1. Pick a new `keyId` (`staging-2`). Add the new key to `vault-seal-key` beside the old one, through
+   the founder's bootstrap, never in git, a value, or a log.
+2. Set `seal.keyId` to the new name and the old one as the previous key in
+   `deploy/cell/values/vault-staging.yaml`; Flux restarts `vault-0`, which unseals with the old key
+   and re-wraps its root key under the new one.
+3. Once `bao status` shows the vault unsealed under the new key id, remove the previous key from
+   the values, then the old key from the Secret.
 
 The `vault` drill provisions the cell's vault and proves each identity's reach (DEC-2022). Not yet:
 each process's secret id as a mounted file (V3, with the executor's wiring, E21-9), and the

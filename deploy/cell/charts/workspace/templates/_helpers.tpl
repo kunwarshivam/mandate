@@ -171,6 +171,8 @@ start without them (AGENTS.md rule 3).
 {{- end }}
 - name: HOME
   value: /tmp
+- name: MANDATE_DEPLOYMENT_TIER
+  value: {{ .root.Values.deploymentTier | quote }}
 {{- if include "mandate.artifactsAccess" . }}
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}

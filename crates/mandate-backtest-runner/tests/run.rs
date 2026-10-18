@@ -18,6 +18,9 @@ use mandate_time::UtcNanos;
 use mandate_backtest_runner::{InputFiles, Inputs, Ran, RunnerError, decode, run};
 use mandate_canon::{Digest, Key, Object, Value, parse, to_canonical};
 use mandate_journal::{ArtifactRef, ArtifactStore, Draft, get_artifact};
+use mandate_num::SplitRatio;
+use mandate_time::Date;
+use mandate_version_backtest::RecordedAction;
 
 type Store = BTreeMap<Digest, Vec<u8>>;
 
@@ -228,7 +231,7 @@ fn a_refused_run_stores_a_refused_payload() {
     let (store, ran) = ran(Some((
         "bars.json",
         r#""corporate_actions": []"#,
-        r#""corporate_actions": ["2026-09-15"]"#,
+        r#""corporate_actions": [{"kind": "split", "ex_date": "2026-09-15", "ratio": {"new": 2, "old": 1}, "cash_in_lieu_price": null}]"#,
     )));
     assert_eq!(ran.outcome, Err("corporate_action_in_range"));
     let payload = payload(&store, &ran);
@@ -675,4 +678,120 @@ fn the_store_is_the_flag_or_the_cells_variable() {
     assert_eq!(store_root(None, None), Err(RunnerError::StoreUnset));
     assert_eq!(RunnerError::StoreUnset.code(), "artifacts_unset");
     assert_eq!(mandate_backtest_runner::ARTIFACTS_VAR, "MANDATE_ARTIFACTS");
+}
+
+/// `bars.json` holding exactly these corporate-action records.
+fn with_actions(records: &str) -> Result<Inputs, RunnerError> {
+    let replaced = format!(r#""corporate_actions": [{records}]"#);
+    decoded(Some(("bars.json", r#""corporate_actions": []"#, &replaced)))
+}
+
+fn date(text: &str) -> Date {
+    Date::parse(text).unwrap_or_else(|e| panic!("{e}"))
+}
+
+const SPLIT: &str = r#"{"kind": "split", "ex_date": "2026-08-14", "ratio": {"new": 1, "old": 10}, "cash_in_lieu_price": "40.5"}"#;
+const DIVIDEND: &str = r#"{"kind": "cash_dividend", "ex_date": "2026-08-18", "pay_date": "2026-08-28", "per_share": "0.25"}"#;
+
+/// DEC-2245 item 1: each kind decodes to its record, in the file's order; a dividend may be paid
+/// on its ex-date.
+#[test]
+fn each_action_kind_decodes_to_its_record() {
+    let inputs =
+        with_actions(&format!("{SPLIT}, {DIVIDEND}")).unwrap_or_else(|e| panic!("decodes: {e:?}"));
+    assert_eq!(
+        inputs.corporate_actions,
+        [
+            RecordedAction::Split {
+                ex_date: date("2026-08-14"),
+                ratio: SplitRatio::new(1, 10).unwrap(),
+                cash_in_lieu_price: Some(Price::parse("40.5").unwrap()),
+            },
+            RecordedAction::CashDividend {
+                ex_date: date("2026-08-18"),
+                pay_date: date("2026-08-28"),
+                per_share: Price::parse("0.25").unwrap(),
+            },
+        ]
+    );
+    let same_day = DIVIDEND.replace(r#""2026-08-28""#, r#""2026-08-18""#);
+    let inputs = with_actions(&same_day).unwrap_or_else(|e| panic!("decodes: {e:?}"));
+    assert!(matches!(
+        inputs.corporate_actions.as_slice(),
+        [RecordedAction::CashDividend { pay_date, .. }] if *pay_date == date("2026-08-18")
+    ));
+    let no_price = SPLIT.replace(r#""40.5""#, "null");
+    let inputs = with_actions(&no_price).unwrap_or_else(|e| panic!("decodes: {e:?}"));
+    assert!(matches!(
+        inputs.corporate_actions.as_slice(),
+        [RecordedAction::Split {
+            cash_in_lieu_price: None,
+            ..
+        }]
+    ));
+}
+
+/// DEC-2245 item 1: an action of another kind, or a record missing, adding, or mistyping a member,
+/// refuses, naming it; a dividend paid before its ex-date and a split of zero shares refuse too.
+#[test]
+fn a_malformed_action_refuses_naming_its_member() {
+    let at = "bars.json/corporate_actions/0";
+    let cases = [
+        (
+            SPLIT.replace(r#""split""#, r#""spin_off""#),
+            format!("{at}/kind"),
+        ),
+        (
+            SPLIT.replace(r#""kind": "split", "#, ""),
+            format!("{at}/kind"),
+        ),
+        (
+            SPLIT.replace(r#", "cash_in_lieu_price": "40.5""#, ""),
+            format!("{at}/cash_in_lieu_price"),
+        ),
+        (
+            SPLIT.replace(r#""new": 1"#, r#""new": 0"#),
+            format!("{at}/ratio"),
+        ),
+        (
+            SPLIT.replace(r#""new": 1"#, r#""new": "1""#),
+            format!("{at}/ratio/new"),
+        ),
+        (
+            SPLIT.replace(r#""old": 10}"#, r#""old": 10, "extra": 1}"#),
+            format!("{at}/ratio/extra"),
+        ),
+        (
+            SPLIT.replace(r#""40.5""#, r#""-1""#),
+            format!("{at}/cash_in_lieu_price"),
+        ),
+        (
+            SPLIT.replace(r#""2026-08-14""#, r#""2026-08-14T00:00:00Z""#),
+            format!("{at}/ex_date"),
+        ),
+        (
+            DIVIDEND.replace(r#""2026-08-28""#, r#""2026-08-17""#),
+            format!("{at}/pay_date"),
+        ),
+        (
+            DIVIDEND.replace(r#""0.25""#, r#""0""#),
+            format!("{at}/per_share"),
+        ),
+        (
+            DIVIDEND.replace(r#""per_share""#, r#""amount""#),
+            format!("{at}/amount"),
+        ),
+        (
+            DIVIDEND.replace(r#""0.25"}"#, r#""0.25", "cash_in_lieu_price": null}"#),
+            format!("{at}/cash_in_lieu_price"),
+        ),
+        (r#""2026-08-14""#.to_owned(), at.to_owned()),
+    ];
+    for (record, path) in cases {
+        assert_eq!(
+            with_actions(&record).map(|_| ()),
+            Err(RunnerError::Input(path.clone())),
+            "{record}"
+        );
+    }
 }

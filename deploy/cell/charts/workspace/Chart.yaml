@@ -3,3 +3,5 @@ name: mandate-workspace
 description: One workspace deployment of Mandate (E21-36), rendered from processes.json, the same process list the Compose file is rendered from
 type: application
 version: 0.1.0
+sources:
+  - https://github.com/kunwarshivam/mandate

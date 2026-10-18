@@ -3,3 +3,5 @@ name: mandate-vault-server
 description: The workspace vault, OpenBao pinned by digest (D-5), in server mode on integrated storage over TLS, unsealed by hand, reachable only by the workspace's processes whose egress names the vault (E21-32, DEC-977, DEC-2019)
 type: application
 version: 0.1.0
+sources:
+  - https://github.com/kunwarshivam/mandate

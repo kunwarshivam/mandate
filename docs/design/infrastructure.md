@@ -410,7 +410,7 @@ into hybrid or on-prem deployments (HLD §8).
 | Object-storage write credentials | Cold exporter, artifact writer | Vault, per workspace prefix |
 | Per-workspace data keys and per-person keys | Encryption at rest; personal-data vault (E5-5, journal §6.5) | Key management service or the customer's HSM; versions kept for the retention period |
 | mTLS identity to the global control plane | The workspace deployment's outbound link | Vault; rotated |
-| Release signing key | The release pipeline | The founder's hardware key (ES-17); never on a server |
+| Release signing key | The release pipeline's `release-signing` job, after the founder approves the run | A cosign key in the protected GitHub environment `release-signing`; no hardware key (DEC-2605 rows 8 and 9, [DEC-2024](../project/decisions/DEC-2024.md)) |
 
 ### 5.2 Custody and scoping
 
@@ -602,8 +602,11 @@ range's `cause` `token_unverifiable`; any `anchor_unstamped` fails the drill (DE
    under the founder's hardware key, with build provenance (ES-17). Every process checks its own
    signature at start (OPS-15) and journals its build digest (`actor.build`). The images, the
    check and the publish job are [DEC-971](../project/decisions/DEC-971.md): CI signs only with
-   an ephemeral test key; outside dev and CI only a compiled-in release key is trusted, and none
-   is wired until the founder's hardware key is (item 7).
+   an ephemeral test key; outside dev and CI only a compiled-in release key is trusted. The
+   release key is a cosign key in the protected `release-signing` environment, and the
+   `release-signing` job signs each binary and `SHA256SUMS` on a dispatch from `main` the founder
+   approves ([DEC-2024](../project/decisions/DEC-2024.md)); none is trusted until its public
+   half is in `RELEASE_KEYS`.
 4. **Promote.** `main` → staging automatically; staging → production by the founder's approval
    while live money is involved (DEC-79). Production rolls out one cell at a time, starting with a
    canary cell of internal workspaces (Proposed).
