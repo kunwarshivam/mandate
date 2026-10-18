@@ -28,6 +28,40 @@ pub fn until_parser(rows: &[StoredEvent]) -> Result<Vec<MembershipRecord>, Looku
     Err(LookupFailed)
 }
 
+/// Why the hosted control stream's rows give no membership records (DEC-2110). Each is a failed
+/// lookup, never an empty membership (`AGENTS.md` rule 3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowsRefused {
+    /// The hosted stream's first row is not its `StreamOpened` at `seq` 1, so the stream names no
+    /// environment.
+    NotOpened,
+    /// The row at `seq` is not a canonical envelope, or is a `Member*` record that does not map
+    /// (`mandate_identity::control_entry`).
+    Unreadable { seq: u64 },
+    /// The `Member*` record at `seq` is at a schema version other than 1 (journal spec §9.12).
+    UnknownVersion { seq: u64 },
+    /// The `Member*` record at `seq` is written in an environment other than the stream's.
+    OtherEnvironment { seq: u64 },
+    /// E21-55 has not landed.
+    Unimplemented,
+}
+
+/// The membership records of `workspace`'s control stream among `rows`, in stream order: each
+/// row's envelope is read, a row of another stream is not the workspace's and is passed over, and
+/// every `Member*` record of the workspace's stream maps through `control_entry` (DEC-991 item 4,
+/// DEC-2110).
+///
+/// # Errors
+/// [`RowsRefused`] for a stream not opened, an unreadable row, or a `Member*` record of an unknown
+/// schema version or another environment.
+pub fn membership_records(
+    workspace: WorkspaceId,
+    rows: &[StoredEvent],
+) -> Result<Vec<MembershipRecord>, RowsRefused> {
+    let _ = (workspace, rows);
+    Err(RowsRefused::Unimplemented)
+}
+
 /// The one workspace this deployment hosts, and its organization (§3.11 item 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Hosted {

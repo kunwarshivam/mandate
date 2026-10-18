@@ -21,6 +21,8 @@ neither the invalidation verdict (E19-5) nor the agent-stream `ModelInvocationRe
   `crates/mandate-research-run/src/plan.rs` (the retrieval plan and its scope),
   `crates/mandate-research-run/src/ports.rs` (the read-only reader ports),
   `crates/mandate-research-run/src/retrieve.rs` (`retrieve` and the capture records),
+  `crates/mandate-research-run/src/dispatch.rs` (`dispatch`: an agentic run's reads and thinks,
+  capped and spotlighted, E19-13 slice 3b, DEC-2209),
   `crates/mandate-research-run/src/call.rs` (`ResearchCall`, its gateway request, `call`, §7.3's
   treatments), `crates/mandate-research-run/src/entry.rs` (the pinned research entry and its output
   schema), `crates/mandate-research-run/src/backend.rs` (the OpenRouter-or-recorded-fake selection),
@@ -33,7 +35,8 @@ neither the invalidation verdict (E19-5) nor the agent-stream `ModelInvocationRe
   (the per-agent trigger queue) and `crates/mandate-research-driver/src/driver.rs` (the step
   machine: commit, check, fold back, then hand on; hold on an unknown append; abandon and halt on a
   refused one; halt as diverged otherwise), with `mandate_runtime::abandon_refused_research`.
-- **Tests:** `crates/mandate-research-run/tests/retrieve.rs`, `crates/mandate-research-run/tests/output.rs`
+- **Tests:** `crates/mandate-research-run/tests/retrieve.rs`, `crates/mandate-research-run/tests/dispatch.rs`
+  (with a property over random answers and byte budgets), `crates/mandate-research-run/tests/output.rs`
   (with a property over arbitrary bytes and an integer-thousandths oracle),
   `crates/mandate-research-run/tests/call.rs`, `crates/mandate-research-run/tests/item.rs`,
   `crates/mandate-research-run/tests/entry.rs`, `crates/mandate-research-run/tests/backend.rs`;

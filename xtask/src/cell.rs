@@ -701,20 +701,18 @@ pub fn up() -> Result<()> {
     if !cluster_exists()? {
         create_cluster()?;
     }
-    if source == ImageSource::Build {
-        sh("k3d", &["image", "import", "--cluster", CLUSTER, &image])?;
-    }
-    if let Some(api) = &api {
-        sh("k3d", &["image", "import", "--cluster", CLUSTER, api])?;
-    }
-    if let Some(runtime) = &runtime {
-        sh("k3d", &["image", "import", "--cluster", CLUSTER, runtime])?;
-    }
-    if let Some(stub) = &stub {
-        sh("k3d", &["image", "import", "--cluster", CLUSTER, stub])?;
-    }
-    if let Some(manager) = &manager {
-        sh("k3d", &["image", "import", "--cluster", CLUSTER, manager])?;
+    let built = (source == ImageSource::Build).then_some(&image);
+    for image in [
+        built,
+        api.as_ref(),
+        runtime.as_ref(),
+        stub.as_ref(),
+        manager.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        import_image(image)?;
     }
     let config = kubeconfig()?;
     sh(
@@ -807,6 +805,17 @@ pub fn up() -> Result<()> {
     installed?;
     eprintln!("    cell: up; `cargo xtask cell drill` runs the drills");
     Ok(())
+}
+
+/// `cargo xtask cell hosted`: cell #1's own `cluster` step (`deploy/hosted/cell1.py`, E21-51,
+/// DEC-2001 item 11) against a two-node k3d cluster of its own, the proof before the droplets are
+/// bought: the same secrets, service-account patch, operator, journal-db and workspace chart with
+/// cell #1's values, the tunnel off.
+pub fn hosted() -> Result<()> {
+    sh(
+        "python3",
+        &["deploy/hosted/cell1.py", "--target", "k3d", "all"],
+    )
 }
 
 /// What the API's pod says when the workspace release does not become ready: its pods, its
@@ -961,6 +970,52 @@ fn build_image(image: &str, dockerfile: &str, binary: &str, files: &[(&str, &str
     )
 }
 
+/// How many times [`import_image`] imports one image before it gives up.
+const IMPORT_ATTEMPTS: u32 = 3;
+
+/// Imports `image` into the cell's node and confirms the node's containerd holds it. `k3d image
+/// import` exits 0 when the import fails inside the node (its own error-level log lines, a node
+/// killed with exit 137 and restarting), so a missing image surfaced only later, as a pod that
+/// could not pull it or an API server that never answered. Each attempt waits for the API server
+/// first, since a failed import can leave the node restarting.
+fn import_image(image: &str) -> Result<()> {
+    for attempt in 1..=IMPORT_ATTEMPTS {
+        let imported = sh("k3d", &["image", "import", "--cluster", CLUSTER, image]);
+        api_server_ready()?;
+        if imported.is_ok() && node_holds(image) {
+            return Ok(());
+        }
+        eprintln!("xtask: {image} is not in {NODE} after import attempt {attempt}");
+    }
+    bail!("{image} never reached {NODE} after {IMPORT_ATTEMPTS} imports")
+}
+
+/// Whether the node's containerd lists `image` by its exact reference; a node it cannot ask holds
+/// nothing.
+fn node_holds(image: &str) -> bool {
+    output(
+        "docker",
+        &["exec", NODE, "ctr", "-n", "k8s.io", "images", "ls", "-q"],
+    )
+    .is_ok_and(|listed| listed_holds(&listed, image))
+}
+
+/// Whether `ctr images ls -q`'s output `listed` names `image` on a line of its own.
+fn listed_holds(listed: &str, image: &str) -> bool {
+    listed.lines().any(|line| line.trim() == image)
+}
+
+/// Waits for the cell's API server to answer `/readyz`.
+fn api_server_ready() -> Result<()> {
+    for _ in 0..POLLS {
+        if kubectl(&["get", "--raw", "/readyz"]).is_ok() {
+            return Ok(());
+        }
+        sleep(Duration::from_secs(2));
+    }
+    bail!("the cell's API server never became ready")
+}
+
 fn cluster_exists() -> Result<bool> {
     let list = output("k3d", &["cluster", "list", "--output", "json"])?;
     let clusters: Value = serde_json::from_str(&list).context("reading `k3d cluster list`")?;
@@ -1004,13 +1059,7 @@ fn create_cluster() -> Result<()> {
     }
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     sh("k3d", &args)?;
-    for _ in 0..POLLS {
-        if kubectl(&["get", "--raw", "/readyz"]).is_ok() {
-            return Ok(());
-        }
-        sleep(Duration::from_secs(2));
-    }
-    bail!("the cell's API server never became ready")
+    api_server_ready()
 }
 
 /// A chart from its GitHub release, kept under `target/cell` as `name` and checked by SHA-256
@@ -3843,6 +3892,16 @@ fn stub_answers() -> bool {
 /// issuer, then `POST /v1/sessions` from the app origin, which must answer 204 with the session
 /// cookie (workspace API spec §3.11 item 5).
 fn demo_sign_in() -> Result<()> {
+    let (status, reply) = open_session(&stub_token()?)?;
+    if !signed_in(status, &reply) {
+        bail!("POST /v1/sessions answered {status}, not 204 with the session cookie");
+    }
+    eprintln!("    sign-in: the demo owner opened a session through the local stub issuer");
+    Ok(())
+}
+
+/// A sign-in token for [`DEMO_SUBJECT`] from the stub issuer.
+fn stub_token() -> Result<String> {
     let body = json!({"subject": DEMO_SUBJECT}).to_string();
     let (status, reply) = http(
         STUB_PORT,
@@ -3857,11 +3916,16 @@ fn demo_sign_in() -> Result<()> {
     }
     let token: Value = serde_json::from_str(reply_body(&reply))
         .context("the stub issuer's token reply is not JSON")?;
-    let token = token["access_token"]
+    token["access_token"]
         .as_str()
-        .context("the stub issuer's reply carries no access_token")?;
+        .map(str::to_owned)
+        .context("the stub issuer's reply carries no access_token")
+}
+
+/// `POST /v1/sessions` with `token` from the app origin, and the API's status and whole reply.
+fn open_session(token: &str) -> Result<(u16, String)> {
     let body = json!({"access_token": token}).to_string();
-    let (status, reply) = http(
+    http(
         API_LOCAL_PORT,
         "POST",
         "/v1/sessions",
@@ -3872,12 +3936,7 @@ fn demo_sign_in() -> Result<()> {
         ],
         &body,
     )
-    .context("opening a session")?;
-    if !signed_in(status, &reply) {
-        bail!("POST /v1/sessions answered {status}, not 204 with the session cookie");
-    }
-    eprintln!("    sign-in: the demo owner opened a session through the local stub issuer");
-    Ok(())
+    .context("opening a session")
 }
 
 /// Whether an answer to `POST /v1/sessions` opened a session: 204 and the `__Host-` cookie.
@@ -4447,6 +4506,23 @@ mod tests {
     }
 
     #[test]
+    fn an_import_counts_only_when_the_node_lists_the_exact_reference() {
+        let listed = "docker.io/rancher/mirrored-pause:3.6\nmandate.local/api:3ab66e87ffdd\n";
+        assert!(listed_holds(listed, "mandate.local/api:3ab66e87ffdd"));
+        assert!(listed_holds(
+            "  mandate.local/api:3ab66e87ffdd  \n",
+            "mandate.local/api:3ab66e87ffdd"
+        ));
+        assert!(!listed_holds(listed, "mandate.local/api:3ab66e87ffd"));
+        assert!(!listed_holds(listed, "mandate.local/runtime:3ab66e87ffdd"));
+        assert!(!listed_holds(
+            "mandate.local/api:3ab66e87ffdd-old\n",
+            "mandate.local/api:3ab66e87ffdd"
+        ));
+        assert!(!listed_holds("", "mandate.local/api:3ab66e87ffdd"));
+    }
+
+    #[test]
     fn compose_quantities_read_as_kubernetes_ones() -> Result<()> {
         assert_eq!(compose_cpus("250m")?, "0.25");
         assert_eq!(compose_cpus("1000m")?, "1");
@@ -4472,13 +4548,17 @@ mod tests {
             format!("issuer: {LOCAL_ISSUER}"),
             format!("jwksUrl: {LOCAL_ISSUER}{STUB_KEY_SET}"),
             format!("appOrigin: {DEMO_APP_ORIGIN}"),
-            "tier: dev".to_string(),
         ] {
             assert!(
                 api.contains(&wanted.as_str()),
                 "k3d.yaml's api block lacks `{wanted}`"
             );
         }
+        assert!(
+            values.lines().any(|l| l == "deploymentTier: ci"),
+            "k3d.yaml must set `deploymentTier: ci`, the one tier the API server and the stub \
+             issuer beside it both take, and one the stub starts in (DEC-2100)"
+        );
         for ulid in [DEMO_ORG, DEMO_WORKSPACE] {
             assert!(
                 ulid.len() == 26
