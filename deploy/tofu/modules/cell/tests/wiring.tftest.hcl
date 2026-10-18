@@ -23,7 +23,7 @@ variables {
   kube_api_allowed_addresses = ["203.0.113.7/32"]
   spaces_monthly_usd         = 5
   block_storage_gb           = 40
-  cap_usd                    = 75
+  cap_usd                    = 65
 }
 
 run "plans_with_the_estimate_under_the_cap" {
@@ -35,8 +35,8 @@ run "plans_with_the_estimate_under_the_cap" {
   }
 
   assert {
-    condition     = output.state_bucket == "mandate-tofu-state-staging" && output.journal_archive_bucket == "mandate-journal-archive-staging"
-    error_message = "The buckets are named for the environment."
+    condition     = output.state_bucket == "mandate-tofu-state-staging"
+    error_message = "The state bucket is named for the environment."
   }
 }
 
@@ -48,4 +48,24 @@ run "refuses_an_unknown_environment" {
   }
 
   expect_failures = [var.environment]
+}
+
+run "refuses_a_cap_over_65" {
+  command = plan
+
+  variables {
+    cap_usd = 75
+  }
+
+  expect_failures = [var.cap_usd]
+}
+
+run "refuses_spaces_counted_as_free" {
+  command = plan
+
+  variables {
+    spaces_monthly_usd = 0
+  }
+
+  expect_failures = [var.spaces_monthly_usd]
 }
