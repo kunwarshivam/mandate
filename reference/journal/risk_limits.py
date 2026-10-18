@@ -1,9 +1,8 @@
-"""Journal spec v0.58 §9.27's reference vectors (DEC-2301), first slice: the account stream's
-`RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, and `HighWaterMarkReset`. The other three
-§9.27 records, `PositionReleased`, `InstrumentRestrictionChanged`, and `GoalCompleted`, come with
-their own slice (E6-15's A1b), and until then the validator refuses them as `unknown_schema`.
+"""Journal spec v0.58 §9.27's reference vectors (DEC-2301): the account stream's seven risk-limit
+records, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`,
+`PositionReleased`, `InstrumentRestrictionChanged`, and `GoalCompleted`.
 
-The schemas and rules 230 to 235 live in `control.py`, beside §9.3's, so one validator judges every
+The schemas and rules 230 to 238 live in `control.py`, beside §9.3's, so one validator judges every
 closed schema. This module builds the `risk_limits` section: a base draft of each record shaped as the
 reference cases' risk-state events are (`docs/specs/reference-cases/mandate.yaml`), an invalid draft
 for every member type and rule, and valid drafts for the shapes the risk-state fold emits that a rule
@@ -58,6 +57,9 @@ EVENT_IDS = {
     "rung_lifted": "01J8Z4R1A000000000000000B4",
     "tripwire_lifted": "01J8Z4R1A000000000000000B5",
     "mark_reset": "01J8Z4R1A000000000000000B6",
+    "owner_released": "01J8Z4R1A000000000000000B7",
+    "mark_stale": "01J8Z4R1A000000000000000B8",
+    "goal_completed": "01J8Z4R1A000000000000000B9",
 }
 PAYLOADS = {
     "day_started": (
@@ -101,6 +103,26 @@ PAYLOADS = {
     "mark_reset": (
         "HighWaterMarkReset",
         {"from": "10500", "to": "9650", "user_id": "user_owner", "step_up": step_up("2026-09-22T14:29:10.000000000Z")},
+    ),
+    "owner_released": (
+        "PositionReleased",
+        {
+            "instrument": ASSET,
+            "qty": "0.15",
+            "cause": "owner_release",
+            "canceled_order_ids": ["order_stop_1"],
+            "warning_ref": WARNING,
+            "user_id": "user_owner",
+            "step_up": step_up("2026-09-22T14:29:10.000000000Z"),
+        },
+    ),
+    "mark_stale": (
+        "InstrumentRestrictionChanged",
+        {"instrument": ASSET, "restriction": "stale_mark", "reason": "no_sane_mark", "active": True},
+    ),
+    "goal_completed": (
+        "GoalCompleted",
+        {"reason": None, "then": None, "on_complete": "release"},
     ),
 }
 ACKNOWLEDGING = ("tripwire_lifted", "mark_reset")
@@ -161,12 +183,29 @@ MEMBER_CASES = {
     ),
     "rung_lifted": (("limit", 7, "drawdown_ladder[01]"), ("action", 7, "resume"), ("reason", 7, "lifted")),
     "mark_reset": (("from", 7, "ten"), ("to", 7, "ten"), ("user_id", 7, "user owner")),
+    "owner_released": (
+        ("instrument", 7, ASSET.upper()),
+        ("qty", 7, "0,15"),
+        ("cause", 7, "release"),
+        ("canceled_order_ids", "order_stop_1", None),
+        ("warning_ref", 7, "sha256:short"),
+        ("user_id", 7, "user owner"),
+    ),
+    "mark_stale": (
+        ("instrument", 7, "not-an-asset"),
+        ("restriction", 7, "halted"),
+        ("reason", 7, "quote_gap"),
+        ("active", "true", None),
+    ),
+    "goal_completed": (("reason", 7, "done"), ("then", 7, "retire"), ("on_complete", 7, "sell_all")),
 }
 # Members whose type is not nullable, each refused as `null`.
 NULLED = {
     "day_started": ("day", "day_start_equity", "agent_id", "risk_clock"),
     "rung_triggered": (*SNAPSHOT, "limit", "action"),
     "mark_reset": ("from", "to", "user_id", "step_up"),
+    "owner_released": ("instrument", "qty", "cause", "canceled_order_ids"),
+    "mark_stale": ("instrument", "restriction", "reason", "active"),
 }
 
 
@@ -175,14 +214,17 @@ def member_drafts() -> list[dict]:
     for base, cases in MEMBER_CASES.items():
         for member, wrong_kind, wrong_form in cases:
             path = f"payload.{member}"
-            out.append(invalid(f"{base}.{member}.kind", "§9.27 types", base, [change(path, wrong_kind)], "schema", path))
+            refs = [change("artifact_refs", [])] if member == "warning_ref" else []
+            out.append(
+                invalid(f"{base}.{member}.kind", "§9.27 types", base, [change(path, wrong_kind), *refs], "schema", path)
+            )
             if wrong_form is not None:
                 out.append(
                     invalid(
                         f"{base}.{member}.form",
                         "§9.27 types",
                         base,
-                        [change(path, wrong_form)],
+                        [change(path, wrong_form), *refs],
                         "non_canonical",
                         path,
                     )
@@ -251,7 +293,11 @@ def member_drafts() -> list[dict]:
 
 T, R, L = "tripwire_triggered", "rung_triggered", "rung_lifted"
 C = change
-# (name, base, changes, the path the rule reports): each breaks exactly one of rules 230 to 235.
+NO_GESTURE = [C(f"payload.{m}", None) for m in ("warning_ref", "user_id", "step_up")]
+GOAL = [C("payload.cause", "goal_release"), *NO_GESTURE, C("artifact_refs", [])]
+REMOVED = C("payload.restriction", "removed_instrument")
+PROFIT_STOP = [C("payload.then", "discretionary_exit_all_then_retire"), C("payload.on_complete", None)]
+# (name, base, changes, the path the rule reports): each breaks exactly one of rules 230 to 238.
 RULE_CASES = (
     ("230.tripwire_without_its_reason", T, [C("payload.reason", None)], "payload.reason"),
     ("230.tripwire_pauses", T, [C("payload.action", "flatten_and_pause")], "payload.action"),
@@ -284,6 +330,44 @@ RULE_CASES = (
     ),
     ("235.lift_without_its_acknowledgment", "tripwire_lifted", [C("causation_id", None)], "causation_id"),
     ("235.reset_without_its_acknowledgment", "mark_reset", [C("causation_id", None)], "causation_id"),
+    ("236.owner_releases_nothing", "owner_released", [C("payload.qty", "0")], "payload.qty"),
+    ("236.goal_releases_a_negative", "owner_released", [*GOAL, C("payload.qty", "-0.1")], "payload.qty"),
+    (
+        "236.owner_release_without_its_warning",
+        "owner_released",
+        [C("payload.warning_ref", None), C("artifact_refs", [])],
+        "payload.warning_ref",
+    ),
+    ("236.owner_release_without_step_up", "owner_released", [C("payload.step_up", None)], "payload.step_up"),
+    (
+        "236.goal_release_with_a_user",
+        "owner_released",
+        [
+            C("payload.cause", "goal_release"),
+            C("payload.warning_ref", None),
+            C("payload.step_up", None),
+            C("artifact_refs", []),
+        ],
+        "payload.user_id",
+    ),
+    ("237.stale_mark_for_a_removal", "mark_stale", [C("payload.reason", "operator_halt")], "payload.reason"),
+    ("237.stale_mark_cleared_as_set", "mark_stale", [C("payload.active", False)], "payload.active"),
+    ("237.removed_for_no_mark", "mark_stale", [C("payload.restriction", "removed_instrument")], "payload.reason"),
+    (
+        "237.removed_by_an_admission",
+        "mark_stale",
+        [C("payload.restriction", "removed_instrument"), C("payload.reason", "thesis_admitted")],
+        "payload.active",
+    ),
+    (
+        "237.cleared_by_a_removal",
+        "mark_stale",
+        [C("payload.restriction", "removed_instrument"), C("payload.reason", "eligibility_lost"), C("payload.active", False)],
+        "payload.active",
+    ),
+    ("238.both_forms", "goal_completed", [C("payload.then", "discretionary_exit_all_then_retire")], "payload.then"),
+    ("238.neither_form", "goal_completed", [C("payload.on_complete", None)], "payload.then"),
+    ("238.reason_with_on_complete", "goal_completed", [C("payload.reason", "target_qty")], "payload.reason"),
 )
 LOSS = [C("payload.limit", "tripwire:day_loss"), C("payload.action", "end_delegations"), C("payload.metric", "realized_loss_usd")]
 # (name, the rule a misreading would break, base, changes): each a shape the risk-state fold emits.
@@ -317,6 +401,19 @@ VALID_CASES = (
         [C("payload.limit", "lifetime_floor"), C("payload.action", None), C("payload.reason", "version_loosened")],
     ),
     ("rung_acknowledged", "rule 235", "tripwire_lifted", [C("payload.limit", "drawdown_ladder[3]")]),
+    ("goal_release", "rule 236", "owner_released", [*GOAL, C("payload.canceled_order_ids", [])]),
+    ("goal_releases_nothing", "rule 236: a goal completes flat or not", "owner_released", [*GOAL, C("payload.qty", "0")]),
+    ("sane_mark_clears", "rule 237", "mark_stale", [C("payload.reason", "sane_mark"), C("payload.active", False)]),
+    *(
+        (f"removed_{r}", "rule 237", "mark_stale", [REMOVED, C("payload.reason", r)])
+        for r in ("thesis_expired", "operator_halt", "version_applied")
+    ),
+    *(
+        (f"readmitted_{r}", "rule 237", "mark_stale", [REMOVED, C("payload.reason", r), C("payload.active", False)])
+        for r in ("thesis_admitted", "version_applied")
+    ),
+    ("profit_stop_confirmed", "rule 238", "goal_completed", [C("payload.reason", "profit_stop_reached"), *PROFIT_STOP]),
+    ("goal_with_no_on_complete", "rule 238", "goal_completed", PROFIT_STOP),
     ("day_started_at_zero", "§9.27", "day_started", [C("payload.day_start_equity", "0")]),
 )
 
@@ -340,6 +437,9 @@ REFERENCE_SHAPES = {
     "RiskLimitLifted": {"limit", "action", "reason"},
     "RiskDayStarted": {"day_start_equity"},
     "HighWaterMarkReset": {"from", "to"},
+    "PositionReleased": {"qty"},
+    "InstrumentRestrictionChanged": {"restriction", "reason", "active"},
+    "GoalCompleted": {"reason", "then", "on_complete"},
 }
 
 
@@ -382,12 +482,15 @@ VALIDATOR_MUTANTS = (
     "config_refs.required",
     "types.limit_key",
     "types.limit_key_rung",
-    *(f"rule.{n}" for n in range(230, 236)),
+    *(f"rule.{n}" for n in range(230, 239)),
     "rule.230.scale",
     "boundary.rule_231_strict",
     "rule.233.whole",
     "boundary.rule_233_strict",
     "rule.234.floor",
+    "rule.236.goal_zero",
+    "rule.237.removing",
+    "rule.238.reason",
     *(f"nullable.payload.{m}" for members in NULLED.values() for m in members if m not in ("agent_id", "risk_clock")),
 )
 
