@@ -5,9 +5,10 @@
 //! process, from `infra.yml` on `main`, with the runner's own address opened on the control-plane
 //! firewall for the run (DEC-2018 item 7). The commands below are the founder's break-glass path:
 //! the firewall otherwise admits only the founder's addresses (`KUBE_API_ALLOWED_CIDRS`), so they
-//! run on the founder's machine, with the founder's kubeconfig, and nowhere else. They refuse to run in CI or without a terminal, and they apply
-//! nothing until the founder types the kubeconfig's current context, so an agent never applies
-//! anything to a real cluster (DEC-2015 item 5). The workload secrets come from the founder's
+//! run on the founder's machine, with the founder's kubeconfig, and nowhere else. They refuse to
+//! run in CI or without a terminal, and they apply nothing until the founder types the
+//! kubeconfig's current context, so an agent never applies anything to a real cluster (DEC-2015
+//! item 5). The workload secrets come from the founder's
 //! shell: Barman's R2 token, which the founder makes by hand, and lane IAC's `tunnel_token` output
 //! (deploy/gitops/BOOTSTRAP.md). Each reaches only `kubectl`'s stdin and is never printed.
 //!
@@ -108,7 +109,7 @@ impl Secret {
         if env::var("GITHUB_ACTIONS").is_ok_and(|actions| actions == "true") {
             let mut out = io::stdout().lock();
             for form in mask_forms(&value) {
-                let _ = writeln!(out, "::add-mask::{form}");
+                let _ = writeln!(out, "{}", mask_command(&form));
             }
             let _ = out.flush();
         }
@@ -124,6 +125,17 @@ impl std::fmt::Debug for Secret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<redacted>")
     }
+}
+
+/// The workflow command that masks `form`. GitHub decodes `%25`, `%0D` and `%0A` in a command's
+/// data, so `%` is escaped first, then CR and LF; unescaped, a form holding a literal `%0A` would
+/// register a different mask and leave itself visible.
+fn mask_command(form: &str) -> String {
+    let data = form
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A");
+    format!("::add-mask::{data}")
 }
 
 /// Every form of `value` a log line could carry, each one line and non-empty: the value, its
@@ -603,6 +615,8 @@ pub(crate) fn bootstrap_from_infra(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     /// An excerpt of `flux install --export` for v2.9.6, its image lines as the CLI prints them.
@@ -834,6 +848,51 @@ mod tests {
         Ok(())
     }
 
+    /// Each printed mask line, decoded as GitHub decodes command data in one pass, gives back the
+    /// exact form, even when the form holds `%`, a literal `%0A` or `%0D`, or a CR.
+    #[test]
+    fn each_mask_line_decodes_to_its_form() {
+        let decode = |line: &str| -> String {
+            let data = line.strip_prefix("::add-mask::").unwrap_or("<no prefix>");
+            let mut out = String::new();
+            let mut rest = data;
+            while let Some(c) = rest.chars().next() {
+                if let Some(tail) = rest.strip_prefix("%25") {
+                    out.push('%');
+                    rest = tail;
+                } else if let Some(tail) = rest.strip_prefix("%0D") {
+                    out.push('\r');
+                    rest = tail;
+                } else if let Some(tail) = rest.strip_prefix("%0A") {
+                    out.push('\n');
+                    rest = tail;
+                } else {
+                    out.push(c);
+                    rest = &rest[c.len_utf8()..];
+                }
+            }
+            out
+        };
+        assert_eq!(
+            mask_command("a\rb\nc%0Ad%"),
+            "::add-mask::a%0Db%0Ac%250Ad%25"
+        );
+        let value = "p%0Aq\rr%0Ds%\nline two";
+        let forms = mask_forms(value);
+        assert!(forms.contains(&"p%250Aq%0Dr%250Ds%25%0Aline%20two".to_owned()));
+        for form in &forms {
+            let line = mask_command(form);
+            assert!(!line.contains(['\n', '\r']), "{line:?} spans lines");
+            assert_eq!(&decode(&line), form, "{line:?} masks something else");
+        }
+        assert!(
+            forms
+                .iter()
+                .any(|form| mask_command(form).contains("%25250A")),
+            "the URL-encoded form's literal %0A is not escaped in {forms:?}"
+        );
+    }
+
     /// Every printable form of a secret is masked, each on one line, none empty or repeated.
     #[test]
     fn every_printable_form_of_a_secret_is_masked() {
@@ -855,9 +914,8 @@ mod tests {
             assert!(forms.contains(&expected), "{expected} not in {forms:?}");
         }
         assert!(forms.iter().all(|f| !f.is_empty() && !f.contains('\n')));
-        let mut unique = forms.clone();
-        unique.dedup();
-        assert_eq!(unique.len(), forms.len());
+        let unique: BTreeSet<&String> = forms.iter().collect();
+        assert_eq!(unique.len(), forms.len(), "a form repeats in {forms:?}");
         assert_eq!(
             mask_forms("plain"),
             vec![
