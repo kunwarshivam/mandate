@@ -21,6 +21,7 @@ const DO_TOKEN_ENV: &str = "DIGITALOCEAN_TOKEN";
 const CF_TOKEN_ENV: &str = "TF_VAR_cloudflare_api_token";
 const PASSPHRASE_ENV: &str = "TF_VAR_state_passphrase";
 pub(crate) const KUBE_CIDRS_ENV: &str = "TF_VAR_kube_api_allowed_addresses";
+pub(crate) const EMAILS_ENV: &str = "TF_VAR_access_allowed_emails";
 
 /// The Cloudflare permissions a run needs, each with the group names Cloudflare lists for it
 /// (its API says Write, its dashboard Edit, and account-owned tokens prefix API Tokens with
@@ -123,11 +124,53 @@ pub(crate) struct SpacesKey {
     pub(crate) secret_key: String,
 }
 
-/// What the preflight leaves the run: its checklist, and the run's Spaces key when one was minted,
-/// which the caller deletes with [`delete_key`] however the run ends.
+/// This run's Spaces key, if one was minted, deleted when the guard is dropped: on success, on an
+/// error, and on a panic alike (DEC-2030 item 4). [`KeyGuard::release`] deletes it early and says
+/// whether DigitalOcean confirmed it.
+pub(crate) struct KeyGuard {
+    token: String,
+    key: Option<SpacesKey>,
+}
+
+impl KeyGuard {
+    fn none() -> Self {
+        Self {
+            token: String::new(),
+            key: None,
+        }
+    }
+
+    /// The key, while the guard holds one.
+    pub(crate) fn key(&self) -> Option<&SpacesKey> {
+        self.key.as_ref()
+    }
+
+    /// Deletes the key now; `true` when there was none or DigitalOcean confirmed the deletion.
+    pub(crate) fn release(mut self) -> Result<bool> {
+        match self.key.take() {
+            Some(key) => delete_key(&self.token, &key.access_key),
+            None => Ok(true),
+        }
+    }
+}
+
+impl Drop for KeyGuard {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.take()
+            && !delete_key(&self.token, &key.access_key).unwrap_or(false)
+        {
+            eprintln!(
+                "    this run's Spaces key was not deleted; `infra close` and the next run delete it \
+                 (DEC-2030 item 4)"
+            );
+        }
+    }
+}
+
+/// What the preflight leaves the run: its checklist, and the guard of the run's Spaces key.
 pub(crate) struct Preflight {
     pub(crate) checklist: Checklist,
-    pub(crate) key: Option<SpacesKey>,
+    pub(crate) key: KeyGuard,
 }
 
 /// The value of `name`, when set and not blank.
@@ -135,8 +178,8 @@ fn present(read: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String> 
     read(name).filter(|value| !value.trim().is_empty())
 }
 
-/// Whether `value`, `KUBE_API_ALLOWED_CIDRS` as `infra.yml` hands it on, names no CIDR: unset,
-/// blank, or an empty JSON list.
+/// Whether `value`, a JSON list as `infra.yml` hands it on (`KUBE_API_ALLOWED_CIDRS`,
+/// `ACCESS_ALLOWED_EMAILS`), names nothing: unset, blank, or an empty JSON list.
 pub(crate) fn no_cidrs(value: Option<&str>) -> bool {
     value.is_none_or(|value| {
         value
@@ -172,6 +215,10 @@ pub(crate) fn environment_items(
         list.check(
             !no_cidrs(read(KUBE_CIDRS_ENV).as_deref()),
             "variable KUBE_API_ALLOWED_CIDRS lists at least one CIDR (production only)",
+        );
+        list.check(
+            !no_cidrs(read(EMAILS_ENV).as_deref()),
+            "secret ACCESS_ALLOWED_EMAILS lists at least one email (production only)",
         );
     }
     list
@@ -238,10 +285,15 @@ impl Answer {
 }
 
 /// Runs `curl` with `config` on its standard input, so no credential is on a command line, and
-/// returns the status and body.
-fn curl(config: &str) -> Result<Answer> {
+/// returns the status and body. Only a request that is safe to repeat is retried.
+fn curl(config: &str, retry: bool) -> Result<Answer> {
     let mut child = Command::new("curl")
-        .args(["-sS", "--retry", "3", "--max-time", "60", "-K", "-"])
+        .args(["-sS", "--max-time", "60", "-K", "-"])
+        .args(if retry {
+            ["--retry", "3"].as_slice()
+        } else {
+            [].as_slice()
+        })
         .args(["-w", "\n%{http_code}"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -271,7 +323,8 @@ fn curl(config: &str) -> Result<Answer> {
     })
 }
 
-/// A request to a token-authorised JSON API.
+/// A request to a token-authorised JSON API. A `POST` is sent once, never retried, so a lost
+/// answer never mints a second key.
 fn api(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<Answer> {
     let mut config = format!(
         "url = {}\nrequest = {}\nheader = {}\nheader = {}\n",
@@ -283,7 +336,7 @@ fn api(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<Answe
     if let Some(body) = body {
         config.push_str(&format!("data-binary = {}\n", config_quoted(body)?));
     }
-    curl(&config)
+    curl(&config, method != "POST")
 }
 
 /// A SigV4-signed request for the state bucket itself: `HEAD` to ask whether it exists, `PUT` to
@@ -305,7 +358,7 @@ fn bucket(method: &str, name: &str, key: &SpacesKey) -> Result<u16> {
             config_quoted(method)?
         ));
     }
-    Ok(curl(&config)?.status)
+    Ok(curl(&config, true)?.status)
 }
 
 /// Deletes the Spaces key `access_key`; whether DigitalOcean confirmed it.
@@ -348,21 +401,22 @@ fn mint_key(token: &str, name: &str) -> Result<Option<SpacesKey>> {
 }
 
 /// The DigitalOcean half: the token, its read scopes, last run's keys deleted, this run's key
-/// minted, and the state bucket found or, when `make_bucket`, made.
+/// minted into a [`KeyGuard`] at once, and the state bucket found or, when `make_bucket`, made. An
+/// error after the mint drops the guard, which deletes the key.
 fn digitalocean(
     list: &mut Checklist,
     environment: &str,
     run: &str,
     token: &str,
     make_bucket: bool,
-) -> Result<Option<SpacesKey>> {
+) -> Result<KeyGuard> {
     let accepted = api("GET", &format!("{DO_API}/account"), token, None)?.ok();
     list.check(
         accepted,
         "DIGITAL_OCEAN_API_KEY is accepted by DigitalOcean",
     );
     if !accepted {
-        return Ok(None);
+        return Ok(KeyGuard::none());
     }
     let mut listing = None;
     for (scope, path) in DO_READ_PROBES {
@@ -392,21 +446,18 @@ fn digitalocean(
             );
         }
     }
-    let key = mint_key(token, &format!("{prefix}{run}"))?;
+    let guard = KeyGuard {
+        token: token.to_owned(),
+        key: mint_key(token, &format!("{prefix}{run}"))?,
+    };
     list.check(
-        key.is_some(),
+        guard.key().is_some(),
         "DIGITAL_OCEAN_API_KEY has scope Spaces Keys create",
     );
-    let Some(key) = key else {
-        return Ok(None);
-    };
-    match state_bucket(list, environment, &key, make_bucket) {
-        Ok(()) => Ok(Some(key)),
-        Err(error) => {
-            delete_key(token, &key.access_key)?;
-            Err(error)
-        }
+    if let Some(key) = guard.key() {
+        state_bucket(list, environment, key, make_bucket)?;
     }
+    Ok(guard)
 }
 
 /// Finds the state bucket with this run's key, or makes it when `make_bucket`.
@@ -541,8 +592,9 @@ fn cloudflare(list: &mut Checklist, token: &str) -> Result<()> {
     Ok(())
 }
 
-/// The whole preflight for `environment` (DEC-2030 item 5). When `make_bucket`, as `plan` and
-/// `apply` ask, a missing state bucket is created; the key it mints is returned for the run.
+/// The whole preflight for `environment` (DEC-2030 item 5). The Cloudflare half runs first, so
+/// nothing after the mint but the state bucket can fail. When `make_bucket`, as `plan` and `apply`
+/// ask, a missing state bucket is created; the key it mints is returned in its guard.
 pub(crate) fn preflight(
     environment: &str,
     run: &str,
@@ -553,15 +605,43 @@ pub(crate) fn preflight(
         bail!("the environment must be staging or production, not `{environment}`");
     }
     let mut checklist = environment_items(environment, read);
-    let mut key = None;
-    if let Some(token) = present(read, DO_TOKEN_ENV) {
-        key = digitalocean(&mut checklist, environment, run, &token, make_bucket)?;
-    }
     if let Some(token) = present(read, CF_TOKEN_ENV) {
         cloudflare(&mut checklist, &token)?;
     }
+    let mut key = KeyGuard::none();
+    if let Some(token) = present(read, DO_TOKEN_ENV) {
+        key = digitalocean(&mut checklist, environment, run, &token, make_bucket)?;
+    }
     checklist.remind("DigitalOcean billing alert at $120, 80% of the $150 cap (no API reads it)");
     Ok(Preflight { checklist, key })
+}
+
+/// `infra close`'s work (DEC-2030 item 4): deletes every `mandate-infra-<environment>-*` Spaces
+/// key, this run's included, so a run killed before its own guard ran leaves none behind. Returns
+/// how many it deleted; a key DigitalOcean would not delete fails it.
+pub(crate) fn close(environment: &str, token: &str) -> Result<usize> {
+    if !matches!(environment, "staging" | "production") {
+        bail!("the environment must be staging or production, not `{environment}`");
+    }
+    let listing = api(
+        "GET",
+        &format!("{DO_API}/spaces/keys?per_page=200"),
+        token,
+        None,
+    )?;
+    ensure!(
+        listing.ok(),
+        "DigitalOcean refused to list Spaces keys (DIGITAL_OCEAN_API_KEY needs Spaces Keys read)"
+    );
+    let keys = keys_named(&listing.body, &key_prefix(environment))?;
+    for access_key in &keys {
+        ensure!(
+            delete_key(token, access_key)?,
+            "DigitalOcean refused to delete a {} key (Spaces Keys delete)",
+            key_prefix(environment)
+        );
+    }
+    Ok(keys.len())
 }
 
 #[cfg(test)]
@@ -631,6 +711,7 @@ mod tests {
                 (PASSPHRASE_ENV, "a-passphrase-of-at-least-thirty-two-chars"),
                 (DO_TOKEN_ENV, "t"),
                 (CF_TOKEN_ENV, "t"),
+                (EMAILS_ENV, "[\"founder@example.com\"]"),
             ];
             if let Some(cidrs) = cidrs {
                 pairs.push((KUBE_CIDRS_ENV, cidrs));
@@ -646,6 +727,28 @@ mod tests {
             );
         }
         assert!(environment_items("production", &full(Some("[\"203.0.113.7/32\"]"))).complete());
+        let without_emails = reader(&[
+            (PASSPHRASE_ENV, "a-passphrase-of-at-least-thirty-two-chars"),
+            (DO_TOKEN_ENV, "t"),
+            (CF_TOKEN_ENV, "t"),
+            (KUBE_CIDRS_ENV, "[\"203.0.113.7/32\"]"),
+            (EMAILS_ENV, "[]"),
+        ]);
+        assert_eq!(
+            missing(&environment_items("production", &without_emails)),
+            ["secret ACCESS_ALLOWED_EMAILS lists at least one email (production only)"]
+        );
+        assert!(environment_items("staging", &without_emails).complete());
+    }
+
+    /// DEC-2030 item 4: a guard with no key deletes nothing and releases cleanly, so an early
+    /// return before the mint never calls DigitalOcean.
+    #[test]
+    fn an_empty_key_guard_releases_cleanly() -> Result<()> {
+        assert!(KeyGuard::none().key().is_none());
+        assert!(KeyGuard::none().release()?);
+        drop(KeyGuard::none());
+        Ok(())
     }
 
     /// DEC-2029 item 4: each needed Cloudflare permission is named when no group grants it, by

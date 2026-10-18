@@ -316,6 +316,7 @@ fn run() -> Result<()> {
         }
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
         ["infra"] => infra(),
+        ["infra", "close"] => infra_close(),
         ["release", "publish-charts", out] => release::publish_charts(&root, Path::new(out)),
         ["gitops", "bootstrap", environment] => {
             gitops::bootstrap(&root, gitops::Environment::parse(environment)?)
@@ -1166,14 +1167,19 @@ fn tofu_roots(tofu_dir: &Path) -> Result<Vec<PathBuf>> {
 const INFRA_WORKFLOW: &str = ".github/workflows/infra.yml";
 /// The one command `infra.yml`'s secret-holding step runs.
 const INFRA_RUN: &str = "cargo xtask infra";
+/// The command `infra.yml`'s last step runs, `if: always()`, with only the DigitalOcean token.
+const INFRA_CLOSE: &str = "cargo xtask infra close";
+/// The one secret [`INFRA_CLOSE`]'s step may read.
+const INFRA_CLOSE_SECRET: &str = "DIGITAL_OCEAN_API_KEY";
 /// The secrets that step reads, each from the environment `infra-<environment>` the founder
 /// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Spaces key is
 /// minted per run, never stored (DEC-2030 item 4). The Cloudflare token goes to OpenTofu as a
 /// variable under a `CF_` name, since `web/scripts/workers.mjs`
 /// keeps every `CLOUDFLARE_` name to `web-deploy.yml`'s deploy step (DEC-1005 item 2).
-const INFRA_SECRETS: [&str; 3] = [
+const INFRA_SECRETS: [&str; 4] = [
     "DIGITAL_OCEAN_API_KEY",
     "CF_INFRA_API_TOKEN",
+    "ACCESS_ALLOWED_EMAILS",
     "TOFU_STATE_PASSPHRASE",
 ];
 /// The environment variables `infra.yml` hands `cargo xtask infra`: which environment and
@@ -1255,28 +1261,47 @@ fn infra() -> Result<()> {
     let preflight = infra_preflight::preflight(&environment, &run, !commands.is_empty(), &read)?;
     eprint!("{}", preflight.checklist.render(&environment));
     let outcome = if preflight.checklist.complete() {
-        run_tofu(&commands, preflight.key.as_ref(), &plan_file)
+        run_tofu(&commands, preflight.key.key(), &plan_file)
     } else {
         Err(anyhow::anyhow!(
             "infra preflight: each MISSING line above is a step in deploy/tofu/README.md; nothing \
              was planned"
         ))
     };
-    if let Some(key) = &preflight.key {
-        let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
-        if !infra_preflight::delete_key(&token, &key.access_key)? {
-            bail!(
-                "this run's Spaces key was not deleted; the next run of {environment} deletes it \
-                 (DEC-2030 item 4)"
-            );
-        }
+    if !preflight.key.release()? {
+        bail!(
+            "this run's Spaces key was not deleted; `infra close` and the next run of \
+             {environment} delete it (DEC-2030 item 4)"
+        );
     }
     outcome
 }
 
+/// `cargo xtask infra close` (DEC-2030 item 4): `infra.yml`'s last step, which runs `if:
+/// always()` with only the DigitalOcean token, deletes every Spaces key this environment's runs
+/// minted, so a run killed before its own guard ran leaves none. Like `infra`, it runs only in
+/// that job on `main`.
+fn infra_close() -> Result<()> {
+    let actions = env::var("GITHUB_ACTIONS").unwrap_or_default();
+    let reference = env::var("GITHUB_REF").unwrap_or_default();
+    if actions != "true" || reference != "refs/heads/main" {
+        bail!("infra close runs only in {INFRA_WORKFLOW}'s job on main, never by hand (DEC-2030)");
+    }
+    let environment = env::var(INFRA_ENVIRONMENT_ENV).unwrap_or_default();
+    let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
+    if token.trim().is_empty() {
+        eprintln!("    infra close: DIGITAL_OCEAN_API_KEY is not set, so no key was minted");
+        return Ok(());
+    }
+    let deleted = infra_preflight::close(&environment, &token)?;
+    eprintln!("    infra close: deleted {deleted} Spaces key(s) this environment's runs minted");
+    Ok(())
+}
+
 /// Runs each `tofu` command in turn, with the run's Spaces key in the child's environment alone,
 /// as both of the names the provider and the backend read. A blank or empty
-/// `KUBE_API_ALLOWED_CIDRS` is left out, so staging's root takes its empty default. The public
+/// `KUBE_API_ALLOWED_CIDRS` is left out, so staging's root takes its empty default, and so is a
+/// blank `ACCESS_ALLOWED_EMAILS`, which only production's root declares. The public
 /// log gets no `tofu` output (DEC-2014 item 4): each command's output is captured, only a
 /// failure's diagnostics, which OpenTofu redacts for every sensitive value, are printed, and after
 /// `plan` the saved plan's addresses and actions alone.
@@ -1286,6 +1311,7 @@ fn run_tofu(
     plan_file: &Path,
 ) -> Result<()> {
     let cidrs = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
+    let emails = env::var(infra_preflight::EMAILS_ENV).ok();
     let tofu = |args: &[String]| {
         let mut command = Command::new("tofu");
         command.args(args).env("TF_IN_AUTOMATION", "1");
@@ -1299,6 +1325,9 @@ fn run_tofu(
         }
         if infra_preflight::no_cidrs(cidrs.as_deref()) {
             command.env_remove(infra_preflight::KUBE_CIDRS_ENV);
+        }
+        if infra_preflight::no_cidrs(emails.as_deref()) {
+            command.env_remove(infra_preflight::EMAILS_ENV);
         }
         command
     };
@@ -1486,6 +1515,10 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         INFRA_WORKFLOW,
         "TF_VAR_cloudflare_api_token: ${{ secrets.CF_INFRA_API_TOKEN }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "TF_VAR_access_allowed_emails: ${{ secrets.ACCESS_ALLOWED_EMAILS }}",
     ),
 ];
 
@@ -1707,9 +1740,25 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
     let running: Vec<usize> = (0..steps.len())
         .filter(|at| steps.get(*at).and_then(|step| run_of(step)) == Some(INFRA_RUN))
         .collect();
-    if running.len() != 1 || running.first().copied() != steps.len().checked_sub(1) {
+    let closing: Vec<usize> = (0..steps.len())
+        .filter(|at| steps.get(*at).and_then(|step| run_of(step)) == Some(INFRA_CLOSE))
+        .collect();
+    if running.len() != 1 || running.first().copied() != steps.len().checked_sub(2) {
         fail(&format!(
-            "its job must end with the one step that runs `{INFRA_RUN}`"
+            "its job must run `{INFRA_RUN}` once, in the step before the last"
+        ));
+    }
+    let closes_always = closing.len() == 1
+        && closing.first().copied() == steps.len().checked_sub(1)
+        && closing
+            .first()
+            .and_then(|at| steps.get(*at))
+            .and_then(|step| step.first())
+            .and_then(|index| lines.get(*index))
+            .is_some_and(|line| line.trim_end() == "      - if: always()");
+    if !closes_always {
+        fail(&format!(
+            "its job must end with one `if: always()` step that runs `{INFRA_CLOSE}`"
         ));
     }
     let in_a_step: BTreeSet<usize> = steps.iter().flatten().copied().collect();
@@ -1721,13 +1770,20 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
         fail("only a step may read a secret, never the workflow or the job");
     }
     for (at, step) in steps.iter().enumerate() {
-        let allowed = running == [at];
+        let allowed: &[&str] = if running == [at] {
+            &INFRA_SECRETS
+        } else if closing == [at] {
+            &[INFRA_CLOSE_SECRET]
+        } else {
+            &[]
+        };
         if secret_names(&text_of(step))
             .iter()
-            .any(|name| !allowed || !INFRA_SECRETS.contains(&name.as_str()))
+            .any(|name| !allowed.contains(&name.as_str()))
         {
             fail(&format!(
-                "only the step that runs `{INFRA_RUN}` may read a secret, and only {}",
+                "only the step that runs `{INFRA_RUN}` may read a secret, and only {}; the \
+                 closing step reads {INFRA_CLOSE_SECRET} alone",
                 INFRA_SECRETS.join(", ")
             ));
         }
@@ -4826,6 +4882,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "DIGITALOCEAN_TOKEN",
     "TF_VAR_state_passphrase",
     "TF_VAR_kube_api_allowed_addresses",
+    "TF_VAR_access_allowed_emails",
     "TF_VAR_cloudflare_api_token",
     "MANDATE_SCHEMA_SHARD",
     "MANDATE_SWEEP_CLOCK",
@@ -16223,6 +16280,17 @@ mod tests {
             (
                 "step after",
                 format!("{text}      - run: cargo xtask markers\n"),
+            ),
+            (
+                "close not always",
+                edited(
+                    "      - if: always()\n        run: cargo xtask infra close\n",
+                    "      - run: cargo xtask infra close\n",
+                ),
+            ),
+            (
+                "close reads another secret",
+                format!("{text}          T: ${{{{ secrets.CF_INFRA_API_TOKEN }}}}\n"),
             ),
             (
                 "secret step twice",
