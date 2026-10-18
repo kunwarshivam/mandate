@@ -18,7 +18,7 @@ use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_domain::{AssetClass, AssetId as DomainAsset, AutonomyDecision, MarketSession};
 use mandate_gateway::fake::{Recorded, RecordedTransport};
 use mandate_gateway::guard::GuardContext;
-use mandate_gateway::meter::{Caps, MemoryMeter, Meter, MeterStore, StoreError};
+use mandate_gateway::meter::{Caps, DeploymentMeter, MemoryMeter, Meter, MeterStore, StoreError};
 use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
 use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::policy::EndpointPolicy;
@@ -377,7 +377,7 @@ fn delivered(status: u16, body: Vec<u8>, latency_ms: u64) -> Recorded {
 /// which no default gateway has, so that one is built by hand.
 pub fn gateway_for(model: &Model, now: UtcNanos) -> TestGateway {
     let mut recorded = RecordedTransport::new();
-    let mut caps = Caps::demo();
+    let mut caps = budget();
     let mut policy = EndpointPolicy::new(
         BTreeSet::from([Locality::Hosted]),
         Some(BTreeSet::from([UPSTREAM.to_owned()])),
@@ -474,7 +474,7 @@ pub fn gateway_for(model: &Model, now: UtcNanos) -> TestGateway {
             Model::Revisable(_) => registry_of(revisable_content()),
             _ => registry(),
         },
-        meter: Meter::new(meter, caps),
+        meter: Meter::new(meter, caps, deployment_meter()),
         clock: ManualClock::at(now),
         ids: Box::new(SequentialIds::starting_at(1 << 80)),
     };
@@ -556,6 +556,7 @@ pub fn config() -> ResearchConfig {
         bounds: OutputBounds::v0_1(),
         description: "Long-only US large caps, on public news and filings.".to_owned(),
         revisions_enabled: false,
+        agentic: None,
     }
 }
 
@@ -573,7 +574,7 @@ pub fn open_preconditions() -> Preconditions {
 }
 
 pub fn production_preconditions() -> Preconditions {
-    Preconditions::read(&JournalCatalog)
+    Preconditions::read(&JournalCatalog::JOURNAL)
 }
 
 /// The `research_equity` envelope: five instruments, US equities, a research envelope with a
@@ -634,6 +635,7 @@ pub struct World {
     pub lineages: LineageState,
     pub active: Vec<ActiveThesis>,
     pub last_reservation: Option<RiskClock>,
+    pub data_symbols: BTreeSet<Symbol>,
 }
 
 impl World {
@@ -651,6 +653,7 @@ impl World {
             lineages: LineageState::default(),
             active: Vec::new(),
             last_reservation: None,
+            data_symbols: BTreeSet::from([symbol("AAPL"), symbol("MSFT")]),
         }
     }
 
@@ -665,6 +668,7 @@ impl World {
             lineages: &self.lineages,
             active_theses: &self.active,
             last_reservation: self.last_reservation,
+            data_symbols: &self.data_symbols,
         }
     }
 
@@ -1151,7 +1155,7 @@ pub fn demo_parts(now: UtcNanos) -> GatewayParts<MemoryMeter, ManualClock> {
             },
         },
         registry: registry(),
-        meter: Meter::new(MemoryMeter::new(), Caps::demo()),
+        meter: Meter::new(MemoryMeter::new(), budget(), deployment_meter()),
         clock: ManualClock::at(now),
         ids: Box::new(SequentialIds::starting_at(1 << 80)),
     }
@@ -1199,4 +1203,19 @@ impl Transport for HostedDouble {
             .extend(key.map(|key| key.expose_secret().to_owned()));
         self.inner.send(request, key, deadline, clock)
     }
+}
+
+/// A workspace's monthly model budget for the tests, a setting (DEC-2207 item 1): $50 here.
+pub fn budget() -> Caps {
+    Caps::new(Usd6::dollars(50).unwrap_or_else(|e| panic!("{e}")))
+}
+
+/// A deployment meter of its own, with a cap far above any workspace's, so the tests meet only the
+/// workspace's caps (DEC-2207).
+pub fn deployment_meter() -> DeploymentMeter {
+    DeploymentMeter::new(
+        Box::new(MemoryMeter::new()),
+        Usd6::dollars(1_000_000).unwrap_or_else(|e| panic!("{e}")),
+        Box::new(SequentialIds::starting_at(1 << 100)),
+    )
 }

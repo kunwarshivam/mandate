@@ -137,6 +137,7 @@ impl Draft {
                     config_refs: fields.get("config_refs"),
                     actor: fields.get("actor"),
                     causation_id,
+                    correlation_id: fields.get("correlation_id"),
                     pii_refs: fields.get("pii_refs"),
                     event_time: fields.get("event_time"),
                 },
@@ -331,9 +332,11 @@ fn subject(stream_id: &StreamId, payload: &Value) -> Option<String> {
             field("workspace_id")?,
             field("account_ref")?
         )),
-        StreamType::Agent | StreamType::Control | StreamType::Scheduler | StreamType::Notice => {
-            None
-        }
+        StreamType::Agent
+        | StreamType::Control
+        | StreamType::Scheduler
+        | StreamType::Notice
+        | StreamType::Meter => None,
     }
 }
 

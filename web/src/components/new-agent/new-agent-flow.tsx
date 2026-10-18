@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { claimedBy, independentApprovalRequired, unallocatedUsd } from "@/lib/fixture-journey";
 import { useHandoff } from "@/lib/handoff";
-import { useRuntime } from "@/lib/mock-runtime";
+import { type SetUp, useRuntime } from "@/lib/mock-runtime";
 import { Chat, type Creation } from "./chat";
 import { type Compiler, type CompilerInput, figuresOnly, fixtureCompiler, validateTurn } from "./compiler";
 import { type Checks, type Conversation, applyTurn, blocker, chooseModel, draftOf, failTurn, inputFor, readWithoutModel, say, startConversation } from "./conversation";
@@ -13,20 +13,23 @@ import { STEP_HEADING } from "./steps";
 const FIXTURE_COMPILER = fixtureCompiler();
 
 /**
- * Setting up an agent on the fixture workspace (brief A0 to A2 and A5, DEC-476, DEC-477): one
- * conversation gathers the owner's values, shows the whole agent once, and creates it with a
- * passkey. Everything stays in this component's state until then; only the deployment reaches the
- * runtime, which repeats V-047, V-002 and V-006 when it applies it. Under the workspace's
- * independent-approval policy the summary offers no passkey confirm at all (V-047, interim until a
+ * Setting up an agent on the fixture workspace (brief A0 to A2, A5 and B3, DEC-476, DEC-477,
+ * DEC-2401): one conversation gathers the owner's values, shows the whole agent once, and then three
+ * steps set it up, each its own record: create the version, confirm it with a passkey, deploy it to
+ * paper with a passkey. Everything stays in this component's state until then; only the steps reach
+ * the runtime, which repeats V-047, V-002 and V-006 when it validates the version and when it applies
+ * the deployment. Under the workspace's
+ * independent-approval policy the summary offers no step at all (V-047, interim until a
  * second user can approve). Words handed over from Messages or the
  * copilot wait in the message field; nothing is read until the owner sends them.
  */
 export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compiler }) {
-  const { ws, deployments } = useRuntime();
+  const { ws, setUps } = useRuntime();
   const [conversation, setConversation] = useState<Conversation>(startConversation);
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [sent, setSent] = useState<{ id: string; revision: number } | null>(null);
+  /** Each summary revision's latest set-up, by its id. */
+  const [sent, setSent] = useState<Readonly<Record<number, string>>>({});
 
   const checks = useMemo<Checks>(
     () => ({ room: unallocatedUsd(ws), claimedBy: (symbol) => claimedBy(ws, symbol)?.label ?? null, independentApproval: independentApprovalRequired(ws) }),
@@ -72,12 +75,19 @@ export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compi
 
   const draft = useMemo(() => draftOf(conversation), [conversation]);
   const request = useMemo(() => (draft ? mandateFrom(draft, ws.connection.connection_id) : null), [draft, ws.connection.connection_id]);
-  const deployment = sent ? (deployments.find((d) => d.id === sent.id) ?? null) : null;
+  const shown = useMemo(() => {
+    const out: Record<number, SetUp> = {};
+    for (const [revision, id] of Object.entries(sent)) {
+      const setUp = setUps.find((s) => s.id === id);
+      if (setUp) out[Number(revision)] = setUp;
+    }
+    return out;
+  }, [sent, setUps]);
   const creation: Creation = {
     draft,
     request,
     blocked: blocker(conversation, checks),
-    sent: sent && deployment ? { deployment, revision: sent.revision } : null,
+    setUps: shown,
   };
 
   const send = (text: string) => {
@@ -106,10 +116,10 @@ export function NewAgentFlow({ compiler = FIXTURE_COMPILER }: { compiler?: Compi
             setConversation(next);
             void read(inputFor(next, messageId), messageId, false);
           },
-          onSent: (id, revision) => setSent({ id, revision }),
+          onCreated: (id, revision) => setSent((map) => ({ ...map, [revision]: id })),
           onStartOver: () => {
             setConversation(startConversation());
-            setSent(null);
+            setSent({});
             setAttempt((n) => n + 1);
           },
         }}

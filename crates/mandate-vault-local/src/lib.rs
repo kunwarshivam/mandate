@@ -21,9 +21,17 @@
 //!
 //! Both keys arrive as systemd credentials (`LoadCredential=`) in `$CREDENTIALS_DIRECTORY`, never
 //! as environment variables. [`startup::check`] refuses to start on any other arrangement.
+//!
+//! [`store::open`] starts the vault in its role; [`store`] encrypts and checks every entry,
+//! [`port`] serves the connect core's vault port from it, and [`import`] is
+//! `mandate vault import`. No value it holds reaches a log, an error, or `Debug` output.
 
+pub mod entry;
 pub mod error;
+pub mod import;
+pub mod port;
 pub mod startup;
+pub mod store;
 
 pub use error::VaultError;
 

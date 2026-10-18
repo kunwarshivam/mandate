@@ -46,12 +46,14 @@ fn app() -> App {
         },
         sessions: Arc::new(Sessions::new(&key, Box::new(OsRandom::new()))),
         tokens: Arc::new(Issuer::new(config, Arc::new(FixedKeys(None)))),
-        links: dir.join("absent"),
+        links: Arc::new(common::LinksAt(dir.join("absent"))),
         clock: common::ManualClock::at(1_791_000_000),
         journal: Arc::new(common::MemJournal::default()),
         members: Arc::new(mandate_api_server::members::until_parser),
         hosted: common::hosted(),
         artifacts: None,
+        objects: None,
+        step_up: Arc::new(mandate_api_server::stepup::Unbound),
     }
 }
 

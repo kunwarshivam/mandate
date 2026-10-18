@@ -174,6 +174,7 @@ REQUIRED_REFS = {
     "UniverseChanged": ("mandate_version",),
     "ThesisProposed": ("mandate_version", "model_version"),
     "ThesisRevised": ("mandate_version", "model_version"),
+    "ThesisInvalidated": ("mandate_version",),
 }
 
 # §9.3 (DEC-403): the account stream's risk-state records.
@@ -276,6 +277,19 @@ THESIS = rec(
 )
 SCHEMAS[("agent", "ThesisProposed")] = THESIS
 SCHEMAS[("agent", "ThesisRevised")] = THESIS
+
+# §9.22 (DEC-2202): the invalidation verdict on the agent stream. Its batch and stream rules (186 and
+# 187) are `invalidation.py`'s; rules 184 and 185 are judged here with the other per-draft rules.
+INVALIDATION_CAUSES = ("model", "source_revoked")
+SCHEMAS[("agent", "ThesisInvalidated")] = rec(
+    ("thesis_id", IDENT_T),
+    ("lineage_id", IDENT_T),
+    ("instrument_id", ASSET_ID),
+    ("cause", one_of(*INVALIDATION_CAUSES)),
+    ("candidate", opt(INT)),
+    ("evidence", list_of(STR)),
+    ("source", opt(STR)),
+)
 
 # §9.7 (DEC-533): the owner's approval answer and the runtime's two records of it. Times are integer
 # risk-clock seconds, as §9.6's `ApprovalRequested.deadline` is, so their step-up evidence is not
@@ -890,6 +904,42 @@ CP_RECORDS = (
 )
 CP_SEQUENCED = ("LicenseApplied", "ReleaseOffered", "ReleaseInstalled", "CatalogEntryRegistered", "DataBundleImported")
 
+# §9.18 v0.45 (DEC-1001, DEC-1002): the backtest's and the forward-paper evaluation's records, on the
+# control stream, each naming its report by artifact. Their writers are a `user` who asked or a
+# `system` runner, never another principal (DEC-1141).
+SCHEMAS[("ctl", "BacktestRunRecorded")] = rec(
+    ("backtest_id", IDENT_T),
+    ("mandate_version", REF),
+    ("data_snapshot", REF),
+    ("model_outputs", REF),
+    ("theses", REF),
+    ("configuration", REF),
+    ("code_build", REF),
+    ("report", opt(REF)),
+    ("report_version", INT),
+    ("marker", one_of("backtest")),
+    ("result", one_of("completed", "refused")),
+    ("refusal", opt(STR)),
+)
+SCHEMAS[("ctl", "EvaluationRunRecorded")] = rec(
+    ("evaluation_id", IDENT_T),
+    ("decision", STR),
+    ("cut_off", TS),
+    ("theses", REF),
+    ("theses_from", list_of(STR)),
+    ("theses_to", list_of(STR)),
+    ("theses_head", list_of(DIGEST_HEX)),
+    ("closes", REF),
+    ("cost_model", REF),
+    ("code_build", REF),
+    ("report", REF),
+    ("report_version", INT),
+    ("passed", BOOL),
+)
+BACKTEST_RECORDS = ("BacktestRunRecorded", "EvaluationRunRecorded")
+BACKTEST_WRITERS = ("user", "system")
+REQUIRED_REFS["BacktestRunRecorded"] = ("rule_set", "mandate_version")
+REQUIRED_REFS["EvaluationRunRecorded"] = ("rule_set",)
 # §9.21 v0.48 (DEC-1170): the deployment manager's records, written by workspace control services on
 # the control stream. No member is free text: IDs, enumerations, and integers only.
 DM_PROCESSES = ("runtime", "executor")
@@ -1011,6 +1061,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("agent", "AgentModeChanged"): (1, 2),
     ("agent", "OwnerCommandRefused"): (1, 2),
     ("ctl", "VerificationRun"): (1, 2),
+    ("ctl", "AgentDeployed"): (1, 2),
 }
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "StreamOpened", 1): rec(
@@ -1040,6 +1091,8 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("agent", "AgentModeChanged", 2): MODE_CHANGED_V2,
     ("agent", "OwnerCommandRefused", 2): REFUSAL_V2,
     ("ctl", "VerificationRun", 2): VERIFICATION_RUN_V2,
+    # v0.51 §9.24 (DEC-1171): version 1's members, then the stored document's connection.
+    ("ctl", "AgentDeployed", 2): rec(*SCHEMAS[("ctl", "AgentDeployed")].fields, ("connection_id", IDENT_T)),
 }
 
 # §9.6 (DEC-460) and v0.42 (DEC-942): the runtime's approval request. Version 2 is version 1 with
@@ -1490,6 +1543,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += audit_violations(event_type, draft, skip)
     out += cold_violations(event_type, draft, skip)
     out += control_plane_violations(event_type, draft, skip)
+    out += backtest_violations(event_type, draft, skip)
     out += deployment_manager_violations(event_type, draft, skip)
     return out
 
@@ -1704,6 +1758,15 @@ def workspace_rules(event_type: str, draft: dict, skip: frozenset[str], out: lis
             rule("76", services, "actor.kind")
         else:
             gateway_call_rules(p, actor, rule, skip)
+    if event_type == "ThesisInvalidated":
+        model = p["cause"] == "model"
+        (
+            rule("184.candidate", (p["candidate"] is not None) == model, "payload.candidate")
+            and rule("184.evidence", model or not p["evidence"], "payload.evidence")
+            and rule("184.source", (p["source"] is None) == model, "payload.source")
+            and rule("184.causation", draft["causation_id"] is not None, "causation_id")
+        )
+        rule("185", actor["kind"] == "agent", "actor.kind")
     if event_type in ("MeterReserved", "MeterSettled"):
         rule("155", actor["kind"] == "system", "actor.kind")
     if event_type == "MeterReserved":
@@ -2192,6 +2255,31 @@ def control_plane_violations(event_type: str, draft: dict, skip: frozenset[str])
     return out
 
 
+def backtest_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.18's rules 143 to 145 and DEC-1141's writer, on a well-typed payload, in that order."""
+    if event_type not in BACKTEST_RECORDS:
+        return []
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    if event_type == "BacktestRunRecorded":
+        refused = p["result"] == "refused"
+        rule("143.report", (p["report"] is None) == refused, "payload.report")
+        rule("143.refusal", (p["refusal"] is not None) == refused, "payload.refusal")
+        bound = draft["config_refs"].get("mandate_version")
+        rule("144", bound == p["mandate_version"], "payload.mandate_version")
+    else:
+        lengths = {len(p["theses_from"]), len(p["theses_to"]), len(p["theses_head"])}
+        rule("145.empty", bool(p["theses_from"]), "payload.theses_from")
+        rule("145.length", len(lengths) == 1, "payload.theses_from")
+    rule("writer", draft["actor"]["kind"] in BACKTEST_WRITERS, "actor.kind")
+    return out
+
+
 def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
     """§9.21's rules 165 to 168, on a well-typed payload, in number order."""
     if event_type not in DM_RECORDS:
@@ -2648,12 +2736,15 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
             Violation("config_refs.required", "missing_config_ref", f"config_refs.{k}") for k in missing[:1]
         ]
     versions = VERSIONED_VERSIONS.get((stream[0], event_type), (1,))
+    if event_type == "AgentDeployed" and "versions.agent_deployed_v2" in skip:
+        versions = (1,)
     if draft["schema_version"] not in versions:
         return [*out, Violation("catalogue", "unknown_schema", "payload")]
     command = draft["payload"].get("command") if isinstance(draft["payload"], dict) else None
     if event_type == "OwnerCommandIssued" and command not in HOLD_COMMANDS and "closed.owner_commands" not in skip:
         return out + open_command_violations(draft, skip)
-    if (stream[0], event_type) in SCHEMAS and draft["schema_version"] == 1:
+    v1_read = event_type == "AgentDeployed" and "versions.agent_deployed_v1_schema" in skip
+    if (stream[0], event_type) in SCHEMAS and (draft["schema_version"] == 1 or v1_read):
         schema = SCHEMAS[(stream[0], event_type)]
     else:
         schema = VERSIONED_SCHEMAS[(stream[0], event_type, draft["schema_version"])]

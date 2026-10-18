@@ -39,20 +39,24 @@ use mandate_api_server::clock::SystemClock;
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
     StartRefusal, artifact_store, check_bind, check_database_url, check_environment,
-    read_session_key,
+    check_key_set_tier, read_session_key,
 };
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::Postgres;
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
+use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{OsRandom, Sessions};
+use mandate_api_server::stepup::Unbound;
 use mandate_api_server::subject;
 use mandate_api_server::token::Issuer;
+use mandate_artifacts_fs::FsArtifactStore;
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_identity::{OrgId, WorkspaceId};
 use mandate_journal::ArtifactSource;
 use mandate_journal_pg::PgJournal;
+use mandate_release::startup::{TIER_VAR, Tier};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{mpsc, watch};
@@ -136,10 +140,9 @@ struct Start {
     key: SessionKey,
     issuer: IssuerConfig,
     keys: Arc<FetchedKeys>,
-    links: PathBuf,
     database_url: String,
     hosted: Hosted,
-    artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
+    artifacts: Option<Arc<Objects<FsArtifactStore>>>,
 }
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
@@ -184,18 +187,18 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
     .map_err(|_| StartRefusal::Setting {
         name: "MANDATE_API_ISSUER",
     })?;
-    let keys =
-        FetchedKeys::new(&setting("MANDATE_API_JWKS_URL")?).map_err(|_| StartRefusal::Setting {
-            name: "MANDATE_API_JWKS_URL",
-        })?;
-    let links = PathBuf::from(subject::SUBJECT_LINKS);
+    let key_set = setting("MANDATE_API_JWKS_URL")?;
+    let tier = Tier::from_setting(env::var(TIER_VAR).ok().as_deref());
+    check_key_set_tier(&key_set, tier)?;
+    let keys = FetchedKeys::new(&key_set).map_err(|_| StartRefusal::Setting {
+        name: "MANDATE_API_JWKS_URL",
+    })?;
     let artifacts = artifact_store(env::var_os("MANDATE_API_ARTIFACTS").as_deref())?;
     let start = Start {
         settings,
         key,
         issuer,
         keys: Arc::new(keys),
-        links,
         database_url,
         hosted,
         artifacts,
@@ -243,14 +246,22 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         settings: start.settings,
         sessions: Arc::new(Sessions::new(&start.key, Box::new(OsRandom::new()))),
         tokens: Arc::new(Issuer::new(start.issuer, start.keys)),
-        links: start.links,
+        links: Arc::new(subject::Fixed),
         clock: Arc::new(SystemClock),
         journal: Arc::new(Postgres(PgJournal::from_dsn(&start.database_url).map_err(
             |_| io::Error::other("the journal's connection settings are refused"),
         )?)),
         members: Arc::new(members::until_parser),
         hosted: start.hosted,
-        artifacts: start.artifacts,
+        artifacts: start.artifacts.clone().map(|store| {
+            let store: Arc<dyn ArtifactSource + Send + Sync> = store;
+            store
+        }),
+        objects: start.artifacts.map(|store| {
+            let store: Arc<dyn ObjectStore> = store;
+            store
+        }),
+        step_up: Arc::new(Unbound),
     };
     let api = spawn_listener(
         serve(

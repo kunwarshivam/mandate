@@ -343,10 +343,15 @@ impl RuntimeState {
 
     /// Takes the startup hold unless the fold already proves the broker's truth is known
     /// (DEC-131 item 13). Called by `Input::Started` and by nothing else, so the hold is a decision
-    /// a process takes once, at the point where its replay ends.
+    /// a process takes once, at the point where its replay ends. A hold taken forgets the
+    /// reconciliation the replay folded, so only one folded after this start lifts it: the earlier
+    /// one is the very knowledge the hold was just judged not to be enough (DEC-1014 item 6).
     pub(crate) fn take_startup_hold(&mut self) {
         self.awaiting_reconciliation =
             !(self.reconciliation_known() && self.outstanding.is_empty());
+        if self.awaiting_reconciliation {
+            self.reconciled = false;
+        }
     }
 
     /// Lifts the startup hold once, when the reconciliation it waits for has arrived. Latched
@@ -505,6 +510,13 @@ impl RuntimeState {
     /// next is the same one, re-deriving the same ids (journal spec §5.1).
     pub(crate) fn remember(&mut self, batch: UnresolvedAppend) {
         self.unresolved = Some(batch);
+    }
+
+    /// Forgets a remembered batch the journal refused and so stored none of (journal spec §5.1: a
+    /// refused batch writes nothing), so the single writer is not held on a batch that can never
+    /// commit. Only [`crate::abandon_refused_research`] calls it, for a research batch.
+    pub(crate) fn forget_refused(&mut self) {
+        self.unresolved = None;
     }
 
     /// Clears a remembered batch once its last draft has been folded back, which is how a single
@@ -743,6 +755,12 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "DecisionMade"
         | "ThesisProposed"
         | "ThesisRevised"
+        | "ThesisInvalidated"
+        | "RunStarted"
+        | "ToolCallRecorded"
+        | "ToolResultRecorded"
+        | "RunSummaryRecorded"
+        | "RunEnded"
         | "BrokerExchangeRecorded"
         | "FillApplied"
         | "LateFillApplied"

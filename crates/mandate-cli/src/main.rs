@@ -15,10 +15,11 @@ use mandate_cli::journal::JournalCommand;
 use mandate_cli::register::{ConfigCommand, ModelCommand};
 #[cfg(feature = "rh-sim")]
 use mandate_cli::sim_clock::from_env;
+use mandate_cli::vault::VaultCommand;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
     Cli, Command, artifact, brake, connection, db, download, gestures, identity, inbox, inspect,
-    journal, register, workspace,
+    journal, register, vault, workspace,
 };
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
@@ -146,6 +147,23 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Agent(AgentCommand::Kill(args)) => {
             brake::run_kill(&args, now()?, &mut io::stdout().lock()).map(drop)
+        }
+        Command::Vault(VaultCommand::Import(args)) => {
+            let environment: Vec<(String, String)> = std::env::vars_os()
+                .map(|(k, v)| {
+                    (
+                        k.to_string_lossy().into_owned(),
+                        v.to_string_lossy().into_owned(),
+                    )
+                })
+                .collect();
+            vault::run_import(
+                &args,
+                &environment,
+                &vault::UserDatabase::from_host()?,
+                &mut io::stdin().lock(),
+                &mut io::stdout().lock(),
+            )
         }
         Command::Db(DbCommand::Migrate(args)) => {
             db::migrate(&args, &mut io::stdout().lock())?;

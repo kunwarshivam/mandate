@@ -50,3 +50,13 @@ test("a screen the API does not serve yet says so, and shows no fixture figures"
   await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toBeVisible();
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });
+
+test("a backtest report reads GET /backtests/{id} and shows the served report, with no fixture tag", async ({ page }) => {
+  const calls = apiCalls(page);
+  await page.goto("/backtests/bt_01JBR2C4D6E8F0G2H4J6K8M0N2?scenario=normal");
+  await expect(page.getByRole("table", { name: "This version and buy and hold" })).toBeVisible();
+  await expect(page.getByText("[[LEGEND-HYPOTHETICAL]]")).toBeVisible();
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+  expect(calls.map((c) => new URL(c.url()).pathname)).toContain(`/v1/workspaces/${WS}/backtests/bt_01JBR2C4D6E8F0G2H4J6K8M0N2`);
+  for (const call of calls) expect(operationFor(call.method(), call.url(), WS), `${call.method()} ${call.url()}`).not.toBeNull();
+});

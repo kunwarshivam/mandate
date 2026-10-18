@@ -92,7 +92,8 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("OwnerAcknowledged", &[ACCT, CTL], &[]),
     ("ConfigSnapshotRegistered", &[CTL], &[]),
     ("SurveillanceReportGenerated", &[CTL], &[RULE]),
-    ("BacktestRunRecorded", &[CTL], &[RULE]),
+    ("BacktestRunRecorded", &[CTL], &[RULE, MAN]),
+    ("EvaluationRunRecorded", &[CTL], &[RULE]),
     ("PlatformOperatorAction", &[CTL], &[]),
     ("AnchorComputed", &[CTL], &[]),
     ("VerificationRun", &[CTL], &[]),
@@ -216,7 +217,7 @@ const CLOSED_BY_E7_17: &[(&str, &[&str])] = &[
 
 /// The control-stream records journal spec v0.21 and v0.22 close (§9.9 and §9.10, DEC-670 and
 /// DEC-671), with the configuration each names. `ModelInvocationRecorded` is also catalogued on the
-/// agent stream, where it stays open, so it is kept out of [`SPEC`] until E10-15's implementation;
+/// agent stream, closed there by §9.19 (E15-8), so it is kept out of [`SPEC`];
 /// `the_workspace_api_records_are_catalogued_and_closed_on_the_control_stream` asserts what each
 /// becomes.
 const CLOSED_BY_E10_15: &[(&str, &[&str])] = &[
@@ -240,6 +241,12 @@ const CLOSED_BY_E12_3: [&str; 3] = ["RecordsAccessed", "ExportCreated", "Verific
 /// `the_anchor_and_segment_records_are_catalogued_and_closed_on_the_control_stream` asserts what
 /// each becomes.
 const CLOSED_BY_SECTION_9_14: [&str; 2] = ["AnchorComputed", "SegmentExported"];
+
+/// The backtest and evaluation records journal spec v0.45 §9.18 closes at schema version 1
+/// (DEC-1001, DEC-1002), registered by E4-5 and E17-8, so
+/// [`stream_types_and_required_config_refs_match_the_spec`] leaves their schema reason alone;
+/// `tests/backtest_records.rs` asserts each against its vectors.
+const CLOSED_BY_SECTION_9_18: [&str; 2] = ["BacktestRunRecorded", "EvaluationRunRecorded"];
 
 /// The account stream's snapshot, which §9.2 closes with rule 24 and its registration routes there
 /// (DEC-402). It is kept apart from the eleven pairs until that registration is implemented.
@@ -337,6 +344,7 @@ fn stream_types_and_required_config_refs_match_the_spec() {
                 && !section_9_7
                 && !CLOSED_BY_E12_3.contains(event_type)
                 && !CLOSED_BY_SECTION_9_14.contains(event_type)
+                && !CLOSED_BY_SECTION_9_18.contains(event_type)
             {
                 assert_eq!(with_all.reason, expected, "{event_type} in {kind}");
             }
@@ -1463,7 +1471,7 @@ fn the_workspace_api_records_are_catalogued_and_closed_on_the_control_stream() {
             let want = match kind {
                 CTL => (InvalidReason::Schema, "payload.unregistered".to_owned()),
                 AGENT if *event_type == "ModelInvocationRecorded" => {
-                    (InvalidReason::UnknownSchema, "payload".to_owned())
+                    (InvalidReason::Schema, "payload.unregistered".to_owned())
                 }
                 _ => wrong_stream.clone(),
             };
@@ -1495,13 +1503,16 @@ fn refused(event_type: &str, kind: &str, refs: &[&str]) -> (InvalidReason, Strin
     (refused.reason, refused.path)
 }
 
-/// The compiler's record is on the control stream (§9.9), but on the agent stream
-/// `ModelInvocationRecorded` stays catalogued and open, needing `model_version`, before and after
-/// E10-15 (E15-8 closes it there).
+/// The compiler's record is on the control stream (§9.9), and E15-8 closes the agent stream's at
+/// schema version 1 (journal spec v0.46 §9.19, DEC-998, DEC-2201): an unlisted member is refused
+/// `schema` there too, and `model_version` is still required.
 #[test]
-fn the_model_invocation_stays_open_on_the_agent_stream() {
-    let (mir, unknown) = ("ModelInvocationRecorded", InvalidReason::UnknownSchema);
-    assert_eq!(refused(mir, AGENT, &[MOD]), (unknown, "payload".to_owned()));
+fn the_model_invocation_is_closed_on_the_agent_stream() {
+    let mir = "ModelInvocationRecorded";
+    assert_eq!(
+        refused(mir, AGENT, &[MOD]),
+        (InvalidReason::Schema, "payload.unregistered".to_owned())
+    );
     let missing = (
         InvalidReason::MissingConfigRef,
         "config_refs.model_version".to_owned(),

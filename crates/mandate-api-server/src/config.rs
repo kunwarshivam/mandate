@@ -10,6 +10,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
+use mandate_release::startup::Tier;
+
 /// The session signing key's file name under `$CREDENTIALS_DIRECTORY` (`deploy/systemd`).
 pub const SESSION_KEY_FILE: &str = "session-signing-key";
 
@@ -121,6 +123,29 @@ where
     Ok(())
 }
 
+/// Refuses a key set fetched over anything but `https` outside dev and CI (E21-53, DEC-2100 item
+/// 9), so a staging or production server never trusts a loopback issuer, such as the local stub,
+/// even when its settings name one. In dev and CI an `http` key set is admitted here; the key-set
+/// client still takes `http` only on loopback.
+///
+/// # Errors
+/// [`StartRefusal::Setting`] naming `MANDATE_API_JWKS_URL`.
+pub fn check_key_set_tier(url: &str, tier: Tier) -> Result<(), StartRefusal> {
+    let https = url
+        .get(..HTTPS.len())
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case(HTTPS));
+    if https || matches!(tier, Tier::Dev | Tier::Ci) {
+        Ok(())
+    } else {
+        Err(StartRefusal::Setting {
+            name: "MANDATE_API_JWKS_URL",
+        })
+    }
+}
+
+/// The one scheme a key set is fetched with outside dev and CI.
+const HTTPS: &str = "https://";
+
 /// Refuses a database connection string that carries a password, in a URL's user information or
 /// as a `password` keyword, in either libpq form (a URL or `key=value` pairs). The string is read
 /// percent-decoded, ASCII case-insensitively, and without whitespace, as libpq would read it; a
@@ -209,16 +234,19 @@ pub fn read_session_key(credentials_dir: &Path) -> Result<SessionKey, StartRefus
 }
 
 /// The content-addressed store at `root`, which the agent reads take mandate documents from
-/// (DEC-1020 item 1), or none when `root` is absent or empty. The server only reads it, so a root
-/// that is not already a store (its `sha256` directory) is refused rather than created.
+/// (DEC-1020 item 1) and the version routes add objects to (DEC-2101 item 8), or none when `root`
+/// is absent or empty. A root that is not already a store (its `sha256` directory) is refused
+/// rather than created.
 ///
 /// # Errors
 /// [`StartRefusal::Setting`] naming `MANDATE_API_ARTIFACTS` when `root` cannot be opened as a
 /// store.
 pub fn artifact_store(
     root: Option<&std::ffi::OsStr>,
-) -> Result<Option<std::sync::Arc<dyn mandate_journal::ArtifactSource + Send + Sync>>, StartRefusal>
-{
+) -> Result<
+    Option<std::sync::Arc<crate::objects::Objects<mandate_artifacts_fs::FsArtifactStore>>>,
+    StartRefusal,
+> {
     let Some(root) = root.filter(|root| !root.is_empty()) else {
         return Ok(None);
     };
@@ -232,5 +260,7 @@ pub fn artifact_store(
         mandate_artifacts_fs::FsArtifactStore::open(root).map_err(|_| StartRefusal::Setting {
             name: "MANDATE_API_ARTIFACTS",
         })?;
-    Ok(Some(std::sync::Arc::new(store)))
+    Ok(Some(std::sync::Arc::new(crate::objects::Objects::new(
+        store,
+    ))))
 }

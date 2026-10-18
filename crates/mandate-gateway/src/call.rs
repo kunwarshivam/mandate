@@ -15,6 +15,17 @@
 //!    shape, and the endpoint is marked unhealthy (INF-2).
 //! 3. **Settlement** of the reservation at the reported cost, or at the reservation's maximum when
 //!    the cost of an attempt cannot be read, so spend is never under-counted.
+//!
+//! **A turn of an agentic run** (inference spec v0.4 §3.1, §3.2; DEC-2203) is one call too. Its
+//! request names the run's kind, offers some of the entry's pinned tools, and hands back the
+//! transcript of the run's earlier turns, each reply by its bytes and each tool result as text; a
+//! request the entry could not have made (a tool it does not declare for that kind, a transcript
+//! that is not a run of its validated tool calls) is a [`RequestError`]. Each result goes into its
+//! own data section and through the guard, as every input does. A reply with any tool call is a
+//! tool-call reply: each call must name an offered tool with arguments its schema accepts, at most
+//! `max_tool_calls_per_turn` of them, or the call is `schema_invalid`. The gateway runs none of
+//! them; it returns them, validated, as data. A turn's reservation must also fit under the request's
+//! `spend_ceiling_usd`, the run's ceiling less what its earlier turns cost.
 
 use std::collections::BTreeMap;
 
@@ -33,9 +44,10 @@ use crate::provider::{
 use crate::record::CallRecord;
 use crate::registry::{
     Endpoint, Entry, Locality, ModelRef, Registry, RegistryError, Status, Template, Unresolved,
-    int, object, sampling,
+    int, object,
 };
 use crate::schema;
+use crate::tools::{self, ToolCall, ToolDeclaration, TranscriptTurn, Turn};
 
 /// The most attempts one call makes (inference spec §3.4: retries only within the deadline).
 pub const MAX_ATTEMPTS: u32 = 3;
@@ -57,6 +69,17 @@ pub struct CallRequest {
     pub deadline: UtcNanos,
     pub observations: Vec<String>,
     pub key_owner: KeyOwner,
+    /// The agentic run's kind, which picks the final output's schema; `None` for a `single_call`
+    /// entry.
+    pub run_kind: Option<String>,
+    /// The run's earlier turns, oldest first; empty for a run's first turn and for a `single_call`
+    /// entry.
+    pub turns: Vec<Turn>,
+    /// The names of the pinned tools this turn offers; empty for a `single_call` entry.
+    pub tools: Vec<String>,
+    /// The most this call may reserve: the run's ceiling less its earlier turns' cost (inference
+    /// spec §7.3). Not part of the canonical request.
+    pub spend_ceiling: Option<Usd6>,
 }
 
 /// The gateway's own rate caps, per workspace and per agent, in calls per minute (inference spec
@@ -85,9 +108,21 @@ struct CacheKey {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Cached {
-    output: Value,
+    output: Option<Value>,
+    tool_calls: Vec<ToolCall>,
     response_ref: Digest,
     reported_identity: Option<String>,
+}
+
+/// What a request asks of its entry, checked before the call starts: the tools offered in this
+/// turn, in the entry's order; the transcript, each turn's calls validated and its results as the
+/// caller gave them; the final output's schema; and the bound on one reply's calls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Plan {
+    offered: Vec<ToolDeclaration>,
+    transcript: Vec<TranscriptTurn>,
+    output_schema: Value,
+    per_turn: u32,
 }
 
 /// One workspace's model gateway: the only component that calls a model (INF-13: nothing on the
@@ -103,11 +138,13 @@ pub struct Gateway<T, S, C> {
     ids: Box<dyn IdSource>,
     cache: BTreeMap<CacheKey, Cached>,
     admitted: Vec<(UtcNanos, Option<String>)>,
+    orphans: u64,
 }
 
 /// What a call has gathered so far, turned into its record at the end.
 struct Draft {
     record: CallRecord,
+    plan: Plan,
 }
 
 impl Draft {
@@ -116,6 +153,7 @@ impl Draft {
         self.record.completed_at = at;
         if outcome != Outcome::Ok {
             self.record.output = None;
+            self.record.tool_calls.clear();
         }
         self.record
     }
@@ -124,7 +162,8 @@ impl Draft {
 /// How one attempt ended.
 enum Attempt {
     Output {
-        output: Value,
+        output: Option<Value>,
+        tool_calls: Vec<ToolCall>,
         reply_ref: Digest,
         body: Vec<u8>,
     },
@@ -158,6 +197,7 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
             ids,
             cache: BTreeMap::new(),
             admitted: Vec::new(),
+            orphans: 0,
         }
     }
 
@@ -171,6 +211,12 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
 
     pub fn meter_mut(&mut self) -> &mut Meter<S> {
         &mut self.meter
+    }
+
+    /// The calls refused `meter_unavailable` that left an orphan open on the deployment's meter
+    /// stream (DEC-2207 item 4): the count the operator's alert reads.
+    pub fn orphans(&self) -> u64 {
+        self.orphans
     }
 
     pub fn transport(&self) -> &T {
@@ -244,29 +290,138 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
                 return Err(RequestError::UnknownModel);
             }
         };
-        Ok(self.call_entry(request, entry, start))
+        let plan = self.plan(request, &entry)?;
+        Ok(self.call_entry(request, entry, plan, start))
     }
 
-    fn call_entry(&mut self, request: &CallRequest, entry: Entry, start: UtcNanos) -> CallRecord {
+    /// What the request asks of `entry`, or why the entry could not have been asked it.
+    fn plan(&self, request: &CallRequest, entry: &Entry) -> Result<Plan, RequestError> {
+        let content = entry.content();
+        let Some(agentic) = content.agentic() else {
+            if request.run_kind.is_some() || !request.turns.is_empty() || !request.tools.is_empty()
+            {
+                return Err(RequestError::NotAgentic);
+            }
+            return Ok(Plan {
+                offered: Vec::new(),
+                transcript: Vec::new(),
+                output_schema: content.output_schema.clone(),
+                per_turn: 0,
+            });
+        };
+        let kind = request.run_kind.as_deref().ok_or(RequestError::RunKind)?;
+        let output_schema = agentic
+            .output_schemas
+            .get(kind)
+            .cloned()
+            .ok_or(RequestError::RunKind)?;
+        let menu: Vec<&ToolDeclaration> = agentic
+            .tools
+            .iter()
+            .filter(|t| t.menu.iter().any(|k| k == kind))
+            .collect();
+        let named = |name: &String| request.tools.iter().filter(|n| *n == name).count();
+        if request
+            .tools
+            .iter()
+            .any(|name| named(name) != 1 || !menu.iter().any(|t| t.name == *name))
+        {
+            return Err(RequestError::Tools);
+        }
+        let offered = menu
+            .iter()
+            .filter(|t| request.tools.contains(&t.name))
+            .map(|t| (*t).clone())
+            .collect();
+        let per_turn = agentic.loop_bounds.max_tool_calls_per_turn;
+        if u32::try_from(request.turns.len()).map_or(true, |n| n >= agentic.loop_bounds.max_turns) {
+            return Err(RequestError::Transcript);
+        }
+        let transcript = request
+            .turns
+            .iter()
+            .map(|turn| {
+                let reply = self
+                    .adapter
+                    .reply(&turn.response)
+                    .ok_or(RequestError::Transcript)?;
+                let calls = tools::validate(&reply.tool_calls, &menu, per_turn)
+                    .map_err(|_| RequestError::Transcript)?;
+                if calls.is_empty() || calls.len() != turn.results.len() {
+                    return Err(RequestError::Transcript);
+                }
+                Ok(TranscriptTurn {
+                    calls,
+                    results: turn.results.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Plan {
+            offered,
+            transcript,
+            output_schema,
+            per_turn,
+        })
+    }
+
+    fn call_entry(
+        &mut self,
+        request: &CallRequest,
+        entry: Entry,
+        plan: Plan,
+        start: UtcNanos,
+    ) -> CallRecord {
         let mut draft = Draft {
             record: skeleton(request, start),
+            plan,
         };
         let content = entry.content();
         let latest = after_ms(start, content.deadline_ms).unwrap_or(start);
         draft.record.deadline = request.deadline.min(latest);
         draft.record.seed = content.seed;
-        let Some(prompt) = render(&content.template, &request.inputs) else {
+        let Some(mut prompt) = render(&content.template, &request.inputs) else {
             draft.record.guard_rule = Some(GuardRule::InputContract);
             return draft.finish(Outcome::InputRejected, start);
         };
+        let Some(transcript) = spotlight(&draft.plan.transcript) else {
+            draft.record.guard_rule = Some(GuardRule::InputContract);
+            return draft.finish(Outcome::InputRejected, start);
+        };
+        prompt.tools = draft.plan.offered.clone();
+        prompt.transcript = transcript;
         let verdict = guard::check(&prompt.system, &self.settings.guard)
-            .and_then(|()| guard::check(&prompt.user, &self.settings.guard));
+            .and_then(|()| guard::check(&prompt.user, &self.settings.guard))
+            .and_then(|()| {
+                prompt
+                    .transcript
+                    .iter()
+                    .flat_map(|turn| &turn.results)
+                    .try_for_each(|result| guard::check(result, &self.settings.guard))
+            })
+            .and_then(|()| {
+                prompt
+                    .transcript
+                    .iter()
+                    .flat_map(|turn| &turn.calls)
+                    .try_for_each(|call| {
+                        guard::check(
+                            &tools::canonical_text(&call.arguments),
+                            &self.settings.guard,
+                        )
+                    })
+            });
         if let Err(rule) = verdict {
             draft.record.guard_rule = Some(rule);
             return draft.finish(Outcome::InputRejected, start);
         }
         let prompt_bytes = prompt_bytes(&prompt);
-        let digest = request_digest(&entry, &prompt, request.as_of);
+        let digest = request_digest_for(
+            &entry,
+            &prompt,
+            request.as_of,
+            request.run_kind.as_deref(),
+            &draft.plan.output_schema,
+        );
         draft.record.prompt_ref = Some(Digest::of(&prompt_bytes));
         draft.record.request_digest = Some(digest);
         draft.record.prompt = Some(prompt_bytes.clone());
@@ -291,12 +446,19 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
         if !self.within_rate(request.agent_id.as_deref(), start) {
             return draft.finish(Outcome::RateLimitedLocal, start);
         }
+        let input_bound = prompt_bytes.len().max(http.body.len());
         let Ok(max_cost) = endpoint.prices.max_cost(
-            u64::try_from(prompt_bytes.len()).unwrap_or(u64::MAX),
+            u64::try_from(input_bound).unwrap_or(u64::MAX),
             content.max_output_tokens,
         ) else {
             return draft.finish(Outcome::BudgetExhausted, start);
         };
+        if request
+            .spend_ceiling
+            .is_some_and(|ceiling| max_cost > ceiling)
+        {
+            return draft.finish(Outcome::BudgetExhausted, start);
+        }
         let reservation = Reservation {
             event_id: self.ids.next_id(),
             call_id: request.call_id.clone(),
@@ -314,6 +476,10 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
             Err(MeterRefusal::BudgetExhausted) => {
                 return draft.finish(Outcome::BudgetExhausted, start);
             }
+            Err(MeterRefusal::Orphaned) => {
+                self.orphans = self.orphans.saturating_add(1);
+                return draft.finish(Outcome::MeterUnavailable, start);
+            }
             Err(MeterRefusal::Unavailable) => {
                 return draft.finish(Outcome::MeterUnavailable, start);
             }
@@ -324,7 +490,7 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
         self.settle(&reservation, &record);
         if record.outcome == Outcome::Ok
             && record.completed_at <= record.deadline
-            && let (Some(output), Some(response_ref)) = (record.output.clone(), record.response_ref)
+            && let Some(response_ref) = record.response_ref
         {
             self.cache.insert(
                 CacheKey {
@@ -333,7 +499,8 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
                     request_digest: digest,
                 },
                 Cached {
-                    output,
+                    output: record.output.clone(),
+                    tool_calls: record.tool_calls.clone(),
                     response_ref,
                     reported_identity: record.reported_identity.clone(),
                 },
@@ -370,7 +537,8 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
         let cached = self.cache.get(&key)?;
         let mut record = draft.record.clone();
         record.cache_hit = true;
-        record.output = Some(cached.output.clone());
+        record.output = cached.output.clone();
+        record.tool_calls = cached.tool_calls.clone();
         record.response_ref = Some(cached.response_ref);
         record.reported_identity = cached.reported_identity.clone();
         record.outcome = Outcome::Ok;
@@ -467,10 +635,12 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
             match attempt {
                 Attempt::Output {
                     output,
+                    tool_calls,
                     reply_ref,
                     body,
                 } => {
-                    draft.record.output = Some(output);
+                    draft.record.output = output;
+                    draft.record.tool_calls = tool_calls;
                     draft.record.response_ref = Some(reply_ref);
                     draft.record.response = Some(body);
                     outcome = Outcome::Ok;
@@ -551,14 +721,27 @@ impl<T: Transport, S: MeterStore, C: Clock> Gateway<T, S, C> {
         if reply.refused {
             return Attempt::Failed(Outcome::ContentRefused);
         }
+        if !reply.tool_calls.is_empty() {
+            let offered: Vec<&ToolDeclaration> = draft.plan.offered.iter().collect();
+            return match tools::validate(&reply.tool_calls, &offered, draft.plan.per_turn) {
+                Ok(tool_calls) => Attempt::Output {
+                    output: None,
+                    tool_calls,
+                    reply_ref,
+                    body,
+                },
+                Err(_) => Attempt::Failed(Outcome::SchemaInvalid),
+            };
+        }
         let output = reply
             .content
             .as_deref()
             .and_then(|text| parse(text.as_bytes()).ok())
-            .filter(|value| schema::fits(&entry.content().output_schema, value));
+            .filter(|value| schema::fits(&draft.plan.output_schema, value));
         match output {
             Some(output) => Attempt::Output {
-                output,
+                output: Some(output),
+                tool_calls: Vec::new(),
                 reply_ref,
                 body,
             },
@@ -608,6 +791,16 @@ pub enum RequestError {
     UnknownModel,
     #[error("the pin's content hash differs from the registered entry's")]
     HashMismatch,
+    #[error("a run kind, a transcript, or offered tools for a single_call entry")]
+    NotAgentic,
+    #[error("an agentic entry's call names no run kind, or one the entry does not serve")]
+    RunKind,
+    #[error("an offered tool the entry does not declare for the run kind, or one offered twice")]
+    Tools,
+    #[error(
+        "the transcript is not a run of the entry's validated tool calls, each with one result, within max_turns"
+    )]
+    Transcript,
 }
 
 fn add_usage(a: Usage, b: Usage) -> Usage {
@@ -644,6 +837,7 @@ fn skeleton(request: &CallRequest, at: UtcNanos) -> CallRecord {
         reservation: None,
         observations: request.observations.clone(),
         output: None,
+        tool_calls: Vec::new(),
         prompt: None,
         response: None,
     }
@@ -675,37 +869,117 @@ pub fn render(template: &Template, inputs: &BTreeMap<String, String>) -> Option<
     Some(Prompt {
         system: template.system.clone(),
         user,
+        tools: Vec::new(),
+        transcript: Vec::new(),
     })
 }
 
-/// The bytes of the rendered prompt as stored: canonical JSON of its two parts.
-pub fn prompt_bytes(prompt: &Prompt) -> Vec<u8> {
-    to_canonical(&object([
-        ("system", Value::Str(prompt.system.clone())),
-        ("user", Value::Str(prompt.user.clone())),
-    ]))
+/// The transcript with each result inside its own data section, or `None` when a result holds a
+/// section marker or a slot, so a result cannot close its own section (inference spec §8.3).
+pub fn spotlight(transcript: &[TranscriptTurn]) -> Option<Vec<TranscriptTurn>> {
+    transcript
+        .iter()
+        .map(|turn| {
+            let results = turn
+                .results
+                .iter()
+                .map(|result| {
+                    let marked = result.contains(DATA_OPEN)
+                        || result.contains(DATA_CLOSE)
+                        || result.contains("{{");
+                    (!marked).then(|| format!("{DATA_OPEN}\n{result}\n{DATA_CLOSE}"))
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(TranscriptTurn {
+                calls: turn.calls.clone(),
+                results,
+            })
+        })
+        .collect()
 }
 
-/// The canonical request's digest (inference spec §3.1): the identity, the rendered prompt, the
-/// sampling, the output schema, `max_output_tokens`, and `as_of`.
+/// The prompt's canonical object: its system and user text and, only when present, the offered
+/// tools' declarations and the transcript, so a `single_call` prompt is what it was before
+/// inference spec v0.4.
+fn prompt_value(prompt: &Prompt) -> Value {
+    let mut value = object([
+        ("system", Value::Str(prompt.system.clone())),
+        ("user", Value::Str(prompt.user.clone())),
+    ]);
+    if let Value::Object(members) = &mut value {
+        if !prompt.tools.is_empty()
+            && let Ok(key) = mandate_canon::Key::new("tools")
+        {
+            members.insert(
+                key,
+                Value::Array(
+                    prompt
+                        .tools
+                        .iter()
+                        .map(ToolDeclaration::canonical)
+                        .collect(),
+                ),
+            );
+        }
+        if !prompt.transcript.is_empty()
+            && let Ok(key) = mandate_canon::Key::new("transcript")
+        {
+            members.insert(
+                key,
+                Value::Array(
+                    prompt
+                        .transcript
+                        .iter()
+                        .map(TranscriptTurn::canonical)
+                        .collect(),
+                ),
+            );
+        }
+    }
+    value
+}
+
+/// The bytes of the rendered prompt as stored: canonical JSON of its parts. Its length bounds the
+/// call's input tokens, the offered tools' declarations included (inference spec §7.2).
+pub fn prompt_bytes(prompt: &Prompt) -> Vec<u8> {
+    to_canonical(&prompt_value(prompt))
+}
+
+/// The canonical request's digest (inference spec §3.1) for a `single_call` entry.
 pub fn request_digest(entry: &Entry, prompt: &Prompt, as_of: UtcNanos) -> Digest {
+    request_digest_for(entry, prompt, as_of, None, &entry.content().output_schema)
+}
+
+/// The canonical request's digest (inference spec §3.1): the identity, the rendered prompt with its
+/// offered tools and transcript, the sampling, the output schema the reply is held to,
+/// `max_output_tokens`, `as_of`, and the run kind. The tools, the transcript, the run kind, and
+/// the sampling's `top_p` and reasoning are left out when absent, so a `single_call` digest, and
+/// every recorded fake keyed by one, is what it was before inference spec v0.4.
+pub fn request_digest_for(
+    entry: &Entry,
+    prompt: &Prompt,
+    as_of: UtcNanos,
+    run_kind: Option<&str>,
+    output_schema: &Value,
+) -> Digest {
     let content = entry.content();
-    let canonical = object([
+    let mut canonical = object([
         ("as_of", Value::Str(as_of.to_string())),
         ("identity", content.identity.canonical()),
         (
             "max_output_tokens",
             int(u64::from(content.max_output_tokens)),
         ),
-        ("output_schema", content.output_schema.clone()),
-        (
-            "prompt",
-            object([
-                ("system", Value::Str(prompt.system.clone())),
-                ("user", Value::Str(prompt.user.clone())),
-            ]),
-        ),
-        ("sampling", sampling(content.seed)),
+        ("output_schema", output_schema.clone()),
+        ("prompt", prompt_value(prompt)),
+        ("sampling", content.sampling()),
     ]);
+    if let (Some(kind), Value::Object(members), Ok(key)) = (
+        run_kind,
+        &mut canonical,
+        mandate_canon::Key::new("run_kind"),
+    ) {
+        members.insert(key, Value::Str(kind.to_owned()));
+    }
     Digest::of(&to_canonical(&canonical))
 }

@@ -1,5 +1,25 @@
 # The local and CI cell (E21-37): k3s in containers on a developer machine or a CI runner.
-# `cargo xtask cell up` sets `images.mandate` to the image it built from the change.
+# `cargo xtask cell up` sets `images.mandate` and `images.runtime` to the images it built from the
+# change.
 workspace: ws1
 environment: paper
 localImages: true
+# The demo agent deployment `cargo xtask cell up` starts the runtime for, on the deny-all wiring
+# until the post-R0 hook (DEC-1013). `images.runtime` is set to the image `cell up` built.
+runtime:
+  agent: demo-agent
+  connection: demo-paper
+  owner: demo-owner
+# The workspace API server, when `cargo xtask cell up` names its image. It hosts the demo workspace
+# (`cargo xtask cell demo` opens it under this id). The issuer is the local stub of DEC-2100 on the
+# pod's loopback, which lane SI adds: until then no key set is fetched and every sign-in is refused,
+# and no subject links are mounted, so none could succeed anyway (fail closed).
+api:
+  org: 01KDEM0000000000000000000R
+  workspace: 01KDEM0000000000000000000W
+  issuer: http://127.0.0.1:8090
+  audience: authenticated
+  jwksUrl: http://127.0.0.1:8090/jwks.json
+  appOrigin: https://localhost:4317
+  tier: dev
+  subjectLinks: ""

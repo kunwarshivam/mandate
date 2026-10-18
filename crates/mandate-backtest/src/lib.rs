@@ -38,6 +38,15 @@ pub use metrics::{Metrics, Totals};
 pub use report::{AbsentStatistics, InputDigests, REPORT_VERSION, Report, Sign};
 pub use strategy::{Signal, Strategy, StrategyConfig};
 
+/// The report's canonical encoders, shared with `mandate-version-backtest` so a version report
+/// writes every block it has in common with this crate's report byte for byte as this crate does
+/// (DEC-1001 item 2).
+pub mod encode {
+    pub use crate::report::{
+        bar_input, decimal, fees, int, metrics, object, optional, sim, text, tick,
+    };
+}
+
 use core::cmp::Ordering;
 use std::collections::BTreeSet;
 
@@ -244,7 +253,7 @@ pub fn run(input: &BacktestInput<'_>) -> Result<BacktestRun, BacktestError> {
 /// the bar's start, and for crypto, which has no trade date (spec §2.2), the UTC date of its start.
 /// Either disagreement fails the run, so a mislabelled bar cannot silently move a period boundary
 /// (DEC-127 item 20).
-fn check_trade_dates(input: &BacktestInput<'_>) -> Result<(), BacktestError> {
+pub fn check_trade_dates(input: &BacktestInput<'_>) -> Result<(), BacktestError> {
     let config = input.config;
     for (index, bar) in input.bars.iter().enumerate() {
         let expected = match config.instrument.asset_class {
@@ -260,15 +269,15 @@ fn check_trade_dates(input: &BacktestInput<'_>) -> Result<(), BacktestError> {
 
 /// One strategy's walk over the bars: the periods it observed, the fills it folded, the orders it
 /// submitted, and the account they left behind, which holds the fee totals the report shows.
-struct Walk {
-    equity: Vec<Observation>,
+pub struct Walk {
+    pub equity: Vec<Observation>,
     fills: Vec<RunFill>,
     orders: Vec<SubmittedOrder>,
     account: Account,
 }
 
 impl Walk {
-    fn metrics(&self, config: &RunConfig) -> Result<Metrics, BacktestError> {
+    pub fn metrics(&self, config: &RunConfig) -> Result<Metrics, BacktestError> {
         Metrics::of(
             config.starting_cash,
             &self.equity,
@@ -305,19 +314,19 @@ impl Walk {
 
 /// The order the loop is waiting on: its run-wide index, the order itself, the fills the model
 /// returned for it, how many of them have been folded, and how it ended.
-struct Working {
-    index: u32,
-    order: SimOrder,
-    fills: Vec<SimFill>,
-    folded: usize,
-    end: OrderEnd,
+pub struct Working {
+    pub index: u32,
+    pub order: SimOrder,
+    pub fills: Vec<SimFill>,
+    pub folded: usize,
+    pub end: OrderEnd,
 }
 
 impl Working {
     /// The fills of this order in bar `index`, in the order the model returned them, each with the
     /// execution built from it: `o<index>` as the client order ID, `o<index>-f<ordinal>` as the fill
     /// ID, and the bar's start as the execution instant (DEC-127 item 21).
-    fn fold_bar(
+    pub fn fold_bar(
         &mut self,
         index: usize,
         at: UtcNanos,
@@ -350,7 +359,7 @@ impl Working {
     /// The bar this order stopped working in — its last fill's, or the `at_bar` a day order's
     /// remainder was canceled after, both read from the model rather than recomputed — and `None`
     /// while it is still working (DEC-127 item 18).
-    fn stopped_in(&self) -> Option<usize> {
+    pub fn stopped_in(&self) -> Option<usize> {
         let last_fill = self.fills.last().map(|fill| fill.bar);
         match self.end {
             OrderEnd::Filled => last_fill,
@@ -359,9 +368,19 @@ impl Working {
         }
     }
 
+    /// The quantity this order has not filled yet among the fills folded so far: what still rests
+    /// at the broker for the gate's participation count (trading spec §9.6).
+    pub fn remaining(&self) -> Result<Qty, BacktestError> {
+        let mut filled = Qty::ZERO;
+        for fill in self.fills.iter().take(self.folded) {
+            filled = filled.checked_add(fill.qty)?;
+        }
+        Ok(self.order.qty.checked_sub(filled)?)
+    }
+
     /// Whether this order had stopped working before bar `index`. An order works through the end of
     /// the bar in which it stops (spec §5.3 rule 6), so that bar submits no replacement.
-    fn free_before(&self, index: usize) -> bool {
+    pub fn free_before(&self, index: usize) -> bool {
         self.stopped_in()
             .is_some_and(|stopped| matches!(stopped.cmp(&index), Ordering::Less))
     }
@@ -370,7 +389,7 @@ impl Working {
 /// Walks the bars once, in index order, doing at each bar what DEC-127 item 2 fixes: the cash
 /// movements `Account::due` makes due, the bar's fills, the bar-close mark, the fee charges spec §6.2
 /// and §6.3 date, the period observation when this bar closes a period, and last the decision.
-fn walk(input: &BacktestInput<'_>, strategy: Strategy) -> Result<Walk, BacktestError> {
+pub fn walk(input: &BacktestInput<'_>, strategy: Strategy) -> Result<Walk, BacktestError> {
     let config = input.config;
     let mut account = Account::opening(config.account_type, config.starting_cash, []);
     let mut equity: Vec<Observation> = Vec::new();
@@ -560,7 +579,7 @@ fn intent(
 /// which is spec §8.2's official close, or the last bar of a crypto UTC date. A trade date the input
 /// covers only outside the regular session is no period, and its bars are folded into the next one
 /// (DEC-127 item 3).
-fn closing_bars(bars: &[SimBar]) -> Vec<bool> {
+pub fn closing_bars(bars: &[SimBar]) -> Vec<bool> {
     let mut later: BTreeSet<Date> = BTreeSet::new();
     let mut closing: Vec<bool> = bars
         .iter()
@@ -587,7 +606,7 @@ fn closing_bars(bars: &[SimBar]) -> Vec<bool> {
 ///
 /// Both comparisons are read through [`Ord`] rather than through operators, because no fixture has a
 /// bar exactly at an instant that a shifted operator would move it across.
-fn charges_due(
+pub fn charges_due(
     bar: &SimBar,
     dates: &BTreeSet<Date>,
     charged: &mut BTreeSet<Date>,
