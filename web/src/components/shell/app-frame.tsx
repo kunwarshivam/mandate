@@ -9,6 +9,7 @@ import { getDataSource } from "@/lib/data-source";
 import { getColourBlind, getScenario } from "@/lib/get-workspace";
 import { scenarioSwitcherShown } from "@/lib/scenario";
 import { SessionProvider } from "@/lib/session";
+import { readStubSignIn } from "@/lib/stub-sign-in";
 import { signedInUser } from "@/lib/supabase/server";
 
 /**
@@ -26,7 +27,10 @@ export async function AppFrame({ children }: { children: ReactNode }) {
     return (
       <SessionProvider session={user}>
         <RoleProvider>
-          <ApiProviders source={source.kind === "api" ? { origin: source.origin, workspaceId: source.workspaceId } : null}>
+          <ApiProviders
+            source={source.kind === "api" ? { origin: source.origin, workspaceId: source.workspaceId } : null}
+            stubSignIn={readStubSignIn(process.env, process.env.NODE_ENV) !== null}
+          >
             <AppShell>
               <ViewTransition>{children}</ViewTransition>
             </AppShell>
