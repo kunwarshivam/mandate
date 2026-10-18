@@ -691,9 +691,6 @@ fn openbao() -> Result<()> {
     Ok(())
 }
 
-/// The object store's conformance suite against a real S3-compatible store (E21-40, DEC-973),
-/// run only when the selection holds `mandate-objectstore` (DEC-1190). `test` runs it too, but it
-/// skips there unless `MANDATE_S3_URL` is set; here it must run.
 /// The stub token issuer's crate and binary (E21-52, DEC-2100).
 const STUB_ISSUER: &str = "mandate-stub-issuer";
 
@@ -783,6 +780,9 @@ fn release_stub_refused(output: &std::process::Output) -> Result<()> {
     Ok(())
 }
 
+/// The object store's conformance suite against a real S3-compatible store (E21-40, DEC-973),
+/// run only when the selection holds `mandate-objectstore` (DEC-1190). `test` runs it too, but it
+/// skips there unless `MANDATE_S3_URL` is set; here it must run.
 fn objectstore() -> Result<()> {
     if env::var_os(S3_URL).is_none() {
         if env::var_os(S3_REQUIRED).is_some() {
