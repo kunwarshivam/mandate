@@ -169,6 +169,9 @@ fn error(call: ToolCallId, outcome: ToolOutcome, code: Code) -> Dispatched {
 /// answer, or a read this slice does not serve yet (DEC-2209 items 5 and 6), and a symbol outside
 /// the run's data universe refuses the call whole before any reader is asked (item 10).
 fn read(call: &ToolCall, scope: &Scope, readers: Readers<'_>) -> Result<Answer, ResearchRunError> {
+    if call.tool == Tool::NewsGet {
+        return news_get(call, scope, readers);
+    }
     if call.tool == Tool::NewsSearch {
         return news_search(call, scope, readers);
     }
@@ -278,6 +281,16 @@ fn terms(value: &Value) -> Option<Vec<String>> {
             ((1..=32).contains(&term.len()) && term.chars().all(allowed)).then(|| term.to_owned())
         })
         .collect()
+}
+
+/// `news.get` (§6.10, DEC-2213 items 6 to 8).
+fn news_get(
+    call: &ToolCall,
+    scope: &Scope,
+    readers: Readers<'_>,
+) -> Result<Answer, ResearchRunError> {
+    let _ = (call, scope, readers);
+    Err(ResearchRunError::Unimplemented { story: "E19-13" })
 }
 
 fn outside(symbols: &BTreeSet<Symbol>, scope: &Scope) -> bool {
