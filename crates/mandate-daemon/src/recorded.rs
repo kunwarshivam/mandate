@@ -30,17 +30,6 @@ pub enum BundleError {
     Unregistered,
 }
 
-impl BundleError {
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::Unimplemented => "unimplemented",
-            Self::Unreadable { .. } => "research_bundle_unreadable",
-            Self::Malformed { .. } => "research_bundle_malformed",
-            Self::Unregistered => "research_bundle_unregistered",
-        }
-    }
-}
-
 /// The model's one recorded reply: the output text the fake replays, its latency, and its usage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedReply {
