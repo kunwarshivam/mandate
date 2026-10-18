@@ -19,6 +19,7 @@ mandate-identity.workspace = true
 mandate-identity-seal.workspace = true
 mandate-journal.workspace = true
 mandate-journal-pg.workspace = true
+mandate-passkey.workspace = true
 mandate-release.workspace = true
 mandate-spec.workspace = true
 mandate-time.workspace = true
@@ -38,6 +39,7 @@ mandate-identity.workspace = true
 mandate-identity-seal.workspace = true
 mandate-journal.workspace = true
 mandate-time.workspace = true
+proptest.workspace = true
 ring.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "sync", "time"] }

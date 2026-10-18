@@ -6,14 +6,15 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 
 use mandate_api::envelope::{
-    Actor, ApiVersion, Record, StepUpEvidence, StepUpMethod, StepUpStatus, Watermark,
+    Actor, ApiVersion, Record, StepUpAction, StepUpActionKind, StepUpEvidence, StepUpMethod,
+    StepUpStatus, Watermark,
 };
 use mandate_api::problem::{Problem, Violation};
 use mandate_api::requests::{
     AcknowledgeRequest, ApprovalResponseRequest, BidConfirmation, ConfirmRequest, DelegationChosen,
     DelegationPreviewRequest, EndDelegationRequest, Environment, HoldRequest, KillSwitchRequest,
     LiftHoldRequest, OwnerExitRequest, OwnerRequest, PauseRequest, ResumeRequest, RevokeRequest,
-    Scope, Shape, Side, StopRequest, Verdict,
+    Scope, Shape, Side, StepUpChallengeRequest, StopRequest, Verdict,
 };
 use mandate_api::responses::{
     AlreadyEnded, Applies, ApprovalResponseAccepted, Classification, CommandAccepted, CommandPhase,
@@ -98,6 +99,7 @@ fn the_closed_enums_are_exactly_the_schemas_values() {
     enum_drift::<ApiVersion>(&defs["Envelope"]["properties"]["api_version"]);
     enum_drift::<StepUpMethod>(&defs["StepUpEvidence"]["properties"]["method"]);
     enum_drift::<StepUpStatus>(&defs["StepUpStatus"]);
+    enum_drift::<StepUpActionKind>(&defs["StepUpAction"]["properties"]["kind"]);
     let accepted = file!("workspace-api/commands/command-accepted.schema.json");
     enum_drift::<Recorded>(&accepted["properties"]["phase"]);
     let approval = schema!("approval-response-accepted");
@@ -148,6 +150,7 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<Watermark>(&[watermark], None);
     members::<Record>(&[&defs["Record"]], None);
     members::<StepUpEvidence>(&[&defs["StepUpEvidence"]], None);
+    members::<StepUpAction>(&[&defs["StepUpAction"]], None);
     members::<Actor>(&[&defs["Actor"]["oneOf"][0]], Some(("kind", "user")));
     members::<Actor>(&[&defs["Actor"]["oneOf"][1]], Some(("kind", "client")));
     let accepted = file!("workspace-api/commands/command-accepted.schema.json");
@@ -181,6 +184,7 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<BidConfirmation>(&[exit], None);
     members::<OwnerExitRequest>(&[&schema!("owner-exit-request")], None);
     members::<RevokeRequest>(&[&schema!("revoke-request")], None);
+    members::<StepUpChallengeRequest>(&[&schema!("step-up-challenge-request")], None);
     let preview = schema!("delegation-preview");
     members::<DelegationPreview>(&[&defs["Envelope"], &preview], None);
     members::<PreviewedDelegation>(&[&preview["properties"]["delegation"]], None);
@@ -237,6 +241,7 @@ fn every_member_is_null_able_and_optional_exactly_as_its_schema_says() {
     nulls::<DelegationChosen>(&[&approval["properties"]["delegation"]["oneOf"][0]]);
     nulls::<DelegationPreviewRequest>(&[&schema!("delegation-preview-request")]);
     nulls::<StopRequest>(&[&schema!("stop-request")]);
+    nulls::<StepUpChallengeRequest>(&[&schema!("step-up-challenge-request")]);
     let kill = schema!("kill-switch-request");
     nulls::<KillSwitchRequest>(&[&kill]);
     nulls::<BidConfirmation>(&[&kill["properties"]["owner_exit"]["oneOf"][0]["items"]]);
@@ -341,6 +346,7 @@ fn the_envelope_shapes_accept_their_examples_and_refuse_the_invalid() {
     check::<Record>(&of("Record", &good), &of("Record", &bad));
     check::<StepUpEvidence>(&of("StepUpEvidence", &good), &of("StepUpEvidence", &bad));
     check::<StepUpStatus>(&of("StepUpStatus", &good), &of("StepUpStatus", &bad));
+    check::<StepUpAction>(&of("StepUpAction", &good), &of("StepUpAction", &bad));
     let valid = file!("workspace-api/examples/common.valid.json");
     let common = [file!("workspace-api/examples/common.json"), valid];
     let invalid = [file!("workspace-api/examples/common.invalid.json")];
@@ -446,6 +452,7 @@ fn the_plain_requests_match_their_examples() {
     request::<ResumeRequest>(cases!("resume-request"));
     request::<AcknowledgeRequest>(cases!("acknowledge-request"));
     request::<OwnerRequest>(cases!("owner-request"));
+    request::<StepUpChallengeRequest>(cases!("step-up-challenge-request"));
 }
 
 /// `Scope` holds the kill switch's `if`/`then` as variants tagged on `kind`, so `nulls` cannot read

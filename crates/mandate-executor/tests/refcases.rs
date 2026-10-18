@@ -827,6 +827,7 @@ impl<'p> Drive<'p> {
                     scope: KillScope::Agent(common::agent(common::AGENT)),
                     initiator: Initiator::RiskLimit,
                     confirmation: None,
+                    cause: None,
                 }),
                 &mut seen,
                 "the kill switch",

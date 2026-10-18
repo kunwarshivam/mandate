@@ -65,7 +65,6 @@ fn two_records() -> Vec<ThesisRecord> {
 /// Each object hashes to the digest the report's `inputs` name, so the record's references resolve
 /// to what the report was computed from.
 #[test]
-#[ignore = "pending E17-8"]
 fn each_object_is_the_one_the_report_digests() {
     let (objects, report) = run(&two_records());
     assert_eq!(digest(&objects.theses), report.inputs.theses);
@@ -76,7 +75,6 @@ fn each_object_is_the_one_the_report_digests() {
 /// The thesis records read, in the request's order: each record's position, hash, version and
 /// payload, the digests in the journal's `ref` form.
 #[test]
-#[ignore = "pending E17-8"]
 fn the_theses_object_lists_every_record_read() {
     let records = two_records();
     let (objects, _) = run(&records);
@@ -120,7 +118,6 @@ fn the_theses_object_lists_every_record_read() {
 /// The close series, one per instrument in id order, each close's instant at nanosecond precision
 /// and its price as the store answered it.
 #[test]
-#[ignore = "pending E17-8"]
 fn the_closes_object_is_every_series_in_id_order() {
     let (objects, _) = run(&two_records());
     let series = |instrument: &str, prices: [&str; 3]| {
@@ -141,7 +138,6 @@ fn the_closes_object_is_every_series_in_id_order() {
 /// The cost model: the slippage a leg, the reference notional and its increment, and the equity
 /// fee schedule the round trip is charged.
 #[test]
-#[ignore = "pending E17-8"]
 fn the_cost_model_object_is_the_configured_cost() {
     let (objects, _) = run(&two_records());
     let expected = canonical(
@@ -153,7 +149,6 @@ fn the_cost_model_object_is_the_configured_cost() {
 /// The objects depend on the records read: one more record changes the theses object and its
 /// digest, and leaves the closes and the cost model as they were.
 #[test]
-#[ignore = "pending E17-8"]
 fn another_record_changes_only_the_theses_object() {
     let (version, _) = stored_research();
     let (one, _) = run(&records(version, &[thesis("th_1", AS_OF, HORIZON)]));
