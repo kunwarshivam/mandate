@@ -271,3 +271,120 @@ fn object(members: Vec<(&str, Value)>) -> Result<Value, ResearchRunError> {
     }
     Ok(Value::Object(object))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use mandate_num::{Price, Qty};
+    use mandate_time::UtcNanos;
+
+    use super::*;
+    use crate::item::{Allowlist, Bar, Filing, InstrumentFact, NewsItem};
+    use crate::ports::{
+        BarReader, FilingReader, InstrumentReader, NewsReader, ReadError, TextQuery,
+    };
+
+    /// Answers the two bars it holds, in its order, whatever it is asked.
+    struct InOrder(Vec<Bar>);
+
+    impl BarReader for InOrder {
+        fn daily_bars(&self, _: &Symbol, _: UtcNanos, _: u32) -> Result<Vec<Bar>, ReadError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    impl NewsReader for InOrder {
+        fn news(&self, _: &TextQuery) -> Result<Vec<NewsItem>, ReadError> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl FilingReader for InOrder {
+        fn filings(&self, _: &TextQuery) -> Result<Vec<Filing>, ReadError> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl InstrumentReader for InOrder {
+        fn instruments(&self, _: &BTreeSet<Symbol>) -> Result<Vec<InstrumentFact>, ReadError> {
+            Ok(Vec::new())
+        }
+    }
+
+    const CUT_OFF: i64 = 1_792_180_800;
+
+    fn bar(nanos: u32, close: &str) -> Result<Bar, ResearchRunError> {
+        let price =
+            Price::parse(close).map_err(|_| ResearchRunError::InvalidId { what: "price" })?;
+        Ok(Bar {
+            symbol: Symbol::new("AAPL")?,
+            knowledge_at: UtcNanos::from_parts(CUT_OFF - 86_400, nanos)
+                .map_err(|_| ResearchRunError::TimeOutOfRange)?,
+            open: price,
+            high: price,
+            low: price,
+            close: price,
+            volume: Qty::parse("1000").map_err(|_| ResearchRunError::InvalidId { what: "qty" })?,
+        })
+    }
+
+    /// The close of the one bar a dispatch keeps when the reader answers `answers` in that order.
+    fn kept(answers: Vec<Bar>) -> Result<Vec<Price>, ResearchRunError> {
+        let scope = Scope {
+            workspace: "ws1".to_owned(),
+            agent: "agent-a".to_owned(),
+            cut_off: UtcNanos::from_parts(CUT_OFF, 0)
+                .map_err(|_| ResearchRunError::TimeOutOfRange)?,
+            data_universe: BTreeSet::from([Symbol::new("AAPL")?]),
+            held: BTreeSet::new(),
+            allowlist: Allowlist {
+                version: 3,
+                sources: BTreeSet::new(),
+            },
+        };
+        let reader = InOrder(answers);
+        let readers = Readers {
+            bars: &reader,
+            news: &reader,
+            filings: &reader,
+            instruments: &reader,
+        };
+        let bounds = LoopBounds::v0_2();
+        let within = DispatchScope {
+            scope: &scope,
+            bounds: &bounds,
+            result_bytes_left: 96_000,
+        };
+        let call = ToolCall {
+            index: 0,
+            tool: Tool::MarketBars,
+            arguments: r#"{"count":5,"symbol":"AAPL"}"#.to_owned(),
+        };
+        let got = dispatch(1, &[call], within, readers)?;
+        Ok(got
+            .results
+            .iter()
+            .flat_map(|result| result.items.iter())
+            .filter_map(|item| match item {
+                RetrievedItem::Bar(bar) => Some(bar.close),
+                RetrievedItem::News(_)
+                | RetrievedItem::Filing(_)
+                | RetrievedItem::Instrument(_) => None,
+            })
+            .collect())
+    }
+
+    /// DEC-2209 item 12: two answers in one second share one id, and the first answered is kept,
+    /// as `retrieve` keeps it, whichever of the two is later within the second.
+    #[test]
+    fn two_answers_in_one_second_keep_the_first_answered() -> Result<(), ResearchRunError> {
+        let (earlier, later) = (bar(100, "100")?, bar(900, "101")?);
+        assert_eq!(
+            kept(vec![earlier.clone(), later.clone()])?,
+            vec![earlier.close]
+        );
+        assert_eq!(kept(vec![later.clone(), earlier])?, vec![later.close]);
+        Ok(())
+    }
+}
