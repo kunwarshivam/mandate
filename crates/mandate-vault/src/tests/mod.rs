@@ -8,4 +8,5 @@ mod lease;
 mod local_vault;
 mod openbao;
 mod openbao_server;
+mod platform;
 mod policy;
