@@ -36,7 +36,9 @@ mod record;
 mod report;
 
 pub use record::{EvaluationRecord, evaluation_run_recorded};
-pub use report::{EVALUATION_REPORT_VERSION, EvaluationReport, Group, SignalModelKey};
+pub use report::{
+    EVALUATION_REPORT_VERSION, EvaluationReport, Group, InputObjects, SignalModelKey, input_objects,
+};
 
 use std::collections::BTreeMap;
 
@@ -75,6 +77,9 @@ pub enum EvaluationError {
     Research(&'static str),
     #[error(transparent)]
     Num(#[from] NumError),
+    /// A step its story has not built yet (DEC-77): the stub's own report.
+    #[error("not implemented until {story}")]
+    Unimplemented { story: &'static str },
 }
 
 impl From<ResearchError> for EvaluationError {
@@ -94,6 +99,7 @@ impl EvaluationError {
             Self::BaselineWithoutCloses => "baseline_without_closes",
             Self::Research(code) => code,
             Self::Num(e) => e.code(),
+            Self::Unimplemented { .. } => "unimplemented",
         }
     }
 }
