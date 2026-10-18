@@ -429,14 +429,17 @@ pub(crate) fn config_files(root: &Path, cargo_home: &Path) -> Vec<PathBuf> {
 }
 
 /// The settings in one cargo configuration, `text`, that could change what a release compiles:
-/// any `profile`, rustflags under `build` or any `target`, and a compiler or wrapper under
-/// `build` (DEC-2027). A `--config` argument would be one too, and [`build_args`] passes none.
+/// any `profile`, `env` or `include` (cargo follows an `include` without any `-Z` flag, so a file
+/// it names could set any of these; DEC-2027 item 2), rustflags under `build` or any `target`, and
+/// a compiler or wrapper under `build`. A `--config` argument would be one too, and
+/// [`build_args`] passes none.
 pub(crate) fn overriding_settings(text: &str) -> Result<Vec<String>> {
     let config: toml::Table = toml::from_str(text).context("parsing a cargo configuration")?;
-    let mut found = Vec::new();
-    if config.contains_key("profile") {
-        found.push("profile".to_owned());
-    }
+    let mut found: Vec<String> = ["profile", "env", "include"]
+        .into_iter()
+        .filter(|key| config.contains_key(*key))
+        .map(str::to_owned)
+        .collect();
     if let Some(build) = config.get("build").and_then(toml::Value::as_table) {
         for key in [
             "rustflags",
@@ -479,11 +482,14 @@ pub(crate) fn overrides(
     Ok(found)
 }
 
-/// `cargo xtask release build <out>`. It refuses before building anything when its environment
-/// or a cargo configuration it would read holds one of [`overrides`].
-pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
-    let paths = Paths::from_env(root)?;
-    let configs = config_files(root, &paths.cargo_home)
+/// Refuses when `names`, the variables of the environment, or a cargo configuration a build in
+/// `root` with `cargo_home` would read holds one of [`overrides`] (DEC-2100 item 2, DEC-2027).
+pub(crate) fn refuse_overrides(
+    root: &Path,
+    cargo_home: &Path,
+    names: impl IntoIterator<Item = String>,
+) -> Result<()> {
+    let configs = config_files(root, cargo_home)
         .into_iter()
         .map(|file| {
             fs::read_to_string(&file)
@@ -491,16 +497,25 @@ pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
                 .map(|text| (file, text))
         })
         .collect::<Result<Vec<_>>>()?;
-    let refused = overrides(
-        env::vars_os().filter_map(|(name, _)| name.into_string().ok()),
-        &configs,
-    )?;
+    let refused = overrides(names, &configs)?;
     ensure!(
         refused.is_empty(),
         "the release build refuses settings that could change what it compiles, such as turning \
          debug assertions on (DEC-2100 item 2, DEC-2027): {}",
         refused.join(", ")
     );
+    Ok(())
+}
+
+/// `cargo xtask release build <out>`. It runs [`refuse_overrides`] before it installs a tool or
+/// builds anything.
+pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
+    let paths = Paths::from_env(root)?;
+    refuse_overrides(
+        root,
+        &paths.cargo_home,
+        env::vars_os().filter_map(|(name, _)| name.into_string().ok()),
+    )?;
     let tools = tools(&paths.cargo_home)?;
     let epoch = git(root, &["log", "-1", "--format=%ct", "HEAD"])?;
     let commit = git(root, &["rev-parse", "HEAD"])?;
@@ -1212,7 +1227,8 @@ mod tests {
             )?,
             Vec::<String>::new()
         );
-        let seeded = "[profile.release]\ndebug-assertions = true\n\
+        let seeded = "include = [\"more.toml\"]\n[env]\nX = \"1\"\n\
+             [profile.release]\ndebug-assertions = true\n\
              [build]\nrustflags = [\"-C\", \"debug-assertions\"]\nrustc-wrapper = \"w\"\n\
              rustc = \"r\"\nrustc-workspace-wrapper = \"ww\"\n\
              [target.x86_64-unknown-linux-musl]\nrustflags = [\"-Cdebug-assertions\"]\n\
@@ -1221,6 +1237,8 @@ mod tests {
             overriding_settings(seeded)?,
             [
                 "profile",
+                "env",
+                "include",
                 "build.rustflags",
                 "build.rustc",
                 "build.rustc-wrapper",
@@ -1268,15 +1286,75 @@ mod tests {
         fs::write(root.join(".cargo/config.toml"), "")?;
         fs::write(base.join(".cargo/config"), "")?;
         fs::write(home.join("config.toml"), "")?;
-        let found = config_files(&root, &home);
+        fs::write(home.join("config"), "")?;
+        let found: Vec<PathBuf> = config_files(&root, &home)
+            .into_iter()
+            .filter(|file| file.starts_with(&base))
+            .collect();
         let _ = fs::remove_dir_all(&base);
-        let expected: Vec<PathBuf> = vec![
+        assert_eq!(
+            found,
+            [
+                root.join(".cargo/config.toml"),
+                base.join(".cargo/config"),
+                home.join("config.toml"),
+                home.join("config"),
+            ],
+            "the checkout's, then each parent's, then CARGO_HOME's, `config.toml` before `config`"
+        );
+        Ok(())
+    }
+
+    /// DEC-2027: `refuse_overrides` reads the files cargo would read and refuses a variable or a
+    /// setting in any of them, including a file that only includes another; a clean checkout and
+    /// environment pass.
+    #[test]
+    fn overrides_are_refused_from_the_environment_and_every_configuration() -> Result<()> {
+        let base = env::temp_dir().join(format!("mandate-release-refuse-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("mandate");
+        let home = base.join("cargo-home");
+        fs::create_dir_all(root.join(".cargo"))?;
+        fs::create_dir_all(&home)?;
+        fs::write(root.join(".cargo/config.toml"), "[alias]\nx = \"run\"\n")?;
+        let clean = refuse_overrides(&root, &home, ["PATH".to_owned(), "HOME".to_owned()]);
+        let variable = refuse_overrides(&root, &home, ["RUSTFLAGS".to_owned()]);
+        fs::write(home.join("config.toml"), "include = [\"release.toml\"]\n")?;
+        let included = refuse_overrides(&root, &home, Vec::new());
+        let _ = fs::remove_dir_all(&base);
+        assert!(clean.is_ok(), "{clean:?}");
+        for (refused, named) in [(variable, "RUSTFLAGS"), (included, "config.toml: include")] {
+            let message = format!("{:#}", refused.err().context("a refusal")?);
+            assert!(
+                message.contains("DEC-2027") && message.contains(named),
+                "{message}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-2027 item 4: `release build` refuses before it installs a tool, reads git, or builds:
+    /// a checkout whose configuration sets a profile is refused with the refusal, not with any
+    /// later step's error.
+    #[test]
+    fn the_build_refuses_before_anything_runs() -> Result<()> {
+        let base = env::temp_dir().join(format!("mandate-release-first-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("mandate");
+        fs::create_dir_all(root.join(".cargo"))?;
+        fs::write(
             root.join(".cargo/config.toml"),
-            base.join(".cargo/config"),
-            home.join("config.toml"),
-        ];
-        assert_eq!(found[..2], expected[..2]);
-        assert_eq!(found.last(), expected.last());
+            "[profile.release]\ndebug-assertions = true\n",
+        )?;
+        let built = build(&root, &base.join("out"));
+        let wrote = base.join("out").exists();
+        let _ = fs::remove_dir_all(&base);
+        let message = format!("{:#}", built.err().context("a refusal")?);
+        assert!(
+            message.contains("DEC-2027") && message.contains("config.toml: profile"),
+            "{message}"
+        );
+        assert!(!wrote, "a refused build writes nothing");
         Ok(())
     }
 
