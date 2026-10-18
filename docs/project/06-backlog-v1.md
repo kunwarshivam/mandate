@@ -2192,6 +2192,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   `MANDATE_API_INTERNAL_PAPER_WORKSPACE=true`, which start refuses unless the hosted control stream
   is paper throughout; otherwise every evaluation id is the 404 an absent one gets. The harness
   remains.
+  *Debt (DEC-2244 slice (b), #1609):* `crates/mandate-evaluation/src/inputs.rs`'s `fee_config`
+  (about line 230) and its helpers `fields`, `text`, `parsed`, `list`, `date` and `word` repeat
+  `crates/mandate-backtest-runner/src/inputs.rs`'s (about line 598), because nothing may depend on
+  the runner. One shared strict parser of `mandate_accounting::Config`, in a crate below both,
+  replaces the two copies.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
