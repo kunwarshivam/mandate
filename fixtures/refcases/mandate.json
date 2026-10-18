@@ -13780,7 +13780,7 @@
   {
    "id": "MC-R29",
    "kind": "risk_state",
-   "title": "A cash dividend joins E with the ex-date's first mark; its application and its payment move no USD measure",
+   "title": "A cash dividend joins E with the first counted sane mark after application; its application and its payment move no USD measure",
    "base": "two_stock_swing",
    "patch": [
     {
