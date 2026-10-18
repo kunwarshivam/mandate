@@ -14623,10 +14623,12 @@ mod tests {
         assert!(
             workflow.contains(
                 "concurrency:\n  group: ci-${{ github.event_name == 'workflow_dispatch' && \
-                 github.run_id || github.ref }}\n  cancel-in-progress: true\n"
+                 !inputs.post_merge && github.run_id || github.ref }}\n  cancel-in-progress: \
+                 true\n"
             ),
-            "a newer run of the same ref cancels the older one, and a dispatched run, the \
-             nightly's included, has a group of its own, so it is never cancelled (DEC-2610)"
+            "a newer run of the same ref cancels the older one, post-merge runs on main share \
+             one group, and any other dispatched run, the nightly's included, has a group of its \
+             own, so it is never cancelled (DEC-2610)"
         );
         assert!(
             workflow.contains("  push:\n    branches: [main]\n"),
@@ -17022,7 +17024,7 @@ jq -r "$filter" "$src"
             "if: ${{ always() && needs.merge.outputs.merged == 'true' }}",
             "actions: write",
             "run: gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches\" \
-             -f ref=main",
+             -f ref=main -f \"inputs[post_merge]=true\"",
         ] {
             assert!(
                 dispatch.iter().any(|l| l == line),

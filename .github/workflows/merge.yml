@@ -99,4 +99,4 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Dispatch ci on main after this run's merges (DEC-2610)
-        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" -f ref=main
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" -f ref=main -f "inputs[post_merge]=true"

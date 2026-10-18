@@ -45,14 +45,20 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      post_merge:
+        description: "A post-merge run on main, sent by merge.yml (DEC-2610)"
+        type: boolean
+        default: false
 
 permissions: {}
 
-# A pull request's runs, and the runs of pushes to `main`, each share one group per ref, so a newer
-# push cancels the older run. A dispatched run, the nightly's or one `merge.yml` sends after its
-# merges, has a group of its own, so it is never cancelled and cancels nothing (DEC-2610).
+# A pull request's runs share one group per ref, so a newer push cancels the older run. So do the
+# post-merge runs on `main`, a push's and the ones `merge.yml` dispatches with `post_merge`, so a
+# burst of merges runs only the latest. Any other dispatched run, the nightly's included, has a
+# group of its own, so it is never cancelled and cancels nothing (DEC-2610).
 concurrency:
-  group: ci-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  group: ci-${{ github.event_name == 'workflow_dispatch' && !inputs.post_merge && github.run_id || github.ref }}
   cancel-in-progress: true
 
 env:
