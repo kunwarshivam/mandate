@@ -1,0 +1,254 @@
+//! Credential files (DEC-2022): each identity's two files owner-only, an earlier file replaced and
+//! tightened, a directory or token open to others refused, against names written out by hand.
+
+use std::fs;
+use std::os::unix::fs::{PermissionsExt, symlink};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use mandate_connections::record::ConnectionId;
+use proptest::prelude::*;
+use secrecy::{ExposeSecret, SecretString};
+
+use crate::SourceError;
+use crate::credentials::{read_token_file, write_credentials};
+use crate::openbao::RoleCredentials;
+use crate::policy::Identity;
+
+static NEXT: AtomicU32 = AtomicU32::new(0);
+
+/// A fresh path under the temporary directory that does not exist yet.
+fn fresh(name: &str) -> PathBuf {
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "vault-credentials-{}-{n}-{name}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&path);
+    let _ = fs::remove_file(&path);
+    path
+}
+
+fn mode(path: &Path) -> u32 {
+    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+fn set_mode(path: &Path, bits: u32) {
+    fs::set_permissions(path, fs::Permissions::from_mode(bits)).unwrap();
+}
+
+fn c(id: &str) -> ConnectionId {
+    ConnectionId::new(id).unwrap()
+}
+
+fn credential(identity: Identity, role_id: &str, secret_id: &str) -> RoleCredentials {
+    RoleCredentials {
+        identity,
+        role_id: role_id.to_owned(),
+        secret_id: SecretString::from(secret_id.to_owned()),
+    }
+}
+
+/// The oracle's role name, written out by hand rather than read from [`crate::policy::role_name`].
+fn oracle_name(identity: &Identity) -> String {
+    match identity {
+        Identity::Api => "api".to_owned(),
+        Identity::ConnectionManager => "connection-manager".to_owned(),
+        Identity::TokenExchange(c) => format!("exchange-{}", c.as_str()),
+        Identity::Executor(c) => format!("executor-{}", c.as_str()),
+        Identity::Runtime => "runtime".to_owned(),
+        Identity::SecretImport => "secret-import".to_owned(),
+        Identity::ModelGateway => "model-gateway".to_owned(),
+        Identity::EmailSender => "email-sender".to_owned(),
+    }
+}
+
+fn listing(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+#[ignore = "pending E21-32"]
+fn each_identitys_two_files_are_written_owner_only() {
+    let dir = fresh("out");
+    let written = write_credentials(
+        &dir,
+        &[
+            credential(Identity::Api, "role-a", "secret-a"),
+            credential(Identity::Executor(c("c1")), "role-e", "secret-e"),
+            credential(Identity::Runtime, "role-r", "secret-r"),
+        ],
+    )
+    .unwrap();
+    let want = [
+        "api.role-id",
+        "api.secret-id",
+        "executor-c1.role-id",
+        "executor-c1.secret-id",
+        "runtime.role-id",
+        "runtime.secret-id",
+    ];
+    assert_eq!(written, want);
+    assert_eq!(listing(&dir), want);
+    assert_eq!(mode(&dir), 0o700);
+    for (name, value) in [
+        ("api.role-id", "role-a"),
+        ("api.secret-id", "secret-a"),
+        ("executor-c1.secret-id", "secret-e"),
+        ("runtime.role-id", "role-r"),
+    ] {
+        let file = dir.join(name);
+        assert_eq!(fs::read_to_string(&file).unwrap(), value, "{name}");
+        assert_eq!(mode(&file), 0o600, "{name}");
+    }
+}
+
+#[test]
+#[ignore = "pending E21-32"]
+fn an_earlier_file_is_replaced_and_tightened() {
+    let dir = fresh("again");
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    let earlier = dir.join("api.secret-id");
+    fs::write(&earlier, "old-secret").unwrap();
+    set_mode(&earlier, 0o644);
+    write_credentials(&dir, &[credential(Identity::Api, "role-a", "new-secret")]).unwrap();
+    assert_eq!(fs::read_to_string(&earlier).unwrap(), "new-secret");
+    assert_eq!(mode(&earlier), 0o600);
+}
+
+#[test]
+#[ignore = "pending E21-32"]
+fn a_directory_open_to_others_or_linked_is_refused_and_nothing_is_written() {
+    let one = [credential(Identity::Api, "role-a", "secret-a")];
+    for bits in [0o750, 0o705, 0o770, 0o755] {
+        let dir = fresh("open");
+        fs::create_dir(&dir).unwrap();
+        set_mode(&dir, bits);
+        assert_eq!(
+            write_credentials(&dir, &one),
+            Err(SourceError::CredentialFile),
+            "{bits:o}"
+        );
+        assert!(listing(&dir).is_empty(), "{bits:o}");
+    }
+    let real = fresh("real");
+    fs::create_dir(&real).unwrap();
+    set_mode(&real, 0o700);
+    let link = fresh("link");
+    symlink(&real, &link).unwrap();
+    assert_eq!(
+        write_credentials(&link, &one),
+        Err(SourceError::CredentialFile)
+    );
+    assert!(listing(&real).is_empty());
+    let file = fresh("file");
+    fs::write(&file, "").unwrap();
+    assert_eq!(
+        write_credentials(&file, &one),
+        Err(SourceError::CredentialFile)
+    );
+}
+
+#[test]
+#[ignore = "pending E21-32"]
+fn an_owner_only_token_is_read_without_its_newline() {
+    for (text, want) in [("tok-1\n", "tok-1"), ("tok-2", "tok-2")] {
+        let file = fresh("token");
+        fs::write(&file, text).unwrap();
+        set_mode(&file, 0o600);
+        assert_eq!(read_token_file(&file).unwrap().expose_secret(), want);
+        set_mode(&file, 0o400);
+        assert_eq!(read_token_file(&file).unwrap().expose_secret(), want);
+    }
+}
+
+#[test]
+#[ignore = "pending E21-32"]
+fn a_token_open_to_others_missing_empty_or_linked_is_refused() {
+    let refused = |path: &Path| {
+        let read = read_token_file(path).map(|t| t.expose_secret().to_owned());
+        assert_eq!(read, Err(SourceError::CredentialFile), "{}", path.display());
+    };
+    for bits in [0o640, 0o604, 0o644, 0o660, 0o606] {
+        let file = fresh("open-token");
+        fs::write(&file, "tok").unwrap();
+        set_mode(&file, bits);
+        refused(&file);
+    }
+    for text in ["", "\n", "tok\n\n", "tok\nmore"] {
+        let file = fresh("bad-token");
+        fs::write(&file, text).unwrap();
+        set_mode(&file, 0o600);
+        refused(&file);
+    }
+    refused(&fresh("missing"));
+    let target = fresh("target");
+    fs::write(&target, "tok").unwrap();
+    set_mode(&target, 0o600);
+    let link = fresh("token-link");
+    symlink(&target, &link).unwrap();
+    refused(&link);
+    let dir = fresh("token-dir");
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    refused(&dir);
+}
+
+fn identity() -> impl Strategy<Value = Identity> {
+    let connection = "c[a-z0-9]{0,5}".prop_map(|id| c(&id));
+    prop_oneof![
+        Just(Identity::Api),
+        Just(Identity::ConnectionManager),
+        Just(Identity::Runtime),
+        Just(Identity::SecretImport),
+        Just(Identity::ModelGateway),
+        Just(Identity::EmailSender),
+        connection.clone().prop_map(Identity::Executor),
+        connection.prop_map(Identity::TokenExchange),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    /// For any set of identities, the files written are exactly two per identity under the
+    /// oracle's names, each holding its value and owner-only.
+    #[test]
+    #[ignore = "pending E21-32"]
+    fn the_files_are_exactly_two_per_identity_under_the_oracles_names(
+        identities in proptest::collection::vec(identity(), 0..6),
+        value in "[a-z0-9-]{1,24}",
+    ) {
+        let mut unique: Vec<Identity> = Vec::new();
+        for i in identities {
+            if !unique.contains(&i) {
+                unique.push(i);
+            }
+        }
+        let credentials: Vec<RoleCredentials> = unique
+            .iter()
+            .map(|i| credential(i.clone(), &format!("r-{value}"), &format!("s-{value}")))
+            .collect();
+        let dir = fresh("prop");
+        let written = write_credentials(&dir, &credentials);
+        let mut want: Vec<String> = unique
+            .iter()
+            .flat_map(|i| [format!("{}.role-id", oracle_name(i)), format!("{}.secret-id", oracle_name(i))])
+            .collect();
+        want.sort();
+        prop_assert_eq!(written.clone(), Ok(want.clone()), "{:?}", written);
+        prop_assert_eq!(listing(&dir), want.clone());
+        for name in &want {
+            let file = dir.join(name);
+            let expected = if name.ends_with(".role-id") { format!("r-{value}") } else { format!("s-{value}") };
+            prop_assert_eq!(fs::read_to_string(&file).unwrap(), expected);
+            prop_assert_eq!(mode(&file), 0o600);
+        }
+    }
+}
