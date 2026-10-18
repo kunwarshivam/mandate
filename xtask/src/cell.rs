@@ -701,20 +701,18 @@ pub fn up() -> Result<()> {
     if !cluster_exists()? {
         create_cluster()?;
     }
-    if source == ImageSource::Build {
-        sh("k3d", &["image", "import", "--cluster", CLUSTER, &image])?;
-    }
-    if let Some(api) = &api {
-        sh("k3d", &["image", "import", "--cluster", CLUSTER, api])?;
-    }
-    if let Some(runtime) = &runtime {
-        sh("k3d", &["image", "import", "--cluster", CLUSTER, runtime])?;
-    }
-    if let Some(stub) = &stub {
-        sh("k3d", &["image", "import", "--cluster", CLUSTER, stub])?;
-    }
-    if let Some(manager) = &manager {
-        sh("k3d", &["image", "import", "--cluster", CLUSTER, manager])?;
+    let built = (source == ImageSource::Build).then_some(&image);
+    for image in [
+        built,
+        api.as_ref(),
+        runtime.as_ref(),
+        stub.as_ref(),
+        manager.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        import_image(image)?;
     }
     let config = kubeconfig()?;
     sh(
@@ -961,6 +959,52 @@ fn build_image(image: &str, dockerfile: &str, binary: &str, files: &[(&str, &str
     )
 }
 
+/// How many times [`import_image`] imports one image before it gives up.
+const IMPORT_ATTEMPTS: u32 = 3;
+
+/// Imports `image` into the cell's node and confirms the node's containerd holds it. `k3d image
+/// import` exits 0 when the import fails inside the node (its own `ERRO` lines, a node killed with
+/// exit 137 and restarting), so a missing image surfaced only later, as a pod that could not pull
+/// it or an API server that never answered. Each attempt waits for the API server first, since a
+/// failed import can leave the node restarting.
+fn import_image(image: &str) -> Result<()> {
+    for attempt in 1..=IMPORT_ATTEMPTS {
+        let imported = sh("k3d", &["image", "import", "--cluster", CLUSTER, image]);
+        api_server_ready()?;
+        if imported.is_ok() && node_holds(image) {
+            return Ok(());
+        }
+        eprintln!("xtask: {image} is not in {NODE} after import attempt {attempt}");
+    }
+    bail!("{image} never reached {NODE} after {IMPORT_ATTEMPTS} imports")
+}
+
+/// Whether the node's containerd lists `image` by its exact reference; a node it cannot ask holds
+/// nothing.
+fn node_holds(image: &str) -> bool {
+    output(
+        "docker",
+        &["exec", NODE, "ctr", "-n", "k8s.io", "images", "ls", "-q"],
+    )
+    .is_ok_and(|listed| listed_holds(&listed, image))
+}
+
+/// Whether `ctr images ls -q`'s output `listed` names `image` on a line of its own.
+fn listed_holds(listed: &str, image: &str) -> bool {
+    listed.lines().any(|line| line.trim() == image)
+}
+
+/// Waits for the cell's API server to answer `/readyz`.
+fn api_server_ready() -> Result<()> {
+    for _ in 0..POLLS {
+        if kubectl(&["get", "--raw", "/readyz"]).is_ok() {
+            return Ok(());
+        }
+        sleep(Duration::from_secs(2));
+    }
+    bail!("the cell's API server never became ready")
+}
+
 fn cluster_exists() -> Result<bool> {
     let list = output("k3d", &["cluster", "list", "--output", "json"])?;
     let clusters: Value = serde_json::from_str(&list).context("reading `k3d cluster list`")?;
@@ -1004,13 +1048,7 @@ fn create_cluster() -> Result<()> {
     }
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     sh("k3d", &args)?;
-    for _ in 0..POLLS {
-        if kubectl(&["get", "--raw", "/readyz"]).is_ok() {
-            return Ok(());
-        }
-        sleep(Duration::from_secs(2));
-    }
-    bail!("the cell's API server never became ready")
+    api_server_ready()
 }
 
 /// A chart from its GitHub release, kept under `target/cell` as `name` and checked by SHA-256
@@ -4444,6 +4482,23 @@ mod tests {
         assert!(no_live_host_allowed("v", &[policy("192.0.2.0/24")], &live).is_err());
         no_live_host_allowed("v", &[policy("198.51.100.0/24")], &live)?;
         Ok(())
+    }
+
+    #[test]
+    fn an_import_counts_only_when_the_node_lists_the_exact_reference() {
+        let listed = "docker.io/rancher/mirrored-pause:3.6\nmandate.local/api:3ab66e87ffdd\n";
+        assert!(listed_holds(listed, "mandate.local/api:3ab66e87ffdd"));
+        assert!(listed_holds(
+            "  mandate.local/api:3ab66e87ffdd  \n",
+            "mandate.local/api:3ab66e87ffdd"
+        ));
+        assert!(!listed_holds(listed, "mandate.local/api:3ab66e87ffd"));
+        assert!(!listed_holds(listed, "mandate.local/runtime:3ab66e87ffdd"));
+        assert!(!listed_holds(
+            "mandate.local/api:3ab66e87ffdd-old\n",
+            "mandate.local/api:3ab66e87ffdd"
+        ));
+        assert!(!listed_holds("", "mandate.local/api:3ab66e87ffdd"));
     }
 
     #[test]
