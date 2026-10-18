@@ -113,6 +113,7 @@ fn api(
         hosted: Hosted {
             org: OrgId::from_ulid_text("01JB3K6F0C9R2V7N4M8Q1T5W3X").expect("a ULID"),
             workspace: WorkspaceId::from_ulid_text(ALICE_ID).expect("a ULID"),
+            internal_paper: false,
         },
         artifacts: None,
         objects: None,
