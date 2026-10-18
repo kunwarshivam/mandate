@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-18 evening: a coordinator session landed the CI unblocks (#1587, #1595), #1501, #1588, #1590 and #1591 to #1597 approvals, and restarted eleven builder lanes; the M5 to M7 and intelligence rows below were re-read against `main` the same day |
+| **Last updated** | 2026-10-18 evening: a coordinator session landed the CI unblocks (#1587, #1595), #1501, #1588 and #1590 merged, and #1539, #1591, #1592 and #1597 approved, and restarted eleven builder lanes; the M5 to M7 and intelligence rows below were re-read against `main` the same day |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
