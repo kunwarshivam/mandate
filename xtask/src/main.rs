@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 mod cell;
 mod image;
+mod infra_preflight;
 mod release;
 
 const USAGE: &str = "\
@@ -998,13 +999,12 @@ const INFRA_WORKFLOW: &str = ".github/workflows/infra.yml";
 /// The one command `infra.yml`'s secret-holding step runs.
 const INFRA_RUN: &str = "cargo xtask infra";
 /// The secrets that step reads, each from the environment `infra-<environment>` the founder
-/// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Cloudflare token
-/// and account go to OpenTofu as variables under `CF_` names, since `web/scripts/workers.mjs`
+/// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Spaces key is
+/// minted per run, never stored (DEC-2030 item 4). The Cloudflare token goes to OpenTofu as a
+/// variable under a `CF_` name, since `web/scripts/workers.mjs`
 /// keeps every `CLOUDFLARE_` name to `web-deploy.yml`'s deploy step (DEC-1005 item 2).
-const INFRA_SECRETS: [&str; 5] = [
+const INFRA_SECRETS: [&str; 3] = [
     "DIGITAL_OCEAN_API_KEY",
-    "SPACES_ACCESS_KEY_ID",
-    "SPACES_SECRET_ACCESS_KEY",
     "CF_INFRA_API_TOKEN",
     "TOFU_STATE_PASSPHRASE",
 ];
@@ -1021,8 +1021,11 @@ fn infra_commands(environment: &str, action: &str, plan_file: &str) -> Result<Ve
     if !matches!(environment, "staging" | "production") {
         bail!("{INFRA_ENVIRONMENT_ENV} must be staging or production, not `{environment}`");
     }
-    if !matches!(action, "plan" | "apply") {
-        bail!("{INFRA_ACTION_ENV} must be plan or apply, not `{action}`");
+    if !matches!(action, "preflight" | "plan" | "apply") {
+        bail!("{INFRA_ACTION_ENV} must be preflight, plan or apply, not `{action}`");
+    }
+    if action == "preflight" {
+        return Ok(Vec::new());
     }
     let chdir = format!("-chdir={TOFU_DIR}environments/{environment}");
     let mut commands = vec![
@@ -1050,10 +1053,12 @@ fn infra_commands(environment: &str, action: &str, plan_file: &str) -> Result<Ve
     Ok(commands)
 }
 
-/// `cargo xtask infra` (E21-56, DEC-2014): plans, or plans and applies, one hosted environment.
-/// It refuses to run anywhere but a GitHub Actions run on `main`, so the only place it reaches a
-/// cloud account is `infra.yml`'s job, which the founder approves; agents never run it (AGENTS.md
-/// rule 8). The providers and the backend read their credentials from that job's environment.
+/// `cargo xtask infra` (E21-56, DEC-2014): checks, plans, or plans and applies, one hosted
+/// environment. It refuses to run anywhere but a GitHub Actions run on `main`, so the only place it
+/// reaches a cloud account is `infra.yml`'s job, which the founder approves; agents never run it
+/// (AGENTS.md rule 8). Every action starts with the preflight, which prints what is missing by
+/// name and stops before `init` if anything is (DEC-2030 item 5). `plan` and `apply` then run with
+/// the Spaces key the preflight minted, deleted again however they end (DEC-2030 item 4).
 fn infra() -> Result<()> {
     let actions = env::var("GITHUB_ACTIONS").unwrap_or_default();
     let reference = env::var("GITHUB_REF").unwrap_or_default();
@@ -1065,16 +1070,58 @@ fn infra() -> Result<()> {
     }
     let environment = env::var(INFRA_ENVIRONMENT_ENV).unwrap_or_default();
     let action = env::var(INFRA_ACTION_ENV).unwrap_or_default();
+    let run = env::var("GITHUB_RUN_ID").unwrap_or_default();
+    if run.is_empty() || !run.chars().all(|c| c.is_ascii_digit()) {
+        bail!("GITHUB_RUN_ID must be the run's number, which names its Spaces key");
+    }
     let work = repo_root()?.join("target").join("tofu");
     fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
     let plan_file = work.join(format!("{environment}.tfplan"));
-    for args in infra_commands(&environment, &action, &plan_file.to_string_lossy())? {
+    let commands = infra_commands(&environment, &action, &plan_file.to_string_lossy())?;
+    let read = |name: &str| env::var(name).ok();
+    let preflight = infra_preflight::preflight(&environment, &run, !commands.is_empty(), &read)?;
+    eprint!("{}", preflight.checklist.render(&environment));
+    let outcome = if preflight.checklist.complete() {
+        run_tofu(&commands, preflight.key.as_ref())
+    } else {
+        Err(anyhow::anyhow!(
+            "infra preflight: each MISSING line above is a step in deploy/tofu/README.md; nothing \
+             was planned"
+        ))
+    };
+    if let Some(key) = &preflight.key {
+        let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
+        if !infra_preflight::delete_key(&token, &key.access_key)? {
+            bail!(
+                "this run's Spaces key was not deleted; the next run of {environment} deletes it \
+                 (DEC-2030 item 4)"
+            );
+        }
+    }
+    outcome
+}
+
+/// Runs each `tofu` command in turn, with the run's Spaces key in the child's environment alone,
+/// as both of the names the provider and the backend read. A blank or empty
+/// `KUBE_API_ALLOWED_CIDRS` is left out, so staging's root takes its empty default.
+fn run_tofu(commands: &[Vec<String>], key: Option<&infra_preflight::SpacesKey>) -> Result<()> {
+    let cidrs = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
+    for args in commands {
         eprintln!("    $ tofu {}", args.join(" "));
-        let status = Command::new("tofu")
-            .args(&args)
-            .env("TF_IN_AUTOMATION", "1")
-            .status()
-            .context("starting `tofu`")?;
+        let mut command = Command::new("tofu");
+        command.args(args).env("TF_IN_AUTOMATION", "1");
+        if let Some(key) = key {
+            for name in ["SPACES_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID"] {
+                command.env(name, &key.access_key);
+            }
+            for name in ["SPACES_SECRET_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY"] {
+                command.env(name, &key.secret_key);
+            }
+        }
+        if infra_preflight::no_cidrs(cidrs.as_deref()) {
+            command.env_remove(infra_preflight::KUBE_CIDRS_ENV);
+        }
+        let status = command.status().context("starting `tofu`")?;
         if !status.success() {
             bail!("`tofu {}` failed with {status}", args.join(" "));
         }
@@ -1188,22 +1235,6 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         INFRA_WORKFLOW,
         "DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_API_KEY }}",
-    ),
-    (
-        INFRA_WORKFLOW,
-        "SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}",
-    ),
-    (
-        INFRA_WORKFLOW,
-        "SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}",
-    ),
-    (
-        INFRA_WORKFLOW,
-        "AWS_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}",
-    ),
-    (
-        INFRA_WORKFLOW,
-        "AWS_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}",
     ),
     (
         INFRA_WORKFLOW,
@@ -1360,7 +1391,7 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
     }
     for wanted in [
         "        options: [staging, production]",
-        "        options: [plan, apply]",
+        "        options: [preflight, plan, apply]",
     ] {
         if !has(wanted) {
             fail(&format!(
@@ -4504,15 +4535,9 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_INFRA_ENVIRONMENT",
     "MANDATE_TOFU_REQUIRED",
     "DIGITALOCEAN_TOKEN",
-    "SPACES_ACCESS_KEY_ID",
-    "SPACES_SECRET_ACCESS_KEY",
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
     "TF_VAR_state_passphrase",
     "TF_VAR_kube_api_allowed_addresses",
-    "TF_VAR_cloudflare_account_id",
     "TF_VAR_cloudflare_api_token",
-    "TF_VAR_access_allowed_emails",
     "MANDATE_SCHEMA_SHARD",
     "MANDATE_SWEEP_CLOCK",
     "MANDATE_TEST_PARTITION",
@@ -15378,8 +15403,9 @@ mod tests {
         Ok(())
     }
 
-    /// E21-56 (DEC-2014): `plan` inits and saves a plan; `apply` applies that same saved plan,
-    /// never a fresh one; any other environment or action is refused before a command runs.
+    /// E21-56 (DEC-2014, DEC-2030): `preflight` runs no `tofu` command; `plan` inits and saves a
+    /// plan; `apply` applies that same saved plan, never a fresh one; any other environment or
+    /// action is refused before a command runs.
     #[test]
     fn infra_applies_only_the_plan_it_showed() -> Result<()> {
         let plan = infra_commands("staging", "plan", "/t/staging.tfplan")?;
@@ -15395,6 +15421,10 @@ mod tests {
             plan.get(1)
                 .is_some_and(|c| c.contains(&"-out=/t/staging.tfplan".to_owned())),
             "the plan is saved: {plan:?}"
+        );
+        assert!(
+            infra_commands("staging", "preflight", "/t/staging.tfplan")?.is_empty(),
+            "preflight runs no tofu command"
         );
         let apply = infra_commands("production", "apply", "/t/production.tfplan")?;
         assert_eq!(
@@ -15538,8 +15568,8 @@ mod tests {
             "          X: ${{ ToJson( secrets ) }}\n",
         ] {
             let infra = edited(
-                "          TF_VAR_access_allowed_emails",
-                &format!("{indirect}          TF_VAR_access_allowed_emails"),
+                "          TF_VAR_kube_api_allowed_addresses",
+                &format!("{indirect}          TF_VAR_kube_api_allowed_addresses"),
             );
             assert!(
                 check(&infra, &[])
