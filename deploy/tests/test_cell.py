@@ -823,9 +823,10 @@ def test_values_take_no_unknown_key():
 def test_a_stopping_journal_waits_briefly_for_its_pooled_clients():
     """The runtime's pool never disconnects by itself, so CloudNativePG's default smart shutdown
     (180 s) would hold every primary restart that long before the fast one (DEC-1013 item 6)."""
-    cluster = next(d for d in render(chart=JOURNAL_CHART) if d["kind"] == "Cluster")
+    cluster = next(d for d in render(*JOURNAL_ARGS, chart=JOURNAL_CHART) if d["kind"] == "Cluster")
     assert cluster["spec"]["smartShutdownTimeout"] == 10
-    assert helm(JOURNAL_CHART, "--set", "smartShutdownTimeout=600").returncode != 0
+    assert helm(JOURNAL_CHART, *JOURNAL_ARGS, "--set", "smartShutdownTimeout=600").returncode != 0
+    assert helm(JOURNAL_CHART, *JOURNAL_ARGS, "--set", "smartShutdownTimeout=180").returncode == 0
 
 
 def test_roles_match():
