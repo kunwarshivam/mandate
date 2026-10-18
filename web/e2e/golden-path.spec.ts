@@ -40,7 +40,7 @@ async function signIn(page: Page, width: number) {
   await expect(page.getByRole("heading", { name: /^Needs you/ })).toBeVisible();
 }
 
-/** From Agents, the set-up conversation, then Create agent with a passkey, until its first check asks. */
+/** From Agents, the set-up conversation, then its version created, confirmed and deployed with passkeys, until its first check asks. */
 async function setUpAgent(page: Page, width: number) {
   await appNav(page, width).getByRole("link", { name: "Agents" }).click();
   await page.getByRole("link", { name: "Describe an agent" }).click();
@@ -51,11 +51,16 @@ async function setUpAgent(page: Page, width: number) {
   await say(page, "MSFT");
   await page.getByRole("group", { name: "Models" }).getByRole("button", { name: /^Momentum/ }).click();
   await say(page, "20");
-  await page.getByRole("button", { name: "Create agent" }).click();
+  await page.getByRole("button", { name: "Create the version" }).click();
+  await page.getByRole("button", { name: "Confirm version 1" }).click();
+  const confirmStepUp = page.getByRole("dialog", { name: "Confirm it is you" });
+  await expect(confirmStepUp).toContainText("Confirm version 1 of this agent: $3,000.00 of simulated money on paper, trading MSFT.");
+  await confirmStepUp.getByRole("button", { name: "Use passkey" }).click();
+  await page.getByRole("button", { name: "Deploy to paper" }).click();
   const stepUp = page.getByRole("dialog", { name: "Confirm it is you" });
-  await expect(stepUp).toContainText("Create this agent on paper with $3,000.00 of simulated money, trading MSFT.");
+  await expect(stepUp).toContainText("Deploy version 1 to paper with $3,000.00 of simulated money, trading MSFT.");
   await stepUp.getByRole("button", { name: "Use passkey" }).click();
-  const after = page.locator("[data-slot=after-confirm]");
+  const after = page.locator("[data-slot=set-up-steps] [data-step=deploy]");
   await expect(after).toContainText("Agent 4 is running on paper");
   await expect(after).toContainText(/Its first check asks you: buy 6 MSFT at \$44\.62\./);
 }
@@ -74,7 +79,7 @@ for (const width of WIDTHS) {
         await signIn(page, width);
       });
 
-      await test.step("2. Set up an agent: the conversation, then Create agent with a passkey", async () => {
+      await test.step("2. Set up an agent: the conversation, then create the version, confirm it and deploy it, with passkeys", async () => {
         await setUpAgent(page, width);
       });
 

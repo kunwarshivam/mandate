@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/version-created.schema.json",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "command_id",
+    "phase",
+    "mandate_version",
+    "warnings"
+  ],
+  "properties": {
+    "command_id": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "phase": {
+      "const": "recorded"
+    },
+    "mandate_version": {
+      "$ref": "../common.schema.json#/$defs/ContentRef"
+    },
+    "warnings": {
+      "description": "The codes of the warnings validation reported, ascending (mandate spec \u00a74).",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^W-[0-9]{3}$"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "description": "POST /mandate-versions (\u00a73.11 item 11, DEC-2100 item 3): the MandateVersionCreated event and the version it records. 202 when this call committed it, 200 when the control stream already recorded the version.",
+  "unevaluatedProperties": false
+}

@@ -19,6 +19,7 @@ mandate-identity.workspace = true
 mandate-identity-seal.workspace = true
 mandate-journal.workspace = true
 mandate-journal-pg.workspace = true
+mandate-release.workspace = true
 mandate-spec.workspace = true
 mandate-time.workspace = true
 reqwest.workspace = true
@@ -29,6 +30,7 @@ tokio = { workspace = true, features = ["rt", "net", "signal", "sync", "time"] }
 
 [dev-dependencies]
 axum.workspace = true
+mandate-release.workspace = true
 mandate-artifacts-fs.workspace = true
 mandate-authn.workspace = true
 mandate-canon.workspace = true

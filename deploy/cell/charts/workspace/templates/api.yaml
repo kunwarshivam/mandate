@@ -1,0 +1,125 @@
+{{- /*
+The workspace API server (workspace API spec §3.11, DEC-978): one replica, since sessions live in
+its memory until they move to Postgres (item 6).
+- Both listeners are on the pod's loopback (item 1), so no other pod and no node reaches it: a
+  port-forward reaches it for the local cell's demo, and the tunnel's route to it is a later change.
+- The session signing key is 32 random bytes an init container writes, owner-only, into a
+  memory-backed `CREDENTIALS_DIRECTORY` at each start (item 2). It never exists at rest or outside
+  the pod, and a restart loses nothing a restart does not already lose: the sessions themselves.
+- The subject links are the operator's ConfigMap, mounted read-only at the one fixed path
+  (DEC-1023); with none named the file is absent and every sign-in is refused.
+- In a dev or ci cell only, the local stub token issuer (DEC-2100, DEC-1025) runs as a sidecar on
+  the pod's loopback, started and answering before the server starts, since the server fetches
+  the stub's key set at its own start and only every five minutes after. Its image can only be a
+  local build, and the chart refuses it in any other tier.
+*/ -}}
+{{- define "mandate.stubIssuer" -}}
+{{- $tier := .root.Values.api.tier -}}
+{{- if not (has $tier (list "dev" "ci")) -}}
+{{- fail (printf "images.stub-issuer runs only in a dev or ci cell, and api.tier is %q (DEC-2100)" $tier) -}}
+{{- end -}}
+- name: stub-issuer
+  image: {{ index .root.Values.images "stub-issuer" | quote }}
+  imagePullPolicy: IfNotPresent
+  restartPolicy: Always
+  args: ["--bind", "127.0.0.1:8090"]
+  env:
+    - {name: MANDATE_DEPLOYMENT_TIER, value: {{ $tier | quote }}}
+    - {name: HOME, value: /tmp}
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+- name: stub-issuer-ready
+  image: {{ .root.Values.images.postgres | quote }}
+  imagePullPolicy: IfNotPresent
+  command:
+    - bash
+    - -c
+    - |
+      for _ in $(seq 1 60); do
+        if timeout 2 bash -c "exec 3<>/dev/tcp/127.0.0.1/8090" 2>/dev/null; then
+          echo "stub issuer answering"
+          exit 0
+        fi
+        sleep 1
+      done
+      echo "the stub issuer did not answer on 127.0.0.1:8090 within a minute" >&2
+      exit 1
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+{{- end -}}
+{{- define "mandate.apiEnv" -}}
+{{- $a := .root.Values.api -}}
+{{- $j := .root.Values.journal -}}
+- name: MANDATE_API_DATABASE_URL
+  value: {{ printf "postgres://%s@%s:%v/%s?sslmode=verify-full&sslrootcert=/run/secrets/journal-ca/ca.crt" .p.db_role $j.host $j.port $j.database | quote }}
+- name: MANDATE_API_ORG
+  value: {{ required "api.org is required with images.api" $a.org | quote }}
+- name: MANDATE_API_WORKSPACE
+  value: {{ required "api.workspace is required with images.api" $a.workspace | quote }}
+- name: MANDATE_API_ISSUER
+  value: {{ required "api.issuer is required with images.api" $a.issuer | quote }}
+- name: MANDATE_API_AUDIENCE
+  value: {{ required "api.audience is required with images.api" $a.audience | quote }}
+- name: MANDATE_API_JWKS_URL
+  value: {{ required "api.jwksUrl is required with images.api" $a.jwksUrl | quote }}
+- name: MANDATE_API_APP_ORIGIN
+  value: {{ required "api.appOrigin is required with images.api" $a.appOrigin | quote }}
+- name: MANDATE_DEPLOYMENT_TIER
+  value: {{ required "api.tier is required with images.api" $a.tier | quote }}
+- name: CREDENTIALS_DIRECTORY
+  value: /run/credentials
+{{- end -}}
+{{- define "mandate.api" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .p.name | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "mandate.selector" . | nindent 6 }}
+  template:
+    {{- $mounts := "- {name: credentials, mountPath: /run/credentials, readOnly: true}" }}
+    {{- if .root.Values.api.subjectLinks }}
+    {{- $mounts = printf "%s\n- {name: subject-links, mountPath: /etc/mandate/subject-links, subPath: subject-links, readOnly: true}" $mounts }}
+    {{- end }}
+    {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" (list "--bind" "127.0.0.1:8080" "--probe-bind" "127.0.0.1:8081") "mounts" $mounts) }}
+    {{- $container = replace "  env:\n" (printf "  env:\n%s\n" (include "mandate.apiEnv" . | indent 4)) $container }}
+    {{- $init := printf `- name: session-key
+  image: %q
+  imagePullPolicy: IfNotPresent
+  command: ["bash", "-c", "umask 077 && head -c 32 /dev/urandom > /run/credentials/session-signing-key"]
+  securityContext:
+%s
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+  volumeMounts:
+    - {name: credentials, mountPath: /run/credentials}` .root.Values.images.postgres (include "mandate.containerSecurity" . | indent 4) }}
+    {{- if index .root.Values.images "stub-issuer" }}
+    {{- $init = printf "%s\n%s" $init (include "mandate.stubIssuer" .) }}
+    {{- end }}
+    {{- $volumes := "- {name: credentials, emptyDir: {medium: Memory, sizeLimit: 1Mi}}" }}
+    {{- with .root.Values.api.subjectLinks }}
+    {{- $volumes = printf "%s\n- {name: subject-links, configMap: {name: %q, defaultMode: 292, items: [{key: subject-links, path: subject-links}]}}" $volumes . }}
+    {{- end }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container "initContainers" $init "volumes" $volumes) | nindent 4 }}
+{{- end -}}
+{{- $root := . }}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
+{{- if eq .name "api" }}
+---
+{{ include "mandate.emit" (include "mandate.api" (dict "root" $root "p" .)) }}
+{{- end }}
+{{- end }}

@@ -140,6 +140,8 @@ fn app(
         members: Arc::new(move |_: &[StoredEvent]| parsed.lock().expect("unpoisoned").clone()),
         hosted,
         artifacts,
+        objects: None,
+        step_up: Arc::new(mandate_api_server::stepup::Unbound),
     }
 }
 

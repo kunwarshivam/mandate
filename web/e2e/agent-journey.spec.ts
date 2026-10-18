@@ -2,8 +2,9 @@ import { type Page, expect, test } from "@playwright/test";
 
 /**
  * The whole journey on the fixture workspace (DEC-472, DEC-477), in one page load so the runtime's
- * state carries from screen to screen: set up an agent in a conversation, create it from its summary
- * with a passkey, find the new agent on Agents and Home, approve its first buy, see it fill with its
+ * state carries from screen to screen: set up an agent in a conversation, then from its summary create
+ * its version, confirm it and deploy it to paper, each step recorded on its own and the last two with
+ * a passkey (DEC-2401), find the new agent on Agents and Home, approve its first buy, see it fill with its
  * protective stop in place, read what it decided, and stop it with its kill switch. Every step after
  * the first `goto` is a click or a message, as an owner would take it.
  */
@@ -71,7 +72,7 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
   });
 
   let agentHref = "";
-  await test.step("the whole agent, shown once in the conversation, created with a passkey", async () => {
+  await test.step("the whole agent, shown once in the conversation, then its version created, confirmed and deployed", async () => {
     const summary = page.locator("[data-slot=summary]");
     await expect(summary).toBeVisible();
     await expect(summary.locator("[data-slot=mandate-version]")).toHaveText(/^sha256:[0-9a-f]{64}$/);
@@ -80,18 +81,38 @@ test("set up, deploy, approve, fill, read, and stop a new agent", async ({ page 
     await expect(summary.locator("[data-slot=not-enforced-item]")).toContainText(["avoid oil companies"]);
     await expect(page.getByRole("button", { name: /confirm section/i })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Create agent" }).click();
-    const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
-    await expect(dialog).toContainText("Create this agent on paper with $3,000.00 of simulated money, trading MSFT.");
-    await dialog.getByRole("button", { name: "Use passkey" }).click();
+    const steps = page.locator("[data-slot=set-up-steps]");
+    await expect(steps.locator("[data-step=confirm]")).toHaveCount(0);
+    await page.getByRole("button", { name: "Create the version" }).click();
+    const version = steps.locator("[data-step=version]");
+    await expect(version.getByRole("heading", { name: "1. Create the version" })).toBeFocused();
+    await expect(version).toHaveAttribute("data-phase", "recorded");
+    await expect(version.locator("[data-slot=created-version]")).toHaveText(await summary.locator("[data-slot=mandate-version]").innerText());
+    await expect(version.locator("[data-slot=classification]")).toHaveAttribute("data-classification", "risk_increasing");
+    await expect(page.getByText("Your mandate version.")).toBeVisible();
 
-    const progress = page.locator("[data-slot=after-confirm]");
-    await expect(progress.locator("[data-phase=sent]")).toBeVisible();
-    await expect(progress.getByRole("heading", { name: "After you created it" })).toBeFocused();
-    await expect(progress).toBeInViewport();
-    await expect(progress.locator("[data-phase=recorded]")).toContainText("Agent 4 is running on paper");
-    await expect(progress.locator("[data-slot=owl]")).toBeVisible();
+    await page.getByRole("button", { name: "Confirm version 1" }).click();
+    const confirmDialog = page.getByRole("dialog", { name: "Confirm it is you" });
+    await expect(confirmDialog).toContainText("Confirm version 1 of this agent: $3,000.00 of simulated money on paper, trading MSFT.");
+    await confirmDialog.getByRole("button", { name: "Use passkey" }).click();
+    const confirm = steps.locator("[data-step=confirm]");
+    await expect(confirm.getByRole("heading", { name: "2. Confirm it" })).toBeFocused();
+    await expect(confirm).toHaveAttribute("data-phase", "recorded");
     await expect(page.getByText("Your confirmed mandate.")).toBeVisible();
+
+    const progress = steps.locator("[data-step=deploy]");
+    await expect(progress.locator("[data-slot=backtest-shown]")).toContainText("None: no backtest of this version has run.");
+    await page.getByRole("button", { name: "Deploy to paper" }).click();
+    const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
+    await expect(dialog).toContainText("Deploy version 1 to paper with $3,000.00 of simulated money, trading MSFT.");
+    await dialog.getByRole("button", { name: "Use passkey" }).click();
+    await expect(progress).toHaveAttribute("data-phase", "sent");
+    await expect(progress.getByRole("heading", { name: "3. Deploy to paper" })).toBeFocused();
+    await expect(progress).toBeInViewport();
+    await expect(progress).toHaveAttribute("data-phase", "recorded");
+    await expect(progress).toContainText("Agent 4 is running on paper");
+    await expect(progress.locator("[data-slot=owl]")).toBeVisible();
+    await expect(page.getByText("Your agent, on paper.")).toBeVisible();
     await expect(progress.locator("[data-slot=first-ask]")).toContainText(/Its first check asks you: buy 6 MSFT at \$44\.62\./);
     const review = progress.getByRole("link", { name: "Review the request" });
     await expect(review).toBeInViewport();

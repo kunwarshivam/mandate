@@ -8,8 +8,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use mandate_api_server::config::{
     MIN_SESSION_KEY_BYTES, SESSION_KEY_FILE, StartRefusal, check_bind, check_database_url,
-    check_environment, read_session_key,
+    check_environment, check_key_set_tier, read_session_key,
 };
+use mandate_release::startup::Tier;
 
 fn at(ip: IpAddr) -> SocketAddr {
     SocketAddr::new(ip, 8080)
@@ -332,13 +333,76 @@ fn the_artifact_store_is_optional_and_refused_by_name_when_unusable() {
 
     let file = root.join("a-file");
     fs::write(&file, b"not a directory").expect("a file");
-    let refused = artifact_store(Some(file.join("store").as_os_str()))
-        .err()
-        .expect("refused");
+    let refused = artifact_store(Some(file.join("store").as_os_str())).expect_err("refused");
     assert_eq!(
         refused,
         StartRefusal::Setting {
             name: "MANDATE_API_ARTIFACTS"
         }
     );
+}
+
+/// E21-53 (DEC-2100 item 9): outside dev and CI, a key set fetched over `http` is refused, so a
+/// staging or production server never trusts a loopback issuer, whatever its settings name.
+#[test]
+fn an_http_key_set_starts_only_in_dev_and_ci() {
+    let refused = Err(StartRefusal::Setting {
+        name: "MANDATE_API_JWKS_URL",
+    });
+    let http = [
+        "http://127.0.0.1:8090/jwks.json",
+        "http://[::1]:8090/jwks.json",
+        "HTTP://127.0.0.1:8090/jwks.json",
+        "http://issuer.example/.well-known/jwks.json",
+    ];
+    for url in http {
+        for tier in [Tier::Dev, Tier::Ci] {
+            assert_eq!(check_key_set_tier(url, tier), Ok(()), "{url} in {tier:?}");
+        }
+        for tier in [Tier::Staging, Tier::Production] {
+            assert_eq!(check_key_set_tier(url, tier), refused, "{url} in {tier:?}");
+        }
+    }
+    let https = [
+        "https://issuer.example/auth/v1/.well-known/jwks.json",
+        "HTTPS://issuer.example/jwks.json",
+    ];
+    for url in https {
+        for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
+            assert_eq!(check_key_set_tier(url, tier), Ok(()), "{url} in {tier:?}");
+        }
+    }
+    for url in [
+        "",
+        "ftp://issuer.example/jwks.json",
+        "httpsx://issuer.example/jwks.json",
+    ] {
+        assert_eq!(
+            check_key_set_tier(url, Tier::Production),
+            refused,
+            "{url:?} is not https, so production refuses it"
+        );
+    }
+}
+
+#[test]
+fn no_tier_or_an_unknown_one_is_production_for_the_key_set() {
+    for setting in [
+        None,
+        Some(""),
+        Some("Dev"),
+        Some("development"),
+        Some("prod"),
+    ] {
+        assert_eq!(
+            check_key_set_tier(
+                "http://127.0.0.1:8090/jwks.json",
+                Tier::from_setting(setting)
+            ),
+            Err(StartRefusal::Setting {
+                name: "MANDATE_API_JWKS_URL"
+            }),
+            "{setting:?}"
+        );
+    }
 }

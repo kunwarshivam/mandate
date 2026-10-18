@@ -187,16 +187,18 @@ const periodsPerYear: Decoder<number> = (value, path) => {
   return read.value >= 1 && read.value <= 366 ? read : fail(path, "not_canonical", String(read.value));
 };
 
-/** JSON Pointer escaping (RFC 6901). */
-const pointer = (path: string, member: string) => `${path}/${member.replace(/~/g, "~0").replace(/\//g, "~1")}`;
-
-/** A map from a reason code to a count (`propertyNames: Code`, `additionalProperties: Count`). */
+/**
+ * A map from a reason code to a count (`propertyNames: Code`, `additionalProperties: Count`). A failure
+ * inside it names the entry as `…/*`, never by its served key, so no served text reaches a screen
+ * through the failure's path, and the issue carries no value.
+ */
 const reasonCounts: Decoder<Record<string, number>> = (value, path) => {
   if (!isRecord(value)) return fail(path, "wrong_type");
   const out: Record<string, number> = {};
+  const masked = `${path}/*`;
   for (const [key, entry] of Object.entries(value)) {
-    if (!CODE.test(key)) return fail(pointer(path, key), "not_canonical", key);
-    const read = count(entry, pointer(path, key));
+    if (!CODE.test(key)) return fail(masked, "not_canonical");
+    const read = count(entry, masked);
     if (!read.ok) return read;
     out[key] = read.value;
   }

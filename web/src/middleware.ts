@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { isScenario } from "@/fixtures/workspace";
 import { authEnabled } from "@/lib/auth-config";
 import { authRoute } from "@/lib/auth-routes";
+import { HOSTS, hostRoute } from "@/lib/hosts";
 import { CVD_COOKIE, CVD_PARAM, colourBlindEnabled, cvdFromParam } from "@/lib/colour-pref";
 import { SCENARIO_COOKIE, SCENARIO_PARAM, scenariosEnabled } from "@/lib/scenario";
 import { updateSession, withSession } from "@/lib/supabase/proxy";
@@ -28,13 +29,43 @@ function preferenceRedirect(request: NextRequest): NextResponse | null {
  * also refreshes the Supabase session and applies `authRoute`: a signed-out visitor sees the welcome
  * page at `/` and is sent to sign in from any other screen. Outside development and the e2e build, the
  * mock workspace API at `/v1` is a plain 404 before anything else, so no production build, Next's or
- * the Workers one, with sign-in on or off, answers there.
+ * the Workers one, with sign-in on or off, answers there. When the site and app origins are configured
+ * (DEC-2405), the request's host is routed first: `www.` to the site, the site's public pages served
+ * with no session read or written, and sign-in, its callbacks and every app screen sent to the app
+ * origin with a 308, so the host-only session cookie lives on the app alone.
  */
+/**
+ * The address as the browser asked for it: the raw path and query, unre-encoded, with the `Host` header's host. Next's
+ * self-hosted server fills `nextUrl` from its own address, so the header is the one each host sends. A
+ * forged `Host` only picks the signed-out public site or a redirect, never a session.
+ */
+function requestedUrl(request: NextRequest): URL {
+  const url = new URL(request.url);
+  const host = request.headers.get("host");
+  if (host) url.host = host;
+  return url;
+}
+
 /** The mock workspace API's prefix (`src/app/v1/`, DEC-975 item 10): served only where the scenario switch is on. */
 const MOCK_API = /^\/v1(\/|$)/;
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (!scenariosEnabled && MOCK_API.test(request.nextUrl.pathname)) return new NextResponse(null, { status: 404 });
+  const byHost = hostRoute(requestedUrl(request), HOSTS);
+  switch (byHost.kind) {
+    case "app":
+      break;
+    case "pass":
+      return NextResponse.next();
+    case "rewrite":
+      return NextResponse.rewrite(new URL(byHost.to, request.url), { request: { headers: request.headers } });
+    case "redirect":
+      return NextResponse.redirect(byHost.to, 308);
+    default: {
+      const unhandled: never = byHost;
+      return unhandled;
+    }
+  }
   const preference = preferenceRedirect(request);
   if (!authEnabled) return preference ?? NextResponse.next();
   const { response, signedIn } = await updateSession(request);

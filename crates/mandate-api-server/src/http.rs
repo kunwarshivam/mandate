@@ -13,7 +13,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use mandate_api::problem::{Effect, Problem, ProblemCode};
+use mandate_api::problem::{Effect, Problem, ProblemCode, Violation};
 use mandate_api::wire::encode;
 use mandate_canon::Value;
 use mandate_journal::ArtifactSource;
@@ -22,10 +22,14 @@ use crate::clock::Clock;
 use crate::journal::Journal;
 use crate::lifecycle::{Drain, Lifecycle};
 use crate::members::{Hosted, ParseMembers};
+use crate::objects::ObjectStore;
 use crate::routes;
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
+use crate::status;
+use crate::stepup::StepUp;
 use crate::subject::{self, LinkRefusal, SubjectLinks};
 use crate::token::{Checked, TokenCheck};
+use crate::version_routes;
 use crate::writes;
 
 /// The methods a preflight from the app origin allows (§3.3 item 5).
@@ -70,6 +74,11 @@ pub struct App {
     /// The content-addressed store the agent reads take mandate documents from, read only
     /// (DEC-1020 item 1); `None` when the deployment names none.
     pub artifacts: Option<Arc<dyn ArtifactSource + Send + Sync>>,
+    /// The same store, which the version routes add objects to (DEC-2101 item 8); `None` when
+    /// the deployment names none, and those routes then answer `journal_unavailable`.
+    pub objects: Option<Arc<dyn ObjectStore>>,
+    /// The step-up port (DEC-2101 item 2): [`crate::stepup::Unbound`] until E9-4 binds it.
+    pub step_up: Arc<dyn StepUp>,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
@@ -97,7 +106,9 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         )
         .route(
             "/v1/workspaces/{workspace}/agents",
-            get(routes::list_agents).fallback(otherwise.clone()),
+            get(routes::list_agents)
+                .post(version_routes::deploy)
+                .fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}",
@@ -130,6 +141,38 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/kill-switch",
             post(writes::kill_switch).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/mandate-versions",
+            post(version_routes::create_version).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/mandate-versions/{version}/confirmation",
+            get(version_routes::confirmation).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/mandate-versions/{version}/confirm",
+            post(version_routes::confirm).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/resume",
+            post(writes::resume).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/stop",
+            post(writes::stop).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/exits",
+            post(writes::owner_exit).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/commands/{command}",
+            get(status::status).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/go-live",
+            post(version_routes::go_live).fallback(otherwise.clone()),
         )
         .fallback(otherwise)
         .with_state(Arc::new(app))
@@ -332,6 +375,20 @@ pub(crate) fn problem_body(code: ProblemCode) -> Bytes {
         .and_then(|problem| encode(&problem).ok())
         .map(Bytes::from)
         .unwrap_or_default()
+}
+
+/// The 422 `invalid` naming `violations`, with nothing recorded.
+pub(crate) fn invalid(violations: Vec<Violation>) -> Response {
+    let body = Problem::of(ProblemCode::Invalid, Effect::None, None, None)
+        .ok()
+        .map(|problem| Problem {
+            violations,
+            ..problem
+        })
+        .and_then(|problem| encode(&problem).ok())
+        .map(Bytes::from)
+        .unwrap_or_default();
+    problem(StatusCode::UNPROCESSABLE_ENTITY, body)
 }
 
 pub(crate) fn problem(code: StatusCode, body: Bytes) -> Response {
