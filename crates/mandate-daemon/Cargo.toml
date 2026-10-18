@@ -13,13 +13,18 @@ workspace = true
 mandate-canon.workspace = true
 mandate-journal.workspace = true
 mandate-process.workspace = true
+mandate-research.workspace = true
+mandate-research-driver.workspace = true
+mandate-research-run.workspace = true
 mandate-runtime.workspace = true
 mandate-store.workspace = true
 mandate-time.workspace = true
 tokio = { workspace = true, features = ["rt", "signal"] }
 
 [dev-dependencies]
+mandate-gateway.workspace = true
 mandate-journal-pg.workspace = true
+mandate-num.workspace = true
 proptest.workspace = true
 sqlx.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }

@@ -1,0 +1,117 @@
+{
+ "asset": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+ "ledger_id": "SPY",
+ "asset_class": "us_equity",
+ "increment": "whole",
+ "tick": {
+  "rule": "reg_nms_equity"
+ },
+ "qty_increment": "1",
+ "min_order_size": "1",
+ "exchange": "arca",
+ "etp_classifications": [
+  {
+   "at": "2026-09-01T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-02T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-03T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-04T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-08T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-09T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-10T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-11T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-14T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-15T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-16T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-17T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-18T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-21T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-22T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-23T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-24T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-25T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-28T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-29T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-09-30T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-10-01T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-10-02T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-10-05T10:00:00Z",
+   "class": "plain"
+  },
+  {
+   "at": "2026-10-06T10:00:00Z",
+   "class": "plain"
+  }
+ ],
+ "fractionable": true,
+ "ipo": false,
+ "ptp_no_exception": false
+}

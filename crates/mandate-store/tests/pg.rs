@@ -65,6 +65,7 @@ fn opened(epoch: u64) -> Vec<u8> {
             event_type: "StreamOpened",
             schema_version: 1,
             causation_id: None,
+            correlation_id: None,
             config_refs: &Object::new(),
             payload: &payload,
         },

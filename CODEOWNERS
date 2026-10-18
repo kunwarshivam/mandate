@@ -33,6 +33,7 @@
 /crates/mandate-artifacts-fs/ @kunwarshivam
 /crates/mandate-audit/      @kunwarshivam
 /crates/mandate-authn/      @kunwarshivam
+/crates/mandate-backtest-runner/ @kunwarshivam
 /crates/mandate-backtest/   @kunwarshivam
 /crates/mandate-builder/    @kunwarshivam
 /crates/mandate-canon/      @kunwarshivam

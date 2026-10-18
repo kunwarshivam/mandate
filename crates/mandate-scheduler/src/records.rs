@@ -81,6 +81,7 @@ impl Writer {
                         event_type,
                         schema_version: 1,
                         causation_id: cause.as_deref(),
+                        correlation_id: None,
                         config_refs: &Object::new(),
                         payload: &payload,
                     },

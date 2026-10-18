@@ -35,5 +35,8 @@ pub mod fixture;
 pub mod runtime;
 pub mod wake;
 
-pub use runtime::{Alert, Config, Refs, RuntimeProcess, Wiring};
+pub use runtime::{
+    Alert, ArtifactSink, Config, Refs, ResearchParts, ResearchSource, ResearchWiring,
+    ResearchWorker, RuntimeProcess, Wiring,
+};
 pub use wake::Wake;

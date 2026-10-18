@@ -1,5 +1,9 @@
 //! One agent deployment's runtime as a long-running process (E21-30 slice 1, DEC-1012).
 
+mod research;
+
+pub use research::{ArtifactSink, ResearchParts, ResearchSource, ResearchWiring, ResearchWorker};
+
 use std::time::Duration;
 
 use mandate_canon::{Object, parse};
@@ -31,6 +35,8 @@ pub struct Wiring {
     pub flatten: Box<dyn FlattenPlanner>,
     pub refs: Box<dyn Refs>,
     pub view: MandateView,
+    /// The deployment's research (DEC-2208); `None`, the default, runs none.
+    pub research: Option<ResearchWiring>,
 }
 
 impl Wiring {
@@ -97,13 +103,16 @@ pub struct RuntimeProcess<S> {
     pending: Option<(Input, UtcNanos)>,
     /// The event time the drafts being written carry.
     written_at: UtcNanos,
+    /// The deployment's research, when its wiring has one (DEC-2208).
+    research: Option<research::Research>,
 }
 
 impl<S: Store> RuntimeProcess<S> {
     /// Starts at `now`: refuses any environment but paper before taking anything, takes a newer
     /// writer epoch on the agent stream (fencing every earlier process), folds the stream, and hands
     /// the core `Input::Started`. Only once that batch commits is the process ready.
-    pub fn start(store: S, wiring: Wiring, config: &Config, now: UtcNanos) -> Self {
+    pub fn start(store: S, mut wiring: Wiring, config: &Config, now: UtcNanos) -> Self {
+        let research = wiring.research.take().map(research::Research::new);
         let deployment = &config.deployment;
         let stream = |kind: &str, rest: &str| StreamId::parse(&format!("{kind}:{rest}"));
         let workspace = deployment.workspace.0.as_str();
@@ -121,6 +130,7 @@ impl<S: Store> RuntimeProcess<S> {
             control_handed: None,
             pending: None,
             written_at: now,
+            research,
         };
         if config.environment != Environment::Paper {
             this.lifecycle.observe(now, Lifecycled::Failed);
@@ -226,10 +236,14 @@ impl<S: Store> RuntimeProcess<S> {
         {
             return alerts;
         }
+        if !self.research_retry(now, &mut alerts) || self.exited() {
+            return alerts;
+        }
         if let Some(control) = self.control_pass(now, &mut alerts)
             && self.account_pass(now, &control)
+            && self.clock_pass(now, &mut alerts)
         {
-            self.clock_pass(now, &mut alerts);
+            self.research_pass(now, &mut alerts);
         }
         alerts
     }
@@ -348,26 +362,28 @@ impl<S: Store> RuntimeProcess<S> {
     /// The scheduler's latest tick, as the core's risk clock. It is handed on every pass: the core
     /// evaluates each risk-clock second once and takes a tick it has seen as no input at all, so a
     /// repeat costs nothing and no bookkeeping of what was handed can drift from the journal. A clock
-    /// stream that cannot be read hands no tick and holds nothing else.
-    fn clock_pass(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) {
+    /// stream that cannot be read hands no tick and holds nothing else. Whether the pass ended with
+    /// a readable clock and nothing in doubt, so the research pass may follow.
+    fn clock_pass(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> bool {
         let Some(clock) = self.clock.clone() else {
-            return;
+            return false;
         };
         let Some(rows) = self.store.rows(&clock) else {
-            return;
+            return false;
         };
         let latest = rows
             .iter()
             .filter(|r| r.event_type == "ClockAdvanced")
             .filter_map(tick_of)
             .max();
-        if let Some(tick) = latest {
-            self.hand(
+        match latest {
+            Some(tick) => self.hand(
                 now,
                 now,
                 Input::Tick(RiskClock::from_secs(tick.secs())),
                 alerts,
-            );
+            ),
+            None => true,
         }
     }
 
@@ -475,6 +491,7 @@ impl<S: Store> RuntimeProcess<S> {
                         event_type: &draft.event_type,
                         schema_version,
                         causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
+                        correlation_id: None,
                         config_refs: &config_refs,
                         payload: &draft.payload,
                     },

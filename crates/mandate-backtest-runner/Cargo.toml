@@ -1,0 +1,31 @@
+[package]
+name = "mandate-backtest-runner"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The backtest runner: a mandate version's backtest over JSON inputs, its report, input objects and BacktestRunRecorded payload stored as artifacts for `mandate backtest record` to journal (E4-4, E4-5, DEC-1144)"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mandate-backtest-runner"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+mandate-accounting.workspace = true
+mandate-artifacts-fs.workspace = true
+mandate-backtest.workspace = true
+mandate-builder.workspace = true
+mandate-canon.workspace = true
+mandate-domain.workspace = true
+mandate-journal.workspace = true
+mandate-num.workspace = true
+mandate-risk.workspace = true
+mandate-sim.workspace = true
+mandate-spec.workspace = true
+mandate-time.workspace = true
+mandate-version-backtest.workspace = true
+thiserror.workspace = true
