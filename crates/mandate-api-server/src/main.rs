@@ -269,7 +269,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         journal: Arc::new(Postgres(PgJournal::from_dsn(&start.database_url).map_err(
             |_| io::Error::other("the journal's connection settings are refused"),
         )?)),
-        members: Arc::new(members::until_parser),
+        members: Arc::new(members::control_parser(start.hosted.workspace)),
         hosted: start.hosted,
         artifacts: start.artifacts.clone().map(|store| {
             let store: Arc<dyn ArtifactSource + Send + Sync> = store;

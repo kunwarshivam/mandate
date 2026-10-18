@@ -24,7 +24,6 @@ const ALICE: PrincipalId = PrincipalId(7);
 const BOB: PrincipalId = PrincipalId(8);
 
 #[test]
-#[ignore = "pending E21-55"]
 fn grants_revokes_and_role_changes_fold_in_stream_order() {
     let mut rows = Rows::opened();
     let owner = [Role::Operator, Role::WorkspaceAdmin];
@@ -96,7 +95,6 @@ fn grants_revokes_and_role_changes_fold_in_stream_order() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn rows_of_other_workspaces_environments_and_types_are_ignored() {
     let mut rows = Rows::opened();
     let admin = roles(&[Role::WorkspaceAdmin]);
@@ -167,7 +165,6 @@ fn granted_then(last: impl FnOnce(&mut Rows)) -> Rows {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn an_unreadable_membership_row_fails_the_whole_lookup_and_is_never_skipped() {
     let unread = granted_then(|rows| {
         rows.edited("MemberDeactivated", T0 - 50, |e| {
@@ -281,7 +278,6 @@ fn authorized(lookup: &ControlLookup, principal: PrincipalId, now: i64) -> Resul
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn a_revoked_member_is_refused() {
     let mut rows = Rows::opened();
     let viewer = roles(&[Role::Viewer]);
@@ -320,7 +316,6 @@ fn a_revoked_member_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn the_time_base_is_the_lookups_now() {
     let mut rows = Rows::opened();
     let granted = [Role::Operator, Role::Viewer];

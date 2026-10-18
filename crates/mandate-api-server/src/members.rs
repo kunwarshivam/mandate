@@ -5,28 +5,33 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_canon::{Value, encode_ulid};
 use mandate_identity::{
-    LookupFailed, Membership, MembershipFold, MembershipLookup, MembershipQuery, MembershipRecord,
-    OrgId, PrincipalId, Role, Scope, WorkspaceId,
+    ControlEntry, LookupFailed, Membership, MembershipFold, MembershipLookup, MembershipQuery,
+    MembershipRecord, OrgId, PrincipalId, Role, Scope, WorkspaceId, control_entry,
 };
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
 /// Turns the control stream's rows into its membership records, refusing a `Member*` record
-/// that does not map (lane ID1's `mandate_identity::control_entry`).
+/// that does not map (`mandate_identity::control_entry`); [`control_parser`] in the deployment.
 pub type ParseMembers =
     dyn Fn(&[StoredEvent]) -> Result<Vec<MembershipRecord>, LookupFailed> + Send + Sync;
 
-/// The parser until lane ID1's `control_entry` lands: it reads no record, so every lookup fails
-/// and every read answers `membership_unavailable` (fail closed, `AGENTS.md` rule 3).
-///
-/// # Errors
-/// Always [`LookupFailed`].
-pub fn until_parser(rows: &[StoredEvent]) -> Result<Vec<MembershipRecord>, LookupFailed> {
-    let _ = rows;
-    Err(LookupFailed)
+/// The parser of the hosted `workspace`'s control stream: [`membership_records`], any refusal a
+/// failed lookup (DEC-2110).
+pub fn control_parser(
+    workspace: WorkspaceId,
+) -> impl Fn(&[StoredEvent]) -> Result<Vec<MembershipRecord>, LookupFailed> + Send + Sync {
+    move |rows| membership_records(workspace, rows).map_err(|_| LookupFailed)
 }
+
+/// The record that opens every stream at `seq` 1 and names its environment (journal spec §2).
+const STREAM_OPENED: &str = "StreamOpened";
+
+/// The one schema version of journal spec §9.12's membership records.
+const MEMBERSHIP_VERSION: u64 = 1;
 
 /// Why the hosted control stream's rows give no membership records (DEC-2110). Each is a failed
 /// lookup, never an empty membership (`AGENTS.md` rule 3).
@@ -42,8 +47,6 @@ pub enum RowsRefused {
     UnknownVersion { seq: u64 },
     /// The `Member*` record at `seq` is written in an environment other than the stream's.
     OtherEnvironment { seq: u64 },
-    /// E21-55 has not landed.
-    Unimplemented,
 }
 
 /// The membership records of `workspace`'s control stream among `rows`, in stream order: each
@@ -58,8 +61,37 @@ pub fn membership_records(
     workspace: WorkspaceId,
     rows: &[StoredEvent],
 ) -> Result<Vec<MembershipRecord>, RowsRefused> {
-    let _ = (workspace, rows);
-    Err(RowsRefused::Unimplemented)
+    let stream = format!("ctl:{}", encode_ulid(workspace.0));
+    let mut environment = None;
+    let mut records = Vec::new();
+    for row in rows {
+        let unreadable = RowsRefused::Unreadable { seq: row.seq };
+        let envelope = mandate_canon::parse(&row.body).map_err(|_| unreadable.clone())?;
+        let text = |key| envelope.get(key).and_then(Value::as_str);
+        if text("stream_id") != Some(stream.as_str()) {
+            continue;
+        }
+        let entry = control_entry(row.seq, &envelope).map_err(|_| unreadable.clone())?;
+        let written = text("environment").ok_or(unreadable)?;
+        let opened = match &environment {
+            Some(opened) => opened,
+            None if row.seq == 1 && text("event_type") == Some(STREAM_OPENED) => {
+                environment.insert(written.to_owned())
+            }
+            None => return Err(RowsRefused::NotOpened),
+        };
+        let ControlEntry::Membership(record) = entry else {
+            continue;
+        };
+        if written != opened {
+            return Err(RowsRefused::OtherEnvironment { seq: row.seq });
+        }
+        if envelope.get("schema_version").and_then(Value::as_int) != Some(MEMBERSHIP_VERSION) {
+            return Err(RowsRefused::UnknownVersion { seq: row.seq });
+        }
+        records.push(record);
+    }
+    Ok(records)
 }
 
 /// The one workspace this deployment hosts, and its organization (§3.11 item 2).
