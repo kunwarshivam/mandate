@@ -167,7 +167,6 @@ fn call_plan(observations: usize) -> CallPlan {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn a_run_retrieves_the_recorded_plane_and_stores_each_record_before_its_answer() {
     let shelf = Shelf::default();
     let mut worker = worker(&shelf);
@@ -191,7 +190,6 @@ fn a_run_retrieves_the_recorded_plane_and_stores_each_record_before_its_answer()
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn an_item_whose_record_the_sink_refuses_is_never_answered() {
     let shelf = Shelf::default();
     shelf.refuse.set(true);
@@ -208,7 +206,6 @@ fn an_item_whose_record_the_sink_refuses_is_never_answered() {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn a_cancelled_run_before_its_call_says_nothing_was_dispatched() {
     let shelf = Shelf::default();
     let mut worker = worker(&shelf);
@@ -235,7 +232,6 @@ proptest! {
     /// response are stored before the answer, which carries the risk clock of the pass it is
     /// handed in, whatever that clock reads.
     #[test]
-    #[ignore = "pending E21-54"]
     fn the_call_answers_the_recorded_reply_stamped_at_the_handed_risk_clock(
         later in 1_i64..86_400,
     ) {
@@ -286,7 +282,6 @@ impl ArtifactStore for Misfiled {
 /// The store sink stores content-addressed: it says stored only when the store kept the bytes under
 /// their own reference.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_store_sink_says_stored_only_for_the_bytes_own_reference() {
     let mut kept = StoreSink(BTreeMap::new());
     assert!(kept.put(b"a record"));
