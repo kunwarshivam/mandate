@@ -1,20 +1,29 @@
 //! One broker account's executor as a long-running process (E21-30, DEC-2003).
 
+use std::collections::VecDeque;
 use std::time::Duration;
 
+use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountScope, BindingGateSource, BrokerOutcome, BrokerRequest, ConnectorError, ExecutorConfig,
-    ExecutorState, IdGen, InstrumentSnapshot, MandateView, Ports,
+    AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
+    BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
+    ExecutorState, IdGen, Input, InstrumentSnapshot, KillScope, MandateView, Ports,
+    ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
 };
-use mandate_journal::Environment;
-use mandate_process::Lifecycle;
+use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
+use mandate_process::{Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_store::Store;
+use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::UtcNanos;
+
+use crate::follow::{Switch, agents_of, folded, switches};
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The broker as the process calls it: one request, one answer, in order. The connector is
+/// `mandate_executor::BrokerConnector`; an adapter that owns its runtime drives it (X2).
 pub trait Broker {
     /// The broker's capability profile, set on the state before `Input::Started` (DEC-838 item 5).
     fn profile(&self) -> Result<CapabilityProfile, ProfileError>;
@@ -63,33 +72,198 @@ pub struct Alert {
 }
 
 /// Why a reconciliation read gave no snapshot.
+enum Read {
+    /// The answer was lost on the way back: read again on a later pass.
+    Lost,
+    /// The broker answered something that is not the read's answer, or the request could not be
+    /// sent.
+    Unusable,
+}
+
+/// How one input's effects ended.
+enum Ran {
+    Committed,
+    InDoubt,
+    Stopped,
+}
 
 /// One broker account's executor process.
 pub struct ExecutorProcess<S, B> {
     store: S,
     broker: B,
+    wiring: Wiring,
     state: ExecutorState,
     lifecycle: Lifecycle,
+    environment: Environment,
+    account: Option<StreamId>,
+    control: Option<StreamId>,
+    clock: Option<StreamId>,
+    epoch: u64,
+    /// The input whose drafts' append is in doubt, with the time they were first written at: the
+    /// core takes no other input until it is handed again, and the retry offers the journal the
+    /// same bytes (journal spec §5.1). Nothing it asks of the broker leaves before it commits.
+    pending: Option<(Input, UtcNanos)>,
+    /// Requests whose drafts committed and which have not been sent, in order: what an answer
+    /// whose own batch went in doubt left behind (DEC-2003 item 7).
+    outbox: VecDeque<BrokerRequest>,
+    /// Whether the core asked for a reconciliation that has not been handed yet.
+    reconcile: bool,
+    max_chain: usize,
+    written_at: UtcNanos,
 }
 
 impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// Starts at `now`: refuses any environment but paper before taking anything, takes a newer
-    /// writer epoch on the account stream, folds it, and opens it if it is empty.
+    /// writer epoch on the account stream (fencing every earlier process), folds it, and opens it
+    /// if it is empty. `Input::Started` waits for the first pass that reads a tick, since every
+    /// record it leads to carries the risk clock (mandate spec §5.2).
     pub fn start(store: S, broker: B, wiring: Wiring, config: &Config, now: UtcNanos) -> Self {
-        let _ = (store, broker, wiring, config, now);
-        todo!()
+        let scope = &config.scope;
+        let workspace = scope.workspace.0.as_str();
+        let stream = |id: String| StreamId::parse(&id);
+        let mut this = Self {
+            store,
+            broker,
+            wiring,
+            state: ExecutorState::new(scope.clone()),
+            lifecycle: Lifecycle::new(Kind::Executor, config.liveness, now),
+            environment: config.environment,
+            account: stream(format!("acct:{workspace}:{}", scope.account.0)),
+            control: stream(format!("ctl:{workspace}")),
+            clock: stream(format!("clock:{workspace}")),
+            epoch: 0,
+            pending: None,
+            outbox: VecDeque::new(),
+            reconcile: false,
+            max_chain: config.max_chain,
+            written_at: now,
+        };
+        if config.environment != Environment::Paper {
+            this.lifecycle.observe(now, Lifecycled::Failed);
+            return this;
+        }
+        let profile = this.broker.profile();
+        let (Some(account), Ok(profile)) = (this.account.clone(), profile) else {
+            this.lifecycle.observe(now, Lifecycled::Failed);
+            return this;
+        };
+        this.state = this.state.clone().with_profile(profile);
+        this.lifecycle.observe(now, Lifecycled::StartupPassed);
+        let Some(epoch) = this.store.take_ownership(&account) else {
+            this.lifecycle.observe(now, Lifecycled::Failed);
+            return this;
+        };
+        this.epoch = epoch;
+        this.lifecycle.observe(now, Lifecycled::EpochTaken);
+        let replayed = this
+            .store
+            .rows(&account)
+            .and_then(|rows| this.fold_rows(&rows));
+        let Some(head) = replayed else {
+            this.lifecycle.observe(now, Lifecycled::Failed);
+            return this;
+        };
+        this.lifecycle.observe(
+            now,
+            Lifecycled::Replayed {
+                position: head,
+                head,
+            },
+        );
+        if head == 0 && !matches!(this.open(now), Ran::Committed) {
+            this.lifecycle.observe(now, Lifecycled::Failed);
+        }
+        this
     }
 
-    /// One pass of the loop at the injected time `now`.
+    /// Journal spec §2's stream lifecycle: the process that owns a new account stream writes its
+    /// `StreamOpened` at sequence 1 before the core receives `Input::Started`.
+    fn open(&mut self, now: UtcNanos) -> Ran {
+        let scope = self.state.scope().clone();
+        let payload = object(vec![
+            ("account_ref", text(&scope.account.0)),
+            ("broker", text("alpaca")),
+            ("stream_type", text("account")),
+            ("workspace_id", text(&scope.workspace.0)),
+        ]);
+        let Some(payload) = payload else {
+            return Ran::Stopped;
+        };
+        let opened = EventDraft {
+            event_id: self.wiring.ids.event_id(WriterEpoch(self.epoch), Seq(0), 0),
+            event_type: "StreamOpened".to_owned(),
+            schema_version: 1,
+            config_refs: Object::new(),
+            causation_id: None,
+            payload,
+        };
+        self.written_at = now;
+        self.journal(now, &[opened])
+    }
+
+    /// One pass of the loop at the injected time `now`: an input in doubt first, then requests
+    /// left unsent and a due reconciliation, then (once started) every kill switch the account's
+    /// agents' streams hold that the fold has not applied, then the latest tick. Before the start,
+    /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
+    /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
-        let _ = now;
-        todo!()
+        let mut alerts = Vec::new();
+        if self.exited() {
+            return alerts;
+        }
+        self.lifecycle.observe(now, Lifecycled::Heartbeat);
+        if let Some((input, at)) = self.pending.take()
+            && !self.hand(now, at, input, &mut alerts, 0)
+        {
+            return alerts;
+        }
+        if !self.flush(now, &mut alerts, 0) {
+            return alerts;
+        }
+        let tick = self.tick();
+        if !self.state.started() {
+            let Some(tick) = tick else {
+                return alerts;
+            };
+            if !self.hand(now, now, Input::Tick(tick), &mut alerts, 0) {
+                return alerts;
+            }
+            let started = Input::Started(WriterEpoch(self.epoch));
+            if !self.hand(now, now, started, &mut alerts, 0) {
+                return alerts;
+            }
+        }
+        let Some(switches) = self.switches(now) else {
+            return alerts;
+        };
+        for (agent, switch) in switches {
+            if !self.apply(now, agent, switch, &mut alerts) {
+                return alerts;
+            }
+        }
+        if let Some(tick) = tick {
+            self.hand(now, now, Input::Tick(tick), &mut alerts, 0);
+        }
+        alerts
     }
 
-    /// Drains at `now`.
+    /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits
+    /// `Drained`, or `DrainIncomplete` if it is still in doubt.
     pub fn drain(&mut self, now: UtcNanos) {
-        let _ = now;
-        todo!()
+        if self.exited() {
+            return;
+        }
+        self.lifecycle.observe(now, Lifecycled::DrainRequested);
+        let settled = match self.pending.take() {
+            Some((input, at)) => self.hand(now, at, input, &mut Vec::new(), 0),
+            None => true,
+        };
+        let last = if settled {
+            Lifecycled::Settled
+        } else {
+            Lifecycled::Failed
+        };
+        self.lifecycle.observe(now, last);
     }
 
     pub fn lifecycle(&self) -> &Lifecycle {
@@ -108,8 +282,341 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         &self.broker
     }
 
-    /// Whether the process may take an opening (design §3.4).
+    /// Whether the process may take an opening: its epoch held, its stream replayed, and its
+    /// startup reconciliation passed (design §3.4).
     pub fn ready(&self) -> bool {
-        todo!()
+        self.lifecycle.state() == State::Ready
     }
+
+    fn exited(&self) -> bool {
+        matches!(self.lifecycle.state(), State::Exited(_))
+    }
+
+    /// The scheduler's latest tick, as the core's risk clock (journal spec §9.20). `None` when
+    /// the clock stream holds none or cannot be read.
+    fn tick(&self) -> Option<RiskClock> {
+        let rows = self.store.rows(self.clock.as_ref()?)?;
+        rows.iter()
+            .filter(|row| row.event_type == "ClockAdvanced")
+            .filter_map(tick_of)
+            .max()
+            .map(|at| RiskClock::from_secs(at.secs()))
+    }
+
+    /// The kill switches of the account's agents that the fold has not applied: a switch counts
+    /// as applied once its agent's folded mode is at least the switch's final mode (DEC-2003 item
+    /// 4). An unreadable control stream yields nothing this pass, and so does an agent stream that
+    /// cannot be read; a row on one that cannot be read stops the process (DEC-85).
+    fn switches(&mut self, now: UtcNanos) -> Option<Vec<(AgentId, Switch)>> {
+        let control = self.store.rows(self.control.as_ref()?)?;
+        let agents = agents_of(&control, self.state.scope(), self.environment);
+        let workspace = self.state.scope().workspace.0.clone();
+        let mut pending = Vec::new();
+        for agent in agents {
+            let Some(stream) = StreamId::parse(&format!("agent:{workspace}:{}", agent.0)) else {
+                continue;
+            };
+            let Some(rows) = self.store.rows(&stream) else {
+                continue;
+            };
+            let read: Result<Vec<_>, _> = rows
+                .iter()
+                .filter(|row| row.environment == self.environment.as_str())
+                .map(folded)
+                .collect();
+            let Ok(held) = read.and_then(|rows| switches(&rows)) else {
+                self.lifecycle.observe(now, Lifecycled::Failed);
+                return None;
+            };
+            let mode = self.state.effective_mode(&agent);
+            pending.extend(
+                held.into_iter()
+                    .filter(|switch| mode < switch.initiator.final_mode())
+                    .map(|switch| (agent.clone(), switch)),
+            );
+        }
+        Some(pending)
+    }
+
+    /// Applies one switch as the core's own kill switch of that agent alone, never an account-wide
+    /// one (`AGENTS.md` rule 13).
+    fn apply(
+        &mut self,
+        now: UtcNanos,
+        agent: AgentId,
+        switch: Switch,
+        alerts: &mut Vec<Alert>,
+    ) -> bool {
+        let command = Command::KillSwitch {
+            scope: KillScope::Agent(agent),
+            initiator: switch.initiator,
+            confirmation: switch.confirmation,
+        };
+        self.hand(now, now, Input::Command(command), alerts, 0)
+    }
+
+    /// Hands `input` to the core, journals its drafts as one batch, and only then sends what it
+    /// asks of the broker, handing each answer back; whether all of it committed. An input whose
+    /// append is in doubt is kept to be handed again; a refusal or a fence stops the process.
+    fn hand(
+        &mut self,
+        now: UtcNanos,
+        at: UtcNanos,
+        input: Input,
+        alerts: &mut Vec<Alert>,
+        depth: usize,
+    ) -> bool {
+        if depth > self.max_chain {
+            self.lifecycle.observe(now, Lifecycled::Failed);
+            return false;
+        }
+        self.written_at = at;
+        let reconciled = matches!(input, Input::BrokerSnapshot(_));
+        let effects = match handle(
+            &mut self.state,
+            input.clone(),
+            &self.wiring.ports(),
+            self.wiring.gate.as_ref(),
+        ) {
+            Ok(effects) => effects,
+            Err(_) => {
+                self.lifecycle.observe(now, Lifecycled::Failed);
+                return false;
+            }
+        };
+        let mut drafts = Vec::new();
+        let mut asked = Vec::new();
+        let mut requests = Vec::new();
+        for effect in effects {
+            match effect {
+                Effect::Journal(draft) => drafts.push(draft),
+                Effect::Broker(request) => requests.push(request),
+                Effect::Notify(notice) => asked.push(Alert {
+                    key: notice.message_key,
+                    subject: Some(notice.subject_event.0),
+                }),
+                Effect::Timer(_) => {}
+            }
+        }
+        if !drafts.is_empty() {
+            match self.journal(now, &drafts) {
+                Ran::Committed => {}
+                Ran::InDoubt => {
+                    self.pending = Some((input, at));
+                    return false;
+                }
+                Ran::Stopped => return false,
+            }
+        }
+        alerts.extend(asked);
+        if reconciled {
+            let passed =
+                self.state.mismatched().is_empty() && self.state.reconciled_through().is_some();
+            self.lifecycle
+                .observe(now, Lifecycled::Reconciled { passed });
+        }
+        let unsent = std::mem::take(&mut self.outbox);
+        for request in requests {
+            if is_reconciliation_read(&request) {
+                self.reconcile = true;
+            } else {
+                self.outbox.push_back(request);
+            }
+        }
+        self.outbox.extend(unsent);
+        self.flush(now, alerts, depth)
+    }
+
+    /// Sends the requests left in the outbox in order, handing each answer to the core, then the
+    /// reconciliation if one is due. A request that cannot be sent, or an answer that cannot be
+    /// read, stops the process (DEC-85); whether everything handed committed.
+    fn flush(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>, depth: usize) -> bool {
+        let next = depth.saturating_add(1);
+        while let Some(request) = self.outbox.pop_front() {
+            let answer = match self.broker.call(&request) {
+                Ok(outcome) => Input::Broker(Ok(outcome)),
+                Err(ConnectorError::Unknown(unknown)) => Input::Broker(Err(unknown)),
+                Err(_) => {
+                    self.lifecycle.observe(now, Lifecycled::Failed);
+                    return false;
+                }
+            };
+            if !self.hand(now, self.written_at, answer, alerts, next) {
+                return false;
+            }
+        }
+        if self.reconcile {
+            return self.reconciliation(now, alerts, next);
+        }
+        true
+    }
+
+    /// The reconciliation the core asked for (trading spec §11): the broker's four reads as one
+    /// snapshot, its account reported first, as the shell's start does, so the reconciliation
+    /// runs at the head the report left. A read whose answer is lost leaves it due for the next
+    /// pass, since a read changes nothing at the broker, and the pass goes on, so a kill switch
+    /// never waits on it (`AGENTS.md` rule 13). It stays due until its snapshot is handed.
+    fn reconciliation(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>, depth: usize) -> bool {
+        let mut snapshot = match self.snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(Read::Lost) => return true,
+            Err(Read::Unusable) => {
+                self.lifecycle.observe(now, Lifecycled::Failed);
+                return false;
+            }
+        };
+        self.reconcile = false;
+        let reported = Input::BrokerUpdate(BrokerUpdate::Account(snapshot.account.clone()));
+        if !self.hand(now, self.written_at, reported, alerts, depth) {
+            self.reconcile = true;
+            return false;
+        }
+        snapshot.taken_at_head = Seq(self.account_head());
+        self.hand(
+            now,
+            self.written_at,
+            Input::BrokerSnapshot(snapshot),
+            alerts,
+            depth,
+        )
+    }
+
+    /// The broker's open orders, positions, account and activity since the executor's cursor.
+    fn snapshot(&mut self) -> Result<BrokerSnapshot, Read> {
+        let since = self
+            .state
+            .checkpoint()
+            .cloned()
+            .unwrap_or_else(|| ActivityCursor(String::new()));
+        let BrokerOutcome::OpenOrders(open_orders) = self.read(&BrokerRequest::ListOpenOrders)?
+        else {
+            return Err(Read::Unusable);
+        };
+        let BrokerOutcome::Positions(positions) = self.read(&BrokerRequest::ListPositions)? else {
+            return Err(Read::Unusable);
+        };
+        let BrokerOutcome::Account(account) = self.read(&BrokerRequest::GetAccount)? else {
+            return Err(Read::Unusable);
+        };
+        let BrokerOutcome::Activities { fills, cursor } =
+            self.read(&BrokerRequest::ListActivities { since })?
+        else {
+            return Err(Read::Unusable);
+        };
+        Ok(BrokerSnapshot {
+            open_orders,
+            positions,
+            account,
+            fills,
+            cursor,
+            reason: ReconcileReason::Startup,
+            taken_at_head: Seq(self.account_head()),
+        })
+    }
+
+    fn read(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, Read> {
+        match self.broker.call(request) {
+            Ok(outcome) => Ok(outcome),
+            Err(ConnectorError::Unknown(_)) => Err(Read::Lost),
+            Err(_) => Err(Read::Unusable),
+        }
+    }
+
+    fn account_head(&self) -> u64 {
+        self.account
+            .as_ref()
+            .and_then(|a| self.state.head(a.as_str()))
+            .map_or(0, |seq| seq.0)
+    }
+
+    /// Journals `drafts` as one batch on the account stream and folds what committed.
+    fn journal(&mut self, now: UtcNanos, drafts: &[EventDraft]) -> Ran {
+        let Some(account) = self.account.clone() else {
+            return Ran::Stopped;
+        };
+        let envelope = Envelope {
+            stream: account.as_str(),
+            environment: self.environment,
+            actor_kind: "system",
+            actor_id: "executor",
+            build: concat!("mandate-executord/", env!("CARGO_PKG_VERSION")),
+            version: VERSION,
+            event_time: self.written_at,
+        };
+        let bytes: Option<Vec<Vec<u8>>> = drafts
+            .iter()
+            .map(|draft| {
+                draft_bytes(
+                    &envelope,
+                    &Fields {
+                        event_id: &draft.event_id.0,
+                        event_type: &draft.event_type,
+                        schema_version: draft.schema_version,
+                        causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
+                        correlation_id: None,
+                        config_refs: &draft.config_refs,
+                        payload: &draft.payload,
+                    },
+                )
+            })
+            .collect();
+        let Some(bytes) = bytes else {
+            self.lifecycle.observe(now, Lifecycled::Failed);
+            return Ran::Stopped;
+        };
+        let head = self.account_head();
+        match self.store.append(&account, head, self.epoch, now, &bytes) {
+            AppendOutcome::Committed(stored) | AppendOutcome::AlreadyCommitted(stored) => {
+                if self.fold_rows(&stored).is_some() {
+                    Ran::Committed
+                } else {
+                    self.lifecycle.observe(now, Lifecycled::Failed);
+                    Ran::Stopped
+                }
+            }
+            AppendOutcome::Unavailable | AppendOutcome::Ambiguous => Ran::InDoubt,
+            AppendOutcome::Fenced { .. } => {
+                self.lifecycle.observe(now, Lifecycled::Fenced);
+                Ran::Stopped
+            }
+            AppendOutcome::HeadMismatch { .. }
+            | AppendOutcome::IdempotencyConflict { .. }
+            | AppendOutcome::Invalid { .. } => {
+                self.lifecycle.observe(now, Lifecycled::Failed);
+                Ran::Stopped
+            }
+        }
+    }
+
+    /// Folds `rows` of the account stream; the stream's head after them, or `None` for a row the
+    /// fold refuses or one journaled for another environment (`AGENTS.md` rule 8).
+    fn fold_rows(&mut self, rows: &[StoredEvent]) -> Option<u64> {
+        for row in rows {
+            if row.environment != self.environment.as_str() {
+                return None;
+            }
+            let event = folded(row).ok()?;
+            fold(&mut self.state, &event).ok()?;
+        }
+        Some(self.account_head())
+    }
+}
+
+/// One of the four reads the core asks for a reconciliation (`request_reconciliation`), which the
+/// process gathers into one snapshot rather than send one by one.
+fn is_reconciliation_read(request: &BrokerRequest) -> bool {
+    matches!(
+        request,
+        BrokerRequest::ListOpenOrders
+            | BrokerRequest::ListPositions
+            | BrokerRequest::GetAccount
+            | BrokerRequest::ListActivities { .. }
+    )
+}
+
+/// The tick a `ClockAdvanced` row carries (journal spec §9.20).
+fn tick_of(row: &StoredEvent) -> Option<UtcNanos> {
+    let body = parse(&row.body).ok()?;
+    let clock = body.get("payload")?.get("clock")?.as_str()?;
+    UtcNanos::parse(clock).ok()
 }

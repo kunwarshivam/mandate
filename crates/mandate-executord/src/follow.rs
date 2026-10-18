@@ -23,8 +23,20 @@ pub struct Unreadable;
 /// # Errors
 /// [`Unreadable`] for a body that is not canonical JSON or has no payload.
 pub fn folded(row: &StoredEvent) -> Result<FoldedEvent, Unreadable> {
-    let _ = row;
-    todo!()
+    let body = parse(&row.body).map_err(|_| Unreadable)?;
+    let payload = body.get("payload").cloned().ok_or(Unreadable)?;
+    let causation_id = body
+        .get("causation_id")
+        .and_then(Value::as_str)
+        .map(|id| EventId(id.to_owned()));
+    Ok(FoldedEvent {
+        stream: row.stream_id.clone(),
+        seq: Seq(row.seq),
+        event_id: EventId(row.event_id.clone()),
+        event_type: row.event_type.clone(),
+        causation_id,
+        payload,
+    })
 }
 
 /// The agents whose deployments trade on the account in `scope`, read from the control stream in
@@ -37,8 +49,57 @@ pub fn agents_of(
     scope: &AccountScope,
     environment: Environment,
 ) -> BTreeSet<AgentId> {
-    let _ = (control, scope, environment);
-    todo!()
+    let mut ours: BTreeMap<String, bool> = BTreeMap::new();
+    let mut deployed: BTreeMap<String, Option<String>> = BTreeMap::new();
+    for row in control
+        .iter()
+        .filter(|row| row.environment == environment.as_str())
+    {
+        let Ok(event) = folded(row) else {
+            continue;
+        };
+        let text = |member: &str| {
+            event
+                .payload
+                .get(member)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        match (row.event_type.as_str(), row.schema_version) {
+            ("ConnectionEstablished", 2) => {
+                if let Some(connection) = text("connection_id") {
+                    let mine = text("account_ref").as_deref() == Some(scope.account.0.as_str())
+                        && text("environment").as_deref() == Some(environment.as_str());
+                    ours.insert(connection, mine);
+                }
+            }
+            ("ConnectionEstablished" | "ConnectionRevoked", _) => {
+                if let Some(connection) = text("connection_id") {
+                    ours.insert(connection, false);
+                }
+            }
+            ("AgentDeployed", version) => {
+                if let Some(agent) = text("agent_id") {
+                    deployed.insert(agent, text("connection_id").filter(|_| version == 2));
+                }
+            }
+            ("AgentStopped", _) => {
+                if let Some(agent) = text("agent_id") {
+                    deployed.insert(agent, None);
+                }
+            }
+            _ => {}
+        }
+    }
+    deployed
+        .into_iter()
+        .filter(|(_, connection)| {
+            connection
+                .as_ref()
+                .is_some_and(|c| ours.get(c).copied().unwrap_or(false))
+        })
+        .map(|(agent, _)| AgentId(agent))
+        .collect()
 }
 
 /// A `KillSwitchActivated` on an agent's stream: the runtime's copy of a kill switch that covers
@@ -57,8 +118,73 @@ pub struct Switch {
 /// # Errors
 /// [`Unreadable`] for a `KillSwitchActivated` whose members do not read.
 pub fn switches(rows: &[FoldedEvent]) -> Result<Vec<Switch>, Unreadable> {
-    let _ = rows;
-    todo!()
+    rows.iter()
+        .filter(|row| row.event_type == "KillSwitchActivated")
+        .map(|row| {
+            let initiator = row
+                .payload
+                .get("initiator")
+                .and_then(Value::as_str)
+                .ok_or(Unreadable)?;
+            Ok(Switch {
+                switch: row.event_id.clone(),
+                initiator: initiator_of(initiator)?,
+                confirmation: confirmation_for(rows, row)?,
+            })
+        })
+        .collect()
+}
+
+fn initiator_of(name: &str) -> Result<Initiator, Unreadable> {
+    match name {
+        "owner" => Ok(Initiator::Owner),
+        "risk_limit" => Ok(Initiator::RiskLimit),
+        "platform_operator" => Ok(Initiator::PlatformOperator),
+        _ => Err(Unreadable),
+    }
+}
+
+/// The owner's confirmation a kill switch carries: its agent-scope `OwnerExitRequested`, copied
+/// from the same command (journal spec §9.1 rule 16), when that copy confirmed a bid.
+fn confirmation_for(
+    rows: &[FoldedEvent],
+    switch: &FoldedEvent,
+) -> Result<Option<OwnerConfirmation>, Unreadable> {
+    let Some(command) = switch.causation_id.as_ref() else {
+        return Ok(None);
+    };
+    let copy = rows.iter().find(|row| {
+        row.event_type == "OwnerExitRequested"
+            && row.causation_id.as_ref() == Some(command)
+            && row.payload.get("scope").and_then(Value::as_str) == Some("agent")
+    });
+    copy.map_or(Ok(None), |row| confirmation(&row.payload))
+}
+
+/// A confirmed bid's members (journal spec §9.1's `OwnerExitRequested`), or none when the owner
+/// confirmed none: then an equity sell waits for the regular session (trading spec §5.5).
+fn confirmation(payload: &Value) -> Result<Option<OwnerConfirmation>, Unreadable> {
+    if payload.get("confirmed") != Some(&Value::Bool(true)) {
+        return Ok(None);
+    }
+    let text = |member: &str| {
+        payload
+            .get(member)
+            .and_then(Value::as_str)
+            .ok_or(Unreadable)
+    };
+    let step_up = payload
+        .get("step_up")
+        .and_then(|s| s.get("assertion_id"))
+        .and_then(Value::as_str)
+        .ok_or(Unreadable)?;
+    Ok(Some(OwnerConfirmation {
+        bid: Price::parse(text("bid")?).map_err(|_| Unreadable)?,
+        bid_size: Qty::parse(text("bid_size")?).map_err(|_| Unreadable)?,
+        floor: Price::parse(text("floor")?).map_err(|_| Unreadable)?,
+        user: text("user")?.to_owned(),
+        step_up: step_up.to_owned(),
+    }))
 }
 
 #[cfg(test)]
