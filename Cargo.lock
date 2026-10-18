@@ -1834,6 +1834,7 @@ dependencies = [
  "mandate-num",
  "mandate-spec",
  "mandate-time",
+ "mandate-vault",
  "mandate-vault-local",
  "proptest",
  "secrecy",

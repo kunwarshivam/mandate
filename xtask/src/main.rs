@@ -717,28 +717,24 @@ fn openbao() -> Result<()> {
         );
         return Ok(());
     }
-    if selection()?.among(&OPENBAO_TESTED).is_empty() {
-        eprintln!("    openbao: mandate-vault is not affected (DEC-1190)");
+    let packages = selection()?.among(&OPENBAO_TESTED);
+    if packages.is_empty() {
+        eprintln!("    openbao: neither mandate-vault nor mandate-cli is affected (DEC-1190)");
         return Ok(());
     }
-    let args = [
-        "nextest",
-        "run",
-        "--package",
-        "mandate-vault",
-        "--lib",
-        "--filterset",
-        "test(/^tests::openbao_server::/)",
-        "--locked",
-    ];
-    eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));
-    let status = Command::new("cargo")
-        .args(args)
-        .env(OPENBAO_REQUIRED, "1")
-        .status()
-        .context("starting `cargo nextest`")?;
-    if !status.success() {
-        bail!("the OpenBao conformance suite failed with {status}");
+    for package in packages {
+        let mut args = vec!["nextest", "run", "--package", package];
+        args.extend_from_slice(openbao_tests(package));
+        args.push("--locked");
+        eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));
+        let status = Command::new("cargo")
+            .args(&args)
+            .env(OPENBAO_REQUIRED, "1")
+            .status()
+            .context("starting `cargo nextest`")?;
+        if !status.success() {
+            bail!("{package}'s OpenBao tests failed with {status}");
+        }
     }
     Ok(())
 }
@@ -1786,9 +1782,17 @@ const BINARY_REFERENCE: &str = "bin:";
 /// them the selection holds.
 const PG_TESTED: [&str; 3] = ["mandate-journal-pg", "mandate-cli", "mandate-dispatcher"];
 
-/// The package whose tests need the OpenBao dev server (E21-32, DEC-977): `cargo xtask ci openbao`
-/// runs its suite when the selection holds it.
-const OPENBAO_TESTED: [&str; 1] = ["mandate-vault"];
+/// The packages whose tests need the OpenBao dev server (E21-32, DEC-977, DEC-2022): `cargo xtask
+/// ci openbao` runs each one's server tests when the selection holds it.
+const OPENBAO_TESTED: [&str; 2] = ["mandate-vault", "mandate-cli"];
+
+/// Which of `package`'s tests need the OpenBao dev server, as nextest arguments.
+fn openbao_tests(package: &str) -> &'static [&'static str] {
+    match package {
+        "mandate-cli" => &["--test", "vault_provision"],
+        _ => &["--lib", "--filterset", "test(/^tests::openbao_server::/)"],
+    }
+}
 
 /// Whether `path` is `entry`, lies under it when `entry` names a directory (ends in `/`), or
 /// starts with it when `entry` ends in `*`.
