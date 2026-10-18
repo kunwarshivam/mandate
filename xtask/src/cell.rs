@@ -12,7 +12,7 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpStream, ToSocketAddrs};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
@@ -56,6 +56,13 @@ pub const PLUGIN_TLS_CHART: &str = "deploy/cell/charts/backup-plugin-tls";
 /// The local cell's stand-in for the S1 endpoint, in its own namespace (DEC-1050 item 5).
 pub const ARCHIVE_STORE_CHART: &str = "deploy/cell/charts/archive-store";
 const ARCHIVE_STORE_NAMESPACE: &str = "archive-store";
+/// The workspace vault's chart (E21-32, DEC-2019), in the workspace's namespace, and its one pod.
+pub const VAULT_CHART: &str = "deploy/cell/charts/vault";
+const VAULT_MANAGED_VALUES: &str = "deploy/cell/values/vault-managed.yaml";
+const VAULT_POD: &str = "vault-0";
+/// Where under `target/cell` the local cell keeps its vault's one unseal key and root token, mode
+/// 0600. They guard fake secrets only; a hosted cell's are the founder's (DEC-977 item 5).
+const VAULT_INIT: &str = "vault-init.json";
 pub const WORKSPACE_CHART: &str = "deploy/cell/charts/workspace";
 pub const JOURNAL_CHART: &str = "deploy/cell/charts/journal-db";
 const WORKSPACE_VALUES: &str = "deploy/cell/values/k3d.yaml";
@@ -304,6 +311,8 @@ pub fn chart_checks() -> Result<()> {
         ),
         (ARCHIVE_STORE_CHART, "", ARCHIVE_STORE_NAMESPACE),
         (PLUGIN_TLS_CHART, "", CNPG_NAMESPACE),
+        (VAULT_CHART, "", NAMESPACE),
+        (VAULT_CHART, VAULT_MANAGED_VALUES, NAMESPACE),
     ] {
         let mut args = vec![chart];
         if !values.is_empty() {
@@ -778,6 +787,7 @@ pub fn up() -> Result<()> {
         "jsonpath={.metadata.annotations.mandate\\.dev/failure-domain}",
     ])?;
     eprintln!("    journal: failure domains: {}", domain.trim());
+    vault()?;
     if stub.is_some() {
         demo_links(&image)?;
     }
@@ -1151,6 +1161,160 @@ fn archive_store() -> Result<()> {
         "--timeout",
         "5m",
     ])
+}
+
+/// What a vault's `bao status -format=json` says, judged as the client judges `sys/seal-status`
+/// (DEC-977 items 5 and 6): the cell refuses a vault on in-memory storage, a dev server, as the
+/// client does outside its tests.
+#[derive(Debug, PartialEq, Eq)]
+enum VaultState {
+    Uninitialized,
+    Sealed,
+    Unsealed,
+}
+
+fn vault_state(status: &str) -> Result<VaultState> {
+    let status: Value = serde_json::from_str(status).context("reading the vault's status")?;
+    let initialized = status["initialized"]
+        .as_bool()
+        .context("the vault's status has no `initialized`")?;
+    let sealed = status["sealed"]
+        .as_bool()
+        .context("the vault's status has no `sealed`")?;
+    let storage = status["storage_type"].as_str().unwrap_or_default();
+    if initialized && storage != "raft" {
+        bail!(
+            "the vault's storage is `{storage}`, not raft: a dev server is refused (DEC-977 item 6)"
+        );
+    }
+    Ok(match (initialized, sealed) {
+        (false, _) => VaultState::Uninitialized,
+        (true, true) => VaultState::Sealed,
+        (true, false) => VaultState::Unsealed,
+    })
+}
+
+/// `bao` in the vault's pod, with `stdin` on its standard input, and its standard output, whatever
+/// its exit: `bao status` exits 2 for a sealed vault. Its output is never printed, since `operator
+/// init`'s holds the unseal key and the root token.
+fn bao(args: &[&str], stdin: &[u8]) -> Result<(bool, String)> {
+    let mut full = vec![
+        "exec",
+        "-i",
+        NODE,
+        "kubectl",
+        "exec",
+        "-i",
+        "--namespace",
+        NAMESPACE,
+        VAULT_POD,
+        "--",
+        "bao",
+    ];
+    full.extend_from_slice(args);
+    let mut child = Command::new("docker")
+        .args(&full)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("starting bao in the vault's pod")?;
+    child
+        .stdin
+        .take()
+        .context("bao's stdin")?
+        .write_all(stdin)?;
+    let out = child.wait_with_output()?;
+    let text = String::from_utf8(out.stdout).context("bao's output is not UTF-8")?;
+    Ok((out.status.success(), text))
+}
+
+/// The workspace vault (E21-32, DEC-2019): installed without `--wait`, since it is ready only once
+/// unsealed, then initialized once with one unseal key, kept with the root token under
+/// `target/cell` (mode 0600; the cell holds fake secrets only), and unsealed with it, the key
+/// passed on stdin and never as an argument. A hosted cell is initialized and unsealed by hand
+/// (deploy/cell/README.md, "The vault").
+fn vault() -> Result<()> {
+    helm(&[
+        "upgrade",
+        "--install",
+        "vault",
+        VAULT_CHART,
+        "--namespace",
+        NAMESPACE,
+        "--create-namespace",
+        "--timeout",
+        "5m",
+    ])?;
+    let mut answer = None;
+    for _ in 0..POLLS {
+        if let Ok((_, status)) = bao(&["status", "-format=json"], b"")
+            && serde_json::from_str::<Value>(&status).is_ok()
+        {
+            answer = Some(status);
+            break;
+        }
+        sleep(Duration::from_secs(2));
+    }
+    let mut seal = vault_state(&answer.context("the vault never answered `bao status`")?)?;
+    let init = state()?.join(VAULT_INIT);
+    if seal == VaultState::Uninitialized {
+        let (ok, made) = bao(
+            &[
+                "operator",
+                "init",
+                "-key-shares=1",
+                "-key-threshold=1",
+                "-format=json",
+            ],
+            b"",
+        )?;
+        if !ok {
+            bail!("`bao operator init` failed");
+        }
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&init)
+            .with_context(|| format!("writing {}", init.display()))?;
+        file.write_all(made.as_bytes())?;
+        seal = VaultState::Sealed;
+    }
+    if seal == VaultState::Sealed {
+        let kept = fs::read_to_string(&init).with_context(|| {
+            format!(
+                "the vault is initialized but {} is gone; `cargo xtask cell down` starts afresh",
+                init.display()
+            )
+        })?;
+        let kept: Value = serde_json::from_str(&kept).context("reading the vault's init")?;
+        let key = kept["unseal_keys_b64"][0]
+            .as_str()
+            .context("the vault's init holds no unseal key")?;
+        let (ok, _) = bao(
+            &["write", "-format=json", "sys/unseal", "key=-"],
+            key.as_bytes(),
+        )?;
+        if !ok {
+            bail!("unsealing the vault failed");
+        }
+        let (_, status) = bao(&["status", "-format=json"], b"")?;
+        if vault_state(&status)? != VaultState::Unsealed {
+            bail!("the vault is still sealed");
+        }
+    }
+    kubectl(&[
+        "wait",
+        "--namespace",
+        NAMESPACE,
+        "--for=condition=Ready",
+        &format!("pod/{VAULT_POD}"),
+        "--timeout=120s",
+    ])?;
+    eprintln!("    vault: unsealed, on raft storage");
+    Ok(())
 }
 
 fn sha256(file: &str) -> Result<String> {
@@ -4067,6 +4231,31 @@ fn sh_in(dir: &str, program: &str, args: &[&str]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The cell judges the vault's status as the client judges `sys/seal-status`: uninitialized,
+    /// sealed or unsealed on raft, and a dev server's in-memory storage refused whatever its seal.
+    #[test]
+    fn the_cell_refuses_a_dev_vault_and_reads_its_seal() {
+        let status = |init: bool, sealed: bool, storage: &str| {
+            json!({"initialized": init, "sealed": sealed, "storage_type": storage}).to_string()
+        };
+        assert_eq!(
+            vault_state(&status(false, true, "raft")).unwrap(),
+            VaultState::Uninitialized
+        );
+        assert_eq!(
+            vault_state(&status(true, true, "raft")).unwrap(),
+            VaultState::Sealed
+        );
+        assert_eq!(
+            vault_state(&status(true, false, "raft")).unwrap(),
+            VaultState::Unsealed
+        );
+        assert!(vault_state(&status(true, false, "inmem")).is_err());
+        assert!(vault_state(&status(true, true, "inmem")).is_err());
+        assert!(vault_state(r#"{"sealed": false, "storage_type": "raft"}"#).is_err());
+        assert!(vault_state("not json").is_err());
+    }
 
     /// One binary's tag is its own digest, as before; two binaries' changes when either changes,
     /// and with their order, so the runner alone changing gives the `mandate` image a new tag.
