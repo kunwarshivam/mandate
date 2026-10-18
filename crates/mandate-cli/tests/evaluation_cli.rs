@@ -19,7 +19,6 @@ fn refused(reason: &'static str) -> ControlError {
 
 /// The flags parse into the command, with `--artifacts` the store's alias.
 #[test]
-#[ignore = "pending E17-8"]
 fn the_command_takes_its_flags() {
     let cli = Cli::try_parse_from([
         "mandate",
@@ -87,7 +86,6 @@ fn the_command_takes_its_flags() {
 
 /// The four files are read in their order; a missing one refuses `input_invalid`.
 #[test]
-#[ignore = "pending E17-8"]
 fn the_inputs_are_the_four_files_in_order() {
     let dir = std::env::temp_dir().join(format!("mandate-cli-eval-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -112,7 +110,6 @@ fn the_inputs_are_the_four_files_in_order() {
 
 /// The cut-off is RFC 3339 UTC, to the nanosecond; anything else refuses `cut_off_invalid`.
 #[test]
-#[ignore = "pending E17-8"]
 fn the_cut_off_is_an_rfc_3339_instant() {
     assert_eq!(
         cut_off("2026-09-24T00:00:00.000000001Z"),
@@ -125,7 +122,6 @@ fn the_cut_off_is_an_rfc_3339_instant() {
 
 /// What it prints: the id, the report, whether it passed, and the event.
 #[test]
-#[ignore = "pending E17-8"]
 fn it_prints_the_evaluation_and_its_event() {
     let mut out = Vec::new();
     let evaluated = Evaluated {
