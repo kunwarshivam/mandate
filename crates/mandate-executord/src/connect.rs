@@ -51,6 +51,142 @@ pub fn connect_check<S: Store, B: Broker>(
     pii_ref: &str,
     now: UtcNanos,
 ) -> Result<Checked, &'static str> {
-    let _ = (store, broker, ids, scope, connection, pii_ref, now);
-    Err("unimplemented")
+    let connection_id = ConnectionId::new(connection).map_err(|_| "connection_id_invalid")?;
+    if !pii_ref.strip_prefix("pii_").is_some_and(is_ulid) {
+        return Err("pii_ref_invalid");
+    }
+    let pii = AccountPiiRef::new(pii_ref).map_err(|_| "pii_ref_invalid")?;
+    let stream = StreamId::parse(&format!("acct:{}:{}", scope.workspace.0, scope.account.0))
+        .ok_or("stream_unavailable")?;
+    let epoch = store.take_ownership(&stream).ok_or("stream_unavailable")?;
+    let head = store
+        .rows(&stream)
+        .map(|rows| u64::try_from(rows.len()).unwrap_or(u64::MAX))
+        .ok_or("stream_unavailable")?;
+    let account = match broker.call(&BrokerRequest::GetAccount) {
+        Ok(BrokerOutcome::Account(_)) => AccountRead::Read {
+            pii_ref: pii,
+            dedicated: None,
+        },
+        _ => AccountRead::Unreadable,
+    };
+    let report = run(&CheckInput {
+        connection_id,
+        broker: Venue::Alpaca,
+        environment: Reach::Paper,
+        auth_kind: AuthKind::ApiKey,
+        occasion: Occasion::Connect,
+        granted: Granted::KeyPermissions(None),
+        account,
+        contract: None,
+        pinned_contract: None,
+    })
+    .map_err(|_| "check_refused")?;
+    let id = |ordinal: u32| ids.event_id(WriterEpoch(epoch), Seq(head), ordinal).0;
+    let envelope = Envelope {
+        stream: stream.as_str(),
+        environment: Environment::Paper,
+        actor_kind: "system",
+        actor_id: "executor",
+        build: concat!("mandate-executord/", env!("CARGO_PKG_VERSION")),
+        version: VERSION,
+        event_time: now,
+    };
+    let mut drafts = Vec::new();
+    if head == 0 {
+        let opened = object(vec![
+            ("account_ref", text(&scope.account.0)),
+            ("broker", text("alpaca")),
+            ("stream_type", text("account")),
+            ("workspace_id", text(&scope.workspace.0)),
+        ])
+        .ok_or("check_refused")?;
+        drafts.push(record(&envelope, &id(0), "StreamOpened", &opened, &[])?);
+    }
+    let checked_id = id(1);
+    let pii_refs: Vec<&str> = report
+        .account_pii_ref
+        .as_ref()
+        .map(AccountPiiRef::as_str)
+        .into_iter()
+        .collect();
+    let payload = checked(&report, now)?;
+    drafts.push(record(
+        &envelope,
+        &checked_id,
+        "ConnectionChecked",
+        &payload,
+        &pii_refs,
+    )?);
+    match store.append(&stream, head, epoch, now, &drafts) {
+        AppendOutcome::Committed(_) | AppendOutcome::AlreadyCommitted(_) => Ok(Checked {
+            event_id: checked_id,
+            passed: report
+                .results
+                .iter()
+                .all(|(_, outcome)| matches!(outcome, Outcome::Passed)),
+        }),
+        _ => Err("append_refused"),
+    }
+}
+
+fn record(
+    envelope: &Envelope<'_>,
+    event_id: &str,
+    event_type: &str,
+    payload: &Value,
+    pii_refs: &[&str],
+) -> Result<Vec<u8>, &'static str> {
+    draft_bytes_with_pii(
+        envelope,
+        &Fields {
+            event_id,
+            event_type,
+            schema_version: 1,
+            causation_id: None,
+            correlation_id: None,
+            config_refs: &Object::new(),
+            payload,
+        },
+        pii_refs,
+    )
+    .ok_or("check_refused")
+}
+
+/// `ConnectionChecked`'s payload (journal spec §9.8): every result, ascending by check (rule 57),
+/// each reason present exactly when it failed (rule 58), the account's reference exactly when it
+/// was read (rule 62), and the check's time on its whole second as `risk_clock` (§4.7).
+fn checked(report: &CheckReport, now: UtcNanos) -> Result<Value, &'static str> {
+    let mut results = report.results.clone();
+    results.sort_by_key(|(check, _)| check.code());
+    let results = results
+        .iter()
+        .map(|(check, outcome)| {
+            let (result, reason) = match outcome {
+                Outcome::Passed => ("passed", Value::Null),
+                Outcome::Failed(reason) => ("failed", text(reason.code())),
+            };
+            object(vec![
+                ("check", text(check.code())),
+                ("reason", reason),
+                ("result", text(result)),
+            ])
+            .ok_or("check_refused")
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let risk_clock = UtcNanos::from_parts(now.secs(), 0).map_err(|_| "check_refused")?;
+    object(vec![
+        (
+            "account_pii_ref",
+            report
+                .account_pii_ref
+                .as_ref()
+                .map_or(Value::Null, |p| text(p.as_str())),
+        ),
+        ("connection_id", text(report.connection_id.as_str())),
+        ("occasion", text("connect")),
+        ("results", Value::Array(results)),
+        ("risk_clock", text(&risk_clock.to_string())),
+    ])
+    .ok_or("check_refused")
 }
