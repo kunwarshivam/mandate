@@ -766,6 +766,10 @@ fn tofu_checks() -> Result<()> {
     let work = root.join("target").join("tofu");
     let cache = work.join("plugins");
     fs::create_dir_all(&cache).with_context(|| format!("creating {}", cache.display()))?;
+    let forbidden = tofu_forbidden_blocks(&tofu_sources(&tofu_dir)?);
+    if !forbidden.is_empty() {
+        bail!("tofu:\n  {}", forbidden.join("\n  "));
+    }
     sh("tofu", &["fmt", "-check", "-recursive", "-diff", TOFU_DIR])?;
     let config = tofu_dir.join(".tflint.hcl");
     sh(
@@ -811,6 +815,57 @@ fn tofu_checks() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The blocks `deploy/tofu/` may never hold, each with why (DEC-2014 item 6): a provisioner runs
+/// a command on the runner or a host during `apply`, and the `external` and `http` data sources
+/// run a program or fetch a URL during `plan`, so any of them would run code or reach a host the
+/// plan does not show, with the job's secrets in reach.
+const TOFU_FORBIDDEN: [(&str, &str); 3] = [
+    ("provisioner \"", "a provisioner"),
+    ("data \"external\"", "the `external` data source"),
+    ("data \"http\"", "the `http` data source"),
+];
+
+/// Every use of a [`TOFU_FORBIDDEN`] block in `files`, each a path and its text, named with its
+/// line; a `#` or `//` comment does not count.
+fn tofu_forbidden_blocks(files: &[(String, String)]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (path, text) in files {
+        for (number, line) in (1_usize..).zip(text.lines()) {
+            let code = line.trim_start();
+            if code.starts_with('#') || code.starts_with("//") {
+                continue;
+            }
+            let compact: String = code.split_whitespace().collect::<Vec<_>>().join(" ");
+            for (block, what) in TOFU_FORBIDDEN {
+                if compact.starts_with(block) {
+                    problems.push(format!(
+                        "{path}:{number}: holds {what}, which deploy/tofu never may (DEC-2014)"
+                    ));
+                }
+            }
+        }
+    }
+    problems
+}
+
+/// Every `.tf` and `.tftest.hcl` file under `dir`, with its text, by [`tofu_forbidden_blocks`]'s
+/// path.
+fn tofu_sources(dir: &Path) -> Result<Vec<(String, String)>> {
+    files_by_extension(dir, &["tf", "hcl"])?
+        .into_iter()
+        .filter(|path| {
+            !path
+                .components()
+                .any(|part| part.as_os_str() == ".terraform")
+        })
+        .map(|path| {
+            let text =
+                fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+            Ok((path.display().to_string(), text))
+        })
+        .collect()
 }
 
 /// Every OpenTofu root under `tofu_dir` that the checks run in: each directory directly under
@@ -964,7 +1019,10 @@ fn infra_workflow_in(root: &Path) -> Result<()> {
 /// `refs/heads/main`, under `environment: infra-${{ inputs.environment }}`, reading contents only,
 /// with a checkout that keeps no credential; offer exactly `staging` and `production`; and read a
 /// secret only in the one step that runs [`INFRA_RUN`], and only [`INFRA_SECRETS`]. No other
-/// workflow may read any of [`INFRA_SECRETS`] or name `infra-staging` or `infra-production`.
+/// workflow may read any of [`INFRA_SECRETS`], name `infra-staging` or `infra-production`, or
+/// compute an `environment:` name, which could resolve to one of them. No workflow, `infra.yml`
+/// included, may reach secrets by a form the check cannot name: an index (`secrets['x']`), the
+/// whole context (`toJSON(secrets)`), or `secrets: inherit`.
 fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
     let secret_names = |text: &str| {
         text.match_indices("secrets.")
@@ -978,9 +1036,32 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
             .collect::<Vec<_>>()
     };
     let mut problems = Vec::new();
+    for file in files {
+        for (number, line) in (1_usize..).zip(file.text.lines()) {
+            let code = uncommented(line).to_ascii_lowercase();
+            let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+            if compact.contains("secrets[")
+                || compact.contains("tojson(secrets")
+                || compact.contains("secrets:inherit")
+            {
+                problems.push(format!(
+                    "{}:{number}: reaches secrets by an index, the whole context or `inherit`, \
+                     which the check cannot name (DEC-2014)",
+                    file.path
+                ));
+            }
+        }
+    }
     for file in files.iter().filter(|file| file.path != INFRA_WORKFLOW) {
         for (number, line) in (1_usize..).zip(file.text.lines()) {
             let code = uncommented(line);
+            if code.trim_start().starts_with("environment:") && code.contains("${{") {
+                problems.push(format!(
+                    "{}:{number}: computes an environment name, which could resolve to an \
+                     infrastructure environment; only {INFRA_WORKFLOW} may (DEC-2014)",
+                    file.path
+                ));
+            }
             if secret_names(code)
                 .iter()
                 .any(|name| INFRA_SECRETS.contains(&name.as_str()))
@@ -4122,7 +4203,9 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// reports' `RUN_URL` and `VERDICTS` (DEC-1190), `merge.yml` the merge inputs, `web.yml` and
 /// `web-e2e.yml` the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and
 /// `web-deploy.yml` the build's public Supabase values and the deploy step's Cloudflare token and
-/// account (DEC-1005).
+/// account (DEC-1005), and `ci.yml` and `infra.yml` OpenTofu's and tflint's versions and checksums,
+/// and `infra.yml` its step's cloud credentials, `TF_VAR_*` inputs and `MANDATE_INFRA_*` choices
+/// (DEC-2013, DEC-2014), which [`infra_workflow_problems`] keeps to that one step.
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
@@ -9826,6 +9909,7 @@ mod tests {
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
+    use super::{TOFU_DIR, tofu_forbidden_blocks, tofu_sources};
     use super::{unoptimised_config, unoptimised_packages};
 
     #[test]
@@ -14861,6 +14945,51 @@ mod tests {
         names.iter().map(|name| (*name).to_owned()).collect()
     }
 
+    /// E21-56 (DEC-2014 item 6): a provisioner and the `external` and `http` data sources are
+    /// refused wherever they appear under `deploy/tofu/`, with their line; a comment naming one,
+    /// another data source, and the committed tree are not.
+    #[test]
+    fn deploy_tofu_holds_no_provisioner_or_fetching_data_source() -> Result<()> {
+        let file = |text: &str| vec![("m/main.tf".to_owned(), text.to_owned())];
+        for (text, line) in [
+            (
+                "resource \"x\" \"y\" {\n  provisioner \"local-exec\" {}\n}\n",
+                2,
+            ),
+            ("data \"external\" \"run\" {}\n", 1),
+            ("data   \"http\" \"fetch\" {}\n", 1),
+            (
+                "resource \"x\" \"y\" {\n\tprovisioner \"remote-exec\" {}\n}\n",
+                2,
+            ),
+        ] {
+            let problems = tofu_forbidden_blocks(&file(text));
+            assert_eq!(problems.len(), 1, "{text:?}: {problems:?}");
+            assert!(
+                problems[0].starts_with(&format!("m/main.tf:{line}:")),
+                "{problems:?}"
+            );
+        }
+        for text in [
+            "# provisioner \"local-exec\" is never used\n",
+            "// data \"external\" \"x\" {}\n",
+            "data \"digitalocean_sizes\" \"node\" {}\n",
+            "description = \"no provisioner here\"\n",
+        ] {
+            assert_eq!(
+                tofu_forbidden_blocks(&file(text)),
+                Vec::<String>::new(),
+                "{text:?}"
+            );
+        }
+        assert_eq!(
+            tofu_forbidden_blocks(&tofu_sources(&repo_root()?.join(TOFU_DIR))?),
+            Vec::<String>::new(),
+            "the committed deploy/tofu holds none"
+        );
+        Ok(())
+    }
+
     /// E21-56 (DEC-2014): `plan` inits and saves a plan; `apply` applies that same saved plan,
     /// never a fresh one; any other environment or action is refused before a command runs.
     #[test]
@@ -15015,9 +15144,28 @@ mod tests {
                 "{name}: {problems:?}"
             );
         }
+        for indirect in [
+            "          X: ${{ secrets['DIGITAL_OCEAN_API_KEY'] }}\n",
+            "          X: ${{ toJSON(secrets) }}\n",
+            "          X: ${{ ToJson( secrets ) }}\n",
+        ] {
+            let infra = edited(
+                "          TF_VAR_access_allowed_emails",
+                &format!("{indirect}          TF_VAR_access_allowed_emails"),
+            );
+            assert!(
+                check(&infra, &[])
+                    .iter()
+                    .any(|p| p.contains("which the check cannot name")),
+                "{indirect} in infra.yml is refused"
+            );
+        }
         for other in [
             "jobs:\n  x:\n    steps:\n      - run: echo ${{ secrets.TOFU_STATE_PASSPHRASE }}\n",
             "jobs:\n  x:\n    environment: infra-staging\n",
+            "jobs:\n  x:\n    environment: ${{ inputs.target }}\n",
+            "jobs:\n  x:\n    uses: ./.github/workflows/y.yml\n    secrets: inherit\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ secrets[inputs.name] }}\n",
         ] {
             let problems = check(&text, &[ci_file(".github/workflows/ci.yml", other)]);
             assert_eq!(problems.len(), 1, "{other}: {problems:?}");

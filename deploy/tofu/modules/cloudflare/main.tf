@@ -174,6 +174,10 @@ resource "cloudflare_r2_bucket_lock" "journal_archive" {
       }
     },
   ]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "this" {

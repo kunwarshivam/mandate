@@ -62,6 +62,9 @@ wait until staging is up.
 
 ### 2. Cloudflare
 
+0. **R2 enabled on the account.** In **R2 Object Storage**, subscribe to R2 once (it asks for a
+   payment method even on the free tier). Until it is enabled, the first apply fails at the
+   archive bucket.
 1. **An API token, `CF_INFRA_API_TOKEN`.** In **My Profile → API Tokens → Create Token → Custom
    token**, named `mandate-tofu`, with only these permissions:
 
@@ -133,8 +136,10 @@ No repository-level secret or variable is used, so no other workflow can read th
    Nothing is destroyed.
    - If it fails with "DOKS does not offer 1.35.1-do.0; it offers: …", tell lane IAC the list.
      The pin changes in a one-line pull request.
-2. Dispatch again with action `apply` on the same commit, and approve it. The job applies the plan
-   it prints. A first cluster takes about ten minutes.
+2. Dispatch again with action `apply` on the same commit, and approve it. The job plans again after
+   your approval, prints that plan, and applies exactly it, so the apply reflects the commit and
+   the cloud as they are when the job runs. Dispatch `apply` only at a commit you have read, and
+   read the apply job's printed plan afterwards. A first cluster takes about ten minutes.
 3. **Reaching the cluster:** from an address in `KUBE_API_ALLOWED_CIDRS`, run
    `doctl kubernetes cluster kubeconfig save mandate-staging` on your own machine.
 4. **Handing over to lane GO (E21-58):** the outputs GO needs that are not secret are the cluster
