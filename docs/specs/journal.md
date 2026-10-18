@@ -4794,7 +4794,8 @@ reader that reads the document still takes every one of them from it.
 
 **Who writes which version.** A writer that deploys a stored version (the CLI's `agent deploy`
 and the workspace API's deployment, which judge it the same way) writes version 2, taking
-`connection_id` from the document it deploys. Until those writers move, in the code change that
+`connection_id` from the document it deploys, exactly when rule 201 holds, and version 1 otherwise.
+Until those writers move, in the code change that
 follows this one, they write version 1, and the deployment manager starts nothing for it (below):
 a writer that has not moved fails closed, never open.
 
@@ -4829,7 +4830,8 @@ a writer that has not moved fails closed, never open.
      deployment.
 
 **Stream rule** (connections spec §3), held and checked as rules 66 to 68 are: the writer checks it
-against its own fold of the stream and refuses the draft before appending, and §11's
+against its own fold of the stream before appending, and writes version 1 instead of a version-2
+draft that would fail it, and §11's
 `connection_lifecycle_mismatch` checks it on every range, from the range's connection anchor, which
 already holds each id's first establishment and its latest establishment or revocation, or failing
 closed without one:
@@ -4861,7 +4863,9 @@ manager does not start (fail closed). Not every deployment written today meets i
   workspace API's deployment clears the environment the same way, though it refuses V-002 for a
   deployment. Such a paper deployment is written as version 1, as today, and is never refused for
   rule 201; the manager starts nothing for it until the owner records the connection (with
-  `connection record`, which needs the connect sequence's `ConnectionChecked`) and deploys again.
+  `connection record`, which needs the connect sequence's `ConnectionChecked`) and deploys under a
+  new agent id: the CLI refuses a second deployment of an active agent, and §9.21 reads its
+  `AgentStopped` as final (the backlog's E21-33 follow-ups on reusing agent ids).
   The CLI changes in the code change that follows only in writing version 2 when rule 201
   holds.
 - **Revoked.** A connection whose latest record is a revocation is known to the fold, so V-001
