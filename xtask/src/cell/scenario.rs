@@ -844,7 +844,9 @@ fn api_unaskable() -> Result<Option<String>> {
 
 /// Points the cell's API and deployment manager at the run's `workspace` (DEC-2006): a `helm
 /// upgrade` of the workspace release that keeps every other value, then a wait until both
-/// Deployments have rolled out, so no pod of an earlier run still serves another workspace.
+/// Deployments have rolled out, so no pod of an earlier run still serves another workspace; and
+/// any earlier `kubectl port-forward` to the API is stopped, so the checks never reach an old pod
+/// through it (`api_port_forward` would reuse a forward that still answers its 401).
 fn point_api(workspace: &str) -> Result<()> {
     let hosted = format!("api.workspace={workspace}");
     helm(&[
@@ -884,7 +886,8 @@ fn point_api(workspace: &str) -> Result<()> {
             "--timeout=120s",
         ])?;
     }
-    eprintln!("    api: hosting {workspace}, rolled out");
+    let _ = output("pkill", &["-f", "port-forward.*deployment/api"]);
+    eprintln!("    api: hosting {workspace}, rolled out; an earlier forward to it is stopped");
     Ok(())
 }
 
@@ -1134,7 +1137,8 @@ mod tests {
 
     /// Step 1 checks the API twice, as main can serve it: a read of the run's own workspace with
     /// no session must be refused with the one 401, and the demo owner's sign-in must open a
-    /// session (204); the read with that session stays a gap until the API reads memberships (lane MB).
+    /// session (204); the read with that session stays a gap until the API reads memberships
+    /// (lane MB).
     #[test]
     fn step_one_checks_the_refusal_and_the_sign_in_and_names_the_signed_in_read() {
         let ws = workspace_of("0123456789");
@@ -1181,10 +1185,29 @@ mod tests {
         }
         assert_ne!(a, b);
         assert_eq!(a, "01KDEM0123456789000000000D");
-        assert_eq!(
-            FOUNDER,
-            super::super::DEMO_OWNER,
-            "the owner who signs in founded it"
+        let steps = plan(&a, &mandate());
+        let all = gestures(&steps);
+        let owner = super::super::DEMO_OWNER;
+        let found = all
+            .iter()
+            .find(|g| g.args[..2] == ["workspace", "found"])
+            .unwrap();
+        assert!(
+            found.args.windows(2).any(|w| w == ["--member", owner]),
+            "the workspace is founded for the owner who signs in: {:?}",
+            found.args
+        );
+        let kill = all
+            .iter()
+            .find(|g| g.args[..2] == ["agent", "kill"])
+            .unwrap();
+        let user = owner.to_ascii_lowercase();
+        assert!(
+            kill.args
+                .windows(2)
+                .any(|w| w[0] == "--user" && w[1] == user),
+            "the owner's gestures act as that member: {:?}",
+            kill.args
         );
     }
 
