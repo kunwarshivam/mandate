@@ -1,6 +1,6 @@
 //! One broker account's executor as a long-running process (E21-30, DEC-2003).
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::time::Duration;
 
 use mandate_canon::{Object, parse};
@@ -108,6 +108,8 @@ pub struct ExecutorProcess<S, B> {
     outbox: VecDeque<BrokerRequest>,
     /// Whether the core asked for a reconciliation that has not been handed yet.
     reconcile: bool,
+    /// The followed streams that did not read on their last read, each alerted once.
+    unreadable: BTreeSet<String>,
     max_chain: usize,
     written_at: UtcNanos,
 }
@@ -135,6 +137,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             pending: None,
             outbox: VecDeque::new(),
             reconcile: false,
+            unreadable: BTreeSet::new(),
             max_chain: config.max_chain,
             written_at: now,
         };
@@ -220,7 +223,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         if !self.flush(now, &mut alerts, 0) {
             return alerts;
         }
-        let tick = self.tick();
+        let tick = self.tick(&mut alerts);
         if !self.state.started() {
             let Some(tick) = tick else {
                 return alerts;
@@ -233,13 +236,17 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
-        let Some(switches) = self.switches(now) else {
+        let Some((switches, unreadable)) = self.switches(now, &mut alerts) else {
             return alerts;
         };
         for (agent, switch) in switches {
             if !self.apply(now, agent, switch, &mut alerts) {
                 return alerts;
             }
+        }
+        if unreadable {
+            self.lifecycle.observe(now, Lifecycled::Failed);
+            return alerts;
         }
         if let Some(tick) = tick {
             self.hand(now, now, Input::Tick(tick), &mut alerts, 0);
@@ -294,8 +301,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// The scheduler's latest tick, as the core's risk clock (journal spec §9.20). `None` when
     /// the clock stream holds none or cannot be read.
-    fn tick(&self) -> Option<RiskClock> {
-        let rows = self.store.rows(self.clock.as_ref()?)?;
+    fn tick(&mut self, alerts: &mut Vec<Alert>) -> Option<RiskClock> {
+        let clock = self.clock.clone()?;
+        let rows = self.follow(&clock, alerts)?;
         rows.iter()
             .filter(|row| row.event_type == "ClockAdvanced")
             .filter_map(tick_of)
@@ -303,20 +311,54 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .map(|at| RiskClock::from_secs(at.secs()))
     }
 
-    /// The kill switches of the account's agents that the fold has not applied: a switch counts
-    /// as applied once its agent's folded mode is at least the switch's final mode (DEC-2003 item
-    /// 4). An unreadable control stream yields nothing this pass, and so does an agent stream that
-    /// cannot be read; a row on one that cannot be read stops the process (DEC-85).
-    fn switches(&mut self, now: UtcNanos) -> Option<Vec<(AgentId, Switch)>> {
-        let control = self.store.rows(self.control.as_ref()?)?;
-        let agents = agents_of(&control, self.state.scope(), self.environment);
+    /// The rows of a stream the process follows, or `None` when the store cannot read it. A stream
+    /// that stops reading raises one opaque alert, and another only after it has read again
+    /// (`AGENTS.md` rule 6: a fixed key and no subject), so a persistent failure is never silent.
+    fn follow(&mut self, stream: &StreamId, alerts: &mut Vec<Alert>) -> Option<Vec<StoredEvent>> {
+        let rows = self.store.rows(stream);
+        let name = stream.as_str().to_owned();
+        match rows {
+            Some(_) => {
+                self.unreadable.remove(&name);
+            }
+            None => {
+                if self.unreadable.insert(name) {
+                    alerts.push(Alert {
+                        key: "stream_unreadable",
+                        subject: None,
+                    });
+                }
+            }
+        }
+        rows
+    }
+
+    /// The kill switches of the account's agents that this stream has not applied, read from the
+    /// switch's own record (`ExecutorState::applied_copy`, DEC-2003 item 4), never from a mode
+    /// another restriction may also have set; and whether a row on an agent's stream could not be
+    /// read. An unreadable control stream yields nothing this pass, and so does an agent stream
+    /// that cannot be read. A control record that does not read stops the process at once, since
+    /// the agents it names are unknown; a row on one agent's stream that does not read stops it only
+    /// after the other agents' switches are applied (DEC-85, `AGENTS.md` rule 13).
+    fn switches(
+        &mut self,
+        now: UtcNanos,
+        alerts: &mut Vec<Alert>,
+    ) -> Option<(Vec<(AgentId, Switch)>, bool)> {
+        let control = self.control.clone()?;
+        let rows = self.follow(&control, alerts)?;
+        let Ok(agents) = agents_of(&rows, self.state.scope(), self.environment) else {
+            self.lifecycle.observe(now, Lifecycled::Failed);
+            return None;
+        };
         let workspace = self.state.scope().workspace.0.clone();
         let mut pending = Vec::new();
+        let mut unreadable = false;
         for agent in agents {
             let Some(stream) = StreamId::parse(&format!("agent:{workspace}:{}", agent.0)) else {
                 continue;
             };
-            let Some(rows) = self.store.rows(&stream) else {
+            let Some(rows) = self.follow(&stream, alerts) else {
                 continue;
             };
             let read: Result<Vec<_>, _> = rows
@@ -325,21 +367,20 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 .map(folded)
                 .collect();
             let Ok(held) = read.and_then(|rows| switches(&rows)) else {
-                self.lifecycle.observe(now, Lifecycled::Failed);
-                return None;
+                unreadable = true;
+                continue;
             };
-            let mode = self.state.effective_mode(&agent);
             pending.extend(
                 held.into_iter()
-                    .filter(|switch| mode < switch.initiator.final_mode())
+                    .filter(|switch| !self.state.applied_copy(&switch.switch))
                     .map(|switch| (agent.clone(), switch)),
             );
         }
-        Some(pending)
+        Some((pending, unreadable))
     }
 
     /// Applies one switch as the core's own kill switch of that agent alone, never an account-wide
-    /// one (`AGENTS.md` rule 13).
+    /// one (`AGENTS.md` rule 13), naming the record it copies so the journal says it was applied.
     fn apply(
         &mut self,
         now: UtcNanos,
@@ -351,7 +392,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             scope: KillScope::Agent(agent),
             initiator: switch.initiator,
             confirmation: switch.confirmation,
-            cause: None,
+            cause: Some(switch.switch),
         };
         self.hand(now, now, Input::Command(command), alerts, 0)
     }

@@ -9,7 +9,8 @@
   first pass that reads a tick, every draft journaled before the broker sees what it names, an
   input in doubt handed again first, the reconciliation's four reads as one snapshot with its
   account reported first and read again when an answer is lost, each agent's kill switch applied
-  once as the core's own agent-scoped switch, ready or not, `mandate-process`'s lifecycle) and
+  once as the core's own agent-scoped switch naming the record it copies (`copied_from`), ready or
+  not, an unreadable stream alerted once, `mandate-process`'s lifecycle) and
   `src/follow.rs` (`agents_of`: the account's agents from version-2 `ConnectionEstablished` and
   `AgentDeployed`; `switches`: an agent stream's `KillSwitchActivated` records with the bid the
   same command's `OwnerExitRequested` confirmed). The agents' orders are slice X1b.
@@ -18,12 +19,17 @@
   again without holding the kill switch, a process that is not ready applying the kill switch, a
   switch applied once across passes and restarts, a workspace or connection switch applied to the
   agent alone with no account-wide request, every waiting switch applied in one pass, only the
-  account's agents followed, a stopped agent not followed, a revoked connection followed again
-  once established again, a lost answer written once, a pass going on after a retry, the chain
+  account's agents followed, a stopped agent's switch still applied, a revoked connection
+  followed again once established again, no pause of every agent, earlier pause of the agent or
+  blocked account swallowing a switch, a lifted switch not applied again, an unreadable row
+  stopping the process after the readable switches, an unreadable control record stopping it, an
+  unreadable stream alerted once, a lost answer written once, a pass going on after a retry, the chain
   bound, a fence, drain, an unreadable switch stopping the process, and an unreadable control
   stream holding nothing back for good.
   `tests/properties.rs`: over random runs of restarts, crashes at any append, lost journal and
   broker answers and switches, every switch applied exactly once and no account-wide request; and
   a pass with nothing new changing nothing. `src/follow.rs`'s unit tests: each initiator, and the
   bid a switch carries. `tests/support/mod.rs`: the journal, broker and core doubles.
+  `mandate-executor`'s `tests/copied_switch.rs`: a copied switch's `copied_from`, read back live
+  and after a replay, and `null` for a switch that copies nothing.
 - **Run:** `cargo nextest run -p mandate-executord`.

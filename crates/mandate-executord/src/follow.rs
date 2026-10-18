@@ -41,57 +41,61 @@ pub fn folded(row: &StoredEvent) -> Result<FoldedEvent, Unreadable> {
 
 /// The agents whose deployments trade on the account in `scope`, read from the control stream in
 /// `environment`: an agent whose latest version-2 `AgentDeployed` names a connection whose latest
-/// establishment or revocation is a version-2 `ConnectionEstablished` naming this `account_ref`,
-/// and that has no `AgentStopped` after it (journal spec §9.8, §9.24, DEC-1171). A version-1
-/// deployment names no connection, so it reaches no executor (DEC-1171 item 3).
+/// establishment or revocation is a version-2 `ConnectionEstablished` naming this `account_ref`
+/// (journal spec §9.8, §9.24, DEC-1171). A version-1 deployment names no connection, so it reaches
+/// no executor (DEC-1171 item 3). An agent whose deployment stopped is still followed, since it may
+/// still hold orders or a position its kill switch must reach (`AGENTS.md` rule 13).
+///
+/// # Errors
+/// [`Unreadable`] for a deployment or connection record whose members do not read: an agent the
+/// account may owe a kill switch is never dropped for it (DEC-85).
 pub fn agents_of(
     control: &[StoredEvent],
     scope: &AccountScope,
     environment: Environment,
-) -> BTreeSet<AgentId> {
+) -> Result<BTreeSet<AgentId>, Unreadable> {
     let mut ours: BTreeMap<String, bool> = BTreeMap::new();
     let mut deployed: BTreeMap<String, Option<String>> = BTreeMap::new();
     for row in control
         .iter()
         .filter(|row| row.environment == environment.as_str())
     {
-        let Ok(event) = folded(row) else {
+        if !matches!(
+            row.event_type.as_str(),
+            "ConnectionEstablished" | "ConnectionRevoked" | "AgentDeployed" | "AgentStopped"
+        ) {
             continue;
-        };
+        }
+        let event = folded(row)?;
         let text = |member: &str| {
             event
                 .payload
                 .get(member)
                 .and_then(Value::as_str)
                 .map(str::to_owned)
+                .ok_or(Unreadable)
         };
         match (row.event_type.as_str(), row.schema_version) {
             ("ConnectionEstablished", 2) => {
-                if let Some(connection) = text("connection_id") {
-                    let mine = text("account_ref").as_deref() == Some(scope.account.0.as_str())
-                        && text("environment").as_deref() == Some(environment.as_str());
-                    ours.insert(connection, mine);
-                }
+                let mine = text("account_ref")? == scope.account.0
+                    && text("environment")? == environment.as_str();
+                ours.insert(text("connection_id")?, mine);
             }
             ("ConnectionEstablished" | "ConnectionRevoked", _) => {
-                if let Some(connection) = text("connection_id") {
-                    ours.insert(connection, false);
-                }
+                ours.insert(text("connection_id")?, false);
             }
-            ("AgentDeployed", version) => {
-                if let Some(agent) = text("agent_id") {
-                    deployed.insert(agent, text("connection_id").filter(|_| version == 2));
-                }
+            ("AgentDeployed", 2) => {
+                deployed.insert(text("agent_id")?, Some(text("connection_id")?));
             }
-            ("AgentStopped", _) => {
-                if let Some(agent) = text("agent_id") {
-                    deployed.insert(agent, None);
-                }
+            ("AgentDeployed", _) => {
+                deployed.insert(text("agent_id")?, None);
             }
-            _ => {}
+            _ => {
+                text("agent_id")?;
+            }
         }
     }
-    deployed
+    Ok(deployed
         .into_iter()
         .filter(|(_, connection)| {
             connection
@@ -99,7 +103,7 @@ pub fn agents_of(
                 .is_some_and(|c| ours.get(c).copied().unwrap_or(false))
         })
         .map(|(agent, _)| AgentId(agent))
-        .collect()
+        .collect())
 }
 
 /// A `KillSwitchActivated` on an agent's stream: the runtime's copy of a kill switch that covers
