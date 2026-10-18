@@ -1572,7 +1572,13 @@ members bound in its approval's `ApprovalRequested` content object.
 | `lifecycle` | `normal` \| `paused` \| `stopped` | The deployment's own state after the change, set only by the owner's pause, resume, or stop. Restrictions lift independently (§5.9), so an owner's pause taken while a stricter restriction held must survive that restriction lifting on replay; this event is the only place the agent stream can record it (§1 principle 4) |
 
 **`KillSwitchActivated`** on the agent stream (trading spec §5.5). The account stream's is not closed
-here.
+here. Its members include `copied_from`, so a later closed schema keeps it:
+- for a switch an executor applied from the agent stream, the `event_id` of that stream's
+  `KillSwitchActivated`;
+- `null` for a switch the executor originated.
+
+Whether a copied switch was already applied is read from the account stream's own records, live
+and after a replay ([DEC-2003](../project/decisions/DEC-2003.md) item 4).
 
 | Member | Type | Meaning |
 |---|---|---|
