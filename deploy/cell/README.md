@@ -44,7 +44,10 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   seccomp profile, and no service-account token, in every container but the deployment manager's;
 - the deployment manager alone holds an API token, its own ServiceAccount's, whose one Role in the
   namespace creates, gets, lists and deletes pods and nothing else: no Secret, no exec, no
-  ClusterRole or cluster scope; the pod templates it starts mount no token;
+  ClusterRole or cluster scope; the pod templates it starts mount no token; and a
+  ValidatingAdmissionPolicy, matched to its ServiceAccount alone and failing closed, admits only
+  pods shaped like those templates: their images, Secrets, labels and egress labels, no token,
+  nothing privileged and nothing of the host;
 - secrets only as mounted files: no Secret in the chart, no secret in any values file, no
   environment variable from a Secret, and no password in a DSN (DEC-822 item 4);
 - migrations as a pre-install and pre-upgrade hook Job under the migration-owner role, never at a

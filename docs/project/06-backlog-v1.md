@@ -2742,13 +2742,22 @@ enables `live` (ES-23, OPS-5).
   crate's fold, driver, fake and Kubernetes adapter, with the property test. *Slice 2*
   ([DEC-1172](decisions/DEC-1172.md)): the process crate `mandate-deployd` (loop, exec probes,
   drain, the Postgres journal port) and the cell's `deploy-manager` process: its image, its
-  ServiceAccount and a Role over pods alone, its `kube-api` egress and an egress gate that probes a
-  denied destination, the runtime's and executor's pod templates, which mount no service-account
-  token, and the `mandate.dev/subject-key` label. *Left:* reading the account from `AgentDeployed`
+  ServiceAccount and a Role over pods alone, bounded by a ValidatingAdmissionPolicy to pods shaped
+  like its templates, its `kube-api` egress and an egress gate that probes a denied destination, the
+  runtime's and executor's pod templates, which mount no service-account token, and the
+  `mandate.dev/subject-key` label. *Left:* reading the account from `AgentDeployed`
   version 2 ([DEC-1171](decisions/DEC-1171.md)), until which the process starts nothing for a
   deployment; the Compose adapter; the restart drill through `cargo xtask cell drill`; the owner's
   resume lifting a crash-loop pause once the runtime copies the pause (E21-30); alerts through the
-  cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting exited pods.
+  cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting exited pods. From
+  slice 2's review, minors left under the freeze rule:
+  - The manager's egress gate reads any connection failure on port 9153 as filtered, so a dead or
+    restarting resolver fails open; a positive control first (TCP 53 on the same address) would
+    close it.
+  - The gate probes only the first `nameserver` of the pod's `/etc/resolv.conf`.
+  - The chart test of the gate seeds no 9153 allow in the manager's policy.
+  - `PgControl`'s `rows_after` reads the whole control stream on every pass.
+  - `pg.rs` has no competing-writer test for the writer epoch taken for each append.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*

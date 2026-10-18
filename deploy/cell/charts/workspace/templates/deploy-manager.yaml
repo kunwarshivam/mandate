@@ -2,7 +2,15 @@
 The deployment manager (journal spec §9.21, infrastructure design §3.4, DEC-1170, DEC-1172): one
 replica per workspace, the one pod that holds an API token. Its ServiceAccount's one Role, in this
 namespace only, creates, reads, lists and deletes pods: no Secret, no exec, no other resource or
-verb, and no cluster scope. Every runtime and executor it starts is a bare pod from the templates
+verb, and no cluster scope. Creating a pod is itself powerful (a pod can mount any Secret in the
+namespace, name any account, claim any egress label, or run privileged), so the admission policy
+below bounds every pod the manager makes to one shaped like its templates: no token and no account
+but `default`; no host namespace or host path; every container unprivileged, without privilege
+escalation; only the templates' images; only memory and the templates' Secrets, and none through the
+environment or a pull secret; the manager's, a templated process's and this workspace's labels; and
+exactly that process's egress labels. Residual: what it does not check (command and arguments,
+resources, node placement, pod-level user, capabilities, other labels), so a pod inside the bound
+can still do what that process's image and role can. Every runtime and executor it starts is a bare pod from the templates
 below, which are exactly the pods the chart would build for those processes (their security
 context, egress gate, credentials, colocation, and the labels their network policies select), so
 the manager adds only a pod's name, its own labels, `restartPolicy: Never` and the process's
@@ -64,6 +72,114 @@ data:{{ if not .templates }} {}{{ end }}
   {{ $file }}: {{ $pod | quote }}
   {{- end }}
 {{- end -}}
+{{- /*
+The bound on what the manager's `create pods` can make (DEC-1172 item 4). RBAC cannot shape a pod,
+and the namespace has no Pod Security label, so a ValidatingAdmissionPolicy (GA since Kubernetes
+1.30; the cell runs k3s v1.35.5) refuses any pod the manager's own ServiceAccount creates or updates
+in this namespace that is not shaped like one of its templates. Every other client and pod is outside
+it (`matchConditions`). The allowed images, Secrets, processes and egress labels are list and map
+literals built from the rendered templates and processes.json, never written by hand; each is valid
+JSON as well as CEL, so the invariant tests read them back. It fails closed: an error evaluating it
+refuses the pod.
+*/ -}}
+{{- define "mandate.deployManagerAdmissionName" -}}
+{{ printf "%s-%s-deploy-manager-pods" .root.Release.Namespace .root.Release.Name }}
+{{- end -}}
+{{- /* CEL: predicate `.` holds for every container and every init container (`c`). */ -}}
+{{- define "mandate.everyContainer" -}}
+object.spec.containers.all(c, {{ . }}) && (!has(object.spec.initContainers) || object.spec.initContainers.all(c, {{ . }}))
+{{- end -}}
+{{- define "mandate.deployManagerAdmission" -}}
+{{- $images := list }}
+{{- $secrets := list }}
+{{- range $file, $text := .templates }}
+{{- $pod := fromJson $text }}
+{{- range (concat ($pod.spec.initContainers | default list) $pod.spec.containers) }}
+{{- $images = append $images .image }}
+{{- end }}
+{{- range ($pod.spec.volumes | default list) }}
+{{- if .secret }}
+{{- $secrets = append $secrets .secret.secretName }}
+{{- end }}
+{{- end }}
+{{- end }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "mandate.deployManagerAdmissionName" . | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .root.Release.Namespace | quote }}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  matchConditions:
+    - name: the-deploy-manager
+      expression: {{ printf "request.userInfo.username == 'system:serviceaccount:%s:%s'" .root.Release.Namespace .p.name | quote }}
+  variables:
+    - name: allowedImages
+      expression: '{{ $images | uniq | sortAlpha | toJson }}'
+    - name: allowedSecrets
+      expression: '{{ $secrets | uniq | sortAlpha | toJson }}'
+    - name: egress
+      expression: '{{ .egress | toJson }}'
+  validations:
+    - expression: 'has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false'
+      reason: Forbidden
+      message: a pod the deployment manager makes mounts no service-account token
+    - expression: '(!has(object.spec.serviceAccountName) || object.spec.serviceAccountName in ["", "default"]) && (!has(object.spec.serviceAccount) || object.spec.serviceAccount in ["", "default"])'
+      reason: Forbidden
+      message: a pod the deployment manager makes names no service account but the default
+    - expression: '(!has(object.spec.hostNetwork) || !object.spec.hostNetwork) && (!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)'
+      reason: Forbidden
+      message: a pod the deployment manager makes shares no host namespace
+    - expression: '!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath))'
+      reason: Forbidden
+      message: a pod the deployment manager makes mounts no host path
+    - expression: '{{ include "mandate.everyContainer" "has(c.securityContext) && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation == false && (!has(c.securityContext.privileged) || c.securityContext.privileged == false)" }}'
+      reason: Forbidden
+      message: every container of a pod the deployment manager makes is unprivileged, with no privilege escalation
+    - expression: '!has(object.spec.ephemeralContainers)'
+      reason: Forbidden
+      message: a pod the deployment manager makes has no ephemeral container
+    - expression: '{{ include "mandate.everyContainer" "c.image in variables.allowedImages" }}'
+      reason: Forbidden
+      message: a pod the deployment manager makes runs only the images of its templates
+    - expression: '!has(object.spec.volumes) || object.spec.volumes.all(v, has(v.emptyDir) || (has(v.secret) && v.secret.secretName in variables.allowedSecrets))'
+      reason: Forbidden
+      message: a pod the deployment manager makes mounts only memory or the Secrets of its templates
+    - expression: '!has(object.spec.imagePullSecrets) && {{ include "mandate.everyContainer" "!has(c.envFrom) && (!has(c.env) || c.env.all(e, !has(e.valueFrom)))" }}'
+      reason: Forbidden
+      message: a pod the deployment manager makes reads no Secret through its environment or a pull secret
+    - expression: 'has(object.metadata.labels) && "app.kubernetes.io/managed-by" in object.metadata.labels && object.metadata.labels["app.kubernetes.io/managed-by"] == "mandate-deploy-manager" && "mandate.dev/process" in object.metadata.labels && object.metadata.labels["mandate.dev/process"] in variables.egress && "mandate.dev/workspace" in object.metadata.labels && object.metadata.labels["mandate.dev/workspace"] == {{ .root.Values.workspace | toJson }}'
+      reason: Forbidden
+      message: a pod the deployment manager makes is one of its processes, in this workspace
+    - expression: 'has(object.metadata.labels) && "mandate.dev/process" in object.metadata.labels && object.metadata.labels["mandate.dev/process"] in variables.egress && object.metadata.labels.all(k, !k.startsWith("mandate.dev/egress-") || (object.metadata.labels[k] == "true" && k in variables.egress[object.metadata.labels["mandate.dev/process"]])) && variables.egress[object.metadata.labels["mandate.dev/process"]].all(k, k in object.metadata.labels && object.metadata.labels[k] == "true")'
+      reason: Forbidden
+      message: a pod the deployment manager makes carries exactly its process's egress labels
+{{- end -}}
+{{- define "mandate.deployManagerAdmissionBinding" -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "mandate.deployManagerAdmissionName" . | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "mandate.deployManagerAdmissionName" . | quote }}
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .root.Release.Namespace | quote }}
+{{- end -}}
 {{- define "mandate.deployManager" -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -91,18 +207,28 @@ spec:
 {{- if eq .name "deploy-manager" }}
 {{- $manager := . }}
 {{- $templates := dict }}
+{{- $egress := dict }}
 {{- range (include "mandate.processes" $root | fromJsonArray) }}
 {{- if and (eq (.started_by | default "") $manager.name) (index $root.Values.images .image) }}
 {{- $_ := set $templates (printf "%s.json" .name) (include "mandate.managedPod" (dict "root" $root "p" .)) }}
+{{- $labels := list }}
+{{- range .egress }}
+{{- $labels = append $labels (printf "mandate.dev/egress-%s" .) }}
+{{- end }}
+{{- $_ := set $egress .name $labels }}
 {{- end }}
 {{- end }}
-{{- $ctx := dict "root" $root "p" . "templates" $templates }}
+{{- $ctx := dict "root" $root "p" . "templates" $templates "egress" $egress }}
 ---
 {{ include "mandate.emit" (include "mandate.deployManagerAccount" $ctx) }}
 ---
 {{ include "mandate.emit" (include "mandate.deployManagerRole" $ctx) }}
 ---
 {{ include "mandate.emit" (include "mandate.deployManagerBinding" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.deployManagerAdmission" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.deployManagerAdmissionBinding" $ctx) }}
 ---
 {{ include "mandate.emit" (include "mandate.deployManagerTemplates" $ctx) }}
 ---
