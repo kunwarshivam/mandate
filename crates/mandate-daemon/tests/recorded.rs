@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use mandate_canon::{Digest, Key, Value, parse, to_canonical};
 use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_gateway::money::Usd6;
+use mandate_research::AllowlistVersion;
 use mandate_research_run::{
     Allowlist, FilingReader, InstrumentReader, NewsReader, Readers, RetrievalPlan, RetrievedItem,
     Scope, SourceId, Symbol, TextQuery, retrieve,
@@ -170,6 +171,42 @@ fn the_plane_gives_no_filings_and_only_the_instruments_asked_for() {
         .unwrap();
     let symbols: Vec<_> = facts.iter().map(|f| f.symbol.as_str().to_owned()).collect();
     assert_eq!(symbols, ["MSFT"]);
+}
+
+/// The bundle records the source allowlist version its items were recorded under, and a bundle that
+/// does not say refuses the load (DEC-2214 item 1).
+#[test]
+fn the_bundle_records_its_allowlist_and_refuses_without_it() {
+    let allowlist = Bundle::load(Path::new(FIXTURE)).unwrap().allowlist;
+    assert_eq!(allowlist.version, AllowlistVersion(3));
+    assert_eq!(
+        allowlist
+            .sources
+            .iter()
+            .map(|source| source.as_str())
+            .collect::<Vec<_>>(),
+        ["src.newswire", "src.wire_two"]
+    );
+    for (index, path) in [
+        &["allowlist"][..],
+        &["allowlist", "version"],
+        &["allowlist", "sources"],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let dir = copy(&format!("allowlist-{index}"), "research.json", |value| {
+            remove(value, path)
+        });
+        assert_eq!(
+            Bundle::load(&dir),
+            Err(BundleError::Malformed {
+                file: "research.json",
+                member: "allowlist"
+            }),
+            "{path:?}"
+        );
+    }
 }
 
 /// The bundle records which of its instruments are halted at its as-of time, and a bundle that
