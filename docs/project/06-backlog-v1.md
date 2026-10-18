@@ -3101,6 +3101,25 @@ enables `live` (ES-23, OPS-5).
   API's image (A1), its version and deploy routes (A2), the runtime's image (P), the executor (X),
   the research driver (I2), step-up (SU), the backtest's API read and `web/` screen (I4, W2), the
   kill switch's CLI (O4) and the deployment manager (D1).
+- **E21-56 (Proposed, M8, staging for the 2026-10-26 demo; lane IAC; claim #1634; DEC-2011,
+  DEC-2012; ADR-0006)** As the founder, I want the hosted staging and production environments made
+  by OpenTofu from the repository, so that cell #1's infrastructure is reviewed code applied only
+  with my approval, never a script run by hand and never a token an agent holds (DEC-2011).
+  *Accepted when:* `deploy/tofu/` has one module per concern (network: a VPC and a firewall; DOKS:
+  one pool of two nodes, the Kubernetes version pinned and auto-upgrade off; Spaces: the state
+  bucket, versioned, and the journal-archive bucket for E21-41's Barman, versioned since Spaces has
+  no object lock; Cloudflare: the tunnel, the API host's DNS record and its Access application;
+  the budget: an estimate the plan refuses past the cap) and one root per environment (`staging`,
+  `production`), with state in Spaces, encrypted on the client, and the providers pinned by a
+  committed lock file; every pull request touching `deploy/tofu/` runs `tofu fmt -check`,
+  `tofu validate`, tflint and `tofu test` against mocked providers as the policy check (no public
+  firewall source, buckets private, no load balancer, the cap), with no credential, selected by
+  `cargo xtask ci select` (DEC-1190); `.github/workflows/infra.yml` runs `plan` and `apply` only
+  from `main` by manual dispatch, under the environments `infra-staging` and `infra-production`
+  with the founder as required reviewer (ES-12, DEC-1005); and the runbook names every token,
+  key, environment and secret the founder creates, each with the least permissions the plan
+  needs. It stops at a reachable, empty cluster with its buckets, DNS and Access: add-ons and
+  applications are lane GO's.
 
 ## Won't (v1)
 
