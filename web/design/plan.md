@@ -311,8 +311,8 @@ item above (C-3, C-9) are not repeated.
   `market.test.ts` now holds every scenario to a path.
 - **Review from viewport captures, not full-page ones.** A full-page screenshot paints fixed
   chrome (the dock, the scenario panel) mid-page; the artefact looks like a defect.
-- **The repository's CI rejects any `Co-authored-by` trailer** (`docs-checks.sh`); commits carry
-  the session link only.
+- **`Co-authored-by` trailers are allowed on branches** (DEC-2601); the merge drops them from
+  `main`'s commit message.
 - **The set-up flow may never suggest an amount** (DEC-476, DEC-477, pinned by a test): example
   prompts and placeholders are out, however helpful they would be.
 

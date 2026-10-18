@@ -127,17 +127,31 @@ const DECODERS: [(&str, Judge); 14] = [
     ("stop-request", judge::<StopRequest>),
 ];
 
+/// Request schemas that land before their type ([DEC-2103](../../../docs/project/decisions/DEC-2103.md)
+/// item 8): a schema change ships without code (ES-22), so a new request shape lands as three
+/// changes, this list naming its stem, then its schema, then its type and decoder row, which
+/// empties the list again. A listed stem has no request type and no row, and may not stay listed
+/// once its type lands.
+const SCHEMA_AHEAD_OF_TYPE: [&str; 1] = ["step-up-challenge-request"];
+
 /// The decoders cover every request schema and every request type the crate declares, so a shape
-/// added to either without a row here fails this test rather than escaping the next one.
+/// added to either without a row here fails this test rather than escaping the next one. The only
+/// schemas without a row are those [`SCHEMA_AHEAD_OF_TYPE`] lists.
 #[test]
 fn the_decoders_cover_every_request_schema_and_request_type() {
     let listed: BTreeSet<String> = DECODERS.iter().map(|(s, _)| (*s).to_owned()).collect();
-    assert_eq!(
-        listed,
-        schema_stems(),
-        "the request schemas under commands/"
-    );
-    assert_eq!(listed, crate_stems(), "the request types in requests.rs");
+    let ahead: BTreeSet<String> = SCHEMA_AHEAD_OF_TYPE.map(str::to_owned).into();
+    let types = crate_stems();
+    for stem in &ahead {
+        assert!(
+            !listed.contains(stem) && !types.contains(stem),
+            "{stem} has its type: remove it from SCHEMA_AHEAD_OF_TYPE in the change that adds it"
+        );
+    }
+    let schemas = schema_stems();
+    let unlisted: BTreeSet<String> = schemas.difference(&ahead).cloned().collect();
+    assert_eq!(listed, unlisted, "the request schemas under commands/");
+    assert_eq!(listed, types, "the request types in requests.rs");
 }
 
 /// A pointer token, `~` and `/` escaped (RFC 6901).

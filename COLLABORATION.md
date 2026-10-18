@@ -52,8 +52,8 @@ These come on top of AGENTS.md.
 7. **Never rewrite shared history.** No force-push to `main` or to a branch someone else is
    working on. On your own branch, merge `origin/main` with a merge commit rather than rebasing
    once a review has started.
-8. **No `Co-authored-by` trailers.** CI rejects them (`spec-guard`'s `commit-trailers` check). If
-   your editor or an AI tool adds one, remove it before you push.
+8. **`Co-authored-by` trailers are allowed on branches** ([DEC-2601](docs/project/decisions/DEC-2601.md)).
+   The merge workflow builds `main`'s commit message from the PR description and drops them there.
 
 ## Setting up
 
