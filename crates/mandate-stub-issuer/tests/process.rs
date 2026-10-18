@@ -51,7 +51,6 @@ fn refused(output: &Output, code: &str) {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn outside_dev_and_ci_it_writes_its_refusal_alone() {
     for tier in [None, Some("staging"), Some("production"), Some("Dev")] {
         refused(&output(stub(tier, "127.0.0.1:8899")), "stub_issuer_tier");
@@ -59,7 +58,6 @@ fn outside_dev_and_ci_it_writes_its_refusal_alone() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_bind_that_is_not_a_loopback_ip_literal_is_refused() {
     for bind in ["0.0.0.0:8899", "localhost:8899", "127.0.0.1:0"] {
         refused(&output(stub(Some("dev"), bind)), "stub_issuer_bind");
@@ -67,7 +65,6 @@ fn a_bind_that_is_not_a_loopback_ip_literal_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_port_in_use_is_refused() {
     let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
     let bind = taken.local_addr().expect("its address").to_string();
@@ -84,16 +81,22 @@ impl Drop for Running {
     }
 }
 
-/// Starts a stub on a free loopback port with `extra` arguments, waits for its announce line, and
-/// checks that the one line names the issuer, its key set's URL and `audience`, in any form.
-fn started(
+/// How many free ports `started` tries: a port picked by binding `:0` and dropping it can be
+/// taken by a parallel test before the stub binds it, and the stub may not bind `:0` itself
+/// (DEC-2100 item 5).
+const PORT_ATTEMPTS: usize = 5;
+
+/// Starts a stub on a port that was free a moment ago and reads its first line. `None` only when
+/// the stub refused with `stub_issuer_bind` alone, the port having been taken meanwhile; any other
+/// stub that wrote no line panics.
+fn announced(
     extra: &[&str],
-    audience: &str,
-) -> (
+) -> Option<(
     Running,
     BufReader<std::process::ChildStdout>,
     std::net::SocketAddr,
-) {
+    String,
+)> {
     let free = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
     let addr = free.local_addr().expect("its address");
     drop(free);
@@ -116,8 +119,27 @@ fn started(
             .take()
             .expect("stderr")
             .read_to_string(&mut stderr);
+        if stderr == "stub_issuer_bind\n" {
+            return None;
+        }
         panic!("the stub wrote no line; stderr: {stderr}");
     }
+    Some((child, stdout, addr, line))
+}
+
+/// Starts a stub on a free loopback port with `extra` arguments, waits for its announce line, and
+/// checks that the one line names the issuer, its key set's URL and `audience`, in any form.
+fn started(
+    extra: &[&str],
+    audience: &str,
+) -> (
+    Running,
+    BufReader<std::process::ChildStdout>,
+    std::net::SocketAddr,
+) {
+    let (child, stdout, addr, line) = (0..PORT_ATTEMPTS)
+        .find_map(|_| announced(extra))
+        .expect("a free port within the attempts");
     assert!(
         line.ends_with('\n') && line.matches('\n').count() == 1,
         "{line:?}"
@@ -138,7 +160,6 @@ fn started(
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn it_announces_its_issuer_serves_and_stops_on_sigterm_or_sigint_writing_nothing_else() {
     for signal in ["-TERM", "-INT"] {
         let (mut child, mut stdout, addr) = started(&[], "authenticated");
@@ -182,7 +203,6 @@ fn it_announces_its_issuer_serves_and_stops_on_sigterm_or_sigint_writing_nothing
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn the_audience_given_is_announced_and_signed() {
     let (_child, _stdout, addr) = started(&["--audience", "mandate-demo"], "mandate-demo");
     let reply = common::mint(addr, r#"{"subject":"alice"}"#);

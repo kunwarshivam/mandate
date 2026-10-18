@@ -1491,6 +1491,21 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let ulid = concat!("01JB3K6F0C9R2V7N", "4M8Q1T5W3Y");
     let setting = format!("        .env(\"MANDATE_API_WORKSPACE\", \"{ulid}\")");
     let not_ulid = format!("        .env(\"MANDATE_API_ORG\", \"{page}\")");
+    let screens = "web/src/components/api-screens/api-screens.test.tsx";
+    let unknown_agent = format!("    mount(<ApiAgent agentId=\"agt_{ulid}\" />);");
+    let not_agent = format!("    mount(<ApiAgent agentId=\"{page}\" />);");
+    let push_section = "web/src/components/notifications/push-section.test.tsx";
+    let subscribe = "web/src/lib/push/subscribe.test.ts";
+    let vapid = concat!(
+        "const VAPID = \"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vC",
+        "YLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8\";"
+    )
+    .to_owned();
+    let auth = format!("    auth: \"{}\",", concat!("BTBZMqHH6r4T", "ts7J_aSIgg"));
+    let not_vapid = format!("const VAPID = \"{page}\";");
+    let cell = "xtask/src/cell.rs";
+    let image = format!("                \"mandate.local/api:{}\",", "0123456789ab");
+    let not_image = format!("                \"mandate.local/api:{page}\",");
     vec![
         (signer.to_owned(), example.clone(), None),
         (signer.to_owned(), near_example, Some("alpaca-key-id")),
@@ -1526,6 +1541,18 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (process.to_owned(), setting.clone(), None),
         ("stray-process.rs".to_owned(), setting, generic),
         (process.to_owned(), not_ulid, generic),
+        (screens.to_owned(), unknown_agent.clone(), None),
+        ("stray-screens.tsx".to_owned(), unknown_agent, generic),
+        (screens.to_owned(), not_agent, generic),
+        (push_section.to_owned(), vapid.clone(), None),
+        (subscribe.to_owned(), vapid.clone(), None),
+        (subscribe.to_owned(), auth.clone(), None),
+        ("stray-push.ts".to_owned(), vapid, generic),
+        ("stray-push.ts".to_owned(), auth, generic),
+        (subscribe.to_owned(), not_vapid, generic),
+        (cell.to_owned(), image.clone(), None),
+        ("stray-cell.rs".to_owned(), image, generic),
+        (cell.to_owned(), not_image, generic),
     ]
 }
 
