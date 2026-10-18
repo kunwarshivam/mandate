@@ -27,7 +27,29 @@ pub fn named(
     flag: &dyn Fn(&str) -> Option<String>,
     var: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Named, &'static str> {
-    let _ = (flag, var);
-    Err("unimplemented")
+    let given = |value: Option<String>| value.filter(|v| !v.is_empty() && v.trim() == v);
+    let (workspace, account) = match given(var("MANDATE_PROCESS")) {
+        None if var("MANDATE_PROCESS").is_some() => return Err("process_not_executor"),
+        None if var("MANDATE_WORKSPACE").is_some() || var("MANDATE_SUBJECT").is_some() => {
+            return Err("account_conflict");
+        }
+        None => (given(flag("--workspace")), given(flag("--account"))),
+        Some(process) if process != "executor" => return Err("process_not_executor"),
+        Some(_) => (
+            agreed(var("MANDATE_WORKSPACE"), flag("--workspace"))?,
+            agreed(var("MANDATE_SUBJECT"), flag("--account"))?,
+        ),
+    };
+    let (Some(workspace), Some(account)) = (given(workspace), given(account)) else {
+        return Err("account_missing");
+    };
+    Ok(Named { workspace, account })
 }
 
+/// The manager's `set` value, unless a flag names a different one.
+fn agreed(set: Option<String>, flagged: Option<String>) -> Result<Option<String>, &'static str> {
+    match flagged {
+        Some(flagged) if set.as_ref() != Some(&flagged) => Err("account_conflict"),
+        _ => Ok(set),
+    }
+}
