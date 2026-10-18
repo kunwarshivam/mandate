@@ -6,13 +6,13 @@
 //! cannot read is never skipped: it is [`Unreadable`], and the process stops rather than guess
 //! (DEC-85, `AGENTS.md` rule 3).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::{Value, parse};
 use mandate_executor::{
-    AccountScope, AgentId, EventId, FoldedEvent, Initiator, OwnerConfirmation, Purpose, Seq,
-    TimeInForce,
+    AccountScope, AgentId, EventId, FoldedEvent, Initiator, MandateVersion, OwnerConfirmation,
+    Purpose, Seq, TimeInForce,
 };
 use mandate_journal::{Environment, StoredEvent};
 use mandate_num::{Price, Qty};
@@ -48,7 +48,9 @@ pub fn folded(row: &StoredEvent) -> Result<FoldedEvent, Unreadable> {
 /// (journal spec §9.8, §9.24, DEC-1171). A version-1 deployment names no connection, so it reaches
 /// no executor (DEC-1171 item 3), nor ends the following an earlier version-2 one began: an agent
 /// followed one switch too many only has its own orders cancelled (`AGENTS.md` rule 13). An agent whose deployment stopped is still followed, since it may
-/// still hold orders or a position its kill switch must reach (`AGENTS.md` rule 13).
+/// still hold orders or a position its kill switch must reach (`AGENTS.md` rule 13). Each agent comes
+/// with the `mandate_version` its latest version-2 deployment names, the version it runs under
+/// (DEC-2034 item 1).
 ///
 /// # Errors
 /// [`Unreadable`] for a deployment or connection record whose members do not read: an agent the
@@ -57,9 +59,9 @@ pub fn agents_of(
     control: &[StoredEvent],
     scope: &AccountScope,
     environment: Environment,
-) -> Result<BTreeSet<AgentId>, Unreadable> {
+) -> Result<BTreeMap<AgentId, MandateVersion>, Unreadable> {
     let mut ours: BTreeMap<String, bool> = BTreeMap::new();
-    let mut deployed: BTreeMap<String, Option<String>> = BTreeMap::new();
+    let mut deployed: BTreeMap<String, Option<(String, String)>> = BTreeMap::new();
     for row in control
         .iter()
         .filter(|row| row.environment == environment.as_str())
@@ -89,7 +91,10 @@ pub fn agents_of(
                 ours.insert(text("connection_id")?, false);
             }
             ("AgentDeployed", 2) => {
-                deployed.insert(text("agent_id")?, Some(text("connection_id")?));
+                deployed.insert(
+                    text("agent_id")?,
+                    Some((text("connection_id")?, text("mandate_version")?)),
+                );
             }
             _ => {
                 text("agent_id")?;
@@ -98,12 +103,13 @@ pub fn agents_of(
     }
     Ok(deployed
         .into_iter()
-        .filter(|(_, connection)| {
-            connection
-                .as_ref()
-                .is_some_and(|c| ours.get(c).copied().unwrap_or(false))
+        .filter_map(|(agent, deployment)| {
+            let (connection, version) = deployment?;
+            ours.get(&connection)
+                .copied()
+                .unwrap_or(false)
+                .then_some((AgentId(agent), MandateVersion(version)))
         })
-        .map(|(agent, _)| AgentId(agent))
         .collect())
 }
 

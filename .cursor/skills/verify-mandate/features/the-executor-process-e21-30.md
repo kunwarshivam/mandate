@@ -3,7 +3,7 @@
 - **Spec:** [infrastructure design](../../../../docs/design/infrastructure.md) §3.1, §3.4, §3.6;
   [journal spec](../../../../docs/specs/journal.md) §2 (the copy rules), §5.1 (writer epochs),
   §9.1 (`KillSwitchActivated`, `OwnerExitRequested`, `IntentProposed`); trading spec §5.5 (the agent-scoped kill
-  switch), §11 (reconciliation); connections spec §8.1 (the connect check); ADR-0001 ES-06, ES-20; DEC-17, DEC-1171, DEC-2003, DEC-2007, DEC-2033.
+  switch), §11 (reconciliation); connections spec §8.1 (the connect check); ADR-0001 ES-06, ES-20; DEC-17, DEC-1171, DEC-2003, DEC-2007, DEC-2033, DEC-2034.
 - **Code:** `mandate-executord` (`crates/mandate-executord`): `src/process.rs` (`ExecutorProcess`:
   one writer epoch on the account stream, `StreamOpened` on an empty one, `Input::Started` on the
   first pass that reads a tick, every draft journaled before the broker sees what it names, an
@@ -12,7 +12,8 @@
   once as the core's own agent-scoped switch naming the record it copies (`copied_from`), ready or
   not, an unreadable stream alerted once, `mandate-process`'s lifecycle) and
   `src/follow.rs` (`agents_of`: the account's agents from version-2 `ConnectionEstablished` and
-  `AgentDeployed`; `switches`: an agent stream's `KillSwitchActivated` records with the bid the
+  `AgentDeployed`, each with its deployed mandate version, which the core's mandate port answers
+  with, DEC-2034 item 1; `switches`: an agent stream's `KillSwitchActivated` records with the bid the
   same command's `OwnerExitRequested` confirmed; `proposals`: its `IntentProposed` limit orders,
   less an opening a later switch or mode change follows, DEC-2033 item 2, and an owner's exit at
   the market at the floor its `OwnerExitRequested` confirmed, item 4), and each handed once as the
@@ -46,8 +47,8 @@
   opening journaled before it is sent with its stop beside it, no opening before ready while the
   switch still goes, an opening a later switch or mode change follows never going while an exit
   does, an opening without gate facts held while the exit behind it goes, an unreadable protection
-  stopping the process, an exit without a mandate version sounding `exit_held` and stopping
-  nothing, a switch going before another agent's earlier
+  stopping the process, an exit going under its agent's deployed version when the mandate port
+  knows none, a switch going before another agent's earlier
   exit, a proposal taken once across passes and restarts, every exit in a pass, an unreadable
   proposal stopping the process, and an owner's market exit going as a limit at its confirmed
   floor, or without one alerting and stopping nothing. `tests/owner_exits.rs`: over random owner

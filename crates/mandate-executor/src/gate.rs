@@ -372,9 +372,10 @@ pub(crate) fn account_stream_checks(
 /// Resolves the trusted references every gate record requires, then runs the executor's
 /// non-substitutable binding gate after its account-stream checks have allowed.
 ///
-/// Missing or unreadable external snapshots refuse an opening. A reducing order keeps the local
-/// decision because §9.1 does not read those missing inputs for a limit denial and rule 13 forbids
-/// converting the absence into a denial.
+/// Missing, unreadable or unbindable external snapshots refuse an opening. A reducing order keeps
+/// the local decision because §9.1 does not read those missing inputs for a limit denial and rule
+/// 13 forbids converting the absence into a denial, a snapshot whose references do not bind
+/// included (DEC-2034 item 2).
 pub(crate) fn binding_checks(
     state: &ExecutorState,
     proposal: &Proposal<'_>,
@@ -416,13 +417,34 @@ pub(crate) fn binding_checks(
             Ok(partial)
         };
     }
-    let Some(mandate_version) = ports.mandates.version(proposal.agent) else {
+    let refs = match bound_refs(&snapshot, ports, proposal.agent) {
+        Ok(refs) => refs,
+        Err(error) if proposal.purpose.adds_risk() => return Err(error),
+        Err(_) => return Ok(partial),
+    };
+    if partial.verdict != GateVerdict::Allow {
+        partial.config_refs = refs;
+        return Ok(partial);
+    }
+    evaluate_binding(partial, proposal, pass, snapshot, refs)
+}
+
+/// The configuration references a snapshot binds the gate's record to, its mandate reference the
+/// version resolved for `agent`. A missing or differing reference is
+/// [`ExecutorError::BindingGateInputMissing`], which refuses an opening and leaves a reducing
+/// order's local decision standing (`AGENTS.md` rule 13, §9.1, DEC-2034 item 2).
+fn bound_refs(
+    snapshot: &BindingGateInput,
+    ports: &Ports<'_>,
+    agent: &AgentId,
+) -> Result<Object, ExecutorError> {
+    let Some(mandate_version) = ports.mandates.version(agent) else {
         return Err(ExecutorError::BindingGateInputMissing);
     };
     if snapshot.config_refs.mandate_version.as_deref() != Some(mandate_version.0.as_str()) {
         return Err(ExecutorError::BindingGateInputMissing);
     }
-    let refs = config_refs(&[
+    config_refs(&[
         ("fee_config", snapshot.config_refs.fee_config.as_deref()),
         (
             "trading_calendar",
@@ -437,12 +459,7 @@ pub(crate) fn binding_checks(
             "mandate_version",
             snapshot.config_refs.mandate_version.as_deref(),
         ),
-    ])?;
-    if partial.verdict != GateVerdict::Allow {
-        partial.config_refs = refs;
-        return Ok(partial);
-    }
-    evaluate_binding(partial, proposal, pass, snapshot, refs)
+    ])
 }
 
 fn evaluate_binding(

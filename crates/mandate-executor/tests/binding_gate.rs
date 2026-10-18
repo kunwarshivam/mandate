@@ -725,7 +725,10 @@ fn an_unbindable_snapshot_does_not_block_risk_reduction() {
             &ports,
             &gate,
         );
-        assert!(submitted(&ran), "{name}: rule 13 keeps the risk exit routable");
+        assert!(
+            submitted(&ran),
+            "{name}: rule 13 keeps the risk exit routable"
+        );
     }
 }
 

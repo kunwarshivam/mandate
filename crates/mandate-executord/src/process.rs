@@ -1,6 +1,6 @@
 //! One broker account's executor as a long-running process (E21-30, DEC-2003, DEC-2033).
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
@@ -10,11 +10,11 @@ use mandate_executor::{
     AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
     BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
     ExecutorError, ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff,
-    IntentId, KillScope, MandateView, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq,
-    WriterEpoch, fold, handle,
+    IntentId, KillScope, MandateVersion, MandateView, Ports, ProtectionPrices, ReconcileReason,
+    RiskClock, Seq, WriterEpoch, fold, handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
-use mandate_num::Price;
+use mandate_num::{Fraction, Price};
 use mandate_process::{Action, Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
@@ -65,14 +65,38 @@ pub struct Wiring {
 }
 
 impl Wiring {
-    fn ports(&self) -> Ports<'_> {
+    fn ports<'a>(&'a self, mandates: &'a Deployed<'a>) -> Ports<'a> {
         Ports {
             ids: self.ids.as_ref(),
-            mandates: self.mandates.as_ref(),
+            mandates,
             instruments: self.instruments.as_ref(),
             config: &self.config,
             fees: &self.fees,
         }
+    }
+}
+
+/// The core's mandate port: a followed agent's version is the one its `AgentDeployed` names, so no
+/// exit of a followed agent waits on the wiring's port; the rest is the wiring's (DEC-2034 item 1).
+struct Deployed<'a> {
+    versions: &'a BTreeMap<AgentId, MandateVersion>,
+    wiring: &'a dyn MandateView,
+}
+
+impl MandateView for Deployed<'_> {
+    fn version(&self, agent: &AgentId) -> Option<MandateVersion> {
+        self.versions
+            .get(agent)
+            .cloned()
+            .or_else(|| self.wiring.version(agent))
+    }
+
+    fn crypto_stop_limit_offset(&self, agent: &AgentId) -> Option<Fraction> {
+        self.wiring.crypto_stop_limit_offset(agent)
+    }
+
+    fn covers(&self, agent: &AgentId, instrument: &InstrumentId) -> bool {
+        self.wiring.covers(agent, instrument)
     }
 }
 
@@ -138,6 +162,9 @@ pub struct ExecutorProcess<S, B> {
     /// [`held`]; asked again every pass, and never a stop, so the exits behind them still go
     /// (`AGENTS.md` rule 13).
     held: BTreeSet<String>,
+    /// Each followed agent's deployed mandate version, from its `AgentDeployed`, which the core's
+    /// mandate port answers with (DEC-2034 item 1).
+    deployed: BTreeMap<AgentId, MandateVersion>,
     /// The owner's exits at the market with no confirmed floor to price them at, each alerted once
     /// and asked again every pass; never dropped, refused or held in silence (DEC-2033 item 4).
     unpriced: BTreeSet<String>,
@@ -170,6 +197,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             reconcile: false,
             unreadable: BTreeSet::new(),
             held: BTreeSet::new(),
+            deployed: BTreeMap::new(),
             unpriced: BTreeSet::new(),
             max_chain: config.max_chain,
             written_at: now,
@@ -402,11 +430,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return None;
         };
+        self.deployed.clone_from(&agents);
         let workspace = self.state.scope().workspace.0.clone();
         let mut pending = Vec::new();
         let mut proposed = Vec::new();
         let mut unreadable = false;
-        for agent in agents {
+        for agent in agents.into_keys() {
             let Some(stream) = StreamId::parse(&format!("agent:{workspace}:{}", agent.0)) else {
                 continue;
             };
@@ -534,7 +563,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let effects = match handle(
             &mut self.state,
             input.clone(),
-            &self.wiring.ports(),
+            &self.wiring.ports(&Deployed {
+                versions: &self.deployed,
+                wiring: self.wiring.mandates.as_ref(),
+            }),
             self.wiring.gate.as_ref(),
         ) {
             Ok(effects) => effects,
@@ -859,6 +891,48 @@ mod tests {
             held(&ExecutorError::NotStarted, &handoff(Purpose::Open)?),
             None
         );
+        Ok(())
+    }
+
+    /// A wiring port that knows `agentb` and covers only MSFT, with a 1 % crypto offset.
+    struct Wired;
+
+    impl MandateView for Wired {
+        fn version(&self, agent: &AgentId) -> Option<MandateVersion> {
+            (agent.0 == "agentb").then(|| MandateVersion("sha256:wired".to_owned()))
+        }
+
+        fn crypto_stop_limit_offset(&self, _agent: &AgentId) -> Option<Fraction> {
+            Fraction::parse("0.01").ok()
+        }
+
+        fn covers(&self, _agent: &AgentId, instrument: &InstrumentId) -> bool {
+            instrument.as_str() == "MSFT"
+        }
+    }
+
+    #[test]
+    fn a_followed_agents_deployed_version_answers_first_and_the_rest_is_the_wirings()
+    -> Result<(), Error> {
+        let agent = |id: &str| AgentId(id.to_owned());
+        let versions = BTreeMap::from([(
+            agent("agenta"),
+            MandateVersion("sha256:deployed".to_owned()),
+        )]);
+        let port = Deployed {
+            versions: &versions,
+            wiring: &Wired,
+        };
+        let version = |id: &str| port.version(&agent(id)).map(|version| version.0);
+        assert_eq!(version("agenta").as_deref(), Some("sha256:deployed"));
+        assert_eq!(version("agentb").as_deref(), Some("sha256:wired"));
+        assert_eq!(version("agentc"), None);
+        assert_eq!(
+            port.crypto_stop_limit_offset(&agent("agenta")),
+            Some(Fraction::parse("0.01")?)
+        );
+        assert!(port.covers(&agent("agenta"), &InstrumentId::new("MSFT")?));
+        assert!(!port.covers(&agent("agenta"), &InstrumentId::new("AAPL")?));
         Ok(())
     }
 }
