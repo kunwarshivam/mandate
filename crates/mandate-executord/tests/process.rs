@@ -11,7 +11,7 @@ use mandate_process::{Exit, State};
 use support::{
     ACCOUNT_STREAM, AGENT, CONTROL_STREAM, Error, Fault, Journal, NOON, OPENED, OPENING,
     OTHER_ACCOUNT, OTHER_AGENT, OTHER_CONNECTION, Paper, at, chained, connect, deploy, deployed,
-    kill, kill_scoped, object, process_config, start, tick, wiring,
+    kill, kill_by, kill_scoped, mode_applied, object, opened, process_config, start, tick, wiring,
 };
 
 const SWITCH: &str = "01JKILL00000000000000000AA";
@@ -256,12 +256,11 @@ fn only_the_accounts_agents_are_followed() -> Result<(), Error> {
     Ok(())
 }
 
-/// An agent whose deployment stopped is not followed, while another agent on the same connection
-/// still is.
+/// An agent whose deployment stopped is still followed: a switch on its stream is applied, since
+/// a stopped agent may still hold orders or a position (`AGENTS.md` rule 13).
 #[test]
-fn a_stopped_agent_is_not_followed() -> Result<(), Error> {
+fn a_stopped_agents_switch_is_still_applied() -> Result<(), Error> {
     let journal = deployed()?;
-    deploy(&journal, "c3", OTHER_AGENT, "conn1")?;
     journal.write(
         CONTROL_STREAM,
         "c4",
@@ -271,11 +270,10 @@ fn a_stopped_agent_is_not_followed() -> Result<(), Error> {
         object(vec![("agent_id", Value::Str(AGENT.to_owned()))])?,
     )?;
     kill(&journal, AGENT, SWITCH)?;
-    kill(&journal, OTHER_AGENT, OTHER_SWITCH)?;
     let broker = Paper::new(&journal);
     let mut process = start(&journal, &broker)?;
     process.step(at(NOON)?);
-    assert_eq!(journal.switched(), [OTHER_AGENT]);
+    assert_eq!(journal.switched(), [AGENT]);
     Ok(())
 }
 
@@ -316,6 +314,161 @@ fn a_lost_answer_is_offered_again_and_written_once() -> Result<(), Error> {
     process.step(at(NOON)?);
     process.step(at(NOON)?);
     assert_eq!(journal.switched(), [AGENT]);
+    Ok(())
+}
+
+/// One minute before noon, on the risk clock: a restriction an earlier executor journaled.
+fn before_noon() -> Result<u64, Error> {
+    Ok(u64::try_from(at(NOON)?.secs())?.saturating_sub(60))
+}
+
+/// A pause of every agent (`*`, a drawdown rung) does not make a risk limit's kill switch count
+/// as applied: whether a switch was applied is read from the switch's own record, never from a
+/// mode another restriction set (DEC-2003 item 4; the #1596 review's major).
+#[test]
+fn a_pause_of_every_agent_does_not_swallow_a_kill_switch() -> Result<(), Error> {
+    let journal = deployed()?;
+    opened(&journal)?;
+    mode_applied(&journal, "m1", "*", "paused", "drawdown", before_noon()?)?;
+    kill_by(&journal, AGENT, SWITCH, "risk_limit")?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT]);
+    Ok(())
+}
+
+/// An earlier pause of the agent itself does not swallow its kill switch either.
+#[test]
+fn an_earlier_pause_of_the_agent_does_not_swallow_a_kill_switch() -> Result<(), Error> {
+    let journal = deployed()?;
+    opened(&journal)?;
+    mode_applied(
+        &journal,
+        "m1",
+        AGENT,
+        "paused",
+        "owner_pause",
+        before_noon()?,
+    )?;
+    kill_by(&journal, AGENT, SWITCH, "risk_limit")?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT]);
+    Ok(())
+}
+
+/// An account the broker blocks from trading does not swallow a kill switch.
+#[test]
+fn a_blocked_account_does_not_swallow_a_kill_switch() -> Result<(), Error> {
+    let journal = deployed()?;
+    kill_by(&journal, AGENT, SWITCH, "risk_limit")?;
+    let broker = Paper::new(&journal);
+    broker.block();
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT]);
+    Ok(())
+}
+
+/// After an applied switch is lifted (its agent back to `normal`), a restart does not apply the
+/// same switch again.
+#[test]
+fn a_lifted_switch_is_not_applied_again() -> Result<(), Error> {
+    let journal = deployed()?;
+    kill(&journal, AGENT, SWITCH)?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT]);
+    let noon = u64::try_from(at(NOON)?.secs())?;
+    mode_applied(&journal, "m9", AGENT, "normal", "kill_switch", noon)?;
+    let mut restarted = start(&journal, &broker)?;
+    restarted.step(at(NOON)?);
+    restarted.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT]);
+    Ok(())
+}
+
+/// A row on one agent's stream that cannot be read stops the process only after the switches of
+/// the agents whose streams read are applied (`AGENTS.md` rule 13).
+#[test]
+fn an_unreadable_row_stops_the_process_after_the_readable_switches() -> Result<(), Error> {
+    let journal = deployed()?;
+    deploy(&journal, "c3", OTHER_AGENT, "conn1")?;
+    journal.write(
+        &support::agent_stream(AGENT),
+        SWITCH,
+        "KillSwitchActivated",
+        1,
+        Some("command"),
+        object(vec![("initiator", Value::Str("someone".to_owned()))])?,
+    )?;
+    kill(&journal, OTHER_AGENT, OTHER_SWITCH)?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [OTHER_AGENT]);
+    assert_eq!(
+        process.lifecycle().state(),
+        State::Exited(Exit::CycleFailed)
+    );
+    Ok(())
+}
+
+/// A deployment or connection record on the control stream that cannot be read is never skipped:
+/// the process stops rather than drop an agent it may owe a kill switch (DEC-85).
+#[test]
+fn an_unreadable_control_record_stops_the_process() -> Result<(), Error> {
+    for (event_type, version) in [
+        ("AgentDeployed", 2),
+        ("ConnectionEstablished", 2),
+        ("AgentStopped", 1),
+        ("ConnectionRevoked", 1),
+    ] {
+        let journal = deployed()?;
+        journal.write(
+            CONTROL_STREAM,
+            "c9",
+            event_type,
+            version,
+            None,
+            object(vec![])?,
+        )?;
+        let broker = Paper::new(&journal);
+        let mut process = start(&journal, &broker)?;
+        process.step(at(NOON)?);
+        assert_eq!(
+            process.lifecycle().state(),
+            State::Exited(Exit::CycleFailed),
+            "{event_type}"
+        );
+    }
+    Ok(())
+}
+
+/// A stream that cannot be read raises one opaque alert when it stops reading, and another only
+/// after it has read again (`AGENTS.md` rule 6: a fixed key, no subject).
+#[test]
+fn a_stream_that_stops_reading_raises_one_opaque_alert() -> Result<(), Error> {
+    let journal = deployed()?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    let unreadable = |alerts: &[mandate_executord::Alert]| {
+        alerts
+            .iter()
+            .filter(|a| a.key == "stream_unreadable" && a.subject.is_none())
+            .count()
+    };
+    journal.unreadable(CONTROL_STREAM);
+    assert_eq!(unreadable(&process.step(at(NOON)?)), 1);
+    assert_eq!(unreadable(&process.step(at(NOON)?)), 0);
+    journal.readable(CONTROL_STREAM);
+    assert_eq!(unreadable(&process.step(at(NOON)?)), 0);
+    journal.unreadable(CONTROL_STREAM);
+    assert_eq!(unreadable(&process.step(at(NOON)?)), 1);
     Ok(())
 }
 

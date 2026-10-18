@@ -351,6 +351,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             scope: KillScope::Agent(agent),
             initiator: switch.initiator,
             confirmation: switch.confirmation,
+            cause: None,
         };
         self.hand(now, now, Input::Command(command), alerts, 0)
     }

@@ -328,6 +328,8 @@ struct Books {
     positions: Vec<BrokerPosition>,
     /// Requests answered `Unknown` after they took effect: the answer is lost on the way back.
     lose_answers: usize,
+    /// Whether the account reads as blocked from trading (trading spec §7.3).
+    blocked: bool,
     sequence: u64,
 }
 
@@ -399,6 +401,11 @@ impl Paper {
         };
         books.orders.insert(client_order_id.to_owned(), order);
         Ok(())
+    }
+
+    /// The account reads as blocked from trading from now on.
+    pub fn block(&self) {
+        self.books.borrow_mut().blocked = true;
     }
 
     pub fn lose_next_answers(&self, n: usize) {
@@ -480,7 +487,11 @@ fn answer(books: &mut Books, request: &BrokerRequest) -> Result<BrokerOutcome, C
             BrokerOutcome::OpenOrders(books.orders.values().cloned().collect())
         }
         BrokerRequest::ListPositions => BrokerOutcome::Positions(books.positions.clone()),
-        BrokerRequest::GetAccount => BrokerOutcome::Account(account().map_err(|_| not_sent)?),
+        BrokerRequest::GetAccount => {
+            let mut held = account().map_err(|_| not_sent)?;
+            held.trading_blocked = books.blocked;
+            BrokerOutcome::Account(held)
+        }
         BrokerRequest::ListActivities { since } => BrokerOutcome::Activities {
             fills: Vec::new(),
             cursor: since.clone(),
@@ -687,9 +698,72 @@ pub fn tick(journal: &Journal, id: &str, clock: &str) -> Result<(), Error> {
     )
 }
 
+/// An `AgentModeApplied` an earlier executor journaled on the account stream (journal spec §9.6):
+/// `agent` (or `*`) set `to` a mode under `restriction`, originated here, at risk clock `at`.
+pub fn mode_applied(
+    journal: &Journal,
+    id: &str,
+    agent: &str,
+    to: &str,
+    restriction: &str,
+    at: u64,
+) -> Result<(), Error> {
+    journal.write(
+        ACCOUNT_STREAM,
+        id,
+        "AgentModeApplied",
+        1,
+        None,
+        object(vec![
+            ("agent", text(agent)),
+            ("originated", Value::Bool(true)),
+            ("restriction", text(restriction)),
+            (
+                "risk_clock",
+                Value::Int(mandate_canon::Int::new(at).ok_or("clock")?),
+            ),
+            ("to", text(to)),
+        ])?,
+    )
+}
+
+/// The account stream's `StreamOpened`, as an earlier executor journaled it.
+pub fn opened(journal: &Journal) -> Result<(), Error> {
+    journal.write(
+        ACCOUNT_STREAM,
+        "e0h0o0",
+        "StreamOpened",
+        1,
+        None,
+        object(vec![
+            ("account_ref", text(ACCOUNT)),
+            ("broker", text("alpaca")),
+            ("stream_type", text("account")),
+            ("workspace_id", text(WORKSPACE)),
+        ])?,
+    )
+}
+
 /// The runtime's copy of an owner's kill switch of the whole agent (journal spec §9.1).
 pub fn kill(journal: &Journal, agent: &str, id: &str) -> Result<(), Error> {
     kill_scoped(journal, agent, id, "agent", agent)
+}
+
+/// The runtime's copy of a kill switch of the whole agent that `initiator` started.
+pub fn kill_by(journal: &Journal, agent: &str, id: &str, initiator: &str) -> Result<(), Error> {
+    journal.write(
+        &agent_stream(agent),
+        id,
+        "KillSwitchActivated",
+        1,
+        Some("command"),
+        object(vec![
+            ("initiator", text(initiator)),
+            ("mode_event", Value::Null),
+            ("scope", text("agent")),
+            ("subject", text(agent)),
+        ])?,
+    )
 }
 
 /// The runtime's copy of a kill switch of `scope` and `subject` on `agent`'s stream.
