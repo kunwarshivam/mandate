@@ -19,6 +19,7 @@
 //! `a_temporary_file_that_cannot_be_created_is_an_error_not_a_retry` fails by design (it needs a
 //! user that file permissions apply to); every other failure is the merge's.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -201,12 +202,22 @@ fn prepare(root: &Path, trial: &Trial) -> Result<(PathBuf, String)> {
     }
     let main = git(root, &["rev-parse", "origin/main"])?;
     let dir: PathBuf = root.join(WORKTREE);
-    if dir.join(".git").exists() {
+    let reused = dir.join(".git").exists() && {
         let _ = git(&dir, &["merge", "--abort"]);
-        git(&dir, &["reset", "--quiet", "--hard"])?;
-        git(&dir, &["clean", "--quiet", "-fdx"])?;
-        git(&dir, &["checkout", "--quiet", "--detach", &main])?;
-    } else {
+        git(&dir, &["reset", "--quiet", "--hard"])
+            .and_then(|_| git(&dir, &["clean", "--quiet", "-fdx"]))
+            .and_then(|_| git(&dir, &["checkout", "--quiet", "--detach", &main]))
+            .is_ok()
+    };
+    if !reused {
+        let _ = git(
+            root,
+            &["worktree", "remove", "--force", &dir.display().to_string()],
+        );
+        if dir.exists() {
+            fs::remove_dir_all(&dir)
+                .with_context(|| format!("removing the stale trial worktree {}", dir.display()))?;
+        }
         git(root, &["worktree", "prune"])?;
         git(
             root,
@@ -253,7 +264,6 @@ fn prepare(root: &Path, trial: &Trial) -> Result<(PathBuf, String)> {
 #[cfg(test)]
 mod tests {
     use std::env;
-    use std::fs;
 
     use super::*;
 
@@ -422,6 +432,19 @@ mod tests {
             "new\n",
             "the next trial reuses the worktree the conflict left"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_worktree_left_by_a_killed_trial_is_replaced() -> Result<()> {
+        let fx = Origin::new("stale")?;
+        let (dir, _) = prepare(&fx.checkout, &Trial::parse(&["clean"])?)?;
+        fs::remove_file(dir.join(".git"))?;
+        fs::write(dir.join("left-over.txt"), "x")?;
+        let (again, _) = prepare(&fx.checkout, &Trial::parse(&["7"])?)?;
+        assert_eq!(again, dir);
+        assert!(!again.join("left-over.txt").exists(), "a fresh worktree");
+        assert_eq!(fs::read_to_string(again.join("added.txt"))?, "new\n");
         Ok(())
     }
 
