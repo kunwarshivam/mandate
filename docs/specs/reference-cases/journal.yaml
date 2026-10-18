@@ -54433,6 +54433,221 @@ agent_deployed:
       rule: 201
       path: payload.connection_id
     processes: *id127
+  - name: version_1_stopped_then_version_2
+    clause: '§9.21: a stop is final, the deployment it stops read or not'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9DA16000000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionEstablished
+      schema_version: 2
+      event_time: '2026-10-17T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J9DA00C000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper_01
+        broker: alpaca
+        environment: paper
+        scopes:
+        - data
+        - trading
+        account_ref: 01J8Z2ACCT00000000000000A1
+        user: user_owner_01
+        step_up:
+          assertion_id: assert_owner_11
+          authenticated_at: '2026-10-17T15:59:50.000000000Z'
+          method: cli_confirm
+        margin_attestation: null
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9DA16010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: AgentDeployed
+      schema_version: 1
+      event_time: '2026-10-17T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs:
+        mandate_version: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+      payload:
+        agent_id: agent_a
+        mandate_version: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+        record_ref: sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
+      artifact_refs:
+      - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9DA16020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: AgentStopped
+      schema_version: 1
+      event_time: '2026-10-17T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs:
+        mandate_version: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+      payload:
+        agent_id: agent_a
+        connection_id: conn_alpaca_paper_01
+        reason: owner_stop
+        retired_on: '2026-10-17'
+        loss_added: '0'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9DA16030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: AgentDeployed
+      schema_version: 2
+      event_time: '2026-10-17T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs:
+        mandate_version: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+      payload:
+        agent_id: agent_a
+        mandate_version: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+        record_ref: sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
+        connection_id: conn_alpaca_paper_01
+      artifact_refs:
+      - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+      pii_refs: []
+    expect: *id125
+    processes: *id127
+  - name: account_stream_copy_only
+    clause: 'rule 201: an establishment on the control stream, never an account stream''s copy'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9DA17000000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: ConnectionChecked
+      schema_version: 1
+      event_time: '2026-10-17T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper_01
+        occasion: connect
+        results:
+        - check: account
+          result: passed
+          reason: null
+        - check: environment
+          result: passed
+          reason: null
+        - check: scope
+          result: passed
+          reason: null
+        account_pii_ref: pii_01J8Z2PR0000000000000000A1
+        risk_clock: '2026-10-17T16:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs:
+      - pii_01J8Z2PR0000000000000000A1
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9DA17010000000000000000
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: ConnectionEstablished
+      schema_version: 2
+      event_time: '2026-10-17T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J9DA00E000000000000000E2
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper_01
+        broker: alpaca
+        environment: paper
+        scopes:
+        - data
+        - trading
+        account_ref: 01J8Z2ACCT00000000000000A1
+        user: user_owner_01
+        step_up:
+          assertion_id: assert_owner_11
+          authenticated_at: '2026-10-17T15:59:50.000000000Z'
+          method: cli_confirm
+        margin_attestation: null
+        risk_clock: '2026-10-17T16:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J9DA17020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: AgentDeployed
+      schema_version: 2
+      event_time: '2026-10-17T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+      config_refs:
+        mandate_version: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+      payload:
+        agent_id: agent_a
+        mandate_version: sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+        record_ref: sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
+        connection_id: conn_alpaca_paper_01
+      artifact_refs:
+      - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
+      - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 2
+      rule: 201
+      path: payload.connection_id
+    processes: *id127
   ranges:
   - name: anchored_after_the_establishment
     clause: '§11: the anchor holds the establishment'
@@ -54513,3 +54728,9 @@ agent_deployed:
       index: 1
       rule: 201
       path: payload.connection_id
+  - name: anchored_after_the_deployment
+    clause: '§11: a revocation after the deployment is not judged'
+    stream: revoked_after_the_deployment
+    start: 2
+    anchored: true
+    expect: *id128

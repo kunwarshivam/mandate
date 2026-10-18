@@ -42,9 +42,11 @@ from common import (
 from control import (
     ACCOUNT_STREAM_REF,
     AGENT_STREAM,
+    EXECUTOR,
     SERVICES,
     STREAM,
     USER,
+    WORKSPACE,
     artifacts,
     check_of,
     reported,
@@ -65,6 +67,7 @@ OTHER_ACCOUNT = "01J8Z2ACCT00000000000000B2"
 AGENT = "agent_a"
 OTHER_AGENT = "agent_b"
 CHECKED = "01J9DA00C000000000000000K1"
+PII = "pii_01J8Z2PR0000000000000000A1"
 STEP_UP = {"assertion_id": "assert_owner_11", "authenticated_at": "2026-10-17T15:59:50.000000000Z", "method": "cli_confirm"}
 NOTHING = {"runtimes": [], "executors": []}
 # The record types §11's unanchored run fails closed at on a control stream (§11, rule 201 added).
@@ -111,6 +114,31 @@ def established(event_id: str, connection: str = CONNECTION, account: str | None
         return envelope(event_id, "ConnectionEstablished", payload, actor=dict(SERVICES))
     payload |= {"account_ref": account, "user": USER["id"], "step_up": dict(STEP_UP), "margin_attestation": None}
     return envelope(event_id, "ConnectionEstablished", payload, 2, actor=dict(SERVICES), causation_id=CHECKED)
+
+
+def on_account(draft: dict, **more) -> dict:
+    """`draft` as the executor's record on the account stream of `ACCOUNT` (journal spec §9.8)."""
+    draft.update(stream_id=f"acct:{WORKSPACE}:{ACCOUNT}", actor=dict(EXECUTOR), **more)
+    return draft
+
+
+def checked(event_id: str) -> dict:
+    """The executor's passing `connect` check, which an account stream's establishment copy rests on (rule 68)."""
+    payload = {
+        "connection_id": CONNECTION,
+        "occasion": "connect",
+        "results": [{"check": c, "result": "passed", "reason": None} for c in ("account", "environment", "scope")],
+        "account_pii_ref": PII,
+        "risk_clock": AT,
+    }
+    return on_account(envelope(event_id, "ConnectionChecked", payload), pii_refs=[PII])
+
+
+def copied(event_id: str, original: str) -> dict:
+    """The account stream's copy of a version-2 establishment (§9.8): never a control-stream record."""
+    draft = established(event_id)
+    draft["payload"]["risk_clock"] = AT
+    return on_account(draft, causation_id=original)
 
 
 def revoked(event_id: str, connection: str = CONNECTION) -> dict:
@@ -249,7 +277,11 @@ def new_state() -> dict:
     return {"v2": {}, "latest": {}}
 
 
-def fold(state: dict, d: dict) -> None:
+def fold(state: dict, d: dict, skip: frozenset[str] = frozenset()) -> None:
+    """Rule 201's fold of the control stream: an account stream's copy of a record is not the
+    control stream's."""
+    if d["stream_id"] != STREAM and "stream.201.account_copy" not in skip:
+        return
     c = d["payload"].get("connection_id")
     if d["event_type"] == "ConnectionEstablished":
         if d["schema_version"] == 2:
@@ -277,6 +309,10 @@ def breaks_201(state: dict, d: dict, skip: frozenset[str], later: list[dict]) ->
         r["event_type"] == "ConnectionEstablished" and r["payload"]["connection_id"] == connection for r in later
     ):
         return False
+    if "stream.201.later_revocation" in skip and any(
+        r["event_type"] == "ConnectionRevoked" and r["payload"]["connection_id"] == connection for r in later
+    ):
+        return True
     has = connection in v2 or ("stream.201.version" in skip and connection in latest)
     live = latest.get(connection) == "established" or "stream.201.revoked" in skip
     return not (has and live)
@@ -290,7 +326,7 @@ def stream_failure(drafts: list[dict], skip: frozenset[str] = frozenset(), state
     for i, d in enumerate(drafts):
         if breaks_201(state, d, skip, drafts[i + 1 :]):
             return {"index": base + i, "rule": 201, "path": "payload.connection_id"}
-        fold(state, d)
+        fold(state, d, skip)
     return None
 
 
@@ -301,7 +337,7 @@ def anchor(prefix: list[dict], skip: frozenset[str] = frozenset()) -> dict | Non
         return None
     state = new_state()
     for d in prefix:
-        fold(state, d)
+        fold(state, d, skip)
     return state
 
 
@@ -352,9 +388,13 @@ def processes(drafts: list[dict], skip: frozenset[str] = frozenset()) -> dict:
             if account is not None and not revoked_now:
                 agents[agent] = account
         elif d["event_type"] == "AgentStopped" and "manager.stop_ignored" not in skip:
-            agents.pop(p["agent_id"], None)
-            gone.add(p["agent_id"])
-        fold(state, d)
+            known = agents.pop(p["agent_id"], None)
+            if known is not None or "manager.stop_of_unread_ignored" not in skip:
+                gone.add(p["agent_id"])
+        elif d["event_type"] == "ConnectionRevoked" and "manager.revocation_stops" in skip:
+            account = state["v2"].get(p["connection_id"])
+            agents = {agent: held for agent, held in agents.items() if held != account}
+        fold(state, d, skip)
     accounts = list(agents.values()) if "manager.executor_per_agent" in skip else sorted(set(agents.values()))
     return {"runtimes": sorted(agents), "executors": sorted(accounts)}
 
@@ -410,6 +450,10 @@ def stream_cases() -> list[dict]:
              lambda i: [established(next(i)), revoked(next(i)), deployed(next(i))], at(2), NOTHING),
         case(15, "version_1_establishment", "rule 201: established at version 2, with an `account_ref`",
              lambda i: [established(next(i), account=None), deployed(next(i))], at(1), NOTHING),
+        case(16, "version_1_stopped_then_version_2", "§9.21: a stop is final, the deployment it stops read or not",
+             lambda i: [established(next(i)), deployed(next(i), connection=None), stopped(next(i)), deployed(next(i))], ok, NOTHING),
+        case(17, "account_stream_copy_only", "rule 201: an establishment on the control stream, never an account stream's copy",
+             lambda i: [checked(next(i)), copied(next(i), "01J9DA00E000000000000000E2"), deployed(next(i))], at(2), NOTHING),
     ]
 
 
@@ -438,6 +482,7 @@ def range_cases() -> list[dict]:
         case("unanchored_stop_only", "§11: an `AgentStopped` is not judged", "stopped", 2, False, ok),
         case("from_the_start", "§11: a full chain is anchored on nothing before it", "never_established", 0, False, at(0)),
         case("anchored_on_another_connection", "§11: the anchor's connection is not the deployment's", "another_connection_established", 1, True, at(1)),
+        case("anchored_after_the_deployment", "§11: a revocation after the deployment is not judged", "revoked_after_the_deployment", 2, True, ok),
     ]
 
 
@@ -553,9 +598,21 @@ VALIDATOR_MUTANTS = (
     "map.200",
     "map.200.v1",
     "map.v2_document_skipped",
-    *(f"stream.201{n}" for n in ("", ".v1_judged", ".connection", ".later", ".version", ".revoked")),
+    *(f"stream.201{n}" for n in ("", ".v1_judged", ".connection", ".later", ".later_revocation", ".version", ".revoked", ".account_copy")),
     *(f"range.201.{n}" for n in ("anchor_ignored", "unanchored_open", "unanchored_v1_only")),
-    *(f"manager.{n}" for n in ("stop_not_final", "v1_document", "later_establishment", "revoked", "stop_ignored", "executor_per_agent")),
+    *(
+        f"manager.{n}"
+        for n in (
+            "stop_not_final",
+            "stop_of_unread_ignored",
+            "v1_document",
+            "later_establishment",
+            "revoked",
+            "revocation_stops",
+            "stop_ignored",
+            "executor_per_agent",
+        )
+    ),
 )
 
 
