@@ -2,13 +2,19 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.19:** §5.7 adds the rule that a pending cancel ends only by the broker's answer to it. A
+  working status reported for a `PendingCancel` order whose cancel is unconfirmed and not refused
+  keeps it `PendingCancel`. Only a refusal is the diagram's "cancel rejected" edge. Every start
+  sends each unconfirmed cancel of a live order again, so a crash between a kill switch's batch
+  and its `Cancel` cannot leave the order working
+  ([DEC-2302](../project/decisions/DEC-2302.md)). A tightening under DEC-176.
 - **v0.18:** §6.2 and §2.1 add `fee_rounding`: under `per_fee_per_fill` each regulatory fee of
   each fill is rounded up to the cent before summing, for a broker that rounds each fee separately
   (Robinhood), so a live sell is never booked below the broker's figure (DEC-958 item 4,
@@ -707,6 +713,13 @@ PartiallyFilled); fills during either pending state update filled quantity witho
 - Per-event fill quantity and price are authoritative; cumulative quantity mismatches trigger
   reconciliation.
 - Every transition is journaled before it takes effect in state.
+- **A pending cancel ends only by the broker's answer to it** ([DEC-2302](../project/decisions/DEC-2302.md)).
+  A status that maps to Accepted or PartiallyFilled, reported for a `PendingCancel` order whose
+  cancel is unconfirmed and not refused, keeps it `PendingCancel` (a fill it reports is still
+  applied). Only a refusal of the cancel takes the "cancel rejected" edge to `PriorState`. On every
+  start, each Accepted, PartiallyFilled, or `PendingCancel` order whose cancel is unconfirmed has
+  its cancel sent again, and its answer decides the order. No new record is written, since the
+  journal already names the request.
 
 ## 6. Fills and fees
 
