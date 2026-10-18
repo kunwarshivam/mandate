@@ -15,6 +15,8 @@ claim issue or the decision file, not here.
   branch, never by a mention (DEC-344).
 - A pending test must fail on its stubs, and fail with the stub's own report (DEC-110, DEC-137).
 - A diff mutation gate can pass while testing nothing; a planted-bug table is the evidence.
+- A head made only of merges is a new head: its mutants run again, on the merged code, and can
+  find what the earlier local run missed (#1577).
 - A merge of `main` that keeps both sides of a registry row leaves two rows, which `cargo xtask
   deps` refuses only in `full-checks`; after every merge run `deps` and gitleaks, not only the
   crate's tests (#1555, #1560).
@@ -44,9 +46,13 @@ claim issue or the decision file, not here.
   #1565's test missing #1555's new field, a chart test rendering without the values #1522 made
   required (#1560), and a k3d image import that failed and still exited 0 (#1581's
   `cell-journal`; the fix belongs in `cell up`). #1537's review found three surviving mutants on
-  the pause exit, killed by tests that need no Postgres. Sequenced: #1555, #1537 and #1576
-  re-approved after their latest merges, #1577 after #1576; #1582 waits on the founder (how the
-  runtime starts in the cell, beside #1560). Waiting on the founder: #1539 and #1501 (above).
+  the pause exit, killed by tests that need no Postgres. Then #1555 `e734a4b8`, #1537
+  `48783ad7`, #1576 `d6170ad1` and #1577 `30061bab`. #1577's head was only merges, yet CI's
+  mutants found the `AgentDeployed` guard untested (a stop naming a version); a test killed it.
+  #1582 is approved after merging `main` as option 1 (the runtime started by the manager, which
+  starts none until DEC-1171's account read lands); the merge needed its admission bound to admit
+  #1578's store claim read-only, and its review caught `cell up` dropping the kube-api egress.
+  Waiting on the founder: #1539 and #1501 (above), and option 1 against option 2 for #1582.
 - **2026-10-17, the gate decision record.** The decision page was an agent header plus a short column of two-line checks, about 770px past a 1440×900 screen. It is now one ledger: the action once, the verdict on a line, every check full width with the result in a column. `web/` only.
 - **2026-10-13 and 10-14, the two coordinator sessions: nine merges, the live path's R0-gap rows
   closed.** The recorded docs sweep of the #1295/#1315 review notes landed split, the spec guard
