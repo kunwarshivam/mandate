@@ -8,7 +8,7 @@ environment: cell
 
 # How the vault unseals. `shamir` (the default): by hand, from key shares the operator holds
 # (DEC-977 item 5). `static`: staging only, from a key in the Secret `keyObject`, which the
-# staging bootstrap creates from the `infra-staging` GitHub environment and which is mounted as a
+# founder's staging bootstrap creates (DEC-2021) and which is mounted as a
 # file, never an environment variable; `keyId` names that key and is not a secret.
 seal:
   type: shamir

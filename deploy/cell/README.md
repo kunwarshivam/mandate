@@ -293,9 +293,10 @@ The shares and the root token are kept offline, never in the repository, CI, a f
 read, or an environment variable. After every restart of `vault-0`, it is unsealed again.
 
 Staging (paper only) unseals itself (DEC-2605 row 10, [DEC-2021](../../docs/project/decisions/DEC-2021.md)):
-the staging bootstrap creates the Secret `vault-seal-key` (its `key` entry, from the
-`infra-staging` GitHub environment) before the chart's first install, and the chart mounts it as a
-file. Once, after that install:
+the founder's local `cargo xtask gitops bootstrap staging` creates the Secret `vault-seal-key` (its
+`key` entry, typed or pasted at the founder's terminal and piped to kubectl's stdin; no CI job can
+reach staging's API, DEC-2015 item 4) before the chart's first install, and the chart mounts it as
+a file. Flux installs the release (DEC-2015). Once, after it reports the vault Running:
 
 ```bash
 helm upgrade --install vault deploy/cell/charts/vault -n ws-ws1 -f deploy/cell/values/vault-staging.yaml
