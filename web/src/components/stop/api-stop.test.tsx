@@ -18,11 +18,13 @@ const ORIGIN = "https://api.owlhead.ai";
  * build from what the API serves, so the switch is reachable there, and nothing the API does not
  * serve is shown as "none".
  */
-function mount(ui: React.ReactNode, scenario: "normal" | "unreachable" = "normal") {
-  const server = createMockServer({ workspaceId: WS, scenario });
+function mount(ui: React.ReactNode, scenario: "normal" | "unreachable" | "silent" = "normal") {
+  const server = createMockServer({ workspaceId: WS, scenario: scenario === "silent" ? "normal" : scenario });
   const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
   const fetch: Fetch = (input, init) => {
-    if ((init.method ?? "GET") === "POST") posts.push({ path: new URL(input).pathname, body: JSON.parse(typeof init.body === "string" ? init.body : "{}") as Record<string, unknown> });
+    const method = init.method ?? "GET";
+    if (method === "POST") posts.push({ path: new URL(input).pathname, body: JSON.parse(typeof init.body === "string" ? init.body : "{}") as Record<string, unknown> });
+    if (scenario === "silent" && method === "GET") return new Promise<Response>(() => {});
     return server.fetch(input, init);
   };
   render(
@@ -110,13 +112,19 @@ describe("the Stop sheet and D10 over the API (rule 13)", () => {
     expect(within(sheet).queryByRole("link", { name: /^Close everything/ })).toBeNull();
   });
 
-  it("sends the account's switch with no read, as the workspace's, which its screen named", async () => {
-    const { posts } = mount(<StopRecordScreen kind="stop_all" targetId={UNREAD_CONNECTION} />, "unreachable");
+  it.each(["unreachable", "silent"] as const)("sends the account's switch with no read (%s), as the workspace's, which its screen named", async (reads) => {
+    const { posts } = mount(<StopRecordScreen kind="stop_all" targetId={UNREAD_CONNECTION} />, reads);
     expect(await screen.findByText(/^The account has not been read, so this is the workspace's kill switch/)).toBeTruthy();
-    fireEvent.click(await screen.findByRole("button", { name: /^Stop all agents|^Activate/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Stop all agents on this account/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Use passkey" }));
     await waitFor(() => expect(posts.filter((p) => p.path.endsWith("/kill-switch")).length).toBeGreaterThan(0), { timeout: 5000 });
     for (const p of posts.filter((p) => p.path.endsWith("/kill-switch"))) expect(p.body).toMatchObject({ scope: { kind: "workspace", id: null } });
+  });
+
+  it("says close-all sends the account's kill switch, the same as stop-all, never the broker's close-all", () => {
+    const record = buildApiRecord("close_all", { agents: [agent({})], approvals: [] }, "paper", "con_1", "con_1");
+    expect(record?.scope).toMatch(/^From here this sends the account's kill switch/);
+    expect(recordLines(record!).join("\n")).not.toMatch(/every position closed|your own holdings included|cancel-all and close-position for the whole account/);
   });
 
   it("sends stop-all scoped to the served connection", async () => {
@@ -125,7 +133,7 @@ describe("the Stop sheet and D10 over the API (rule 13)", () => {
     const id = ((await read.json()) as { connections: Array<{ connection_id: string }> }).connections[0].connection_id;
     expect(recordHref("stop_all", id)).toBe(`/connections/${id}/stop-all`);
     const { posts } = mount(<StopRecordScreen kind="stop_all" targetId={id} />);
-    fireEvent.click(await screen.findByRole("button", { name: /^Stop all agents|^Activate/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Stop all agents on this account/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Use passkey" }));
     await waitFor(() => expect(posts.filter((p) => p.path.endsWith("/kill-switch"))).toHaveLength(1), { timeout: 5000 });
     expect(posts.find((p) => p.path.endsWith("/kill-switch"))?.body).toMatchObject({ scope: { kind: "connection", id } });

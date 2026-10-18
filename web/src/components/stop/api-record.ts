@@ -9,7 +9,8 @@ import { type AgentModeLine, RECORD_TITLE, type RecordList, type StopRecord } fr
  * The API serves no open orders, and its positions are the account's, not one agent's, so those lists
  * say "not reported" and never "none": a list that read empty would claim the switch cancels and
  * sells nothing. The switch itself never waits on a read (rule 13), so a screen with lists not
- * reported can still be confirmed. Release (D11) needs the positions it hands over, so over the API
+ * reported can still be confirmed. "Close everything" sends the same account kill switch as "Stop all
+ * agents" from here (DEC-1007), so its text says that, not the broker's close-all. Release (D11) needs the positions it hands over, so over the API
  * it has no record, and the Stop sheet does not offer it.
  */
 const ORDERS_NOT_REPORTED = "Not reported: the deployment does not serve open orders yet. The kill switch cancels them whatever this list shows.";
@@ -66,12 +67,12 @@ function accountRecord(kind: "stop_all" | "close_all", view: ApiView | null, env
     scope: !connectionRead
       ? "The account has not been read, so this is the workspace's kill switch: it stops every agent in this workspace, each by its own kill switch. Your own holdings are untouched."
       : closeAll
-      ? "The broker's cancel-all and close-position for the whole account. It does not stop at what Owlhead manages: every open order and every position on the account is affected, including ones no agent placed."
+      ? "From here this sends the account's kill switch: each agent on the account is stopped by its own kill switch. The broker's cancel-all and close-position, for orders and holdings no agent placed, is not sent from the web app yet."
       : "Each agent's own kill switch: cancels only that agent's orders, sells only its positions, and ends it. Your own holdings are untouched.",
     warning: null,
     lists: closeAll ? [orders, agents] : [agents, orders],
     afterwards: closeAll
-      ? "Every order is canceled, every position closed, your own holdings included, and every agent stopped. Each step is journaled and shown below as it is recorded."
+      ? "Every agent on this account is stopped for good. Orders and holdings no agent placed are left as they are. Each step is journaled and shown below as it is recorded."
       : "Every agent on this account is stopped for good, and their approval requests are canceled. Each step is journaled and shown below as it is recorded.",
     nothingToDo: !closeAll && view && view.agents.length > 0 && active.length === 0 ? "Every agent on this account is already stopped." : null,
     agentId: null,
