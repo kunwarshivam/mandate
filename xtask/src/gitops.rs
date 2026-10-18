@@ -96,21 +96,80 @@ const WORKLOAD_SECRETS: [WorkloadSecret; 2] = [
     },
 ];
 
-/// The workload secrets' values, held in memory only and never printed: `Debug` names the fields
-/// and hides every value.
-pub(crate) struct WorkloadSecrets {
-    /// The archive's R2 access key id: the bucket-scoped token's id.
-    pub(crate) archive_access_key_id: String,
-    /// The archive's R2 secret: the SHA-256 of that token's value.
-    pub(crate) archive_secret_access_key: String,
-    /// The tunnel's token.
-    pub(crate) tunnel_token: String,
+/// One secret value, held in memory only. In GitHub Actions, constructing it masks the value in the
+/// run's log at once, in every form a later line could print it ([`mask_forms`]): the repository
+/// is public, so its logs are, and GitHub masks only `secrets.*` values on its own. `Debug` hides
+/// it.
+pub(crate) struct Secret(String);
+
+impl Secret {
+    /// The value, masked first when this runs in GitHub Actions.
+    pub(crate) fn new(value: String) -> Self {
+        if env::var("GITHUB_ACTIONS").is_ok_and(|actions| actions == "true") {
+            let mut out = io::stdout().lock();
+            for form in mask_forms(&value) {
+                let _ = writeln!(out, "::add-mask::{form}");
+            }
+            let _ = out.flush();
+        }
+        Self(value)
+    }
+
+    fn expose(&self) -> &str {
+        &self.0
+    }
 }
 
-impl std::fmt::Debug for WorkloadSecrets {
+impl std::fmt::Debug for Secret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("WorkloadSecrets { <redacted> }")
+        f.write_str("<redacted>")
     }
+}
+
+/// Every form of `value` a log line could carry, each one line and non-empty: the value, its
+/// base64, base64url (unpadded), URL-encoded and JSON-escaped forms, and each of its lines.
+fn mask_forms(value: &str) -> Vec<String> {
+    let base64 = image::base64(value.as_bytes());
+    let base64url = base64
+        .replace('+', "-")
+        .replace('/', "_")
+        .trim_end_matches('=')
+        .to_owned();
+    let mut url = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            url.push(char::from(byte));
+        } else {
+            url.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    let json = serde_json::Value::String(value.to_owned()).to_string();
+    let json = json
+        .strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+        .unwrap_or(&json)
+        .to_owned();
+    let mut forms = vec![value.to_owned(), base64, base64url, url, json];
+    forms.extend(value.lines().map(str::to_owned));
+    let mut kept: Vec<String> = Vec::new();
+    for form in forms {
+        let form = form.trim().to_owned();
+        if !form.is_empty() && !form.contains(['\n', '\r']) && !kept.contains(&form) {
+            kept.push(form);
+        }
+    }
+    kept
+}
+
+/// The workload secrets' values, held in memory only and never printed.
+#[derive(Debug)]
+pub(crate) struct WorkloadSecrets {
+    /// The archive's R2 access key id: the bucket-scoped token's id.
+    pub(crate) archive_access_key_id: Secret,
+    /// The archive's R2 secret: the SHA-256 of that token's value.
+    pub(crate) archive_secret_access_key: Secret,
+    /// The tunnel's token.
+    pub(crate) tunnel_token: Secret,
 }
 
 impl WorkloadSecrets {
@@ -119,9 +178,9 @@ impl WorkloadSecrets {
         let read =
             |var: &str| env::var(var).with_context(|| format!("{var} is not set (BOOTSTRAP.md)"));
         Ok(Self {
-            archive_access_key_id: read("JOURNAL_ARCHIVE_ACCESS_KEY_ID")?,
-            archive_secret_access_key: read("JOURNAL_ARCHIVE_SECRET_KEY")?,
-            tunnel_token: read("CLOUDFLARED_TUNNEL_TOKEN")?,
+            archive_access_key_id: Secret::new(read("JOURNAL_ARCHIVE_ACCESS_KEY_ID")?),
+            archive_secret_access_key: Secret::new(read("JOURNAL_ARCHIVE_SECRET_KEY")?),
+            tunnel_token: Secret::new(read("CLOUDFLARED_TUNNEL_TOKEN")?),
         })
     }
 
@@ -137,7 +196,7 @@ impl WorkloadSecrets {
                     "CLOUDFLARED_TUNNEL_TOKEN" => &self.tunnel_token,
                     other => bail!("no workload secret holds {other}"),
                 };
-                values.push((*key, value.clone()));
+                values.push((*key, value.expose().to_owned()));
             }
             manifests.push((secret.name, secret_manifest(secret.name, &values)?));
         }
@@ -314,7 +373,7 @@ fn kubectl(cluster: &Cluster<'_>, args: &[&str], stdin: Option<&str>) -> Result<
         command.arg("--kubeconfig").arg(kubeconfig);
     }
     let mut child = command
-        .args(["--context", &cluster.context])
+        .args(["--v=0", "--context", &cluster.context])
         .args(args)
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -485,7 +544,7 @@ pub(crate) fn bootstrap_from_infra(
         bail!("{reason} (DEC-2018)");
     }
     let out = Command::new("kubectl")
-        .arg("--kubeconfig")
+        .args(["--v=0", "--kubeconfig"])
         .arg(kubeconfig)
         .args(["config", "current-context"])
         .output()
@@ -670,9 +729,9 @@ mod tests {
     #[test]
     fn the_ci_bootstrap_refuses_before_it_reads_anything() {
         let secrets = WorkloadSecrets {
-            archive_access_key_id: "id".to_owned(),
-            archive_secret_access_key: "secret".to_owned(),
-            tunnel_token: "token".to_owned(),
+            archive_access_key_id: Secret::new("id".to_owned()),
+            archive_secret_access_key: Secret::new("secret".to_owned()),
+            tunnel_token: Secret::new("token".to_owned()),
         };
         let refused = bootstrap_from_infra(
             Path::new("/nonexistent"),
@@ -688,9 +747,9 @@ mod tests {
     #[test]
     fn the_secrets_are_redacted_and_land_in_their_keys() -> Result<()> {
         let secrets = WorkloadSecrets {
-            archive_access_key_id: "key-id-1".to_owned(),
-            archive_secret_access_key: "secret-2".to_owned(),
-            tunnel_token: "token-3".to_owned(),
+            archive_access_key_id: Secret::new("key-id-1".to_owned()),
+            archive_secret_access_key: Secret::new("secret-2".to_owned()),
+            tunnel_token: Secret::new("token-3".to_owned()),
         };
         let shown = format!("{secrets:?}");
         for value in ["key-id-1", "secret-2", "token-3"] {
@@ -712,6 +771,44 @@ mod tests {
             image::base64(b"token-3")
         );
         Ok(())
+    }
+
+    /// Every printable form of a secret is masked, each on one line, none empty or repeated.
+    #[test]
+    fn every_printable_form_of_a_secret_is_masked() {
+        let value = "a+b/c=d\"e\nline two";
+        let forms = mask_forms(value);
+        let base64 = image::base64(value.as_bytes());
+        for expected in [
+            base64.clone(),
+            base64
+                .replace('+', "-")
+                .replace('/', "_")
+                .trim_end_matches('=')
+                .to_owned(),
+            "a%2Bb%2Fc%3Dd%22e%0Aline%20two".to_owned(),
+            "a+b/c=d\\\"e\\nline two".to_owned(),
+            "a+b/c=d\"e".to_owned(),
+            "line two".to_owned(),
+        ] {
+            assert!(forms.contains(&expected), "{expected} not in {forms:?}");
+        }
+        assert!(forms.iter().all(|f| !f.is_empty() && !f.contains('\n')));
+        let mut unique = forms.clone();
+        unique.dedup();
+        assert_eq!(unique.len(), forms.len());
+        assert_eq!(
+            mask_forms("plain"),
+            vec![
+                "plain".to_owned(),
+                image::base64(b"plain"),
+                image::base64(b"plain").trim_end_matches('=').to_owned()
+            ]
+        );
+        assert_eq!(
+            format!("{:?}", Secret::new("hidden".to_owned())),
+            "<redacted>"
+        );
     }
 
     /// No workflow may run the bootstrap: the cluster's API admits only the founder's addresses.
