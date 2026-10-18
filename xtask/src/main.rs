@@ -746,6 +746,14 @@ fn tofu_checks() -> Result<()> {
         eprintln!("    tofu: nothing under {TOFU_DIR} changed (DEC-1190)");
         return Ok(());
     }
+    let tofu_root = repo_root()?.join(TOFU_DIR);
+    let forbidden = tofu_forbidden_blocks(&tofu_sources(&tofu_root)?);
+    if !forbidden.is_empty() {
+        bail!("tofu:\n  {}", forbidden.join("\n  "));
+    }
+    eprintln!(
+        "    tofu: no provisioner, external or http data source, or remote module (DEC-2014)"
+    );
     let installed = |tool: &str| {
         Command::new(tool)
             .arg("--version")
@@ -766,10 +774,6 @@ fn tofu_checks() -> Result<()> {
     let work = root.join("target").join("tofu");
     let cache = work.join("plugins");
     fs::create_dir_all(&cache).with_context(|| format!("creating {}", cache.display()))?;
-    let forbidden = tofu_forbidden_blocks(&tofu_sources(&tofu_dir)?);
-    if !forbidden.is_empty() {
-        bail!("tofu:\n  {}", forbidden.join("\n  "));
-    }
     sh("tofu", &["fmt", "-check", "-recursive", "-diff", TOFU_DIR])?;
     let config = tofu_dir.join(".tflint.hcl");
     sh(
@@ -817,43 +821,312 @@ fn tofu_checks() -> Result<()> {
     Ok(())
 }
 
-/// The blocks `deploy/tofu/` may never hold, each with why (DEC-2014 item 6): a provisioner runs
-/// a command on the runner or a host during `apply`, and the `external` and `http` data sources
-/// run a program or fetch a URL during `plan`, so any of them would run code or reach a host the
-/// plan does not show, with the job's secrets in reach.
-const TOFU_FORBIDDEN: [(&str, &str); 3] = [
-    ("provisioner \"", "a provisioner"),
-    ("data \"external\"", "the `external` data source"),
-    ("data \"http\"", "the `http` data source"),
-];
+/// What `deploy/tofu/` may never hold (DEC-2014 item 6): a provisioner runs a command on the
+/// runner or a host during `apply`; the `external` and `http` data sources run a program or fetch a
+/// URL during `plan`; and a module from anywhere but this tree could hold either. Each would run
+/// code or reach a host the plan does not show, with the job's secrets in reach.
+const TOFU_FORBIDDEN_DATA: [&str; 2] = ["external", "http"];
 
-/// Every use of a [`TOFU_FORBIDDEN`] block in `files`, each a path and its text, named with its
-/// line; a `#` or `//` comment does not count.
-fn tofu_forbidden_blocks(files: &[(String, String)]) -> Vec<String> {
-    let mut problems = Vec::new();
-    for (path, text) in files {
-        for (number, line) in (1_usize..).zip(text.lines()) {
-            let code = line.trim_start();
-            if code.starts_with('#') || code.starts_with("//") {
-                continue;
+/// One token of OpenTofu's native syntax, as [`hcl_tokens`] reads it: an identifier, a quoted
+/// string's text (its interpolations dropped), or a structural character.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum HclToken {
+    Ident(String),
+    Str(String),
+    Punct(char),
+}
+
+/// The tokens of `text` with their 1-based lines. `#`, `//` and `/* */` comments and heredoc
+/// bodies are skipped; a string's `${...}` and `%{...}` interpolations, quotes nested in them
+/// included, are skipped inside the string, so a label is read only from a plain string. An
+/// unterminated string, heredoc or block comment ends the text, which [`tofu_forbidden_blocks`]
+/// then refuses.
+fn hcl_tokens(text: &str) -> (Vec<(usize, HclToken)>, bool) {
+    let chars: Vec<char> = text.chars().collect();
+    let mut tokens = Vec::new();
+    let mut line = 1_usize;
+    let mut at = 0_usize;
+    let peek = |i: usize| chars.get(i).copied();
+    while let Some(c) = peek(at) {
+        match c {
+            '\n' => {
+                line = line.saturating_add(1);
+                at = at.saturating_add(1);
             }
-            let compact: String = code.split_whitespace().collect::<Vec<_>>().join(" ");
-            for (block, what) in TOFU_FORBIDDEN {
-                if compact.starts_with(block) {
+            '#' => {
+                while peek(at).is_some_and(|c| c != '\n') {
+                    at = at.saturating_add(1);
+                }
+            }
+            '/' if peek(at.saturating_add(1)) == Some('/') => {
+                while peek(at).is_some_and(|c| c != '\n') {
+                    at = at.saturating_add(1);
+                }
+            }
+            '/' if peek(at.saturating_add(1)) == Some('*') => {
+                at = at.saturating_add(2);
+                loop {
+                    match peek(at) {
+                        None => return (tokens, false),
+                        Some('*') if peek(at.saturating_add(1)) == Some('/') => {
+                            at = at.saturating_add(2);
+                            break;
+                        }
+                        Some(c) => {
+                            if c == '\n' {
+                                line = line.saturating_add(1);
+                            }
+                            at = at.saturating_add(1);
+                        }
+                    }
+                }
+            }
+            '"' => {
+                let start_line = line;
+                let mut value = String::new();
+                let mut depth = 0_usize;
+                let mut in_nested = false;
+                at = at.saturating_add(1);
+                loop {
+                    let Some(c) = peek(at) else {
+                        return (tokens, false);
+                    };
+                    if c == '\n' {
+                        line = line.saturating_add(1);
+                    }
+                    if c == '\\' {
+                        at = at.saturating_add(2);
+                        continue;
+                    }
+                    if depth == 0 {
+                        if c == '"' {
+                            at = at.saturating_add(1);
+                            break;
+                        }
+                        if matches!(c, '$' | '%') && peek(at.saturating_add(1)) == Some('{') {
+                            depth = 1;
+                            at = at.saturating_add(2);
+                            continue;
+                        }
+                        value.push(c);
+                    } else if in_nested {
+                        if c == '"' {
+                            in_nested = false;
+                        }
+                    } else {
+                        match c {
+                            '"' => in_nested = true,
+                            '{' => depth = depth.saturating_add(1),
+                            '}' => depth = depth.saturating_sub(1),
+                            _ => {}
+                        }
+                    }
+                    at = at.saturating_add(1);
+                }
+                tokens.push((start_line, HclToken::Str(value)));
+            }
+            '<' if peek(at.saturating_add(1)) == Some('<') => {
+                let mut i = at.saturating_add(2);
+                if peek(i) == Some('-') {
+                    i = i.saturating_add(1);
+                }
+                let mut marker = String::new();
+                while let Some(c) = peek(i).filter(|c| c.is_ascii_alphanumeric() || *c == '_') {
+                    marker.push(c);
+                    i = i.saturating_add(1);
+                }
+                if marker.is_empty() {
+                    at = at.saturating_add(1);
+                    continue;
+                }
+                at = i;
+                loop {
+                    while peek(at).is_some_and(|c| c != '\n') {
+                        at = at.saturating_add(1);
+                    }
+                    if peek(at).is_none() {
+                        return (tokens, false);
+                    }
+                    at = at.saturating_add(1);
+                    line = line.saturating_add(1);
+                    let mut body = String::new();
+                    let mut j = at;
+                    while let Some(c) = peek(j).filter(|c| *c != '\n') {
+                        body.push(c);
+                        j = j.saturating_add(1);
+                    }
+                    if body.trim() == marker {
+                        at = j;
+                        break;
+                    }
+                }
+            }
+            c if c.is_ascii_alphabetic() || c == '_' => {
+                let mut word = String::new();
+                while let Some(c) =
+                    peek(at).filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+                {
+                    word.push(c);
+                    at = at.saturating_add(1);
+                }
+                tokens.push((line, HclToken::Ident(word)));
+            }
+            c if c.is_whitespace() => at = at.saturating_add(1),
+            c => {
+                tokens.push((line, HclToken::Punct(c)));
+                at = at.saturating_add(1);
+            }
+        }
+    }
+    (tokens, true)
+}
+
+/// The label a block token names: a plain string or an identifier.
+fn hcl_label(token: Option<&(usize, HclToken)>) -> Option<&str> {
+    match token.map(|(_, token)| token) {
+        Some(HclToken::Str(label) | HclToken::Ident(label)) => Some(label),
+        _ => None,
+    }
+}
+
+/// Whether a module `source` is this tree's own: a relative path.
+fn local_module_source(source: &str) -> bool {
+    source.starts_with("./") || source.starts_with("../")
+}
+
+/// The forbidden constructs of one native-syntax file (`.tf`, `.tofu`, `.hcl`).
+fn hcl_forbidden(path: &str, text: &str) -> Vec<String> {
+    let (tokens, complete) = hcl_tokens(text);
+    let mut problems = Vec::new();
+    if !complete {
+        problems.push(format!(
+            "{path}: an unterminated string, heredoc or comment, which the scan cannot read \
+             (DEC-2014)"
+        ));
+    }
+    let mut module_depth: Option<usize> = None;
+    let mut depth = 0_usize;
+    for (at, (line, token)) in tokens.iter().enumerate() {
+        let next = |n: usize| tokens.get(at.saturating_add(n));
+        match token {
+            HclToken::Punct('{') => depth = depth.saturating_add(1),
+            HclToken::Punct('}') => {
+                depth = depth.saturating_sub(1);
+                if module_depth.is_some_and(|d| depth < d) {
+                    module_depth = None;
+                }
+            }
+            HclToken::Ident(word) if word == "provisioner" && hcl_label(next(1)).is_some() => {
+                problems.push(format!(
+                    "{path}:{line}: holds a provisioner, which deploy/tofu never may (DEC-2014)"
+                ));
+            }
+            HclToken::Ident(word)
+                if word == "data"
+                    && hcl_label(next(1)).is_some_and(|l| TOFU_FORBIDDEN_DATA.contains(&l))
+                    && hcl_label(next(2)).is_some() =>
+            {
+                problems.push(format!(
+                    "{path}:{line}: holds the `{}` data source, which deploy/tofu never may \
+                     (DEC-2014)",
+                    hcl_label(next(1)).unwrap_or_default()
+                ));
+            }
+            HclToken::Ident(word)
+                if word == "module"
+                    && hcl_label(next(1)).is_some()
+                    && next(2).is_some_and(|(_, t)| *t == HclToken::Punct('{')) =>
+            {
+                module_depth = Some(depth.saturating_add(1));
+            }
+            HclToken::Ident(word)
+                if word == "source"
+                    && module_depth == Some(depth)
+                    && next(1).is_some_and(|(_, t)| *t == HclToken::Punct('=')) =>
+            {
+                let local = matches!(next(2), Some((_, HclToken::Str(source))) if local_module_source(source));
+                if !local {
                     problems.push(format!(
-                        "{path}:{number}: holds {what}, which deploy/tofu never may (DEC-2014)"
+                        "{path}:{line}: a module whose source is not a path in this tree, \
+                         which deploy/tofu never may (DEC-2014)"
                     ));
                 }
             }
+            _ => {}
         }
     }
     problems
 }
 
-/// Every `.tf` and `.tftest.hcl` file under `dir`, with its text, by [`tofu_forbidden_blocks`]'s
-/// path.
+/// The forbidden constructs of one JSON-syntax file (`.tf.json`, `.tofu.json`), which must parse.
+fn json_forbidden(path: &str, text: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return vec![format!(
+            "{path}: JSON the scan cannot parse, which deploy/tofu never holds (DEC-2014)"
+        )];
+    };
+    let mut problems = BTreeSet::new();
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, child) in map {
+                    if key == "provisioner" {
+                        problems.insert(format!("{path}: holds a provisioner (DEC-2014)"));
+                    }
+                    if key == "data" {
+                        let blocks = match &child {
+                            serde_json::Value::Array(items) => items.clone(),
+                            other => vec![other.clone()],
+                        };
+                        for block in blocks {
+                            if let serde_json::Value::Object(types) = block {
+                                for name in TOFU_FORBIDDEN_DATA {
+                                    if types.contains_key(name) {
+                                        problems.insert(format!(
+                                            "{path}: holds the `{name}` data source (DEC-2014)"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if key == "source"
+                        && !matches!(&child, serde_json::Value::String(source) if local_module_source(source))
+                    {
+                        problems.insert(format!(
+                            "{path}: a `source` that is not a path in this tree (DEC-2014)"
+                        ));
+                    }
+                    pending.push(child);
+                }
+            }
+            serde_json::Value::Array(items) => pending.extend(items),
+            _ => {}
+        }
+    }
+    problems.into_iter().collect()
+}
+
+/// Every forbidden construct in `files`, each a path and its text, with its line where the syntax
+/// has one: JSON files (`.json`) are parsed, every other file is read as native syntax.
+fn tofu_forbidden_blocks(files: &[(String, String)]) -> Vec<String> {
+    files
+        .iter()
+        .flat_map(|(path, text)| {
+            if path.ends_with(".json") {
+                json_forbidden(path, text)
+            } else {
+                hcl_forbidden(path, text)
+            }
+        })
+        .collect()
+}
+
+/// Every OpenTofu source under `dir`, with its text: `.tf`, `.tofu`, `.hcl` (test and tflint
+/// files) and `.json`, outside `.terraform` working directories.
 fn tofu_sources(dir: &Path) -> Result<Vec<(String, String)>> {
-    files_by_extension(dir, &["tf", "hcl"])?
+    files_by_extension(dir, &["tf", "tofu", "hcl", "json"])?
         .into_iter()
         .filter(|path| {
             !path
@@ -1014,6 +1287,125 @@ fn infra_workflow_in(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The workflow `text` with each line's comment removed, lines kept, so offsets map to lines.
+fn uncommented_text(text: &str) -> String {
+    text.lines().map(uncommented).collect::<Vec<_>>().join("\n")
+}
+
+/// The 1-based line of byte offset `at` in `text`.
+fn line_of(text: &str, at: usize) -> usize {
+    text.get(..at)
+        .map_or(1, |head| head.matches('\n').count().saturating_add(1))
+}
+
+/// Every way `file` reaches secrets without naming each one, so the check cannot see which:
+/// inside any `${{ ... }}` expression, a lone line or several, the context `secrets` not followed
+/// at once by `.` and a name (an index, `toJSON(secrets)`, `format('{0}', secrets)`, `join`,
+/// `contains`, any function); and the word `inherit` anywhere outside a comment, quoted or not,
+/// block or flow (`secrets: inherit`, `secrets: 'inherit'`, `{secrets: inherit}`). Comparison
+/// ignores case, as GitHub's expressions do.
+fn unnamed_secret_problems(file: &CiFile) -> Vec<String> {
+    let text = uncommented_text(&file.text).to_ascii_lowercase();
+    let word_at = |at: usize, word: &str| {
+        let before = text.get(..at).and_then(|head| head.chars().last());
+        let after = text
+            .get(at.saturating_add(word.len())..)
+            .and_then(|tail| tail.chars().next());
+        !before.is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+            && !after.is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+    };
+    let mut problems = BTreeSet::new();
+    let mut from = 0_usize;
+    while let Some(open) = text.get(from..).and_then(|tail| tail.find("${{")) {
+        let start = from.saturating_add(open);
+        let end = text
+            .get(start..)
+            .and_then(|tail| tail.find("}}"))
+            .map_or(text.len(), |close| start.saturating_add(close));
+        let expression = text.get(start..end).unwrap_or_default();
+        for (at, _) in expression.match_indices("secrets") {
+            let absolute = start.saturating_add(at);
+            if !word_at(absolute, "secrets") {
+                continue;
+            }
+            let rest = expression
+                .get(at.saturating_add("secrets".len())..)
+                .unwrap_or_default();
+            let named = rest
+                .strip_prefix('.')
+                .and_then(|name| name.chars().next())
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+            if !named {
+                problems.insert(format!(
+                    "{}:{}: reaches `secrets` other than as `secrets.NAME`, so the check cannot \
+                     name what it reads (DEC-2014)",
+                    file.path,
+                    line_of(&text, absolute)
+                ));
+            }
+        }
+        from = end.saturating_add(2).max(start.saturating_add(3));
+    }
+    for (at, _) in text.match_indices("inherit") {
+        if word_at(at, "inherit") {
+            problems.insert(format!(
+                "{}:{}: `inherit` passes every secret on unnamed (DEC-2014)",
+                file.path,
+                line_of(&text, at)
+            ));
+        }
+    }
+    problems.into_iter().collect()
+}
+
+/// Every `environment` key in `file` whose value is computed: the key bare or quoted, in block
+/// or flow form, with a `${{` anywhere in its value, whether that is the rest of its line (a
+/// scalar or a flow map such as `{ name: ${{ x }} }`) or the lines indented under it (a block
+/// map's `name:`). A computed name could resolve to an infrastructure environment.
+fn computed_environment_problems(file: &CiFile) -> Vec<String> {
+    let lines: Vec<String> = file
+        .text
+        .lines()
+        .map(|l| uncommented(l).to_owned())
+        .collect();
+    let indent = |line: &str| line.len().saturating_sub(line.trim_start().len());
+    let mut problems = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let lower = line.to_ascii_lowercase();
+        for (at, _) in lower.match_indices("environment") {
+            let before = lower.get(..at).and_then(|head| head.chars().last());
+            if before.is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-')) {
+                continue;
+            }
+            let rest = lower
+                .get(at.saturating_add("environment".len())..)
+                .unwrap_or_default();
+            let rest = rest.trim_start_matches(['"', '\'']).trim_start();
+            let Some(value) = rest.strip_prefix(':') else {
+                continue;
+            };
+            let mut computed = value.contains("${{");
+            if value.trim().is_empty() {
+                let base = indent(line);
+                computed |= lines
+                    .iter()
+                    .skip(index.saturating_add(1))
+                    .take_while(|next| next.trim().is_empty() || indent(next) > base)
+                    .any(|next| next.contains("${{"));
+            }
+            if computed {
+                problems.push(format!(
+                    "{}:{}: computes an environment name, which could resolve to an \
+                     infrastructure environment; only {INFRA_WORKFLOW} may (DEC-2014)",
+                    file.path,
+                    index.saturating_add(1)
+                ));
+            }
+        }
+    }
+    problems
+}
+
 /// Every way the workflows break DEC-2014's shape for plan and apply: `infra.yml` must run on
 /// `workflow_dispatch` alone; grant nothing at the top; hold one job, `tofu`, which runs only on
 /// `refs/heads/main`, under `environment: infra-${{ inputs.environment }}`, reading contents only,
@@ -1037,31 +1429,12 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
     };
     let mut problems = Vec::new();
     for file in files {
-        for (number, line) in (1_usize..).zip(file.text.lines()) {
-            let code = uncommented(line).to_ascii_lowercase();
-            let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
-            if compact.contains("secrets[")
-                || compact.contains("tojson(secrets")
-                || compact.contains("secrets:inherit")
-            {
-                problems.push(format!(
-                    "{}:{number}: reaches secrets by an index, the whole context or `inherit`, \
-                     which the check cannot name (DEC-2014)",
-                    file.path
-                ));
-            }
-        }
+        problems.extend(unnamed_secret_problems(file));
     }
     for file in files.iter().filter(|file| file.path != INFRA_WORKFLOW) {
+        problems.extend(computed_environment_problems(file));
         for (number, line) in (1_usize..).zip(file.text.lines()) {
             let code = uncommented(line);
-            if code.trim_start().starts_with("environment:") && code.contains("${{") {
-                problems.push(format!(
-                    "{}:{number}: computes an environment name, which could resolve to an \
-                     infrastructure environment; only {INFRA_WORKFLOW} may (DEC-2014)",
-                    file.path
-                ));
-            }
             if secret_names(code)
                 .iter()
                 .any(|name| INFRA_SECRETS.contains(&name.as_str()))
@@ -9909,7 +10282,10 @@ mod tests {
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
-    use super::{TOFU_DIR, tofu_forbidden_blocks, tofu_sources};
+    use super::{
+        TOFU_DIR, computed_environment_problems, tofu_forbidden_blocks, tofu_sources,
+        unnamed_secret_problems,
+    };
     use super::{unoptimised_config, unoptimised_packages};
 
     #[test]
@@ -14945,48 +15321,163 @@ mod tests {
         names.iter().map(|name| (*name).to_owned()).collect()
     }
 
-    /// E21-56 (DEC-2014 item 6): a provisioner and the `external` and `http` data sources are
-    /// refused wherever they appear under `deploy/tofu/`, with their line; a comment naming one,
-    /// another data source, and the committed tree are not.
+    /// E21-56 (DEC-2014 item 6): a provisioner, the `external` and `http` data sources and a
+    /// module from outside the tree are refused in every syntax and spelling: quoted or bare
+    /// labels, nested in a resource, after a block comment on the same line, in `.tofu` and in
+    /// `.tf.json`. Comments, heredoc bodies, strings, other data sources, local modules and the
+    /// committed tree are not; an unterminated comment or unparsable JSON is.
     #[test]
-    fn deploy_tofu_holds_no_provisioner_or_fetching_data_source() -> Result<()> {
-        let file = |text: &str| vec![("m/main.tf".to_owned(), text.to_owned())];
-        for (text, line) in [
+    fn deploy_tofu_holds_no_provisioner_fetching_data_source_or_remote_module() -> Result<()> {
+        let one =
+            |path: &str, text: &str| tofu_forbidden_blocks(&[(path.to_owned(), text.to_owned())]);
+        for (path, text, line) in [
             (
+                "m/a.tf",
                 "resource \"x\" \"y\" {\n  provisioner \"local-exec\" {}\n}\n",
                 2,
             ),
-            ("data \"external\" \"run\" {}\n", 1),
-            ("data   \"http\" \"fetch\" {}\n", 1),
             (
-                "resource \"x\" \"y\" {\n\tprovisioner \"remote-exec\" {}\n}\n",
+                "m/a.tf",
+                "resource x y {\n  provisioner local-exec {\n  }\n}\n",
+                2,
+            ),
+            (
+                "m/a.tf",
+                "resource \"x\" \"y\" {\n  dynamic \"z\" {\n    content {\n      provisioner \"remote-exec\" {}\n    }\n  }\n}\n",
+                4,
+            ),
+            ("m/a.tf", "/* note */ provisioner \"local-exec\" {}\n", 1),
+            ("m/a.tf", "data \"external\" \"run\" {}\n", 1),
+            ("m/a.tf", "data external run {\n}\n", 1),
+            ("m/a.tf", "data   \"http\"   \"fetch\" {}\n", 1),
+            ("m/a.tofu", "data \"http\" \"f\" {}\n", 1),
+            (
+                "m/a.tf",
+                "x = <<EOT\nprovisioner\nEOT\ndata \"http\" \"f\" {}\n",
+                4,
+            ),
+            (
+                "m/a.tf",
+                "module \"m\" {\n  source = \"git::https://example.com/m.git\"\n}\n",
+                2,
+            ),
+            (
+                "m/a.tf",
+                "module m {\n  source = \"registry.example/x/y/z\"\n}\n",
                 2,
             ),
         ] {
-            let problems = tofu_forbidden_blocks(&file(text));
+            let problems = one(path, text);
             assert_eq!(problems.len(), 1, "{text:?}: {problems:?}");
             assert!(
-                problems[0].starts_with(&format!("m/main.tf:{line}:")),
-                "{problems:?}"
+                problems[0].starts_with(&format!("{path}:{line}:")),
+                "{text:?}: {problems:?}"
             );
         }
         for text in [
-            "# provisioner \"local-exec\" is never used\n",
-            "// data \"external\" \"x\" {}\n",
-            "data \"digitalocean_sizes\" \"node\" {}\n",
-            "description = \"no provisioner here\"\n",
+            "{\"resource\": {\"x\": {\"y\": {\"provisioner\": {\"local-exec\": {}}}}}}",
+            "{\"data\": {\"external\": {\"run\": {}}}}",
+            "{\"data\": [{\"http\": {\"f\": {}}}]}",
+            "{\"module\": {\"m\": {\"source\": \"git::x\"}}}",
+            "{not json",
         ] {
-            assert_eq!(
-                tofu_forbidden_blocks(&file(text)),
-                Vec::<String>::new(),
-                "{text:?}"
-            );
+            assert_eq!(one("m/a.tf.json", text).len(), 1, "{text}");
         }
+        for text in [
+            "# provisioner \"local-exec\" {}\n",
+            "// data \"external\" \"x\" {}\n",
+            "/* provisioner \"local-exec\" {}\n data \"http\" \"y\" {} */\n",
+            "x = <<-EOT\n  provisioner \"local-exec\" {}\n  data \"http\" \"y\" {}\n  EOT\n",
+            "description = \"provisioner \\\"local-exec\\\" ${data.http.y} is never used\"\n",
+            "data \"digitalocean_sizes\" \"node\" {}\n",
+            "override_data {\n  target = data.external_thing.node\n}\n",
+            "module \"cell\" {\n  source = \"../../modules/cell\"\n}\n",
+        ] {
+            assert_eq!(one("m/a.tf", text), Vec::<String>::new(), "{text:?}");
+        }
+        assert_eq!(one("m/a.tf", "/* never closed\n").len(), 1);
+        assert_eq!(
+            one(
+                "m/a.tf.json",
+                "{\"module\": {\"m\": {\"source\": \"./m\"}}}"
+            )
+            .len(),
+            0
+        );
         assert_eq!(
             tofu_forbidden_blocks(&tofu_sources(&repo_root()?.join(TOFU_DIR))?),
             Vec::<String>::new(),
             "the committed deploy/tofu holds none"
         );
+        Ok(())
+    }
+
+    /// E21-56 (DEC-2014): secrets reached without a name, in any form the reviewer of #1654 found,
+    /// are refused in every workflow, `infra.yml` included; and a computed environment name, in
+    /// any key form, outside `infra.yml`. The committed workflows pass both.
+    #[test]
+    fn workflows_reach_no_secret_unnamed_and_compute_no_other_environment() -> Result<()> {
+        let unnamed =
+            |text: &str| unnamed_secret_problems(&ci_file(".github/workflows/x.yml", text));
+        for text in [
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ secrets['A'] }}\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{\n          secrets['A']\n        }}\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ toJSON(secrets) }}\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ format('{0}', secrets) }}\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ join(secrets) }}\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ contains(secrets, 'x') }}\n",
+            "jobs:\n  x:\n    steps:\n      - uses: a/b@c\n        with:\n          all: ${{ toJson( SECRETS ) }}\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ secrets . A }}\n",
+            "jobs:\n  x:\n    uses: ./.github/workflows/y.yml\n    secrets: inherit\n",
+            "jobs:\n  x:\n    uses: ./.github/workflows/y.yml\n    secrets: 'inherit'\n",
+            "jobs:\n  x:\n    uses: ./.github/workflows/y.yml\n    secrets: \"inherit\"\n",
+            "jobs:\n  x: {uses: ./.github/workflows/y.yml, secrets: inherit}\n",
+            "jobs:\n  x:\n    uses: ./.github/workflows/y.yml\n    \"secrets\": inherit\n",
+        ] {
+            assert_eq!(unnamed(text).len(), 1, "{text}: {:?}", unnamed(text));
+        }
+        for text in [
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ secrets.A }}\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo \"no secrets here\" # secrets: inherit\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ inputs.secrets_name }}\n",
+        ] {
+            assert_eq!(unnamed(text), Vec::<String>::new(), "{text}");
+        }
+        let computed =
+            |text: &str| computed_environment_problems(&ci_file(".github/workflows/x.yml", text));
+        for text in [
+            "jobs:\n  x:\n    environment: ${{ inputs.target }}\n",
+            "jobs:\n  x:\n    environment: { name: \"${{ inputs.target }}\" }\n",
+            "jobs:\n  x:\n    environment:\n      name: ${{ inputs.target }}\n      url: https://x\n",
+            "jobs:\n  x:\n    \"environment\": ${{ inputs.target }}\n",
+            "jobs:\n  x: {runs-on: u, environment: \"${{ inputs.t }}\"}\n",
+        ] {
+            assert_eq!(computed(text).len(), 1, "{text}: {:?}", computed(text));
+        }
+        for text in [
+            "jobs:\n  x:\n    environment: production\n",
+            "jobs:\n  x:\n    environment:\n      name: production\n    steps:\n      - run: echo ${{ inputs.environment }}\n",
+        ] {
+            assert_eq!(computed(text), Vec::<String>::new(), "{text}");
+        }
+        let dir = repo_root()?.join(".github/workflows");
+        for path in files_by_extension(&dir, &["yml", "yaml"])? {
+            let file = ci_file(&path.display().to_string(), &fs::read_to_string(&path)?);
+            assert_eq!(
+                unnamed_secret_problems(&file),
+                Vec::<String>::new(),
+                "{}",
+                file.path
+            );
+            if !path.ends_with("infra.yml") {
+                assert_eq!(
+                    computed_environment_problems(&file),
+                    Vec::<String>::new(),
+                    "{}",
+                    file.path
+                );
+            }
+        }
         Ok(())
     }
 
@@ -15156,7 +15647,7 @@ mod tests {
             assert!(
                 check(&infra, &[])
                     .iter()
-                    .any(|p| p.contains("which the check cannot name")),
+                    .any(|p| p.contains("the check cannot name")),
                 "{indirect} in infra.yml is refused"
             );
         }
