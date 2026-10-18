@@ -301,23 +301,28 @@ fn an_exit_is_never_refused_and_only_its_code_carries_step_up() {
     }
 }
 
-/// DEC-2507 item 1, lane LV's note on trading spec §9: a confirmed bid the exit price ladder
-/// cannot use, or one not in canonical fixed-point text, is refused `bid_invalid` with nothing committed, whether the code is shown or the
-/// exit committed; the same exit without the bid flags still commits.
+/// DEC-2507 item 1, trading spec §5.5: only what cannot be a confirmation is refused `bid_invalid`,
+/// with nothing committed, whether the code is shown or the exit committed: text that is not a
+/// fixed-point decimal, a value that is not positive, a price finer than nine places, or a floor
+/// above the bid. A floor equal to the bid is a confirmation, and the exit without the bid flags
+/// always commits.
 #[test]
 #[ignore = "pending E8-3"]
 fn an_exit_with_an_unusable_bid_confirmation_is_refused_and_commits_nothing() {
     let (mut fx, mut ids) = (Fixture::new(), FixedIds::default());
     for (bid, bid_size, floor) in [
         ("501.2x", "300", "495"),
-        ("501.20", "300", "495"),
+        ("", "300", "495"),
+        ("5e2", "300", "495"),
+        ("+501.2", "300", "495"),
+        ("501,2", "300", "495"),
+        (".", "300", "495"),
         ("0", "300", "0"),
         ("-501.20", "300", "-510"),
         ("501.2", "0", "495"),
         ("501.2", "-1", "495"),
         ("501.2", "300", "0"),
         ("501.2", "300", "501.21"),
-        ("501.2", "300.0", "495"),
         ("501.2000000001", "300", "495"),
     ] {
         let command = Owned::Exit {
@@ -371,6 +376,71 @@ fn an_exit_with_an_unusable_bid_confirmation_is_refused_and_commits_nothing() {
             &fx,
             &format!("owner_exit {AGENT} {INSTRUMENT}")
         )]
+    );
+}
+
+/// DEC-2507 item 1: a well-formed confirmation is normalized before it is bound, so the bid an
+/// owner types as displayed (`501.20`, `00.50`, `495.`) shows and commits the same code and payload
+/// as its canonical text.
+#[test]
+#[ignore = "pending E8-3"]
+fn an_exit_normalizes_its_bid_confirmation_before_binding_it() {
+    let (mut fx, mut ids) = (Fixture::new(), FixedIds::default());
+    let typed = Owned::Exit {
+        instrument: INSTRUMENT.to_owned(),
+        bid: Some(Confirmed {
+            bid: "501.20".into(),
+            bid_size: "00.50".into(),
+            floor: "495.".into(),
+        }),
+    };
+    let canonical_bid = Confirmed {
+        bid: "501.2".into(),
+        bid_size: "0.5".into(),
+        floor: "495".into(),
+    };
+    let canonical = Owned::Exit {
+        instrument: INSTRUMENT.to_owned(),
+        bid: Some(canonical_bid),
+    };
+    let canonical = code_now(&fx, &canonical);
+    let shown = answered(&mut fx, &mut ids, &typed, Typed::Show, 0);
+    assert_eq!(
+        shown,
+        [format!("code {canonical}")],
+        "the displayed text shows the canonical code"
+    );
+    let lines = answered(
+        &mut fx,
+        &mut ids,
+        &typed,
+        Typed::Commit(Some(&canonical)),
+        1,
+    );
+    assert_eq!(
+        lines,
+        [committed_line(
+            &fx,
+            &format!("owner_exit {AGENT} {INSTRUMENT}")
+        )]
+    );
+    let events = controls(&fx);
+    let event = events.last().expect("the exit commits");
+    for (member_path, value) in [
+        ("payload.bid", "501.2"),
+        ("payload.bid_size", "0.5"),
+        ("payload.floor", "495"),
+    ] {
+        assert_eq!(
+            member_text(event, member_path),
+            Some(value),
+            "{member_path}"
+        );
+    }
+    assert_ne!(
+        member(event, "payload.step_up"),
+        Some(&Value::Null),
+        "the canonical code steps up"
     );
 }
 
