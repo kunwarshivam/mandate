@@ -207,8 +207,9 @@ filtered.
 The deployment manager's policy allows the API server (`kube-api`, DEC-1172), so its gate probes a
 destination that policy denies and that answers whenever nothing filters: the cluster resolver's
 metrics port, 9153, at the address in the pod's resolv.conf (CoreDNS's `kube-dns` Service serves it;
-every policy here allows the resolver on port 53 only). The vault has no pod in the local cell and
-the journal's Service exposes 5432 alone, so a probe of either would read as filtered at once.
+every policy here allows the resolver on port 53 only). The vault admits only its own processes on
+8200 (its chart's policy) and the journal's Service exposes 5432 alone, so a probe of either could
+read as filtered whether or not the pod's own egress is.
 Residual: a resolver that serves no metrics port reads as filtered at once.
 */}}
 {{- define "mandate.egressGate" -}}

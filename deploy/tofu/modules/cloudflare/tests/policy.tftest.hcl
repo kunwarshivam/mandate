@@ -1,0 +1,123 @@
+# The API host is reached only through the tunnel and only past Access (DEC-2012 items 6 and 8),
+# checked on the plan against a mocked provider.
+
+mock_provider "cloudflare" {
+  mock_data "cloudflare_zone" {
+    defaults = {
+      zone_id = "0123456789abcdef0123456789abcdef"
+    }
+  }
+
+  mock_resource "cloudflare_zero_trust_tunnel_cloudflared" {
+    defaults = {
+      id = "c0ffee00-0000-4000-8000-000000000000"
+    }
+  }
+}
+
+variables {
+  name                  = "mandate-staging"
+  account_id            = "fedcba9876543210fedcba9876543210"
+  zone_name             = "example.com"
+  api_hostname          = "api-staging.example.com"
+  api_origin            = "http://127.0.0.1:8080"
+  access_allowed_emails = ["founder@example.com"]
+  archive_bucket        = "mandate-journal-archive-staging"
+}
+
+run "api_host_is_tunnel_only_and_behind_access" {
+  command = plan
+
+  assert {
+    condition     = cloudflare_dns_record.api.proxied && cloudflare_dns_record.api.type == "CNAME" && cloudflare_dns_record.api.content == "c0ffee00-0000-4000-8000-000000000000.cfargotunnel.com"
+    error_message = "The API host must be a proxied CNAME to the tunnel."
+  }
+
+  assert {
+    condition     = cloudflare_zero_trust_tunnel_cloudflared.this.config_src == "cloudflare"
+    error_message = "The tunnel is remotely managed, so its token is all the chart needs."
+  }
+
+  assert {
+    condition = (
+      length(cloudflare_zero_trust_tunnel_cloudflared_config.this.config.ingress) == 2 &&
+      cloudflare_zero_trust_tunnel_cloudflared_config.this.config.ingress[0].hostname == "api-staging.example.com" &&
+      cloudflare_zero_trust_tunnel_cloudflared_config.this.config.ingress[1].service == "http_status:404"
+    )
+    error_message = "The tunnel routes the API host and answers 404 to everything else."
+  }
+
+  assert {
+    condition     = cloudflare_zero_trust_access_application.api.domain == "api-staging.example.com" && cloudflare_zero_trust_access_application.api.type == "self_hosted"
+    error_message = "Access must guard the API host."
+  }
+
+  assert {
+    condition     = length(cloudflare_zero_trust_access_application.api.policies) == 1 && cloudflare_zero_trust_access_application.api.policies[0].id == cloudflare_zero_trust_access_policy.operators.id
+    error_message = "The Access application must carry the operators' policy and no other."
+  }
+
+  assert {
+    condition = (
+      cloudflare_zero_trust_access_policy.operators.decision == "allow" &&
+      length(cloudflare_zero_trust_access_policy.operators.include) == 1 &&
+      alltrue([for rule in cloudflare_zero_trust_access_policy.operators.include : rule.email.email == "founder@example.com" && rule.everyone == null])
+    )
+    error_message = "The policy admits the named emails alone, never everyone."
+  }
+}
+
+run "the_archive_is_locked_for_its_retention" {
+  command = plan
+
+  assert {
+    condition     = cloudflare_r2_bucket.journal_archive.name == "mandate-journal-archive-staging" && cloudflare_r2_bucket.journal_archive.location == "enam" && cloudflare_r2_bucket.journal_archive.jurisdiction == "default"
+    error_message = "The archive is the environment's R2 bucket in eastern North America, in R2's default jurisdiction, whose endpoint the cell's egress is pinned to."
+  }
+
+  assert {
+    condition = (
+      length(cloudflare_r2_bucket_lock.journal_archive.rules) == 1 &&
+      cloudflare_r2_bucket_lock.journal_archive.rules[0].enabled &&
+      cloudflare_r2_bucket_lock.journal_archive.rules[0].prefix == "" &&
+      cloudflare_r2_bucket_lock.journal_archive.rules[0].condition.type == "Age" &&
+      cloudflare_r2_bucket_lock.journal_archive.rules[0].condition.max_age_seconds >= 30 * 86400
+    )
+    error_message = "One enabled lock rule must cover every key for at least the 30-day retention."
+  }
+
+  assert {
+    condition     = cloudflare_r2_bucket_lock.journal_archive.bucket_name == cloudflare_r2_bucket.journal_archive.name
+    error_message = "The lock is on the archive bucket."
+  }
+}
+
+run "refuses_a_lock_shorter_than_the_retention" {
+  command = plan
+
+  variables {
+    archive_retention_days = 7
+  }
+
+  expect_failures = [var.archive_retention_days]
+}
+
+run "refuses_no_email" {
+  command = plan
+
+  variables {
+    access_allowed_emails = []
+  }
+
+  expect_failures = [var.access_allowed_emails]
+}
+
+run "refuses_a_wildcard_email" {
+  command = plan
+
+  variables {
+    access_allowed_emails = ["*@example.com"]
+  }
+
+  expect_failures = [var.access_allowed_emails]
+}

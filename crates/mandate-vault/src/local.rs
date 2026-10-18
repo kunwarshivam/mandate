@@ -25,7 +25,7 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 
 use crate::SourceError;
 use crate::lease::{Lease, lease_times};
-use crate::policy::{Access, Identity, SecretPath, require};
+use crate::policy::{Access, Identity, SecretPath, kv_path, require};
 use crate::source::{GRANT_SECS, Grant, SecretSource};
 
 /// The role name every local grant carries: the local backend has no roles.
@@ -83,9 +83,13 @@ impl LocalSource {
     ) -> Result<Self, SourceError> {
         let held = match (&identity, vault) {
             (Identity::Api | Identity::ConnectionManager, Some(Opened::Api(v))) => Held::Api(v),
-            (Identity::Executor(_) | Identity::SecretImport, Some(Opened::Executor(v))) => {
-                Held::Executor(v)
-            }
+            (
+                Identity::Executor(_)
+                | Identity::SecretImport
+                | Identity::ModelGateway
+                | Identity::EmailSender,
+                Some(Opened::Executor(v)),
+            ) => Held::Executor(v),
             (Identity::Runtime, None) => Held::Nothing,
             _ => return Err(SourceError::Config),
         };
@@ -145,7 +149,9 @@ impl LocalSource {
             SecretPath::ClientSecret => Entry::client_secret(
                 KeyRef::new(ALPACA_CLIENT_SECRET_KEY_REF).map_err(|_| SourceError::Config)?,
             ),
-            SecretPath::Platform(_) => return Err(SourceError::Unimplemented { story: "E21-32" }),
+            SecretPath::Platform(_) => {
+                Entry::client_secret(KeyRef::new(&kv_path(path)).map_err(|_| SourceError::Config)?)
+            }
         })
     }
 

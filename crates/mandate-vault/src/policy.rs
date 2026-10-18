@@ -9,7 +9,12 @@
 //! | Token exchange for `c` (through a grant) | `c`'s code, the client secret | `c`'s token | `c`'s code |
 //! | Executor for `c` | `c`'s token, as a lease | — | — |
 //! | Runtime | — | — | — |
-//! | Secret import | — | the client secret | — |
+//! | Secret import | — | the client secret, the platform's own secrets | — |
+//! | Model gateway | the model provider's key | — | — |
+//! | Email sender | the email credential | — | — |
+//!
+//! The platform's own secrets ([`PlatformSecret`], DEC-2020) are each read by one identity and
+//! written only by the secret import; none is ever deleted, and a rotation writes over it.
 
 use mandate_connections::record::ConnectionId;
 
@@ -74,8 +79,15 @@ pub struct Holders {
 }
 
 /// The holders of `secret` (DEC-2020 item 2).
-pub fn holders(_secret: PlatformSecret) -> Result<Holders, SourceError> {
-    Err(SourceError::Unimplemented { story: "E21-32" })
+pub fn holders(secret: PlatformSecret) -> Result<Holders, SourceError> {
+    let reads = match secret {
+        PlatformSecret::ModelProviderKey => Identity::ModelGateway,
+        PlatformSecret::EmailCredential => Identity::EmailSender,
+    };
+    Ok(Holders {
+        reads,
+        writes: Identity::SecretImport,
+    })
 }
 
 /// What an identity does to a path.
@@ -100,6 +112,12 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
         (Identity::TokenExchange(own), Access::Read | Access::Delete, SecretPath::Code(c))
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Read, SecretPath::Token(c)) => own == c,
+        (identity, Access::Read, SecretPath::Platform(secret)) => {
+            holders(*secret).is_ok_and(|h| h.reads == *identity)
+        }
+        (identity, Access::Write, SecretPath::Platform(secret)) => {
+            holders(*secret).is_ok_and(|h| h.writes == *identity)
+        }
         _ => false,
     }
 }
@@ -165,6 +183,7 @@ pub fn openbao_policy(
     mounts: &Mounts,
 ) -> String {
     let mut paths: Vec<SecretPath> = vec![SecretPath::ClientSecret];
+    paths.extend(PlatformSecret::ALL.map(SecretPath::Platform));
     for connection in connections {
         paths.push(SecretPath::Code(connection.clone()));
         paths.push(SecretPath::Token(connection.clone()));
@@ -208,9 +227,6 @@ pub fn openbao_policy(
 
 /// Refuses as [`SourceError::Denied`] what [`allows`] does not allow.
 pub fn require(identity: &Identity, access: Access, path: &SecretPath) -> Result<(), SourceError> {
-    if let SecretPath::Platform(secret) = path {
-        holders(*secret)?;
-    }
     if allows(identity, access, path) {
         Ok(())
     } else {
