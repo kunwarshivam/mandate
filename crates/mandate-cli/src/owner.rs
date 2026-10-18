@@ -170,10 +170,10 @@ impl ExitArgs {
 /// committed or found (DEC-2507 item 2).
 ///
 /// # Errors
-/// [`crate::agent::command`]'s, a refused resume or Stop committing nothing; `bid_invalid`, committing
-/// nothing, for an exit whose confirmed bid, bid size or floor is not a positive fixed-point decimal
-/// or whose floor is above its bid. A well-formed confirmation is normalized to its canonical text
-/// before the code binds it (DEC-2507 item 1).
+/// [`crate::agent::command`]'s, a refused resume or Stop committing nothing; `bid_invalid`,
+/// committing nothing, for an exit whose confirmed bid, bid size or floor is not a positive
+/// fixed-point decimal or whose floor is above its bid. A well-formed confirmation is normalized to
+/// its canonical text before the code binds it (DEC-2507 item 1).
 pub fn answer(
     journal: &mut dyn ControlJournal,
     ids: &mut dyn Ids,
