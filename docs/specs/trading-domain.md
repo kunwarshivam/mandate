@@ -9,11 +9,11 @@
 
 ## Change history
 
-- **v0.19:** §5.7 adds the rule that a pending cancel ends only by the broker's answer to it. A
-  working status reported for a `PendingCancel` order whose cancel is unconfirmed and not refused
-  keeps it `PendingCancel`. Only a refusal is the diagram's "cancel rejected" edge. Every start
-  sends each unconfirmed cancel of a live order again, so a crash between a kill switch's batch
-  and its `Cancel` cannot leave the order working
+- **v0.19:** §5.7: a pending cancel ends only by the broker's answer to it. A working status
+  keeps a `PendingCancel` order whose cancel is unconfirmed in `PendingCancel`. A refusal takes the
+  "cancel rejected" edge, except for a kill switch's cancel. `Expired` and `Rejected` end a pending
+  cancel. Every start sends each unconfirmed pending cancel again, so a crash between a kill
+  switch's batch and its `Cancel` cannot leave the order working
   ([DEC-2302](../project/decisions/DEC-2302.md)). A tightening under DEC-176.
 - **v0.18:** §6.2 and §2.1 add `fee_rounding`: under `per_fee_per_fill` each regulatory fee of
   each fill is rounded up to the cent before summing, for a broker that rounds each fee separately
@@ -660,7 +660,9 @@ stateDiagram-v2
     PartiallyFilled --> PendingCancel: cancel requested
     PendingCancel --> Canceled: confirmed
     PendingCancel --> Filled: filled first
-    PendingCancel --> PriorState: cancel rejected
+    PendingCancel --> PriorState: cancel rejected (never a kill switch's cancel)
+    PendingCancel --> Expired: expired
+    PendingCancel --> Rejected: rejected
     Accepted --> PendingReplace: broker replace pending
     PartiallyFilled --> PendingReplace: broker replace pending
     PendingReplace --> PriorState: replace rejected
@@ -714,12 +716,16 @@ PartiallyFilled); fills during either pending state update filled quantity witho
   reconciliation.
 - Every transition is journaled before it takes effect in state.
 - **A pending cancel ends only by the broker's answer to it** ([DEC-2302](../project/decisions/DEC-2302.md)).
-  A status that maps to Accepted or PartiallyFilled, reported for a `PendingCancel` order whose
-  cancel is unconfirmed and not refused, keeps it `PendingCancel` (a fill it reports is still
-  applied). Only a refusal of the cancel takes the "cancel rejected" edge to `PriorState`. On every
-  start, each Accepted, PartiallyFilled, or `PendingCancel` order whose cancel is unconfirmed has
-  its cancel sent again, and its answer decides the order. No new record is written, since the
-  journal already names the request.
+  - A status that maps to Accepted or PartiallyFilled, reported for a `PendingCancel` order whose
+    cancel is unconfirmed, keeps it `PendingCancel`. A fill it reports is still applied.
+  - A refusal of the cancel asks one lookup and no cancel. A working answer to that lookup takes
+    the "cancel rejected" edge to `PriorState`, except for a cancel a kill switch asked (§5.5),
+    which stays `PendingCancel`.
+  - A terminal status ends the order, the reservation is released, and its cancel is never sent
+    again.
+  - On every start, each `PendingCancel` order whose cancel is unconfirmed has its cancel sent
+    again in place of the lookup, and its answer decides the order. No new record is written,
+    since the journal already names the request.
 
 ## 6. Fills and fees
 
