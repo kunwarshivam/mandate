@@ -6,6 +6,8 @@ use std::fs::{self, DirBuilder, OpenOptions, Permissions};
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
+use std::process;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use secrecy::{ExposeSecret, SecretString};
 
@@ -21,6 +23,9 @@ pub const SECRET_ID_SUFFIX: &str = ".secret-id";
 /// The permission bits of group and others, none of which a credential's file or directory may
 /// carry.
 const OPEN_TO_OTHERS: u32 = 0o077;
+
+/// The number of the next temporary file this process writes a credential to before renaming it.
+static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 /// Writes each identity's credentials into `dir`, `<role>.role-id` and `<role>.secret-id`, each a
 /// plain file of mode 0600 holding the value alone, replacing any earlier plain file of that name.
@@ -58,27 +63,35 @@ pub fn write_credentials(
         }
     }
     for (name, value) in &files {
-        write_owner_only(&dir.join(name), value)?;
+        write_owner_only(dir, name, value)?;
     }
     let mut written: Vec<String> = files.into_iter().map(|(name, _)| name).collect();
     written.sort();
     Ok(written)
 }
 
-/// Writes `value` to `path`, a plain file or absent, as a plain file of mode 0600, whatever mode
-/// an earlier file had.
-fn write_owner_only(path: &Path, value: &str) -> Result<(), SourceError> {
+/// Writes `value` to `dir/name` as a plain file of mode 0600 that replaces whatever is there. The
+/// value goes first to a dot-named file made new in `dir`, so no existing file, link, or hard link
+/// is opened, and is synced before a rename puts it in place, so a crash never leaves an empty
+/// credential. The temporary file is removed when any step fails.
+fn write_owner_only(dir: &Path, name: &str, value: &str) -> Result<(), SourceError> {
+    let n = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+    let temp = dir.join(format!(".{name}.{}.{n}.tmp", process::id()));
     let mut file = OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
-        .open(path)
+        .open(&temp)
         .map_err(|_| SourceError::CredentialFile)?;
-    file.set_permissions(Permissions::from_mode(0o600))
+    let placed = file
+        .set_permissions(Permissions::from_mode(0o600))
         .and_then(|()| file.write_all(value.as_bytes()))
         .and_then(|()| file.sync_all())
-        .map_err(|_| SourceError::CredentialFile)
+        .and_then(|()| fs::rename(&temp, dir.join(name)));
+    if placed.is_err() {
+        drop(fs::remove_file(&temp));
+    }
+    placed.map_err(|_| SourceError::CredentialFile)
 }
 
 /// Reads an operator's token from `path`: a plain file, not a symbolic link, with no group or

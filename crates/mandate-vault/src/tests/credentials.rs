@@ -2,7 +2,7 @@
 //! tightened, a directory or token open to others refused, against names written out by hand.
 
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -220,6 +220,31 @@ fn a_link_planted_at_an_output_name_is_refused_and_its_target_untouched() {
             .is_symlink()
     );
     assert_eq!(listing(&dir), ["api.secret-id"]);
+}
+
+/// A hard link planted at an output name, which the pre-check sees as a plain file, is replaced
+/// rather than written through: the file it shares stays as it was (DEC-2022 item 1).
+#[test]
+fn a_hard_link_planted_at_an_output_name_is_replaced_not_written_through() {
+    let dir = fresh("hard-linked");
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    let shared = fresh("shared-by-hard-link");
+    fs::write(&shared, "someone-elses-file").unwrap();
+    set_mode(&shared, 0o644);
+    let planted = dir.join("api.secret-id");
+    fs::hard_link(&shared, &planted).unwrap();
+    let written = write_credentials(&dir, &[credential(Identity::Api, "role-a", "secret-a")]);
+    assert_eq!(
+        written,
+        Ok(vec!["api.role-id".to_owned(), "api.secret-id".to_owned()])
+    );
+    assert_eq!(fs::read_to_string(&shared).unwrap(), "someone-elses-file");
+    assert_eq!(mode(&shared), 0o644);
+    assert_eq!(fs::read_to_string(&planted).unwrap(), "secret-a");
+    assert_eq!(mode(&planted), 0o600);
+    assert_eq!(fs::symlink_metadata(&planted).unwrap().nlink(), 1);
+    assert_eq!(listing(&dir), ["api.role-id", "api.secret-id"]);
 }
 
 /// A refusal changes no file: every output name is checked before any is written, so an earlier
