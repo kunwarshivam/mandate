@@ -905,6 +905,12 @@ pub enum Command {
         scope: KillScope,
         initiator: Initiator,
         confirmation: Option<OwnerConfirmation>,
+        /// The record on another stream this switch copies, when it copies one: an agent stream's
+        /// `KillSwitchActivated`, which a separate executor process applies (DEC-2003 item 4). It
+        /// is recorded on this stream's `KillSwitchActivated` as `copied_from`, so whether that
+        /// record was applied is read from this stream's own events, never from a mode another
+        /// restriction may also have set (journal spec §1 principle 4).
+        cause: Option<EventId>,
     },
     Reconcile(ReconcileReason),
     /// Cancels `agent`'s working **opening** orders in `instrument`, and nothing else

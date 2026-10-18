@@ -14,9 +14,9 @@ its memory until they move to Postgres (item 6).
   local build, and the chart refuses it in any other tier.
 */ -}}
 {{- define "mandate.stubIssuer" -}}
-{{- $tier := .root.Values.api.tier -}}
+{{- $tier := .root.Values.deploymentTier -}}
 {{- if not (has $tier (list "dev" "ci")) -}}
-{{- fail (printf "images.stub-issuer runs only in a dev or ci cell, and api.tier is %q (DEC-2100)" $tier) -}}
+{{- fail (printf "images.stub-issuer runs only in a dev or ci cell, and deploymentTier is %q (DEC-2100)" $tier) -}}
 {{- end -}}
 - name: stub-issuer
   image: {{ index .root.Values.images "stub-issuer" | quote }}
@@ -70,8 +70,6 @@ its memory until they move to Postgres (item 6).
   value: {{ required "api.jwksUrl is required with images.api" $a.jwksUrl | quote }}
 - name: MANDATE_API_APP_ORIGIN
   value: {{ required "api.appOrigin is required with images.api" $a.appOrigin | quote }}
-- name: MANDATE_DEPLOYMENT_TIER
-  value: {{ required "api.tier is required with images.api" $a.tier | quote }}
 - name: CREDENTIALS_DIRECTORY
   value: /run/credentials
 {{- end -}}

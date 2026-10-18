@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mandate-vault-server values",
+  "description": "Settings only: the TLS key is made in the cluster by the chart, and the unseal key and root token by the operator's init, never a value (DEC-822 item 4, DEC-977 item 5). Nothing here can add a server argument, so the dev server cannot be turned on (DEC-977 item 6). The static seal is refused outside staging (DEC-2021).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "environment",
+    "workspace",
+    "image",
+    "seal",
+    "storage",
+    "days"
+  ],
+  "properties": {
+    "environment": {
+      "enum": [
+        "cell",
+        "staging",
+        "production"
+      ]
+    },
+    "workspace": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+    },
+    "image": {
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$"
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "size",
+        "className"
+      ],
+      "properties": {
+        "size": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*Gi$"
+        },
+        "className": {
+          "type": "string",
+          "pattern": "^([a-z0-9]([a-z0-9.-]*[a-z0-9])?)?$"
+        }
+      }
+    },
+    "days": {
+      "type": "integer",
+      "minimum": 31,
+      "maximum": 825
+    },
+    "seal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "keyId",
+        "keyObject"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "shamir",
+            "static"
+          ]
+        },
+        "keyId": {
+          "type": "string",
+          "pattern": "^([a-z0-9][a-z0-9-]{0,62})?$"
+        },
+        "keyObject": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "seal": {
+            "properties": {
+              "type": {
+                "const": "static"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "environment": {
+            "const": "staging"
+          },
+          "seal": {
+            "properties": {
+              "keyId": {
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
