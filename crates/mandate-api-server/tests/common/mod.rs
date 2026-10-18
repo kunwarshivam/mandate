@@ -280,6 +280,7 @@ pub fn hosted() -> mandate_api_server::members::Hosted {
     mandate_api_server::members::Hosted {
         org: mandate_identity::OrgId::from_ulid_text(ORG).expect("a ULID"),
         workspace: mandate_identity::WorkspaceId::from_ulid_text(WORKSPACE).expect("a ULID"),
+        internal_paper: false,
     }
 }
 

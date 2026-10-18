@@ -33,6 +33,9 @@ pub fn until_parser(rows: &[StoredEvent]) -> Result<Vec<MembershipRecord>, Looku
 pub struct Hosted {
     pub org: OrgId,
     pub workspace: WorkspaceId,
+    /// Whether the deployment's configuration marks it one of the team's internal paper
+    /// workspaces, checked against its control stream at start (DEC-1143).
+    pub internal_paper: bool,
 }
 
 /// The hosted workspace's memberships at one instant.
