@@ -36,13 +36,13 @@ claim issue or the decision file, not here.
 ## Sessions
 
 - **2026-10-18, late evening: the founder's decisions, the demo's checks, staging's first
-  modules.** The founder answered thirteen questions in the coordinator session, recorded verbatim
-  in DEC-2605 (#1692 added rows 11 to 13): OpenTofu, DOKS and GitOps under a $150 a month cap,
+  modules.** The founder answered fourteen questions in the coordinator session, recorded verbatim
+  in DEC-2605 (#1692 added rows 11 to 13, #1709 row 14): OpenTofu, DOKS and GitOps under a $150 a month cap,
   staging for the demo, Cloudflare R2 with a bucket lock for the archive, `cli_confirm` step-up for
   paper grants, a Robinhood sell booked at its limit price, a CI signing key with staging first
   and no hardware key, staging's vault unsealing itself, and staging's automation needing no step
-  from the founder. The coordinator reports a further direction, that CI no longer gates a merge;
-  its row is still to be recorded. Lane E2E's slices 4 to 7 merged (#1614 `cb043cb5`, #1625,
+  from the founder; and CI no longer gates a merge (row 14), a break on `main` being fixed at once.
+  DEC-2300 merged Accepted (#1598). Lane E2E's slices 4 to 7 merged (#1614 `cb043cb5`, #1625,
   #1674, #1693): the demo cell now checks each run's own workspace, the owner's sign-in and
   signed-in reads, the backtest run, record and read, and the CLI kill switch; running main's API
   locally found its membership parser still a fail-closed placeholder, which lane MB wired

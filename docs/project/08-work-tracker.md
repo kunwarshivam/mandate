@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-18 late evening (main at #1663): the founder's thirteen decisions of the day are recorded in [DEC-2605](decisions/DEC-2605.md); the demo cell checks sign-in, the signed-in reads, the backtest and the kill switch (E2E slices 4 to 7); the hosted infrastructure's first modules merged (IAC, GO, V2); release signing's key is compiled in (#1689) |
+| **Last updated** | 2026-10-18 late evening (main at #1663): the founder's fourteen decisions of the day are recorded in [DEC-2605](decisions/DEC-2605.md); the demo cell checks sign-in, the signed-in reads, the backtest and the kill switch (E2E slices 4 to 7); the hosted infrastructure's first modules merged (IAC, GO, V2); release signing's key is compiled in (#1689) |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
@@ -23,7 +23,7 @@ Open PRs and claim issues on GitHub are the live record of who holds what.
 | M3 Simulated execution and backtest | Done | The backtest runner's remaining pieces (DEC-127 items 15, 24, 25) have no story row yet |
 | M4 Journal | In progress: core, Postgres, artifacts, verification CLI, cold store and its checks, E5-8 `verify-cold` (#654, #662) merged; E7-19's artifact-aware Postgres append in tests (#676, DEC-510) | E5-5 the personal-data vault; E5-7 and E5-9 the cold store's operational half and examination bundle; all safety-critical; DEC-265 item 1 waits on the founder |
 | M5 Agent runtime and risk | In progress: the runtime and kill switches, the mandate document (validation, policy, change classification), the risk state and ladder, the gate with the US account rules, eligibility, conduct controls and restrictions, autonomy and the order builder, delegations, the client ceiling, the review date, V-047. **Tripwires (E6-13) are done**: #613 tests, #618 implementation, #621 status; MC-W01 to MC-W57 and MC-J01 to MC-J10 pass | **E6-15** (lane TW, claim #1599): the account stream's risk state, tripwires and the ladder latch, binds only in the harness today; no runtime or shell gate reads it, and §9.3 closes none of its seven records. Slices A (journal spec and registration) and B (a pure, fail-closed `AccountRiskFold`) are off R0's path; slice C wires the shell gate and the live door, timing is the founder's (Waiting on the founder) |
-| M6 Alpaca connector (paper) and recovery | Code complete for paper, and every first-live-trade code row in the brief is merged (S2 #1349, B3 #1426, K1b #1346, B2b #1084/#1085, C1 to C4, G1a, G1b, the R0 gap rows R1 to R22; lane LV's map, 2026-10-18). The R0 rehearsal against `mandate-rh-sim` passes 1a to 2t; 2u expects today's not-flat refusal (#1518, #1524) | **First paper trade**: the founder's run (E2). **First live trade** (DEC-529, target 2026-10-23): the founder's R0 run and DEC-529 live-door items; R23 (DEC-1152 item 4) is the founder's; DEC-1152's open items: (a) a Robinhood sell's unpublished fill price: the founder chose the limit price (DEC-2605 row 6), and DEC-2300's record waits on #1598 only, (b) `mandate agent exit`, lane M7's S1 (#1686), (c) a fresh connection record per entry, by design. E6-15 slice C (M5) is the founder's timing call |
+| M6 Alpaca connector (paper) and recovery | Code complete for paper, and every first-live-trade code row in the brief is merged (S2 #1349, B3 #1426, K1b #1346, B2b #1084/#1085, C1 to C4, G1a, G1b, the R0 gap rows R1 to R22; lane LV's map, 2026-10-18). The R0 rehearsal against `mandate-rh-sim` passes 1a to 2t; 2u expects today's not-flat refusal (#1518, #1524) | **First paper trade**: the founder's run (E2). **First live trade** (DEC-529, target 2026-10-23): the founder's R0 run and DEC-529 live-door items; R23 (DEC-1152 item 4) is the founder's; DEC-1152's open items: (a) a Robinhood sell's unpublished fill price: the founder chose the limit price (DEC-2605 row 6), recorded as DEC-2300, Accepted (#1598), (b) `mandate agent exit`, lane M7's S1 (#1686), (c) a fresh connection record per entry, by design. E6-15 slice C (M5) is the founder's timing call |
 | M7 Escalation v0 | In progress: `mandate-approval` (E8-1 to E8-3), the runtime's approval path, owner commands, the MC-E lifecycle driver; MC-E01, E06, E17 to E24 and E29 pass; `approvals list/show/approve/skip` and `agent deploy/pause/kill` are wired in the CLI | Lane M7 (claim #1594): S1 `agent status`, `resume`, `stop` and `exit` in the CLI; S2 `agent acknowledge`, which needs `OwnerAcknowledged`'s closed schema (journal spec first); S3 to S5 E8-11's email adapter on a recorded-fixture transport and a founder-only SMTP transport tested on a loopback fake. Chat (E8-12) stays deferred (DEC-824) |
 | M9 Web app (started early, DEC-200) | On fixtures: the shell, Home, agents, approvals, Messages and the copilot, the set-up chat, sign-in, the landing page (its windows move as a Mac's, its name the product's logo, its buttons grey: DEC-903; a switch between Windows 98 and a System 7 desktop, Windows the default until the Mac is finished: DEC-904; the app's own screens in a second browser tab, a painting per visit, and desktop motion: DEC-905; the app itself live in front, driven by the browser, owls with their own minds, and no explaining copy: DEC-906); the design plan's first five decisions (DEC-511 to DEC-515) on #669; the gate decision record is a ledger that fits the first screen (2026-10-17) | `web/design/plan.md`, every unticked item, in its order; then the connection to a deployment; after the first paper trade, the founder's Home (signed-in, D1), holdings, search and watchlist stories (E11-10, E11-11; [DEC-528](decisions/DEC-528.md), which also places E10-19 and E19-12 later and defers adoption) |
 | M8 and M9's demo lanes (DEC-820, demo about 2026-10-26) | In progress in five lanes (below): identity spec v0.3, the authn, identity and passkey crates' tests and the passkey implementation; the workspace API contract and schemas; journal spec to v0.21; notifications spec v0.2 and its crates' tests; the web client foundation; the audit read contracts | L1 E9-1 sessions, E9-2 I1 implementation, E9-4 step-up, E9-7; L2 the journal spec queue (after v0.21), E10-13, E10-10 implementation, E10-7, E7-17 (fold tests and DEC-687 merged, the tests' correction in review, then the fold implementation, then the state-machine slice); L3 the E8-9 and E8-14 implementations; L4 the E11-9 slices; L5 E12-6, waiting on E9-2's `authorize` (identity ID-8) |
@@ -39,9 +39,9 @@ and MC-E cases pass; the rest wait on E8-8 and DEC-444's harness. `crates/mandat
 is the record and outranks this line.
 
 **Open PRs.** GitHub is the live record. Each merges on an independent review on a different
-model (DEC-79), approved by the coordinator under DEC-175. The coordinator reports the founder's
-direction of 2026-10-18 that CI no longer gates a merge: agents land approved PRs without waiting
-on it, and a red `main` is fixed forward. Its DEC-2605 row is still to be recorded.
+model (DEC-79), approved by the coordinator under DEC-175. CI no longer gates a merge (the
+founder, DEC-2605 row 14, #1709): approved PRs land once reviewed, `main`'s post-merge CI catches
+a break, and a builder fixes `main` at once.
 
 ## Next, in order
 
@@ -115,11 +115,12 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   copy; a backlog line makes those scopes a prerequisite before the executor runs beyond the dev
   and CI cells.
 - **Decided 2026-10-18:** the `Co-authored-by` check is gone ([DEC-2601](decisions/DEC-2601.md));
-  and the thirteen rows of [DEC-2605](decisions/DEC-2605.md): hosting, budget, the demo on staging,
+  and the fourteen rows of [DEC-2605](decisions/DEC-2605.md) (row 14 in #1709): hosting, budget, the demo on staging,
   the archive (rows 1 to 4), `cli_confirm` step-up for paper grants (row 5, DEC-2103 item 7), a
-  Robinhood sell booked at its limit price (row 6, DEC-2300 on #1598), no hardware key and a CI
+  Robinhood sell booked at its limit price (row 6, DEC-2300, #1598), no hardware key and a CI
   signing key with staging first (rows 8, 9), staging's vault unsealing itself (row 10), and
-  staging's automation needing no step from you (rows 11 to 13). None of these waits on you.
+  staging's automation needing no step from you (rows 11 to 13), and CI no longer gating a merge
+  (row 14). None of these waits on you.
 
 Nothing else is blocked on you.
 
