@@ -116,8 +116,9 @@ pub enum ConnectionCheck {
     /// A version-2 establishment's or a rotation's check is not the passing check of its occasion
     /// on the bound stream for the same connection, or a copy differs from its original.
     CauseMismatch,
-    /// A range with no connection anchor reached a record rule 66, 67, 68, or 131 judges, so it
-    /// fails closed there: cause `unanchored`, not a rule (journal spec v0.35 §11, DEC-885 item 5).
+    /// A range with no connection anchor reached a record rule 66, 67, 68, 131, or 201 judges, so
+    /// it fails closed there: cause `unanchored`, not a rule (journal spec v0.35 §11, DEC-885 item
+    /// 5; rule 201, v0.54 §9.24, DEC-1171).
     Unanchored,
 }
 
@@ -152,7 +153,7 @@ pub fn verify_connection_lifecycle(rows: &[StoredEvent]) -> Result<(), Connectio
         .map_or(Ok(()), |failing| Err(failing.indexed()))
 }
 
-/// Each stream's fold of rules 66, 67, 68, and 131, as the full-chain run holds it.
+/// Each stream's fold of rules 66, 67, 68, 131, and 201, as the full-chain run holds it.
 #[derive(Debug, Clone, Default)]
 struct Folds {
     controls: BTreeMap<String, ControlFold>,
@@ -200,7 +201,8 @@ impl Failing<'_> {
     }
 }
 
-/// Where a range's run of rules 66, 67, 68, and 131 starts (journal spec v0.35 §11, DEC-885).
+/// Where a range's run of rules 66, 67, 68, 131, and 201 starts (journal spec v0.35 §11, DEC-885;
+/// rule 201, DEC-1171).
 #[derive(Debug, Clone)]
 pub enum ConnectionStart {
     /// The rows start at each stream's `seq` 1: the full chain, anchored on nothing.
@@ -227,11 +229,11 @@ pub struct ConnectionAnchor {
 impl ConnectionAnchor {
     /// The anchor of one stream after `prefix`, its rows `seq` 1 to `from_seq − 1` that
     /// [`VerifiedPrefix::bind`] verified from genesis and bound to the range's trusted start
-    /// (DEC-892, DEC-889). `Broken` when the prefix breaks rule 66, 67, 68, or 131, since a broken
-    /// chain anchors nothing (DEC-885 I5), or when the prefix's rows span more than one stream,
-    /// since rows of more than one stream are no one stream's chain to fold (DEC-913 item 1); an
-    /// empty prefix keeps its meaning (DEC-913 item 1, DEC-889 item 2). The caller then runs the
-    /// range [`ConnectionStart::Unanchored`], as it does when `bind` refuses the rows.
+    /// (DEC-892, DEC-889). `Broken` when the prefix breaks rule 66, 67, 68, 131, or 201, since a
+    /// broken chain anchors nothing (DEC-885 I5), or when the prefix's rows span more than one
+    /// stream, since rows of more than one stream are no one stream's chain to fold (DEC-913 item
+    /// 1); an empty prefix keeps its meaning (DEC-913 item 1, DEC-889 item 2). The caller then runs
+    /// the range [`ConnectionStart::Unanchored`], as it does when `bind` refuses the rows.
     pub fn from_verified(
         prefix: &VerifiedPrefix<'_>,
     ) -> Result<ConnectionAnchor, ConnectionAnchorError> {
@@ -271,7 +273,7 @@ impl ConnectionAnchor {
 /// Why [`ConnectionAnchor::from_verified`] gave no anchor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionAnchorError {
-    /// The prefix breaks rule 66, 67, 68, or 131 (DEC-885 item 2, I5).
+    /// The prefix breaks rule 66, 67, 68, 131, or 201 (DEC-885 item 2, I5; DEC-1171).
     Broken,
     /// Never returned now that E7-17 built the fold; kept, as `PrefixError` keeps its own, so a
     /// caller's match stays the same across the crate's stubs (DEC-77).
@@ -306,9 +308,10 @@ impl LocatedConnectionFailure {
 /// existence included, and fails closed with [`ConnectionCheck::Unanchored`] at the first record
 /// of another stream that the unanchored run would fail at (DEC-889 item 2); unanchored, it
 /// fails closed with [`ConnectionCheck::Unanchored`] at the first `ConnectionRequested`,
-/// `ConnectionEstablished`, `ConnectionCredentialRotated`, or `ConnectionRefused` on a control
-/// stream or connection record on an account stream, a `ConnectionRevoked` there included; a
-/// control-stream `ConnectionRevoked` never fails (DEC-885 items 3 and 4, I6; DEC-888).
+/// `ConnectionEstablished`, `ConnectionCredentialRotated`, `ConnectionRefused`, or version-2
+/// `AgentDeployed` on a control stream or connection record on an account stream, a
+/// `ConnectionRevoked` there included; a control-stream `ConnectionRevoked` never fails, and a
+/// version-1 `AgentDeployed` is never judged (DEC-885 items 3 and 4, I6; DEC-888; DEC-1171).
 pub fn verify_connection_lifecycle_from(
     start: ConnectionStart,
     rows: &[StoredEvent],
