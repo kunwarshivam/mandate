@@ -10,12 +10,24 @@
 //! that is not JSON (`null`, a number, an array, or a quoted string) is a bare string; `expected`
 //! is `ok` or `reason@path`.
 //!
-//! `NoticeAttempted` is written at version 2 (journal spec v0.40, DEC-706): version 1's members and
-//! `verdict` last, non-null exactly when `status` is `failed` and held by rule 134 to the verdict
-//! notifications spec §5.2 to §5.4 fix for its reason. From v0.40 `append` refuses version 1 as
-//! `unknown_schema` at `payload`. Until DEC-706's implementation registers version 2, every test
-//! that parses an attempt is pending: the journal refuses version 2 as `unknown_schema`, which is
-//! the answer they fail on.
+//! `NoticeAttempted` is written at version 3 (journal spec v0.51, DEC-2505): version 2's members
+//! (DEC-706's `verdict` last, held by rule 134) and `address_ref` after them, non-null exactly when
+//! `channel` is `web_push` and then the only entry of `pii_refs` (rule 215), with the stop
+//! `address_retired` on an abandoned web-push attempt only (rules 127 and 216). From v0.51 `append`
+//! refuses versions 1 and 2 as `unknown_schema` at `payload`; both still verify as stored. Until
+//! DEC-2505's implementation registers version 3, every test that parses an attempt is pending
+//! E8-10: the journal refuses version 3 as `unknown_schema`, which is the answer they fail on.
+//!
+//! The control stream's `NotificationAddressChanged` (v0.51, DEC-2505 items 1 to 4) is closed at
+//! version 1 with rules 210 to 214: the address is named by the `event_id` of the record that added
+//! it and listed as the only `pii_refs` entry, an `added` carries fresh step-up by the member
+//! themself, and a request's records commit with their `notification_address_changed` alert. Until
+//! DEC-2505's implementation catalogues it, the journal refuses it as `unknown_event_type`, which
+//! is the answer the tests pending E8-14 fail on. A `removed` without step-up rides a
+//! `MemberDeactivated` or `MemberRemoved` (rule 214 (c)), which the journal registers only with
+//! E9-7, so the test that commits one beside its deactivation is pending E9-7. The active set's
+//! fold (DEC-2505 item 5) is not `mandate-journal`'s: no fold of addresses lives here, and the
+//! dispatcher and workspace services read it.
 
 mod common;
 
@@ -61,10 +73,10 @@ const FIXED: [(&str, Option<&str>); 11] = [
     ("unsubscribed", Some("permanent")),
 ];
 
-/// A draft on `stream`, at schema version 2 for `NoticeAttempted` (DEC-706) and 1 for the rest.
+/// A draft on `stream`, at schema version 3 for `NoticeAttempted` (DEC-2505) and 1 for the rest.
 fn envelope(stream: &str, id: u64, event_type: &str, causation: &str, payload: &str) -> Vec<u8> {
     let version = if event_type == "NoticeAttempted" {
-        2
+        3
     } else {
         1
     };
@@ -82,8 +94,14 @@ fn envelope(stream: &str, id: u64, event_type: &str, causation: &str, payload: &
 
 /// An `OwnerAlertSent` on `stream`, with `event_id` `id`, about the event with `event_id` `subject`.
 fn alert(stream: &str, id: u64, subject: u64) -> Vec<u8> {
+    alert_of(stream, id, subject, "risk_limit")
+}
+
+/// An `OwnerAlertSent` of `kind` on `stream`, with `event_id` `id`, about the event with `event_id`
+/// `subject`.
+fn alert_of(stream: &str, id: u64, subject: u64, kind: &str) -> Vec<u8> {
     let subject = event_id(subject);
-    let payload = format!(r#"{{"subject":"{subject}","kind":"risk_limit","owner_command":null}}"#);
+    let payload = format!(r#"{{"subject":"{subject}","kind":"{kind}","owner_command":null}}"#);
     envelope(
         stream,
         id,
@@ -93,11 +111,69 @@ fn alert(stream: &str, id: u64, subject: u64) -> Vec<u8> {
     )
 }
 
-/// The base draft `name`: `alert` (on the account stream), `opened`, `issued`, or `attempted`.
+/// The control stream every address change is on.
+const CTL: &str = "ctl:ws_1";
+
+/// The user principal whose addresses the base address changes are, and another member.
+const MEMBER: &str = "01J8Z3M50000000000000000M1";
+const OTHER_MEMBER: &str = "01J8Z3M50000000000000000M2";
+
+/// The base `added`'s `event_id`, which is its address.
+const ADDED: u64 = 20;
+
+/// The address, added in an earlier batch, that the base `removed` and `retired` name.
+const EARLIER: u64 = 10;
+
+/// §9.2's step-up evidence, by passkey, 30 seconds before the envelope's `event_time` [`T`].
+const STEP_UP: &str = r#"{"assertion_id":"assert_1","authenticated_at":"2026-09-21T13:59:30.000000000Z","method":"passkey"}"#;
+
+/// The `build` of every `system` actor here.
+fn build() -> String {
+    format!("sha256:{}", "3".repeat(64))
+}
+
+/// A `NotificationAddressChanged` on [`CTL`] with `event_id` `id`, naming `member`'s address
+/// `event_id(address)` and listing it as the only `pii_refs` entry. `added` and `removed` are the
+/// member's own request, with [`STEP_UP`]; `retired` is a `removed` without step-up by the
+/// `system` actor that deactivates the member (identity spec §5.2 step 3).
+fn address_change(id: u64, kind: &str, address: u64, member: &str) -> Vec<u8> {
+    let address = event_id(address);
+    let (action, step_up, actor) = match kind {
+        "retired" => (
+            "removed",
+            "null".to_owned(),
+            format!(
+                r#"{{"kind":"system","id":"workspace","version":"0.1.0","build":"{}"}}"#,
+                build()
+            ),
+        ),
+        action => (
+            action,
+            STEP_UP.to_owned(),
+            format!(r#"{{"kind":"user","id":"{member}","version":"1","build":null}}"#),
+        ),
+    };
+    format!(
+        r#"{{"envelope_version":1,"environment":"paper","event_id":"{}","stream_id":"{CTL}",
+        "event_type":"NotificationAddressChanged","schema_version":1,"event_time":"{T}",
+        "clock_source":"local","causation_id":null,"correlation_id":null,"actor":{actor},
+        "config_refs":{{}},"payload":{{"member":"{member}","channel":"web_push","action":"{action}",
+        "address_ref":"{address}","step_up":{step_up}}},"artifact_refs":[],"pii_refs":["{address}"]}}"#,
+        event_id(id)
+    )
+    .into_bytes()
+}
+
+/// The base draft `name`: `alert` (on the account stream), `opened`, `issued`, or `attempted` (an
+/// email attempt, so with no `address_ref`), or one of the control stream's address changes:
+/// `added`, `removed` (a request's, with step-up), or `retired` (riding a deactivation, without).
 fn base(name: &str) -> Vec<u8> {
     let cause = event_id(100);
     let (id, event_type, causation, payload) = match name {
         "alert" => return alert(STREAM, 101, 100),
+        "added" => return address_change(ADDED, "added", ADDED, MEMBER),
+        "removed" => return address_change(21, "removed", EARLIER, MEMBER),
+        "retired" => return address_change(22, "retired", EARLIER, MEMBER),
         "opened" => (
             0,
             "StreamOpened",
@@ -120,7 +196,7 @@ fn base(name: &str) -> Vec<u8> {
             format!(
                 r#"{{"notice":"{NOTICE}","recipient":"u_1","channel":"email","attempt":1,
                 "status":"delivered","reason":null,"provider_message_id":"<m1@mail.example>",
-                "coalesced_into":null,"verdict":null}}"#
+                "coalesced_into":null,"verdict":null,"address_ref":null}}"#
             ),
         ),
     };
@@ -440,17 +516,26 @@ fn the_batch_rule_binds_an_alert_to_an_earlier_subject_in_its_batch() {
     assert_eq!(refused, Some((0, "schema", "payload.subject")), "{late:?}");
 }
 
-/// Version 2 is the only `NoticeAttempted` `append` admits (DEC-706 item 6): closed on the notice
-/// stream and `wrong_stream` elsewhere, while version 1, in its own shape or with a `verdict`, and
-/// any later version are `unknown_schema` at `payload`, through `Draft::parse` and `append` alike.
+/// Version 3 is the only `NoticeAttempted` `append` admits (DEC-2505 item 8): closed on the notice
+/// stream and `wrong_stream` elsewhere, while version 2 in its own shape or with an `address_ref`,
+/// version 1 in its own shape, and any later version are `unknown_schema` at `payload`, through
+/// `Draft::parse` and `append` alike.
 #[test]
-fn an_attempt_is_appended_at_version_2_and_refused_at_version_1() {
+#[ignore = "pending E8-10"]
+fn an_attempt_is_appended_at_version_3_and_refused_at_versions_1_and_2() {
     closed_on(&[("NoticeAttempted", &[NTF])]);
     run(&[
         "attempted | | ok",
         "attempted | ^schema_version=1 | unknown_schema@payload",
-        "attempted | ^schema_version=3 | unknown_schema@payload",
+        "attempted | ^schema_version=2 | unknown_schema@payload",
+        "attempted | ^schema_version=4 | unknown_schema@payload",
     ]);
+    let v2 = version_2(&base("attempted"));
+    assert_eq!(
+        outcome(&v2),
+        "unknown_schema@payload",
+        "version 2's own shape"
+    );
     let v1 = version_1(&base("attempted"));
     assert_eq!(
         outcome(&v1),
@@ -461,29 +546,69 @@ fn an_attempt_is_appended_at_version_2_and_refused_at_version_1() {
     let ntf = StreamId::parse(NTF).unwrap();
     let epoch = journal.take_ownership(&ntf);
     let failed = set(
-        &base("attempted"),
+        &on_channel(&base("attempted"), "web_push"),
         "status=failed reason=provider_error provider_message_id=null verdict=retryable",
     );
     let opened = journal.append(&ntf, 0, epoch, now(), &[&base("opened"), &base("issued")]);
     assert_eq!(opened.name(), "Committed", "{opened:?}");
     let attempted = journal.append(&ntf, 2, epoch, now(), &[&failed]);
     assert_eq!(attempted.name(), "Committed", "{attempted:?}");
-    let later = set(&v1, &format!("^event_id={}", event_id(3)));
-    let refused = match journal.append(&ntf, 3, epoch, now(), &[&later]) {
-        AppendOutcome::Invalid { draft, error } => Some((draft, error.reason.code(), error.path)),
-        _ => None,
-    };
-    assert_eq!(refused, Some((0, "unknown_schema", "payload".to_owned())));
+    for (n, older, version) in [(3, v2, 2), (4, v1, 1)] {
+        let later = set(&older, &format!("^event_id={}", event_id(n)));
+        let refused = match journal.append(&ntf, 3, epoch, now(), &[&later]) {
+            AppendOutcome::Invalid { draft, error } => {
+                Some((draft, error.reason.code(), error.path))
+            }
+            _ => None,
+        };
+        assert_eq!(
+            refused,
+            Some((0, "unknown_schema", "payload".to_owned())),
+            "version {version}"
+        );
+    }
 }
 
-/// `draft`, an attempt, in version 1's shape: `schema_version` 1 and no `verdict`.
+/// `draft`, an attempt, in version 2's shape: `schema_version` 2 and no `address_ref`.
+fn version_2(draft: &[u8]) -> Vec<u8> {
+    edit(
+        &set(draft, "^schema_version=2"),
+        "payload.address_ref",
+        None,
+    )
+}
+
+/// `draft`, an attempt, in version 1's shape: `schema_version` 1 and neither `verdict` nor
+/// `address_ref`.
 fn version_1(draft: &[u8]) -> Vec<u8> {
-    edit(&set(draft, "^schema_version=1"), "payload.verdict", None)
+    edit(
+        &set(&version_2(draft), "^schema_version=1"),
+        "payload.verdict",
+        None,
+    )
 }
 
-/// Version 2 is closed (DEC-720's form): without `verdict`, or with an unlisted member beside it,
-/// an attempt is `schema` at that member.
+/// The web-push address the attempts here go to: an `added`'s `event_id`.
+fn address() -> String {
+    event_id(ADDED)
+}
+
+/// `draft`, an attempt, on `channel`, naming [`address`] and listing it in `pii_refs` on web push
+/// (rule 215).
+fn on_channel(draft: &[u8], channel: &str) -> Vec<u8> {
+    let draft = edit(draft, "payload.channel", Some(&format!("\"{channel}\"")));
+    if channel != "web_push" {
+        return draft;
+    }
+    let named = format!("\"{}\"", address());
+    let draft = edit(&draft, "payload.address_ref", Some(&named));
+    edit(&draft, "pii_refs", Some(&format!("[{named}]")))
+}
+
+/// Version 3 is closed (DEC-720's form): without `verdict` or `address_ref`, or with an unlisted
+/// member beside them, an attempt is `schema` at that member, on web push as on every other channel.
 #[test]
+#[ignore = "pending E8-10"]
 fn every_member_of_an_attempt_is_required_and_no_unlisted_member_is_admitted() {
     closed(&base("attempted"));
     let failed = set(
@@ -491,11 +616,14 @@ fn every_member_of_an_attempt_is_required_and_no_unlisted_member_is_admitted() {
         "status=failed reason=timeout provider_message_id=null verdict=retryable",
     );
     closed(&failed);
+    closed(&on_channel(&failed, "web_push"));
 }
 
-/// Non-negotiable 6 and NT-1, NT-2 on version 2: an attempt holds no trading content, address, or
-/// sentence, its `verdict` included.
+/// Non-negotiable 6 and NT-1, NT-2 on version 3: an attempt holds no trading content, address, or
+/// sentence, its `verdict` and `address_ref` included, and no part of a web-push address beside
+/// the `address_ref` that names it.
 #[test]
+#[ignore = "pending E8-10"]
 fn no_attempt_can_carry_trading_content() {
     no_unlisted_content("attempted");
     for member in [
@@ -503,16 +631,43 @@ fn no_attempt_can_carry_trading_content() {
         "coalesced_into",
         "recipient",
         "verdict",
+        "address_ref",
     ] {
         no_sentence_in("attempted", member);
     }
     run(&["attempted | recipient=jane@example.com | non_canonical@payload.recipient"]);
+    let pushed = on_channel(&base("attempted"), "web_push");
+    for member in ADDRESS_PARTS {
+        let planted = edit(&pushed, &format!("payload.{member}"), Some(ENDPOINT));
+        assert_eq!(outcome(&planted), format!("schema@payload.{member}"));
+    }
+    let endpoint = edit(&pushed, "payload.address_ref", Some(ENDPOINT));
+    assert_eq!(outcome(&endpoint), "non_canonical@payload.address_ref");
 }
 
-/// The member types of version 2, each refused in §9.1's order: a non-string `verdict` is
-/// `schema`, a string outside `retryable` and `permanent` is `non_canonical`, and an unlisted
-/// member or an earlier ill-typed member is reported before it.
+/// The parts of a web-push address and its key that no record holds (DEC-2505 item 2, NT-2,
+/// workspace API API-11): the endpoint, the subscription's keys, the push service and its host, a
+/// hash of any of them, and the VAPID `key_id`.
+const ADDRESS_PARTS: [&str; 9] = [
+    "endpoint",
+    "p256dh",
+    "auth",
+    "push_service",
+    "host",
+    "endpoint_hash",
+    "endpoint_sha256",
+    "key_id",
+    "vapid_key_id",
+];
+
+/// A web-push endpoint, as JSON text.
+const ENDPOINT: &str = r#""https://fcm.googleapis.com/fcm/send/dXNlcl9hZGRyZXNz""#;
+
+/// The member types of version 3, each refused in §9.1's order: a non-string `verdict` is
+/// `schema`, a string outside `retryable` and `permanent` is `non_canonical`, `address_ref` is a
+/// `ulid` or `null`, and an unlisted member or an earlier ill-typed member is reported before it.
 #[test]
+#[ignore = "pending E8-10"]
 fn an_attempts_member_types_refuse_event_ids_and_foreign_vocabulary() {
     let ulid = event_id(5);
     let over = "x".repeat(257);
@@ -550,17 +705,32 @@ fn an_attempts_member_types_refuse_event_ids_and_foreign_vocabulary() {
         "attempted | zz_unlisted=true verdict=final | schema@payload.zz_unlisted",
         "attempted | status=sent verdict=final | non_canonical@payload.status",
         "attempted | channel=fax verdict=7 | non_canonical@payload.channel",
+        "attempted | address_ref=not-a-ulid | non_canonical@payload.address_ref",
+        "attempted | address_ref=u_1 | non_canonical@payload.address_ref",
+        &format!("attempted | address_ref=pii_{ulid} | non_canonical@payload.address_ref"),
+        "attempted | address_ref=5 | schema@payload.address_ref",
+        "attempted | address_ref=true | schema@payload.address_ref",
+        &format!("attempted | address_ref=[\"{ulid}\"] | schema@payload.address_ref"),
+        "attempted | verdict=final address_ref=5 | non_canonical@payload.verdict",
+        "attempted | zz_unlisted=true address_ref=5 | schema@payload.zz_unlisted",
     ]);
 }
 
-/// Every channel, and every outcome rules 127 and 134 admit, at version 2: a `failed` attempt
-/// with each verdict its reason takes, every other status with none.
+/// Every channel, and every outcome rules 127 and 134 admit, at version 3: a `failed` attempt
+/// with each verdict its reason takes, every other status with none, on email and on web push at
+/// one address, and the web-push stop `address_retired`.
 #[test]
-fn every_channel_and_outcome_is_admitted_at_version_2() {
+#[ignore = "pending E8-10"]
+fn every_channel_and_outcome_is_admitted_at_version_3() {
     let mut cases = Vec::new();
-    for channel in ["email", "phone", "slack", "sms", "telegram", "web_push"] {
+    for channel in ["email", "phone", "slack", "sms", "telegram"] {
         cases.push(format!("attempted | channel={channel} | ok"));
     }
+    let pushed = web_push();
+    cases.push(format!("attempted | {pushed} | ok"));
+    cases.push(format!(
+        "attempted | {pushed} status=abandoned reason=address_retired provider_message_id=null | ok"
+    ));
     let failed = "status=failed provider_message_id=null";
     let receipt = "status=failed provider_message_id=m-1 verdict=permanent";
     for outcome in [
@@ -584,13 +754,21 @@ fn every_channel_and_outcome_is_admitted_at_version_2() {
         &format!("{receipt} reason=unsubscribed"),
     ] {
         cases.push(format!("attempted | {outcome} | ok"));
+        cases.push(format!("attempted | {pushed} {outcome} | ok"));
     }
     run(&cases.iter().map(String::as_str).collect::<Vec<_>>());
 }
 
-/// Rules 126 to 129 at version 2, and rule 134 after them: `verdict` is refused only on a payload
+/// The edits that put the base attempt on web push at [`address`], listed in `pii_refs`.
+fn web_push() -> String {
+    let named = address();
+    format!("channel=web_push address_ref={named} ^pii_refs=[\"{named}\"]")
+}
+
+/// Rules 126 to 129 at version 3, and rule 134 after them: `verdict` is refused only on a payload
 /// those rules pass, so a wrong verdict never hides an earlier rule's path.
 #[test]
+#[ignore = "pending E8-10"]
 fn an_attempts_consistency_rules_refuse_at_their_paths() {
     let failed = "status=failed provider_message_id=null verdict=permanent";
     let abandoned = "status=abandoned provider_message_id=null";
@@ -699,8 +877,10 @@ fn attempt_with((status, reason, message): Attempt, verdict: Option<&str>) -> Ve
 /// Rule 134 over every outcome rules 127 and 128 admit and every verdict, `null` included: `verdict`
 /// is non-null exactly when `status` is `failed`, and a reason the spec fixes takes only its own.
 /// The oracle is [`rule_134`], written from the spec's text; the counts are DEC-706 item 4's own:
-/// five outcomes with no verdict, nine fixed reasons with one, and two reasons with either.
+/// five outcomes with no verdict, nine fixed reasons with one, and two reasons with either. It holds
+/// at version 3 unchanged (DEC-2505 item 6).
 #[test]
+#[ignore = "pending E8-10"]
 fn the_verdict_is_set_exactly_on_a_failed_attempt_and_fixed_where_the_reason_fixes_it() {
     let mut admitted = 0;
     let mut differ = Vec::new();
@@ -723,9 +903,11 @@ fn the_verdict_is_set_exactly_on_a_failed_attempt_and_fixed_where_the_reason_fix
     assert!(differ.is_empty(), "{}", differ.join("\n"));
 }
 
-/// Rule 134 holds whatever the attempt's other members are: its channel, attempt number,
-/// recipient, and, where rule 129 allows one, the combined message.
+/// Rule 134 holds whatever the attempt's other members are: its channel (on web push with its
+/// address, as rule 215 requires), attempt number, recipient, and, where rule 129 allows one, the
+/// combined message.
 #[test]
+#[ignore = "pending E8-10"]
 fn rule_134_does_not_depend_on_the_other_members() {
     let channel = prop_oneof![
         Just("email"),
@@ -750,8 +932,7 @@ fn rule_134_does_not_depend_on_the_other_members() {
         let joined = coalesced
             .filter(|_| !quiet)
             .map_or_else(|| "null".to_owned(), |c| format!("\"{c}\""));
-        let draft = attempt_with(attempted, verdict);
-        let draft = edit(&draft, "payload.channel", Some(&format!("\"{channel}\"")));
+        let draft = on_channel(&attempt_with(attempted, verdict), channel);
         let draft = edit(&draft, "payload.attempt", Some(&attempt.to_string()));
         let draft = edit(
             &draft,
@@ -766,17 +947,220 @@ fn rule_134_does_not_depend_on_the_other_members() {
     assert_eq!(checked, Ok(()));
 }
 
-/// Version 1 is never edited and still replays (journal spec §8, DEC-706 item 6): a stored
-/// version-1 `failed` attempt, which `append` no longer admits, passes §11's per-event checks as
-/// stored, since verification re-hashes the stored body and never re-reads it against `append`'s
-/// schemas.
+/// Rule 215: an attempt names its address exactly on web push, and lists it as the only entry of
+/// `pii_refs`, which is empty on every other channel. It is checked after rule 134 and before rule
+/// 216, and on a payload whose members are well typed.
 #[test]
-fn a_stored_version_1_attempt_still_verifies() {
-    let failed = set(
-        &version_1(&base("attempted")),
-        "status=failed reason=provider_error provider_message_id=null",
-    );
-    let Value::Object(mut body) = parse(&failed).unwrap() else {
+#[ignore = "pending E8-10"]
+fn an_attempt_names_its_address_exactly_on_web_push_and_lists_it_in_pii_refs() {
+    let named = address();
+    let other = event_id(99);
+    let pushed = web_push();
+    let mut cases = vec![
+        format!("attempted | {pushed} | ok"),
+        "attempted | channel=web_push | schema@payload.address_ref".to_owned(),
+        format!(
+            "attempted | channel=web_push ^pii_refs=[\"{named}\"] | schema@payload.address_ref"
+        ),
+        format!("attempted | channel=web_push address_ref={named} | schema@pii_refs"),
+        format!(
+            "attempted | channel=web_push address_ref={named} ^pii_refs=[\"{other}\"] | schema@pii_refs"
+        ),
+        format!(
+            "attempted | channel=web_push address_ref={named} ^pii_refs=[\"{named}\",\"{other}\"] | schema@pii_refs"
+        ),
+        format!(
+            "attempted | channel=web_push address_ref={named} ^pii_refs=[\"pii_{named}\"] | schema@pii_refs"
+        ),
+        format!("attempted | ^pii_refs=[\"{named}\"] | schema@pii_refs"),
+        format!(
+            "attempted | {pushed} status=failed reason=timeout provider_message_id=null verdict=permanent | schema@payload.verdict"
+        ),
+        format!("attempted | {pushed} attempt=0 | schema@payload.attempt"),
+        format!(
+            "attempted | address_ref={named} status=abandoned reason=address_retired provider_message_id=null | schema@payload.address_ref"
+        ),
+        "attempted | channel=web_push address_ref=5 | schema@payload.address_ref".to_owned(),
+    ];
+    for channel in ["email", "phone", "slack", "sms", "telegram"] {
+        cases.push(format!(
+            "attempted | channel={channel} address_ref={named} ^pii_refs=[\"{named}\"] | schema@payload.address_ref"
+        ));
+        cases.push(format!(
+            "attempted | channel={channel} address_ref={named} | schema@payload.address_ref"
+        ));
+    }
+    run(&cases.iter().map(String::as_str).collect::<Vec<_>>());
+}
+
+/// Rules 127 and 216: `address_retired` is a stop, so only an `abandoned` attempt carries it, and
+/// only on web push, where an address can leave the set; every other status, and every other
+/// channel, refuses it at `payload.reason`. The other stops stay admitted on web push.
+#[test]
+#[ignore = "pending E8-10"]
+fn address_retired_stops_only_an_abandoned_web_push_attempt() {
+    let pushed = web_push();
+    let retired = "reason=address_retired provider_message_id=null";
+    let mut cases = vec![
+        format!("attempted | {pushed} status=abandoned {retired} | ok"),
+        format!("attempted | {pushed} status=abandoned {retired} coalesced_into=m-1 | ok"),
+        format!(
+            "attempted | {pushed} status=abandoned reason=not_pending provider_message_id=null | ok"
+        ),
+        format!(
+            "attempted | {pushed} status=abandoned reason=retry_window_ended provider_message_id=null | ok"
+        ),
+        format!(
+            "attempted | {pushed} status=failed {retired} verdict=permanent | schema@payload.reason"
+        ),
+        format!(
+            "attempted | {pushed} status=failed {retired} verdict=retryable | schema@payload.reason"
+        ),
+        format!(
+            "attempted | {pushed} status=delivered reason=address_retired | schema@payload.reason"
+        ),
+        format!(
+            "attempted | {pushed} status=suppressed_quiet_hours {retired} | schema@payload.reason"
+        ),
+        format!(
+            "attempted | {pushed} status=deferred_quiet_hours {retired} | schema@payload.reason"
+        ),
+        format!(
+            "attempted | {pushed} status=abandoned reason=address_retiring provider_message_id=null | non_canonical@payload.reason"
+        ),
+        format!(
+            "attempted | {pushed} status=abandoned {retired} verdict=permanent | schema@payload.verdict"
+        ),
+    ];
+    for channel in ["email", "phone", "slack", "sms", "telegram"] {
+        cases.push(format!(
+            "attempted | channel={channel} status=abandoned {retired} | schema@payload.reason"
+        ));
+    }
+    run(&cases.iter().map(String::as_str).collect::<Vec<_>>());
+}
+
+/// The push channels, in the schema's order.
+const CHANNELS: [&str; 6] = ["email", "phone", "slack", "sms", "telegram", "web_push"];
+
+/// An attempt's statuses, in the schema's order.
+const STATUSES: [&str; 5] = [
+    "delivered",
+    "failed",
+    "suppressed_quiet_hours",
+    "deferred_quiet_hours",
+    "abandoned",
+];
+
+/// Version 3's reasons, in the schema's order: version 2's and `address_retired`.
+const REASONS: [&str; 14] = [
+    "timeout",
+    "rate_limited",
+    "provider_error",
+    "address_rejected",
+    "auth_failed",
+    "too_large",
+    "recipient_not_permitted",
+    "address_missing",
+    "bounced",
+    "complained",
+    "unsubscribed",
+    "not_pending",
+    "retry_window_ended",
+    "address_retired",
+];
+
+/// Rules 127, 215, and 216 as journal spec §9.15 states them, in its report order, on an attempt
+/// whose `provider_message_id`, `coalesced_into`, and `verdict` already fit rules 128, 129, and
+/// 134, and whose `pii_refs` lists its `address_ref` when it has one: `ok`, or `reason@path`.
+fn rules_127_215_216(channel: &str, status: &str, reason: Option<&str>, named: bool) -> String {
+    let stops = ["not_pending", "retry_window_ended", "address_retired"];
+    let fits = match (status, reason) {
+        ("failed", Some(r)) => !stops.contains(&r),
+        ("abandoned", Some(r)) => stops.contains(&r),
+        ("failed" | "abandoned", None) => false,
+        (_, r) => r.is_none(),
+    };
+    let web = channel == "web_push";
+    let failed = if !fits {
+        Some("payload.reason")
+    } else if named != web {
+        Some("payload.address_ref")
+    } else if reason == Some("address_retired") && !web {
+        Some("payload.reason")
+    } else {
+        None
+    };
+    failed.map_or_else(|| "ok".to_owned(), |path| format!("schema@{path}"))
+}
+
+/// An attempt on `channel` with `status` and `reason`, naming [`address`] when `named`, whose
+/// other members fit rules 128, 129, and 134 by construction: a message id on a delivery or a
+/// receipt, no combined message, and on a `failed` attempt the verdict [`FIXED`] gives its reason,
+/// or `permanent` where it gives none.
+fn attempt_on(channel: &str, status: &str, reason: Option<&str>, named: bool) -> Vec<u8> {
+    let json = |v: Option<&str>| v.map_or_else(|| "null".to_owned(), |v| format!("\"{v}\""));
+    let receipt = reason.is_some_and(|r| ["bounced", "complained", "unsubscribed"].contains(&r));
+    let message = (status == "delivered" || receipt).then_some("m-1");
+    let fixed = FIXED
+        .iter()
+        .find(|(r, _)| Some(*r) == reason)
+        .and_then(|(_, v)| *v);
+    let verdict = (status == "failed").then(|| fixed.unwrap_or("permanent"));
+    let address = address();
+    let reference = named.then_some(address.as_str());
+    let listed = reference.map_or_else(|| "[]".to_owned(), |a| format!("[\"{a}\"]"));
+    let edits = [
+        ("payload.channel", json(Some(channel))),
+        ("payload.status", json(Some(status))),
+        ("payload.reason", json(reason)),
+        ("payload.provider_message_id", json(message)),
+        ("payload.verdict", json(verdict)),
+        ("payload.address_ref", json(reference)),
+        ("pii_refs", listed),
+    ];
+    edits.iter().fold(base("attempted"), |d, (path, value)| {
+        edit(&d, path, Some(value))
+    })
+}
+
+/// Rules 127, 215, and 216 over every channel, status, reason (`null` included), and address
+/// (named or not): 900 attempts, each judged against [`rules_127_215_216`], an oracle written from
+/// the spec's text. The count admitted is the spec's own: on web push at one address, three
+/// statuses with no reason, three stops, and eleven failures; on each of the five other channels
+/// with none, the same but for `address_retired`.
+#[test]
+#[ignore = "pending E8-10"]
+fn rules_127_215_and_216_hold_over_every_channel_status_reason_and_address() {
+    let mut admitted = 0;
+    let mut tried = 0;
+    let mut differ = Vec::new();
+    let reasons = std::iter::once(None).chain(REASONS.iter().copied().map(Some));
+    for channel in CHANNELS {
+        for status in STATUSES {
+            for reason in reasons.clone() {
+                for named in [false, true] {
+                    tried += 1;
+                    let want = rules_127_215_216(channel, status, reason, named);
+                    admitted += usize::from(want == "ok");
+                    let got = outcome(&attempt_on(channel, status, reason, named));
+                    if got != want {
+                        differ.push(format!(
+                            "{channel} {status} {reason:?} named={named}: got {got}, want {want}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(tried, 6 * 5 * 15 * 2);
+    assert_eq!(admitted, (3 + 3 + 11) + 5 * (3 + 2 + 11));
+    assert!(differ.is_empty(), "{}", differ.join("\n"));
+}
+
+/// `draft`, stored at `seq` 1 at `schema_version` `version`: the row §11 verifies.
+fn stored(draft: &[u8], version: u64) -> StoredEvent {
+    let Value::Object(mut body) = parse(draft).unwrap() else {
         panic!("a draft is an object")
     };
     for (name, value) in [
@@ -787,18 +1171,609 @@ fn a_stored_version_1_attempt_still_verifies() {
         body.insert(Key::new(name).unwrap(), parse(value.as_bytes()).unwrap());
     }
     let body = to_canonical(&Value::Object(body));
-    let row = StoredEvent {
+    StoredEvent {
         stream_id: NTF.to_owned(),
         seq: 1,
         event_id: event_id(2),
         event_type: "NoticeAttempted".to_owned(),
-        schema_version: 1,
+        schema_version: version,
         environment: "paper".to_owned(),
         recorded_at: T.to_owned(),
         prev_hash: Digest::ZERO,
         hash: Digest::of(&body),
         body,
-    };
-    let verified = verify_events(&[row], TrustedStart::GENESIS, &BTreeMap::new());
+    }
+}
+
+/// Version 1 is never edited and still replays (journal spec §8, DEC-706 item 6): a stored
+/// version-1 `failed` attempt, which `append` no longer admits, passes §11's per-event checks as
+/// stored, since verification re-hashes the stored body and never re-reads it against `append`'s
+/// schemas.
+#[test]
+fn a_stored_version_1_attempt_still_verifies() {
+    let failed = set(
+        &version_1(&base("attempted")),
+        "status=failed reason=provider_error provider_message_id=null",
+    );
+    let verified = verify_events(
+        &[stored(&failed, 1)],
+        TrustedStart::GENESIS,
+        &BTreeMap::new(),
+    );
     assert_eq!(verified.map(|v| v.next_seq), Ok(2));
+}
+
+/// Version 2 is never edited and still replays (journal spec §8, DEC-2505 item 8): a stored
+/// version-2 web-push `failed` attempt, which names no address and which `append` refuses from
+/// v0.51, passes §11's per-event checks as stored.
+#[test]
+fn a_stored_version_2_attempt_still_verifies() {
+    let failed = set(
+        &version_2(&base("attempted")),
+        "channel=web_push status=failed reason=provider_error provider_message_id=null verdict=permanent",
+    );
+    let verified = verify_events(
+        &[stored(&failed, 2)],
+        TrustedStart::GENESIS,
+        &BTreeMap::new(),
+    );
+    assert_eq!(verified.map(|v| v.next_seq), Ok(2));
+}
+
+/// `NotificationAddressChanged` is catalogued on the control stream only: closed there at version
+/// 1, `wrong_stream` at `event_type` on every other stream, and any other version `unknown_schema`
+/// (DEC-2505 item 1). The three base drafts, an add, a request's removal, and a deactivation's
+/// removal, are admitted.
+#[test]
+#[ignore = "pending E8-14"]
+fn an_address_change_is_closed_on_the_control_stream_only_at_version_1() {
+    closed_on(&[("NotificationAddressChanged", &[CTL])]);
+    run(&[
+        "added | | ok",
+        "removed | | ok",
+        "retired | | ok",
+        "added | ^schema_version=2 | unknown_schema@payload",
+        "added | ^schema_version=0 | unknown_schema@payload",
+        "added | ^stream_id=ntf:ws_1 | wrong_stream@event_type",
+        "added | ^stream_id=acct:ws_1:ACCT1 | wrong_stream@event_type",
+    ]);
+}
+
+/// The record is closed (DEC-720's form, as §9.15 closes it): without any one of its members, its
+/// step-up evidence's members included, or with an unlisted one, it is `schema` at that member.
+#[test]
+#[ignore = "pending E8-14"]
+fn every_member_of_an_address_change_is_required_and_no_unlisted_member_is_admitted() {
+    for name in ["added", "removed", "retired"] {
+        closed(&base(name));
+    }
+    for member in ["assertion_id", "authenticated_at", "method"] {
+        let path = format!("payload.step_up.{member}");
+        let missing = edit(&base("added"), &path, None);
+        assert_eq!(outcome(&missing), format!("schema@{path}"));
+    }
+    run(&["added | step_up.zz_unlisted=true | schema@payload.step_up.zz_unlisted"]);
+}
+
+/// NT-2, workspace API API-11, and DEC-2505 item 2: no record holds an endpoint, a key, a push
+/// service or its host, a hash of any of them, or the VAPID `key_id`, beside the opaque
+/// `address_ref` or inside the step-up evidence; and no trading content or sentence either.
+#[test]
+#[ignore = "pending E8-14"]
+fn no_address_change_can_hold_any_part_of_an_address() {
+    for name in ["added", "removed", "retired"] {
+        no_unlisted_content(name);
+        for member in ADDRESS_PARTS {
+            let planted = edit(&base(name), &format!("payload.{member}"), Some(ENDPOINT));
+            assert_eq!(
+                outcome(&planted),
+                format!("schema@payload.{member}"),
+                "{name}"
+            );
+        }
+        let endpoint = edit(&base(name), "payload.address_ref", Some(ENDPOINT));
+        let refused = outcome(&endpoint);
+        assert_eq!(refused, "non_canonical@payload.address_ref", "{name}");
+    }
+    let tucked = edit(&base("added"), "payload.step_up.endpoint", Some(ENDPOINT));
+    assert_eq!(outcome(&tucked), "schema@payload.step_up.endpoint");
+    run(&["added | member=jane@example.com | non_canonical@payload.member"]);
+}
+
+/// The member types (§9.1, §9.12's `member`, §9.2's step-up evidence), each refused in §9.1's
+/// order: an unlisted member first, then the listed members in the order given, a non-string
+/// `schema` and a string outside the type `non_canonical`.
+#[test]
+#[ignore = "pending E8-14"]
+fn an_address_changes_member_types_refuse_foreign_vocabulary() {
+    run(&[
+        "added | member=not-a-ulid | non_canonical@payload.member",
+        "added | member=u_1 | non_canonical@payload.member",
+        "added | member=5 | schema@payload.member",
+        "added | member=null | schema@payload.member",
+        "added | channel=email | non_canonical@payload.channel",
+        "added | channel=web_inbox | non_canonical@payload.channel",
+        "added | channel=Web_Push | non_canonical@payload.channel",
+        "added | channel=null | schema@payload.channel",
+        "added | action=replaced | non_canonical@payload.action",
+        "added | action=Added | non_canonical@payload.action",
+        "added | action=[\"added\"] | schema@payload.action",
+        "added | address_ref=not-a-ulid | non_canonical@payload.address_ref",
+        &format!("added | address_ref={NOTICE} | non_canonical@payload.address_ref"),
+        "added | address_ref=null | schema@payload.address_ref",
+        "added | address_ref=5 | schema@payload.address_ref",
+        "added | step_up=true | schema@payload.step_up",
+        "added | step_up=\"assert_1\" | schema@payload.step_up",
+        "added | step_up.assertion_id=5 | schema@payload.step_up.assertion_id",
+        "added | step_up.assertion_id=\"\" | non_canonical@payload.step_up.assertion_id",
+        "added | step_up.authenticated_at=yesterday | non_canonical@payload.step_up.authenticated_at",
+        "added | step_up.authenticated_at=5 | schema@payload.step_up.authenticated_at",
+        "added | step_up.method=5 | schema@payload.step_up.method",
+        "added | step_up.method=\"\" | non_canonical@payload.step_up.method",
+        "added | zz_unlisted=true member=5 | schema@payload.zz_unlisted",
+        "added | member=5 channel=email | schema@payload.member",
+        "added | channel=email address_ref=5 | non_canonical@payload.channel",
+        "added | address_ref=5 step_up=true | schema@payload.address_ref",
+    ]);
+}
+
+/// Rules 210 and 211: an `added` names its address by its own `event_id`, a `removed` names an
+/// earlier one, and `pii_refs` is exactly `[address_ref]`, so redaction reaches the vault entry and
+/// the record lists nothing else. Rule 210 is reported before rule 211, and both before rules 212
+/// and 213, on a payload whose members are well typed.
+#[test]
+#[ignore = "pending E8-14"]
+fn an_address_is_named_by_the_event_that_added_it_and_listed_in_pii_refs() {
+    let added = event_id(ADDED);
+    let earlier = event_id(EARLIER);
+    let removed = event_id(21);
+    let retired = event_id(22);
+    let other = event_id(99);
+    run(&[
+        &format!(
+            "added | address_ref={earlier} ^pii_refs=[\"{earlier}\"] | schema@payload.address_ref"
+        ),
+        &format!(
+            "removed | address_ref={removed} ^pii_refs=[\"{removed}\"] | schema@payload.address_ref"
+        ),
+        &format!(
+            "retired | address_ref={retired} ^pii_refs=[\"{retired}\"] | schema@payload.address_ref"
+        ),
+        &format!("removed | address_ref={added} ^pii_refs=[\"{added}\"] | ok"),
+        "added | ^pii_refs=[] | schema@pii_refs",
+        "removed | ^pii_refs=[] | schema@pii_refs",
+        "retired | ^pii_refs=[] | schema@pii_refs",
+        &format!("added | ^pii_refs=[\"{other}\"] | schema@pii_refs"),
+        &format!("removed | ^pii_refs=[\"{removed}\"] | schema@pii_refs"),
+        &format!("added | ^pii_refs=[\"{added}\",\"{other}\"] | schema@pii_refs"),
+        &format!("added | ^pii_refs=[\"pii_{added}\"] | schema@pii_refs"),
+        &format!("added | address_ref={earlier} | schema@payload.address_ref"),
+        &format!("added | address_ref={earlier} channel=email | non_canonical@payload.channel"),
+        "added | ^pii_refs=[] step_up=null | schema@pii_refs",
+        &format!("added | ^pii_refs=[] ^actor.id={OTHER_MEMBER} | schema@pii_refs"),
+    ]);
+}
+
+/// The step-up evidence at `authenticated_at` `2026-09-21T{time}Z`, as one `set` edit.
+fn authenticated(time: &str) -> String {
+    format!("step_up.authenticated_at=2026-09-21T{time}Z")
+}
+
+/// Rule 212: an `added` carries step-up, and non-null evidence, on an `added` or a `removed`, is
+/// valid at the envelope's `event_time` as rule 102 reads it: `passkey`, or in a non-`live`
+/// envelope also `cli_confirm`, authenticated 0 to 300 seconds before. The method is reported
+/// before the time, and rule 212 before rule 213. A `removed` without step-up passes the record's
+/// rules; the batch decides whether it rides a deactivation (rule 214).
+#[test]
+#[ignore = "pending E8-14"]
+fn an_address_change_carries_fresh_step_up_unless_it_rides_a_deactivation() {
+    let build = build();
+    let stale = authenticated("13:54:59.999999999");
+    run(&[
+        "added | step_up=null | schema@payload.step_up",
+        "removed | step_up=null | ok",
+        "retired | | ok",
+        "added | step_up.method=cli_confirm | ok",
+        "removed | step_up.method=cli_confirm | ok",
+        "added | step_up.method=password | schema@payload.step_up.method",
+        "added | step_up.method=oidc | schema@payload.step_up.method",
+        "added | step_up.method=email_link | schema@payload.step_up.method",
+        "added | step_up.method=Passkey | schema@payload.step_up.method",
+        "removed | step_up.method=totp | schema@payload.step_up.method",
+        "added | ^environment=live | ok",
+        "removed | ^environment=live | ok",
+        "added | ^environment=live step_up.method=cli_confirm | schema@payload.step_up.method",
+        "removed | ^environment=live step_up.method=cli_confirm | schema@payload.step_up.method",
+        &format!("added | {} | ok", authenticated("13:55:00.000000000")),
+        &format!("added | {stale} | schema@payload.step_up.authenticated_at"),
+        &format!("added | {} | ok", authenticated("14:00:00.000000000")),
+        &format!(
+            "added | {} | schema@payload.step_up.authenticated_at",
+            authenticated("14:00:00.000000001")
+        ),
+        &format!("removed | {stale} | schema@payload.step_up.authenticated_at"),
+        &format!(
+            "removed | {} | schema@payload.step_up.authenticated_at",
+            authenticated("14:05:00.000000000")
+        ),
+        &format!("added | step_up.method=password {stale} | schema@payload.step_up.method"),
+        &format!(
+            "added | step_up=null ^actor.kind=system ^actor.build={build} | schema@payload.step_up"
+        ),
+        &format!(
+            "added | {stale} ^actor.id={OTHER_MEMBER} | schema@payload.step_up.authenticated_at"
+        ),
+    ]);
+}
+
+/// Rule 213: with step-up the actor is a `user` who is the `member`, so a member sets and removes
+/// only their own addresses (API-6); without step-up, a removal riding a deactivation, it is a
+/// `user` or the `system`, as rule 98 has the deactivation's. A `client` is refused at
+/// `actor.kind` before the payload is read (rule 83).
+#[test]
+#[ignore = "pending E8-14"]
+fn only_the_member_changes_their_own_addresses() {
+    let build = build();
+    run(&[
+        &format!("added | ^actor.id={OTHER_MEMBER} | schema@payload.member"),
+        &format!("removed | ^actor.id={OTHER_MEMBER} | schema@payload.member"),
+        &format!("added | member={OTHER_MEMBER} | schema@payload.member"),
+        &format!("added | member={OTHER_MEMBER} ^actor.id={OTHER_MEMBER} | ok"),
+        &format!("added | ^actor.kind=system ^actor.build={build} | schema@actor.kind"),
+        &format!("removed | ^actor.kind=system ^actor.build={build} | schema@actor.kind"),
+        "added | ^actor.kind=platform_operator | schema@actor.kind",
+        "added | ^actor.kind=broker | schema@actor.kind",
+        &format!("added | ^actor.kind=agent ^actor.build={build} | schema@actor.kind"),
+        &format!("retired | step_up={STEP_UP} | schema@actor.kind"),
+        &format!(
+            "retired | step_up={STEP_UP} ^actor.kind=user ^actor.id={MEMBER} ^actor.build=null | ok"
+        ),
+        &format!("retired | ^actor.kind=user ^actor.id={OTHER_MEMBER} ^actor.build=null | ok"),
+        &format!("retired | ^actor.kind=user ^actor.id={MEMBER} ^actor.build=null | ok"),
+        "retired | ^actor.kind=platform_operator ^actor.build=null | schema@actor.kind",
+        "retired | ^actor.kind=broker ^actor.build=null | schema@actor.kind",
+        "retired | ^actor.kind=agent | schema@actor.kind",
+        "added | ^actor.kind=client ^actor.on_behalf_of=u_1 | schema@actor.kind",
+        "added | ^actor.kind=client ^actor.on_behalf_of=u_1 member=5 | schema@actor.kind",
+        "retired | ^actor.kind=client ^actor.on_behalf_of=u_1 ^actor.build=null | schema@actor.kind",
+        &format!("added | ^actor.id={OTHER_MEMBER} step_up=null | schema@payload.step_up"),
+    ]);
+}
+
+/// A member's own `added` with `event_id` `id`, which is its address.
+fn add(id: u64) -> Vec<u8> {
+    address_change(id, "added", id, MEMBER)
+}
+
+/// A member's own `removed`, with step-up, with `event_id` `id`, of the address added at `address`.
+fn remove(id: u64, address: u64) -> Vec<u8> {
+    address_change(id, "removed", address, MEMBER)
+}
+
+/// A deactivation's `removed`, without step-up, with `event_id` `id`, of the address added at
+/// `address`.
+fn retire(id: u64, address: u64) -> Vec<u8> {
+    address_change(id, "retired", address, MEMBER)
+}
+
+/// The `notification_address_changed` alert on [`CTL`] with `event_id` `id` about `subject`.
+fn notify(id: u64, subject: u64) -> Vec<u8> {
+    alert_of(CTL, id, subject, "notification_address_changed")
+}
+
+/// Rule 214's refusal is reported at the first `NotificationAddressChanged` that breaks (a) to (d)
+/// at this path, and rule 130's and (e)'s at the alert's.
+const AT_ADDRESS: &str = "payload.address_ref";
+const AT_SUBJECT: &str = "payload.subject";
+
+/// One batch: its name, its drafts, and `None` when it is admitted, or every `(draft, path)` at
+/// which the spec's report rule lets it be refused as `schema`. Where one batch breaks two clauses
+/// whose report places differ, or a clause two records break together, the spec does not say which
+/// is first, so each such place is listed.
+type Batch = (
+    &'static str,
+    Vec<Vec<u8>>,
+    Option<Vec<(usize, &'static str)>>,
+);
+
+/// Judges each batch by `check_batch` after every draft passes `Draft::parse` alone, reporting
+/// every one that differs.
+fn judge(batches: Vec<Batch>) {
+    let mut failed = Vec::new();
+    for (name, batch, refused) in batches {
+        let drafts: Result<Vec<Draft>, _> =
+            batch.iter().map(|d| Draft::parse(d.as_slice())).collect();
+        let drafts = match drafts {
+            Ok(drafts) => drafts,
+            Err(e) => {
+                failed.push(format!(
+                    "{name}: a draft is refused alone, {}@{}",
+                    e.reason.code(),
+                    e.path
+                ));
+                continue;
+            }
+        };
+        let got = check_batch(&drafts)
+            .err()
+            .map(|(i, e)| (i, e.reason.code(), e.path));
+        let fits = match (&got, &refused) {
+            (None, None) => true,
+            (Some((i, code, path)), Some(places)) => {
+                *code == "schema" && places.iter().any(|(j, p)| j == i && *p == path.as_str())
+            }
+            _ => false,
+        };
+        if !fits {
+            failed.push(format!("{name}: got {got:?}, want {refused:?}"));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+/// Rule 214 on a request's batch, after rule 130: at most one `added` and one `removed`, of one
+/// member with one step-up; each `added`, and a lone `removed`, is the subject of a
+/// `notification_address_changed` alert, a replacement's `removed` of none; a `removed` without
+/// step-up rides a deactivation, which no batch here holds; no `removed` names an address twice or
+/// the batch's own `added`; and every such alert names a record that clause alerts. A commit
+/// through `append` shows the same: an add with its alert, then a lone removal refused, then the
+/// removal with its own alert.
+#[test]
+#[ignore = "pending E8-14"]
+fn a_request_commits_its_address_change_with_its_alert_in_one_batch() {
+    let other = address_change(21, "removed", EARLIER, OTHER_MEMBER);
+    let second = set(&remove(21, EARLIER), "step_up.assertion_id=assert_2");
+    let unasked = set(&remove(21, EARLIER), "step_up=null");
+    let batches: Vec<Batch> = vec![
+        ("an add and its alert", vec![add(20), notify(101, 20)], None),
+        (
+            "a removal and its alert",
+            vec![remove(21, EARLIER), notify(102, 21)],
+            None,
+        ),
+        (
+            "a replacement, removal first",
+            vec![remove(21, EARLIER), add(20), notify(101, 20)],
+            None,
+        ),
+        (
+            "a replacement, add first",
+            vec![add(20), remove(21, EARLIER), notify(101, 20)],
+            None,
+        ),
+        (
+            "an add without its alert",
+            vec![add(20)],
+            Some(vec![(0, AT_ADDRESS)]),
+        ),
+        (
+            "a removal without its alert",
+            vec![remove(21, EARLIER)],
+            Some(vec![(0, AT_ADDRESS)]),
+        ),
+        (
+            "an add alerted as another kind",
+            vec![add(20), alert_of(CTL, 101, 20, "new_device")],
+            Some(vec![(0, AT_ADDRESS)]),
+        ),
+        (
+            "a replacement without its alert",
+            vec![remove(21, EARLIER), add(20)],
+            Some(vec![(1, AT_ADDRESS)]),
+        ),
+        (
+            "a replacement whose removal is alerted too",
+            vec![
+                remove(21, EARLIER),
+                add(20),
+                notify(101, 20),
+                notify(102, 21),
+            ],
+            Some(vec![(0, AT_ADDRESS), (3, AT_SUBJECT)]),
+        ),
+        (
+            "a replacement alerted on its removal only",
+            vec![remove(21, EARLIER), add(20), notify(102, 21)],
+            Some(vec![(0, AT_ADDRESS), (1, AT_ADDRESS), (2, AT_SUBJECT)]),
+        ),
+        (
+            "two adds",
+            vec![add(20), add(23), notify(101, 20), notify(103, 23)],
+            Some(vec![(0, AT_ADDRESS), (1, AT_ADDRESS)]),
+        ),
+        (
+            "two removals",
+            vec![
+                remove(21, EARLIER),
+                remove(24, 11),
+                notify(102, 21),
+                notify(104, 24),
+            ],
+            Some(vec![(0, AT_ADDRESS), (1, AT_ADDRESS)]),
+        ),
+        (
+            "a replacement across two members",
+            vec![other, add(20), notify(101, 20)],
+            Some(vec![(0, AT_ADDRESS), (1, AT_ADDRESS)]),
+        ),
+        (
+            "a replacement under two step-ups",
+            vec![second, add(20), notify(101, 20)],
+            Some(vec![(0, AT_ADDRESS), (1, AT_ADDRESS)]),
+        ),
+        (
+            "a removal without step-up and no deactivation",
+            vec![retire(22, EARLIER)],
+            Some(vec![(0, AT_ADDRESS)]),
+        ),
+        (
+            "a member's own removal without step-up",
+            vec![unasked],
+            Some(vec![(0, AT_ADDRESS)]),
+        ),
+        (
+            "a removal without step-up beside a request",
+            vec![retire(22, 11), add(20), notify(101, 20)],
+            Some(vec![(0, AT_ADDRESS)]),
+        ),
+        (
+            "a removal of the batch's own add",
+            vec![add(20), remove(21, 20), notify(101, 20)],
+            Some(vec![(1, AT_ADDRESS)]),
+        ),
+        (
+            "an address alert on another record",
+            vec![
+                mark_draft(1, "1"),
+                alert_of(STREAM, 101, 1, "notification_address_changed"),
+            ],
+            Some(vec![(1, AT_SUBJECT)]),
+        ),
+        (
+            "two alerts on one add, rule 130 first",
+            vec![add(20), notify(101, 20), notify(102, 20)],
+            Some(vec![(2, AT_SUBJECT)]),
+        ),
+        (
+            "an alert before its add, rule 130 first",
+            vec![notify(101, 20), add(20)],
+            Some(vec![(0, AT_SUBJECT)]),
+        ),
+    ];
+    judge(batches);
+    let mut journal = MemoryJournal::new();
+    let ctl = StreamId::parse(CTL).unwrap();
+    let epoch = journal.take_ownership(&ctl);
+    let opened = envelope(
+        CTL,
+        0,
+        "StreamOpened",
+        "null",
+        r#"{"stream_type":"control","workspace_id":"ws_1"}"#,
+    );
+    let first = journal.append(
+        &ctl,
+        0,
+        epoch,
+        now(),
+        &[&opened, &add(20), &notify(101, 20)],
+    );
+    assert_eq!(first.name(), "Committed", "{first:?}");
+    let lone = remove(21, 20);
+    let refused = match journal.append(&ctl, 3, epoch, now(), &[&lone]) {
+        AppendOutcome::Invalid { draft, error } => Some((draft, error.reason.code(), error.path)),
+        _ => None,
+    };
+    assert_eq!(refused, Some((0, "schema", AT_ADDRESS.to_owned())));
+    let alerted = journal.append(&ctl, 3, epoch, now(), &[&lone, &notify(102, 21)]);
+    assert_eq!(alerted.name(), "Committed", "{alerted:?}");
+}
+
+/// An admin's user principal.
+const ADMIN: &str = "01J8Z3M50000000000000000A1";
+
+/// A `MemberDeactivated` or `MemberRemoved` (`event_type`) of `member` on [`CTL`] with `event_id`
+/// `id`, as journal spec §9.12 closes it: by the `system` actor that writes [`retire`]'s removals,
+/// with reason `deprovisioned` or `org_deleted` (rules 97, 98, and 105), or, when `by_admin`, by
+/// the [`ADMIN`] user through a session, with reason `admin` (rule 99).
+fn ended(id: u64, event_type: &str, member: &str, by_admin: bool) -> Vec<u8> {
+    let (actor, by, reason, session) = if by_admin {
+        (
+            format!(r#"{{"kind":"user","id":"{ADMIN}","version":"1","build":null}}"#),
+            ADMIN.to_owned(),
+            "admin",
+            "\"session_admin\"",
+        )
+    } else {
+        let reason = if event_type == "MemberRemoved" {
+            "org_deleted"
+        } else {
+            "deprovisioned"
+        };
+        (
+            format!(
+                r#"{{"kind":"system","id":"workspace","version":"0.1.0","build":"{}"}}"#,
+                build()
+            ),
+            "workspace".to_owned(),
+            reason,
+            "null",
+        )
+    };
+    format!(
+        r#"{{"envelope_version":1,"environment":"paper","event_id":"{}","stream_id":"{CTL}",
+        "event_type":"{event_type}","schema_version":1,"event_time":"{T}","clock_source":"local",
+        "causation_id":null,"correlation_id":null,"actor":{actor},"config_refs":{{}},
+        "payload":{{"member":"{member}","by":"{by}","reason":"{reason}","session_ref":{session}}},
+        "artifact_refs":[],"pii_refs":[]}}"#,
+        event_id(id)
+    )
+    .into_bytes()
+}
+
+/// Rule 214 (c) and (d) on a deactivation's batch: a `removed` without step-up rides a
+/// `MemberDeactivated` or `MemberRemoved` of its own member by its own actor, has no alert, shares
+/// its batch with no request, and names no address twice. It needs E9-7's registration of those
+/// two records as well as E8-14's of this one, so it is pending until the later of the two.
+#[test]
+#[ignore = "pending E9-7"]
+fn a_removal_without_step_up_rides_its_members_deactivation() {
+    let deactivated = || ended(30, "MemberDeactivated", MEMBER, false);
+    let by_admin =
+        format!("^actor.kind=user ^actor.id={ADMIN} ^actor.version=\"1\" ^actor.build=null");
+    let batches: Vec<Batch> = vec![
+        (
+            "a deactivation and its removals",
+            vec![deactivated(), retire(22, EARLIER), retire(23, 11)],
+            None,
+        ),
+        (
+            "an organization's deletion and a removal",
+            vec![
+                ended(30, "MemberRemoved", MEMBER, false),
+                retire(22, EARLIER),
+            ],
+            None,
+        ),
+        (
+            "an admin's deactivation and the admin's removal",
+            vec![
+                ended(30, "MemberDeactivated", MEMBER, true),
+                set(&retire(22, EARLIER), &by_admin),
+            ],
+            None,
+        ),
+        (
+            "another member's deactivation",
+            vec![
+                ended(30, "MemberDeactivated", OTHER_MEMBER, false),
+                retire(22, EARLIER),
+            ],
+            Some(vec![(1, AT_ADDRESS)]),
+        ),
+        (
+            "a deactivation by another actor",
+            vec![
+                ended(30, "MemberDeactivated", MEMBER, true),
+                retire(22, EARLIER),
+            ],
+            Some(vec![(1, AT_ADDRESS)]),
+        ),
+        (
+            "a deactivation's removal alerted",
+            vec![deactivated(), retire(22, EARLIER), notify(101, 22)],
+            Some(vec![(1, AT_ADDRESS), (2, AT_SUBJECT)]),
+        ),
+        (
+            "one address removed twice",
+            vec![deactivated(), retire(22, EARLIER), retire(23, EARLIER)],
+            Some(vec![(1, AT_ADDRESS), (2, AT_ADDRESS)]),
+        ),
+        (
+            "a deactivation's removal beside a request",
+            vec![deactivated(), retire(22, 11), add(20), notify(101, 20)],
+            Some(vec![(1, AT_ADDRESS), (2, AT_ADDRESS)]),
+        ),
+    ];
+    judge(batches);
 }

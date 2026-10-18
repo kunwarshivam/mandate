@@ -32,6 +32,11 @@ const PUBLIC_FILES = new Set([
   "/push-sw.js",
 ]);
 
+/** A path the public site serves itself, with no session (DEC-2405): every public path but sign-in and its callbacks. */
+export function isSitePath(pathname: string): boolean {
+  return pathname === "/" || (isPublicPath(pathname) && pathname !== LOGIN_PATH && !pathname.startsWith("/auth/"));
+}
+
 export function isPublicPath(pathname: string): boolean {
   return (
     pathname === WELCOME_PATH ||

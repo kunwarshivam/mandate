@@ -37,6 +37,7 @@
         "postgres",
         "mandate",
         "api",
+        "stub-issuer",
         "runtime",
         "executor",
         "token-exchange",
@@ -57,6 +58,11 @@
         "api": {
           "type": "string",
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "stub-issuer": {
+          "type": "string",
+          "pattern": "^$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$",
+          "description": "The local stub token issuer (DEC-2100), a sidecar in the API pod for a dev or ci cell's sign-in. Only a local build can be named, and only the local cell's values allow a local build (localImages), so a hosted values file cannot run it (DEC-1025)."
         },
         "runtime": {
           "type": "string",

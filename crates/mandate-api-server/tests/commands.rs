@@ -92,7 +92,7 @@ fn expected_payload(command: &Command) -> Value {
         Command::KillSwitch(KillScope::Workspace) => {
             ("null".to_owned(), "kill_switch", "workspace", WORKSPACE)
         }
-        Command::Skip { .. } => panic!("a Skip is not an owner command"),
+        other => panic!("{other:?} is not among `every()`'s commands"),
     };
     parse(
         format!(

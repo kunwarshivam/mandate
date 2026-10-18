@@ -1,0 +1,28 @@
+[package]
+name = "mandate-stub-issuer"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "A stub token issuer for dev and CI cells only: loopback, a key made at each start, compiled out of every build without debug assertions (E21-52, DEC-2100)"
+
+[lints]
+workspace = true
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+ring.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "signal"] }
+
+[dev-dependencies]
+axum.workspace = true
+base64.workspace = true
+mandate-api-server.workspace = true
+mandate-authn.workspace = true
+mandate-identity.workspace = true
+mandate-journal.workspace = true
+mandate-time.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "net"] }
