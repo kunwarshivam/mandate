@@ -17,6 +17,7 @@ spec:
   instances: {{ .Values.instances }}
   imageName: {{ .Values.image | quote }}
   enableSuperuserAccess: false
+  smartShutdownTimeout: {{ .Values.smartShutdownTimeout }}
   inheritedMetadata:
     labels:
       mandate.dev/archive-client: "true"

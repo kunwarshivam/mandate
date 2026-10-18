@@ -1870,11 +1870,13 @@ version = "0.0.0"
 dependencies = [
  "mandate-canon",
  "mandate-journal",
+ "mandate-journal-pg",
  "mandate-process",
  "mandate-runtime",
  "mandate-store",
  "mandate-time",
  "proptest",
+ "sqlx",
  "tokio",
 ]
 

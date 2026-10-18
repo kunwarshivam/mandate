@@ -311,7 +311,28 @@ spec:
     {{- end }}
 {{- end -}}
 
-{{/* One container of process `p`: name, image, args, and optional extra mounts. */}}
+{{/*
+A service's launch from processes.json (DEC-1013): its `args`, and its `probe` asked `livez` and
+`readyz` (DEC-994 item 5), with `{workspace}` and the `runtime` values' `{agent}`, `{connection}` and
+`{owner}` filled in. A placeholder whose value is unset fails the render rather than starting a
+process for no deployment.
+*/}}
+{{- define "mandate.fill" -}}
+{{- $v := .root.Values -}}
+{{- $out := list -}}
+{{- range .words -}}
+{{- $w := . -}}
+{{- if contains "{workspace}" $w }}{{ $w = replace "{workspace}" $v.workspace $w }}{{ end -}}
+{{- if contains "{agent}" $w }}{{ $w = replace "{agent}" (required "runtime.agent is required once images.runtime is named" $v.runtime.agent) $w }}{{ end -}}
+{{- if contains "{connection}" $w }}{{ $w = replace "{connection}" (required "runtime.connection is required once images.runtime is named" $v.runtime.connection) $w }}{{ end -}}
+{{- if contains "{owner}" $w }}{{ $w = replace "{owner}" (required "runtime.owner is required once images.runtime is named" $v.runtime.owner) $w }}{{ end -}}
+{{- if contains "{probe}" $w }}{{ $w = replace "{probe}" $.probe $w }}{{ end -}}
+{{- $out = append $out $w -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/* One container of process `p`: name, image, args, probes, and optional extra mounts. */}}
 {{- define "mandate.container" -}}
 - name: {{ .name | quote }}
   image: {{ index .root.Values.images .p.image | quote }}
@@ -321,6 +342,18 @@ spec:
   {{- end }}
   {{- with .args }}
   args: {{ toJson . }}
+  {{- end }}
+  {{- with .probe }}
+  readinessProbe:
+    exec:
+      command: {{ toJson (index . "readyz") }}
+    periodSeconds: 5
+    failureThreshold: 3
+  livenessProbe:
+    exec:
+      command: {{ toJson (index . "livez") }}
+    periodSeconds: 10
+    failureThreshold: 3
   {{- end }}
   env:
     {{- include "mandate.env" . | nindent 4 }}
