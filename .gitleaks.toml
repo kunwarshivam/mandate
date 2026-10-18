@@ -168,3 +168,16 @@ condition = "AND"
 paths = ['''^xtask/src/cell\.rs$''']
 regexTarget = "match"
 regexes = ['''^api:0123456789ab"$''']
+
+# The step-up challenge examples' `webauthn_challenge` values (E9-4, DEC-2103 item 9): fixed
+# base64url strings of 32 example bytes and four malformed variants the invalid cases refuse, not
+# credentials (a WebAuthn challenge is public by design). Allowed only as those exact values and
+# only in the challenge response's example files, so another value there, or the same value
+# anywhere else, is still reported.
+[[allowlists]]
+description = "Example WebAuthn challenges in the step-up challenge examples"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^schemas/workspace-api/examples/commands\.step-up-challenge(?:\.valid|\.invalid)?\.json$''']
+regexTarget = "match"
+regexes = ['''^webauthn_challenge": "(?:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJ(?:A=?|B)|q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWe\+A|q83vEjRWeJCrze8SNFZ4kA)"$''']
