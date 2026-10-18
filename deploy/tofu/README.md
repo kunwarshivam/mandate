@@ -62,6 +62,9 @@ wait until staging is up.
 
 ### 2. Cloudflare
 
+0. **R2 enabled on the account.** In **R2 Object Storage**, subscribe to R2 once (it asks for a
+   payment method even on the free tier). Until it is enabled, the first apply fails at the
+   archive bucket.
 1. **An API token, `CF_INFRA_API_TOKEN`.** In **My Profile → API Tokens → Create Token → Custom
    token**, named `mandate-tofu`, with only these permissions:
 

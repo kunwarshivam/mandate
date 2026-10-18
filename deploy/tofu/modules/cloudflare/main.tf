@@ -37,7 +37,7 @@ variable "api_hostname" {
   type = string
 
   validation {
-    condition     = can(regex("^[a-z0-9-]+(\\.[a-z0-9-]+)+$", var.api_hostname))
+    condition     = can(regex("^[a-z0-9-]+([.][a-z0-9-]+)+$", var.api_hostname))
     error_message = "The API hostname is a plain DNS name."
   }
 }
@@ -48,7 +48,7 @@ variable "api_origin" {
 
   validation {
     condition     = can(regex("^https?://", var.api_origin))
-    error_message = "The API origin is an http or https URL."
+    error_message = "The API origin must be a web URL, plain or over TLS."
   }
 }
 
@@ -57,7 +57,7 @@ variable "access_allowed_emails" {
   type        = list(string)
 
   validation {
-    condition     = length(var.access_allowed_emails) > 0 && alltrue([for email in var.access_allowed_emails : can(regex("^[^@\\s*]+@[^@\\s*]+\\.[^@\\s*]+$", email))])
+    condition     = length(var.access_allowed_emails) > 0 && alltrue([for email in var.access_allowed_emails : can(regex("^[^@[:space:]*]+@[^@[:space:]*]+[.][^@[:space:]*]+$", email))])
     error_message = "Access needs at least one email, each a full address; a wildcard or a domain alone is refused."
   }
 }
@@ -174,6 +174,10 @@ resource "cloudflare_r2_bucket_lock" "journal_archive" {
       }
     },
   ]
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "this" {
