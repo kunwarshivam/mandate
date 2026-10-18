@@ -47,6 +47,7 @@
 
 pub mod canary;
 mod delivery;
+pub mod email;
 mod kind;
 mod payload;
 mod provider;
@@ -85,4 +86,12 @@ pub enum NotifyError {
     /// A fixed key could not be represented canonically.
     #[error("the {what} cannot be represented")]
     Unrepresentable { what: &'static str },
+    /// Text that is not exactly one plain email address was offered as the founder's (DEC-2508).
+    /// The error names no part of it.
+    #[error("the founder's address is exactly one plain address, local@domain")]
+    NotAnAddress,
+    /// No mail of this notice's text may be sent yet (DEC-2508): the brief waits for its
+    /// unsubscribe endpoint and counsel's wording.
+    #[error("no mail of this kind may be sent yet")]
+    MailNotPermitted,
 }

@@ -37,11 +37,13 @@ pub mod control;
 pub mod db;
 pub mod deploy;
 pub mod download;
+pub mod evaluation;
 pub mod gestures;
 pub mod identity;
 pub mod inbox;
 pub mod inspect;
 pub mod journal;
+pub mod owner;
 pub mod postgres;
 pub mod register;
 #[cfg(any(test, feature = "rh-sim"))]

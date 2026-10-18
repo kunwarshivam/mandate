@@ -1,0 +1,21 @@
+# The workspace vault (E21-32, DEC-2019). Settings only: the TLS key is made in the cluster at the
+# first install and kept across upgrades, and the unseal key and the root token are made by
+# `bao operator init`, never by the chart and never a value (DEC-822 item 4, DEC-977 item 5).
+
+# The workspace whose processes may reach the vault, by the label every workspace pod carries
+# (`mandate.dev/workspace`) and the egress label of each process whose egress names the vault
+# (`mandate.dev/egress-vault`).
+workspace: ws1
+
+# OpenBao 2.7.1, pinned by its index digest: the image CI's conformance suite runs (D-5, DEC-990;
+# docs/dependencies.md).
+image: ghcr.io/openbao/openbao:2.7.1@sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf
+
+# The integrated (raft) storage's volume. An empty class is the cluster's default.
+storage:
+  size: 1Gi
+  className: ""
+
+# How long the server certificate and its CA are valid from the install that made them. An
+# install or upgrade within 30 days of their end makes new ones.
+days: 365

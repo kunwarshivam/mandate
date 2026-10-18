@@ -32,6 +32,10 @@ pub enum Identity {
     Runtime,
     /// `mandate vault import`: writes the platform's client secret, and reads nothing.
     SecretImport,
+    /// The model gateway: reads the model provider's API key (DEC-2020).
+    ModelGateway,
+    /// The process that sends the platform's email: reads the email credential (DEC-2020).
+    EmailSender,
 }
 
 /// One secret the vault holds.
@@ -43,6 +47,35 @@ pub enum SecretPath {
     Token(ConnectionId),
     /// The platform's OAuth client secret.
     ClientSecret,
+    /// A secret of the platform's own that one process type reads (DEC-2020).
+    Platform(PlatformSecret),
+}
+
+/// A secret of the platform's own, held for one process type, never an environment variable or a
+/// committed file (DEC-2020).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlatformSecret {
+    /// The model provider's API key, the model gateway's (OpenRouter, DEC-997).
+    ModelProviderKey,
+    /// The credential the platform's email is sent with.
+    EmailCredential,
+}
+
+impl PlatformSecret {
+    pub const ALL: [Self; 2] = [Self::ModelProviderKey, Self::EmailCredential];
+}
+
+/// Who holds a [`PlatformSecret`]: the one identity that reads it and the one that writes it.
+/// No identity deletes it; a rotation writes over it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Holders {
+    pub reads: Identity,
+    pub writes: Identity,
+}
+
+/// The holders of `secret` (DEC-2020 item 2).
+pub fn holders(_secret: PlatformSecret) -> Result<Holders, SourceError> {
+    Err(SourceError::Unimplemented { story: "E21-32" })
 }
 
 /// What an identity does to a path.
@@ -103,6 +136,8 @@ pub fn role_name(identity: &Identity) -> String {
         Identity::Executor(c) => format!("executor-{}", c.as_str()),
         Identity::Runtime => "runtime".to_owned(),
         Identity::SecretImport => "secret-import".to_owned(),
+        Identity::ModelGateway => "model-gateway".to_owned(),
+        Identity::EmailSender => "email-sender".to_owned(),
     }
 }
 
@@ -112,6 +147,12 @@ pub fn kv_path(path: &SecretPath) -> String {
         SecretPath::Code(c) => format!("connections/{}/code", c.as_str()),
         SecretPath::Token(c) => format!("connections/{}/token", c.as_str()),
         SecretPath::ClientSecret => "platform/alpaca-oauth-client-secret".to_owned(),
+        SecretPath::Platform(PlatformSecret::ModelProviderKey) => {
+            "platform/model-provider-key".to_owned()
+        }
+        SecretPath::Platform(PlatformSecret::EmailCredential) => {
+            "platform/email-credential".to_owned()
+        }
     }
 }
 
@@ -167,6 +208,9 @@ pub fn openbao_policy(
 
 /// Refuses as [`SourceError::Denied`] what [`allows`] does not allow.
 pub fn require(identity: &Identity, access: Access, path: &SecretPath) -> Result<(), SourceError> {
+    if let SecretPath::Platform(secret) = path {
+        holders(*secret)?;
+    }
     if allows(identity, access, path) {
         Ok(())
     } else {
