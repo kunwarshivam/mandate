@@ -57,7 +57,7 @@ variable "access_allowed_emails" {
   type        = list(string)
 
   validation {
-    condition     = length(var.access_allowed_emails) > 0 && alltrue([for email in var.access_allowed_emails : can(regex("^[^@ *]+@[^@ *]+[.][^@ *]+$", email))])
+    condition     = length(var.access_allowed_emails) > 0 && alltrue([for email in var.access_allowed_emails : can(regex("^[^@[:space:]*]+@[^@[:space:]*]+[.][^@[:space:]*]+$", email))])
     error_message = "Access needs at least one email, each a full address; a wildcard or a domain alone is refused."
   }
 }
