@@ -507,17 +507,11 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                               cell (#1588)",
                     waits: vec![SI_SESSION, W2_WEB],
                 }),
-                Part::Gap(Gap {
-                    what: "the kill switch through the CLI, at agent scope",
-                    on_main: "`mandate agent kill` at agent, connection and workspace scope \
-                              (#1537, DEC-2000)",
-                    waits: vec![wait(
-                        "E2E",
-                        "E21-54",
-                        None,
-                        "this scenario runs it as a gesture and the closing verify covers it",
-                    )],
-                }),
+                gesture(
+                    "the owner's kill switch for the agent, through the CLI (agent scope)",
+                    owner(&["agent", "kill", "--agent", AGENT]),
+                    format!("kill_switch agent {AGENT} committed as event"),
+                ),
                 Part::Gap(Gap {
                     what: "the agent's processes stop on it",
                     on_main: "the runtime reads the kill switch first (#1521, image #1560)",
@@ -1002,6 +996,46 @@ mod tests {
         assert_eq!(all[all.len() - 1].args[2], SEGMENT);
     }
 
+    /// Step 6 commits the owner's kill switch for the demo's agent, at agent scope only (an
+    /// agent-scoped switch never reaches the connection or the workspace, rule 13), after the
+    /// agent is deployed and before the record is exported, so the closing verify covers it.
+    #[test]
+    fn step_six_kills_the_demo_agent_at_agent_scope_before_the_record() {
+        let steps = plan("demo1", &mandate());
+        let all = gestures(&steps);
+        let at = |head: &[&str]| all.iter().position(|g| g.args[..head.len()] == *head);
+        let kill = at(&["agent", "kill"]).expect("step 6 runs `agent kill`");
+        let g = all[kill];
+        assert_eq!(g.args[2..4], ["--agent", AGENT]);
+        assert!(
+            !g.args
+                .iter()
+                .any(|a| a == "--connection" || a == "--workspace-wide"),
+            "{:?}",
+            g.args
+        );
+        assert_eq!(
+            g.expect,
+            format!("kill_switch agent {AGENT} committed as event")
+        );
+        let deployed = all
+            .iter()
+            .rposition(|g| g.args[..2] == ["agent", "deploy"])
+            .unwrap();
+        assert!(deployed < kill, "the agent is deployed before it is killed");
+        assert!(
+            kill < at(&["journal", "export"]).unwrap(),
+            "exported after it"
+        );
+        let step6 = &steps[5].parts;
+        assert!(
+            step6
+                .iter()
+                .any(|p| matches!(p, Part::Gesture(x) if x.container == g.container)),
+            "the kill switch is step 6's"
+        );
+    }
+
     /// The API is checked only for what it serves without a session: step 1 asks for the demo
     /// workspace's agents and must be refused with the one 401, and no check expects a success the
     /// cell cannot give until a session exists.
@@ -1152,15 +1186,15 @@ mod tests {
         );
     }
 
-    /// Which steps run today: the gestures on `main` make steps 1, 2 and 4 partial, steps 3, 5
-    /// and 6 wait wholly on other lanes, and the record runs whole.
+    /// Which steps run today: the gestures on `main` make steps 1, 2, 4 and 6 partial, steps 3
+    /// and 5 wait wholly on other lanes, and the record runs whole.
     #[test]
     fn each_step_reads_ready_partial_or_skipped_from_its_parts() {
         let steps = plan("demo1", &mandate());
         let read: Vec<Readiness> = steps.iter().map(readiness).collect();
         assert_eq!(
             read,
-            [Partial, Partial, Skipped, Partial, Skipped, Skipped, Ready]
+            [Partial, Partial, Skipped, Partial, Skipped, Partial, Ready]
         );
         let step = |parts: Vec<Part>| Step {
             number: 9,

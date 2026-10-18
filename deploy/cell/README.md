@@ -210,7 +210,7 @@ workspace's control stream and verifying it by journal spec §11 against the art
 gestures wrote, so every artifact a record names is checked. Each run uses a fresh workspace,
 `demo<run id>`.
 
-The run's own report is the up-to-date list; on 2026-10-18 it read:
+The run's own report is the up-to-date list; on 2026-10-18, after slice 4, it read:
 
 | Step | Today | Runs | Waits on |
 |---|---|---|---|
@@ -219,7 +219,7 @@ The run's own report is the up-to-date list; on 2026-10-18 it read:
 | 3. Research, through the gateway's recorded fake | skipped | Nothing yet | D1: the runtime started; I2 (E19-2): a deployment's research configured (DEC-2208); AH (E19-13): the agentic loop over its state (#1551, #1561, #1566, #1569 on `main`) |
 | 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4, #1592) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
 | 5. A backtest of the same version | skipped | Nothing yet | E2E: run the runner and `mandate backtest record` (#1581) in the gestures' pod; SI: the API read with a session |
-| 6. The kill switch | skipped | Nothing yet | SI and W2: from `web/`; E2E: `mandate agent kill` (#1537) as a gesture; D1 and X: the processes stop on it |
+| 6. The kill switch | partial | `agent kill --agent demo-spy` (agent scope), recorded before the closing export and verify | SI and W2: from `web/`; D1 and X: the processes stop on it |
 
 The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
 every opening asked, protection on. CI's `cell-demo` job, which no required check depends on, runs

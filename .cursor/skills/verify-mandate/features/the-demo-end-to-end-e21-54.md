@@ -6,7 +6,8 @@
   cell-demo`), and the demo's envelope and instrument under `deploy/cell/demo/`.
 - **Tests:** `xtask/src/cell/scenario.rs`'s unit tests: the demo files are canonical JSON and the
   envelope is paper and asks every opening; the plan runs the six steps in order and types only the
-  codes it was shown; every gesture is in the run's workspace and never live; the cell's API is
+  codes it was shown; step 6 kills the demo's agent at agent scope only, before the record is
+  exported; every gesture is in the run's workspace and never live; the cell's API is
   checked only for its refusal with no session; every gap cites what of it is on `main` and waits on
   a named lane with its backlog story; each step reads ready, partial or skipped from its parts;
   the closing summary lists every wait once under its lane; and the gestures run in one pod after
