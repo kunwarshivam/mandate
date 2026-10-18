@@ -16,7 +16,15 @@ spec:
     matchLabels:
       {{- include "mandate.selector" . | nindent 6 }}
   template:
-    {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name) }}
+    {{- $launch := dict "root" .root "p" .p "name" .p.name }}
+    {{- with .p.args }}
+    {{- $_ := set $launch "args" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "") | fromJsonArray) }}
+    {{- end }}
+    {{- with .p.probe }}
+    {{- $probe := dict "livez" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "livez") | fromJsonArray) "readyz" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "readyz") | fromJsonArray) }}
+    {{- $_ := set $launch "probe" $probe }}
+    {{- end }}
+    {{- $container := include "mandate.container" $launch }}
     {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container) | nindent 4 }}
 {{- end -}}
 {{- $root := . }}

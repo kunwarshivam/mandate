@@ -86,6 +86,7 @@ const HOST_CA_BUNDLES: [&str; 4] = [
     "/etc/ssl/ca-bundle.pem",
     "/etc/ssl/cert.pem",
 ];
+const RUNTIME_DOCKERFILE: &str = "deploy/cell/images/runtime.Dockerfile";
 /// Where the cell keeps what it derives: the kubeconfig, the downloaded operator chart, and the
 /// image build context. Under `target/`, so nothing derived is ever committed.
 const STATE: &str = "target/cell";
@@ -545,10 +546,33 @@ fn static_binary(binary: &str) -> String {
     format!("{STATIC_TARGET}/{STATIC_TRIPLE}/debug/{binary}")
 }
 
-/// `cargo xtask cell up`: build the `mandate` and `api` images from this checkout (never with the
-/// `live` feature), bring up the k3d cluster if it is not up, install the CloudNativePG operator, the
-/// journal's Postgres and the workspace chart, and wait until every pod is ready and the
-/// migration Job has finished.
+/// The cell's `runtime` image (DEC-1013): this checkout's `mandate-daemon`. `None` where the
+/// `mandate` image is pulled: no signed runtime image is published yet, so the runtime is left out
+/// of that cell rather than built from something else.
+fn runtime_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag("runtime", "mandate-daemon").map(Some)
+}
+
+/// The `images.*` settings for the images this cell runs, so `up` and every render agree.
+fn image_sets() -> Result<Vec<String>> {
+    let mut sets = vec![
+        format!("images.mandate={}", image_tag()?),
+        format!("images.api={}", api_image_tag()?.unwrap_or_default()),
+    ];
+    sets.extend(signin_values(stub_image_tag()?.as_deref()));
+    if let Some(runtime) = runtime_image()? {
+        sets.push(format!("images.runtime={runtime}"));
+    }
+    Ok(sets)
+}
+
+/// `cargo xtask cell up`: build the `mandate`, `api` and `runtime` images from this checkout (never
+/// with the `live` feature), bring up the k3d cluster if it is not up, install the CloudNativePG
+/// operator, the journal's Postgres and the workspace chart, and wait until every pod is ready and
+/// the migration Job has finished.
 pub fn up() -> Result<()> {
     let source = host_image_source()?;
     if source == ImageSource::Build {
@@ -556,9 +580,13 @@ pub fn up() -> Result<()> {
     }
     let image = image_tag()?;
     let api = api_image_tag()?;
+    let runtime = runtime_image()?;
     let stub = stub_image_tag()?;
     if source == ImageSource::Build {
         build_image(&image, IMAGE_DOCKERFILE, "mandate", &[])?;
+    }
+    if let Some(runtime) = &runtime {
+        build_image(runtime, RUNTIME_DOCKERFILE, "mandate-daemon", &[])?;
     }
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
@@ -579,6 +607,9 @@ pub fn up() -> Result<()> {
     }
     if let Some(api) = &api {
         sh("k3d", &["image", "import", "--cluster", CLUSTER, api])?;
+    }
+    if let Some(runtime) = &runtime {
+        sh("k3d", &["image", "import", "--cluster", CLUSTER, runtime])?;
     }
     if let Some(stub) = &stub {
         sh("k3d", &["image", "import", "--cluster", CLUSTER, stub])?;
@@ -648,10 +679,8 @@ pub fn up() -> Result<()> {
     if stub.is_some() {
         demo_links(&image)?;
     }
-    let image_value = format!("images.mandate={image}");
-    let api_value = format!("images.api={}", api.clone().unwrap_or_default());
-    let [stub_value, links_value] = signin_values(stub.as_deref());
-    let installed = helm(&[
+    let sets = image_sets()?;
+    let mut install = vec![
         "upgrade",
         "--install",
         "workspace",
@@ -660,19 +689,12 @@ pub fn up() -> Result<()> {
         NAMESPACE,
         "-f",
         WORKSPACE_VALUES,
-        "--set",
-        &image_value,
-        "--set",
-        &api_value,
-        "--set",
-        &stub_value,
-        "--set",
-        &links_value,
-        "--wait",
-        "--wait-for-jobs",
-        "--timeout",
-        "5m",
-    ]);
+    ];
+    for set in &sets {
+        install.extend(["--set", set.as_str()]);
+    }
+    install.extend(["--wait", "--wait-for-jobs", "--timeout", "5m"]);
+    let installed = helm(&install);
     if installed.is_err() && api.is_some() {
         api_diagnosis();
     }
@@ -743,10 +765,11 @@ pub fn down() -> Result<()> {
 const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
-/// `mandate-cli` and `mandate-api-server` linked statically, so their images need no base
-/// (DEC-993 item 9), with no feature at all: never `live`; with them the stub issuer once
-/// [`stub_ready`], which the dev profile's debug assertions are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes (DEC-464): it keeps
-/// overflow checks, and the cell's journals are small.
+/// `mandate-cli`, `mandate-api-server` and the runtime's `mandate-daemon` (DEC-1013) linked
+/// statically, so their images need no base (DEC-993 item 9), with no feature at all: never
+/// `live`; with them the stub issuer once [`stub_ready`], which the dev profile's debug assertions
+/// are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes (DEC-464):
+/// it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
     let mut args = vec![
         "build",
@@ -755,6 +778,8 @@ fn build_binary() -> Result<()> {
         "mandate-cli",
         "--package",
         "mandate-api-server",
+        "--package",
+        "mandate-daemon",
     ];
     if stub_ready(Path::new(".")) {
         args.extend(["--package", "mandate-stub-issuer"]);
@@ -1071,9 +1096,7 @@ fn apply_as(objects: &[Value], extra: &[&str]) -> Result<()> {
 
 /// The chart rendered with the cell's values and `sets`, as the JSON documents it emits.
 pub fn render(sets: &[String], show_only: Option<&str>) -> Result<Vec<Value>> {
-    let image = format!("images.mandate={}", image_tag()?);
-    let api = format!("images.api={}", api_image_tag()?.unwrap_or_default());
-    let [stub, links] = signin_values(stub_image_tag()?.as_deref());
+    let images = image_sets()?;
     let mut args = vec![
         "template",
         "workspace",
@@ -1082,15 +1105,10 @@ pub fn render(sets: &[String], show_only: Option<&str>) -> Result<Vec<Value>> {
         NAMESPACE,
         "-f",
         WORKSPACE_VALUES,
-        "--set",
-        image.as_str(),
-        "--set",
-        api.as_str(),
-        "--set",
-        stub.as_str(),
-        "--set",
-        links.as_str(),
     ];
+    for image in &images {
+        args.extend(["--set", image.as_str()]);
+    }
     for set in sets {
         args.push("--set-json");
         args.push(set);
@@ -1938,6 +1956,14 @@ pub fn compose_document(root: &Path, all: &[Value]) -> Result<Value> {
                 service["depends_on"] =
                     json!({"migrate": {"condition": "service_completed_successfully"}});
                 service["restart"] = json!("unless-stopped");
+                if let Some(args) = p["args"].as_array() {
+                    service["command"] = json!(compose_words(args, "")?);
+                }
+                if let Some(probe) = p["probe"].as_array() {
+                    let mut test = vec![json!("CMD")];
+                    test.extend(compose_words(probe, "readyz")?.into_iter().map(Value::from));
+                    service["healthcheck"] = json!({"test": test, "interval": "5s", "retries": 6});
+                }
                 if name == API_PROCESS {
                     compose_api(&mut service)?;
                 }
@@ -1999,6 +2025,83 @@ fn compose_api(service: &mut Value) -> Result<()> {
         .context("the API's Compose service has no secrets")?
         .push(json!({"source": API_SESSION_KEY, "target": "session-signing-key"}));
     Ok(())
+}
+
+/// A service's `args` or `probe` from processes.json for Compose (DEC-1013): `{workspace}` and the
+/// `runtime` values' placeholders become the variables the operator sets, each required, and
+/// `{probe}` becomes `probe`.
+fn compose_words(words: &[Value], probe: &str) -> Result<Vec<String>> {
+    words
+        .iter()
+        .map(|w| {
+            let word = w.as_str().context("a launch word is not a string")?;
+            Ok(word
+                .replace("{workspace}", "${MANDATE_WORKSPACE:?set the workspace}")
+                .replace(
+                    "{agent}",
+                    "${MANDATE_RUNTIME_AGENT:?set the runtime's agent}",
+                )
+                .replace(
+                    "{connection}",
+                    "${MANDATE_RUNTIME_CONNECTION:?set the runtime's connection}",
+                )
+                .replace(
+                    "{owner}",
+                    "${MANDATE_RUNTIME_OWNER:?set the runtime's owner}",
+                )
+                .replace("{probe}", probe))
+        })
+        .collect()
+}
+
+/// The runtime image Compose is given when this cell built none (its `mandate` image is pulled):
+/// the drill never starts the runtime, but Compose resolves every service's variables first.
+const RUNTIME_NOT_BUILT: &str = "mandate.local/runtime:0000000";
+
+/// The variables the Compose file requires (DEC-1013): the workspace, the `mandate` image, the
+/// API server's settings ([`compose_api_settings`]), the runtime's image, and the runtime's
+/// deployment, read from the local cell's values so Compose and the k3d cell run one demo
+/// deployment.
+fn compose_env(
+    root: &Path,
+    image: &str,
+    api: &str,
+    runtime: Option<&str>,
+) -> Result<Vec<(String, String)>> {
+    let mut env = vec![
+        ("MANDATE_WORKSPACE".to_string(), WORKSPACE.to_string()),
+        ("MANDATE_IMAGE_MANDATE".to_string(), image.to_string()),
+        (
+            "MANDATE_IMAGE_RUNTIME".to_string(),
+            runtime.unwrap_or(RUNTIME_NOT_BUILT).to_string(),
+        ),
+    ];
+    env.extend(
+        compose_api_settings(api)
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value)),
+    );
+    for key in ["agent", "connection", "owner"] {
+        env.push((
+            format!("MANDATE_RUNTIME_{}", key.to_uppercase()),
+            runtime_value(root, key)?,
+        ));
+    }
+    Ok(env)
+}
+
+/// One of the local cell's `runtime:` values (`deploy/cell/values/k3d.yaml`).
+fn runtime_value(root: &Path, key: &str) -> Result<String> {
+    let text = fs::read_to_string(root.join(WORKSPACE_VALUES))
+        .with_context(|| format!("reading {WORKSPACE_VALUES}"))?;
+    let prefix = format!("  {key}: ");
+    text.lines()
+        .skip_while(|l| *l != "runtime:")
+        .take_while(|l| l.starts_with(' ') || *l == "runtime:")
+        .find_map(|l| l.strip_prefix(&prefix))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .with_context(|| format!("{WORKSPACE_VALUES} names no `runtime.{key}`"))
 }
 
 /// An image the workspace chart's values.yaml pins, read from its `images:` block, so the Compose
@@ -2838,14 +2941,13 @@ const COMPOSE_SECRETS: &str = "deploy/cell/compose/secrets";
 fn compose_cmd(args: &[&str]) -> Result<String> {
     let image = image_tag()?;
     let api = api_image_tag()?.unwrap_or_else(|| image.clone());
+    let env = compose_env(Path::new("."), &image, &api, runtime_image()?.as_deref())?;
     let mut full = vec!["compose", "-f", "compose.json"];
     full.extend_from_slice(args);
     let out = Command::new("docker")
         .current_dir(COMPOSE_DIR)
         .args(&full)
-        .env("MANDATE_WORKSPACE", WORKSPACE)
-        .env("MANDATE_IMAGE_MANDATE", &image)
-        .envs(compose_api_settings(&api))
+        .envs(env)
         .output()
         .context("starting docker compose")?;
     let text = format!(
@@ -3090,6 +3192,13 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
             ),
         },
         DemoPart {
+            name: "the agent runtime, on the deny-all wiring until the post-R0 hook (DEC-1013)",
+            skipped: lane(
+                built("runtime"),
+                "the runtime image is not on main yet (lane P3, E21-30)",
+            ),
+        },
+        DemoPart {
             name: "a paper agent on rh-sim and recorded Alpaca fixtures, no credential",
             skipped: lane(
                 built("runtime") && built("executor"),
@@ -3099,8 +3208,9 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
         DemoPart {
             name: RESEARCH_GATEWAY,
             skipped: lane(
-                built("runtime"),
-                "the research loop runs in the runtime image, not on main yet (lane P1, #1451)",
+                built("runtime") && built("executor"),
+                "the research loop runs in the runtime once the post-R0 hook wires its ports; until \
+                 then the cell's runtime runs the deny-all wiring (DEC-1013)",
             ),
         },
         DemoPart {
@@ -3147,7 +3257,13 @@ pub fn demo(web: bool) -> Result<()> {
         &["run", "--rm", "--network", "none", &image, "--help"],
     )
     .context("reading the CLI's commands from the image it built")?;
-    let mut parts = demo_parts(&processes()?, &help, stub_ready(Path::new(".")));
+    let mut listed = processes()?;
+    if runtime_image()?.is_none() {
+        for p in listed.iter_mut().filter(|p| p["name"] == "runtime") {
+            p["built"] = json!(false);
+        }
+    }
+    let mut parts = demo_parts(&listed, &help, stub_ready(Path::new(".")));
     if api_image_tag()?.is_none() {
         skip_without_api_image(&mut parts);
     }
@@ -3569,8 +3685,8 @@ mod tests {
             .collect();
         assert_eq!(
             skipped.len(),
-            6,
-            "API, agent, research, membership, sign-in and web/ wait on their lanes: {skipped:?}"
+            7,
+            "API, runtime, agent, research, membership, sign-in and web/ wait on their lanes: {skipped:?}"
         );
         assert!(
             skipped.contains(&RESEARCH_GATEWAY),
@@ -3673,6 +3789,73 @@ mod tests {
     }
 
     #[test]
+    fn the_runtime_is_ready_once_built_and_the_agent_still_waits_on_its_executor() {
+        let list = [process("runtime", true), process("executor", false)];
+        let parts = demo_parts(&list, "", false);
+        let skipped = |prefix: &str| {
+            parts
+                .iter()
+                .find(|p| p.name.starts_with(prefix))
+                .map(|p| p.skipped.is_some())
+        };
+        assert_eq!(skipped("the agent runtime"), Some(false));
+        assert_eq!(skipped("a paper agent"), Some(true));
+        assert_eq!(
+            parts
+                .iter()
+                .find(|p| p.name == RESEARCH_GATEWAY)
+                .map(|p| p.skipped.is_some()),
+            Some(true),
+            "a deny-all runtime runs no research"
+        );
+        let unbuilt = demo_parts(&[process("runtime", false)], "", false);
+        assert!(
+            unbuilt
+                .iter()
+                .any(|p| p.name.starts_with("the agent runtime") && p.skipped.is_some())
+        );
+    }
+
+    /// Every variable the generated Compose file requires is one the drill sets, so a service it
+    /// never starts still cannot stop it (DEC-1013).
+    #[test]
+    fn the_compose_drill_sets_every_variable_the_compose_file_requires() -> Result<()> {
+        let root = crate::repo_root()?;
+        let compose = fs::read_to_string(root.join(COMPOSE_FILE))?;
+        let required: std::collections::BTreeSet<&str> = compose
+            .split("${")
+            .skip(1)
+            .filter_map(|rest| rest.split_once(":?").map(|(name, _)| name))
+            .collect();
+        assert!(required.contains("MANDATE_RUNTIME_AGENT"), "{required:?}");
+        for runtime in [Some("mandate.local/runtime:0123456789ab"), None] {
+            let env = compose_env(
+                &root,
+                "mandate.local/mandate:0123456789ab",
+                "mandate.local/api:0123456789ab",
+                runtime,
+            )?;
+            let set: std::collections::BTreeSet<&str> = env
+                .iter()
+                .filter(|(_, v)| !v.is_empty())
+                .map(|(k, _)| k.as_str())
+                .collect();
+            let missing: Vec<&&str> = required.iter().filter(|r| !set.contains(**r)).collect();
+            assert!(missing.is_empty(), "the drill leaves {missing:?} unset");
+        }
+        let agent = compose_env(&root, "i", "a", None)?
+            .into_iter()
+            .find(|(k, _)| k == "MANDATE_RUNTIME_AGENT")
+            .map(|(_, v)| v);
+        assert_eq!(
+            agent.as_deref(),
+            Some("demo-agent"),
+            "the k3d cell's deployment"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn an_agent_needs_both_its_runtime_and_its_executor() {
         for (runtime, executor) in [(true, false), (false, true)] {
             let list = [process("runtime", runtime), process("executor", executor)];
@@ -3756,11 +3939,8 @@ mod tests {
     fn every_compose_placeholder_is_one_the_drill_sets() -> Result<()> {
         let root = crate::repo_root()?;
         let text = serde_json::to_string(&compose_document(&root, &processes_in(&root)?)?)?;
-        let set: Vec<&str> = compose_api_settings("x")
-            .iter()
-            .map(|(name, _)| *name)
-            .chain(["MANDATE_WORKSPACE", "MANDATE_IMAGE_MANDATE"])
-            .collect();
+        let env = compose_env(&root, "x", "x", None)?;
+        let set: Vec<&str> = env.iter().map(|(name, _)| name.as_str()).collect();
         let named: Vec<&str> = text
             .split("${")
             .skip(1)
