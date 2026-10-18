@@ -29,6 +29,7 @@ use mandate_passkey::stepup::{
 };
 use mandate_time::UtcNanos;
 
+use crate::backtests::paper;
 use crate::http::{App, invalid, problem, problem_body};
 use crate::routes::{Refused, Unreadable, authorized, enveloped, path_refused, string};
 use crate::writes::{derived_for, json_string, ref_text, strict};
@@ -160,11 +161,7 @@ pub async fn challenge(
         Ok(reader) => reader,
         Err(refusal) => return refusal.response(),
     };
-    let paper = reader
-        .control
-        .first()
-        .is_some_and(|row| row.environment == "paper");
-    if !paper {
+    if !paper(&reader.control) {
         return problem(
             StatusCode::CONFLICT,
             problem_body(ProblemCode::LiveUnavailable),
