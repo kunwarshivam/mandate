@@ -1,8 +1,8 @@
 //! The records journal spec v0.46 §9.19 closes for the model gateway (DEC-998, E15-8's code half,
 //! DEC-2201): the agent stream's `ModelInvocationRecorded`, with rules 146 to 152, and the meter
 //! stream `meter:{workspace_id}`'s `StreamOpened`, `MeterReserved`, and `MeterSettled`, with rules
-//! 154 to 157. Rules 153 and 158 are stream rules, [`check_stream`]'s: `append` hands it the
-//! stream's earlier records. Every rule only refuses a draft.
+//! 154 to 157. Rules 153 and 158 are stream rules, [`stream_rule`]'s, which
+//! [`crate::check_stream`] runs with the stream's earlier records. Every rule only refuses a draft.
 //!
 //! The control stream's `ModelInvocationRecorded` is the compiler's, [`crate::workspace`]'s; rules
 //! 72 to 75 are shared with it there.
@@ -195,28 +195,9 @@ fn sent_nothing(p: View<'_>) -> Result<(), Invalid> {
     ensure(p.text("cost_usd") == "0", "payload.cost_usd")
 }
 
-/// Rules 153 and 158 over one stream, from its start: `earlier` are the stream's records already
-/// stored, in order, and `batch` the drafts appended after them. The first draft of `batch` that
-/// breaks one is reported by its index in `batch`, with the member that names the break. Only
-/// `earlier` records and drafts of the same stream as the draft judged are read, so a record of the
-/// same call on another stream never counts.
-///
-/// - 153: an agent stream's `ModelInvocationRecorded` names a `call_id` no earlier one names.
-/// - 158: a `MeterReserved` names a `call_id` no earlier one names; a `MeterSettled` names as its
-///   `reservation` an earlier `MeterReserved` of the same `call_id` that no earlier `MeterSettled`
-///   names, the first that fails.
-pub fn check_stream(earlier: &[Draft], batch: &[Draft]) -> Result<(), (usize, Invalid)> {
-    for (i, draft) in batch.iter().enumerate() {
-        let before = earlier
-            .iter()
-            .chain(batch.get(..i).unwrap_or_default())
-            .filter(|d| d.stream_id() == draft.stream_id());
-        stream_rule(before, draft).map_err(|error| (i, error))?;
-    }
-    Ok(())
-}
-
-fn stream_rule<'a>(before: impl Iterator<Item = &'a Draft>, draft: &Draft) -> Result<(), Invalid> {
+/// Rules 153 and 158 on one draft, against the stream's records `before` it, in order.
+pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
+    let before = before.iter().copied();
     let stream = draft.stream_id().stream_type();
     let judged = (draft.event_type(), draft.schema_version(), stream);
     let mine = payload_of(draft);

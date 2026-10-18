@@ -573,7 +573,7 @@ pub fn open_preconditions() -> Preconditions {
 }
 
 pub fn production_preconditions() -> Preconditions {
-    Preconditions::read(&JournalCatalog)
+    Preconditions::read(&JournalCatalog::JOURNAL)
 }
 
 /// The `research_equity` envelope: five instruments, US equities, a research envelope with a

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { LINK, RULE } from "./letter";
 import { Badges } from "./retro";
+import { SIGN_IN_HREF } from "@/lib/hosts";
 
 /** The homepage's footer: its badges, the plain terms the page is offered on, and the way back up. */
 export function SiteFooter() {
@@ -13,7 +14,7 @@ export function SiteFooter() {
         <p className="max-w-[36rem] text-pretty">Owlhead is in private beta. It is software, not investment advice. Trading involves risk, and you can lose money.</p>
         <p>
           © 2026 Owlhead.{" "}
-          <Link href="/login" className={LINK}>
+          <Link href={SIGN_IN_HREF} className={LINK}>
             Sign in
           </Link>
           {" | "}
