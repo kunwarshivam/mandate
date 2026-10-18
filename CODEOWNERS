@@ -87,5 +87,6 @@
 /crates/mandate-tenant/     @kunwarshivam
 /crates/mandate-time/       @kunwarshivam
 /crates/mandate-vault-local/ @kunwarshivam
+/crates/mandate-vault/      @kunwarshivam
 /crates/mandate-version-backtest/ @kunwarshivam
 /crates/mandate-webpush/    @kunwarshivam

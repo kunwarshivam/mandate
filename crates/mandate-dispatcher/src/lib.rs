@@ -34,6 +34,11 @@
 //! holding its notice stream's writer epoch. They are the crate's only I/O, so it is `pure = false`
 //! in `xtask/layers.toml`, and nothing may depend on it (NT-9).
 //!
+//! [`WebPushProvider`] is the web-push channel adapter (E8-10 slice D10b, E8-14, DEC-2506): one
+//! address per call through [`Addressed`], over ports for the vault, the POST, the clock, and the
+//! random source, signing with a [`RingVapidSigner`] (DEC-2503). [`WebPushSwitch`] keeps web push
+//! off until DEC-2504 is decided.
+//!
 //! Every entry point returns a `Result`, so a stub reports [`DispatchError::Unimplemented`]
 //! (DEC-77).
 
@@ -41,11 +46,17 @@ mod due;
 mod os;
 mod pg;
 mod step;
+mod webpush;
 
 pub use due::{Due, Next, due};
 pub use os::{Entropy, EntropyUnavailable, OsRandom, System};
 pub use pg::{PgNotices, READ_DEADLINE};
 pub use step::{Config, Journal, NoticeWriter, step};
+pub use webpush::{
+    AddressBook, AddressRef, Addressed, Clock, KeyId, Ports, PostFailure, PushAnswer, PushPost,
+    RingVapidSigner, SEND_DEADLINE, StoredSubscription, VaultUnavailable, WebPushProvider,
+    WebPushSwitch,
+};
 
 use mandate_notify::{NotifyError, Outcome, Reason};
 use mandate_push_relay::{RelayError, RelayRequest};

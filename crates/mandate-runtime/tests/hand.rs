@@ -2398,6 +2398,39 @@ fn a_clean_reconciliation_lifts_the_startup_hold_with_an_intent_still_outstandin
     );
 }
 
+/// A hold taken at a start with an intent outstanding waits for a reconciliation folded after
+/// that start (DEC-1014 item 6). A clean one from before it proves nothing about what the
+/// outstanding intent did since, so the next input must not lift the hold on it, as a runtime
+/// process whose executor reconciles on its own schedule would otherwise do.
+#[test]
+fn a_reconciliation_from_before_the_start_does_not_lift_a_hold_taken_with_an_intent_outstanding() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+    shell.run(Input::ModelOutput(fresh_output(100)), &ports);
+    shell.run(Input::Tick(clock(100)), &ports);
+
+    let (mut shell, _) = shell.restart(&ports);
+    assert!(!shell.state.outstanding().is_empty());
+    assert_eq!(shell.state.effective_mode(), Mode::Paused);
+    shell.run(Input::Tick(clock(101)), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "the reconciliation folded before the start is not the one the hold waits for"
+    );
+
+    let clean = reconciliation(2, 200);
+    shell.fold_one(&clean).expect("folds");
+    shell.run(Input::Tick(clock(200)), &ports);
+    assert_eq!(shell.state.effective_mode(), Mode::Normal);
+}
+
 /// Round-1 review finding 6 and round-3 findings 1 and 2: a `RiskLimit` flatten's restriction lifts
 /// through the account stream **by the owner's acknowledgment** and nowhere else (brief item 21,
 /// mandate spec §5.4, §5.7, §5.8), while an owner or operator stop is terminal (DEC-131 item 12).
