@@ -16,6 +16,7 @@ use serde::Deserialize;
 mod cell;
 mod image;
 mod release;
+mod trial;
 
 const USAGE: &str = "\
 usage: cargo xtask <command>
@@ -49,6 +50,9 @@ commands:
   live-feature          check that only the runner may build `live`, and CI only compiles it or
                         tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
+  trial <branch>        merge origin/<branch> into origin/main in target/trial, then cargo check
+                        --workspace --all-targets and the selected crates' nextest run
+  trial --main <since>  the same checks on origin/main itself, selecting what changed since <since>
   release tools         install the release build's pinned tools under $CARGO_HOME
   release build <out>   build the release binaries reproducibly into <out>, with SHA256SUMS and an
                         SBOM each, and print digest=<sha256 of SHA256SUMS> (E21-8)
@@ -158,6 +162,9 @@ const SCHEMA_SHARD_ENV: &str = "MANDATE_SCHEMA_SHARD";
 /// test-nextest`, through the environment for the same reason as [`SCHEMA_SHARD_ENV`] (DEC-871).
 /// `cargo xtask ci test` ignores it and runs every test.
 const TEST_PARTITION_ENV: &str = "MANDATE_TEST_PARTITION";
+/// Set, `ci test-nextest` keeps running after a failing test and reports every failure: what
+/// `cargo xtask trial` asks for. CI never sets it, so its shards still stop at the first failure.
+pub(crate) const NO_FAIL_FAST_ENV: &str = "MANDATE_NO_FAIL_FAST";
 /// The simulator binary `test-rh-sim` builds, for `mandate-mcp`'s rehearsal tests to run (DEC-922
 /// item 3).
 const RH_SIM_BIN_ENV: &str = "MANDATE_RH_SIM_BIN";
@@ -273,6 +280,7 @@ fn run() -> Result<()> {
             release::tools(&release::Paths::from_env(&root)?.cargo_home).map(drop)
         }
         ["release", "build", out] => release::build(&root, Path::new(out)),
+        ["trial", rest @ ..] => trial::run(&root, &trial::Trial::parse(rest)?),
         ["release", "compare", a, b] => release::compare(Path::new(a), Path::new(b)),
         ["release", "images", dist, out] => {
             release::images(&root, Path::new(dist), Path::new(out), false)
@@ -471,7 +479,10 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
                 eprintln!("    test-nextest: no crate affected (DEC-1190)");
                 return Ok(());
             }
-            let args = nextest_args(partition, scoped_packages(&selected).as_deref())?;
+            let mut args = nextest_args(partition, scoped_packages(&selected).as_deref())?;
+            if env::var_os(NO_FAIL_FAST_ENV).is_some() {
+                args.push("--no-fail-fast".to_owned());
+            }
             sh(
                 "cargo",
                 &args.iter().map(String::as_str).collect::<Vec<_>>(),
