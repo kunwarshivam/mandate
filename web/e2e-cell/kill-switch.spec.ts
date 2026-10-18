@@ -35,12 +35,19 @@ test("the kill switch from web/, recorded through the API", async ({ page }) => 
   await expect(sheet).toBeVisible();
   await sheet.getByRole("link", { name: /^Kill switch:/ }).first().click();
   await expect(page).toHaveURL(new RegExp(`/agents/${agent.agent_id}/kill-switch$`));
+  let scopeShown: unknown = null;
+  await page.route(`**/v1/workspaces/${WORKSPACE}/kill-switch`, async (route) => {
+    scopeShown = (JSON.parse(route.request().postData() ?? "{}") as { scope?: unknown }).scope ?? null;
+    const exact = JSON.stringify(scopeShown) === JSON.stringify({ kind: "agent", id: agent.agent_id });
+    await (exact ? route.continue() : route.abort());
+  });
   const recorded = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/kill-switch`);
   await page.getByRole("button", { name: /Activate the kill switch/ }).click();
   const passkey = page.getByRole("dialog", { name: "Confirm it is you" });
   const first = await Promise.race([recorded.then(() => "sent" as const), passkey.waitFor({ state: "visible" }).then(() => "passkey" as const)]);
   if (first === "passkey") await passkey.getByRole("button", { name: "Use passkey" }).click();
   const answer = await recorded;
+  expect(scopeShown, "the request carried exactly this agent's scope before it was let through").toEqual({ kind: "agent", id: agent.agent_id });
   expect(answer.status(), "the API recorded the kill switch").toBe(202);
   const body = (await answer.json()) as { command_id?: string; phase?: string };
   expect(body.phase).toBe("recorded");

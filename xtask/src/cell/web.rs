@@ -5,8 +5,9 @@
 
 use std::env;
 use std::fs;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -136,6 +137,105 @@ fn answers(program: &str, arg: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// How many polls the group gets to stop on SIGTERM before it is killed: five seconds.
+const STOP_POLLS: u32 = 20;
+
+/// A process and everything it starts, in a process group of their own: `npx`, Playwright, and the
+/// `next dev` server Playwright starts. Dropping it, on success, timeout, error, or unwinding, stops
+/// the whole group, SIGTERM first so Playwright can stop its server, then SIGKILL, so no server is
+/// left holding the app origin's port for the next run.
+pub struct Group {
+    child: Child,
+    pgid: u32,
+    stopped: bool,
+}
+
+impl Group {
+    /// Spawns `command` as the leader of a new process group.
+    pub fn spawn(command: &mut Command) -> Result<Group> {
+        let child = command.process_group(0).spawn()?;
+        let pgid = child.id();
+        Ok(Group {
+            child,
+            pgid,
+            stopped: false,
+        })
+    }
+
+    /// The leader's exit status, once it has one within `polls` polls; `None` when it ran past them.
+    pub fn wait_within(&mut self, polls: u32) -> Result<(Option<ExitStatus>, u32)> {
+        for polled in 0..=polls {
+            if let Some(status) = self.child.try_wait()? {
+                return Ok((Some(status), polled));
+            }
+            if polled < polls {
+                sleep(POLL);
+            }
+        }
+        Ok((None, polls))
+    }
+
+    /// Whether any process of the group is still alive.
+    pub fn alive(&self) -> bool {
+        group_alive(self.pgid)
+    }
+
+    /// Stops every process in the group: SIGTERM, up to [`STOP_POLLS`] polls, then SIGKILL, and
+    /// reaps the leader, whose status it returns (`None` once already stopped). Idempotent.
+    pub fn stop(&mut self) -> Option<ExitStatus> {
+        if self.stopped {
+            return None;
+        }
+        self.stopped = true;
+        signal("-TERM", self.pgid);
+        for _ in 0..STOP_POLLS {
+            let _ = self.child.try_wait();
+            if !self.alive() {
+                break;
+            }
+            sleep(POLL);
+        }
+        signal("-KILL", self.pgid);
+        self.child.wait().ok()
+    }
+}
+
+impl Drop for Group {
+    fn drop(&mut self) {
+        let _ = self.stop();
+    }
+}
+
+/// Whether a live process is in group `pgid`. Where `/proc` exists, a zombie does not count: a
+/// container's first process may never reap the group's orphans, and `kill -0` still reaches a
+/// zombie. Elsewhere, whether `kill -0` reaches the group.
+fn group_alive(pgid: u32) -> bool {
+    let Ok(procs) = fs::read_dir("/proc") else {
+        return signal("-0", pgid);
+    };
+    procs.flatten().any(|entry| {
+        fs::read_to_string(entry.path().join("stat")).is_ok_and(|stat| {
+            stat.rsplit_once(") ").is_some_and(|(_, rest)| {
+                let fields: Vec<&str> = rest.split_whitespace().collect();
+                fields.first().is_some_and(|state| *state != "Z")
+                    && fields
+                        .get(2)
+                        .is_some_and(|group| *group == pgid.to_string())
+            })
+        })
+    })
+}
+
+/// Sends `sig` to the process group `pgid` with the system's `kill`; whether it reached a process.
+fn signal(sig: &str, pgid: u32) -> bool {
+    Command::new("kill")
+        .args([sig, "--", &format!("-{pgid}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 /// Step 6 from `web/`, in `workspace`, the one the cell's API hosts (the scenario passes its own run's,
 /// never a fixed id), and to `agent` when it names one (else the first listed agent not stopped; a
 /// named agent already stopped is an `Err`, since D10 offers nothing to confirm for it): starts
@@ -144,15 +244,16 @@ fn answers(program: &str, arg: &str) -> bool {
 /// recorded. An `Err` is the gap the scenario prints: a missing tool, no agent to kill, or a run
 /// that failed or ran past [`GESTURE_POLLS`] (its log is named).
 pub fn kill_switch_from_web(workspace: &str, agent: Option<&str>) -> Result<WebGesture> {
+    let web = crate::repo_root()?.join("web");
     if let Some(why) = gesture_missing(
         answers("npm", "--version"),
-        Path::new("web/node_modules").exists(),
+        web.join("node_modules").exists(),
         chromium_cached(),
         answers("openssl", "version"),
     ) {
         bail!(why);
     }
-    let dir = state()?.join("web-gesture");
+    let dir = crate::repo_root()?.join(state()?).join("web-gesture");
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let (key, cert, result, log) = (
         dir.join("key.pem"),
@@ -183,39 +284,32 @@ pub fn kill_switch_from_web(workspace: &str, agent: Option<&str>) -> Result<WebG
         bail!("openssl could not make next dev's local certificate");
     }
     let output = fs::File::create(&log).with_context(|| format!("creating {}", log.display()))?;
-    let mut child = Command::new("npx")
-        .current_dir("web")
-        .args(["playwright", "test", "-c", "playwright.cell.config.ts"])
-        .envs(
-            web_run(true, workspace)
-                .env
-                .iter()
-                .map(|(n, v)| (*n, v.as_str())),
-        )
-        .env("OWLHEAD_CELL_TLS_KEY", &key)
-        .env("OWLHEAD_CELL_TLS_CERT", &cert)
-        .env("OWLHEAD_CELL_RESULT", &result)
-        .env("OWLHEAD_CELL_AGENT", agent.unwrap_or_default())
-        .stdout(output.try_clone()?)
-        .stderr(output)
-        .spawn()
-        .context("starting web/'s Playwright gesture")?;
-    let mut polls = 0;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if polls >= GESTURE_POLLS {
-            let _ = child.kill();
-            let _ = child.wait();
-            bail!(
-                "web/'s gesture ran past {}s and was stopped; its log is {}",
-                (POLL * GESTURE_POLLS).as_secs(),
-                log.display()
-            );
-        }
-        sleep(POLL);
-        polls += 1;
+    let mut group = Group::spawn(
+        Command::new("npx")
+            .current_dir(&web)
+            .args(["playwright", "test", "-c", "playwright.cell.config.ts"])
+            .envs(
+                web_run(true, workspace)
+                    .env
+                    .iter()
+                    .map(|(n, v)| (*n, v.as_str())),
+            )
+            .env("OWLHEAD_CELL_TLS_KEY", &key)
+            .env("OWLHEAD_CELL_TLS_CERT", &cert)
+            .env("OWLHEAD_CELL_RESULT", &result)
+            .env("OWLHEAD_CELL_AGENT", agent.unwrap_or_default())
+            .stdout(output.try_clone()?)
+            .stderr(output),
+    )
+    .context("starting web/'s Playwright gesture")?;
+    let (status, polls) = group.wait_within(GESTURE_POLLS)?;
+    let _ = group.stop();
+    let Some(status) = status else {
+        bail!(
+            "web/'s gesture ran past {}s and was stopped; its log is {}",
+            (POLL * GESTURE_POLLS).as_secs(),
+            log.display()
+        );
     };
     eprintln!(
         "    web/: the gesture's Playwright run took about {:.1}s",
@@ -249,6 +343,8 @@ mod tests {
 
     use anyhow::{Context, Result};
     use serde_json::Value;
+
+    use std::os::unix::process::ExitStatusExt;
 
     use super::super::{API_LOCAL_PORT, DEMO_WORKSPACE, STUB_PORT};
     use super::*;
@@ -369,6 +465,42 @@ mod tests {
         let config = fs::read_to_string(web.join("playwright.cell.config.ts"))?;
         assert!(config.contains(r#"testDir: "e2e-cell""#));
         assert!(config.contains(&format!(r#"const ORIGIN = "{DEMO_APP_ORIGIN}";"#)));
+        Ok(())
+    }
+
+    #[test]
+    fn a_stopped_group_leaves_no_process_behind_even_one_that_ignores_sigterm() -> Result<()> {
+        let mut group = Group::spawn(
+            Command::new("sh").args(["-c", "trap '' TERM; sleep 60 & sleep 60 & wait"]),
+        )?;
+        let (status, _) = group.wait_within(2)?;
+        assert!(
+            status.is_none(),
+            "the group is still running before it is stopped"
+        );
+        assert!(group.alive());
+        let leader = group.stop();
+        assert_eq!(
+            leader.and_then(|s| s.signal()),
+            Some(9),
+            "a leader that ignores SIGTERM is killed, never waited out"
+        );
+        assert!(
+            !group.alive(),
+            "no process of the group survives stop, SIGTERM ignored or not"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn dropping_a_group_stops_it() -> Result<()> {
+        let group = Group::spawn(Command::new("sh").args(["-c", "sleep 60 & sleep 60"]))?;
+        let pgid = group.pgid;
+        drop(group);
+        assert!(
+            !group_alive(pgid),
+            "a dropped group leaves no process behind"
+        );
         Ok(())
     }
 }
