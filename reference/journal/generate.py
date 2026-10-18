@@ -36,6 +36,7 @@ import approval
 import audit
 import backtest_records
 import canceled
+import confirmations
 import control_plane
 import deployed
 import deployment_manager
@@ -3859,6 +3860,7 @@ def render(
     invalidation_section: dict,
     deployed_section: dict,
     risk_limits_section: dict,
+    confirmations_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3896,6 +3898,7 @@ def render(
             "thesis_invalidation": invalidation_section,
             "agent_deployed": deployed_section,
             "risk_limits": risk_limits_section,
+            "step_up_confirmations": confirmations_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3964,6 +3967,7 @@ def main(argv: list[str] | None = None) -> int:
     invalidation_section = invalidation.build_section()
     deployed_section = deployed.build_section()
     risk_limits_section = risk_limits.build_section()
+    confirmations_section = confirmations.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -3989,6 +3993,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += requests.run_mutants(requests_section)
     problems += canceled.check_section(cancel_section)
     problems += canceled.run_mutants(cancel_section)
+    problems += confirmations.check_section(confirmations_section)
+    problems += confirmations.run_mutants(confirmations_section)
     problems += control_plane.check_section(control_plane_section)
     problems += control_plane.run_mutants(control_plane_section)
     problems += gateway.check_section(gateway_section)
@@ -4071,6 +4077,7 @@ def main(argv: list[str] | None = None) -> int:
         invalidation_section,
         deployed_section,
         risk_limits_section,
+        confirmations_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -4107,6 +4114,7 @@ def main(argv: list[str] | None = None) -> int:
         or invalidation.check_section(reread["thesis_invalidation"])
         or deployed.check_section(reread["agent_deployed"])
         or risk_limits.check_section(reread["risk_limits"])
+        or confirmations.check_section(reread["step_up_confirmations"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -4162,6 +4170,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(cancel_section['invalid_drafts'])} invalid and {len(cancel_section['valid_drafts'])} valid "
         f"approval-cancel drafts, {len(canceled.VALIDATOR_MUTANTS)} validator and "
         f"{len(canceled.vector_mutants(cancel_section))} vector mutants caught; "
+        f"{len(confirmations_section['invalid_drafts'])} invalid and {len(confirmations_section['valid_drafts'])} valid "
+        f"step-up confirmation drafts, {len(confirmations_section['streams'])} rule-243 streams, "
+        f"{len(confirmations.VALIDATOR_MUTANTS)} validator and "
+        f"{len(confirmations.vector_mutants(confirmations_section))} vector mutants caught; "
         f"{len(control_plane_section['invalid_drafts'])} invalid and {len(control_plane_section['valid_drafts'])} valid "
         f"control-plane drafts, {len(control_plane.VALIDATOR_MUTANTS)} validator and "
         f"{len(control_plane.vector_mutants(control_plane_section))} vector mutants caught; "

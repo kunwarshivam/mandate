@@ -57056,3 +57056,601 @@ risk_limits:
       value: '0'
     expect:
       outcome: Valid
+step_up_confirmations:
+  spec: docs/specs/journal.md v0.62 §9.29 (DEC-2104)
+  drafts:
+    step_up_confirmed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAA2P4A000000000000000C1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpConfirmed
+      schema_version: 1
+      event_time: '2026-10-18T22:30:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA2P0A000000000000000H1
+        action_kind: approve
+        action_digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+        principal: 01JAA2N0A000000000000000P1
+        code: 7KXV6BGD
+        confirmed_at: 1792362605
+      artifact_refs:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      pii_refs: []
+  invalid_drafts:
+  - name: challenge.kind
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.challenge
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.challenge
+  - name: challenge.form
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.challenge
+      value: not-a-ulid
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.challenge
+  - name: action_digest.kind
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.action_digest
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.action_digest
+      also:
+      - reason: artifact_refs
+        path: artifact_refs
+  - name: action_digest.form
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.action_digest
+      value: '4444444444444444444444444444444444444444444444444444444444444444'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.action_digest
+      also:
+      - reason: artifact_refs
+        path: artifact_refs
+  - name: principal.kind
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.principal
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.principal
+  - name: principal.form
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.principal
+      value: user_owner_01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.principal
+  - name: code.kind
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.code
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.code
+  - name: code.form
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.code
+      value: 7kxv6bgd
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.code
+  - name: confirmed_at.kind
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.confirmed_at
+      value: '1792362605'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.confirmed_at
+  - name: challenge.null
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.challenge
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.challenge
+  - name: action_kind.null
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.action_kind
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.action_kind
+  - name: action_digest.null
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.action_digest
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.action_digest
+      also:
+      - reason: artifact_refs
+        path: artifact_refs
+  - name: principal.null
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.principal
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.principal
+  - name: code.null
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.code
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.code
+  - name: confirmed_at.null
+    clause: §9.29 types
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.confirmed_at
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.confirmed_at
+  - name: code.shape.7KXV6BG
+    clause: §9.29 `confirm_code`
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.code
+      value: 7KXV6BG
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.code
+  - name: code.shape.7KXV-6BGD
+    clause: §9.29 `confirm_code`
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.code
+      value: 7KXV-6BGD
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.code
+  - name: code.shape.7KXV6BGU
+    clause: §9.29 `confirm_code`
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.code
+      value: 7KXV6BGU
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.code
+  - name: missing
+    clause: §9.29 closed
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.code
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.code
+  - name: extra
+    clause: §9.29 closed
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.method
+      value: cli_confirm
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.method
+  - name: another_kind
+    clause: 'rule 242: the one kind is `approve`'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.action_kind
+      value: confirm_version
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.action_kind
+  - name: in_live
+    clause: 'rule 242: a `live` confirmation is never recorded'
+    base_draft: step_up_confirmed
+    changes:
+    - path: environment
+      value: live
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: environment
+  - name: by_the_runtime
+    clause: 'rule 242: the actor is a user'
+    base_draft: step_up_confirmed
+    changes:
+    - path: actor
+      value:
+        kind: system
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: for_another_principal
+    clause: 'rule 242: the actor''s id is the principal'
+    base_draft: step_up_confirmed
+    changes:
+    - path: actor.id
+      value: 01JAA2N0A000000000000000P2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.id
+  - name: at_version_2
+    clause: '§9.29: closed at schema version 1 only'
+    base_draft: step_up_confirmed
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  valid_drafts:
+  - name: another_challenge
+    clause: '§9.29: any challenge the API issued'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.challenge
+      value: 01JAA2P0A000000000000000H2
+    expect:
+      outcome: Valid
+  - name: another_principal_as_its_own_actor
+    clause: 'rule 242: a principal confirms for itself'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.principal
+      value: 01JAA2N0A000000000000000P2
+    - path: actor.id
+      value: 01JAA2N0A000000000000000P2
+    expect:
+      outcome: Valid
+  - name: caused
+    clause: '§9.29: no rule reads the cause'
+    base_draft: step_up_confirmed
+    changes:
+    - path: causation_id
+      value: 01JAA2P0A000000000000000H2
+    expect:
+      outcome: Valid
+  - name: an_early_second
+    clause: '§9.29: no rule reads `confirmed_at`; the API judges it'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.confirmed_at
+      value: 0
+    expect:
+      outcome: Valid
+  - name: all_digits
+    clause: '§9.29 `confirm_code`: digits are Crockford characters'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.code
+      value: '01234567'
+    expect:
+      outcome: Valid
+  streams:
+  - name: two_challenges
+    clause: 'rule 243: one confirmation per challenge'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA2P4A000000000000000C1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpConfirmed
+      schema_version: 1
+      event_time: '2026-10-18T22:30:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA2P0A000000000000000H1
+        action_kind: approve
+        action_digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+        principal: 01JAA2N0A000000000000000P1
+        code: 7KXV6BGD
+        confirmed_at: 1792362605
+      artifact_refs:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA2P4A000000000000000C2
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpConfirmed
+      schema_version: 1
+      event_time: '2026-10-18T22:30:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA2P0A000000000000000H2
+        action_kind: approve
+        action_digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+        principal: 01JAA2N0A000000000000000P1
+        code: 7KXV6BGD
+        confirmed_at: 1792362605
+      artifact_refs:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: one_challenge_twice
+    clause: 'rule 243: a challenge is confirmed at most once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA2P4A000000000000000C1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpConfirmed
+      schema_version: 1
+      event_time: '2026-10-18T22:30:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA2P0A000000000000000H1
+        action_kind: approve
+        action_digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+        principal: 01JAA2N0A000000000000000P1
+        code: 7KXV6BGD
+        confirmed_at: 1792362605
+      artifact_refs:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA2P4A000000000000000C2
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpConfirmed
+      schema_version: 1
+      event_time: '2026-10-18T22:30:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA2P0A000000000000000H1
+        action_kind: approve
+        action_digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+        principal: 01JAA2N0A000000000000000P1
+        code: 7KXV6BGD
+        confirmed_at: 1792362605
+      artifact_refs:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '243'
+      index: 1
+  - name: one_challenge_by_two_principals
+    clause: 'rule 243: whoever confirms it second'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA2P4A000000000000000C1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpConfirmed
+      schema_version: 1
+      event_time: '2026-10-18T22:30:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA2P0A000000000000000H1
+        action_kind: approve
+        action_digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+        principal: 01JAA2N0A000000000000000P1
+        code: 7KXV6BGD
+        confirmed_at: 1792362605
+      artifact_refs:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA2P4A000000000000000C2
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpConfirmed
+      schema_version: 1
+      event_time: '2026-10-18T22:30:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P2
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA2P0A000000000000000H1
+        action_kind: approve
+        action_digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+        principal: 01JAA2N0A000000000000000P2
+        code: 7KXV6BGD
+        confirmed_at: 1792362605
+      artifact_refs:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '243'
+      index: 1
+  - name: the_third_repeats_the_first
+    clause: 'rule 243: not only adjacent records'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA2P4A000000000000000C1
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpConfirmed
+      schema_version: 1
+      event_time: '2026-10-18T22:30:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA2P0A000000000000000H1
+        action_kind: approve
+        action_digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+        principal: 01JAA2N0A000000000000000P1
+        code: 7KXV6BGD
+        confirmed_at: 1792362605
+      artifact_refs:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA2P4A000000000000000C2
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpConfirmed
+      schema_version: 1
+      event_time: '2026-10-18T22:30:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA2P0A000000000000000H2
+        action_kind: approve
+        action_digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+        principal: 01JAA2N0A000000000000000P1
+        code: 7KXV6BGD
+        confirmed_at: 1792362605
+      artifact_refs:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA2P4A000000000000000C3
+      stream_id: ctl:ws_01J8Z2
+      event_type: StepUpConfirmed
+      schema_version: 1
+      event_time: '2026-10-18T22:30:05.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        challenge: 01JAA2P0A000000000000000H1
+        action_kind: approve
+        action_digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+        principal: 01JAA2N0A000000000000000P1
+        code: 7KXV6BGD
+        confirmed_at: 1792362605
+      artifact_refs:
+      - sha256:4444444444444444444444444444444444444444444444444444444444444444
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '243'
+      index: 2
