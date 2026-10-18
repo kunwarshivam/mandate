@@ -1168,6 +1168,8 @@ after U-A1 to U-A5 are recorded.
   journal spec §9.28 closes `OwnerAcknowledged` and adds `OwnerAcknowledgmentRequested`. Still
   owed:
   - `mandate-journal` registers both, with rule 239 and §9.28's vectors (M7 S2);
+  - `mandate-journal` registers `OwnerCommandRefused`'s reasons `trigger_unknown`,
+    `trigger_superseded` and `request_invalid`, with rule 28's scoping (M7 S2);
   - the CLI's `agent request-ack` and `agent acknowledge` (M7 S2);
   - the workspace API's members (DEC-2102 item 4, lane L1);
   - the executor's copy and its four checks (E7-4, lane X);
