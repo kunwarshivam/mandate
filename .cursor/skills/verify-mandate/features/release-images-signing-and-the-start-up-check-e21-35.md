@@ -12,7 +12,7 @@
   `main` only, `publish-amd64`, `publish-arm64`, then `publish-index` over them).
 - **Tests:** `crates/mandate-release/tests/startup.rs`: a release key starts everywhere; unsigned
   only in dev and CI; a test key only in dev and CI; a wrong, truncated or other-binary signature
-  refused in every tier; no release key compiled in yet; a signature cosign itself wrote verifies
+  refused in every tier; exactly the founder's release key compiled in, pinned by its SPKI SHA-256; a signature cosign itself wrote verifies
   (`tests/fixtures`); malformed PEMs refused; the check's files and variables, and the test key
   never read outside dev and CI; a property over random binaries, tiers and signers against a
   restated rule. `crates/mandate-agentd/tests/process.rs`: the unsigned test build refuses with no

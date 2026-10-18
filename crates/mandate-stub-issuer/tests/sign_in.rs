@@ -14,7 +14,7 @@ use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::{Answer, Journal, JournalUnavailable, Rows};
 use mandate_api_server::keys::FetchedKeys;
 use mandate_api_server::lifecycle::Drain;
-use mandate_api_server::members::{Hosted, until_parser};
+use mandate_api_server::members::{Hosted, control_parser};
 use mandate_api_server::session::{OsRandom, Sessions};
 use mandate_api_server::subject::{SubjectLinks, digest, principal_at};
 use mandate_api_server::token::{Issuer as TokenIssuer, Keys};
@@ -97,6 +97,7 @@ fn api(
     runtime
         .block_on(fetched.fetch())
         .expect("the stub's key set fetched");
+    let workspace = WorkspaceId::from_ulid_text(ALICE_ID).expect("a ULID");
     let app = App {
         settings: Settings {
             app_origin: APP.to_owned(),
@@ -109,10 +110,10 @@ fn api(
         links: Arc::new(LinksAt(links)),
         clock: Arc::new(SystemClock),
         journal: Arc::new(NoJournal),
-        members: Arc::new(until_parser),
+        members: Arc::new(control_parser(workspace)),
         hosted: Hosted {
             org: OrgId::from_ulid_text("01JB3K6F0C9R2V7N4M8Q1T5W3X").expect("a ULID"),
-            workspace: WorkspaceId::from_ulid_text(ALICE_ID).expect("a ULID"),
+            workspace,
             internal_paper: false,
         },
         artifacts: None,

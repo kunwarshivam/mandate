@@ -880,6 +880,13 @@ const SCHEMA_SWEEP_INPUTS: [&str; 4] = [
     "reference/mandate/requirements.txt",
 ];
 
+/// The paths outside every crate that the cell jobs read (DEC-2609): the charts, images, compose
+/// files and drills under `deploy/`, and the Python environment `cargo xtask ci cell` runs the
+/// charts' invariant tests (`deploy/tests`) in. With the crates the cell's images hold
+/// ([`cell::IMAGE_PACKAGES`]) they are everything a cell job builds or reads that `xtask/` and
+/// `.github/`, which select everything, do not already cover.
+const CELL_INPUTS: [&str; 3] = ["deploy/", "python/pyproject.toml", "python/uv.lock"];
+
 /// The runner, the one crate whose `live` build the founder runs (DEC-529): `fast-portable` lints
 /// and tests it on macOS (DEC-954) and `fast-rh-sim-live` runs its rehearsal build (DEC-964), so
 /// both run exactly when it is selected.
@@ -1143,6 +1150,10 @@ struct Selection {
     full_checks: bool,
     /// Whether `schema-mutants` runs: a path the schema sweep reads changed ([`SCHEMA_SWEEP_INPUTS`]).
     schema_mutants: bool,
+    /// Whether the cell jobs run (DEC-2609): a path they read changed ([`CELL_INPUTS`]), or the
+    /// selection holds a crate the cell's images hold ([`cell::IMAGE_PACKAGES`]), which it does
+    /// whenever any crate those are built on changed.
+    cell: bool,
 }
 
 impl Selection {
@@ -1154,6 +1165,7 @@ impl Selection {
             python: true,
             full_checks: true,
             schema_mutants: true,
+            cell: true,
         }
     }
 
@@ -1190,12 +1202,14 @@ impl Selection {
         };
         format!(
             "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {}; \
-             schema-mutants {}; lint, the spec guard and mutants run as always (DEC-1190)",
+             schema-mutants {}; cell {}; lint, the spec guard and mutants run as always \
+             (DEC-1190)",
             yes(self.tests()),
             yes(self.python),
             yes(self.runner()),
             yes(self.full_checks),
             yes(self.schema_mutants),
+            yes(self.cell),
         )
     }
 
@@ -1204,13 +1218,14 @@ impl Selection {
     fn outputs(&self) -> String {
         format!(
             "tests={}\npython={}\nportable={}\nrh_sim_live={}\nfull_checks={}\nschema_mutants={}\n\
-             reasons={}\n",
+             cell={}\nreasons={}\n",
             self.tests(),
             self.python,
             self.runner(),
             self.runner(),
             self.full_checks,
             self.schema_mutants,
+            self.cell,
             self.reasons(),
         )
     }
@@ -1240,6 +1255,7 @@ fn select(
     let mut python = false;
     let mut full_checks = false;
     let mut schema_mutants = false;
+    let mut cell = false;
     for path in changed {
         if selects_everything(path) {
             return Selection::everything(graph, format!("{path} changed"));
@@ -1271,6 +1287,7 @@ fn select(
         schema_mutants |= SCHEMA_SWEEP_INPUTS
             .iter()
             .any(|entry| path_under(path, entry));
+        cell |= CELL_INPUTS.iter().any(|entry| path_under(path, entry));
     }
     let mut crates = dependents_closure(graph, &seeds);
     loop {
@@ -1292,12 +1309,16 @@ fn select(
         seeds.extend(coupled);
         crates = dependents_closure(graph, &seeds);
     }
+    cell |= cell::IMAGE_PACKAGES
+        .iter()
+        .any(|package| crates.contains(*package));
     Selection {
         everything: None,
         crates,
         python,
         full_checks,
         schema_mutants,
+        cell,
     }
 }
 
@@ -14427,7 +14448,7 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 7] = [
+    const SELECT_GATES: [(&str, &str); 12] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
@@ -14435,6 +14456,11 @@ mod tests {
         ("fast-rh-sim-live", "rh_sim_live"),
         ("full-checks", "full_checks"),
         ("schema-mutants", "schema_mutants"),
+        ("cell", "cell"),
+        ("cell-demo", "cell"),
+        ("cell-journal", "cell"),
+        ("cell-failover", "cell"),
+        ("cell-kill-switch", "cell"),
     ];
 
     /// DEC-1190 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
@@ -14676,6 +14702,7 @@ mod tests {
             python: bool,
             full_checks: bool,
             schema_mutants: bool,
+            cell: bool,
         }
         let cases: Vec<(&[&str], Expected)> = vec![
             (
@@ -14685,6 +14712,7 @@ mod tests {
                     python: false,
                     full_checks: false,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14694,6 +14722,7 @@ mod tests {
                     python: false,
                     full_checks: false,
                     schema_mutants: true,
+                    cell: false,
                 },
             ),
             (
@@ -14709,6 +14738,7 @@ mod tests {
                     python: false,
                     full_checks: true,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14718,6 +14748,7 @@ mod tests {
                     python: false,
                     full_checks: true,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14727,6 +14758,7 @@ mod tests {
                     python: false,
                     full_checks: false,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14736,6 +14768,7 @@ mod tests {
                     python: false,
                     full_checks: false,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14745,6 +14778,7 @@ mod tests {
                     python: true,
                     full_checks: true,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14754,6 +14788,7 @@ mod tests {
                     python: true,
                     full_checks: true,
                     schema_mutants: true,
+                    cell: false,
                 },
             ),
             (
@@ -14766,6 +14801,7 @@ mod tests {
                     python: true,
                     full_checks: true,
                     schema_mutants: false,
+                    cell: false,
                 },
             ),
             (
@@ -14775,6 +14811,7 @@ mod tests {
                     python: true,
                     full_checks: true,
                     schema_mutants: true,
+                    cell: false,
                 },
             ),
             (
@@ -14784,6 +14821,7 @@ mod tests {
                     python: false,
                     full_checks: false,
                     schema_mutants: true,
+                    cell: false,
                 },
             ),
             (
@@ -14793,6 +14831,7 @@ mod tests {
                     python: true,
                     full_checks: true,
                     schema_mutants: true,
+                    cell: false,
                 },
             ),
             (
@@ -14802,6 +14841,27 @@ mod tests {
                     python: false,
                     full_checks: true,
                     schema_mutants: true,
+                    cell: false,
+                },
+            ),
+            (
+                &["deploy/cell/charts/workspace/values.yaml"],
+                Expected {
+                    crates: &[],
+                    python: true,
+                    full_checks: true,
+                    schema_mutants: false,
+                    cell: true,
+                },
+            ),
+            (
+                &["python/uv.lock"],
+                Expected {
+                    crates: &[],
+                    python: true,
+                    full_checks: true,
+                    schema_mutants: false,
+                    cell: true,
                 },
             ),
         ];
@@ -14822,6 +14882,7 @@ mod tests {
                 selected.schema_mutants, expected.schema_mutants,
                 "{paths:?}'s schema-mutants"
             );
+            assert_eq!(selected.cell, expected.cell, "{paths:?}'s cell jobs");
             assert_eq!(
                 selected.tests(),
                 !expected.crates.is_empty(),
@@ -14905,9 +14966,10 @@ mod tests {
                 nothing.tests(),
                 nothing.python,
                 nothing.full_checks,
-                nothing.schema_mutants
+                nothing.schema_mutants,
+                nothing.cell
             ),
-            (false, false, false, false),
+            (false, false, false, false, false),
             "an empty diff runs no scoped job"
         );
     }
@@ -14922,7 +14984,7 @@ mod tests {
         let outputs = selected.outputs();
         let lines: Vec<&str> = outputs.lines().collect();
         assert_eq!(
-            lines.get(..6),
+            lines.get(..7),
             Some(
                 [
                     "tests=true",
@@ -14931,18 +14993,78 @@ mod tests {
                     "rh_sim_live=true",
                     "full_checks=true",
                     "schema_mutants=false",
+                    "cell=false",
                 ]
                 .as_slice()
             )
         );
-        let reasons = lines.get(6).copied().unwrap_or_default();
+        let reasons = lines.get(7).copied().unwrap_or_default();
         assert!(
             reasons.starts_with(
                 "reasons=3 crate(s) affected: mandate-executor, mandate-paper, mandate-risk;"
             ),
             "{reasons}"
         );
-        assert_eq!(lines.len(), 7, "{outputs}");
+        assert_eq!(lines.len(), 8, "{outputs}");
+    }
+
+    /// DEC-2609: the cell jobs start for a change to a crate any image package is built on, the
+    /// image package itself included, and for a path under `deploy/` or the cell's Python pins;
+    /// never for a crate no image holds, the documentation or `web/`; and always with no base.
+    #[test]
+    fn the_cell_jobs_run_only_for_what_the_cell_builds_or_reads() {
+        let mut graph = sample_graph();
+        for package in crate::cell::IMAGE_PACKAGES {
+            graph
+                .dirs
+                .insert(package.to_owned(), format!("crates/{package}"));
+            graph
+                .deps
+                .insert(package.to_owned(), crate_set(&["mandate-risk"]));
+        }
+        let cell_for = |paths: &[&str]| {
+            let changed: Vec<String> = paths.iter().map(|p| (*p).to_owned()).collect();
+            select(Some(&changed), &graph, &BTreeMap::new()).cell
+        };
+        for package in crate::cell::IMAGE_PACKAGES {
+            assert!(
+                cell_for(&[&format!("crates/{package}/src/main.rs")]),
+                "{package}'s own change runs the cell"
+            );
+        }
+        for paths in [
+            &["crates/mandate-num/src/lib.rs"][..],
+            &["crates/mandate-risk/tests/limits.rs"],
+            &["deploy/cell/images/mandate.Dockerfile"],
+            &["deploy/tests/test_chart.py"],
+            &["python/pyproject.toml"],
+            &["python/uv.lock"],
+        ] {
+            assert!(cell_for(paths), "{paths:?} runs the cell");
+        }
+        for paths in [
+            &["crates/mandate-canon/src/lib.rs"][..],
+            &["crates/mandate-identity/src/lib.rs"],
+            &["docs/specs/journal.md"],
+            &["web/src/app.tsx"],
+            &["python/mandate_tools/tests/test_x.py"],
+            &[],
+        ] {
+            assert!(!cell_for(paths), "{paths:?} leaves the cell out");
+        }
+        assert!(
+            select(None, &graph, &BTreeMap::new()).cell,
+            "a run with no base, as on main and the nightly, runs the cell"
+        );
+        assert!(
+            select(
+                Some(&[".github/workflows/ci.yml".to_owned()]),
+                &graph,
+                &BTreeMap::new()
+            )
+            .cell,
+            "a change that selects everything runs the cell"
+        );
     }
 
     /// A xorshift generator, so the property tests below need no dependency and replay from
