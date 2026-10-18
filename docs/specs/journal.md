@@ -4986,11 +4986,16 @@ switch's, unchanged.
 `reason` (an owner stop, `goal_complete`, `profit_stop_reached`, or `end_date`), and appends
 nothing; the CLI's code is `agent_stopped`, the workspace API's `invalid` at `/agent_id`. An agent
 active with the same version is answered with its deployment, as before. So §9.21's final stop and
-the writers agree, and a stopped agent's runtime is never wanted again. A new agent id resets no
-limit that redeploying the old one would have kept: the loss carry, and with it the lifetime floor,
-is the connection's (mandate spec §5.7; `AgentStopped.loss_added` adds to the connection's carry,
-and V-032 reads it), and the high-water mark starts from the deployment either way (§5.5).
-`append` does not judge it: it reads no stream.
+the writers agree, and a stopped agent's runtime is never wanted again. A new agent id leaves the
+lifetime floor as it was: the loss carry is the connection's (mandate spec §5.7;
+`AgentStopped.loss_added` adds to the connection's carry, and V-032 reads it), and the high-water
+mark starts from the deployment under either id (§5.5). The per-agent daily and conduct state does
+restart with a new agent id, as it does for any other agent deployed on the connection: the
+`max_daily_loss` latch and its E₀ (§5.4), the drawdown ladder's latches (§5.5, §5.8), the re-entry
+cooldown, the order-rate, order-to-fill and `max_orders_per_day` limits (trading spec §9.7), and
+the per-agent ask caps. That is bounded by the lifetime floor and by a deployment being the owner's
+stepped-up gesture ([DEC-1173](../project/decisions/DEC-1173.md) item 6 leaves keying them by
+connection to the founder). `append` does not judge it: it reads no stream.
 
 **Every reader of `AgentDeployed`**, by version:
 

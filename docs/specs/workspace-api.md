@@ -668,8 +668,9 @@ per workspace deployment (item 6).
       version answers `200` with its `AgentDeployed`, and with another version `invalid` at
       `/agent_id`; an agent an `AgentStopped` names is `invalid` at `/agent_id` too, since an
       agent id is deployed once ([DEC-1173](../project/decisions/DEC-1173.md) item 1); every
-      V-rule for the agent (V-002, V-006, and V-032 included) and the pinned instruments, else `invalid` with the V-codes. V-002 reads the account's equity from the
-      latest `AccountSnapshotRecorded` on the account stream of the document's connection; with
+      V-rule for the agent (V-002, V-006, and V-032 included) and the pinned instruments, else
+      `invalid` with the V-codes. V-002 reads the account's equity from the latest
+      `AccountSnapshotRecorded` on the account stream of the document's connection; with
       none, the equity is 0 and V-002 refuses (a tightening of the CLI, which leaves V-002 to the
       executor); then step-up, bound to the SHA-256 of the
       canonical `{agent_id, mandate_version}`, kind `deploy`. It commits `AgentDeployed` with
