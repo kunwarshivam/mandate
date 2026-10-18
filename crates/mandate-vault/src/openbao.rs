@@ -539,6 +539,8 @@ pub async fn provision(
         Identity::ConnectionManager,
         Identity::Runtime,
         Identity::SecretImport,
+        Identity::ModelGateway,
+        Identity::EmailSender,
     ];
     for connection in connections {
         identities.push(Identity::Executor(connection.clone()));
