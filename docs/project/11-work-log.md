@@ -49,7 +49,7 @@ claim issue or the decision file, not here.
   the pause exit, killed by tests that need no Postgres. Then #1555 `e734a4b8`, #1537
   `48783ad7`, #1576 `d6170ad1` and #1577 `30061bab`. #1577's head was only merges, yet CI's
   mutants found the `AgentDeployed` guard untested (a stop naming a version); a test killed it.
-  #1582 is approved after merging `main` as option 1 (the runtime started by the manager, which
+  #1582 `07a1573f` merged after merging `main` as option 1 (the runtime started by the manager, which
   starts none until DEC-1171's account read lands); the merge needed its admission bound to admit
   #1578's store claim read-only, and its review caught `cell up` dropping the kube-api egress.
   Waiting on the founder: #1539 and #1501 (above), and option 1 against option 2 for #1582.

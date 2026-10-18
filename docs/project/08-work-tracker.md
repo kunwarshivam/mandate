@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-18, a coordinator session took over the orphaned PRs of the founder's other coordinating account: nineteen merged and #1582 approved (work log). 2026-10-17: the gate decision record is a ledger on the first screen (`web/`, #1558). The Where-we-are rows are as of 2026-10-14 |
+| **Last updated** | 2026-10-18, a coordinator session took over the orphaned PRs of the founder's other coordinating account: twenty merged (work log). 2026-10-17: the gate decision record is a ledger on the first screen (`web/`, #1558). The Where-we-are rows are as of 2026-10-14 |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
@@ -111,7 +111,7 @@ Streams that touch different crates run in parallel; reviews and merges run one 
 - **#1501** (Dependabot): besides sharp and undici it moves `wrangler`, which deploys `web/` from
   `main`, from 4.139.0 to 4.151.1 without the registry row that pins 4.139.0
   (`docs/dependencies.md`). Left open: redo the bump with its row, or close it.
-- **#1582** (the deployment manager in the cell) merged `main` as option 1: the manager starts the
+- **#1582** (the deployment manager in the cell, merged) took option 1: the manager starts the
   runtime, and starts none until DEC-1171's account read lands, so the cell runs no runtime until
   then. Option 2 keeps #1560's static runtime meanwhile, one line in `processes.json`.
 
