@@ -73,7 +73,6 @@ fn listing(dir: &Path) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn each_identitys_two_files_are_written_owner_only() {
     let dir = fresh("out");
     let written = write_credentials(
@@ -109,7 +108,6 @@ fn each_identitys_two_files_are_written_owner_only() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_earlier_file_is_replaced_and_tightened() {
     let dir = fresh("again");
     fs::create_dir(&dir).unwrap();
@@ -123,7 +121,6 @@ fn an_earlier_file_is_replaced_and_tightened() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_directory_open_to_others_or_linked_is_refused_and_nothing_is_written() {
     let one = [credential(Identity::Api, "role-a", "secret-a")];
     for bits in [0o750, 0o705, 0o770, 0o755] {
@@ -156,7 +153,6 @@ fn a_directory_open_to_others_or_linked_is_refused_and_nothing_is_written() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_owner_only_token_is_read_without_its_newline() {
     for (text, want) in [("tok-1\n", "tok-1"), ("tok-2", "tok-2")] {
         let file = fresh("token");
@@ -169,7 +165,6 @@ fn an_owner_only_token_is_read_without_its_newline() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_token_open_to_others_missing_empty_or_linked_is_refused() {
     let refused = |path: &Path| {
         let read = read_token_file(path).map(|t| t.expose_secret().to_owned());
@@ -220,7 +215,6 @@ proptest! {
     /// For any set of identities, the files written are exactly two per identity under the
     /// oracle's names, each holding its value and owner-only.
     #[test]
-    #[ignore = "pending E21-32"]
     fn the_files_are_exactly_two_per_identity_under_the_oracles_names(
         identities in proptest::collection::vec(identity(), 0..6),
         value in "[a-z0-9-]{1,24}",
