@@ -105,6 +105,8 @@ pub struct Bundle {
     pub deployment_cap: Usd6,
     pub reply: RecordedReply,
     pub plane: RecordedPlane,
+    /// The recorded instruments halted at the bundle's as-of time (DEC-2214 item 1).
+    pub halted: BTreeSet<AssetId>,
 }
 
 const RESEARCH: &str = "research.json";
@@ -133,6 +135,29 @@ impl Bundle {
             Digest::of(endpoint.text("price_table")?.as_bytes()),
         )
         .map_err(|_| endpoint.malformed("cached_per_million"))?;
+        let plane = RecordedPlane {
+            bars: Doc::read(dir, BARS)?
+                .rows()?
+                .iter()
+                .map(bar)
+                .collect::<Result<_, _>>()?,
+            news: Doc::read(dir, NEWS)?
+                .rows()?
+                .iter()
+                .map(news)
+                .collect::<Result<_, _>>()?,
+            filings: Doc::read(dir, FILINGS)?
+                .rows()?
+                .iter()
+                .map(filing)
+                .collect::<Result<_, _>>()?,
+            instruments: Doc::read(dir, INSTRUMENTS)?
+                .rows()?
+                .iter()
+                .map(instrument)
+                .collect::<Result<_, _>>()?,
+        };
+        let halted = halts(&research, &plane.instruments)?;
         Ok(Self {
             entry: ResearchEntry {
                 model_id: entry.text("model_id")?.to_owned(),
@@ -175,28 +200,8 @@ impl Bundle {
                     cached: reply.int("cached_tokens")?,
                 },
             },
-            plane: RecordedPlane {
-                bars: Doc::read(dir, BARS)?
-                    .rows()?
-                    .iter()
-                    .map(bar)
-                    .collect::<Result<_, _>>()?,
-                news: Doc::read(dir, NEWS)?
-                    .rows()?
-                    .iter()
-                    .map(news)
-                    .collect::<Result<_, _>>()?,
-                filings: Doc::read(dir, FILINGS)?
-                    .rows()?
-                    .iter()
-                    .map(filing)
-                    .collect::<Result<_, _>>()?,
-                instruments: Doc::read(dir, INSTRUMENTS)?
-                    .rows()?
-                    .iter()
-                    .map(instrument)
-                    .collect::<Result<_, _>>()?,
-            },
+            plane,
+            halted,
         })
     }
 
@@ -413,6 +418,32 @@ impl Read {
             })
             .collect())
     }
+}
+
+/// The assets of the instruments `research.json`'s `halted_instruments` names by symbol, each one an
+/// instrument the bundle records.
+fn halts(
+    research: &Read,
+    instruments: &[InstrumentFact],
+) -> Result<BTreeSet<AssetId>, BundleError> {
+    let malformed = BundleError::Malformed {
+        file: RESEARCH,
+        member: "halted_instruments",
+    };
+    research
+        .value
+        .get("halted_instruments")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed.clone())?
+        .iter()
+        .map(|symbol| {
+            symbol
+                .as_str()
+                .and_then(|text| instruments.iter().find(|fact| fact.symbol.as_str() == text))
+                .map(|fact| fact.asset_id.clone())
+                .ok_or_else(|| malformed.clone())
+        })
+        .collect()
 }
 
 fn bar(row: &Doc<'_>) -> Result<RecordedBar, BundleError> {
