@@ -1,6 +1,6 @@
 [
   {
-    "label": "a challenge id with every base-32 digit kind",
+    "label": "the largest challenge id a ULID's 128 bits can write",
     "set": {
       "/challenge_id": "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
     }
