@@ -1514,7 +1514,10 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   compile, validate, diffs, and an agent's later versions (with `MandateConfirmed` version 2,
   E10-15); the confirmation screen's worst-case figures, unasked dollars, and provenance badges;
   `DeploymentRejected`; the acknowledgment route, until `mandate-journal` registers
-  `OwnerAcknowledged` on the control stream (DEC-2102 item 7); the hold and its lift (after the runtime folds them, DEC-1007 item 1); and
+  `OwnerAcknowledged` on the control stream (DEC-2102 item 7); when E9-4 binds the step-up port,
+  an owner command's append made conditional on the `control_head` its evidence names (DEC-279
+  item 1's digest binds the head read before step-up is judged, and the append does not yet check
+  it); the hold and its lift (after the runtime folds them, DEC-1007 item 1); and
   the deploy request's schema with its `mandate-api` type, which must land together (DEC-2101
   item 6).
 - **E10-13 (Must, M8, with the connections spec; SC)** As a workspace admin, I want to connect and
