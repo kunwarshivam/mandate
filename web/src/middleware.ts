@@ -48,9 +48,12 @@ function requestedUrl(request: NextRequest): URL {
 
 /** The mock workspace API's prefix (`src/app/v1/`, DEC-975 item 10): served only where the scenario switch is on. */
 const MOCK_API = /^\/v1(\/|$)/;
+/** The dev-only routes under `/dev/` (`route.dev.ts`, DEC-2406): a plain 404 outside `next dev`, even if one were compiled. */
+const DEV_ONLY = /^\/dev(\/|$)/;
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (!scenariosEnabled && MOCK_API.test(request.nextUrl.pathname)) return new NextResponse(null, { status: 404 });
+  if (process.env.NODE_ENV !== "development" && DEV_ONLY.test(request.nextUrl.pathname)) return new NextResponse(null, { status: 404 });
   const byHost = hostRoute(requestedUrl(request), HOSTS);
   switch (byHost.kind) {
     case "app":

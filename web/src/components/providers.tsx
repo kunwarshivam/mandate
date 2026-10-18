@@ -38,9 +38,18 @@ function Frame({ children }: { children: ReactNode }) {
  * configuration names the API but does not parse: the fixture stand-in then holds an unreachable
  * workspace with nothing in it, which takes no command, so nothing on screen passes for a record.
  */
-export function ApiProviders({ source, children }: { source: Pick<ApiSource, "origin" | "workspaceId"> | null; children: ReactNode }) {
+export function ApiProviders({
+  source,
+  stubSignIn = false,
+  children,
+}: {
+  source: Pick<ApiSource, "origin" | "workspaceId"> | null;
+  /** Whether `next dev`'s server holds a stub sign-in for a dev cell (DEC-2406); never true in a production build. */
+  stubSignIn?: boolean;
+  children: ReactNode;
+}) {
   const origin = source?.origin ?? null;
-  const session = useMemo(() => (origin ? browserSessionKeeper(origin) : null), [origin]);
+  const session = useMemo(() => (origin ? browserSessionKeeper(origin, stubSignIn) : null), [origin, stubSignIn]);
   const body = (
     <HandoffProvider>
       {children}
