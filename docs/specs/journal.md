@@ -5097,7 +5097,7 @@ after the input, which mandate spec §5.10 lists as E, H, DD, E₀, C, L and §9
 | `limit` | `limit_key` | The limit |
 | `action` | `scale_sizes` \| `exits_only` \| `flatten_and_pause` \| `end_delegations` | What it does while it holds: a rung's own action, the daily loss's `daily_loss_action`, or a tripwire's: rule 230 |
 | `reason` | `hard_trigger` \| `hard_breach_pending` \| `resolved_at_rollover` \| `new_day_breach` \| `after_reset` \| `tripwire_condition`, or `null` | Why, when it is not plain confirmation by breach time: rule 230 |
-| `breach_time_s` | `integer?` | The breach time (mandate spec §5.6) the limit's confirmation had accumulated at the input that triggered it, read before the trigger clears it, in whole seconds; 0 when it had none, as for a hard trigger or a rung that triggers again after a reset; `null` for a tripwire: rule 232 |
+| `breach_time_s` | `integer?` | The breach time (mandate spec §5.6) the limit's confirmation holds at the input that produced the record, in whole seconds. The risk fold's event carries no breach time, so the writer reads the confirmation at that input, before the fold's latch removes it. A hard trigger, `hard_breach_pending`, and `new_day_breach` carry whatever had accumulated, which may be more than 0 and less than `breach_confirm_s`. It is 0 only where the limit has no confirmation at that input: an `after_reset` rung, or a scale rung. `null` for a tripwire: rule 232 |
 | `metric` | `consecutive_losing_exits` \| `realized_loss_usd` \| `new_instruments`, or `null` | A tripwire's metric: rule 232 |
 | `threshold` | `decimal?` | A tripwire's threshold: rules 232 and 233 |
 | `value` | `decimal?` | The metric's value reached: rules 232 and 233 |
