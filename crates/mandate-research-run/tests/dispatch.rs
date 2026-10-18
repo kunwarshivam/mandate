@@ -184,14 +184,14 @@ fn the_result_is_spotlighted_canonical_json() {
     for item in items {
         assert_eq!(
             keys(item),
-            ["data", "item_id", "source"],
-            "platform data sits under `data`"
+            ["item_id", "source", "untrusted"],
+            "every item is wrapped as untrusted data, bars included (§6.10)"
         );
         assert_eq!(
             item.get("source").and_then(Value::as_str),
             Some("platform.bars")
         );
-        let data = item.get("data").unwrap_or_else(|| panic!("data"));
+        let data = item.get("untrusted").unwrap_or_else(|| panic!("untrusted"));
         let fields = [
             "close",
             "high",
@@ -579,7 +579,7 @@ fn seeded(days: &[i64], truncated: bool, left: u32) -> Dispatch {
         .collect();
     let item = |bar: &Bar| {
         let id = format!("bar:AAPL:{}", bar.knowledge_at.secs());
-        format!(r#"{{"data":{{}},"item_id":"{id}","source":"platform.bars"}}"#)
+        format!(r#"{{"item_id":"{id}","source":"platform.bars","untrusted":{{}}}}"#)
     };
     let items: Vec<String> = bars.iter().map(item).collect();
     let content = format!(
