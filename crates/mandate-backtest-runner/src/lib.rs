@@ -65,6 +65,9 @@ pub enum RunnerError {
     Store(&'static str),
     #[error("no artifact store: neither `--store` nor MANDATE_ARTIFACTS names one")]
     StoreUnset,
+    /// A step its story has not built yet (DEC-77): the stub's own report.
+    #[error("not implemented until {story}")]
+    Unimplemented { story: &'static str },
 }
 
 impl RunnerError {
@@ -79,6 +82,7 @@ impl RunnerError {
             Self::Input(_) => "input_invalid",
             Self::Encode(code) | Self::Store(code) => code,
             Self::StoreUnset => "artifacts_unset",
+            Self::Unimplemented { .. } => "unimplemented",
         }
     }
 }

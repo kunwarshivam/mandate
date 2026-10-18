@@ -58,49 +58,55 @@ pub struct InputObjects {
 /// holds in its `inputs`.
 ///
 /// # Errors
-/// `unimplemented` until E17-8's run append builds it.
-pub fn input_objects(_request: &EvaluationRequest<'_>) -> Result<InputObjects, EvaluationError> {
-    Err(EvaluationError::Unimplemented { story: "E17-8" })
+/// `Num` when a record's `seq` exceeds the canonical integer range, or a member name is not a
+/// canonical key.
+pub fn input_objects(request: &EvaluationRequest<'_>) -> Result<InputObjects, EvaluationError> {
+    let records = request
+        .records
+        .iter()
+        .map(|record| {
+            object(vec![
+                ("stream_id", text(&record.stream_id)),
+                ("seq", int(record.seq)?),
+                ("hash", reference(&record.hash)),
+                ("mandate_version", reference(&record.mandate_version)),
+                ("payload", record.payload.clone()),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let closes = request
+        .closes
+        .iter()
+        .map(|(id, closes)| {
+            let rows = closes
+                .iter()
+                .map(|close| {
+                    object(vec![
+                        ("at", decimal(close.at)),
+                        ("price", decimal(close.price)),
+                    ])
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            object(vec![
+                ("instrument", text(id.as_str())),
+                ("closes", Value::Array(rows)),
+            ])
+        })
+        .collect::<Result<Vec<_>, EvaluationError>>()?;
+    Ok(InputObjects {
+        theses: Value::Array(records),
+        closes: Value::Array(closes),
+        cost_model: cost_model(request.cost)?,
+    })
 }
 
 impl InputDigests {
     pub(crate) fn of(request: &EvaluationRequest<'_>) -> Result<Self, EvaluationError> {
-        let records = request
-            .records
-            .iter()
-            .map(|record| {
-                object(vec![
-                    ("stream_id", text(&record.stream_id)),
-                    ("seq", int(record.seq)?),
-                    ("hash", reference(&record.hash)),
-                    ("mandate_version", reference(&record.mandate_version)),
-                    ("payload", record.payload.clone()),
-                ])
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let closes = request
-            .closes
-            .iter()
-            .map(|(id, closes)| {
-                let rows = closes
-                    .iter()
-                    .map(|close| {
-                        object(vec![
-                            ("at", decimal(close.at)),
-                            ("price", decimal(close.price)),
-                        ])
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                object(vec![
-                    ("instrument", text(id.as_str())),
-                    ("closes", Value::Array(rows)),
-                ])
-            })
-            .collect::<Result<Vec<_>, EvaluationError>>()?;
+        let objects = input_objects(request)?;
         Ok(Self {
-            theses: digest(&Value::Array(records)),
-            closes: digest(&Value::Array(closes)),
-            cost_model: digest(&cost_model(request.cost)?),
+            theses: digest(&objects.theses),
+            closes: digest(&objects.closes),
+            cost_model: digest(&objects.cost_model),
         })
     }
 }

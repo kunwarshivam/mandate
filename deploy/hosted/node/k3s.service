@@ -1,0 +1,29 @@
+# k3s, the server on cell1-a and the agent on cell1-b (E21-51, DEC-2001). Installed by cloud-init,
+# never enabled by it: `cell1-k3s-start` enables it once the node's config and, on the agent, the
+# join token are in place. The role is the unit's one argument, written in by cloud-init.
+[Unit]
+Description=k3s (__K3S_ROLE__)
+Documentation=https://docs.k3s.io
+Wants=network-online.target
+After=network-online.target cell1-metadata-block.service
+Requires=cell1-metadata-block.service
+# The data directory is the node's block volume; never start on an empty root-disk directory.
+RequiresMountsFor=/var/lib/rancher
+
+[Service]
+Type=notify
+ExecStartPre=-/sbin/modprobe br_netfilter
+ExecStartPre=-/sbin/modprobe overlay
+ExecStart=/usr/local/bin/k3s __K3S_ROLE__
+KillMode=process
+Delegate=yes
+LimitNOFILE=1048576
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+TimeoutStartSec=0
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
