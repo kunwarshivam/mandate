@@ -82,11 +82,14 @@ fn fixture_with(keys: bool) -> Fixture {
         links: Arc::new(common::LinksAt(links.clone())),
         clock: Arc::clone(&clock) as Arc<dyn mandate_api_server::clock::Clock>,
         journal: Arc::new(common::MemJournal::default()),
-        members: Arc::new(mandate_api_server::members::until_parser),
+        members: Arc::new(mandate_api_server::members::control_parser(
+            common::hosted().workspace,
+        )),
         hosted: common::hosted(),
         artifacts: None,
         objects: None,
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
+        challenges: Arc::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

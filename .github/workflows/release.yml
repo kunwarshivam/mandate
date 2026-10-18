@@ -1,21 +1,21 @@
 # The release build (E21-8, DEC-972; infrastructure design §7.1 step 2, ES-14, ES-17), for amd64
-# and arm64 (DEC-1060), each natively on runners of its own arch, never cross-built. For each
-# arch, two jobs build the same commit with `cargo xtask release build`: on two runners, in two
-# checkout paths, with no cache, so nothing one build left behind can reach the other. `compare`
-# fails unless each arch's two builds printed the same digest of their SHA256SUMS, which lists
-# every binary's SHA-256: one commit, byte-identical binaries. On `main` and on demand, each
-# arch's `build-a` keeps its binaries, SHA256SUMS and SBOMs as `release-<commit>-<arch>`, and
-# builds one image a binary (E21-35, DEC-971), signed by an ephemeral test key, and drills the
-# start-up signature check on them: an unsigned and a wrongly signed image are refused outside dev
-# and CI. Only a push to `main` publishes: each arch's `publish` job rebuilds, requires its
-# `build-a`'s digest, pushes that arch's images to GHCR by digest, signs each keyless with the
-# run's OIDC identity and attests its SBOM; then `publish-index` pushes and signs the multi-arch
-# index a cell pulls on any arch. A pull request that changes the release build runs the builds and
-# the drills and keeps and publishes nothing (ES-12). On a manual dispatch from `main` only,
-# `release-signing` waits for the founder to approve its `release-signing` environment, then signs
-# each arch's binaries and SHA256SUMS with the release key that environment's secrets hold
-# (DEC-2024, as the founder decided in DEC-2605 rows 8 and 9). Nothing here builds a feature, so
-# no release build holds `live` (DEC-529 item 3).
+# and arm64 (DEC-1060), each natively on runners of its own arch, never cross-built. For each arch,
+# two jobs build the same commit with `cargo xtask release build`: on two runners, in two checkout
+# paths, with no cache, so nothing one build left behind can reach the other. `compare` fails
+# unless each arch's two builds printed the same digest of their SHA256SUMS, which lists every
+# binary's SHA-256: one commit, byte-identical binaries. On `main` and on demand, each arch's
+# `build-a` keeps its binaries, SHA256SUMS and SBOMs as `release-<commit>-<arch>`, and builds one
+# image a binary (E21-35, DEC-971), signed by an ephemeral test key, and drills the start-up
+# signature check on them: an unsigned and a wrongly signed image are refused outside dev and CI.
+# Only a push to `main` publishes: each arch's `publish` job rebuilds, requires its `build-a`'s
+# digest, pushes that arch's images to GHCR by digest, signs each keyless with the run's OIDC
+# identity and attests its SBOM; then `publish-index` pushes and signs the multi-arch index a cell
+# pulls on any arch, and the hosted clusters' charts (E21-58). A pull request that changes the
+# release build runs the builds and the drills and keeps and publishes nothing (ES-12). On a
+# manual dispatch from `main` only, `release-signing` waits for the founder to approve its
+# `release-signing` environment, then signs each arch's binaries and SHA256SUMS with the release key
+# that environment's secrets hold (DEC-2024, as the founder decided in DEC-2605 rows 8 and 9).
+# Nothing here builds a feature, so no release build holds `live` (DEC-529 item 3).
 name: release
 
 on:
@@ -42,6 +42,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # helm for `publish-charts`, at ci.yml's pin (E21-58).
+  HELM_VERSION: "4.3.0"
+  HELM_SHA256: "86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"
 
 jobs:
   build-a-amd64:
@@ -306,6 +309,23 @@ jobs:
           path: published/PUBLISHED
           if-no-files-found: error
           retention-days: 90
+      - name: Install helm (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+      # The hosted clusters' charts, packaged through their symlinks, pushed and signed by the
+      # same identity as the images (E21-58, DEC-2015 item 3), after PUBLISHED is kept, so a chart
+      # failure never loses the index's list; CHARTS names each chart's digest.
+      - name: Push and sign the hosted clusters' charts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: cargo xtask release publish-charts published
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: charts-${{ github.sha }}
+          path: published/CHARTS
 
   # A manual dispatch from `main` only, never a push or a pull request, and only once the founder,
   # the `release-signing` environment's required reviewer, approves the run (DEC-2024; DEC-2605

@@ -187,7 +187,10 @@ fn facts() -> AdmissionFacts {
     AdmissionFacts {
         allowlist: SourceAllowlist {
             version: AllowlistVersion(3),
-            sources: BTreeSet::from([SourceId::new("src.newswire").unwrap()]),
+            sources: ["src.newswire", "src.wire_two"]
+                .into_iter()
+                .map(|source| SourceId::new(source).unwrap())
+                .collect(),
         },
         eligibility_failures: BTreeSet::new(),
         instrument_groups: BTreeMap::new(),
@@ -248,10 +251,10 @@ struct Hands {
 }
 
 impl ResearchWorker for Hands {
-    fn hand(&mut self, request: &ResearchRequest) {
+    fn hand(&mut self, request: &ResearchRequest, _: &ResearchParts) {
         self.handed.borrow_mut().push(request.clone());
     }
-    fn answers(&mut self) -> Vec<ResearchInput> {
+    fn answers(&mut self, _: RiskClock) -> Vec<ResearchInput> {
         self.asked.set(self.asked.get() + 1);
         self.queued.borrow_mut().drain(..).collect()
     }

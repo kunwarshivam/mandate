@@ -3,8 +3,9 @@
 For the founder. The route is the one you decided (DEC-2605 rows 8 and 9); the design is
 [DEC-2024](../project/decisions/DEC-2024.md). There is no hardware key. One cosign key pair signs
 every release. Its private half lives only in the GitHub environment `release-signing`, and CI
-uses it only when you approve a run from `main`. Until its public half is in `RELEASE_KEYS`, no
-binary starts at tier `staging` or `production`.
+uses it only when you approve a run from `main`. Its public half is in `RELEASE_KEYS`
+(`crates/mandate-release/release-keys/cosign.pub`, #1689), so a binary starts at tier `staging` or
+`production` only when that key signed it.
 
 ## Once: make the key and store it
 
@@ -38,10 +39,10 @@ its password anywhere but GitHub's secret form.
    GitHub holds the working copy, and a new pair can always replace a lost one (see Rotating
    below).
 
-5. **Commit the public half.** Give `cosign.pub` to the coordinating agent. The public half is
-   not secret. It goes into `RELEASE_KEYS` in `crates/mandate-release/src/startup.rs` in its own
-   PR, which needs your CODEOWNERS review. From then on, a binary starts outside dev and CI only
-   when that key signed it.
+5. **Commit the public half.** The public half is not secret. It is
+   `crates/mandate-release/release-keys/cosign.pub`, and a test pins its fingerprint, so replacing
+   it is a PR that needs your CODEOWNERS review. For the first key this was #1689. From then on, a
+   binary starts outside dev and CI only when that key signed it.
 
 ## Each release: sign it
 
@@ -61,12 +62,12 @@ its password anywhere but GitHub's secret form.
    ```
 
 **If the job fails at "did not start at tier production",** the key in the environment is not
-the one in `RELEASE_KEYS`: either the public half is not committed yet, or the secrets hold
-another pair. Nothing was published, and nothing changes until the two match.
+the one in `RELEASE_KEYS`: the secrets hold a different pair from the committed public half.
+Nothing was published, and nothing changes until the two match.
 
 ## Rotating or revoking the key
 
 Generate a new pair as above, replace both secrets, and add the new public half to `RELEASE_KEYS`
-in a PR. To revoke the old key, remove its public half in the same PR. Releases it signed then
-stop starting outside dev and CI once the new binaries roll out. If you think the secret leaked,
+in a PR, with the fingerprint its test pins. To revoke the old key, remove its public half in the
+same PR. Releases it signed then stop starting outside dev and CI once the new binaries roll out. If you think the secret leaked,
 delete it from the environment first, then rotate.

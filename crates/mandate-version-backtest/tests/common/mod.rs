@@ -30,8 +30,8 @@ use mandate_spec::document::{ModelId, ProvenanceMap};
 use mandate_spec::{Mandate, ValidatedMandate, ValidationContext};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 use mandate_version_backtest::{
-    EtpClassification, InstrumentReference, RecordedOutput, RecordedThesis, VersionInput,
-    VersionRun, VersionSettings,
+    EtpClassification, InstrumentReference, RecordedAction, RecordedOutput, RecordedThesis,
+    VersionInput, VersionRun, VersionSettings,
 };
 use serde_json::Value as Json;
 
@@ -442,7 +442,7 @@ pub fn run_with(
     bars: &[SimBar],
     outputs: &[RecordedOutput],
     theses: &[RecordedThesis],
-    corporate_actions: &[Date],
+    corporate_actions: &[RecordedAction],
 ) -> Result<VersionRun, mandate_version_backtest::VersionError> {
     let medians = Median(qty("10000000"));
     let coverage_start = bars
@@ -502,4 +502,13 @@ pub fn tight_ladder() -> ValidatedMandate {
         Json::String("0.2".to_owned()),
     );
     validate(&document)
+}
+
+/// A 2-for-1 split on `ex_date` with no cash in lieu posted.
+pub fn split_on(ex_date: Date) -> RecordedAction {
+    RecordedAction::Split {
+        ex_date,
+        ratio: mandate_num::SplitRatio::new(2, 1).unwrap_or_else(|e| panic!("{e}")),
+        cash_in_lieu_price: None,
+    }
 }
