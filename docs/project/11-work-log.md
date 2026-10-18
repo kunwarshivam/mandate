@@ -27,6 +27,7 @@ claim issue or the decision file, not here.
 
 ## Sessions
 
+- **2026-10-17, the gate decision record.** The decision page was an agent header plus a short column of two-line checks, about 770px past a 1440×900 screen. It is now one ledger: the action once, the verdict on a line, every check full width with the result in a column. `web/` only.
 - **2026-10-13 and 10-14, the two coordinator sessions: nine merges, the live path's R0-gap rows
   closed.** The recorded docs sweep of the #1295/#1315 review notes landed split, the spec guard
   refusing spec and code in one PR (#1323 `29d0914c`, the agent-harness line alone in #1324

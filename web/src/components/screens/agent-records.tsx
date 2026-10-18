@@ -8,6 +8,7 @@ import { LinkButton } from "@cloudflare/kumo/components/button";
 import { ChartSkeleton } from "@/components/charts/chart-parts";
 import { PositionChart } from "@/components/charts/price-chart";
 import { AsOf } from "@/components/domain/as-of";
+import { VERDICT_COLUMN, VerdictChip } from "@/components/domain/gate-decision";
 import { SourceTag } from "@/components/domain/mode";
 import { KEY } from "@/components/kumo/key";
 import { Money, SignedMoney } from "@/components/domain/money";
@@ -18,7 +19,7 @@ import type { Agent, Fill } from "@/fixtures/types";
 import { dec, mul, toFixed } from "@/lib/decimal";
 import { clock, dateLabel, price, quantity, usd, zoneLabel } from "@/lib/format";
 import { CHECK_RESULT_LABEL, type GateCheck, gateChecks } from "@/lib/gate-checks";
-import { actionSentence, isExit, verdictLabel } from "@/lib/gate-reasons";
+import { actionSentence, isExit } from "@/lib/gate-reasons";
 import { ORDER_STATE_LABEL, PURPOSE_LABEL } from "@/lib/labels";
 import { useRuntime } from "@/lib/mock-runtime";
 import { type AnyOrder, allOrders, fillsOf, findOrder, isPast, lifecycle, orderSentence, realizedIn } from "@/lib/orders";
@@ -337,12 +338,28 @@ const CHECK_CHIP: Record<GateCheck["result"], string> = {
   not_run: "border border-dashed border-muted-foreground text-muted-foreground",
 };
 
+const CHECK_LABEL: Record<GateCheck["result"], string> = {
+  passed: "font-medium",
+  failed: "font-semibold",
+  waiting: "font-semibold",
+  not_run: "text-muted-foreground",
+};
+
+/** A lapis text link in the verdict strip. Tall enough to tap on a phone, one line from `lg`. */
+const RECORD_LINK =
+  "inline-flex min-h-11 items-center font-medium text-lapis underline decoration-lapis/30 underline-offset-4 outline-none hover:decoration-current focus-visible:ring-3 focus-visible:ring-ring lg:min-h-0";
+
+/**
+ * One gate decision as a ledger (J6): the action once, under the title; the verdict, when, and where
+ * it led on one strip; every check on one line from `lg`, the result in a column and the rule beside
+ * it. The agent's page chrome stays, at the ledger's scale, so the checks are on the first screen.
+ */
 function DecisionRecord({ agent, id }: { agent: Agent; id: string }) {
   const { ws } = useRuntime();
   const decision = ws.decisions.find((d) => d.event_id === id && d.agent_id === agent.agent_id);
   if (!decision) {
     return (
-      <AgentFrame agent={agent} title="Gate decision" description={agent.label}>
+      <AgentFrame agent={agent} title="Gate decision" description={agent.label} compact>
         <RecordNotFound
           title="No gate decision with this ID"
           text="This agent has no gate decision with that ID."
@@ -355,60 +372,80 @@ function DecisionRecord({ agent, id }: { agent: Agent; id: string }) {
   const exit = isExit(decision.action.purpose);
   const order: AnyOrder | undefined = decision.client_order_id ? findOrder(agent, decision.client_order_id) : undefined;
   const resultLabel = (c: GateCheck) => (c.result === "failed" && exit ? "Held" : CHECK_RESULT_LABEL[c.result]);
+  const ledTo = order || decision.approval_id;
 
   return (
     <AgentFrame
       agent={agent}
+      compact
       title="Gate decision"
       description={
         <>
-          {actionSentence(decision.action)}, {agent.label}
+          <span className="font-medium text-foreground">{actionSentence(decision.action)}</span>
+          {`, ${agent.label}`}
         </>
       }
     >
-      <section aria-label="Verdict" data-verdict={decision.verdict} className="reveal grid gap-2">
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <span
-            data-slot="verdict"
-            className={cn("inline-flex h-7 items-center rounded-md px-2.5 text-label", decision.verdict === "allow" ? "bg-muted" : "bg-card ring-1 ring-foreground ring-inset")}
-          >
-            {verdictLabel(decision)}
-          </span>
-          <span className="font-semibold">{actionSentence(decision.action)}</span>
-          <span className="text-sm text-muted-foreground">{PURPOSE_LABEL[decision.action.purpose]}</span>
-        </p>
-        <p className="text-caption text-muted-foreground">
-          <time dateTime={decision.at} className="font-mono tabular">
-            {stamp(decision.at)}
-          </time>
-        </p>
-        {decision.then ? <p className="max-w-measure text-sm">{decision.then}</p> : null}
-      </section>
+      <div className="grid content-start gap-4">
+        <section aria-label="Verdict" data-verdict={decision.verdict} className={cn("grid gap-1", VERDICT_COLUMN)}>
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <VerdictChip decision={decision} />
+            <span className="text-sm text-muted-foreground">{PURPOSE_LABEL[decision.action.purpose]}</span>
+            <span className="inline-flex items-center gap-x-2 text-caption text-muted-foreground">
+              <span aria-hidden className="max-lg:hidden">
+                ·
+              </span>
+              <time dateTime={decision.at} className="font-mono tabular">
+                {stamp(decision.at)}
+              </time>
+            </span>
+          </p>
+          {decision.then ? <p className="max-w-measure text-sm text-pretty">{decision.then}</p> : null}
+          {ledTo ? (
+            <ul className="flex flex-wrap gap-x-5">
+              {order ? (
+                <li>
+                  <Link href={orderHref(agent.agent_id, order.client_order_id)} className={RECORD_LINK}>{`The order: ${orderSentence(order)}`}</Link>
+                </li>
+              ) : null}
+              {decision.approval_id ? (
+                <li>
+                  <Link href={`/approvals/${decision.approval_id}`} className={RECORD_LINK}>
+                    The request it sent you
+                  </Link>
+                </li>
+              ) : null}
+            </ul>
+          ) : null}
+        </section>
 
-      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
-        <Section title="Checks, in the order the gate ran them">
-          <ol className="grid divide-y divide-border/70" data-slot="gate-checks">
+        <section aria-labelledby="gate-checks-title" className="grid gap-1">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+            <h2 id="gate-checks-title" className="text-sm font-medium">
+              Checks
+            </h2>
+            <p className="text-caption text-muted-foreground">In the order the gate ran them.</p>
+          </div>
+          <ol className="grid" data-slot="gate-checks">
             {checks.map((c) => (
-              <li key={c.key} data-check={c.key} data-result={c.result} className="grid gap-1 py-3">
-                <p className="flex flex-wrap items-center justify-between gap-2">
-                  <span className={cn("font-semibold", c.result === "not_run" && "text-muted-foreground")}>{c.label}</span>
-                  <span className={cn("inline-flex h-6 items-center rounded-md px-2.5 text-label", CHECK_CHIP[c.result])}>{resultLabel(c)}</span>
-                </p>
-                <p className="text-sm text-muted-foreground">{c.rule}</p>
+              <li
+                key={c.key}
+                data-check={c.key}
+                data-result={c.result}
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 border-b border-border/70 py-1.5 last:border-b-0 lg:grid-cols-[18rem_6.75rem_minmax(0,1fr)] lg:items-center lg:py-0.5"
+              >
+                <span className={cn("text-sm", CHECK_LABEL[c.result])}>{c.label}</span>
+                <span className={cn("inline-flex h-5 w-[6.75rem] items-center justify-center rounded-md px-1 text-label whitespace-nowrap", CHECK_CHIP[c.result])}>
+                  {resultLabel(c)}
+                </span>
+                <p className="col-span-2 text-caption text-pretty text-muted-foreground lg:col-span-1">{c.rule}</p>
               </li>
             ))}
           </ol>
-          {checks.some((c) => c.result === "not_run") ? <p className="text-caption text-muted-foreground">The gate stops at the first check that does not pass; later checks did not run.</p> : null}
-        </Section>
-
-        {order || decision.approval_id ? (
-          <Section title="What it led to">
-            <ul className="grid divide-y divide-border/70">
-              {order ? <RelatedLink href={orderHref(agent.agent_id, order.client_order_id)}>{`The order: ${orderSentence(order)}`}</RelatedLink> : null}
-              {decision.approval_id ? <RelatedLink href={`/approvals/${decision.approval_id}`}>The request it sent you</RelatedLink> : null}
-            </ul>
-          </Section>
-        ) : null}
+          {checks.some((c) => c.result === "not_run") ? (
+            <p className="text-caption text-muted-foreground">The gate stops at the first check that does not pass; later checks did not run.</p>
+          ) : null}
+        </section>
       </div>
     </AgentFrame>
   );
