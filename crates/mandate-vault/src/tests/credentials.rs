@@ -99,8 +99,10 @@ fn each_identitys_two_files_are_written_owner_only() {
     for (name, value) in [
         ("api.role-id", "role-a"),
         ("api.secret-id", "secret-a"),
+        ("executor-c1.role-id", "role-e"),
         ("executor-c1.secret-id", "secret-e"),
         ("runtime.role-id", "role-r"),
+        ("runtime.secret-id", "secret-r"),
     ] {
         let file = dir.join(name);
         assert_eq!(fs::read_to_string(&file).unwrap(), value, "{name}");
@@ -126,7 +128,7 @@ fn an_earlier_file_is_replaced_and_tightened() {
 #[ignore = "pending E21-32"]
 fn a_directory_open_to_others_or_linked_is_refused_and_nothing_is_written() {
     let one = [credential(Identity::Api, "role-a", "secret-a")];
-    for bits in [0o750, 0o705, 0o770, 0o755] {
+    for bits in [0o750, 0o705, 0o770, 0o755, 0o500, 0o300] {
         let dir = fresh("open");
         fs::create_dir(&dir).unwrap();
         set_mode(&dir, bits);
@@ -181,7 +183,7 @@ fn a_token_open_to_others_missing_empty_or_linked_is_refused() {
         set_mode(&file, bits);
         refused(&file);
     }
-    for text in ["", "\n", "tok\n\n", "tok\nmore"] {
+    for text in ["", "\n", "tok\n\n", "tok\nmore", "tok\r\n", "tok\r"] {
         let file = fresh("bad-token");
         fs::write(&file, text).unwrap();
         set_mode(&file, 0o600);
@@ -198,6 +200,69 @@ fn a_token_open_to_others_missing_empty_or_linked_is_refused() {
     fs::create_dir(&dir).unwrap();
     set_mode(&dir, 0o700);
     refused(&dir);
+}
+
+/// A symbolic link planted at an output name is refused, not followed: the link stays, its target
+/// is neither read nor written, and nothing else is written (DEC-2022 item 1).
+#[test]
+#[ignore = "pending E21-32"]
+fn a_link_planted_at_an_output_name_is_refused_and_its_target_untouched() {
+    let dir = fresh("planted");
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    let target = fresh("target-of-link");
+    fs::write(&target, "someone-elses-file").unwrap();
+    set_mode(&target, 0o644);
+    let planted = dir.join("api.secret-id");
+    symlink(&target, &planted).unwrap();
+    let written = write_credentials(&dir, &[credential(Identity::Api, "role-a", "secret-a")]);
+    assert_eq!(written, Err(SourceError::CredentialFile));
+    assert_eq!(fs::read_to_string(&target).unwrap(), "someone-elses-file");
+    assert_eq!(mode(&target), 0o644);
+    assert!(
+        fs::symlink_metadata(&planted)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(listing(&dir), ["api.secret-id"]);
+}
+
+/// A refusal changes no file: every output name is checked before any is written, so an earlier
+/// file stays as it was when a later name cannot be written (DEC-2022 item 1).
+#[test]
+#[ignore = "pending E21-32"]
+fn a_refusal_leaves_every_earlier_file_as_it_was() {
+    let dir = fresh("partial");
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    let earlier = dir.join("api.secret-id");
+    fs::write(&earlier, "old-secret").unwrap();
+    set_mode(&earlier, 0o600);
+    fs::create_dir(dir.join("runtime.role-id")).unwrap();
+    let written = write_credentials(
+        &dir,
+        &[
+            credential(Identity::Api, "role-a", "new-secret"),
+            credential(Identity::Runtime, "role-r", "secret-r"),
+        ],
+    );
+    assert_eq!(written, Err(SourceError::CredentialFile));
+    assert_eq!(fs::read_to_string(&earlier).unwrap(), "old-secret");
+    assert_eq!(listing(&dir), ["api.secret-id", "runtime.role-id"]);
+}
+
+/// Neither the refusal nor a credential's `Debug` shows the secret it holds.
+#[test]
+fn no_debug_shows_a_credential_or_its_refusal() {
+    let held = credential(Identity::Api, "role-a", "canary-77d0-secret-id");
+    for output in [
+        format!("{held:?}"),
+        format!("{:?}", SourceError::CredentialFile),
+    ] {
+        assert!(!output.contains("canary-77d0"), "{output}");
+    }
+    assert!(!SourceError::CredentialFile.to_string().contains('/'));
 }
 
 fn identity() -> impl Strategy<Value = Identity> {
