@@ -21,7 +21,7 @@ use mandate_cli::vault::VaultCommand;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
     Cli, Command, artifact, backtest, brake, connection, db, download, evaluation, gestures,
-    identity, inbox, inspect, journal, register, vault, workspace,
+    identity, inbox, inspect, journal, owner, register, vault, workspace,
 };
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
@@ -149,6 +149,18 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Agent(AgentCommand::Kill(args)) => {
             brake::run_kill(&args, now()?, &mut io::stdout().lock()).map(drop)
+        }
+        Command::Agent(AgentCommand::Status(args)) => {
+            owner::run_status(&args, &mut io::stdout().lock())
+        }
+        Command::Agent(AgentCommand::Resume(args)) => {
+            owner::run_resume(&args, now()?, &mut io::stdout().lock())
+        }
+        Command::Agent(AgentCommand::Stop(args)) => {
+            owner::run_stop(&args, now()?, &mut io::stdout().lock())
+        }
+        Command::Agent(AgentCommand::Exit(args)) => {
+            owner::run_exit(&args, now()?, &mut io::stdout().lock())
         }
         Command::Vault(VaultCommand::Import(args)) => {
             let environment: Vec<(String, String)> = std::env::vars_os()

@@ -1,0 +1,29 @@
+#!/bin/sh
+# Installs one secret from stdin into its root-only file, never echoing it, and restarts what reads
+# it. The founder's machine pipes each value over SSH (deploy/hosted/cell1.py), so no secret is on a
+# command line, in the environment, or in a log.
+#   cell1-token ops-tunnel     the ops tunnel's token (cloudflared-ops.service)
+#   cell1-token agent-token    the k3s join token, on the agent
+set -eu
+case "${1:-}" in
+  ops-tunnel) dest=/etc/cell1/credentials/ops-tunnel-token ;;
+  agent-token) dest=/etc/rancher/k3s/agent-token ;;
+  *)
+    echo "usage: cell1-token ops-tunnel|agent-token < value" >&2
+    exit 2
+    ;;
+esac
+install -d -m 0700 "$(dirname "$dest")"
+umask 077
+tmp="$(mktemp "$dest.XXXXXX")"
+head -c 4096 | tr -d '\r\n' >"$tmp"
+if [ ! -s "$tmp" ]; then
+  rm -f "$tmp"
+  echo "the value on stdin is empty" >&2
+  exit 1
+fi
+chmod 0600 "$tmp"
+mv "$tmp" "$dest"
+if [ "$1" = ops-tunnel ]; then
+  systemctl restart cloudflared-ops
+fi

@@ -233,7 +233,7 @@ pub fn issue_challenge(
     challenge_id: AssertionId,
     issued_at: UtcNanos,
 ) -> Result<Issued, IssueRefusal> {
-    if context.permission() != row_of(action.kind) {
+    if context.permission() != permission_for(action.kind) {
         return Err(IssueRefusal::Refused(mandate_identity::Refusal::Forbidden));
     }
     let record = ChallengeRecord::issue(
@@ -250,9 +250,10 @@ pub fn issue_challenge(
 }
 
 /// The identity spec §4.2 row a step-up action kind needs (workspace API spec §3.6, DEC-665 item
-/// 2). Every row named here carries **S**, so a context authorized for a row without it matches
-/// no kind (DEC-665 item 3), and a new kind does not compile until its row is named.
-fn row_of(kind: StepUpActionKind) -> Permission {
+/// 2), which the caller authorizes before [`issue_challenge`]. Every row named here carries **S**,
+/// so a context authorized for a row without it matches no kind (DEC-665 item 3), and a new kind
+/// does not compile until its row is named.
+pub fn permission_for(kind: StepUpActionKind) -> Permission {
     match kind {
         StepUpActionKind::ConfirmVersion => Permission::ConfirmRiskIncreasing,
         StepUpActionKind::Deploy => Permission::Deploy,

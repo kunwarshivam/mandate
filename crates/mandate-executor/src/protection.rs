@@ -10224,6 +10224,7 @@ mod sequence_tests {
                     scope: KillScope::Agent(agent.clone()),
                     initiator: Initiator::Owner,
                     confirmation: None,
+                    cause: None,
                 })),
             };
             if let Some(input) = input {
