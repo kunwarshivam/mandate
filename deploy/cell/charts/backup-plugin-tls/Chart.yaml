@@ -1,0 +1,5 @@
+apiVersion: v2
+name: mandate-backup-plugin-tls
+description: The two self-signed certificates CloudNativePG's Barman Cloud plugin and the operator authenticate each other with, made in the cluster in place of cert-manager (E21-41, DEC-1050)
+type: application
+version: 0.1.0

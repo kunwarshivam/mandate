@@ -1,0 +1,58 @@
+{{- /*
+Where the journal's WAL and base backups go: the Barman Cloud plugin's ObjectStore, read with the
+archive's own access key (E21-41, DEC-1050 item 2), and a daily base backup. WAL is compressed and
+uploaded as each segment closes; `retention` drops base backups, and the WAL only they need, once
+older. The archive is not journal §6.2's write-once store (DEC-973 item 6).
+*/ -}}
+{{- define "journal.objectStore" -}}
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: journal-archive
+  labels:
+    {{- include "journal.labels" . | nindent 4 }}
+spec:
+  retentionPolicy: {{ .Values.archive.retention | quote }}
+  configuration:
+    destinationPath: {{ .Values.archive.destinationPath | quote }}
+    endpointURL: {{ .Values.archive.endpointURL | quote }}
+    s3Credentials:
+      accessKeyId:
+        name: {{ .Values.archive.keyFrom | quote }}
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: {{ .Values.archive.keyFrom | quote }}
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
+{{- end -}}
+{{- define "journal.baseBackup" -}}
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: journal-base
+  labels:
+    {{- include "journal.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.archive.baseBackupSchedule | quote }}
+  backupOwnerReference: self
+  cluster:
+    name: journal
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+{{- end -}}
+---
+{{ include "journal.emit" (include "journal.objectStore" .) }}
+---
+{{ include "journal.emit" (include "journal.baseBackup" .) }}

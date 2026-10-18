@@ -83,6 +83,7 @@
 /crates/mandate-sources/    @kunwarshivam
 /crates/mandate-spec/       @kunwarshivam
 /crates/mandate-store/      @kunwarshivam
+/crates/mandate-stub-issuer/ @kunwarshivam
 /crates/mandate-tenant/     @kunwarshivam
 /crates/mandate-time/       @kunwarshivam
 /crates/mandate-vault-local/ @kunwarshivam

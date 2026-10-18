@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.4, draft ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
+| **Status** | v0.5, draft ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
@@ -13,6 +13,13 @@ is not built (§11).
 
 ## Change history
 
+- **v0.5 ([DEC-2207](../project/decisions/DEC-2207.md); E19-13, delivery slice 2 of ADR-0005):**
+  §3.3's `meter_unavailable` and §3.6's meter-writer bullets cover the deployment meter stream,
+  `dmeter:{deployment_id}` (journal spec v0.53 §9.19), that §7.3's deployment cap folds from: the
+  workspace's caps are checked, then the deployment's writer checks and appends, then the workspace
+  appends; each writer admits one reservation at a time. A workspace append that fails after the
+  deployment's is an orphan, counted at its maximum and alerted, the one refusal that leaves a meter
+  record. Agent-accepted under DEC-176: it only refuses more.
 - **v0.4 ([DEC-2203](../project/decisions/DEC-2203.md); E19-13):** the research run becomes a
   bounded agent loop ([agent harness spec](agent-harness.md) v0.2 §6.9 to §6.11), by the founder's
   decision of 2026-10-17. The gateway still runs nothing a model asks for.
@@ -211,7 +218,7 @@ tokens the provider reports in `tokens.cached` (§7.1). A test pins the order.
 | `policy_denied` | Endpoint, provider, or model type not allowed by policy, or local-only (INF-12) | No | No |
 | `budget_exhausted` | A spend cap would be exceeded by the reservation (§7.3) | No | No |
 | `rate_limited_local` | The gateway's own per-agent or per-workspace rate cap | No | No |
-| `meter_unavailable` | The reservation could not be appended: the meter writer is unreachable, or this replica is fenced (§3.6) | No | No |
+| `meter_unavailable` | The reservation could not be appended: the workspace's or the deployment's meter writer is unreachable, or this replica or that writer is fenced (§3.6) | No | No |
 | `input_rejected` | The prompt guard found forbidden content (§8.3) | No | No |
 | `model_withdrawn` | The entry is withdrawn (INF-15) | No | No |
 | `deadline_exceeded` | No complete response before the deadline | No further attempts | Maybe |
@@ -304,16 +311,30 @@ existing ones. So:
   stream (`meter:{workspace_id}`, journal spec §9.19: `MeterReserved` and `MeterSettled`). The
   reservation is appended before the first attempt leaves the deployment, so a crash cannot lose a
   cost, and spend per agent and per workspace folds from that stream.
+- **The deployment's cap folds from the deployment meter stream** (`dmeter:{deployment_id}`,
+  [DEC-2207](../project/decisions/DEC-2207.md), journal spec §9.19), written by the deployment's one
+  meter writer: a copy of every workspace's reservations and settlements. The workspace's holder
+  checks its own caps and then asks the deployment's writer to reserve; that writer checks the
+  deployment cap and appends in one step, and only then does the holder append to the workspace
+  stream. A deployment writer that is unreachable inside the call's deadline, or fenced, ends the
+  call `meter_unavailable`, with nothing appended to either stream, or an orphan (below) if its
+  append was in fact committed.
 - **One meter writer per workspace** (DEC-432 item 20). The gateway may run as several replicas, but
   a stream has one writer, fenced by epoch (journal spec §2, §5). So exactly one replica holds the
-  meter writer role for a workspace, and it alone checks caps and appends. Any other replica asks
-  the holder to reserve before it sends anything. A cap is therefore checked against one ordered
-  stream, never against two replicas' separate views.
+  meter writer role for a workspace, and it alone checks the workspace's caps and appends. Any other
+  replica asks the holder to reserve before it sends anything. The holder admits one reservation at
+  a time, from its check to its own append, the deployment's reservation included, and the
+  deployment's writer likewise. Each cap is therefore checked against one ordered stream, never
+  against two replicas' separate views.
 - **A replica that cannot reserve refuses.** If the holder is unreachable inside the call's
   deadline, or the replica's own append is fenced, the call ends `meter_unavailable` (§3.3):
   nothing is sent and the output is missing (INF-4). Each such refusal is counted and alerts the
-  operator, so it is never a silent partial outage. It has no meter-stream entry and costs nothing;
-  the caller's `ModelInvocationRecorded` records the outcome.
+  operator, so it is never a silent partial outage. It has no workspace meter-stream entry and costs
+  nothing; the caller's `ModelInvocationRecorded` records the outcome. One case leaves a deployment
+  entry: a workspace append that fails after the deployment's reservation was appended. That
+  reservation is an **orphan**: it stays open, counted at its maximum against the deployment's cap
+  and never settled, so the deployment over-counts and never under-counts, and the operator is
+  alerted (DEC-2207 item 4).
 - **Hand-over.** A new holder takes the next epoch and folds the stream before it reserves. A
   reservation the old holder left unsettled stays counted (§7.3).
 - **A caller can read its own reservations** in the meter stream (agent harness spec §10.1 ask 2),
@@ -464,7 +485,7 @@ DEC-432 item 14's guard stands and no live call runs). The routing lock is set p
   `[a-z_]` segments joined by `.`, and no segment holds `__`, so the mapping cannot collide; a reply
   naming a wire name that maps to no offered tool is `schema_invalid`. The transcript gives each
   tool call a deterministic id from its turn and index, never the provider's, so a re-run's
-  request digests match (DEC-2204, lane I1).
+  request digests match (DEC-2203; lane I1's gateway, #1551).
 
 The response's reported model and provider must both equal the pin, or the call is
 `identity_mismatch` (DEC-997 item 2). Each endpoint records the routing slug it requests and the
@@ -528,7 +549,7 @@ a settlement only for the calls that could cost money, and spend for caps folds 
 | Research cost cap | `behavior.research.cost_cap_usd_per_day`, an envelope field ([DEC-120](../project/04-decision-log.md#decisions)), tightened by the policy's `research_cost_cap_usd_per_day` | The research agent's calls, per agent per risk day |
 | Workspace model spend | HLD §8 quota ("model spend"), set by the operator or plan | All calls of the workspace per risk day |
 | Workspace monthly cap | Workspace configuration: each workspace's own monthly model budget, from its setting; per-agent monthly caps under it, each at most the workspace's. No figure is a product limit, and none is hardcoded (DEC-2203 item 9) | All calls of the workspace per calendar month of risk days |
-| Deployment monthly cap | A deployment setting, separate from every workspace's: the platform's own provider spend for that deployment, folded from the deployment meter stream `dmeter:{deployment_id}` (DEC-2204, lane I1's #1547). **$50 a month** today, for the demo and dev deployment ([DEC-997](../project/decisions/DEC-997.md) item 3, Proposed; until accepted, no live call runs at all). The founder clarified on 2026-10-17 that it is the platform's demo cap, not a customer limit (DEC-2203 item 9) | All calls of the deployment per calendar month of risk days |
+| Deployment monthly cap | A deployment setting, separate from every workspace's: the platform's own provider spend for that deployment, folded from the deployment meter stream `dmeter:{deployment_id}` ([DEC-2207](../project/decisions/DEC-2207.md)). **$50 a month** today, for the demo and dev deployment ([DEC-997](../project/decisions/DEC-997.md) item 3, Proposed; until accepted, no live call runs at all). The founder clarified on 2026-10-17 that it is the platform's demo cap, not a customer limit (DEC-2203 item 9) | All calls of the deployment per calendar month of risk days |
 | Workspace cycle allotment | The license's `model_spend_usd_per_cycle`, from the plan ([billing design](../design/billing.md) §3.4, DEC-442 item 4) | All calls of the workspace per billing cycle; enforced alongside the per-risk-day caps, never instead of them |
 | Run ceiling | The request's `spend_ceiling_usd`: the workspace's configured `research_run_cost_cap_usd`, less the cost of the run's earlier turns as the caller folds them from its own records ([agent harness spec §6.11](agent-harness.md#611-bounds-and-budgets), DEC-2203 item 9) | One call: its reservation must fit under the ceiling. It only refuses, and never lifts another cap |
 | Rate caps | Per agent: research runs only in proposal rounds no more often than `behavior.research.interval_s`, an agentic run's turns inside its one round; per workspace: a token bucket set by the plan | Calls per second |
