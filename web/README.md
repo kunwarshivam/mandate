@@ -169,7 +169,9 @@ creates yet. Until E9-4 gives the browser its step-up ceremony, a first version'
 step-up and the API answers `step_up_required` with nothing recorded, which the set-up shows; changing a mandate is not sent yet,
 and the charts and sample headlines are not drawn over the API: DEC-975 has the detail, including the
 provisional read bodies the API server serves until `schemas/workspace-api/read-models/` lands.
-`/demo` always reads the fixtures. With sign-in on, the browser first opens an API session with
+Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
+switch, and the record screens build from the API's view, with open orders and per-agent positions
+shown as not reported, never as none. Release is not offered there. `/demo` always reads the fixtures. With sign-in on, the browser first opens an API session with
 `POST /v1/sessions` from its Supabase access token and refreshes it every four minutes, one tab at a
 time (`src/api/session.ts`, DEC-1095); a read answered `membership_unavailable` shows that state, and no session
 shows "Sign in to see your workspace".

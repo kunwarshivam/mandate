@@ -42,6 +42,8 @@ mod client_data;
 mod cose;
 pub mod stepup;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use mandate_canon::Digest;
 
 use auth_data::AuthData;
@@ -71,6 +73,12 @@ impl Challenge {
             return Err(ChallengeTooShort);
         }
         Ok(Self(bytes.to_vec()))
+    }
+
+    /// The challenge as `clientDataJSON.challenge` carries it: base64url without padding, the
+    /// form a relying party hands its client and the form [`verify`] compares exactly.
+    pub fn base64url(&self) -> String {
+        URL_SAFE_NO_PAD.encode(&self.0)
     }
 }
 
