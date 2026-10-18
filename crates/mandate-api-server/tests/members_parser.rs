@@ -346,7 +346,6 @@ fn the_time_base_is_the_lookups_now() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn a_membership_row_of_another_environment_fails_the_lookup_closed() {
     let viewer = roles(&[Role::Viewer]);
     let revoke = granted_then(|rows| {
@@ -381,7 +380,6 @@ fn a_membership_row_of_another_environment_fails_the_lookup_closed() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn the_deployments_parser_answers_every_refusal_as_a_failed_lookup() {
     let parse = control_parser(hosted().workspace);
     let granted = granted_then(|_| {});
@@ -418,7 +416,6 @@ fn the_deployments_parser_answers_every_refusal_as_a_failed_lookup() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn only_a_membership_record_of_the_workspace_must_be_at_version_1() {
     let passed_over = granted_then(|rows| {
         rows.edited("AgentDeployed", T0 - 60, |e| e["schema_version"] = json!(7));

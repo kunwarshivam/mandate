@@ -19,14 +19,6 @@ use mandate_time::UtcNanos;
 pub type ParseMembers =
     dyn Fn(&[StoredEvent]) -> Result<Vec<MembershipRecord>, LookupFailed> + Send + Sync;
 
-/// The parser of the hosted `workspace`'s control stream: [`membership_records`], any refusal a
-/// failed lookup (DEC-2110).
-pub fn control_parser(
-    workspace: WorkspaceId,
-) -> impl Fn(&[StoredEvent]) -> Result<Vec<MembershipRecord>, LookupFailed> + Send + Sync {
-    move |rows| membership_records(workspace, rows).map_err(|_| LookupFailed)
-}
-
 /// The record that opens every stream at `seq` 1 and names its environment (journal spec §2).
 const STREAM_OPENED: &str = "StreamOpened";
 
