@@ -37,8 +37,8 @@ claim issue or the decision file, not here.
   `36a2d669` (renumbered to v0.54 at merge, vectors regenerated); #1448 closed, its content already
   on `main` through #1458. Approved and waiting on CI: #1555 and #1560 (each re-approved after
   `full-checks` found a doubled `serde_json` or `tokio` row the merge kept), #1581 (retargeted
-  to `main` once #1570 landed) and #1558 (Cursor's gate decision ledger, marked ready). In review:
-  #1569 (retargeted after #1566) and #1578 (its first review). Sequenced behind them: #1537,
+  to `main` once #1570 landed), #1558 (Cursor's gate decision ledger, marked ready), #1569
+  (retargeted after #1566) and #1578 (its first review). Sequenced behind them: #1537,
   #1582 (gitleaks' two false positives allowed by path and value, as the other test allowlists
   are), #1576 and #1577 after #1560, since all four rewrite `xtask/src/cell.rs`; #1575 after
   #1569; #1545 after #1580, as v0.55. Waiting on the founder: #1539 and #1501 (above, in the
