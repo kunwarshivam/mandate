@@ -1,5 +1,6 @@
-//! A property of the owner's exits over random runs (E21-30, DEC-2033 item 4, `AGENTS.md` rule
-//! 13): the process never drops, refuses or silently holds one, and the gate never fails one on
+//! A property of the exits over random runs (E21-30, DEC-2033 items 4 and 5, `AGENTS.md` rule 13):
+//! the process never drops, refuses or silently holds an owner's exit, holds no exit at all while
+//! the agent is `normal` and no order is `Unknown`, and the gate never fails an owner's exit on
 //! eligibility, session, conduct, buying power or the day-trade budget. The oracle reads only what
 //! the journal holds and the alerts the process raised.
 
@@ -27,6 +28,8 @@ const NEVER_FAIL: [&str; 5] = [
 enum Exit {
     Limit(u32),
     Market(Option<u32>),
+    /// A risk or discretionary exit at this limit.
+    Other(&'static str, u32),
 }
 
 fn owner_exits() -> impl Strategy<Value = Vec<Exit>> {
@@ -34,6 +37,11 @@ fn owner_exits() -> impl Strategy<Value = Vec<Exit>> {
         prop_oneof![
             (100u32..200).prop_map(Exit::Limit),
             proptest::option::of(100u32..200).prop_map(Exit::Market),
+            (
+                prop_oneof![Just("risk_exit"), Just("discretionary_exit")],
+                100u32..200
+            )
+                .prop_map(|(purpose, limit)| Exit::Other(purpose, limit)),
         ],
         1..5,
     )
@@ -60,6 +68,18 @@ fn check(exits: &[Exit]) -> Result<(), Error> {
                 )?;
                 priced.push(intent);
             }
+            Exit::Other(purpose, limit) => {
+                propose(
+                    &journal,
+                    AGENT,
+                    &intent,
+                    "sell",
+                    "10",
+                    &limit.to_string(),
+                    purpose,
+                )?;
+                priced.push(intent);
+            }
             Exit::Market(floor) => {
                 let request = format!("01JOWNREQS{n:016}");
                 let floor = floor.map(|floor| floor.to_string());
@@ -77,15 +97,17 @@ fn check(exits: &[Exit]) -> Result<(), Error> {
     broker.holding("AAPL", "1000")?;
     let mut process = start(&journal, &broker)?;
     let mut alerted = Vec::new();
+    let mut held = Vec::new();
     for _ in 0..3 {
-        alerted.extend(
-            process
-                .step(at(NOON)?)
-                .into_iter()
-                .filter(|alert| alert.key == "owner_exit_unpriced")
-                .filter_map(|alert| alert.subject),
-        );
+        for alert in process.step(at(NOON)?) {
+            match alert.key {
+                "owner_exit_unpriced" => alerted.extend(alert.subject),
+                "exit_held" => held.extend(alert.subject),
+                _ => {}
+            }
+        }
     }
+    assert!(held.is_empty(), "exits held in normal mode: {held:?}");
     assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
     assert_eq!(journal.received(), priced);
     assert_eq!(alerted.len(), unpriced.len());
@@ -112,7 +134,7 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 64, failure_persistence: None, ..ProptestConfig::default() })]
 
     #[test]
-    fn no_owner_exit_is_dropped_refused_or_held_in_silence(exits in owner_exits()) {
+    fn no_exit_is_held_and_no_owner_exit_dropped_or_refused(exits in owner_exits()) {
         check(&exits).map_err(|error| TestCaseError::fail(error.to_string()))?;
     }
 }

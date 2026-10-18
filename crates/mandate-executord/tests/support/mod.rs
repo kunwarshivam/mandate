@@ -1091,3 +1091,20 @@ pub fn propose_owner_market_exit(
         ])?,
     )
 }
+
+/// A mandate port that knows no agent's version, as the binary's fixture port does today.
+pub struct NoVersion;
+
+impl MandateView for NoVersion {
+    fn version(&self, _agent: &AgentId) -> Option<MandateVersion> {
+        None
+    }
+
+    fn crypto_stop_limit_offset(&self, agent: &AgentId) -> Option<Fraction> {
+        Mandate.crypto_stop_limit_offset(agent)
+    }
+
+    fn covers(&self, agent: &AgentId, instrument: &InstrumentId) -> bool {
+        Mandate.covers(agent, instrument)
+    }
+}

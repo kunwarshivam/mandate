@@ -190,7 +190,7 @@ fn an_opening_without_gate_facts_is_held_and_an_exit_behind_it_still_goes() -> R
     let held = |alerts: &[Alert]| {
         alerts
             .iter()
-            .filter(|alert| alert.key == "intent_held" && alert.subject.as_deref() == Some(OPEN))
+            .filter(|alert| alert.key == "opening_held" && alert.subject.as_deref() == Some(OPEN))
             .count()
     };
     assert_eq!((held(&first), held(&second)), (1, 0));
@@ -346,5 +346,35 @@ fn an_owner_exit_at_the_market_without_a_floor_alerts_and_stops_nothing() -> Res
             .count()
     };
     assert_eq!((unpriced(&first), unpriced(&second)), (1, 0));
+    Ok(())
+}
+
+/// The alarm that must never sound: an exit the core refuses because the mandate port knows no
+/// version for its agent, as the binary's fixture port knows none today. It raises `exit_held`,
+/// distinct from an opening's alert, once; nothing is journaled for it; and the process keeps
+/// applying the kill switch (DEC-2033 item 5, `AGENTS.md` rule 13).
+#[test]
+fn an_exit_without_a_mandate_version_sounds_the_exit_alarm_and_stops_nothing() -> Result<(), Error>
+{
+    let journal = deployed()?;
+    exit(&journal, AGENT, EXIT)?;
+    let broker = Paper::new(&journal);
+    held(&broker)?;
+    let mut wiring = wired(Box::new(Allowing), Box::new(support::TwoPercentStop))?;
+    wiring.mandates = Box::new(support::NoVersion);
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    let first = process.step(at(NOON)?);
+    kill(&journal, AGENT, SWITCH)?;
+    let second = process.step(at(NOON)?);
+    let alarms = |alerts: &[Alert]| {
+        alerts
+            .iter()
+            .filter(|alert| alert.key == "exit_held" && alert.subject.as_deref() == Some(EXIT))
+            .count()
+    };
+    assert_eq!((alarms(&first), alarms(&second)), (1, 0));
+    assert!(journal.received().is_empty());
+    assert_eq!(journal.switched(), [AGENT]);
+    assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
     Ok(())
 }
