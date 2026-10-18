@@ -398,9 +398,109 @@ pub(crate) fn build_env(
     vars
 }
 
-/// `cargo xtask release build <out>`.
+/// Whether `name`, a variable of the environment `release build` was started in, could change
+/// what a release compiles: rustflags in any of cargo's spellings, a compiler or a wrapper, or any
+/// profile setting (DEC-2100 item 2, DEC-2027). [`build_env`] already keeps every one of them from
+/// the build; refusing them makes a run that asked for one fail rather than ship without it.
+pub(crate) fn overriding_variable(name: &str) -> bool {
+    matches!(
+        name,
+        "RUSTFLAGS" | "RUSTC" | "RUSTC_WRAPPER" | "RUSTC_WORKSPACE_WRAPPER"
+    ) || name.starts_with("CARGO_PROFILE_")
+        || (name.starts_with("CARGO_") && name.ends_with("RUSTFLAGS"))
+        || matches!(
+            name,
+            "CARGO_BUILD_RUSTC"
+                | "CARGO_BUILD_RUSTC_WRAPPER"
+                | "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"
+        )
+}
+
+/// The cargo configuration files the build's `cargo` reads, in cargo's order: `.cargo/config.toml`
+/// and `.cargo/config` in the checkout and each directory above it, then `cargo_home`'s. Only the
+/// ones that exist are listed.
+pub(crate) fn config_files(root: &Path, cargo_home: &Path) -> Vec<PathBuf> {
+    root.ancestors()
+        .map(|dir| dir.join(".cargo"))
+        .chain(std::iter::once(cargo_home.to_path_buf()))
+        .flat_map(|dir| [dir.join("config.toml"), dir.join("config")])
+        .filter(|file| file.is_file())
+        .collect()
+}
+
+/// The settings in one cargo configuration, `text`, that could change what a release compiles:
+/// any `profile`, rustflags under `build` or any `target`, and a compiler or wrapper under
+/// `build` (DEC-2027). A `--config` argument would be one too, and [`build_args`] passes none.
+pub(crate) fn overriding_settings(text: &str) -> Result<Vec<String>> {
+    let config: toml::Table = toml::from_str(text).context("parsing a cargo configuration")?;
+    let mut found = Vec::new();
+    if config.contains_key("profile") {
+        found.push("profile".to_owned());
+    }
+    if let Some(build) = config.get("build").and_then(toml::Value::as_table) {
+        for key in [
+            "rustflags",
+            "rustc",
+            "rustc-wrapper",
+            "rustc-workspace-wrapper",
+        ] {
+            if build.contains_key(key) {
+                found.push(format!("build.{key}"));
+            }
+        }
+    }
+    if let Some(targets) = config.get("target").and_then(toml::Value::as_table) {
+        for (target, table) in targets {
+            if table.get("rustflags").is_some() {
+                found.push(format!("target.{target}.rustflags"));
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// Every override that would make `release build` refuse: the variables of `names` that
+/// [`overriding_variable`] names, then each setting [`overriding_settings`] finds in `configs`,
+/// written `<file>: <key>`.
+pub(crate) fn overrides(
+    names: impl IntoIterator<Item = String>,
+    configs: &[(PathBuf, String)],
+) -> Result<Vec<String>> {
+    let mut found: Vec<String> = names
+        .into_iter()
+        .filter(|name| overriding_variable(name))
+        .collect();
+    found.sort();
+    for (file, text) in configs {
+        for key in overriding_settings(text).with_context(|| format!("in {}", file.display()))? {
+            found.push(format!("{}: {key}", file.display()));
+        }
+    }
+    Ok(found)
+}
+
+/// `cargo xtask release build <out>`. It refuses before building anything when its environment
+/// or a cargo configuration it would read holds one of [`overrides`].
 pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
     let paths = Paths::from_env(root)?;
+    let configs = config_files(root, &paths.cargo_home)
+        .into_iter()
+        .map(|file| {
+            fs::read_to_string(&file)
+                .with_context(|| format!("reading {}", file.display()))
+                .map(|text| (file, text))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let refused = overrides(
+        env::vars_os().filter_map(|(name, _)| name.into_string().ok()),
+        &configs,
+    )?;
+    ensure!(
+        refused.is_empty(),
+        "the release build refuses settings that could change what it compiles, such as turning \
+         debug assertions on (DEC-2100 item 2, DEC-2027): {}",
+        refused.join(", ")
+    );
     let tools = tools(&paths.cargo_home)?;
     let epoch = git(root, &["log", "-1", "--format=%ct", "HEAD"])?;
     let commit = git(root, &["rev-parse", "HEAD"])?;
@@ -896,6 +996,7 @@ pub(crate) fn compare(a: &Path, b: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo_root;
 
     fn paths() -> Paths {
         Paths {
@@ -1056,6 +1157,139 @@ mod tests {
         assert_eq!(value("PATH").as_deref(), Some("/tools:/usr/bin"));
         assert_eq!(value("SOURCE_DATE_EPOCH").as_deref(), Some("1792212600"));
         assert_eq!(value("HOME").as_deref(), Some("inherited-HOME"));
+    }
+
+    /// DEC-2027: every spelling of rustflags, a compiler or wrapper, and every profile variable is
+    /// refused, and what `cargo run`, rustup and a runner set is not.
+    #[test]
+    fn variables_that_could_change_the_build_are_refused() {
+        for name in [
+            "RUSTFLAGS",
+            "CARGO_ENCODED_RUSTFLAGS",
+            "CARGO_BUILD_RUSTFLAGS",
+            "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS",
+            "CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS",
+            "CARGO_PROFILE_RELEASE_PACKAGE_MANDATE_CLI_DEBUG_ASSERTIONS",
+            "CARGO_PROFILE_RELEASE_OPT_LEVEL",
+            "RUSTC",
+            "RUSTC_WRAPPER",
+            "RUSTC_WORKSPACE_WRAPPER",
+            "CARGO_BUILD_RUSTC",
+            "CARGO_BUILD_RUSTC_WRAPPER",
+            "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+        ] {
+            assert!(overriding_variable(name), "{name} is refused");
+        }
+        for name in [
+            "CARGO",
+            "CARGO_HOME",
+            "CARGO_MANIFEST_DIR",
+            "CARGO_PKG_NAME",
+            "CARGO_TERM_COLOR",
+            "CARGO_HTTP_CAINFO",
+            "RUSTUP_HOME",
+            "RUSTUP_TOOLCHAIN",
+            "RUSTDOCFLAGS",
+            "HOME",
+            "PATH",
+            "HTTPS_PROXY",
+        ] {
+            assert!(!overriding_variable(name), "{name} is not refused");
+        }
+    }
+
+    /// DEC-2027: a cargo configuration that sets a profile, rustflags, or a compiler or wrapper
+    /// is refused, naming each setting and its file; the repository's own configuration, an
+    /// alias, and registry or network settings are not.
+    #[test]
+    fn configurations_that_could_change_the_build_are_refused() -> Result<()> {
+        let repo = fs::read_to_string(repo_root()?.join(".cargo/config.toml"))?;
+        assert_eq!(overriding_settings(&repo)?, Vec::<String>::new());
+        assert_eq!(
+            overriding_settings(
+                "[alias]\nx = \"run\"\n[http]\ncainfo = \"/ca.pem\"\n[net]\nretry = 3\n\
+                 [build]\njobs = 4\n[target.x86_64-unknown-linux-musl]\nlinker = \"cc\"\n"
+            )?,
+            Vec::<String>::new()
+        );
+        let seeded = "[profile.release]\ndebug-assertions = true\n\
+             [build]\nrustflags = [\"-C\", \"debug-assertions\"]\nrustc-wrapper = \"w\"\n\
+             rustc = \"r\"\nrustc-workspace-wrapper = \"ww\"\n\
+             [target.x86_64-unknown-linux-musl]\nrustflags = [\"-Cdebug-assertions\"]\n\
+             [target.'cfg(unix)']\nrustflags = []\n";
+        assert_eq!(
+            overriding_settings(seeded)?,
+            [
+                "profile",
+                "build.rustflags",
+                "build.rustc",
+                "build.rustc-wrapper",
+                "build.rustc-workspace-wrapper",
+                "target.cfg(unix).rustflags",
+                "target.x86_64-unknown-linux-musl.rustflags",
+            ]
+        );
+        assert_eq!(
+            overrides(
+                [
+                    "PATH".to_owned(),
+                    "RUSTFLAGS".to_owned(),
+                    "CARGO_PROFILE_RELEASE_LTO".to_owned()
+                ],
+                &[
+                    (PathBuf::from("/repo/.cargo/config.toml"), repo),
+                    (
+                        PathBuf::from("/home/runner/.cargo/config.toml"),
+                        "[profile.release]\ndebug-assertions = true\n".to_owned()
+                    ),
+                ],
+            )?,
+            [
+                "CARGO_PROFILE_RELEASE_LTO",
+                "RUSTFLAGS",
+                "/home/runner/.cargo/config.toml: profile",
+            ]
+        );
+        assert!(overrides(Vec::new(), &[(PathBuf::from("/bad"), "[".to_owned())]).is_err());
+        Ok(())
+    }
+
+    /// DEC-2027: the configuration files are the checkout's and each parent's, in cargo's order,
+    /// then `CARGO_HOME`'s, and only those that exist.
+    #[test]
+    fn the_configuration_files_are_the_ones_cargo_reads() -> Result<()> {
+        let base = env::temp_dir().join(format!("mandate-release-config-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("work").join("mandate");
+        let home = base.join("cargo-home");
+        for dir in [root.join(".cargo"), base.join(".cargo"), home.clone()] {
+            fs::create_dir_all(&dir)?;
+        }
+        fs::write(root.join(".cargo/config.toml"), "")?;
+        fs::write(base.join(".cargo/config"), "")?;
+        fs::write(home.join("config.toml"), "")?;
+        let found = config_files(&root, &home);
+        let _ = fs::remove_dir_all(&base);
+        let expected: Vec<PathBuf> = vec![
+            root.join(".cargo/config.toml"),
+            base.join(".cargo/config"),
+            home.join("config.toml"),
+        ];
+        assert_eq!(found[..2], expected[..2]);
+        assert_eq!(found.last(), expected.last());
+        Ok(())
+    }
+
+    /// DEC-2027: the release build's own `cargo` arguments pass no `--config` and no `-Z`, so no
+    /// setting reaches it from its command line.
+    #[test]
+    fn the_build_passes_no_configuration_on_its_command_line() {
+        let args = build_args(Path::new("/t"), Arch::Amd64);
+        assert!(
+            args.iter()
+                .all(|arg| !arg.starts_with("--config") && !arg.starts_with("-Z")),
+            "{args:?}"
+        );
     }
 
     #[test]
