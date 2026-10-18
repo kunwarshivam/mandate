@@ -1,7 +1,8 @@
 # The demo, end to end, on the local cell (E21-54)
 
 - **Spec:** the managed-cells plan (`docs/project/tasks/managed-cells.md`), DEC-967, DEC-995 (the
-  2026-10-26 demo), DEC-2002, DEC-2004, DEC-2010, DEC-2023; journal spec §11 for the closing verification.
+  2026-10-26 demo), DEC-2002, DEC-2004, DEC-2010, DEC-2023; journal spec §11 for the closing
+  verification.
 - **Code:** `xtask/src/cell/scenario.rs` (`cargo xtask cell demo --scenario demo`, `cargo xtask ci
   cell-demo`), the demo's envelope and instrument under `deploy/cell/demo/`, and the backtest
   runner's demo inputs and golden store under `crates/mandate-backtest-runner/tests/fixtures/`.
