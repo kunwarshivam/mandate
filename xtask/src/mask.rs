@@ -18,15 +18,15 @@ pub(crate) fn command_escaped(data: &str) -> String {
         .replace('\n', "%0A")
 }
 
-/// Every form of `value` a log line could carry, none empty or whitespace only: the value, its
-/// standard and URL-safe base64 with and without padding, its percent-encoding (every byte but
-/// `[A-Za-z0-9-._~]`), its JSON-escaped form, and each of its lines at least
-/// [`MIN_LINE_FORM`] characters long once trimmed.
 /// The shortest line of a multi-line value masked on its own. A shorter line would hide every
 /// match of it anywhere in the log, and is too short to be secret on its own; the whole value
 /// and its encodings are masked whatever their length.
 const MIN_LINE_FORM: usize = 4;
 
+/// Every form of `value` a log line could carry, none empty or whitespace only: the value, its
+/// standard and URL-safe base64 with and without padding, its percent-encoding (every byte but
+/// `[A-Za-z0-9-._~]`), its JSON-escaped form, and each of its lines at least
+/// [`MIN_LINE_FORM`] characters long once trimmed.
 pub(crate) fn forms(value: &str) -> BTreeSet<String> {
     let base64 = image::base64(value.as_bytes());
     let base64url = base64.replace('+', "-").replace('/', "_");
