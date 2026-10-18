@@ -137,6 +137,7 @@ impl Draft {
                     config_refs: fields.get("config_refs"),
                     actor: fields.get("actor"),
                     causation_id,
+                    correlation_id: fields.get("correlation_id"),
                     pii_refs: fields.get("pii_refs"),
                     event_time: fields.get("event_time"),
                 },

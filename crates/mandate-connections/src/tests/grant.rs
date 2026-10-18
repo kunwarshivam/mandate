@@ -55,3 +55,11 @@ fn granted_scopes_must_equal_the_request() {
         );
     }
 }
+
+#[test]
+fn the_granted_scopes_iterate_sorted_once_each() {
+    for granted in ["trading data", "data trading"] {
+        let scopes = check_scope(granted).unwrap();
+        assert_eq!(scopes.iter().collect::<Vec<_>>(), ["data", "trading"]);
+    }
+}

@@ -47,6 +47,7 @@
 //! and exact `mandate-num` arithmetic (ADR-0001 ES-21). Instants are arguments, or the gateway's
 //! own [`mandate_gateway::provider::Clock`].
 
+pub mod agentic;
 mod backend;
 mod call;
 mod entry;

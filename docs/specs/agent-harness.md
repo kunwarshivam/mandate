@@ -1665,7 +1665,7 @@ deadline) is E19-13's. For the desk:
 
 | Event | What the owner sees |
 |---|---|
-| The guard refuses the question | `OwnerQuestionSubmitted` is journaled with no question (journal spec §9.24); the runtime copies nothing and starts no run. The desk shows it `refused`, with generic text asking the member to leave out keys, account numbers, and personal details |
+| The guard refuses the question | `OwnerQuestionSubmitted` is journaled with no question (journal spec §9.25); the runtime copies nothing and starts no run. The desk shows it `refused`, with generic text asking the member to leave out keys, account numbers, and personal details |
 | No run starts for a question within 60 s of its `recorded_at` (the agent paused or stopped, the process down, a precondition of §15.1 unmet, or a run in flight) | The desk shows it `unavailable`, with the fallback. The runtime starts no run for a question whose `recorded_at` is more than 60 s before the risk clock at its copy (two deployment clocks, within the scheduler's tolerance, journal spec §5.4); the desk's own `unavailable` uses the API's clock at the read. If a run still starts under watermark lag, its states override: `running` and then `answered` replace `unavailable`, so the desk never shows an answer and `unavailable` at once |
 | The process restarts during a run | E19-13 ends it; the desk shows the fallback. Its reservations stay counted (inference §7.3) |
 | The agent is paused, stopped, or killed | No owner or explain run starts; one in flight is cancelled at its next step (ADR-0005 §4). The desk serves the fallback for each later question |
@@ -1682,7 +1682,7 @@ the agent stream, written by the runtime core: `RunStarted` with `kind` `owner` 
 call, the `answer` check's result as the result's `code`; `RunSummaryRecorded`; and `RunEnded`,
 whose reason `answered` marks a shown answer. Rule 173 there allows one `explain` run per approval
 and one `owner` run per question. One record is new, on the control stream
-([journal spec §9.24](journal.md#924-desk-question-records-dec-2240)):
+([journal spec §9.25](journal.md#925-desk-question-records-dec-2240)):
 
 | Event | When |
 |---|---|

@@ -15,7 +15,8 @@
     "verify",
     "localImages",
     "ingress",
-    "api"
+    "api",
+    "artifacts"
   ],
   "properties": {
     "workspace": {
@@ -36,6 +37,7 @@
         "postgres",
         "mandate",
         "api",
+        "stub-issuer",
         "runtime",
         "executor",
         "token-exchange",
@@ -56,6 +58,11 @@
         "api": {
           "type": "string",
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "stub-issuer": {
+          "type": "string",
+          "pattern": "^$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$",
+          "description": "The local stub token issuer (DEC-2100), a sidecar in the API pod for a dev or ci cell's sign-in. Only a local build can be named, and only the local cell's values allow a local build (localImages), so a hosted values file cannot run it (DEC-1025)."
         },
         "runtime": {
           "type": "string",
@@ -317,7 +324,7 @@
       }
     },
     "api": {
-      "description": "The workspace API server's settings (workspace API spec §3.11 item 2), each required once images.api is named. None is a secret: the session signing key is made in the pod's memory at each start, and the subject links are a ConfigMap the operator makes.",
+      "description": "The workspace API server's settings (workspace API spec \u00a73.11 item 2), each required once images.api is named. None is a secret: the session signing key is made in the pod's memory at each start, and the subject links are a ConfigMap the operator makes.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -375,6 +382,31 @@
           "type": "string",
           "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
           "description": "The ConfigMap whose `subject-links` key is mounted at /etc/mandate/subject-links (DEC-1023); empty mounts none, and every sign-in is refused"
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "size",
+        "storageClass",
+        "accessMode"
+      ],
+      "properties": {
+        "size": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(Mi|Gi|Ti)$"
+        },
+        "storageClass": {
+          "type": "string",
+          "pattern": "^([a-z0-9]([a-z0-9.-]*[a-z0-9])?)?$"
+        },
+        "accessMode": {
+          "enum": [
+            "ReadWriteOnce",
+            "ReadWriteMany"
+          ]
         }
       }
     }

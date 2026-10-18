@@ -24,10 +24,12 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | objectstore | mutants | schema-mutants | cell | cell-demo | sweep; or one part
-                        of test: test-nextest | test-doc | test-rh-sim | test-python. Tests,
-                        pending tests, doctests, the rehearsal, Postgres and object-store runs and `portable` run over
-                        the crates the diff selects (DEC-1190); with no diff base, all of them
+                        postgres | openbao | objectstore | mutants | schema-mutants | cell |
+                        cell-demo | cell-journal | cell-failover | sweep; or one part of test:
+                        test-nextest | test-doc | test-rh-sim | test-python. Tests, pending tests,
+                        doctests, the rehearsal, Postgres, OpenBao and object-store runs and
+                        `portable` run over the crates the diff selects (DEC-1190); with no diff
+                        base, all of them
   ci select             print which scoped jobs this diff runs, as GITHUB_OUTPUT lines
   ci sweep --plan       print tonight's share of the whole-crate mutation sweep (DEC-1190)
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
@@ -63,7 +65,7 @@ commands:
                         (main only, from CI, after each arch's publish)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
-  cell drill [--seeded] [boot|journal|egress]...
+  cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
                         run the cell's drills; --seeded plants each drill's bug and fails if a
                         drill still holds
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
@@ -96,6 +98,7 @@ const FULL_JOB: &[&str] = &[
     "schemas",
     "supply-chain",
     "postgres",
+    "openbao",
     "objectstore",
 ];
 const PR_JOBS: &[&str] = &[
@@ -109,10 +112,13 @@ const PR_JOBS: &[&str] = &[
     "supply-chain",
     "spec-guard",
     "postgres",
+    "openbao",
     "objectstore",
     "mutants",
     "schema-mutants",
     "cell",
+    "cell-journal",
+    "cell-failover",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -124,6 +130,11 @@ const SCHEMA_DIR: &str = "schemas/workspace-api";
 /// rather than a skip (DEC-109). CI's `full` and nightly jobs set both.
 const PG_URL: &str = "MANDATE_PG_URL";
 const PG_REQUIRED: &str = "MANDATE_PG_REQUIRED";
+/// The OpenBao dev server `mandate-vault`'s conformance suite runs against (E21-32, DEC-977), and
+/// the switch that makes its absence a failure rather than a skip. CI's `full` job starts the
+/// server with `.github/scripts/start-openbao.sh` and sets both.
+const OPENBAO_ADDR: &str = "MANDATE_OPENBAO_ADDR";
+const OPENBAO_REQUIRED: &str = "MANDATE_OPENBAO_REQUIRED";
 /// The S3-compatible test store `mandate-objectstore`'s conformance suite uses, and the switch that
 /// makes its absence a failure rather than a skip (E21-40, DEC-973). CI's `full` and mutants jobs
 /// set both, with the store `.github/scripts/start-minio.sh` starts.
@@ -277,7 +288,11 @@ fn run() -> Result<()> {
                 names => (false, names),
             };
             let drills = if names.is_empty() {
-                cell::DRILLS.to_vec()
+                cell::DRILLS
+                    .into_iter()
+                    .chain(cell::JOURNAL_DRILLS)
+                    .chain(cell::FAILOVER_DRILLS)
+                    .collect()
             } else {
                 names
                     .iter()
@@ -314,6 +329,8 @@ fn ci(job: &str) -> Result<()> {
         "select" => ci_select(),
         "cell" => cell::ci(),
         "cell-demo" => cell::scenario::ci(),
+        "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
+        "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -365,6 +382,7 @@ fn ci(job: &str) -> Result<()> {
             spec_guard()
         }
         "postgres" => postgres(),
+        "openbao" => openbao(),
         "objectstore" => objectstore(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "sweep" => sweep(Path::new(".")),
@@ -629,6 +647,45 @@ fn postgres() -> Result<()> {
     Ok(())
 }
 
+/// `mandate-vault`'s conformance suite against a real OpenBao dev server (E21-32, DEC-977). `test`
+/// runs it too, but it skips there unless `MANDATE_OPENBAO_ADDR` is set; here it must run, when
+/// the diff selects `mandate-vault` (DEC-1190).
+fn openbao() -> Result<()> {
+    if env::var_os(OPENBAO_ADDR).is_none() {
+        if env::var_os(OPENBAO_REQUIRED).is_some() {
+            bail!("{OPENBAO_REQUIRED} is set but {OPENBAO_ADDR} is not");
+        }
+        eprintln!(
+            "    openbao: {OPENBAO_ADDR} is unset; skipping (see .github/scripts/start-openbao.sh)"
+        );
+        return Ok(());
+    }
+    if selection()?.among(&OPENBAO_TESTED).is_empty() {
+        eprintln!("    openbao: mandate-vault is not affected (DEC-1190)");
+        return Ok(());
+    }
+    let args = [
+        "nextest",
+        "run",
+        "--package",
+        "mandate-vault",
+        "--lib",
+        "--filterset",
+        "test(/^tests::openbao_server::/)",
+        "--locked",
+    ];
+    eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));
+    let status = Command::new("cargo")
+        .args(args)
+        .env(OPENBAO_REQUIRED, "1")
+        .status()
+        .context("starting `cargo nextest`")?;
+    if !status.success() {
+        bail!("the OpenBao conformance suite failed with {status}");
+    }
+    Ok(())
+}
+
 /// The object store's conformance suite against a real S3-compatible store (E21-40, DEC-973),
 /// run only when the selection holds `mandate-objectstore` (DEC-1190). `test` runs it too, but it
 /// skips there unless `MANDATE_S3_URL` is set; here it must run.
@@ -741,6 +798,10 @@ const BINARY_REFERENCE: &str = "bin:";
 /// adapter among them (E8-10 slice D10a, DEC-2500 item 8): `cargo xtask ci postgres` runs those of
 /// them the selection holds.
 const PG_TESTED: [&str; 3] = ["mandate-journal-pg", "mandate-cli", "mandate-dispatcher"];
+
+/// The package whose tests need the OpenBao dev server (E21-32, DEC-977): `cargo xtask ci openbao`
+/// runs its suite when the selection holds it.
+const OPENBAO_TESTED: [&str; 1] = ["mandate-vault"];
 
 /// Whether `path` is `entry`, lies under it when `entry` names a directory (ends in `/`), or
 /// starts with it when `entry` ends in `*`.
@@ -3587,6 +3648,7 @@ const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
     ".github/scripts/start-postgres.sh",
+    ".github/scripts/start-openbao.sh",
     ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
     CREDENTIAL_GUARD,
@@ -3645,6 +3707,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
     "MANDATE_MUTANT_SHARD",
+    "MANDATE_OPENBAO_ADDR",
+    "MANDATE_OPENBAO_CA",
+    "MANDATE_OPENBAO_OPERATOR_TOKEN_FILE",
+    "MANDATE_OPENBAO_REQUIRED",
     "MANDATE_PG_REQUIRED",
     "MANDATE_PG_URL",
     "MANDATE_PR_BODY",
@@ -15362,11 +15428,11 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            13,
+            15,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, and \
-             `cell-demo` (DEC-2002)"
+             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, \
+             `cell-demo` (DEC-2002), `cell-journal`, and `cell-failover`"
         );
         for checkout in checkouts {
             assert!(
