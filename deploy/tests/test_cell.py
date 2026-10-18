@@ -482,6 +482,37 @@ def test_a_process_renders_only_with_its_image():
     assert set(policies(docs)) == {"default-deny", "egress-migrate"}
 
 
+def test_each_service_starts_and_is_probed_as_its_process_list_says():
+    """A service with `args` starts with them and is asked `readyz` and `livez` with its `probe`, every
+    placeholder filled from the values (DEC-1013, DEC-994 item 5)."""
+    docs = render_all()
+    for p in PROCESSES:
+        if p["kind"] != "service" or not (p.get("args") or p.get("probe")):
+            continue
+        w = next(w for w in workloads(docs) if w["metadata"]["name"] == p["name"])
+        c = first_container(w)
+        probes = [x for k in ("readinessProbe", "livenessProbe") for x in c[k]["exec"]["command"]]
+        words = c.get("args", []) + probes
+        assert not [x for x in words if "{" in x], words
+        assert c["args"][: len(p["args"])] == [
+            x.replace("{workspace}", "ws1")
+            .replace("{agent}", "demo-agent")
+            .replace("{connection}", "demo-paper")
+            .replace("{owner}", "demo-owner")
+            for x in p["args"]
+        ]
+        assert c["readinessProbe"]["exec"]["command"] == [x.replace("{probe}", "readyz") for x in p["probe"]]
+        assert c["livenessProbe"]["exec"]["command"] == [x.replace("{probe}", "livez") for x in p["probe"]]
+
+
+def test_the_runtime_never_renders_for_no_deployment():
+    """Naming the runtime's image without the deployment it runs fails the render, rather than
+    starting a runtime for no agent (DEC-1013, AGENTS.md rule 3)."""
+    done = helm(CHART, "--set", "images.runtime=mandate.local/runtime:0123456789ab")
+    assert done.returncode != 0
+    assert "runtime.agent is required" in done.stderr
+
+
 def test_colocated():
     assert colocated(render_all()) == []
 
@@ -787,6 +818,15 @@ def test_values_take_no_unknown_key():
     assert helm(CHART, "--set", "password=x").returncode != 0
     assert helm(JOURNAL_CHART, *JOURNAL_ARGS).returncode == 0
     assert helm(JOURNAL_CHART, *JOURNAL_ARGS, "--set", "superuserPassword=x").returncode != 0
+
+
+def test_a_stopping_journal_waits_briefly_for_its_pooled_clients():
+    """The runtime's pool never disconnects by itself, so CloudNativePG's default smart shutdown
+    (180 s) would hold every primary restart that long before the fast one (DEC-1013 item 6)."""
+    cluster = next(d for d in render(*JOURNAL_ARGS, chart=JOURNAL_CHART) if d["kind"] == "Cluster")
+    assert cluster["spec"]["smartShutdownTimeout"] == 10
+    assert helm(JOURNAL_CHART, *JOURNAL_ARGS, "--set", "smartShutdownTimeout=600").returncode != 0
+    assert helm(JOURNAL_CHART, *JOURNAL_ARGS, "--set", "smartShutdownTimeout=180").returncode == 0
 
 
 def test_roles_match():
