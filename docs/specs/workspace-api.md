@@ -352,7 +352,7 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   object for commands).
 - The challenge route ([DEC-2103](../project/decisions/DEC-2103.md)), operation name
   `step_up_challenge`: the session (the one 401, or `reduction_only` for a reduction-only session,
-  identity spec §7.2 step 1), the CSRF mark, `Idempotency-Key`, the body
+  identity spec §7.2 step 1 and §7.3), the CSRF mark, `Idempotency-Key`, the body
   (`commands/step-up-challenge-request`, strict), then the §3.7 row the kind needs; a principal
   that may not perform the action gets that row's refusal and no challenge, and the two kinds of
   `own` rows answer the one 404 until their own routes land. The challenge id is
