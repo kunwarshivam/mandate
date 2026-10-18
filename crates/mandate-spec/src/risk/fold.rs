@@ -30,7 +30,8 @@ use crate::validate::ValidatedMandate;
 /// The places §5.2 reports the drawdown and the daily P&L fraction at, rounded half to even.
 const REPORTED_RATIO_PLACES: u32 = 12;
 
-/// The places a split's adjusted mark is rounded to, half to even, once (§5.2, trading spec §8.5).
+/// The places a split's adjusted mark is rounded to, toward zero, once, so a split never raises E
+/// (§5.2, MI-33).
 const MARK_PLACES: u32 = 12;
 
 /// Cash in lieu and a dividend are cents, rounded half to even (§5.2, trading spec §8.5).
@@ -54,6 +55,9 @@ pub(super) struct Fold {
     /// cancelled out: a reduction moves realized P&L and the basis by the same amount, so its rounding
     /// (trading spec §8.1) never reaches E.
     cash: Usd,
+    /// Dividends applied whose receivable waits for the first counted sane mark after them: until
+    /// then the last mark is the cum-dividend close, so counting both would overstate E (§5.2, MI-33).
+    dividends_due: Usd,
     qty: Qty,
     /// A mark, not a price: a split's adjusted mark has up to 12 places (§5.2).
     mark: MarkPrice,
@@ -190,6 +194,7 @@ impl Fold {
             mark_max_age_s: opening.mark_max_age_s,
             allocation,
             cash: opening.position_qty.notional(opening.avg_cost)?.negated(),
+            dividends_due: Usd::ZERO,
             qty: opening.position_qty,
             mark: MarkPrice::from(opening.avg_cost),
             high_water: allocation,
@@ -397,7 +402,7 @@ impl Fold {
     ) -> Result<(Read, Option<Rejection>), SpecError> {
         let refused = match &step.input {
             Input::Mark { bid, sane } => {
-                return Ok((self.read_mark(*bid, *sane, step.session), None));
+                return Ok((self.read_mark(*bid, *sane, step.session)?, None));
             }
             Input::Fill { side, qty, price } => {
                 self.fill(*side, *qty, *price)?;
@@ -463,14 +468,22 @@ impl Fold {
     }
 
     /// For an equity only a regular-session mark counts; crypto counts every mark. A counted sane
-    /// mark moves E, resets the mark's age, and clears `stale_mark`; a counted mark that fails its
-    /// checks makes a held instrument `stale_mark` (§5.2, trading spec §8.2).
-    fn read_mark(&mut self, bid: Price, sane: bool, session: MarketSession) -> Read {
+    /// mark moves E, brings in the dividends due (MI-33), resets the mark's age, and clears
+    /// `stale_mark`; a counted mark that fails its checks makes a held instrument `stale_mark` (§5.2,
+    /// trading spec §8.2).
+    fn read_mark(
+        &mut self,
+        bid: Price,
+        sane: bool,
+        session: MarketSession,
+    ) -> Result<Read, SpecError> {
         let counts = self.asset_class == AssetClass::Crypto || session == MarketSession::Regular;
-        if !counts {
+        Ok(if !counts {
             Read::Nothing
         } else if sane {
             self.mark = MarkPrice::from(bid);
+            self.cash = self.cash.checked_add(self.dividends_due)?;
+            self.dividends_due = Usd::ZERO;
             self.mark_age_s = 0;
             self.instrument_restrictions
                 .remove(&InstrumentRestriction::StaleMark);
@@ -481,7 +494,7 @@ impl Fold {
                     .insert(InstrumentRestriction::StaleMark);
             }
             Read::Failed
-        }
+        })
     }
 
     /// A removal restricts the instrument and a re-admission lifts it (§5.9). The state holds one
@@ -524,17 +537,18 @@ impl Fold {
             self.cash = self.cash.checked_add(in_lieu)?;
         }
         self.qty = split.after().abs();
-        self.mark = ratio.mark(self.mark, MARK_PLACES, Rounding::HalfEven)?;
+        self.mark = ratio.mark(self.mark, MARK_PLACES, Rounding::TowardZero)?;
         Ok(())
     }
 
-    /// A cash dividend's receivable, round(Q × d, 2), is income on the ex-date (§5.2, MI-33).
+    /// A cash dividend is due round(Q × d, 2), Q being the position at application; it joins E with
+    /// the first counted sane mark after it (§5.2, MI-33).
     fn pay_dividend(&mut self, per_share: Price) -> Result<(), SpecError> {
         let receivable = self
             .qty
             .notional(per_share)?
             .round(CENT_PLACES, Rounding::HalfEven)?;
-        self.cash = self.cash.checked_add(receivable)?;
+        self.dividends_due = self.dividends_due.checked_add(receivable)?;
         Ok(())
     }
 
