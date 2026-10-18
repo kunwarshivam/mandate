@@ -750,6 +750,7 @@ fn tofu_checks() -> Result<()> {
     }
     let tofu_root = repo_root()?.join(TOFU_DIR);
     let mut forbidden = tofu_symlinks(&tofu_root)?;
+    forbidden.extend(tofu_committed_working_dirs(&tofu_root)?);
     forbidden.extend(tofu_forbidden_blocks(&tofu_sources(&tofu_root)?));
     if !forbidden.is_empty() {
         bail!("tofu:\n  {}", forbidden.join("\n  "));
@@ -987,20 +988,22 @@ fn tofu_forbidden_blocks(files: &[(String, String)]) -> Vec<String> {
     problems
 }
 
-/// Every symlink under `dir`, `.terraform` working directories aside: a link could point the raw
-/// scan at one file and OpenTofu at another, so `deploy/tofu/` holds none (DEC-2014 item 6).
+/// Every symlink under `dir`, real `.terraform` working directories aside: a link could point the
+/// raw scan at one file and OpenTofu at another, so `deploy/tofu/` holds none (DEC-2014 item 6).
+/// A `.terraform` that is itself a link is refused like any other, since the raw scan skips what
+/// it holds. Whether a `.terraform` is committed is [`tofu_committed_working_dirs`]'s.
 fn tofu_symlinks(dir: &Path) -> Result<Vec<String>> {
     let mut links = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(dir) = pending.pop() {
         for entry in fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
             let path = entry?.path();
-            if path.file_name().is_some_and(|name| name == ".terraform") {
-                continue;
-            }
             let kind = fs::symlink_metadata(&path)
                 .with_context(|| format!("reading {}", path.display()))?
                 .file_type();
+            if kind.is_dir() && path.file_name().is_some_and(|name| name == ".terraform") {
+                continue;
+            }
             if kind.is_symlink() {
                 links.push(format!(
                     "{}: a symlink, which deploy/tofu never holds (DEC-2014)",
@@ -1013,6 +1016,38 @@ fn tofu_symlinks(dir: &Path) -> Result<Vec<String>> {
     }
     links.sort();
     Ok(links)
+}
+
+/// Every path git tracks under `dir` that sits in a `.terraform` working directory: the raw scan
+/// skips those directories, so one committed would carry configuration past it (DEC-2014 item 6).
+fn tofu_committed_working_dirs(dir: &Path) -> Result<Vec<String>> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["ls-files", "-z", "--", "."])
+        .output()
+        .context("starting `git ls-files`")?;
+    if !out.status.success() {
+        bail!(
+            "`git ls-files` under {} failed: {}",
+            dir.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(committed_working_dirs(&String::from_utf8_lossy(
+        &out.stdout,
+    )))
+}
+
+/// The paths of a NUL-separated `git ls-files` listing that sit in a `.terraform` directory.
+fn committed_working_dirs(listing: &str) -> Vec<String> {
+    listing
+        .split('\0')
+        .filter(|path| path.split('/').any(|part| part == ".terraform"))
+        .map(|path| {
+            format!("{path}: committed inside a .terraform working directory, which the scan skips (DEC-2014)")
+        })
+        .collect()
 }
 
 /// Every file under `dir` the raw scan reads, with its text: `.tf`, `.tofu`, `.hcl` and `.json`,
@@ -1458,10 +1493,10 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     ),
 ];
 
-/// The only workflow lines that may hold a backslash beside a quote or a `${{` expression, exactly,
-/// after trimming (DEC-2014 item 7): a backslash in a quoted YAML scalar or an expression is an
-/// escape (`\x73ecrets`) or a line continuation the raw scan would not decode, so outside these
-/// reviewed shell lines it is refused.
+/// The only workflow lines that may hold a backslash, exactly, after trimming (DEC-2014 item 7):
+/// a backslash in a quoted YAML scalar is an escape (`\x73ecrets`) the raw scan would not decode,
+/// and a multi-line double-quoted scalar can carry one on a line that holds no quote and no
+/// `${{` at all, so outside these reviewed shell lines every backslash is refused.
 const BACKSLASH_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         ".github/workflows/ci.yml",
@@ -1508,14 +1543,13 @@ fn guarded_word_problems(file: &CiFile) -> Vec<String> {
             .iter()
             .any(|(path, allowed)| *path == file.path && *allowed == raw.trim());
         let escaped = raw.contains('\\')
-            && (raw.contains('"') || raw.contains('\'') || raw.contains("${{"))
             && !BACKSLASH_WORKFLOW_LINES
                 .iter()
                 .any(|(path, allowed)| *path == file.path && *allowed == raw.trim());
         if escaped {
             problems.push(format!(
-                "{}:{number}: a backslash beside a quote or an expression, an escape the scan \
-                 would not decode, on a line xtask's BACKSLASH_WORKFLOW_LINES has not reviewed \
+                "{}:{number}: a backslash, which YAML or the shell may decode as an escape the \
+                 scan would not, on a line xtask's BACKSLASH_WORKFLOW_LINES has not reviewed \
                  (DEC-2014)",
                 file.path
             ));
@@ -10407,7 +10441,8 @@ mod tests {
     use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
     use super::{
-        TOFU_DIR, guarded_word_problems, tofu_forbidden_blocks, tofu_sources, tofu_symlinks,
+        TOFU_DIR, committed_working_dirs, guarded_word_problems, tofu_committed_working_dirs,
+        tofu_forbidden_blocks, tofu_sources, tofu_symlinks,
     };
     use super::{unoptimised_config, unoptimised_packages};
 
@@ -15526,10 +15561,26 @@ mod tests {
             root.join("modules/x/link.tf"),
         )?;
         symlink(root.join("modules/x"), root.join("modules/x/.terraform/ok"))?;
+        fs::create_dir_all(root.join("modules/y"))?;
+        symlink(root.join("modules/x"), root.join("modules/y/.terraform"))?;
         let links = tofu_symlinks(&root)?;
         fs::remove_dir_all(&root)?;
-        assert_eq!(links.len(), 1, "{links:?}");
-        assert!(links[0].contains("link.tf"), "{links:?}");
+        assert_eq!(links.len(), 2, "{links:?}");
+        assert!(links.iter().any(|l| l.contains("link.tf")), "{links:?}");
+        assert!(
+            links.iter().any(|l| l.contains("modules/y/.terraform")),
+            "a .terraform that is a link is refused: {links:?}"
+        );
+        assert_eq!(
+            committed_working_dirs("modules/x/main.tf\0modules/x/.terraform/modules/m/main.tf\0"),
+            [
+                "modules/x/.terraform/modules/m/main.tf: committed inside a .terraform working directory, which the scan skips (DEC-2014)"
+            ]
+        );
+        assert_eq!(
+            tofu_committed_working_dirs(&repo_root()?.join(TOFU_DIR))?,
+            Vec::<String>::new()
+        );
         assert_eq!(
             tofu_symlinks(&repo_root()?.join(TOFU_DIR))?,
             Vec::<String>::new()
@@ -15581,6 +15632,8 @@ mod tests {
             "jobs:\n  x:\n    steps:\n      - run: echo \"${{ \\x73ecrets.A }}\"\n",
             "jobs:\n  x:\n    \"envir\\x6fnment\": infra-staging\n",
             "jobs:\n  x:\n    steps:\n      - run: \"echo ${{ sec\\\n          rets.A }}\"\n",
+            "jobs:\n  x:\n    env:\n      T: \"${{\n        \\x73ecrets.A\n        }}\"\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo \\x73ecrets\n",
         ] {
             assert!(!guarded(text).is_empty(), "{text}");
         }
