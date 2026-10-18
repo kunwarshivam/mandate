@@ -4,13 +4,17 @@
 //! lands. `trial --main <since>` checks `main` itself, selecting what changed since `<since>`.
 //!
 //! The worktree is `target/trial` and its builds use `target/trial-build`, both reused between
-//! runs, so only what the merge changed rebuilds. The trial never shares the checkout's own
-//! `target`: cargo copies each binary to `target/debug/<name>`, so a shared directory would leave
-//! the checkout running `main`'s xtask and its tests running the trial's binaries. Incremental
-//! compilation is off, which keeps a trial's disk use to its artifacts. The nextest run does not
-//! stop at its first failure (`MANDATE_NO_FAIL_FAST`, which the worktree's own xtask reads once
-//! this lands on `main`), so a trial reports every failing test at once. Run as root, as a
-//! cloud container is, `mandate-marketdata`'s
+//! runs. The worktree is reset and checked out at `main`'s tip rather than made anew, so files that
+//! did not change keep their timestamps and only what the merge changed rebuilds.
+//!
+//! The trial never shares the checkout's own `target`: cargo copies each binary to
+//! `target/debug/<name>`, so a shared directory would leave the checkout running `main`'s xtask
+//! and its tests running the trial's binaries. Incremental compilation is off, which keeps a
+//! trial's disk use to its artifacts.
+//!
+//! The nextest run does not stop at its first failure (`MANDATE_NO_FAIL_FAST`, which the
+//! worktree's own xtask reads once this lands on `main`), so a trial reports every failing test at
+//! once. Run as root, as a cloud container is, `mandate-marketdata`'s
 //! `a_temporary_file_that_cannot_be_created_is_an_error_not_a_retry` fails by design (it needs a
 //! user that file permissions apply to); every other failure is the merge's.
 
@@ -108,22 +112,24 @@ pub(crate) fn run(root: &Path, trial: &Trial) -> Result<()> {
     }
     let main = git(root, &["rev-parse", "origin/main"])?;
     let dir: PathBuf = root.join(WORKTREE);
-    if dir.exists() {
+    if dir.join(".git").exists() {
+        let _ = git(&dir, &["merge", "--abort"]);
+        git(&dir, &["reset", "--quiet", "--hard"])?;
+        git(&dir, &["clean", "--quiet", "-fdx"])?;
+        git(&dir, &["checkout", "--quiet", "--detach", &main])?;
+    } else {
+        git(root, &["worktree", "prune"])?;
         git(
             root,
-            &["worktree", "remove", "--force", &dir.display().to_string()],
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                &dir.display().to_string(),
+                &main,
+            ],
         )?;
     }
-    git(
-        root,
-        &[
-            "worktree",
-            "add",
-            "--detach",
-            &dir.display().to_string(),
-            &main,
-        ],
-    )?;
     if let Trial::Merge(branch) = trial {
         let merged = git(
             &dir,
