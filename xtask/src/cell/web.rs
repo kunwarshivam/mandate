@@ -114,6 +114,21 @@ pub fn gesture_result(text: &str) -> Result<WebGesture> {
     })
 }
 
+/// Why no web gesture can run on this machine, or `None`: [`gesture_missing`] over what this
+/// machine has, so a caller can tell a machine without the tools from a gesture that failed.
+///
+/// # Errors
+/// When the repository's root cannot be found.
+pub fn unavailable() -> Result<Option<String>> {
+    let web = crate::repo_root()?.join("web");
+    Ok(gesture_missing(
+        answers("npm", "--version"),
+        web.join("node_modules").exists(),
+        chromium_cached(),
+        answers("openssl", "version"),
+    ))
+}
+
 /// Whether Playwright's Chromium is already on this machine, where `PLAYWRIGHT_BROWSERS_PATH` or
 /// its default cache puts it.
 fn chromium_cached() -> bool {
@@ -264,15 +279,10 @@ fn signal(sig: &str, pgid: u32) -> bool {
 /// recorded. An `Err` is the gap the scenario prints: a missing tool, no agent to kill, or a run
 /// that failed or ran past [`GESTURE_POLLS`] (its log is named).
 pub fn kill_switch_from_web(workspace: &str, agent: Option<&str>) -> Result<WebGesture> {
-    let web = crate::repo_root()?.join("web");
-    if let Some(why) = gesture_missing(
-        answers("npm", "--version"),
-        web.join("node_modules").exists(),
-        chromium_cached(),
-        answers("openssl", "version"),
-    ) {
+    if let Some(why) = unavailable()? {
         bail!(why);
     }
+    let web = crate::repo_root()?.join("web");
     let dir = crate::repo_root()?.join(state()?).join("web-gesture");
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let (key, cert, result, log) = (
