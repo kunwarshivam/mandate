@@ -619,9 +619,8 @@ const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, the backtest runner and `mandate-api-server` linked statically, so their images
-/// need no base
-/// (DEC-993 item 9), with no feature at all: never `live`. The dev profile, for the CI job's ten minutes (DEC-464): it keeps
-/// overflow checks, and the cell's journals are small.
+/// need no base (DEC-993 item 9), with no feature at all: never `live`. The dev profile, for the
+/// CI job's ten minutes (DEC-464): it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
     let args = [
         "build",

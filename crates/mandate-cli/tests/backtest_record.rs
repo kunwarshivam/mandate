@@ -178,6 +178,15 @@ fn the_runners_demo_run_is_recorded_once_as_the_system_runner() {
     let actor = member(&envelope, "actor");
     assert_eq!(member_text(actor, "kind"), "system");
     assert_eq!(member_text(actor, "id"), "backtest_runner");
+    let build = format!(
+        "sha256:{}",
+        Digest::of(concat!("mandate-cli/", env!("CARGO_PKG_VERSION")).as_bytes()).to_hex()
+    );
+    assert_eq!(
+        member_text(actor, "build"),
+        build,
+        "the record names the build of the CLI that appended it"
+    );
     let config = member(&envelope, "config_refs");
     assert_eq!(member_text(config, "mandate_version"), world.version());
     assert_eq!(member_text(config, "rule_set"), RULE_SET);
@@ -528,5 +537,38 @@ fn the_store_and_the_owner_come_from_the_flags_or_fail_closed() {
             Err(ControlError::Refused { reason: code }),
             "{workspace} {environment}"
         );
+    }
+}
+
+/// DEC-1144 item 5: a report that differs from the run's only in its `kind`, or only in its
+/// `report_version`, is not the payload's report: each refuses `report_mismatch` before anything
+/// is appended.
+#[test]
+fn a_report_of_another_kind_or_version_refuses() {
+    for (name, to) in [
+        ("kind", text("forward_paper_evaluation")),
+        (
+            "report_version",
+            Value::Int(mandate_canon::Int::new(1).unwrap()),
+        ),
+    ] {
+        let mut world = World::new();
+        let reference = ArtifactRef::parse(member_text(&world.payload, "report")).unwrap();
+        let report = parse(&world.store[&reference.digest()]).unwrap();
+        assert_ne!(member(&report, name), &to, "{name}");
+        let other = world
+            .store
+            .put_artifact(&to_canonical(&edited(&report, name, Some(to))))
+            .unwrap()
+            .to_string();
+        let payload = edited(&world.payload, "report", Some(text(&other)));
+        let payload_ref = world.store_payload(&payload);
+        let rows = world.rows();
+        assert_eq!(
+            world.record(&payload_ref),
+            refused("report_mismatch"),
+            "{name}"
+        );
+        assert_eq!(world.rows(), rows, "{name}");
     }
 }
