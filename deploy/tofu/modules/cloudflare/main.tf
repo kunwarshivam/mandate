@@ -1,8 +1,9 @@
 # The environment's only ingress (DEC-2012 item 6, DEC-967 item 6): a remotely managed tunnel,
 # whose token becomes the workspace chart's cloudflared-tunnel Secret (lane GO places it); one
 # proxied DNS record for the API's hostname pointing at the tunnel; one Access application on that
-# hostname that admits only the named emails; and the journal's WAL and base-backup archive, an R2
-# bucket whose one lock rule keeps every key for at least the archive's retention (DEC-973 item 6,
+# hostname that admits only members of the founder's own Cloudflare account, so no email is
+# configured anywhere; and the journal's WAL and base-backup archive, an R2 bucket whose one lock
+# rule keeps every key for at least the archive's retention (DEC-973 item 6,
 # DEC-2012 item 9); and Barman's token for that bucket alone, Object Read and Write, minted here
 # (DEC-2029) and handed on only as sensitive outputs.
 
@@ -50,16 +51,6 @@ variable "api_origin" {
   validation {
     condition     = can(regex("^https?://", var.api_origin))
     error_message = "The API origin must be a web URL, plain or over TLS."
-  }
-}
-
-variable "access_allowed_emails" {
-  description = "The only identities Access admits to the API host."
-  type        = list(string)
-
-  validation {
-    condition     = length(var.access_allowed_emails) > 0 && alltrue([for email in var.access_allowed_emails : can(regex("^[^@ *]+@[^@ *]+[.][^@ *]+$", email))])
-    error_message = "Access needs at least one email, each a full address; a wildcard or a domain alone is refused."
   }
 }
 
@@ -123,7 +114,13 @@ resource "cloudflare_zero_trust_access_policy" "operators" {
   name             = "${var.name}-operators"
   decision         = "allow"
   session_duration = "24h"
-  include          = [for email in var.access_allowed_emails : { email = { email = email } }]
+  include = [
+    {
+      cloudflare_account_member = {
+        account_id = var.account_id
+      }
+    },
+  ]
 }
 
 resource "cloudflare_zero_trust_access_application" "api" {
