@@ -20,6 +20,14 @@ import pytest
 CELL = Path(__file__).resolve().parents[1] / "cell"
 CHART = CELL / "charts" / "workspace"
 JOURNAL_CHART = CELL / "charts" / "journal-db"
+# The journal-db chart as the local cell renders it, with the Kubernetes API's address a rendering
+# without a cluster must be given (E21-41).
+JOURNAL_ARGS = (
+    "-f",
+    str(CELL / "values" / "k3d-journal-db.yaml"),
+    "--set-json",
+    'kubeApi={"cidrs":["10.43.0.1/32"],"ports":[443]}',
+)
 PROCESSES = json.loads((CHART / "processes.json").read_text())["processes"]
 COMPOSE = json.loads((CELL / "compose" / "compose.json").read_text())
 ROLES_SQL = (JOURNAL_CHART / "files" / "roles.sql").read_text()
@@ -808,7 +816,8 @@ def test_external_targets_are_narrow():
 
 def test_values_take_no_unknown_key():
     assert helm(CHART, "--set", "password=x").returncode != 0
-    assert helm(JOURNAL_CHART, "--set", "superuserPassword=x").returncode != 0
+    assert helm(JOURNAL_CHART, *JOURNAL_ARGS).returncode == 0
+    assert helm(JOURNAL_CHART, *JOURNAL_ARGS, "--set", "superuserPassword=x").returncode != 0
 
 
 def test_a_stopping_journal_waits_briefly_for_its_pooled_clients():
@@ -820,7 +829,7 @@ def test_a_stopping_journal_waits_briefly_for_its_pooled_clients():
 
 
 def test_roles_match():
-    assert roles_match(render(chart=JOURNAL_CHART)) == []
+    assert roles_match(render(*JOURNAL_ARGS, chart=JOURNAL_CHART)) == []
 
 
 def test_compose_matches():
@@ -1017,7 +1026,7 @@ def test_each_seeded_bug_is_caught(check, seed):
 
 
 def test_roles_and_compose_seeded_bugs_are_caught():
-    journal = render(chart=JOURNAL_CHART)
+    journal = render(*JOURNAL_ARGS, chart=JOURNAL_CHART)
     dropped = mutate(journal, "journal", "Cluster", lambda c: c["spec"]["managed"]["roles"].pop())
     assert roles_match(dropped)
     superuser = mutate(journal, "journal", "Cluster", lambda c: c["spec"].update(enableSuperuserAccess=True))

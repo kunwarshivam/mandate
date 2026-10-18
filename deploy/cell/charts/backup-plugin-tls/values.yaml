@@ -1,0 +1,6 @@
+# The Barman Cloud plugin's TLS (DEC-1050 item 3). Nothing to set: the certificates are made in the
+# cluster at the first install and kept across upgrades, never a value (DEC-822 item 4).
+
+# How long each certificate is valid from the install that made it. An install or upgrade within
+# 30 days of its end makes a new one.
+days: 365
