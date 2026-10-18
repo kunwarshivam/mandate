@@ -725,8 +725,7 @@ PartiallyFilled); fills during either pending state update filled quantity witho
     the "cancel rejected" edge to `PriorState`, except for a cancel a kill switch asked (§5.5),
     which stays `PendingCancel`.
   - Within one run, a kill switch's order stays `PendingCancel` until the broker reports a
-    terminal status or a lookup answers it working. This holds whatever happens to the cancel's
-    answer: a 429 or 5xx, an answer in doubt, no reply, or a lookup unanswered or answered 404.
+    terminal status. This holds whatever happens to the cancel's answer: a 429 or 5xx, an answer in doubt, no reply, or a lookup unanswered or answered 404.
     Such an order never returns to `PriorState` and is never dropped. The bounded in-run retry of
     that cancel is DEC-2302 item 7's.
   - A terminal status ends the order, the reservation is released, and its cancel is never sent
