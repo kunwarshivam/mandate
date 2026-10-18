@@ -4319,8 +4319,11 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// reports' `RUN_URL` and `VERDICTS` (DEC-1190), `merge.yml` the merge inputs, `web.yml` and
 /// `web-e2e.yml` the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and
 /// `web-deploy.yml` the build's public Supabase values and the deploy step's Cloudflare token and
-/// account (DEC-1005), and `release.yml`'s `release-signing` job the release key, its password, the pinned
-/// cosign it signs with, and the digest it checks (DEC-2024).
+/// account (DEC-1005), `release.yml`'s `release-signing` job the release key, its password, the
+/// pinned cosign it signs with, and the digest it checks (DEC-2024), and `ci.yml` and `infra.yml`
+/// OpenTofu's and tflint's versions and checksums, and `infra.yml` its step's cloud credentials,
+/// `TF_VAR_*` inputs and `MANDATE_INFRA_*` choices (DEC-2013, DEC-2014), which
+/// [`infra_workflow_problems`] keeps to that one step.
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
