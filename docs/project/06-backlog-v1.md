@@ -2203,6 +2203,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   `MANDATE_API_INTERNAL_PAPER_WORKSPACE=true`, which start refuses unless the hosted control stream
   is paper throughout; otherwise every evaluation id is the 404 an absent one gets. The harness
   remains.
+  *Debt (DEC-2244 slice (b), #1609):* `crates/mandate-evaluation/src/inputs.rs`'s `fee_config`
+  (about line 230) and its helpers `fields`, `text`, `parsed`, `list`, `date` and `word` repeat
+  `crates/mandate-backtest-runner/src/inputs.rs`'s (about line 598), because nothing may depend on
+  the runner. One shared strict parser of `mandate_accounting::Config`, in a crate below both,
+  replaces the two copies.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -2855,18 +2860,20 @@ enables `live` (ES-23, OPS-5).
   - The chart test of the gate seeds no 9153 allow in the manager's policy.
   - `PgControl`'s `rows_after` reads the whole control stream on every pass.
   - `pg.rs` has no competing-writer test for the writer epoch taken for each append.
-  Follow-ups from DEC-1171's review (minors, freeze rule):
-  - m1: the CLI lets a stopped agent's id be deployed again, while §9.21 reads `AgentStopped` as
-    final; decide whether agent ids are reused.
-  - m2: add a vector for a version-1 deployment, a stop, then a version-2 deployment of the same
-    agent; the Rust manager must treat that stop as final (code change).
-  - m3: a manager must not ship into a workspace holding version-1 deployments; say how an existing
-    one is retired or redeployed at version 2.
-  - m4: the `agent_deployed` oracle's case of a revocation after the deployment cannot fail a
-    mutant; and no vector shows an account-stream copy against rule 201.
-  - m5: the §9 catalogue row for `AgentDeployed` does not mention version 2.
-  - m6: `docs/specs/workspace-api.md` (near line 673) and `docs/design/infrastructure.md` (near line
-    277) still describe version 1; the code change updates them.
+  Follow-ups from DEC-1171's review (minors, freeze rule), decided in
+  [DEC-1173](decisions/DEC-1173.md) and specified in journal spec v0.56:
+  - m1 (decided, writers to build): an agent id is deployed once, so a writer refuses an agent an
+    `AgentStopped` names; the CLI's `agent_stopped` and the workspace API's refusal land with the
+    writers.
+  - m2 (done in the vectors; the manager to build): a stop is final even for a deployment the
+    manager never read.
+  - m3 (decided; the manager to build): a version-1 deployment is retired before the manager runs
+    its workspace, and the manager raises `deployment_unread` for one it finds.
+  - m4 (done): the oracle's revocation-after-deployment case now fails two seeded bugs, and a
+    vector shows rule 201 refusing an account stream's copy.
+  - m5 (done): the §9 catalogue row names version 2.
+  - m6 (half done): `docs/specs/workspace-api.md` states the version its deployment writes;
+    `docs/design/infrastructure.md` changes with the manager's code.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
@@ -3153,8 +3160,28 @@ enables `live` (ES-23, OPS-5).
   environment other than the stream's each fail the whole lookup closed, never skipping the row;
   a revoked member is refused; and a property test folds random grant, revoke and role-change
   histories against an independent oracle that catches each seeded bug.
+- **E21-56 (Proposed, M8, staging for the 2026-10-26 demo; lane IAC; claim #1634; DEC-2011,
+  DEC-2012; ADR-0006)** As the founder, I want the hosted staging and production environments made
+  by OpenTofu from the repository, so that cell #1's infrastructure is reviewed code applied only
+  with my approval, never a script run by hand and never a token an agent holds (DEC-2011).
+  *Accepted when:* `deploy/tofu/` has one module per concern (network: a VPC and a firewall; DOKS:
+  one pool of two nodes, the Kubernetes version pinned and auto-upgrade off; Spaces: OpenTofu's
+  state bucket, versioned, and nothing else; Cloudflare: the tunnel, the API host's DNS record, its
+  Access application, and the R2 bucket for E21-41's WAL archive and base backups with a lock rule
+  over every key for at least the archive's 30-day retention (DEC-973 item 6); the budget: an
+  estimate the plan refuses past $65 per environment) and one root per environment (`staging`,
+  `production`), with state in Spaces, encrypted on the client, and the providers pinned by a
+  committed lock file; every pull request touching `deploy/tofu/` runs `tofu fmt -check`,
+  `tofu validate`, tflint and `tofu test` against mocked providers as the policy check (no public
+  firewall source, the state bucket private, the archive locked, no load balancer, the cap), with
+  no credential, selected by `cargo xtask ci select` (DEC-1190); `.github/workflows/infra.yml`
+  runs `plan` and `apply` only from `main` by manual dispatch, under the environments `infra-staging` and `infra-production`
+  with the founder as required reviewer (ES-12, DEC-1005); and the runbook names every token,
+  key, environment and secret the founder creates, each with the least permissions the plan
+  needs. It stops at a reachable, empty cluster with its buckets, DNS and Access: add-ons and
+  applications are lane GO's.
 - **E21-58 (Proposed, M8, staging by 2026-10-26; lane GO; claim #1635; DEC-2015 to DEC-2018; after
-  E21-57's empty DOKS cluster from lane IAC, DEC-2011)** As the founder, I want staging and production
+  E21-56's empty DOKS cluster from lane IAC, DEC-2011)** As the founder, I want staging and production
   on DOKS reconciled by GitOps from `main`, so that what runs is exactly what `main` says and
   production moves only by a reviewed pull request. *Accepted when:* `deploy/gitops/` holds one
   overlay per environment (`staging`, `production`), reconciled by Flux read-only from `main`
