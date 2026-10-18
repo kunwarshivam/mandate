@@ -197,12 +197,13 @@ fn bars(arguments: &Value, scope: &Scope, readers: Readers<'_>) -> Answer {
     let Ok(answered) = readers.bars.daily_bars(&symbol, scope.cut_off, count) else {
         return Answer::Failed;
     };
+    let mut seconds = BTreeSet::new();
     let mut kept: Vec<Bar> = answered
         .into_iter()
         .filter(|bar| bar.symbol == symbol && bar.knowledge_at <= scope.cut_off)
+        .filter(|bar| seconds.insert(bar.knowledge_at.secs()))
         .collect();
     kept.sort_by_key(|bar| std::cmp::Reverse(bar.knowledge_at));
-    kept.dedup_by_key(|bar| bar.knowledge_at.secs());
     kept.truncate(usize::try_from(count).unwrap_or(usize::MAX));
     Answer::Read(Read {
         items: kept.into_iter().map(RetrievedItem::Bar).collect(),
