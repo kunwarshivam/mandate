@@ -678,18 +678,24 @@ jobs:
 
   # DEC-538. Sizes the mutation matrix to the diff: `cargo xtask ci mutants --plan` lists, without
   # building, exactly the mutants the gate would test (its own diff and listing code), and reports
-  # the count and `min(192, count)` shard indices. A diff with no mutants, a documentation-only one
-  # included (DEC-112), launches no shard at all.
+  # the count, `min(192, ceil(count / k))` shard indices and `k`, the mutants a shard carries,
+  # sized per package from the `mutant-costs` history and one without a clean one (DEC-2607). A
+  # diff with no mutants, a documentation-only one included (DEC-112), launches no shard at all.
   mutants-plan:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # DEC-2607 item 3: the plan reads the `mutant-costs` history through the Actions API.
     permissions:
+      actions: read
       contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
     outputs:
       mutants: ${{ steps.plan.outputs.mutants }}
       shards: ${{ steps.plan.outputs.shards }}
       total: ${{ steps.plan.outputs.total }}
+      per_shard: ${{ steps.plan.outputs.per_shard }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -716,13 +722,15 @@ jobs:
         run: |
           if [ "$DOCS_ONLY" = true ]; then
             echo "docs-only change; no mutation shard has source to test (DEC-112)"
-            printf 'mutants=0\nshards=[]\ntotal=0\n' >> "$GITHUB_OUTPUT"
+            printf 'mutants=0\nshards=[]\ntotal=0\nper_shard=1\n' >> "$GITHUB_OUTPUT"
           else
             cargo xtask ci mutants --plan >> "$GITHUB_OUTPUT"
           fi
 
-  # One shard per planned mutant up to DEC-498's 192, so each shard's slice is what it was with 192
-  # (DEC-538). Skipped when the plan counted none; `full` accepts that skip only then.
+  # Up to `k` planned mutants a shard, 192 shards at most (DEC-538, DEC-2607); at `k` of one each
+  # shard's slice is what it was with 192. A shard of more than one stops 480 s after the gate
+  # starts and fails if it has not finished (DEC-2607 item 5). Skipped when the plan counted none;
+  # `full` accepts that skip only then.
   mutants:
     name: mutants (${{ matrix.shard }}/${{ needs.mutants-plan.outputs.total }})
     needs: mutants-plan
@@ -746,6 +754,7 @@ jobs:
     env:
       MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/${{ needs.mutants-plan.outputs.total }}
       MANDATE_MUTANTS_PLANNED: ${{ needs.mutants-plan.outputs.mutants }}
+      MANDATE_MUTANTS_PER_SHARD: ${{ needs.mutants-plan.outputs.per_shard }}
       MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
       MANDATE_PG_REQUIRED: "1"
       MANDATE_OPENBAO_REQUIRED: "1"
