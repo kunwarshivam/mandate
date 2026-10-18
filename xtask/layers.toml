@@ -716,6 +716,15 @@ pure = false
 allowed_external = ["tokio"]
 forbidden_internal = ["mandate-cli", "mandate-paper"]
 
+# The stub token issuer for dev and CI cells only (E21-52, DEC-2100): no crate may depend on it, so
+# no product binary can hold it, and its issuer and router compile only with debug assertions.
+[crates.mandate-stub-issuer]
+layer = "tool"
+safety_critical = true
+pure = false
+allowed_external = ["axum", "base64", "ring", "serde_json", "tokio"]
+allowed_dependents = []
+
 # The journal port a long-running process writes and follows through (E21-29, E21-30, DEC-1012):
 # the in-memory journal and Postgres, with tokio driving the Postgres client. Below every process
 # crate that uses it, and above mandate-journal-pg.

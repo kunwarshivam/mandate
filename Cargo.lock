@@ -2526,6 +2526,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-stub-issuer"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "mandate-api-server",
+ "mandate-authn",
+ "mandate-identity",
+ "mandate-journal",
+ "mandate-time",
+ "ring",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-telemetry"
 version = "0.0.0"
 dependencies = [

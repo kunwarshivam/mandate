@@ -25,10 +25,11 @@ commands:
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
                         postgres | openbao | objectstore | mutants | schema-mutants | cell |
-                        cell-demo | sweep; or one part of test: test-nextest | test-doc |
-                        test-rh-sim | test-python. Tests, pending tests, doctests, the rehearsal,
-                        Postgres, OpenBao and object-store runs and `portable` run over the crates
-                        the diff selects (DEC-1190); with no diff base, all of them
+                        cell-demo | cell-journal | cell-failover | sweep; or one part of test:
+                        test-nextest | test-doc | test-rh-sim | test-python. Tests, pending tests,
+                        doctests, the rehearsal, Postgres, OpenBao and object-store runs and
+                        `portable` run over the crates the diff selects (DEC-1190); with no diff
+                        base, all of them
   ci select             print which scoped jobs this diff runs, as GITHUB_OUTPUT lines
   ci sweep --plan       print tonight's share of the whole-crate mutation sweep (DEC-1190)
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
@@ -64,7 +65,7 @@ commands:
                         (main only, from CI, after each arch's publish)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
-  cell drill [--seeded] [boot|journal|egress]...
+  cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
                         run the cell's drills; --seeded plants each drill's bug and fails if a
                         drill still holds
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
@@ -116,6 +117,8 @@ const PR_JOBS: &[&str] = &[
     "mutants",
     "schema-mutants",
     "cell",
+    "cell-journal",
+    "cell-failover",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -285,7 +288,11 @@ fn run() -> Result<()> {
                 names => (false, names),
             };
             let drills = if names.is_empty() {
-                cell::DRILLS.to_vec()
+                cell::DRILLS
+                    .into_iter()
+                    .chain(cell::JOURNAL_DRILLS)
+                    .chain(cell::FAILOVER_DRILLS)
+                    .collect()
             } else {
                 names
                     .iter()
@@ -322,6 +329,8 @@ fn ci(job: &str) -> Result<()> {
         "select" => ci_select(),
         "cell" => cell::ci(),
         "cell-demo" => cell::scenario::ci(),
+        "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
+        "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -15419,11 +15428,11 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            13,
+            15,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, and \
-             `cell-demo` (DEC-2002)"
+             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, \
+             `cell-demo` (DEC-2002), `cell-journal`, and `cell-failover`"
         );
         for checkout in checkouts {
             assert!(

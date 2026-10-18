@@ -1,0 +1,18 @@
+# The local cell's stand-in for the S1 endpoint (DEC-1050 item 5). Settings only: its key is made
+# in the cluster by this chart and kept across upgrades, never a value (DEC-822 item 4).
+
+# The test store, pinned by digest: the MinIO build the object store's conformance suite runs
+# against (D-5, test only; docs/dependencies.md).
+image: cgr.dev/chainguard/minio@sha256:c93745c56fccdaf0e5dcb88999a96a65a136428beb045ef5d546255a80d747a7
+
+# The bucket the journal's archive goes to, made as the store starts.
+bucket: journal-archive
+
+# The image that makes the bucket's directory before the store starts: CloudNativePG's PostgreSQL
+# 18 image, already in the cell (D-5).
+initImage: ghcr.io/cloudnative-pg/postgresql:18.6-202609281634-minimal-trixie@sha256:4467d4cf7e502fbc29800b75d755ede477a765b25a506a58a0842a57a4bf42c9
+
+# The namespace whose journal archives here, which gets the key as the Secret `clientKeyName` and
+# is the only one whose pods may connect.
+clientNamespace: ws-ws1
+clientKeyName: journal-archive-key
