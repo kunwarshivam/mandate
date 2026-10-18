@@ -7,9 +7,9 @@ and the command refuses to run in CI or without a terminal.
 
 ## Before you start
 
-1. **The cluster.** Lane IAC's OpenTofu (E21-57, `deploy/tofu/`) has made the DOKS cluster with two nodes (the journal's two
-   instances must sit on separate nodes), the R2 archive bucket with bucket lock (DEC-2605 row 4),
-   DNS, and the Cloudflare Tunnel and Access application (DEC-2011).
+1. **The cluster.** Lane IAC's OpenTofu (E21-56, `deploy/tofu/`) has made the DOKS cluster with two
+   nodes (the journal's two instances must sit on separate nodes), the R2 archive bucket with
+   bucket lock (DEC-2605 row 4), DNS, and the Cloudflare Tunnel and Access application (DEC-2011).
 2. **Your machine.**
    - Its address must be in the control-plane firewall's `KUBE_API_ALLOWED_CIDRS`.
    - Its kubeconfig's current context must point at the cluster (`doctl kubernetes cluster
