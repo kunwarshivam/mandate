@@ -63,6 +63,10 @@ pub const COMPOSE_FILE: &str = "deploy/cell/compose/compose.json";
 const IMAGE_DOCKERFILE: &str = "deploy/cell/images/mandate.Dockerfile";
 /// The workspace API server's image, built beside `mandate` from the same static build.
 const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
+/// The deployment manager's image (DEC-1172), built beside `mandate` from the same static build.
+const DEPLOY_MANAGER_DOCKERFILE: &str = "deploy/cell/images/deploy-manager.Dockerfile";
+/// The deployment manager's process name, which is also its image's key in the chart's values.
+const DEPLOY_MANAGER_PROCESS: &str = "deploy-manager";
 /// The local stub token issuer's image (DEC-2100, DEC-1025), a sidecar in the API pod.
 const STUB_DOCKERFILE: &str = "deploy/cell/images/stub-issuer.Dockerfile";
 /// Lane SI's stub issuer crate (E21-52); the cell runs it only once it is in the workspace.
@@ -507,6 +511,65 @@ fn api_image_tag() -> Result<Option<String>> {
     local_tag("api", &["mandate-api-server"]).map(Some)
 }
 
+/// The cell's `deploy-manager` image, this checkout's build of `mandate-deployd`: none when the
+/// cell pulls its `mandate` image, as for the API server, so the chart leaves the manager out and
+/// renders the runtime and executor as Deployments of their own.
+fn deploy_manager_image_tag() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(DEPLOY_MANAGER_PROCESS, &["mandate-deployd"]).map(Some)
+}
+
+/// The workspace chart's settings, each a `--set-json` pair, that `cell up` installs it with and
+/// the drills render it with, beside [`image_sets`]: the API server's own endpoints as the
+/// deployment manager's one `kube-api` destination (DEC-1172). The endpoints are read from the
+/// cell, never written in k3d.yaml: docker picks the k3d network's subnet, so the server node's
+/// address is known only once it exists.
+fn egress_sets() -> Result<Vec<String>> {
+    let (addresses, port) = kube_api_endpoints()?;
+    Ok(vec![
+        format!("egress.kube-api={}", json!(addresses)),
+        format!("egress.kubeApiPort={port}"),
+    ])
+}
+
+/// The `kubernetes` Service's endpoint addresses, each as a /32, and their port, from its
+/// EndpointSlices: where a pod's connection to `kubernetes.default.svc` lands once the Service's
+/// address is translated, which is what a network policy filters (6443 on k3s).
+fn kube_api_endpoints() -> Result<(Vec<String>, u16)> {
+    let found = kubectl(&[
+        "get",
+        "endpointslices",
+        "--namespace",
+        "default",
+        "--selector",
+        "kubernetes.io/service-name=kubernetes",
+        "-o",
+        "jsonpath={range .items[*].endpoints[*].addresses[*]}{@} {end}|{.items[0].ports[0].port}",
+    ])?;
+    let (ips, port) = found
+        .trim()
+        .split_once('|')
+        .with_context(|| format!("the API server's endpoints read as `{found}`"))?;
+    let addresses = ips
+        .split_whitespace()
+        .map(|ip| {
+            ip.parse::<Ipv4Addr>()
+                .map(|ip| format!("{ip}/32"))
+                .with_context(|| format!("the API server's endpoint `{ip}` is not IPv4"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if addresses.is_empty() {
+        bail!("the API server lists no endpoint address");
+    }
+    let port = port
+        .trim()
+        .parse::<u16>()
+        .with_context(|| format!("the API server's endpoint port `{port}` is not a port"))?;
+    Ok((addresses, port))
+}
+
 /// Whether this checkout can run the stub issuer in the cell: lane SI's crate is in the workspace
 /// with its entry point implemented, not still the `todo!()` its tests land with, and the server
 /// refuses an `http` key set outside dev and CI (DEC-2100 item 9). Until all hold, the cell runs
@@ -587,6 +650,10 @@ fn image_sets() -> Result<Vec<String>> {
     let mut sets = vec![
         format!("images.mandate={}", image_tag()?),
         format!("images.api={}", api_image_tag()?.unwrap_or_default()),
+        format!(
+            "images.{DEPLOY_MANAGER_PROCESS}={}",
+            deploy_manager_image_tag()?.unwrap_or_default()
+        ),
     ];
     sets.extend(signin_values(stub_image_tag()?.as_deref()));
     if let Some(runtime) = runtime_image()? {
@@ -595,10 +662,10 @@ fn image_sets() -> Result<Vec<String>> {
     Ok(sets)
 }
 
-/// `cargo xtask cell up`: build the `mandate`, `api` and `runtime` images from this checkout (never
-/// with the `live` feature), bring up the k3d cluster if it is not up, install the CloudNativePG
-/// operator, the journal's Postgres and the workspace chart, and wait until every pod is ready and
-/// the migration Job has finished.
+/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime` and `deploy-manager` images from
+/// this checkout (never with the `live` feature), bring up the k3d cluster if it is not up, install
+/// the CloudNativePG operator, the journal's Postgres and the workspace chart, and wait until every
+/// pod is ready and the migration Job has finished.
 pub fn up() -> Result<()> {
     let source = host_image_source()?;
     if source == ImageSource::Build {
@@ -606,6 +673,7 @@ pub fn up() -> Result<()> {
     }
     let image = image_tag()?;
     let api = api_image_tag()?;
+    let manager = deploy_manager_image_tag()?;
     let runtime = runtime_image()?;
     let stub = stub_image_tag()?;
     if source == ImageSource::Build {
@@ -617,6 +685,9 @@ pub fn up() -> Result<()> {
     }
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
+    }
+    if let Some(manager) = &manager {
+        build_image(manager, DEPLOY_MANAGER_DOCKERFILE, "mandate-deployd", &[])?;
     }
     if let Some(api) = &api {
         build_image(
@@ -640,6 +711,9 @@ pub fn up() -> Result<()> {
     }
     if let Some(stub) = &stub {
         sh("k3d", &["image", "import", "--cluster", CLUSTER, stub])?;
+    }
+    if let Some(manager) = &manager {
+        sh("k3d", &["image", "import", "--cluster", CLUSTER, manager])?;
     }
     let config = kubeconfig()?;
     sh(
@@ -720,6 +794,10 @@ pub fn up() -> Result<()> {
     for set in &sets {
         install.extend(["--set", set.as_str()]);
     }
+    let egress = egress_sets()?;
+    for set in &egress {
+        install.extend(["--set-json", set.as_str()]);
+    }
     install.extend(["--wait", "--wait-for-jobs", "--timeout", "5m"]);
     let installed = helm(&install);
     if installed.is_err() && api.is_some() {
@@ -793,7 +871,7 @@ const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
-/// (DEC-1013) linked statically, so their images need no base (DEC-993 item 9), with no feature at
+/// (DEC-1013) and the deployment manager's `mandate-deployd` (DEC-1172) linked statically, so their images need no base (DEC-993 item 9), with no feature at
 /// all: never `live`; with them the stub issuer once [`stub_ready`], which the dev profile's debug
 /// assertions are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes
 /// (DEC-464): it keeps overflow checks, and the cell's journals are small.
@@ -809,6 +887,8 @@ fn build_binary() -> Result<()> {
         "mandate-api-server",
         "--package",
         "mandate-daemon",
+        "--package",
+        "mandate-deployd",
     ];
     if stub_ready(Path::new(".")) {
         args.extend(["--package", "mandate-stub-issuer"]);
@@ -1126,6 +1206,7 @@ fn apply_as(objects: &[Value], extra: &[&str]) -> Result<()> {
 /// The chart rendered with the cell's values and `sets`, as the JSON documents it emits.
 pub fn render(sets: &[String], show_only: Option<&str>) -> Result<Vec<Value>> {
     let images = image_sets()?;
+    let egress = egress_sets()?;
     let mut args = vec![
         "template",
         "workspace",
@@ -1138,7 +1219,7 @@ pub fn render(sets: &[String], show_only: Option<&str>) -> Result<Vec<Value>> {
     for image in &images {
         args.extend(["--set", image.as_str()]);
     }
-    for set in sets {
+    for set in egress.iter().chain(sets) {
         args.push("--set-json");
         args.push(set);
     }
@@ -1487,8 +1568,9 @@ fn live_addresses() -> Result<BTreeMap<String, Vec<String>>> {
 /// One probe pod per process type, labelled as the chart labels that process, trying every live
 /// trading host and the journal. The pod is the chart's: non-root, read-only, no capability, and,
 /// outside seeded mode, behind the chart's own egress gate, so the probe starts when a process
-/// would. Seeded, the policies are gone and the gate would never open, so the probe goes without
-/// it to show it can see a leak.
+/// would; the deployment manager's probe waits behind the manager's own gate, since its policy
+/// allows the API server every other gate waits on (DEC-1172). Seeded, the policies are gone and
+/// the gate would never open, so the probe goes without it to show it can see a leak.
 fn probe_pod(process: &Value, id: &str, image: &str, script: &str) -> Result<Value> {
     let name = process["name"].as_str().context("a process has no name")?;
     let mut labels = serde_json::Map::new();
@@ -1591,12 +1673,15 @@ fn egress(seeded: bool) -> Result<Verdict> {
         .filter(|o| o["kind"] == "NetworkPolicy")
         .filter_map(|o| o["metadata"]["name"].as_str().map(String::from))
         .collect();
-    let gate = rendered
-        .iter()
-        .find(|o| o["kind"] == "Job" && o["metadata"]["name"] == "migrate")
-        .map(|j| j["spec"]["template"]["spec"]["initContainers"][0].clone())
-        .filter(|c| c["name"] == "egress-gate")
-        .context("the migration Job renders no egress gate")?;
+    let gate_of = |kind: &str, name: &str| {
+        rendered
+            .iter()
+            .find(|o| o["kind"] == kind && o["metadata"]["name"] == name)
+            .map(|w| w["spec"]["template"]["spec"]["initContainers"][0].clone())
+            .filter(|c| c["name"] == "egress-gate")
+    };
+    let gate = gate_of("Job", "migrate").context("the migration Job renders no egress gate")?;
+    let manager_gate = gate_of("Deployment", DEPLOY_MANAGER_PROCESS);
     let id = run_id()?;
     let all = processes()?;
     let pods = all
@@ -1604,7 +1689,10 @@ fn egress(seeded: bool) -> Result<Verdict> {
         .map(|p| {
             let mut pod = probe_pod(p, &id, &image, &script)?;
             if !seeded {
-                pod["spec"]["initContainers"] = json!([gate.clone()]);
+                let own = manager_gate
+                    .as_ref()
+                    .filter(|_| p["name"] == DEPLOY_MANAGER_PROCESS);
+                pod["spec"]["initContainers"] = json!([own.unwrap_or(&gate).clone()]);
             }
             Ok(pod)
         })
@@ -1903,7 +1991,7 @@ pub fn compose_document(root: &Path, all: &[Value]) -> Result<Value> {
         }),
     );
     let mut needs_egress = false;
-    for p in all.iter().filter(|p| p["built"] == true) {
+    for p in all.iter().filter(|p| in_compose(p)) {
         let name = p["name"].as_str().context("a process has no name")?;
         let kind = p["kind"].as_str().context("a process has no kind")?;
         let image_key = p["image"].as_str().context("a process has no image")?;
@@ -2017,6 +2105,12 @@ pub fn compose_document(root: &Path, all: &[Value]) -> Result<Value> {
             "journal-roles": {"file": "../charts/journal-db/files/roles.sql"}
         }
     }))
+}
+
+/// Whether process `p` is in the Compose file: built, and not one whose `compose` is false, which
+/// has no Compose adapter (the deployment manager drives Kubernetes only, DEC-1172).
+fn in_compose(p: &Value) -> bool {
+    p["built"] == true && p["compose"] != false
 }
 
 /// The Compose file's secret holding the API server's session signing key, mounted owner-only as
@@ -3460,6 +3554,11 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
             .iter()
             .any(|p| p["name"] == name && p["built"] == true)
     };
+    let started_by_built = |name: &str| {
+        processes
+            .iter()
+            .any(|p| p["name"] == name && p["started_by"].as_str().is_some_and(&built))
+    };
     let lane = |ready: bool, why: &str| (!ready).then(|| why.to_string());
     vec![
         DemoPart {
@@ -3479,10 +3578,18 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
         },
         DemoPart {
             name: "the agent runtime, on the deny-all wiring until the post-R0 hook (DEC-1013)",
-            skipped: lane(
-                built("runtime"),
-                "the runtime image is not on main yet (lane P3, E21-30)",
-            ),
+            skipped: if started_by_built("runtime") {
+                Some(
+                    "the deployment manager starts it, once it reads a deployment's account from \
+                     `AgentDeployed` version 2 (DEC-1171); until then it starts none"
+                        .to_string(),
+                )
+            } else {
+                lane(
+                    built("runtime"),
+                    "the runtime image is not on main yet (lane P3, E21-30)",
+                )
+            },
         },
         DemoPart {
             name: "a paper agent on rh-sim and recorded Alpaca fixtures, no credential",
@@ -4140,6 +4247,24 @@ mod tests {
     }
 
     #[test]
+    fn the_deploy_manager_is_built_but_never_composed() -> Result<()> {
+        let all = processes_in(&crate::repo_root()?)?;
+        let manager = all.iter().find(|p| p["name"] == DEPLOY_MANAGER_PROCESS);
+        assert!(
+            manager.is_some_and(|p| p["built"] == true && !in_compose(p)),
+            "the deployment manager is built, and has no Compose adapter (DEC-1172)"
+        );
+        let compose = compose_document(&crate::repo_root()?, &all)?;
+        assert!(
+            compose["services"].get(DEPLOY_MANAGER_PROCESS).is_none(),
+            "the Compose file holds no deployment manager"
+        );
+        assert!(in_compose(&json!({"built": true})));
+        assert!(!in_compose(&json!({"built": false})));
+        Ok(())
+    }
+
+    #[test]
     fn a_host_that_cannot_build_pulls_a_pinned_image_or_stops() {
         let digest = format!("ghcr.io/x/mandate@sha256:{}", "a".repeat(64));
         assert_eq!(
@@ -4212,6 +4337,26 @@ mod tests {
             unbuilt
                 .iter()
                 .any(|p| p.name.starts_with("the agent runtime") && p.skipped.is_some())
+        );
+    }
+
+    /// A runtime the built deployment manager starts is not called ready: the manager starts none
+    /// until it reads a deployment's account (DEC-1171), so no runtime pod runs in the cell yet.
+    #[test]
+    fn a_runtime_the_built_manager_starts_is_not_called_ready() {
+        let runtime = json!({"name": "runtime", "built": true, "started_by": "deploy-manager"});
+        let ready = |manager_built: bool| {
+            let list = [runtime.clone(), process("deploy-manager", manager_built)];
+            demo_parts(&list, "", false)
+                .into_iter()
+                .find(|p| p.name.starts_with("the agent runtime"))
+                .map(|p| p.skipped.is_none())
+        };
+        assert_eq!(ready(true), Some(false));
+        assert_eq!(
+            ready(false),
+            Some(true),
+            "without the manager, the runtime is a Deployment"
         );
     }
 

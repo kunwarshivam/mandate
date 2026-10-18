@@ -9,8 +9,9 @@ Before any process starts, the store has `sha256/` and `tmp/`: the API server re
 """
 
 import copy
+import json
 
-from test_cell import render_all
+from test_cell import TEMPLATES, managed_pods, render_all, workloads
 
 CLAIM = "artifacts"
 MOUNT = "/var/lib/mandate/artifacts"
@@ -58,9 +59,7 @@ def artifact_modes(docs: list[dict]) -> list[str]:
     claims = [d for d in docs if d["kind"] == "PersistentVolumeClaim" and d["metadata"]["name"] == CLAIM]
     if len(claims) > 1:
         problems.append(f"{len(claims)} claims named {CLAIM}")
-    for doc in docs:
-        if doc["kind"] not in ("Deployment", "Job"):
-            continue
+    for doc in workloads(docs):
         spec = pod_spec(doc)
         name = process_of(doc)
         want = ACCESS.get(name)
@@ -115,14 +114,15 @@ def artifact_modes(docs: list[dict]) -> list[str]:
 
 
 def rendered_with_store(docs: list[dict]) -> set[str]:
-    return {process_of(d) for d in docs if d["kind"] in ("Deployment", "Job") and store_volumes(pod_spec(d))}
+    return {process_of(d) for d in workloads(docs) if store_volumes(pod_spec(d))}
 
 
 def test_each_pod_gets_its_mode():
-    """Every image is named, so the runtime renders too, as it will once it is built."""
+    """Every image is named, so the runtime renders too, as a pod template of the deployment
+    manager's, which reads the store itself (DEC-1170, DEC-1016)."""
     docs = render_all()
     assert artifact_modes(docs) == []
-    assert rendered_with_store(docs) == {"api", "control", "runtime"}
+    assert rendered_with_store(docs) == {"api", "control", "runtime", "deploy-manager"}
 
 
 def test_the_store_size_and_class_are_values_not_its_access():
@@ -148,14 +148,24 @@ def test_no_store_for_a_reader_without_its_writer():
     """The runtime without the API server: a claim with only a reader would wait for a layout that no
     writer makes, so the runtime renders with no store, as the control run does."""
     docs = render_all("--set", "images.api=")
-    assert "runtime" in {process_of(d) for d in docs if d["kind"] == "Deployment"}
+    assert "runtime" in {process_of(d) for d in workloads(docs)}
     assert not [d for d in docs if d["kind"] == "PersistentVolumeClaim"]
     assert artifact_modes(docs) == []
     assert rendered_with_store(docs) == set()
 
 
+# The pod templates of the deployment manager's ConfigMap a seeded change has read, by `id(docs)`:
+# they are JSON text in the ConfigMap, so `seeded` writes each back after the change.
+EDITED: dict[int, dict[str, dict]] = {}
+
+
 def workload(docs: list[dict], name: str) -> dict:
-    return next(d for d in docs if d["kind"] in ("Deployment", "Job") and process_of(d) == name)
+    """Process `name`'s Deployment or Job, or else its pod template of the deployment manager's."""
+    found = [d for d in docs if d["kind"] in ("Deployment", "Job") and process_of(d) == name]
+    if found:
+        return found[0]
+    pods = EDITED.setdefault(id(docs), {process_of(w): w for w in managed_pods(docs)})
+    return pods[name]
 
 
 def main_mount(doc: dict) -> dict:
@@ -171,6 +181,11 @@ def layout(doc: dict) -> dict:
 def seeded(change, *args):
     docs = copy.deepcopy(render_all(*args))
     change(docs)
+    edited = EDITED.pop(id(docs), {})
+    if edited:
+        templates = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == TEMPLATES)
+        for name, w in edited.items():
+            templates["data"][f"{name}.json"] = json.dumps(w["spec"]["template"])
     return docs
 
 

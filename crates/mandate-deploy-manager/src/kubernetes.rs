@@ -18,10 +18,14 @@ use crate::orchestrator::{Instance, Orchestrator, Phase, Unavailable};
 
 const MANAGED_BY: &str = "app.kubernetes.io/managed-by";
 const MANAGER: &str = "mandate-deploy-manager";
-const WORKSPACE: &str = "mandate.dev/workspace";
+/// The manager's own key for its workspace. The chart's `mandate.dev/workspace` label, which the
+/// network policies and the colocation affinity select, is the template's and is kept as it is.
+const WORKSPACE: &str = "mandate.dev/workspace-key";
 const PROCESS: &str = "mandate.dev/process";
 const GENERATION: &str = "mandate.dev/generation";
 const SUBJECT: &str = "mandate.dev/subject";
+/// The subject as a selectable label: an id is not always label-safe, so the label is its key.
+const SUBJECT_KEY: &str = "mandate.dev/subject-key";
 /// The largest answer read from the API server; a longer one is unavailable.
 pub const MAX_BODY: usize = 8_388_608;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -167,6 +171,7 @@ impl Kubernetes {
         labels.insert(WORKSPACE.to_owned(), json!(hex16(&self.workspace)));
         labels.insert(PROCESS.to_owned(), json!(slot.process.code()));
         labels.insert(GENERATION.to_owned(), json!(generation.to_string()));
+        labels.insert(SUBJECT_KEY.to_owned(), json!(hex16(&slot.subject)));
         member(metadata, "annotations")?.insert(SUBJECT.to_owned(), json!(slot.subject));
         let spec = member(root, "spec")?;
         spec.insert("restartPolicy".to_owned(), json!("Never"));

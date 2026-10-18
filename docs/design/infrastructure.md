@@ -260,6 +260,20 @@ journals each start, stop and crash loop on the control stream before acting (jo
 [DEC-1170](../project/decisions/DEC-1170.md)): a restart is a `ProcessStartIssued` with `cause`
 `restart`, which the bound counts, and the pause is `ProcessCrashLooped`. A kill switch never
 makes it stop a process, and a process the switch covers that is down is started at once.
+In the cell it is its own process, `mandate-deployd` ([DEC-1172](../project/decisions/DEC-1172.md)),
+the one pod with a service-account token. Its namespaced Role creates, reads, lists and deletes
+pods and nothing else, only its pod may reach the API server, and its egress gate proves its policy
+by probing a destination that policy denies. Creating pods is itself powerful, so a
+ValidatingAdmissionPolicy, matched to the manager's ServiceAccount alone and failing closed, admits
+only pods shaped like the chart's templates: no service-account token and no account but
+`default`; nothing of the host; every container unprivileged with no privilege escalation; only the
+templates' images; only memory and the templates' Secrets (the started processes' roles and the
+journal's CA), and no Secret through the environment; the manager's, a templated process's and the
+workspace's labels; and exactly that process's egress labels. What it does not check (command,
+resources, placement, pod-level user and capabilities) remains a pod running a template's image with
+that process's role. The runtime's and executor's pods are the chart's
+templates, which it reads; each gets its identity as `MANDATE_WORKSPACE`, `MANDATE_PROCESS`,
+`MANDATE_SUBJECT` and `MANDATE_GENERATION`, as §3.5 says a process starts.
 
 **At most one writer is the fence's job.** The orchestrator may briefly run two copies of a
 process (a partition, a slow termination, a manual mistake). Safety does not depend on it: a new

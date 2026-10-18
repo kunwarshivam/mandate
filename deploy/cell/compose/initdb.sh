@@ -17,6 +17,7 @@ set_password mandate_migrator journal-role-mandate-migrator
 set_password mandate_control journal-role-mandate-control
 set_password mandate_verify journal-role-mandate-verify
 set_password mandate_api journal-role-mandate-api
+set_password mandate_deploy_manager journal-role-mandate-deploy-manager
 set_password mandate_runtime journal-role-mandate-runtime
 set_password mandate_executor journal-role-mandate-executor
 set_password mandate_scheduler journal-role-mandate-scheduler

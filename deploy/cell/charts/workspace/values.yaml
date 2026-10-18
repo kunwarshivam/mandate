@@ -32,6 +32,9 @@ images:
   model-gateway: ""
   exporter: ""
   data: ""
+  # The deployment manager (DEC-1172): the one pod with an API token, which starts the runtimes and
+  # executors. Once named, those two render as its pod templates, never as Deployments.
+  deploy-manager: ""
 
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once
 # images.api is named. None is a secret: the session signing key is made in the pod's memory at
@@ -90,6 +93,11 @@ egress:
   market-data: []
   artifact-store: []
   identity-provider: []
+  # The cluster's API server, for the deployment manager alone (DEC-1172): a policy cannot select
+  # it by pod label (k3s's is not a pod), so it is the addresses its `kubernetes` endpoints list,
+  # each a /32 or a narrow CIDR, and the port they listen on: 6443 on k3s, behind the 443 Service.
+  kube-api: []
+  kubeApiPort: 6443
   # The cluster DNS, which every process with an egress target needs to resolve its names.
   dns:
     namespace: kube-system
