@@ -38,11 +38,12 @@ use std::time::Duration;
 use mandate_api_server::clock::SystemClock;
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
-    StartRefusal, artifact_store, check_bind, check_database_url, check_environment,
-    check_key_set_tier, read_session_key,
+    INTERNAL_PAPER_WORKSPACE, StartRefusal, artifact_store, check_bind, check_database_url,
+    check_environment, check_internal_paper, check_key_set_tier, internal_paper_workspace,
+    read_session_key,
 };
 use mandate_api_server::http::{self, App, Settings};
-use mandate_api_server::journal::Postgres;
+use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
@@ -171,6 +172,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
                 name: "MANDATE_API_WORKSPACE",
             },
         )?,
+        internal_paper: internal_paper_workspace(env::var_os(INTERNAL_PAPER_WORKSPACE).as_deref())?,
     };
     let credentials = env::var_os("CREDENTIALS_DIRECTORY")
         .map(PathBuf::from)
@@ -204,6 +206,22 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         artifacts,
     };
     Ok((args, start))
+}
+
+/// How long the internal paper workspace's start check waits for the control stream.
+const START_READ_BOUND: Duration = Duration::from_secs(5);
+
+/// DEC-1143 item 2: with [`INTERNAL_PAPER_WORKSPACE`] on, the hosted control stream must be read
+/// within [`START_READ_BOUND`] and be paper throughout, or the process does not start.
+async fn internal_paper_checked(start: &Start) -> Result<(), StartRefusal> {
+    let refused = StartRefusal::InternalWorkspaceNotPaper;
+    let journal = Postgres(PgJournal::from_dsn(&start.database_url).map_err(|_| refused.clone())?);
+    let workspace = start.hosted.workspace.to_ulid_text().map_err(|_| refused)?;
+    let stream = format!("ctl:{workspace}");
+    let rows = tokio::time::timeout(START_READ_BOUND, journal.rows(&stream))
+        .await
+        .unwrap_or(Err(JournalUnavailable));
+    check_internal_paper(rows.as_deref().map_err(|&unavailable| unavailable))
 }
 
 /// Serves until `stop` resolves and in-flight requests finish.
@@ -335,6 +353,12 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if start.hosted.internal_paper
+        && let Err(refusal) = runtime.block_on(internal_paper_checked(&start))
+    {
+        eprintln!("refused: {refusal}");
+        return ExitCode::from(2);
+    }
     match runtime.block_on(run(args, start)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

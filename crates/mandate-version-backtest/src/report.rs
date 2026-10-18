@@ -158,6 +158,23 @@ impl VersionDigests {
     /// digests it, the recorded outputs and theses in the order given, and every setting the run
     /// reads besides the mandate, which the report names by its own version hash.
     pub fn of(input: &VersionInput<'_>) -> Result<Self, VersionError> {
+        Ok(VersionObjects::of(input)?.digests())
+    }
+}
+
+/// The canonical objects [`VersionDigests`] digests, so a runner can store each one under its
+/// digest and every reference a `BacktestRunRecorded` names resolves (journal spec §6.3, §11 check
+/// 6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionObjects {
+    pub bars: Value,
+    pub model_outputs: Value,
+    pub theses: Value,
+    pub config: Value,
+}
+
+impl VersionObjects {
+    pub fn of(input: &VersionInput<'_>) -> Result<Self, VersionError> {
         let bars = mandate_backtest::encode::bar_input(
             input.bars,
             input.coverage_start,
@@ -174,11 +191,21 @@ impl VersionDigests {
             .map(thesis_value)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
-            bars: digest(&bars),
-            model_outputs: digest(&Value::Array(outputs)),
-            theses: digest(&Value::Array(theses)),
-            config: digest(&super::record::configuration(input)?),
+            bars,
+            model_outputs: Value::Array(outputs),
+            theses: Value::Array(theses),
+            config: super::record::configuration(input)?,
         })
+    }
+
+    /// SHA-256 of each object's canonical bytes.
+    pub fn digests(&self) -> VersionDigests {
+        VersionDigests {
+            bars: digest(&self.bars),
+            model_outputs: digest(&self.model_outputs),
+            theses: digest(&self.theses),
+            config: digest(&self.config),
+        }
     }
 }
 

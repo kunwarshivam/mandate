@@ -165,6 +165,8 @@ describe("only the deploy job deploys, from main, through the production environ
     for (const name of ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN"]) {
       expect(yml, name).toContain(`          ${name}: \${{ vars.${name} }}\n`);
     }
+    expect(yml).toContain('          NEXT_PUBLIC_OWLHEAD_SITE_ORIGIN: "https://owlhead.ai"\n');
+    expect(yml).toContain('          NEXT_PUBLIC_OWLHEAD_APP_ORIGIN: "https://app.owlhead.ai"\n');
   });
 
   it("pending E21-38: flags any trigger but a push to main or a dispatch", () => {

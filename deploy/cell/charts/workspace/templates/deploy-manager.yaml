@@ -54,10 +54,15 @@ subjects:
     namespace: {{ .root.Release.Namespace | quote }}
 {{- end -}}
 {{- /* The pod of process `p` the manager starts, as JSON: the runtime's and, mirroring it, the
-executor's container runs `mandate-daemon run`, which reads its identity from the variables the
-manager adds. */ -}}
+executor's container runs its image's `mandate-daemon` as `run --probe /tmp/process.sock`, which
+reads its workspace and agent from the variables the manager adds and the rest from the journal and
+the artifact store (DEC-1015, DEC-1016). Its probes are processes.json's `probe`, as a Deployment's
+are (DEC-1013), or `mandate-daemon probe` where the process names none. */ -}}
 {{- define "mandate.managedPod" -}}
-{{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "command" (list "mandate-daemon" "run" "--probe" "/tmp/process.sock") "probe" "mandate-daemon") }}
+{{- $ctx := . -}}
+{{- $words := .p.probe | default (list "/usr/local/bin/mandate-daemon" "probe" "{probe}" "--probe" "/tmp/process.sock") -}}
+{{- $probe := dict "livez" (include "mandate.fill" (dict "root" $ctx.root "words" $words "probe" "livez") | fromJsonArray) "readyz" (include "mandate.fill" (dict "root" $ctx.root "words" $words "probe" "readyz") | fromJsonArray) -}}
+{{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" (list "run" "--probe" "/tmp/process.sock") "probe" $probe) }}
 {{- fromYaml (include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container)) | toJson }}
 {{- end -}}
 {{- define "mandate.deployManagerTemplates" -}}
@@ -78,7 +83,8 @@ and the namespace has no Pod Security label, so a ValidatingAdmissionPolicy (GA 
 1.30; the cell runs k3s v1.35.5) refuses any pod the manager's own ServiceAccount creates or updates
 in this namespace that is not shaped like one of its templates. Every other client and pod is outside
 it (`matchConditions`). The allowed images, Secrets, processes and egress labels are list and map
-literals built from the rendered templates and processes.json, never written by hand; each is valid
+literals built from the rendered templates and processes.json, never written by hand (the claims
+only those a template mounts read-only, the artifact store's for the runtime); each is valid
 JSON as well as CEL, so the invariant tests read them back. It fails closed: an error evaluating it
 refuses the pod.
 */ -}}
@@ -92,6 +98,7 @@ object.spec.containers.all(c, {{ . }}) && (!has(object.spec.initContainers) || o
 {{- define "mandate.deployManagerAdmission" -}}
 {{- $images := list }}
 {{- $secrets := list }}
+{{- $claims := list }}
 {{- range $file, $text := .templates }}
 {{- $pod := fromJson $text }}
 {{- range (concat ($pod.spec.initContainers | default list) $pod.spec.containers) }}
@@ -100,6 +107,9 @@ object.spec.containers.all(c, {{ . }}) && (!has(object.spec.initContainers) || o
 {{- range ($pod.spec.volumes | default list) }}
 {{- if .secret }}
 {{- $secrets = append $secrets .secret.secretName }}
+{{- end }}
+{{- if and .persistentVolumeClaim .persistentVolumeClaim.readOnly }}
+{{- $claims = append $claims .persistentVolumeClaim.claimName }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -128,6 +138,8 @@ spec:
       expression: '{{ $images | uniq | sortAlpha | toJson }}'
     - name: allowedSecrets
       expression: '{{ $secrets | uniq | sortAlpha | toJson }}'
+    - name: allowedClaims
+      expression: '{{ $claims | uniq | sortAlpha | toJson }}'
     - name: egress
       expression: '{{ .egress | toJson }}'
   validations:
@@ -152,9 +164,9 @@ spec:
     - expression: '{{ include "mandate.everyContainer" "c.image in variables.allowedImages" }}'
       reason: Forbidden
       message: a pod the deployment manager makes runs only the images of its templates
-    - expression: '!has(object.spec.volumes) || object.spec.volumes.all(v, has(v.emptyDir) || (has(v.secret) && v.secret.secretName in variables.allowedSecrets))'
+    - expression: '!has(object.spec.volumes) || object.spec.volumes.all(v, has(v.emptyDir) || (has(v.secret) && v.secret.secretName in variables.allowedSecrets) || (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName in variables.allowedClaims && has(v.persistentVolumeClaim.readOnly) && v.persistentVolumeClaim.readOnly == true))'
       reason: Forbidden
-      message: a pod the deployment manager makes mounts only memory or the Secrets of its templates
+      message: a pod the deployment manager makes mounts only memory, the Secrets of its templates, or their claims read-only
     - expression: '!has(object.spec.imagePullSecrets) && {{ include "mandate.everyContainer" "!has(c.envFrom) && (!has(c.env) || c.env.all(e, !has(e.valueFrom)))" }}'
       reason: Forbidden
       message: a pod the deployment manager makes reads no Secret through its environment or a pull secret
@@ -197,7 +209,8 @@ spec:
   template:
     {{- $args := list "run" "--workspace" (required "api.workspace, the hosted workspace's ULID whose control stream the manager reads, is required with images.deploy-manager" .root.Values.api.workspace) "--probe" "/tmp/process.sock" "--templates" "/etc/mandate/templates" }}
     {{- $mounts := "- {name: templates, mountPath: /etc/mandate/templates, readOnly: true}" }}
-    {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" $args "mounts" $mounts "probe" "mandate-deployd") }}
+    {{- $probe := dict "livez" (list "/usr/local/bin/mandate-deployd" "probe" "livez" "--probe" "/tmp/process.sock") "readyz" (list "/usr/local/bin/mandate-deployd" "probe" "readyz" "--probe" "/tmp/process.sock") }}
+    {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" $args "mounts" $mounts "probe" $probe) }}
     {{- $volumes := printf "- {name: templates, configMap: {name: %q, defaultMode: 292}}" (printf "%s-templates" .p.name) }}
     {{- $annotations := dict "mandate.dev/templates-sha256" (toJson .templates | sha256sum) }}
     {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container "volumes" $volumes "serviceAccount" .p.name "annotations" $annotations) | nindent 4 }}

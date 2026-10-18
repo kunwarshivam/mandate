@@ -1702,6 +1702,7 @@ dependencies = [
  "ring",
  "rustix",
  "rustls",
+ "serde_json",
  "tokio",
 ]
 
@@ -1767,6 +1768,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-backtest-runner"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "mandate-accounting",
+ "mandate-artifacts-fs",
+ "mandate-backtest",
+ "mandate-builder",
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-journal",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-sim",
+ "mandate-spec",
+ "mandate-time",
+ "mandate-version-backtest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-builder"
 version = "0.0.0"
 dependencies = [
@@ -1809,6 +1831,7 @@ dependencies = [
  "mandate-num",
  "mandate-spec",
  "mandate-time",
+ "mandate-vault-local",
  "proptest",
  "secrecy",
  "serde",
@@ -1867,13 +1890,23 @@ dependencies = [
 name = "mandate-daemon"
 version = "0.0.0"
 dependencies = [
+ "mandate-artifacts-fs",
  "mandate-canon",
+ "mandate-gateway",
  "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-num",
  "mandate-process",
+ "mandate-research",
+ "mandate-research-driver",
+ "mandate-research-run",
  "mandate-runtime",
+ "mandate-spec",
  "mandate-store",
  "mandate-time",
  "proptest",
+ "serde_json",
+ "sqlx",
  "tokio",
 ]
 
@@ -1923,7 +1956,9 @@ dependencies = [
 name = "mandate-dispatcher"
 version = "0.0.0"
 dependencies = [
+ "aes-gcm",
  "base64ct",
+ "hkdf",
  "mandate-canon",
  "mandate-journal",
  "mandate-journal-pg",
@@ -1931,8 +1966,11 @@ dependencies = [
  "mandate-push-relay",
  "mandate-time",
  "mandate-webpush",
+ "p256",
  "proptest",
  "ring",
+ "secrecy",
+ "sha2 0.11.0",
  "sqlx",
  "thiserror",
  "tokio",
@@ -2515,6 +2553,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-stub-issuer"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "mandate-api-server",
+ "mandate-authn",
+ "mandate-identity",
+ "mandate-journal",
+ "mandate-time",
+ "ring",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-telemetry"
 version = "0.0.0"
 dependencies = [
@@ -2544,9 +2598,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-vault"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "mandate-connections",
+ "mandate-time",
+ "mandate-vault-local",
+ "proptest",
+ "reqwest",
+ "ring",
+ "rustls",
+ "secrecy",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-vault-local"
 version = "0.0.0"
 dependencies = [
+ "mandate-connections",
+ "proptest",
+ "ring",
  "secrecy",
  "thiserror",
 ]

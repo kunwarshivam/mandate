@@ -14,6 +14,13 @@ pub(crate) const REQUESTED_SCOPES_SORTED: [&str; 2] = ["data", "trading"];
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GrantedScopes(pub(crate) BTreeSet<String>);
 
+impl GrantedScopes {
+    /// The scopes, sorted, each once: what the vault stores beside the token (E10-13 V1).
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().map(String::as_str)
+    }
+}
+
 /// Reads the token response's space-separated `scope` and accepts it only if it is exactly
 /// `trading` and `data`, in any order: a missing or an added scope is refused (CN-2).
 pub fn check_scope(granted: &str) -> Result<GrantedScopes, ConnectError> {

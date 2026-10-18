@@ -14,11 +14,11 @@ use common::{
     ACCOUNT_STREAM, AllowGate, FixedPlan, TestIds, clock, event, ports, text, universe, with_clock,
 };
 use mandate_research_driver::{
-    AppendFailure, Driver, DriverError, JournalWriter, RuntimeCore, Stepped, Worker,
+    AppendFailure, Driver, DriverError, JournalWriter, RuntimeCore, StepBatch, Stepped, Worker,
 };
 use mandate_research_run::{Answer, call, retrieve};
 use mandate_runtime::{
-    ActorKind, AgentId, Command, EventDraft, FoldedEvent, Initiator, Input, KillScope, Mode, Ports,
+    ActorKind, AgentId, Command, FoldedEvent, Initiator, Input, KillScope, Mode, Ports,
     ResearchInput, ResearchRequest, RetrievedObservation, RiskClock, Seq, WriterEpoch,
 };
 
@@ -47,7 +47,8 @@ struct Stream {
 }
 
 impl JournalWriter for Stream {
-    fn append(&mut self, drafts: &[EventDraft]) -> Result<Vec<FoldedEvent>, AppendFailure> {
+    fn append(&mut self, batch: &StepBatch<'_>) -> Result<Vec<FoldedEvent>, AppendFailure> {
+        let drafts = batch.drafts;
         if !self.failures.is_empty() {
             return Err(self.failures.remove(0));
         }
