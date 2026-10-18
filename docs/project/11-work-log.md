@@ -35,6 +35,25 @@ claim issue or the decision file, not here.
 
 ## Sessions
 
+- **2026-10-18, late evening: the founder's decisions, the demo's checks, staging's first
+  modules.** The founder answered thirteen questions in the coordinator session, recorded verbatim
+  in DEC-2605 (#1692 added rows 11 to 13): OpenTofu, DOKS and GitOps under a $150 a month cap,
+  staging for the demo, Cloudflare R2 with a bucket lock for the archive, `cli_confirm` step-up for
+  paper grants, a Robinhood sell booked at its limit price, a CI signing key with staging first
+  and no hardware key, staging's vault unsealing itself, and staging's automation needing no step
+  from the founder. The coordinator reports a further direction, that CI no longer gates a merge;
+  its row is still to be recorded. Lane E2E's slices 4 to 7 merged (#1614 `cb043cb5`, #1625,
+  #1674, #1693): the demo cell now checks each run's own workspace, the owner's sign-in and
+  signed-in reads, the backtest run, record and read, and the CLI kill switch; running main's API
+  locally found its membership parser still a fail-closed placeholder, which lane MB wired
+  (#1632, #1633, #1637). #1693 merged before CI ran on its last head, so its two signed-in checks
+  first run in a cell on `main`. Two merges crossed and turned `main`'s xtask test red (the vault
+  chart, #1646, against the published-charts test, #1647); #1681 fixed it forward. Infrastructure:
+  lane H's droplet bring-up (#1539), IAC's design and modules (#1639 to #1643), GO's Flux and the
+  founder's bootstrap (#1642, #1651), the charts published (#1647, #1681), V2's OpenBao (#1646,
+  #1655, #1662), and the release key compiled in (#1689); RS's signing job (#1673) and IAC's
+  remaining slices (#1644, #1648, #1650, #1652, #1654, #1690, #1701, #1703) are open. The
+  coordinator's secrets audit assigned its fixes to IAC, GO, RS, CT and SI's leak guard.
 - **2026-10-18, taking over the orphaned PRs.** The founder's other coordinating account ran out
   of tokens with 23 PRs open; this session took them over (merging `main` in, never rebasing).
   Merged on a Sonnet review each: #1566 `9942eec5`, #1572 `a34b2874`, #1583 `9befec7a`, #1547
