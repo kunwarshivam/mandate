@@ -34,6 +34,7 @@ from pathlib import Path
 import account
 import approval
 import audit
+import backtest_records
 import canceled
 import control_plane
 import deployed
@@ -3853,6 +3854,7 @@ def render(
     verification_section: dict,
     rows_section: dict,
     gateway_section: dict,
+    backtest_section: dict,
     invalidation_section: dict,
     deployed_section: dict,
 ) -> str:
@@ -3888,6 +3890,7 @@ def render(
             "verification_runs": verification_section,
             "segment_rows": rows_section,
             "model_gateway": gateway_section,
+            "backtest_records": backtest_section,
             "thesis_invalidation": invalidation_section,
             "agent_deployed": deployed_section,
         },
@@ -3954,6 +3957,7 @@ def main(argv: list[str] | None = None) -> int:
     verification_section = verification.build_section()
     rows_section = segment_rows.build_section(account_section["chain"])
     gateway_section = gateway.build_section()
+    backtest_section = backtest_records.build_section()
     invalidation_section = invalidation.build_section()
     deployed_section = deployed.build_section()
 
@@ -3985,6 +3989,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += control_plane.run_mutants(control_plane_section)
     problems += gateway.check_section(gateway_section)
     problems += gateway.run_mutants(gateway_section)
+    problems += backtest_records.check_section(backtest_section)
+    problems += backtest_records.run_mutants(backtest_section)
     problems += deployment_manager.check_section(deployment_manager_section)
     problems += deployment_manager.run_mutants(deployment_manager_section)
     problems += invalidation.check_section(invalidation_section)
@@ -4055,6 +4061,7 @@ def main(argv: list[str] | None = None) -> int:
         verification_section,
         rows_section,
         gateway_section,
+        backtest_section,
         invalidation_section,
         deployed_section,
     )
@@ -4089,6 +4096,7 @@ def main(argv: list[str] | None = None) -> int:
         or verification.check_section(reread["verification_runs"])
         or segment_rows.check_section(reread["segment_rows"])
         or gateway.check_section(reread["model_gateway"])
+        or backtest_records.check_section(reread["backtest_records"])
         or invalidation.check_section(reread["thesis_invalidation"])
         or deployed.check_section(reread["agent_deployed"])
     ):
@@ -4153,6 +4161,9 @@ def main(argv: list[str] | None = None) -> int:
         f"model-gateway drafts, {len(gateway_section['agent_streams'])} agent and {len(gateway_section['streams'])} meter streams, "
         f"{len(gateway_section['folds'])} spend folds, {gateway_section['fuzz']['runs']} fuzzed meter streams, "
         f"{len(gateway.VALIDATOR_MUTANTS)} validator and {len(gateway.vector_mutants(gateway_section))} vector mutants caught; "
+        f"{len(backtest_section['invalid_drafts'])} invalid and {len(backtest_section['valid_drafts'])} valid "
+        f"backtest and evaluation drafts, {len(backtest_records.VALIDATOR_MUTANTS)} validator and "
+        f"{len(backtest_records.vector_mutants(backtest_section))} vector mutants caught; "
         f"{len(deployment_manager_section['invalid_drafts'])} invalid and "
         f"{len(deployment_manager_section['valid_drafts'])} valid deployment-manager drafts, "
         f"{len(deployment_manager.VALIDATOR_MUTANTS)} validator and "

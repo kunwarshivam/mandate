@@ -18,7 +18,8 @@ use sha2::{Digest, Sha256};
 
 use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_WORKSPACE, NAMESPACE, NODE, api_image_tag,
-    api_port_forward, http_status, kubectl, processes, render, run_id, run_job, tools_missing, up,
+    api_port_forward, http_status, kubectl, processes, render, run_id, run_job, stub_image_tag,
+    tools_missing, up,
 };
 use crate::output;
 
@@ -578,7 +579,7 @@ fn api_status(path: &str) -> Result<Result<u16, String>> {
             "no kubectl on this machine to forward the API's port with".into(),
         ));
     }
-    let forwarded = api_port_forward();
+    let forwarded = api_port_forward(stub_image_tag()?.is_some());
     Ok(answer_of(forwarded, || http_status(API_LOCAL_PORT, path)))
 }
 

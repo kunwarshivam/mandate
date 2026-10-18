@@ -7,7 +7,7 @@
   Postgres under CloudNativePG), `deploy/cell/compose/compose.json` (generated), and
   `xtask/src/cell.rs` (`cargo xtask cell up`, `drill`, `demo`, `down`, `generate`; `cargo xtask ci cell`); the image source on a host that cannot build (`MANDATE_CELL_IMAGE`).
 - **Tests:** `deploy/tests/test_cell.py` (each chart and Compose invariant, each shown failing on a
-  seeded bug); the drills `boot`, `journal`, `egress`, `compose` and `restart`, each also run with its bug planted, and `kill-switch`, skipped until its processes land
+  seeded bug); the drills `boot`, `journal`, `egress` and `compose`, each also run with its bug planted, and `kill-switch`, skipped until its processes land; `restart` runs in `cargo xtask ci cell-failover` (E21-41)
   (`cargo xtask cell drill --seeded`).
 - **Run:** `cargo xtask ci cell` (needs docker, k3d, helm and kubeconform; `deploy/cell/README.md`);
   the lint job runs `cargo xtask cell generate`, the drift check of the Compose and roles files.

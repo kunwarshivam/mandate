@@ -10,11 +10,14 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 |---|---|
 | `charts/workspace/processes.json` | **The process list** (infrastructure §3.1): every process type with its kind, image, database role, egress column, placement and resources. The chart and the Compose file are both rendered from it |
 | `charts/workspace/` | The Helm chart `mandate-workspace`: one Deployment or Job per process type whose image is named, the migration hook, and the network policies |
-| `charts/journal-db/` | The journal's Postgres under the CloudNativePG operator, its roles (`files/roles.sql`), and one credential Secret per process type. Installed before the workspace chart. Lane S2 (E21-41) grows it |
+| `charts/journal-db/` | The journal's Postgres under the CloudNativePG operator: a primary and a synchronous standby, its roles (`files/roles.sql`), one credential Secret per process type, and the WAL archive and base backups through the Barman Cloud plugin (E21-41, [DEC-1050](../../docs/project/decisions/DEC-1050.md)). Installed before the workspace chart |
+| `charts/backup-plugin-tls/` | The two certificates the Barman Cloud plugin and the operator authenticate each other with, made in the cluster in place of cert-manager (DEC-1050 item 3) |
+| `charts/archive-store/` | The local cell's stand-in for the S1 endpoint the journal archives to: the pinned test store, in its own namespace, reachable only by the journal's archive clients (DEC-1050 item 5). Never in cell #1 |
 | `compose/compose.json` | The same processes for one host (infrastructure §3.2, hybrid), generated: `cargo xtask cell generate --write` |
 | `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ |
 | `images/mandate.Dockerfile` | The interim `mandate` image the cell builds from the change; lane R2 (E21-35) replaces it |
 | `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
+| `../tests/test_journal_db.py` | The journal-db chart's invariants and those of the two charts beside it, each shown failing on a seeded bug |
 
 ## What the chart guarantees
 
@@ -45,17 +48,35 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
 - no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and
   k3d's differs only by the tunnel.
 
+And the journal-db chart, in `deploy/tests/test_journal_db.py` (E21-41, DEC-1050):
+
+- two instances or more, `synchronous_commit = on`, and one synchronous standby every commit waits
+  for, still waited for with that standby down (`dataDurability: required`), in the template, so no
+  value can weaken it;
+- the WAL archiver is the Barman Cloud plugin, writing to the chart's ObjectStore with a key no
+  database role holds, and a scheduled base backup goes through the same plugin;
+- the journal's pods reach only the cluster DNS, the Kubernetes API by `/32`, each other on 5432
+  and 8000, and the archive's endpoint, by CIDRs of /24 or narrower or, in the cluster, by pod
+  label; a plain-HTTP endpoint only for a Service in the cluster;
+- instances on separate nodes are a scheduling rule; on one node the Cluster's
+  `mandate.dev/failure-domain` annotation says the standby is no second failure domain, and
+  `cell up` prints it;
+- the local test store accepts only the journal's archive clients and reaches nothing, and the
+  plugin's two certificates are self-signed TLS pairs that record when they end.
+
 ## The local cell
 
 Needs docker, plus k3d, helm and kubeconform at the versions in `.github/workflows/ci.yml`
 (`bash .cursor/install.sh` installs them on x86_64 Linux; on a Mac, see "On a laptop").
 
 ```bash
-cargo xtask cell up               # build the image, start k3d, install the operator, journal-db, workspace
-cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch
+cargo xtask cell up               # build the image, start k3d, install the operator, its backup plugin, the test store, journal-db, workspace
+cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch, standby-down, archive
 cargo xtask cell drill --seeded   # each drill with its bug planted; fails if one still holds
 cargo xtask cell down
 cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills
+cargo xtask ci cell-journal       # and beside it: up, then standby-down and archive, plain and seeded
+cargo xtask ci cell-failover      # and beside it: up, then restart (a failover with the standby), plain and seeded
 ```
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
@@ -98,6 +119,7 @@ upgrades every release in place.
 | The cell: k3d, CloudNativePG, the migration Job | Always |
 | The demo workspace, its control stream verified | Always |
 | The workspace API server, through a port-forward | Lane A1 (E21-31) marks `api` built in `processes.json` |
+| Sign-in as the demo owner, through the local stub issuer | Lane SI's stub issuer (E21-52) and the server's key-set tier check (E21-53) are both on `main` |
 | A paper agent on rh-sim and recorded Alpaca fixtures | Lane P1 (#1451) marks `runtime` and `executor` built |
 | The founding membership | Lane ID1's `mandate membership` gesture is in the CLI |
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
@@ -106,8 +128,23 @@ The API server listens only on its pod's loopback, so nothing in the cluster rea
 tunnel's route lands. The demo forwards http://127.0.0.1:8787 to it with the machine's own `kubectl`,
 or prints the `kubectl port-forward` command when there is none, and checks that `/v1` answers with
 the one 401. The forward outlives the demo until its pod goes or it is stopped; a later demo
-reuses one that still answers. Sign-in waits on lane SI's stub issuer (DEC-2100) and on subject links: until both are
-in the cell, every sign-in is refused. The session signing key is made in the pod's memory at each
+reuses one that still answers.
+
+Sign-in runs through lane SI's stub issuer (DEC-2100, DEC-1025).
+- It runs as a sidecar of the API pod on its loopback (`127.0.0.1:8090`), and the server starts
+  only once the stub answers.
+- It runs only in a dev or ci cell and only from a local build, so no hosted values file can name
+  it.
+- `cell up` runs it once lane SI's `crates/mandate-stub-issuer` and the server's E21-53 check are
+  both in the checkout. It then links the demo owner (`01KDEM0000000000000000000P`, subject
+  `demo-owner`) with `mandate identity link` and mounts the result as the `subject-links`
+  ConfigMap.
+- `cell demo` also forwards 127.0.0.1:8090 to the stub. It then asks the stub for a token and opens
+  a session with it through `POST /v1/sessions`, which must answer 204 with the session cookie.
+- Until both pieces are in, no stub runs, no links are mounted, every sign-in is refused, and the
+  demo names the sign-in step as skipped.
+
+The session signing key is made in the pod's memory at each
 start. The interim `api` image carries a CA bundle found on the building host (`SSL_CERT_FILE`, else
 the usual Debian, Fedora, openSUSE or Alpine path), without which the server refuses to start; when `cell up` cannot install the workspace release, it prints the API pod's
 state, logs and the namespace's events. A cell that pulls its `mandate` image (`MANDATE_CELL_IMAGE`) has no API image yet, so it
@@ -151,17 +188,27 @@ the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecti
 | `restart` | A control stream written before the journal's Postgres primary pod is deleted still exports and verifies by journal spec §11 once CloudNativePG has the cluster Ready again | A stream id the restart never held is verified, which must read as lost (`export_stream_empty`): it proves the drill sees a lost stream, not a loss the restart itself caused |
 | `kill-switch` | Skipped, by name, until P1's runtime and executor images and O4's `mandate agent kill` are on `main` (OPS-4) | None until it runs |
 | `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
+| `standby-down` | With the synchronous standby fenced, an append neither commits nor becomes visible on the primary, and its Job ends on its deadline; once the standby is back and streams synchronously, a new append commits and every stream written verifies by journal spec §11 (OPS-2, E21-41) | The cluster's durability set to `preferred`, so the primary commits alone: `committed with the standby fenced` |
+| `archive` | A closed WAL segment is reported archived by Postgres, a base backup completes, and Barman's own tools, reading the store with the archive's key, list the backup and fetch the segment back (E21-41) | The archive pointed at another bucket of the same store, which Postgres cannot tell: `not in the archive` |
 
 A seeded run counts as caught only when its report names the planted bug's own symptom
-(`rehash_mismatch`, a live host reached, the deleted policy missing, `export_stream_empty`), never
-any failure. A skipped drill is reported as skipped, never as held. In the
+(`rehash_mismatch`, a live host reached, the deleted policy missing, `export_stream_empty`, a commit
+with the standby fenced, a segment not in the archive), never any failure. `standby-down` and
+`archive` run in CI's `cell-journal` job and `restart`, which with the synchronous standby is a
+failover and the old primary's rejoin, in `cell-failover`, each beside `cell`, so each stays within
+ten minutes (DEC-464). A skipped drill is reported as skipped, never as held. In the
 seeded egress run, with the workspace's policies deleted, the probes open TCP connections to the
 live trading hosts from the runner, to prove the drill can see a leak; they send no byte, so no
 request reaches a broker (AGENTS.md rule 8).
 
 The kill switch run with the exporter, API and deployment manager down (OPS-4), kills at each step of
-submission, two executors for one account (OPS-3), the upgrade drill (OPS-7) and the restore drill
-(OPS-8) join as their processes land.
+submission, two executors for one account (OPS-3), the upgrade drill (OPS-7), and E21-41's
+point-in-time restore (OPS-8) and failover with intents in flight (DEC-434 item 15) join as their
+processes and slices land (DEC-1050 item 8).
+
+Residuals of the local cell, disclosed: its two journal instances share its one node, so the
+standby is no second failure domain (the Cluster says so); and its archive's traffic to the test
+store is plain HTTP inside the cluster.
 
 ## The Compose file
 

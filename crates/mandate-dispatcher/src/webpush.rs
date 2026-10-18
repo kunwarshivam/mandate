@@ -37,18 +37,20 @@ use std::time::Duration;
 
 use mandate_notify::{
     AddressHandle, IdempotencyKey, Notification, NotifyError, Origin, Outcome, Provider,
-    PushChannel, Recipient,
+    PushChannel, Reason, Recipient, TextKey,
 };
+use mandate_push_relay::RelayError;
 use mandate_time::UtcNanos;
 use mandate_webpush::{
-    PushAllowlist, PushRequest, SecureRandom, VapidSigner, VapidSubject, WebPushError,
+    NoticeClass, PushAllowlist, PushEndpoint, PushPlaintext, PushRequest, SecureRandom,
+    Subscription, VapidSigner, VapidSubject, WebPushError, encrypt,
 };
 use ring::digest::{SHA256, digest};
 use ring::rand::SystemRandom;
 use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair};
 use secrecy::{ExposeSecret, SecretSlice, SecretString};
 
-use crate::DispatchError;
+use crate::{Attempt, DispatchError, Prepared, Route, prepare, push_status, relay_refusal};
 
 /// One send's whole budget, its vault read and its POST together (DEC-2500 item 6, DEC-2502 item
 /// 4). Past it a send is `retryable`: `timeout` for the POST, `provider_error` for a vault read that
@@ -250,10 +252,6 @@ impl VapidSigner for RingVapidSigner {
 }
 
 /// The web-push provider of a managed deployment, sending directly (spec §4.6). No `Debug`.
-#[allow(
-    dead_code,
-    reason = "the tests PR's stubs build and read no provider; the implementation does (DEC-77, E8-10 D10b)"
-)]
 pub struct WebPushProvider {
     ports: Ports,
     allowlist: PushAllowlist,
@@ -275,8 +273,13 @@ impl WebPushProvider {
         subject: VapidSubject,
         keys: Vec<(KeyId, Box<dyn VapidSigner>)>,
     ) -> Result<Self, DispatchError> {
-        let _ = (ports, allowlist, subject, keys);
-        Err(DispatchError::Unimplemented { story: "E8-10" })
+        subject.check_relayed()?;
+        Ok(Self {
+            ports,
+            allowlist,
+            subject,
+            keys,
+        })
     }
 
     /// This provider seen through `address`, as the dispatcher's fan-out calls it.
@@ -303,19 +306,181 @@ impl WebPushProvider {
     ///    `notification`'s text key belongs to;
     /// 5. one POST, within what is left of the deadline, whose answer [`crate::push_status`] reads.
     ///
+    /// The origin is not read: a push carries no link, only the closed pair (NT-1). The idempotency
+    /// key is not read either: a push service keeps no key, and the message id is a fresh draw
+    /// (DEC-2506 item 5).
+    ///
     /// # Errors
     /// [`NotifyError::EntropyUnavailable`] when the random source or the signer fails, before any
     /// POST: nothing is sent and nothing is journaled, and the next step tries again.
+    /// [`NotifyError::Unrepresentable`] for a request that cannot be formed for any other reason,
+    /// such as a clock before the Unix epoch; nothing is posted.
     pub fn send_to(
         &mut self,
-        origin: &Origin,
+        _origin: &Origin,
         notification: &Notification,
         handle: &AddressHandle,
         address_ref: &AddressRef,
-        key: &IdempotencyKey,
+        _key: &IdempotencyKey,
     ) -> Result<Outcome, NotifyError> {
-        let _ = (origin, notification, handle, address_ref, key);
-        Err(NotifyError::Unimplemented { story: "E8-10" })
+        if handle.channel != PushChannel::WebPush {
+            return Ok(PROVIDER_FAULT);
+        }
+        let started = self.ports.clock.now();
+        let entry = match self
+            .ports
+            .book
+            .entry(&handle.recipient, address_ref, SEND_DEADLINE)
+        {
+            Ok(Some(entry)) => entry,
+            Ok(None) => {
+                return Ok(Outcome::Permanent {
+                    reason: Reason::AddressMissing,
+                });
+            }
+            Err(VaultUnavailable) => return Ok(VAULT_SILENT),
+        };
+        let now = self.ports.clock.now();
+        let Some(left) = left_of(started, now) else {
+            return Ok(VAULT_SILENT);
+        };
+        let Some(signer) = self
+            .keys
+            .iter()
+            .find(|(id, _)| *id == entry.key_id)
+            .map(|(_, signer)| signer.as_ref())
+        else {
+            return Ok(PROVIDER_FAULT);
+        };
+        let endpoint = entry.endpoint.expose_secret();
+        let Ok(allowed) = PushEndpoint::parse_allowed(endpoint, &self.allowlist) else {
+            return Ok(Outcome::Permanent {
+                reason: Reason::AddressRejected,
+            });
+        };
+        let Ok(subscription) = Subscription::new(
+            allowed,
+            entry.p256dh.expose_secret(),
+            entry.auth.expose_secret(),
+        ) else {
+            return Ok(PROVIDER_FAULT);
+        };
+        let mut drawn = [0u8; MESSAGE_ID_BYTES];
+        self.ports.random.fill(&mut drawn).map_err(unformed)?;
+        let message_id: String = drawn.iter().map(|byte| format!("{byte:02x}")).collect();
+        let plaintext = PushPlaintext::of(notification).map_err(unformed)?;
+        let body =
+            encrypt(&subscription, &plaintext, self.ports.random.as_mut()).map_err(unformed)?;
+        let now_unix_s = u64::try_from(now.secs()).map_err(|_| unformed(WebPushError::Clock))?;
+        let attempt = Attempt {
+            endpoint,
+            allowlist: &self.allowlist,
+            body: &body,
+            class: class_of(notification.text),
+            signer,
+            subject: &self.subject,
+            now_unix_s,
+            route: Route::Direct,
+        };
+        let request = match prepare(&attempt).map_err(not_formed)? {
+            Prepared::Direct(request) => request,
+            Prepared::Refused(outcome) => return Ok(outcome),
+            Prepared::Relayed(_) => {
+                return Err(NotifyError::Unrepresentable {
+                    what: DIRECT_REQUEST,
+                });
+            }
+        };
+        match self.ports.post.post(&request, left) {
+            Ok(PushAnswer { status }) => push_status(status, &message_id).map_err(not_formed),
+            Err(PostFailure::Timeout) => Ok(Outcome::Retryable {
+                reason: Reason::Timeout,
+            }),
+            Err(PostFailure::Unreachable) => {
+                relay_refusal(RelayError::Unreachable).map_err(not_formed)
+            }
+        }
+    }
+}
+
+/// The octets of a message id's draw: 128 bits, written as 32 lowercase hex digits (DEC-2500 item
+/// 9, DEC-2506 item 5).
+const MESSAGE_ID_BYTES: usize = 16;
+
+/// What a request that cannot be formed is named as, in [`NotifyError::Unrepresentable`].
+const DIRECT_REQUEST: &str = "direct push request";
+
+/// A fault of the deployment's own wiring or keys: retried by no step, marking no address
+/// (DEC-728's reading, DEC-2503 item 5, DEC-2506 items 2 and 3).
+const PROVIDER_FAULT: Outcome = Outcome::Permanent {
+    reason: Reason::ProviderError,
+};
+
+/// A vault that did not answer within the send's budget: retried, marking nothing (DEC-2502 item
+/// 7).
+const VAULT_SILENT: Outcome = Outcome::Retryable {
+    reason: Reason::ProviderError,
+};
+
+/// What is left of [`SEND_DEADLINE`] for the POST once the vault read, begun at `started`, has
+/// answered at `now`, or `None` when nothing is left (DEC-2506 item 4). A clock that moved back
+/// spent nothing.
+fn left_of(started: UtcNanos, now: UtcNanos) -> Option<Duration> {
+    let spent = since_epoch(now)?.saturating_sub(since_epoch(started)?);
+    SEND_DEADLINE
+        .checked_sub(spent)
+        .filter(|left| !left.is_zero())
+}
+
+/// `at` as the time since the Unix epoch, or `None` before it.
+fn since_epoch(at: UtcNanos) -> Option<Duration> {
+    let secs = u64::try_from(at.secs()).ok()?;
+    Duration::from_secs(secs).checked_add(Duration::from_nanos(u64::from(at.nanos())))
+}
+
+/// Spec §3.2's class of each text key, which partition the classes (DEC-2506 item 6). The match
+/// names every key, so a new key fails to compile until it has its class.
+fn class_of(text: TextKey) -> NoticeClass {
+    match text {
+        TextKey::ApprovalNeeded => NoticeClass::Action,
+        TextKey::AttentionNeeded | TextKey::AccountChanged => NoticeClass::Safety,
+        TextKey::BriefReady => NoticeClass::Info,
+    }
+}
+
+/// Why a send was not formed: a random source or a signer that failed is
+/// [`NotifyError::EntropyUnavailable`], so the next step tries again (DEC-2506 item 3); anything
+/// else, which no well-formed entry reaches, is [`NotifyError::Unrepresentable`]. Closed: neither
+/// holds an input. The match names every code, so a new one cannot fall through.
+fn unformed(error: WebPushError) -> NotifyError {
+    match error {
+        WebPushError::Random | WebPushError::Signer => NotifyError::EntropyUnavailable,
+        WebPushError::Unimplemented { .. }
+        | WebPushError::InvalidEndpoint
+        | WebPushError::InvalidKey
+        | WebPushError::InvalidAuthSecret
+        | WebPushError::InvalidSubject
+        | WebPushError::TooLarge
+        | WebPushError::Clock
+        | WebPushError::InvalidNotice => NotifyError::Unrepresentable {
+            what: DIRECT_REQUEST,
+        },
+    }
+}
+
+/// [`unformed`] for the dispatcher's own errors. The match names every variant.
+fn not_formed(error: DispatchError) -> NotifyError {
+    match error {
+        DispatchError::WebPush(error) => unformed(error),
+        DispatchError::Notify(error) => error,
+        DispatchError::Unimplemented { .. }
+        | DispatchError::NoMessageId
+        | DispatchError::NotANoticeStream
+        | DispatchError::Fenced { .. }
+        | DispatchError::NotCommitted { .. }
+        | DispatchError::JournalUnavailable => NotifyError::Unrepresentable {
+            what: DIRECT_REQUEST,
+        },
     }
 }
 
@@ -358,8 +523,11 @@ impl WebPushSwitch {
         self,
         audience: &[(&'a str, PushChannel)],
     ) -> Result<Vec<(&'a str, PushChannel)>, DispatchError> {
-        let _ = audience;
-        Err(DispatchError::Unimplemented { story: "E8-10" })
+        Ok(audience
+            .iter()
+            .copied()
+            .filter(|(_, channel)| self == Self::On || *channel != PushChannel::WebPush)
+            .collect())
     }
 }
 

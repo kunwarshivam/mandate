@@ -18,6 +18,10 @@ pub enum ResearchRunError {
     /// A window, a deadline, or an instant outside the representable range.
     #[error("an instant outside the representable range")]
     TimeOutOfRange,
+    /// An agentic run's step out of its order: a turn after the run stopped, a reply for a turn
+    /// not asked for, results that are not the dispatch's calls, or a second end (§6.9).
+    #[error("out of the loop's order: {what}")]
+    LoopOrder { what: &'static str },
 }
 
 impl ResearchRunError {
@@ -27,6 +31,7 @@ impl ResearchRunError {
             Self::InvalidId { .. } => "invalid_id",
             Self::ObservationsMismatch { .. } => "observations_mismatch",
             Self::TimeOutOfRange => "time_out_of_range",
+            Self::LoopOrder { .. } => "loop_order",
         }
     }
 }

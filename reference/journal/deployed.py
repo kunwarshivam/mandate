@@ -1,4 +1,4 @@
-"""Journal spec v0.52 §9.24's reference vectors (DEC-1171): `AgentDeployed` version 2, which names
+"""Journal spec v0.54 §9.24's reference vectors (DEC-1171): `AgentDeployed` version 2, which names
 the connection of the stored mandate document its version names, so the deployment manager (§9.21)
 learns a deployment's account from the control stream alone.
 
@@ -51,7 +51,7 @@ from control import (
     violations,
 )
 
-SPEC = "docs/specs/journal.md v0.52 §9.24 (DEC-1171)"
+SPEC = "docs/specs/journal.md v0.54 §9.24 (DEC-1171)"
 AT = "2026-10-17T16:00:00.000000000Z"
 ARTIFACTS = {name: obj for name, obj in artifacts().items() if name in ("mandate_document", "deployment_record")}
 DOCUMENT = ARTIFACTS["mandate_document"]

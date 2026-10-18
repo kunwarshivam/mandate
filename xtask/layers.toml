@@ -605,7 +605,17 @@ allowed_external = ["thiserror"]
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["secrecy", "thiserror"]
+allowed_external = ["ring", "secrecy", "thiserror"]
+
+# The workspace vault behind `SecretSource` (E21-32, DEC-977): the local vault and OpenBao. Above
+# mandate-vault-local, whose store it adapts. No runtime, scheduler, or connector may take it: an
+# executor gets its token through the process that leases it (V3, E21-9), and a runtime reads no
+# credential at all (CN-4).
+[crates.mandate-vault]
+layer = 8
+safety_critical = true
+pure = false
+allowed_external = ["base64", "reqwest", "ring", "rustls", "secrecy", "serde_json", "thiserror", "tokio"]
 
 [crates.mandate-alpaca]
 layer = 7
