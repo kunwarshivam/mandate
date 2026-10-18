@@ -7,9 +7,11 @@ by a recorder: once as a dry run, which must call nothing, and once for real aga
 fake Cloudflare API, which must put each secret only on a process's stdin.
 """
 
+import ast
 import base64
 import copy
 import importlib.util
+import inspect
 import io
 import json
 import os
@@ -485,15 +487,7 @@ def test_recorded_cluster_puts_every_secret_on_stdin_only(isolated, monkeypatch)
     monkeypatch.setattr(
         cell1, "open_kube_tunnel", lambda argv: type("P", (), {"terminate": lambda s: None})()
     )
-    published = tmp_path / "PUBLISHED"
-    published.write_text(
-        "ghcr.io/kunwarshivam/mandate/mandate@sha256:"
-        + "a" * 64
-        + "  mandate\n"
-        + "ghcr.io/kunwarshivam/mandate/mandate-agentd@sha256:"
-        + "b" * 64
-        + "  mandate-agentd\n"
-    )
+    published = write_published(tmp_path)
     out = io.StringIO()
     argv = ["cluster", *HOSTED_ARGS, *secret_files(tmp_path), "--published", str(published)]
     assert cell1.main(argv, io.StringIO()) == 1, "cluster runs only with --accept-dev-tier"
@@ -789,8 +783,23 @@ def test_hosted_cluster_refuses_without_an_archive(isolated, monkeypatch, capsys
     assert calls(log) == []
 
 
+def write_published(tmp_path: Path) -> Path:
+    """A release run's PUBLISHED list naming the mandate image's multi-arch index exactly once."""
+    published = tmp_path / "PUBLISHED"
+    published.write_text(
+        "ghcr.io/kunwarshivam/mandate/mandate@sha256:"
+        + "a" * 64
+        + "  mandate\n"
+        + "ghcr.io/kunwarshivam/mandate/mandate-agentd@sha256:"
+        + "b" * 64
+        + "  mandate-agentd\n"
+    )
+    return published
+
+
 def real_all(tmp_path: Path, key: Path) -> list[str]:
-    return ["all", *HOSTED_ARGS, *secret_files(tmp_path), "--ssh-public-key", str(key), "--published", "PUBLISHED"]
+    published = write_published(tmp_path)
+    return ["all", *HOSTED_ARGS, *secret_files(tmp_path), "--ssh-public-key", str(key), "--published", str(published)]
 
 
 def drop_flag(argv: list[str], flag: str) -> list[str]:
@@ -831,23 +840,80 @@ def test_real_all_without_the_dev_tier_answer_refuses_up_front(isolated, monkeyp
     assert "--accept-dev-tier is required" in err
 
 
-SECRET_FLAGS = {
-    "--ghcr-token-file": "ghcr",
-    "--cf-token-file": "cf",
-    "--r2-access-key-id-file": "r2-id",
-    "--r2-secret-access-key-file": "r2-key",
-    "--archive-access-key-id-file": "archive-id",
-    "--archive-secret-access-key-file": "archive-key",
-}
+SECRET_FLAGS = sorted("--" + attr.replace("_", "-") for attr, _ in cell1.CLUSTER_SECRET_FILES)
 
 
-def test_the_pre_flight_checks_every_secret_file_cluster_reads():
-    """The pre-flight's list is exactly the secret files `cluster` reads on cell #1."""
-    flags = {"--" + attr.replace("_", "-") for attr, _ in cell1.CLUSTER_SECRET_FILES}
-    assert flags == set(SECRET_FLAGS)
+def called_functions(name: str) -> set[str]:
+    """`name` and every module-level function of cell1.py it reaches by a direct call."""
+    tree = ast.parse(inspect.getsource(cell1))
+    defs = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    seen, todo = set(), [name]
+    while todo:
+        current = todo.pop()
+        if current in seen or current not in defs:
+            continue
+        seen.add(current)
+        for node in ast.walk(defs[current]):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                todo.append(node.func.id)
+    return seen
 
 
-@pytest.mark.parametrize("flag", sorted(SECRET_FLAGS))
+def secret_file_reads(function_names: set[str]) -> list[tuple[str, str]]:
+    """Each `secret_file(plan, <path>, ...)` call in those functions, as (function, path source)."""
+    tree = ast.parse(inspect.getsource(cell1))
+    found = []
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in function_names:
+            for call in ast.walk(node):
+                if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "secret_file":
+                    found.append((node.name, ast.unparse(call.args[1])))
+    return found
+
+
+def unlisted_secret_reads(function_names: set[str]) -> list[str]:
+    """Secret files read outside `CLUSTER_SECRET_FILES`: a read names `args.<flag>` for a flag in the
+    table, or is the table loop in `hosted_cluster_inputs`."""
+    table = {attr for attr, _ in cell1.CLUSTER_SECRET_FILES}
+    problems = []
+    for function, path in secret_file_reads(function_names):
+        if function == "hosted_cluster_inputs" and path == "getattr(args, flag)":
+            continue
+        if path.startswith("args.") and path[len("args.") :] in table:
+            continue
+        problems.append(f"{function} reads {path}")
+    return problems
+
+
+def test_cluster_and_the_pre_flight_read_secret_files_only_from_one_table():
+    """`cluster` and the pre-flight both read their secret files through `hosted_cluster_inputs`,
+    which iterates `CLUSTER_SECRET_FILES`, so the pre-flight cannot miss one `cluster` reads."""
+    reached = called_functions("step_cluster")
+    assert "hosted_cluster_inputs" in reached
+    assert "hosted_cluster_inputs" in called_functions("preflight")
+    assert unlisted_secret_reads(reached) == []
+    reads = secret_file_reads(reached)
+    assert ("hosted_cluster_inputs", "getattr(args, flag)") in reads
+    assert ("cloudflare_client", "args.cf_token_file") in reads
+
+
+def test_unlisted_secret_reads_catches_a_seeded_read(monkeypatch):
+    """The source check fails on a secret file read beside the table."""
+    seeded = inspect.getsource(cell1).replace(
+        "    held = hosted_cluster_inputs(plan, args) if hosted else {}\n",
+        "    held = hosted_cluster_inputs(plan, args) if hosted else {}\n"
+        "    secret_file(plan, args.extra_token_file, 'an extra token')\n",
+    )
+    assert seeded != inspect.getsource(cell1)
+    monkeypatch.setattr(inspect, "getsource", lambda _module: seeded)
+    assert unlisted_secret_reads(called_functions("step_cluster")) == ["step_cluster reads args.extra_token_file"]
+
+
+def flag_value(argv: list[str], flag: str) -> str:
+    return argv[argv.index(flag) + 1]
+
+
+@pytest.mark.parametrize("flag", SECRET_FLAGS)
 @pytest.mark.parametrize("fault", ["missing", "readable"])
 def test_real_all_refuses_up_front_without_a_private_secret_file(isolated, monkeypatch, capsys, flag, fault):
     tmp_path, log, key = isolated
@@ -857,18 +923,117 @@ def test_real_all_refuses_up_front_without_a_private_secret_file(isolated, monke
         argv = drop_flag(argv, flag)
         expected = "no file given"
     else:
-        (tmp_path / f"{SECRET_FLAGS[flag]}.secret").chmod(0o644)
+        Path(flag_value(argv, flag)).chmod(0o644)
         expected = "chmod 600"
     assert expected in refused_before_any_step(argv, log, capsys)
 
 
-def test_the_pre_flight_leaves_dry_runs_and_k3d_alone(isolated, monkeypatch):
-    """A dry run still prints every step up to `cluster`'s refusal, and k3d needs none of it."""
+@pytest.mark.parametrize(
+    "flag, expected",
+    [
+        ("--ghcr-user", "--ghcr-user is required"),
+        ("--r2-endpoint", "--r2-endpoint is required"),
+        ("--published", "--published is required"),
+        ("--ssh-public-key", "--ssh-public-key is required"),
+    ],
+)
+def test_real_all_refuses_up_front_without_what_a_later_step_requires(
+    isolated, monkeypatch, capsys, flag, expected
+):
+    """Each of these is refused by `droplets`, `nodes` or `cluster` only after `cloudflare` and
+    `droplets` would have spent money; the pre-flight refuses first."""
+    tmp_path, log, key = isolated
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", no_network)
+    argv = drop_flag([*real_all(tmp_path, key), "--accept-dev-tier"], flag)
+    assert expected in refused_before_any_step(argv, log, capsys)
+
+
+@pytest.mark.parametrize(
+    "fault, expected",
+    [
+        ("absent", "No such file or directory"),
+        ("directory", "Is a directory"),
+        ("binary", "is not a text file"),
+        ("no mandate line", "exactly once"),
+        ("mandate twice", "exactly once"),
+        ("tag, not digest", "exactly once"),
+    ],
+)
+def test_real_all_refuses_up_front_with_a_bad_published_list(isolated, monkeypatch, capsys, fault, expected):
+    """`cluster` would refuse a PUBLISHED list it cannot read, or one that does not name the mandate
+    image's multi-arch index by digest exactly once, after `droplets` had spent money."""
+    tmp_path, log, key = isolated
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", no_network)
+    argv = [*real_all(tmp_path, key), "--accept-dev-tier"]
+    published = Path(flag_value(argv, "--published"))
+    good = published.read_text()
+    mandate_line = good.splitlines()[0] + "\n"
+    if fault == "absent":
+        published.unlink()
+    elif fault == "directory":
+        published.unlink()
+        published.mkdir()
+    elif fault == "binary":
+        published.write_bytes(b"\xff\xfe\x00")
+    elif fault == "no mandate line":
+        published.write_text(good.replace(mandate_line, ""))
+    elif fault == "mandate twice":
+        published.write_text(good + mandate_line)
+    else:
+        published.write_text("ghcr.io/kunwarshivam/mandate/mandate:latest  mandate\n")
+    err = refused_before_any_step(argv, log, capsys)
+    assert expected in err and str(published) in err, err
+
+
+def test_real_all_refuses_up_front_a_private_key_for_the_public_one(isolated, monkeypatch, capsys):
+    """`nodes` needs the `.pub` beside the private key ssh uses; a key file without the suffix
+    would pass `droplets` and then stop `nodes` with the droplets already bought."""
+    tmp_path, log, key = isolated
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", no_network)
+    bare = tmp_path / "id_ed25519"
+    bare.write_text(KEY + "\n")
+    argv = [*real_all(tmp_path, key), "--accept-dev-tier"]
+    argv[argv.index(str(key))] = str(bare)
+    assert "the .pub beside the private key" in refused_before_any_step(argv, log, capsys)
+
+
+def test_droplets_alone_refuses_a_key_without_the_pub_suffix(isolated, monkeypatch, capsys):
+    """`droplets` refuses it too, in the pre-flight and in the step itself."""
+    tmp_path, log, _ = isolated
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", no_network)
+    bare = tmp_path / "id_ed25519"
+    bare.write_text(KEY + "\n")
+    argv = ["droplets", *HOSTED_ARGS, *secret_files(tmp_path), "--ssh-public-key", str(bare)]
+    assert "the .pub beside the private key" in refused_before_any_step(argv, log, capsys)
+    args = cell1.parser().parse_args(argv)
+    with pytest.raises(cell1.Refused, match=r"the \.pub beside the private key"):
+        cell1.step_droplets(cell1.Plan(False, io.StringIO()), args)
+    assert calls(log) == []
+
+
+def test_the_pre_flight_leaves_dry_runs_alone(isolated, monkeypatch):
+    """A dry run still prints every step up to `cluster`'s refusal."""
     tmp_path, log, key = isolated
     monkeypatch.setattr(cell1.urllib.request, "urlopen", no_network)
     out = io.StringIO()
     assert cell1.main(["--dry-run", *without_archive(real_all(tmp_path, key))], out) == 1
     assert "+ doctl compute droplet create cell1-a" in out.getvalue()
+    assert calls(log) == []
+
+
+def test_the_pre_flight_leaves_k3d_alone(isolated):
+    """k3d needs none of cell #1's inputs: a real k3d `all` with none of them passes the
+    pre-flight, as does a hosted dry run."""
+    _, log, _ = isolated
+    every_step = ["cloudflare", "droplets", "nodes", "cluster", "check"]
+    for argv, order in (
+        (["--target", "k3d", "all"], ["nodes", "cluster", "check"]),
+        (["--dry-run", "all"], every_step),
+    ):
+        args = cell1.parser().parse_args(argv)
+        assert cell1.preflight(cell1.Plan(args.dry_run, io.StringIO()), args, order) is None, argv
+    with pytest.raises(cell1.Refused):
+        cell1.preflight(cell1.Plan(False, io.StringIO()), cell1.parser().parse_args(["all"]), every_step)
     assert calls(log) == []
 
 

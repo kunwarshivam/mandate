@@ -434,11 +434,17 @@ def write_private(path: Path, content: str) -> None:
         f.write(content)
 
 
+def ssh_public_key_named(args) -> None:
+    """`droplets` installs the key and `nodes` then uses the private key beside it, so both need
+    the `.pub` file itself."""
+    if not args.ssh_public_key or not args.ssh_public_key.endswith(".pub"):
+        raise Refused("--ssh-public-key is required: the .pub beside the private key ssh uses")
+
+
 def step_droplets(plan: Plan, args) -> None:
     """The tag and the firewall first, so no droplet is ever up without it; then the VPC, the SSH
     key, the volumes, the server and, once its private address is known, the agent."""
-    if not args.ssh_public_key:
-        raise Refused("--ssh-public-key is required")
+    ssh_public_key_named(args)
     try:
         public_key = Path(args.ssh_public_key).expanduser().read_text().strip()
     except OSError as error:
@@ -654,8 +660,7 @@ def step_nodes(plan: Plan, args) -> None:
         return
     if not args.zone:
         raise Refused("--zone is required")
-    if not args.ssh_public_key or not args.ssh_public_key.endswith(".pub"):
-        raise Refused("--ssh-public-key is required: the .pub beside the private key ssh uses")
+    ssh_public_key_named(args)
     identity = str(Path(args.ssh_public_key).expanduser())[: -len(".pub")]
     plan.say("The agent's private address")
     found = plan.lines(
@@ -934,8 +939,16 @@ def images(plan: Plan, args) -> dict[str, str]:
         return {
             "mandate": placeholder("ghcr.io/kunwarshivam/mandate/mandate@sha256:... from " + args.published)
         }
+    try:
+        listed = Path(args.published).expanduser().read_text()
+    except OSError as error:
+        raise Refused(
+            f"--published {args.published}: {error.strerror or error}; give the release run's PUBLISHED file"
+        ) from None
+    except UnicodeDecodeError:
+        raise Refused(f"--published {args.published} is not a text file") from None
     refs = []
-    for line in Path(args.published).read_text().splitlines():
+    for line in listed.splitlines():
         fields = line.split()
         if (
             len(fields) == 2
@@ -963,6 +976,8 @@ def require_dev_tier(plan: Plan, args) -> None:
         )
 
 
+#: Every secret file `cluster` reads on cell #1, in its order; `hosted_cluster_inputs` reads them
+#: all from this table, for `cluster` and for the pre-flight alike.
 CLUSTER_SECRET_FILES = (
     ("ghcr_token_file", "the GHCR read:packages token"),
     ("cf_token_file", "the Cloudflare API token"),
@@ -973,17 +988,34 @@ CLUSTER_SECRET_FILES = (
 )
 
 
+def hosted_cluster_inputs(plan: Plan, args) -> dict[str, str]:
+    """What `cluster` needs from the founder on cell #1 besides the archive and the images: the
+    GHCR user, every secret file in `CLUSTER_SECRET_FILES` (keyed by its flag), and the R2
+    endpoint."""
+    if not args.ghcr_user:
+        raise Refused("--ghcr-user is required: the GitHub account the read:packages token belongs to")
+    held = {flag: secret_file(plan, getattr(args, flag), what) for flag, what in CLUSTER_SECRET_FILES}
+    if not args.r2_endpoint:
+        raise Refused("--r2-endpoint is required: https://<account id>.r2.cloudflarestorage.com")
+    return held
+
+
 def preflight(plan: Plan, args, order: list[str]) -> None:
-    """A real hosted run that reaches `cluster` refuses before its first step, with the messages
-    `cluster` would give, so `all` never buys droplets for a cluster step that cannot run: the
-    dev-tier answer, the founder's archive (DEC-2006), and each secret file `cluster` reads, in its
-    order. `cluster` checks them all again itself."""
-    if args.target != "hosted" or plan.dry_run or "cluster" not in order:
+    """A real hosted run refuses before its first step, with the messages the later steps would
+    give, so `all` never buys droplets for a step that cannot run: the `.pub` key `droplets` and
+    `nodes` use and, when it reaches `cluster`, the dev-tier answer, the founder's archive
+    (DEC-2006), the GHCR user, each secret file `cluster` reads, the R2 endpoint, and the
+    PUBLISHED list. Each step checks its own again itself."""
+    if args.target != "hosted" or plan.dry_run:
+        return
+    if "droplets" in order or "nodes" in order:
+        ssh_public_key_named(args)
+    if "cluster" not in order:
         return
     require_dev_tier(plan, args)
     hosted_archive(args)
-    for flag, what in CLUSTER_SECRET_FILES:
-        secret_file(plan, getattr(args, flag), what)
+    hosted_cluster_inputs(plan, args)
+    images(plan, args)
 
 
 def step_cluster(plan: Plan, args) -> None:
@@ -996,6 +1028,7 @@ def step_cluster(plan: Plan, args) -> None:
     kubeconfig = STATE / ("kubeconfig" if hosted else "kubeconfig-k3d")
     tunnel = None
     picked = images(plan, args)
+    held = hosted_cluster_inputs(plan, args) if hosted else {}
     try:
         if hosted:
             if not args.zone:
@@ -1024,26 +1057,15 @@ def step_cluster(plan: Plan, args) -> None:
         )
         names = CONFIG["secrets"]
         if hosted:
-            user = args.ghcr_user or ""
-            if not user:
-                raise Refused(
-                    "--ghcr-user is required: the GitHub account the read:packages token belongs to"
-                )
-            token = secret_file(plan, args.ghcr_token_file, "the GHCR read:packages token")
-            auth = base64.b64encode(f"{user}:{token}".encode()).decode()
+            auth = base64.b64encode(f"{args.ghcr_user}:{held['ghcr_token_file']}".encode()).decode()
             plan.secret(auth)
             config = json.dumps({"auths": {"ghcr.io": {"auth": auth}}})
             cf = cloudflare_client(plan, args)
             app = CONFIG["tunnels"]["app"]["name"]
             tunnel_token = cf.token_of(cf.tunnel(app), app)
-            key_id = secret_file(plan, args.r2_access_key_id_file, "the R2 access key id")
-            key = secret_file(plan, args.r2_secret_access_key_file, "the R2 secret access key")
-            if not args.r2_endpoint:
-                raise Refused("--r2-endpoint is required: https://<account id>.r2.cloudflarestorage.com")
-            archive_id = secret_file(plan, args.archive_access_key_id_file, "the archive's access key id")
-            archive_key = secret_file(
-                plan, args.archive_secret_access_key_file, "the archive's secret access key"
-            )
+            key_id, key = held["r2_access_key_id_file"], held["r2_secret_access_key_file"]
+            archive_id = held["archive_access_key_id_file"]
+            archive_key = held["archive_secret_access_key_file"]
         else:
             config = json.dumps({"auths": {}})
             tunnel_token = ""
