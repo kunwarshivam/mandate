@@ -79,6 +79,8 @@ const GUARDED_DIRS: [&str; 2] = [".github/workflows", ".github/scripts"];
 ///   pins the job's shape (#1700).
 /// - `main.rs`'s nextest command removes every `PROPTEST_*` variable by name, and `release.rs`'s
 ///   refusal reads the environment's names only (DEC-2027); neither reads a value.
+/// - `gitops.rs`'s `WorkloadSecrets` derives `Debug` over fields of its `Secret` type, whose
+///   `Debug` writes `<redacted>`; its mask test decodes and compares `add_mask`'s output.
 /// - `merge.yml`'s `RUN_PRS` is the JSON list of the pull request numbers a `workflow_run` names,
 ///   which the event holds in public.
 const ALLOWED: &[(&str, &str, &str)] = &[
@@ -107,6 +109,26 @@ const ALLOWED: &[(&str, &str, &str)] = &[
         "L10",
         "xtask/src/release.rs",
         "env::vars_os().filter_map(|(name, _)| name.into_string().ok()),",
+    ),
+    (
+        "L10",
+        "xtask/src/gitops.rs",
+        "pub(crate) archive_secret_access_key: Secret,",
+    ),
+    (
+        "L10",
+        "xtask/src/gitops.rs",
+        "pub(crate) tunnel_token: Secret,",
+    ),
+    (
+        "L10",
+        "xtask/src/gitops.rs",
+        "let data = line.strip_prefix(\"::add-mask::\").unwrap_or(\"<no prefix>\");",
+    ),
+    (
+        "L10",
+        "xtask/src/gitops.rs",
+        "\"::add-mask::a%0Db%0Ac%250Ad%25\"",
     ),
     (
         "L3",
@@ -283,16 +305,18 @@ pub(crate) fn rust_findings(sources: &[Source]) -> Vec<Finding> {
                      secret with `.ok()` first, or name it by a literal that names no secret",
                 );
             }
-            if trimmed.starts_with("#[derive(")
-                && trimmed.contains("Debug")
-                && let Some(field) = secret_field(&lines, index)
-            {
-                found.push(Finding {
-                    rule: "L10",
-                    path: source.path.clone(),
-                    line: field,
-                    why: "a struct with a secret field derives no `Debug`",
-                });
+            if trimmed.starts_with("#[derive(") && trimmed.contains("Debug") {
+                for field in secret_fields(&lines, index) {
+                    let text = lines.get(field).map(|line| line.trim()).unwrap_or_default();
+                    if !ALLOWED.contains(&("L10", source.path.as_str(), text)) {
+                        found.push(Finding {
+                            rule: "L10",
+                            path: source.path.clone(),
+                            line: field.saturating_add(1),
+                            why: "a struct with a secret field derives no `Debug`",
+                        });
+                    }
+                }
             }
             for why in hits {
                 if !ALLOWED.contains(&("L10", source.path.as_str(), trimmed)) {
@@ -337,9 +361,10 @@ fn var_context(text: &str) -> bool {
     wrapped && !safe_literal
 }
 
-/// The 1-based line of the first secret-named field of the struct a `#[derive(..Debug..)]` at
+/// The 0-based lines of every secret-named field of the struct a `#[derive(..Debug..)]` at
 /// `index` decorates, if it decorates a struct with braces.
-fn secret_field(lines: &[&str], index: usize) -> Option<usize> {
+fn secret_fields(lines: &[&str], index: usize) -> Vec<usize> {
+    let mut out = Vec::new();
     let mut at = index.saturating_add(1);
     while lines
         .get(at)
@@ -347,16 +372,18 @@ fn secret_field(lines: &[&str], index: usize) -> Option<usize> {
     {
         at = at.saturating_add(1);
     }
-    let header = lines.get(at)?;
+    let Some(header) = lines.get(at) else {
+        return out;
+    };
     if !(header.contains("struct ") && header.trim_end().ends_with('{')) {
-        return None;
+        return out;
     }
     let indent = header.len().saturating_sub(header.trim_start().len());
     for (offset, line) in lines.iter().enumerate().skip(at.saturating_add(1)) {
         let trimmed = line.trim();
         if trimmed.starts_with('}') && line.len().saturating_sub(line.trim_start().len()) <= indent
         {
-            return None;
+            return out;
         }
         let name = trimmed
             .trim_start_matches("pub(crate) ")
@@ -372,22 +399,15 @@ fn secret_field(lines: &[&str], index: usize) -> Option<usize> {
                 .filter(|word| **word != "key")
                 .any(|word| name.contains(word))
         {
-            return Some(offset.saturating_add(1));
+            out.push(offset);
         }
     }
-    None
+    out
 }
 
 /// The `::add-mask::` workflow command for `value`, escaped as the runner reads it: `%` to `%25`
 /// first, then CR to `%0D` and LF to `%0A`, so no byte of the value can end the command or start
 /// another (DEC-2032, L8). The one way xtask writes it.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the one way xtask may write `::add-mask::` (L10); no xtask command masks a value yet"
-    )
-)]
 pub(crate) fn add_mask(value: &str) -> String {
     let escaped = value
         .replace('%', "%25")

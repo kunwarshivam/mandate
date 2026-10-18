@@ -2,13 +2,15 @@
 # API host behind the tunnel and Access. The Spaces subscription is per account but is counted
 # here as well, so neither environment undercounts. api.owlhead.ai is DEC-822's host: an apply
 # refuses to create its record while the founder's hand-made record still exists, which the
-# runbook says to remove first. The providers read their credentials from the environment
-# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, CLOUDFLARE_API_TOKEN),
-# which only infra.yml's jobs under infra-production receive.
+# runbook says to remove first. DigitalOcean's provider reads its credentials from the environment
+# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
+# token as a variable; only infra.yml's job under infra-production receives either.
 
 provider "digitalocean" {}
 
-provider "cloudflare" {}
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
+}
 
 locals {
   environment = "production"

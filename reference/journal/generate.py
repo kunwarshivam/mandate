@@ -32,6 +32,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import account
+import acknowledgments
 import approval
 import audit
 import backtest_records
@@ -3859,6 +3860,7 @@ def render(
     invalidation_section: dict,
     deployed_section: dict,
     risk_limits_section: dict,
+    acknowledgments_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3896,6 +3898,7 @@ def render(
             "thesis_invalidation": invalidation_section,
             "agent_deployed": deployed_section,
             "risk_limits": risk_limits_section,
+            "acknowledgments": acknowledgments_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3964,6 +3967,7 @@ def main(argv: list[str] | None = None) -> int:
     invalidation_section = invalidation.build_section()
     deployed_section = deployed.build_section()
     risk_limits_section = risk_limits.build_section()
+    acknowledgments_section = acknowledgments.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4003,6 +4007,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += deployed.run_mutants(deployed_section)
     problems += risk_limits.check_section(risk_limits_section)
     problems += risk_limits.run_mutants(risk_limits_section)
+    problems += acknowledgments.check_section(acknowledgments_section)
+    problems += acknowledgments.run_mutants(acknowledgments_section)
     problems += check_broker_profile(broker_profile)
     problems += run_broker_profile_mutants(broker_profile)
     problems += connections.check_section(connections_section)
@@ -4071,6 +4077,7 @@ def main(argv: list[str] | None = None) -> int:
         invalidation_section,
         deployed_section,
         risk_limits_section,
+        acknowledgments_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -4107,6 +4114,7 @@ def main(argv: list[str] | None = None) -> int:
         or invalidation.check_section(reread["thesis_invalidation"])
         or deployed.check_section(reread["agent_deployed"])
         or risk_limits.check_section(reread["risk_limits"])
+        or acknowledgments.check_section(reread["acknowledgments"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -4188,6 +4196,12 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(risk_limits_section['drafts'])} risk-limit drafts, {len(risk_limits_section['invalid_drafts'])} invalid and "
         f"{len(risk_limits_section['valid_drafts'])} valid; {len(risk_limits.VALIDATOR_MUTANTS)} validator and "
         f"{len(risk_limits.vector_mutants(risk_limits_section))} vector mutants caught; "
+        f"{len(acknowledgments_section['invalid_drafts'])} invalid and {len(acknowledgments_section['valid_drafts'])} valid "
+        f"acknowledgment drafts, {len(acknowledgments_section['streams'])} rule-240 and rule-241 streams, "
+        f"{len(acknowledgments_section['executor'])} executor judgments, {acknowledgments_section['fuzz']['runs']} fuzzed "
+        f"orderings judged by an independent oracle, {len(acknowledgments.VALIDATOR_MUTANTS)} seeded, "
+        f"{len(acknowledgments.INVARIANT_MUTANTS)} fuzz and "
+        f"{len(acknowledgments.vector_mutants(acknowledgments_section))} vector mutants caught; "
         f"{len(broker_profile['invalid_drafts'])} invalid broker-profile registrations and "
         f"{len(broker_profile['invalid_artifacts'])} invalid profiles, 2 validator and 3 vector mutants caught; "
         f"{len(connections_section['drafts'])} connection drafts, {len(connections_section['invalid_drafts'])} invalid and "
