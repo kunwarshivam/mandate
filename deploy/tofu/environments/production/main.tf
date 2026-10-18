@@ -42,7 +42,7 @@ module "cloudflare" {
   account_id            = var.cloudflare_account_id
   zone_name             = "owlhead.ai"
   api_hostname          = "api.owlhead.ai"
-  api_origin            = "http://127.0.0.1:8080"
+  api_origin            = var.api_origin
   access_allowed_emails = var.access_allowed_emails
   archive_bucket        = "mandate-journal-archive-${local.environment}"
 }
@@ -61,6 +61,18 @@ output "archive_bucket" {
 
 output "archive_endpoint" {
   value = module.cloudflare.archive_endpoint
+}
+
+output "archive_destination_path" {
+  value = "s3://${module.cloudflare.archive_bucket}/journal-db"
+}
+
+output "archive_jurisdiction" {
+  value = module.cloudflare.archive_jurisdiction
+}
+
+output "cloudflare_account_id" {
+  value = var.cloudflare_account_id
 }
 
 output "tunnel_id" {
