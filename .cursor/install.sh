@@ -140,7 +140,7 @@ if [ -x "/usr/lib/postgresql/$PG_MAJOR/bin/postgres" ]; then
 fi
 
 # Cursor's agent hooks add the invoking user's email as a Co-authored-by trailer on agent commits.
-# The founder does not want that address in the history, and CI rejects the trailer (spec guard).
+# Disabling it keeps that address off agent commits; CI no longer checks for it (DEC-2601).
 for hook in "$HOME"/.cursor/agent-hooks/*/commit-msg.cursor.co-author; do
   [ -e "$hook" ] && chmod -x "$hook"
 done

@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # The short path's checks for a documentation-only change (DEC-112), mirroring xtask's
-# `spec-guard` and `commit-trailers` parts so a docs PR needs no Rust toolchain:
+# `spec-guard` part so a docs PR needs no Rust toolchain:
 #   1. `typos` over the repository (the same binary and config `xtask ci lint` uses);
 #   2. protected paths (ES-22) changed only with a DEC-<n> cited in the PR description or a commit;
-#   3. no `Co-authored-by` trailer on any commit;
-#   4. no two decision files with one DEC number (`decision-numbers.sh`, DEC-2600 item 3).
+#   3. no two decision files with one DEC number (`decision-numbers.sh`, DEC-2600 item 3).
 # Usage: MANDATE_PR_BODY=<body> docs-checks.sh   (the base is `base-ref.sh`'s, as xtask chooses it)
 set -euo pipefail
 base=$("$(dirname "$0")/base-ref.sh")
@@ -13,7 +12,7 @@ echo "    $ typos"
 typos || problems=1
 "$(dirname "$0")/decision-numbers.sh" || problems=1
 if [ -z "$base" ]; then
-  echo "    spec-guard, commit-trailers: HEAD is the base; nothing to check"
+  echo "    spec-guard: HEAD is the base; nothing to check"
   [ "$problems" -eq 0 ] && echo "    docs checks passed" || exit 1
   exit 0
 fi
@@ -31,12 +30,4 @@ $(git log --format=%B "$merge_base..HEAD")"
 else
   echo "    spec-guard: no protected paths changed"
 fi
-while IFS= read -r line; do
-  sha=${line%% *}
-  trailer=${line#* }
-  if [ -n "$(echo "$trailer" | tr -d '[:space:]')" ] && [ "$trailer" != "$sha" ]; then
-    echo "    commit-trailers: commit $sha has a Co-authored-by trailer; remove it" >&2
-    problems=1
-  fi
-done < <(git log --format='%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)' "$merge_base..HEAD")
 [ "$problems" -eq 0 ] && echo "    docs checks passed" || exit 1
