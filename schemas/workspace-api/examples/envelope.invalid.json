@@ -1775,6 +1775,32 @@
     "valid",
     "mutant_value"
   ],
+  "StepUpAction": [
+    {
+      "kind": "approve"
+    },
+    {
+      "digest": "sha256:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+    },
+    {
+      "kind": "halt_lift",
+      "digest": "sha256:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+    },
+    {
+      "kind": "mutant_value",
+      "digest": "sha256:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+    },
+    {
+      "kind": "approve",
+      "digest": "sha256:5E"
+    },
+    {
+      "kind": "approve",
+      "digest": "sha256:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+      "workspace_id": "01JB3K6F0C9R2V7N4M8Q1T5W3Y"
+    },
+    "approve"
+  ],
   "Record": [
     {
       "artifact": "sha256:abababababababababababababababababababababababababababababababab"

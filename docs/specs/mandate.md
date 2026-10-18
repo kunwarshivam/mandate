@@ -856,7 +856,7 @@ is admitted again.
 |---|---|---|---|
 | `MandateVersionApplied` | account | A version takes effect or is rejected (§2.2) | agent, old and new version, classification, step-up evidence, allocation change, result and reason |
 | `RiskDayStarted` | account | 00:00 America/New_York | agent, E₀ |
-| `RiskLimitTriggered`, `RiskLimitLifted` | account | A limit or rung changes state | agent, limit (`max_daily_loss`, `drawdown_ladder[i]`, `lifetime_floor`, `tripwire:<id>`), action, reason (`hard_trigger`, `resolved_at_rollover`, `new_day_breach`, `after_reset`, `owner_acknowledged`, `tripwire_condition`), E, H, DD, E₀, C, L, breach time; for a tripwire, its metric, threshold, and the value reached (§6.7) |
+| `RiskLimitTriggered`, `RiskLimitLifted` | account | A limit or rung changes state | agent, limit (`max_daily_loss`, `drawdown_ladder[i]`, `lifetime_floor`, `tripwire:<id>`), action, reason (`hard_trigger`, `hard_breach_pending`, `resolved_at_rollover`, `new_day_breach`, `after_reset`, `owner_acknowledged`, `version_loosened`, `hard_breach_cleared`, `tripwire_condition`), E, H, DD, E₀, C, L, breach time; for a tripwire, its metric, threshold, and the value reached (§6.7) |
 | `HighWaterMarkReset` | account | Owner acknowledgment (§5.8) | agent, old and new H, acknowledging user (opaque), step-up evidence |
 | `AgentModeApplied` | account | The effective mode changes | agent, from, to, restrictions; copied by the agent runtime into the agent stream as `AgentModeChanged` |
 | `KillSwitchActivated` | account | A flatten | scope, initiator, orders canceled, sells submitted or deferred |
