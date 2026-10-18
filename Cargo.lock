@@ -1824,6 +1824,7 @@ dependencies = [
  "mandate-approval",
  "mandate-artifacts-fs",
  "mandate-canon",
+ "mandate-evaluation",
  "mandate-identity",
  "mandate-journal",
  "mandate-journal-cold",
