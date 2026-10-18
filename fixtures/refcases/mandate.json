@@ -13780,7 +13780,7 @@
   {
    "id": "MC-R29",
    "kind": "risk_state",
-   "title": "A cash dividend is income on the ex-date; its payment moves no USD measure",
+   "title": "A cash dividend joins E with the ex-date's first mark; its application and its payment move no USD measure",
    "base": "two_stock_swing",
    "patch": [
     {
@@ -13856,12 +13856,12 @@
      "session": "after_hours",
      "per_share": "0.255",
      "expect": {
-      "agent_equity": "10025.5",
-      "high_water_mark": "10025.5",
+      "agent_equity": "10000",
+      "high_water_mark": "10000",
       "drawdown": "0",
       "day_start_equity": "10000",
-      "daily_pnl": "25.5",
-      "daily_pnl_fraction": "0.00255",
+      "daily_pnl": "0",
+      "daily_pnl_fraction": "0",
       "capital_base": "10000",
       "size_factor": "1",
       "restrictions": [],
@@ -13889,8 +13889,8 @@
      "sane": true,
      "expect": {
       "agent_equity": "10000",
-      "high_water_mark": "10025.5",
-      "drawdown": "0.002543514039",
+      "high_water_mark": "10000",
+      "drawdown": "0",
       "day_start_equity": "10000",
       "daily_pnl": "0",
       "daily_pnl_fraction": "0",
@@ -13917,8 +13917,8 @@
      "session": "regular",
      "expect": {
       "agent_equity": "10000",
-      "high_water_mark": "10025.5",
-      "drawdown": "0.002543514039",
+      "high_water_mark": "10000",
+      "drawdown": "0",
       "day_start_equity": "10000",
       "daily_pnl": "0",
       "daily_pnl_fraction": "0",
@@ -13933,7 +13933,412 @@
      }
     }
    ],
-   "note": "The receivable is round(100 x 0.255, 2) = 25.5, income on the ex-date (trading spec 8.5), so E rises to 10025.5 and H with it. The ex-date's mark, lower by the dividend, returns E to 10000, leaving a drawdown of the dividend's share of H: the receivable is counted before the mark falls, which only tightens. DividendPaid only moves the receivable to cash."
+   "note": "The receivable is round(100 x 0.255, 2) = 25.5, Q being the position at application. Applied at 20:00 before the ex-date, while the last mark is still the cum-dividend close, it changes nothing (MI-33). It joins E with the first counted sane mark after it, the ex-date's, in the same step: 100 x 99.745 + 25.5 - 10000 + 10000 = 10000, so E, H and the drawdown never see the dividend twice. DividendPaid only moves the receivable to cash."
+  },
+  {
+   "id": "MC-R30",
+   "kind": "risk_state",
+   "title": "A dividend applied before the ex-date's mark lifts no rung",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/risk/max_position_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_position_fraction",
+     "value": "1"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_gross_exposure_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/breach_confirm_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/scale_lift_after_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/daily_breach_min_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_daily_loss",
+     "value": "0.5"
+    }
+   ],
+   "initial": {
+    "position_qty": "100",
+    "avg_cost": "100",
+    "asset_class": "us_equity",
+    "at": "2026-09-21T14:00:00.000000000Z",
+    "inherited_loss_usd": "0"
+   },
+   "steps": [
+    {
+     "event": "mark",
+     "at": "2026-09-21T14:01:00.000000000Z",
+     "bid": "96.9",
+     "session": "regular",
+     "sane": true,
+     "expect": {
+      "agent_equity": "9690",
+      "high_water_mark": "10000",
+      "drawdown": "0.031",
+      "day_start_equity": "10000",
+      "daily_pnl": "-310",
+      "daily_pnl_fraction": "-0.031",
+      "capital_base": "10000",
+      "size_factor": "0.5",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": [
+       {
+        "type": "RiskLimitTriggered",
+        "limit": "drawdown_ladder[0]",
+        "action": "scale_sizes"
+       }
+      ]
+     }
+    },
+    {
+     "event": "corporate_action_dividend",
+     "at": "2026-09-22T00:00:00.000000000Z",
+     "session": "after_hours",
+     "per_share": "1.2",
+     "expect": {
+      "agent_equity": "9690",
+      "high_water_mark": "10000",
+      "drawdown": "0.031",
+      "day_start_equity": "10000",
+      "daily_pnl": "-310",
+      "daily_pnl_fraction": "-0.031",
+      "capital_base": "10000",
+      "size_factor": "0.5",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [
+       "stale_mark"
+      ],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": [
+       {
+        "type": "InstrumentRestrictionChanged",
+        "restriction": "stale_mark",
+        "reason": "no_sane_mark",
+        "active": true
+       }
+      ]
+     }
+    },
+    {
+     "event": "mark",
+     "at": "2026-09-22T13:35:00.000000000Z",
+     "bid": "95.7",
+     "session": "regular",
+     "sane": true,
+     "expect": {
+      "agent_equity": "9690",
+      "high_water_mark": "10000",
+      "drawdown": "0.031",
+      "day_start_equity": "10000",
+      "daily_pnl": "-310",
+      "daily_pnl_fraction": "-0.031",
+      "capital_base": "10000",
+      "size_factor": "0.5",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": [
+       {
+        "type": "InstrumentRestrictionChanged",
+        "restriction": "stale_mark",
+        "reason": "sane_mark",
+        "active": false
+       }
+      ]
+     }
+    }
+   ],
+   "note": "96.9 is a 3.1% drawdown, past the 0.03 scale_sizes rung. A dividend of 120 counted at application, against the cum-dividend mark, would make E 9810, a 1.9% drawdown below the rung's 0.02 lift level, and lift it for the night; the ex-date's mark of 95.7 would trigger it again. Held until that mark, the dividend arrives with it: E = 9570 + 120 = 9690, still 3.1%, and the rung never moves (MI-33)."
+  },
+  {
+   "id": "MC-R31",
+   "kind": "risk_state",
+   "title": "A 3:2 split at a rung's exact boundary does not clear the breach its confirmation is counting",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/risk/max_position_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_position_fraction",
+     "value": "1"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_gross_exposure_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/scale_lift_after_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/daily_breach_min_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_daily_loss",
+     "value": "0.5"
+    }
+   ],
+   "initial": {
+    "position_qty": "100",
+    "avg_cost": "100",
+    "asset_class": "us_equity",
+    "at": "2026-09-21T14:00:00.000000000Z",
+    "inherited_loss_usd": "0"
+   },
+   "steps": [
+    {
+     "event": "mark",
+     "at": "2026-09-21T14:01:00.000000000Z",
+     "bid": "94",
+     "session": "regular",
+     "sane": true,
+     "expect": {
+      "agent_equity": "9400",
+      "high_water_mark": "10000",
+      "drawdown": "0.06",
+      "day_start_equity": "10000",
+      "daily_pnl": "-600",
+      "daily_pnl_fraction": "-0.06",
+      "capital_base": "10000",
+      "size_factor": "0.5",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [
+       "drawdown_ladder[1]"
+      ],
+      "net_contributed": "10000",
+      "journal": [
+       {
+        "type": "RiskLimitTriggered",
+        "limit": "drawdown_ladder[0]",
+        "action": "scale_sizes"
+       }
+      ]
+     }
+    },
+    {
+     "event": "corporate_action_split",
+     "at": "2026-09-21T14:01:30.000000000Z",
+     "session": "regular",
+     "new": 3,
+     "old": 2,
+     "fractionable": false,
+     "cash_in_lieu_price": null,
+     "expect": {
+      "agent_equity": "9399.9999999999",
+      "high_water_mark": "10000",
+      "drawdown": "0.06",
+      "day_start_equity": "10000",
+      "daily_pnl": "-600.0000000001",
+      "daily_pnl_fraction": "-0.06",
+      "capital_base": "10000",
+      "size_factor": "0.5",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [
+       "drawdown_ladder[1]"
+      ],
+      "net_contributed": "10000",
+      "journal": []
+     }
+    },
+    {
+     "event": "clock",
+     "at": "2026-09-21T14:02:05.000000000Z",
+     "session": "regular",
+     "expect": {
+      "agent_equity": "9399.9999999999",
+      "high_water_mark": "10000",
+      "drawdown": "0.06",
+      "day_start_equity": "10000",
+      "daily_pnl": "-600.0000000001",
+      "daily_pnl_fraction": "-0.06",
+      "capital_base": "10000",
+      "size_factor": "0.5",
+      "restrictions": [
+       "drawdown_exits_only"
+      ],
+      "agent_mode": "exits_only",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": [
+       {
+        "type": "RiskLimitTriggered",
+        "limit": "drawdown_ladder[1]",
+        "action": "exits_only"
+       },
+       {
+        "type": "AgentModeApplied",
+        "from": "normal",
+        "to": "exits_only"
+       }
+      ]
+     }
+    }
+   ],
+   "note": "94 is a drawdown of exactly 6%, the exits_only rung, whose confirmation needs 60 s. 94 x 2 / 3 rounded half to even would be 62.666666666667 and lift E to 9400.00000000005, clearing the breach and restarting the wait. Rounded toward zero it is 62.666666666666: E = 150 x 62.666666666666 = 9399.9999999999, so the breach holds and the tick 65 s after the mark confirms the rung, as a tick in place of the split would (MI-33)."
+  },
+  {
+   "id": "MC-R32",
+   "kind": "risk_state",
+   "title": "A reverse split that leaves no whole share and posts no price removes the position at 0; a later posting adds nothing",
+   "base": "two_stock_swing",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/risk/max_position_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_position_fraction",
+     "value": "1"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_gross_exposure_usd",
+     "value": "10000"
+    },
+    {
+     "op": "replace",
+     "path": "/risk/breach_confirm_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/scale_lift_after_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/daily_breach_min_s",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/risk/max_daily_loss",
+     "value": "0.5"
+    }
+   ],
+   "initial": {
+    "position_qty": "2",
+    "avg_cost": "100",
+    "asset_class": "us_equity",
+    "at": "2026-09-21T14:00:00.000000000Z",
+    "inherited_loss_usd": "0"
+   },
+   "steps": [
+    {
+     "event": "mark",
+     "at": "2026-09-21T14:01:00.000000000Z",
+     "bid": "100",
+     "session": "regular",
+     "sane": true,
+     "expect": {
+      "agent_equity": "10000",
+      "high_water_mark": "10000",
+      "drawdown": "0",
+      "day_start_equity": "10000",
+      "daily_pnl": "0",
+      "daily_pnl_fraction": "0",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": []
+     }
+    },
+    {
+     "event": "corporate_action_split",
+     "at": "2026-09-22T00:00:00.000000000Z",
+     "session": "after_hours",
+     "new": 1,
+     "old": 3,
+     "fractionable": false,
+     "cash_in_lieu_price": null,
+     "expect": {
+      "agent_equity": "9800",
+      "high_water_mark": "10000",
+      "drawdown": "0.02",
+      "day_start_equity": "10000",
+      "daily_pnl": "-200",
+      "daily_pnl_fraction": "-0.02",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": []
+     }
+    },
+    {
+     "event": "cash_in_lieu_posted",
+     "at": "2026-09-22T13:35:00.000000000Z",
+     "session": "regular",
+     "expect": {
+      "agent_equity": "9800",
+      "high_water_mark": "10000",
+      "drawdown": "0.02",
+      "day_start_equity": "10000",
+      "daily_pnl": "-200",
+      "daily_pnl_fraction": "-0.02",
+      "capital_base": "10000",
+      "size_factor": "1",
+      "restrictions": [],
+      "agent_mode": "normal",
+      "instrument_restrictions": [],
+      "pending": [],
+      "net_contributed": "10000",
+      "journal": []
+     }
+    }
+   ],
+   "note": "Q_raw = 2 / 3, so Q' = 0 and the whole basis, 200, is removed. No price is posted, so cash in lieu is 0 and E falls by 2 x 100 to 9800. The broker's later CashInLieuPosted changes no figure, whatever it pays: cash the risk state never booked stays out of E, and the difference is the reconciliation's (MI-33)."
   },
   {
    "id": "MC-T01",
