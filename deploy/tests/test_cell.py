@@ -1221,6 +1221,14 @@ def test_stub_sidecar():
         ["-f", str(CELL / "values" / "managed.yaml"), "--set", f"images.stub-issuer={STUB}"],
         [
             "-f",
+            str(CELL / "values" / "k3s.yaml"),
+            "-f",
+            str(CELL.parent / "hosted" / "values" / "cell1.yaml"),
+            "--set",
+            f"images.stub-issuer={STUB}",
+        ],
+        [
+            "-f",
             str(CELL / "values" / "k3d.yaml"),
             *every_image(),
             "--set",
