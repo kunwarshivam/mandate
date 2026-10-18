@@ -42,6 +42,14 @@ TOOLS+=(
   "flux 2.9.6 https://github.com/fluxcd/flux2/releases/download/v2.9.6/flux_2.9.6_linux_amd64.tar.gz b4d22673e9246cbd628881f1a9ef3b090085dced291e42d804555cee8e8d42c5 flux"
 )
 
+# The hosted environments' OpenTofu and its linter (E21-56, DEC-2012 item 2), with the versions in
+# ci.yml. tflint publishes only zip archives, so it is unpacked with Python's zipfile.
+TOOLS+=(
+  "tofu 1.13.1 https://github.com/opentofu/opentofu/releases/download/v1.13.1/tofu_1.13.1_linux_amd64.tar.gz 378ada19d4bc70c43732004e8159be771b23b9a5afdf059e5f8a2b3fa2c70a69 tofu"
+)
+TFLINT_VERSION="0.64.0"
+TFLINT_SHA256="cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537"
+
 installed_version() {
   case "$1" in
     cargo-deny) cargo-deny --version 2>/dev/null | awk '{print $2}' ;;
@@ -53,6 +61,7 @@ installed_version() {
     flux) flux version --client 2>/dev/null | awk '{sub(/^v/, "", $2); print $2}' ;;
     cargo-mutants) cargo-mutants mutants --version 2>/dev/null | awk '{print $2}' ;;
     kubeconform) kubeconform -v 2>/dev/null | sed 's/^v//' ;;
+    tofu) tofu version 2>/dev/null | awk 'NR==1 {print $2}' | sed 's/^v//' ;;
   esac
 }
 
@@ -77,6 +86,14 @@ for entry in "${TOOLS[@]}"; do
   tar -xzf "$tmp/$name.tgz" -C "$tmp" "$member"
   install -m 0755 "$tmp/$member" "$BIN/$name"
 done
+
+if [ "$(tflint --version 2>/dev/null | awk 'NR==1 {print $3}')" != "$TFLINT_VERSION" ]; then
+  echo "installing tflint $TFLINT_VERSION"
+  curl -sSfL -o "$tmp/tflint.zip" "https://github.com/terraform-linters/tflint/releases/download/v$TFLINT_VERSION/tflint_linux_amd64.zip"
+  echo "$TFLINT_SHA256  $tmp/tflint.zip" | sha256sum --check --quiet
+  python3 -I -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extract("tflint", sys.argv[2])' "$tmp/tflint.zip" "$tmp"
+  install -m 0755 "$tmp/tflint" "$BIN/tflint"
+fi
 
 if [ "$(k3d version 2>/dev/null | awk 'NR==1 {print $3}')" != "v$K3D_VERSION" ]; then
   echo "installing k3d $K3D_VERSION"

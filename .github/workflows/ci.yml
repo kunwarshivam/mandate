@@ -61,6 +61,12 @@ env:
   HELM_SHA256: "86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"
   KUBECONFORM_VERSION: "0.8.0"
   KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
+  # The hosted environments' OpenTofu and tflint (E21-56, DEC-2012 item 2), pinned with
+  # .cursor/install.sh and .github/workflows/infra.yml. tflint publishes only zip archives.
+  TOFU_VERSION: "1.13.1"
+  TOFU_SHA256: "378ada19d4bc70c43732004e8159be771b23b9a5afdf059e5f8a2b3fa2c70a69"
+  TFLINT_VERSION: "0.64.0"
+  TFLINT_SHA256: "cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537"
 
 jobs:
   # DEC-1190. The affected-set selection every scoped job follows: one boolean a job, and the
@@ -384,6 +390,7 @@ jobs:
       MANDATE_S3_ACCESS_KEY_ID: mandate-test
       MANDATE_S3_SECRET_ACCESS_KEY: mandate-test-only
       MANDATE_S3_REQUIRED: "1"
+      MANDATE_TOFU_REQUIRED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -410,6 +417,16 @@ jobs:
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
           tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
+      # `tofu`, the credential-free checks of deploy/tofu/ (E21-56, DEC-2013): fmt, tflint,
+      # validate, and `tofu test` against mocked providers. No step here holds a cloud credential.
+      - name: Install OpenTofu and tflint (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o tofu.tgz "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz"
+          echo "${TOFU_SHA256}  tofu.tgz" | sha256sum --check
+          tar xzf tofu.tgz tofu && sudo install tofu /usr/local/bin/ && rm tofu tofu.tgz
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o tflint.zip "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_amd64.zip"
+          echo "${TFLINT_SHA256}  tflint.zip" | sha256sum --check
+          unzip tflint.zip tflint && sudo install tflint /usr/local/bin/ && rm tflint tflint.zip
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
