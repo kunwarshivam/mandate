@@ -904,7 +904,8 @@ pub(crate) fn publish_index(root: &Path, out: &Path) -> Result<()> {
 
 /// The charts a hosted cluster installs from `deploy/cell/charts/` (E21-58, DEC-2015 item 3).
 /// `archive-store` is the local cell's test stand-in and is never published (DEC-1050 item 5).
-pub(crate) const HOSTED_CHARTS: [&str; 3] = ["backup-plugin-tls", "journal-db", "workspace"];
+pub(crate) const HOSTED_CHARTS: [&str; 4] =
+    ["backup-plugin-tls", "journal-db", "vault", "workspace"];
 
 /// A published chart's version: its `Chart.yaml` version with the commit's first twelve hex
 /// digits as build metadata, so a chart's tag names the commit it was packaged from.
