@@ -201,7 +201,10 @@ pub struct Proposal {
     pub instrument: InstrumentId,
     pub side: Side,
     pub qty: Qty,
-    pub limit: Price,
+    /// The limit: the proposal's own, or for an owner's exit at the market the floor the owner
+    /// confirmed in the `OwnerExitRequested` it follows from, or none when no floor was confirmed
+    /// (DEC-2033 item 4).
+    pub limit: Option<Price>,
     pub tif: TimeInForce,
     pub purpose: Purpose,
 }
@@ -209,23 +212,19 @@ pub struct Proposal {
 /// The orders one agent's stream proposes, in stream order. An opening or an increase that a later
 /// `KillSwitchActivated`, or a later `AgentModeChanged` to any mode but `normal`, follows is left
 /// out: the agent stopped wanting it before the executor took it, and leaving it out adds no risk
-/// (`AGENTS.md` rule 3; DEC-2033 item 2). An owner's exit at the market is not a proposal this
-/// slice hands, since the core takes only limit orders from a handoff (DEC-2033 item 4).
+/// (`AGENTS.md` rule 3; DEC-2033 item 2). An owner's exit at the market is priced at the floor the
+/// owner confirmed, since the core takes only limit orders from a handoff (DEC-2033 item 4).
 ///
 /// # Errors
-/// [`Unreadable`] for an `IntentProposed` whose members do not read, or that is not a limit order.
+/// [`Unreadable`] for an `IntentProposed` whose members do not read, or that is at the market and
+/// not an owner's exit.
 pub fn proposals(rows: &[FoldedEvent]) -> Result<Vec<Proposal>, Unreadable> {
     let mut proposed: Vec<Proposal> = Vec::new();
     for row in rows {
         let text = |member: &str| row.payload.get(member).and_then(Value::as_str);
         let stops = match row.event_type.as_str() {
-            "IntentProposed"
-                if text("purpose") == Some("owner_exit") && text("type") == Some("market") =>
-            {
-                false
-            }
             "IntentProposed" => {
-                proposed.push(proposal(row)?);
+                proposed.push(proposal(rows, row)?);
                 false
             }
             "KillSwitchActivated" => true,
@@ -239,12 +238,38 @@ pub fn proposals(rows: &[FoldedEvent]) -> Result<Vec<Proposal>, Unreadable> {
     Ok(proposed)
 }
 
-/// An `IntentProposed`'s limit order (journal spec §9.1).
-fn proposal(row: &FoldedEvent) -> Result<Proposal, Unreadable> {
-    let text = |member: &str| row.payload.get(member).and_then(Value::as_str);
-    if text("type") != Some("limit") {
-        return Err(Unreadable);
+/// The floor the owner confirmed for an exit at the market: the `OwnerExitRequested` the proposal
+/// follows from on its causation chain, when it confirmed one (journal spec §9.1 rule 12: the floor
+/// is set exactly when the bid was confirmed).
+fn floor(rows: &[FoldedEvent], proposed: &FoldedEvent) -> Result<Option<Price>, Unreadable> {
+    let mut cause = proposed.causation_id.as_ref();
+    for _ in 0..rows.len() {
+        let Some(row) = cause.and_then(|id| rows.iter().find(|row| &row.event_id == id)) else {
+            return Ok(None);
+        };
+        if row.event_type == "OwnerExitRequested" {
+            return match row.payload.get("floor") {
+                Some(Value::Str(floor)) => Price::parse(floor).map(Some).map_err(|_| Unreadable),
+                Some(Value::Null) => Ok(None),
+                _ => Err(Unreadable),
+            };
+        }
+        cause = row.causation_id.as_ref();
     }
+    Ok(None)
+}
+
+/// An `IntentProposed`'s order (journal spec §9.1): a limit order, or an owner's exit at the
+/// market at its confirmed floor.
+fn proposal(rows: &[FoldedEvent], row: &FoldedEvent) -> Result<Proposal, Unreadable> {
+    let text = |member: &str| row.payload.get(member).and_then(Value::as_str);
+    let limit = match (text("type"), text("purpose")) {
+        (Some("limit"), _) => {
+            Some(Price::parse(text("limit_price").ok_or(Unreadable)?).map_err(|_| Unreadable)?)
+        }
+        (Some("market"), Some("owner_exit")) => floor(rows, row)?,
+        _ => return Err(Unreadable),
+    };
     let side = match text("side") {
         Some("buy") => Side::Buy,
         Some("sell") => Side::Sell,
@@ -270,7 +295,7 @@ fn proposal(row: &FoldedEvent) -> Result<Proposal, Unreadable> {
         instrument: InstrumentId::new(member("instrument_id")?).map_err(|_| Unreadable)?,
         side,
         qty: Qty::parse(member("qty")?).map_err(|_| Unreadable)?,
-        limit: Price::parse(member("limit_price")?).map_err(|_| Unreadable)?,
+        limit,
         tif,
         purpose,
     })
@@ -501,12 +526,56 @@ mod tests {
         Ok(())
     }
 
+    fn requested(id: &str, floor: Option<&str>) -> FoldedEvent {
+        let confirmed = |value: &str| floor.map_or(Value::Null, |_| s(value));
+        row(
+            id,
+            "OwnerExitRequested",
+            Some("command"),
+            &[
+                ("bid", confirmed("150")),
+                ("bid_size", confirmed("100")),
+                ("confirmed", Value::Bool(floor.is_some())),
+                ("floor", floor.map_or(Value::Null, s)),
+                ("scope", s("instrument")),
+                ("step_up", Value::Null),
+                ("step_up_status", s("absent")),
+                ("subject", s("AAPL")),
+                ("user", s("u1")),
+            ],
+        )
+    }
+
+    fn at_market(cause: &str) -> FoldedEvent {
+        let mut proposed = proposed("i1", "owner_exit", "market", "day");
+        proposed.causation_id = Some(EventId(cause.to_owned()));
+        proposed
+    }
+
+    fn limits(rows: &[FoldedEvent]) -> Result<Vec<Option<String>>, Unreadable> {
+        Ok(proposals(rows)?
+            .into_iter()
+            .map(|proposal| proposal.limit.map(|limit| limit.to_string()))
+            .collect())
+    }
+
     #[test]
-    fn only_an_owners_exit_at_the_market_is_passed_over() {
-        assert_eq!(
-            ids(&[proposed("i1", "owner_exit", "market", "day")]),
-            Ok(Vec::new())
-        );
+    fn an_owners_exit_at_the_market_is_priced_at_its_confirmed_floor() -> Result<(), Unreadable> {
+        let floored = [requested("r1", Some("142.5")), at_market("r1")];
+        assert_eq!(limits(&floored)?, [Some("142.5".to_owned())]);
+        let decided = row("d1", "DecisionMade", Some("r1"), &[]);
+        let chained = [requested("r1", Some("142.5")), decided, at_market("d1")];
+        assert_eq!(limits(&chained)?, [Some("142.5".to_owned())]);
+        let unconfirmed = [requested("r1", None), at_market("r1")];
+        assert_eq!(limits(&unconfirmed)?, [None]);
+        assert_eq!(limits(&[at_market("r1")])?, [None]);
+        let other = [requested("r2", Some("142.5")), at_market("r1")];
+        assert_eq!(limits(&other)?, [None]);
+        Ok(())
+    }
+
+    #[test]
+    fn only_an_owners_exit_may_be_at_the_market() {
         assert_eq!(
             ids(&[proposed("i1", "risk_exit", "market", "day")]),
             Err(Unreadable)
@@ -515,5 +584,8 @@ mod tests {
             ids(&[proposed("i1", "owner_exit", "stop", "day")]),
             Err(Unreadable)
         );
+        let mut unreadable = requested("r1", Some("142.5"));
+        unreadable.payload = payload(&[("floor", Value::Bool(true))]);
+        assert_eq!(ids(&[unreadable, at_market("r1")]), Err(Unreadable));
     }
 }

@@ -110,6 +110,9 @@ pub struct ExecutorProcess<S, B> {
     reconcile: bool,
     /// The followed streams that did not read on their last read, each alerted once.
     unreadable: BTreeSet<String>,
+    /// The owner's exits at the market with no confirmed floor to price them at, each alerted once
+    /// and asked again every pass; never dropped, refused or held in silence (DEC-2033 item 4).
+    unpriced: BTreeSet<String>,
     max_chain: usize,
     written_at: UtcNanos,
 }
@@ -138,6 +141,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             outbox: VecDeque::new(),
             reconcile: false,
             unreadable: BTreeSet::new(),
+            unpriced: BTreeSet::new(),
             max_chain: config.max_chain,
             written_at: now,
         };
@@ -424,7 +428,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         self.hand(now, now, Input::Command(command), alerts, 0)
     }
 
-    /// Hands one exit as the handoff the runtime would make in one process (DEC-2033 item 1).
+    /// Hands one exit as the handoff the runtime would make in one process (DEC-2033 item 1). An
+    /// owner's exit at the market with no confirmed floor raises one opaque `owner_exit_unpriced`
+    /// alert naming the intent and stops nothing, since the core takes only limit orders from a
+    /// handoff (DEC-2033 item 4).
     fn take(
         &mut self,
         now: UtcNanos,
@@ -432,6 +439,16 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         proposal: Proposal,
         alerts: &mut Vec<Alert>,
     ) -> bool {
+        let Some(limit) = proposal.limit else {
+            let intent = proposal.intent.0;
+            if self.unpriced.insert(intent.clone()) {
+                alerts.push(Alert {
+                    key: "owner_exit_unpriced",
+                    subject: Some(intent),
+                });
+            }
+            return true;
+        };
         let handoff = IntentHandoff {
             intent_id: IntentId(proposal.intent),
             agent,
@@ -440,7 +457,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 instrument: proposal.instrument,
                 side: proposal.side,
                 qty: proposal.qty,
-                limit: proposal.limit,
+                limit,
                 purpose: proposal.purpose,
                 protection: None,
             },

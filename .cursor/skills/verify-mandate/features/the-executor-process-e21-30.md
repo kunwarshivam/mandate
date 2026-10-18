@@ -14,8 +14,10 @@
   `src/follow.rs` (`agents_of`: the account's agents from version-2 `ConnectionEstablished` and
   `AgentDeployed`; `switches`: an agent stream's `KillSwitchActivated` records with the bid the
   same command's `OwnerExitRequested` confirmed; `proposals`: its `IntentProposed` limit orders,
-  less an opening a later switch or mode change follows, DEC-2033 item 2), and each exit handed
-  once as the runtime's handoff, ready or not (DEC-2033 item 1); `src/paper.rs` (`FixturePaper`, the fixture
+  less an opening a later switch or mode change follows, DEC-2033 item 2, and an owner's exit at
+  the market at the floor its `OwnerExitRequested` confirmed, item 4), and each exit handed once as
+  the runtime's handoff, ready or not (DEC-2033 item 1), an owner's market exit without a floor
+  raising one `owner_exit_unpriced` alert; `src/paper.rs` (`FixturePaper`, the fixture
   paper broker below `mandate-alpaca`'s client, DEC-2007 item 1) and `src/alpaca.rs`
   (`AlpacaBroker`, the client as the process's `Broker`, DEC-2007 item 2), `src/connect.rs`
   (`connect_check`: `StreamOpened` and `ConnectionChecked` for a paper Alpaca connection, DEC-2007
@@ -39,7 +41,11 @@
   `tests/orders.rs`: an exit handed while not ready and decided in the batch that receives it, an
   opening waiting, a mode change keeping an exit, a switch going before another agent's earlier
   exit, a proposal taken once across passes and restarts, every exit in a pass, an unreadable
-  proposal stopping the process, and an owner's market exit not handed.
+  proposal stopping the process, and an owner's market exit going as a limit at its confirmed
+  floor, or without one alerting and stopping nothing. `tests/owner_exits.rs`: over random owner
+  exits, none dropped, refused or held in silence, and no gate check of eligibility, session,
+  conduct, buying power or the day-trade budget failing one. `tests/fixture_only.rs`: the layers
+  entry that leaves the in-process fixture the only broker in reach (DEC-2033 item 7).
   `tests/properties.rs`: over random runs of restarts, crashes at any append, lost journal and
   broker answers and switches, every switch applied exactly once and no account-wide request; and
   a pass with nothing new changing nothing. `src/follow.rs`'s unit tests: each initiator, and the
