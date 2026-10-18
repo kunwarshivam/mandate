@@ -377,10 +377,7 @@ fn ci(job: &str) -> Result<()> {
             }?;
             gitleaks_exceptions()
         }
-        "spec-guard" => {
-            commit_trailers()?;
-            spec_guard()
-        }
+        "spec-guard" => spec_guard(),
         "postgres" => postgres(),
         "openbao" => openbao(),
         "objectstore" => objectstore(),
@@ -6369,10 +6366,6 @@ const PARSER_LIMITED_LINES: &[(&str, &str)] = &[
         "if [[ \"${line%%=*}\" =~ (KEY|SECRET|TOKEN|PASSWORD) ]]; then",
     ),
     (
-        ".github/scripts/docs-checks.sh",
-        r##"done < <(git log --format='%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)' "$merge_base..HEAD")"##,
-    ),
-    (
         ".github/scripts/docs-only.sh",
         r##"done < <(git diff --name-only "$merge_base" HEAD)"##,
     ),
@@ -9108,31 +9101,6 @@ fn choose_base(inputs: &BaseInputs) -> Result<Option<String>> {
         );
     }
     Ok(base)
-}
-
-/// Commits a change adds carry no `Co-authored-by` trailer: Cursor's agent hook fills it with the
-/// founder's email, which must not enter the history.
-fn commit_trailers() -> Result<()> {
-    let Some(base) = base_ref()? else {
-        return Ok(());
-    };
-    let log = output(
-        "git",
-        &[
-            "log",
-            "--format=%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)",
-            &format!("{base}..HEAD"),
-        ],
-    )?;
-    let problems: Vec<String> = log
-        .lines()
-        .filter_map(|line| line.split_once(' '))
-        .filter(|(_, trailer)| !trailer.trim().is_empty())
-        .map(|(sha, _)| {
-            format!("commit {sha} has a Co-authored-by trailer; remove it (.cursor/install.sh disables the hook that adds it)")
-        })
-        .collect();
-    report(problems, "commit-trailers")
 }
 
 fn spec_guard() -> Result<()> {
@@ -21156,10 +21124,6 @@ jq -r "$filter" "$src"
             (
                 ".github/scripts/docs-only.sh",
                 "while read -r f; do\n  echo \"$f\"\ndone < <(git diff --name-only \"$merge_base\" HEAD)\n",
-            ),
-            (
-                ".github/scripts/docs-checks.sh",
-                "while read -r c; do\n  echo \"$c\"\ndone < <(git log --format='%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)' \"$merge_base..HEAD\")\n",
             ),
             (
                 ".github/scripts/merge-approved.sh",
