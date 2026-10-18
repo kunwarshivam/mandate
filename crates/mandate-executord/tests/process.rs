@@ -241,42 +241,65 @@ fn every_switch_waiting_in_a_pass_is_applied_in_it() -> Result<(), Error> {
 }
 
 /// Only the account's agents are followed: an agent deployed on another account's connection asks
-/// this executor nothing.
+/// this executor nothing, while the account's own agent's switch, in the same pass, is applied.
 #[test]
 fn only_the_accounts_agents_are_followed() -> Result<(), Error> {
     let journal = deployed()?;
     connect(&journal, "c3", OTHER_CONNECTION, OTHER_ACCOUNT)?;
     deploy(&journal, "c4", OTHER_AGENT, OTHER_CONNECTION)?;
     kill(&journal, OTHER_AGENT, OTHER_SWITCH)?;
+    kill(&journal, AGENT, SWITCH)?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT]);
+    Ok(())
+}
+
+/// An agent whose deployment stopped is not followed, while another agent on the same connection
+/// still is.
+#[test]
+fn a_stopped_agent_is_not_followed() -> Result<(), Error> {
+    let journal = deployed()?;
+    deploy(&journal, "c3", OTHER_AGENT, "conn1")?;
+    journal.write(
+        CONTROL_STREAM,
+        "c4",
+        "AgentStopped",
+        1,
+        None,
+        object(vec![("agent_id", Value::Str(AGENT.to_owned()))])?,
+    )?;
+    kill(&journal, AGENT, SWITCH)?;
+    kill(&journal, OTHER_AGENT, OTHER_SWITCH)?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [OTHER_AGENT]);
+    Ok(())
+}
+
+/// A revoked connection's agents are not followed until the connection is established again: the
+/// latest establishment or revocation decides (DEC-1171 item 4).
+#[test]
+fn a_revoked_connection_is_followed_again_once_established_again() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.write(
+        CONTROL_STREAM,
+        "c3",
+        "ConnectionRevoked",
+        1,
+        None,
+        object(vec![("connection_id", Value::Str("conn1".to_owned()))])?,
+    )?;
+    kill(&journal, AGENT, SWITCH)?;
     let broker = Paper::new(&journal);
     let mut process = start(&journal, &broker)?;
     process.step(at(NOON)?);
     assert!(journal.switched().is_empty());
-    Ok(())
-}
-
-/// An agent whose deployment stopped, or whose connection was revoked, is not followed.
-#[test]
-fn a_stopped_agent_or_a_revoked_connection_is_not_followed() -> Result<(), Error> {
-    for (event_type, member, subject) in [
-        ("AgentStopped", "agent_id", AGENT),
-        ("ConnectionRevoked", "connection_id", "conn1"),
-    ] {
-        let journal = deployed()?;
-        journal.write(
-            CONTROL_STREAM,
-            "c9",
-            event_type,
-            1,
-            None,
-            object(vec![(member, Value::Str(subject.to_owned()))])?,
-        )?;
-        kill(&journal, AGENT, SWITCH)?;
-        let broker = Paper::new(&journal);
-        let mut process = start(&journal, &broker)?;
-        process.step(at(NOON)?);
-        assert!(journal.switched().is_empty(), "{event_type}");
-    }
+    connect(&journal, "c4", "conn1", "acct1")?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT]);
     Ok(())
 }
 

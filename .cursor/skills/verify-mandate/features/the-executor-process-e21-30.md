@@ -18,9 +18,10 @@
   again without holding the kill switch, a process that is not ready applying the kill switch, a
   switch applied once across passes and restarts, a workspace or connection switch applied to the
   agent alone with no account-wide request, every waiting switch applied in one pass, only the
-  account's agents followed, a stopped agent or a revoked connection not followed, a lost answer
-  written once, a pass going on after a retry, the chain bound, a fence, drain, an unreadable
-  switch stopping the process, and an unreadable control stream holding nothing back for good.
+  account's agents followed, a stopped agent not followed, a revoked connection followed again
+  once established again, a lost answer written once, a pass going on after a retry, the chain
+  bound, a fence, drain, an unreadable switch stopping the process, and an unreadable control
+  stream holding nothing back for good.
   `tests/properties.rs`: over random runs of restarts, crashes at any append, lost journal and
   broker answers and switches, every switch applied exactly once and no account-wide request; and
   a pass with nothing new changing nothing. `src/follow.rs`'s unit tests: each initiator, and the

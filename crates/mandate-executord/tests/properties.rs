@@ -125,8 +125,10 @@ proptest! {
         let mut process = start(&journal, &broker).map_err(|e| TestCaseError::fail(e.to_string()))?;
         let now = at(NOON).map_err(|e| TestCaseError::fail(e.to_string()))?;
         process.step(now);
+        prop_assert!(process.ready(), "the settled process is up and reconciled");
         let rows = journal.rows_of(ACCOUNT_STREAM).len();
         let seen = broker.seen().len();
+        prop_assert!(rows > 0 && seen > 0, "the process journaled and asked the broker something");
         for _ in 0..extra {
             process.step(now);
         }
