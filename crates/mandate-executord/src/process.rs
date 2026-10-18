@@ -9,9 +9,9 @@ use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
     BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
-    ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff, IntentId,
-    KillScope, MandateView, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch,
-    fold, handle,
+    ExecutorError, ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff,
+    IntentId, KillScope, MandateView, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq,
+    WriterEpoch, fold, handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::Price;
@@ -134,6 +134,10 @@ pub struct ExecutorProcess<S, B> {
     reconcile: bool,
     /// The followed streams that did not read on their last read, each alerted once.
     unreadable: BTreeSet<String>,
+    /// The handoffs the core refused for a missing binding-gate input, each alerted once; asked
+    /// again every pass, and never a stop, so the exits behind them still go (`AGENTS.md` rule 13).
+    /// Any other input refused for it stops the process, as every other refusal does.
+    held: BTreeSet<String>,
     max_chain: usize,
     written_at: UtcNanos,
 }
@@ -162,6 +166,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             outbox: VecDeque::new(),
             reconcile: false,
             unreadable: BTreeSet::new(),
+            held: BTreeSet::new(),
             max_chain: config.max_chain,
             written_at: now,
         };
@@ -280,10 +285,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             return alerts;
         }
         for (agent, proposal) in proposed {
-            if !proposal.purpose.adds_risk()
-                && self.lifecycle.permits(Action::RiskExit)
-                && !self.take(now, agent, proposal, &mut alerts)
-            {
+            let action = if proposal.purpose.adds_risk() {
+                Action::Open
+            } else {
+                Action::RiskExit
+            };
+            if self.lifecycle.permits(action) && !self.take(now, agent, proposal, &mut alerts) {
                 return alerts;
             }
         }
@@ -459,6 +466,21 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         proposal: Proposal,
         alerts: &mut Vec<Alert>,
     ) -> bool {
+        let protection = if proposal.purpose.adds_risk() {
+            match self
+                .wiring
+                .protections
+                .protection(&agent, &proposal.instrument, proposal.limit)
+            {
+                Ok(protection) => protection,
+                Err(Unplanned) => {
+                    self.lifecycle.observe(now, Lifecycled::Failed);
+                    return false;
+                }
+            }
+        } else {
+            None
+        };
         let handoff = IntentHandoff {
             intent_id: IntentId(proposal.intent),
             agent,
@@ -469,7 +491,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 qty: proposal.qty,
                 limit: proposal.limit,
                 purpose: proposal.purpose,
-                protection: None,
+                protection,
             },
         };
         self.hand(now, now, Input::Intent(handoff), alerts, 0)
@@ -499,7 +521,19 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.wiring.gate.as_ref(),
         ) {
             Ok(effects) => effects,
-            Err(_) => {
+            Err(error) => {
+                if let (ExecutorError::BindingGateInputMissing, Input::Intent(handoff)) =
+                    (&error, &input)
+                {
+                    let intent = handoff.intent_id.0.0.clone();
+                    if self.held.insert(intent.clone()) {
+                        alerts.push(Alert {
+                            key: "intent_held",
+                            subject: Some(intent),
+                        });
+                    }
+                    return true;
+                }
                 self.lifecycle.observe(now, Lifecycled::Failed);
                 return false;
             }
