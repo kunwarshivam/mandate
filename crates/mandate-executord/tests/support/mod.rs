@@ -788,3 +788,31 @@ pub fn kill_scoped(
         ])?,
     )
 }
+
+/// The runtime's `IntentProposed` of an AAPL limit order (journal spec §9.1).
+pub fn propose(
+    journal: &Journal,
+    agent: &str,
+    id: &str,
+    side: &str,
+    qty: &str,
+    limit: &str,
+    purpose: &str,
+) -> Result<(), Error> {
+    journal.write(
+        &agent_stream(agent),
+        id,
+        "IntentProposed",
+        1,
+        Some("decision"),
+        object(vec![
+            ("instrument_id", text(AAPL)),
+            ("limit_price", text(limit)),
+            ("purpose", text(purpose)),
+            ("qty", text(qty)),
+            ("side", text(side)),
+            ("tif", text("day")),
+            ("type", text("limit")),
+        ])?,
+    )
+}

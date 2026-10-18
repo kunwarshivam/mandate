@@ -1,0 +1,220 @@
+//! The orders the account's agents propose (E21-30, DEC-2032): each exit's `IntentProposed`
+//! handed to the core as the runtime's handoff would be, once, whether or not the process is
+//! ready, kill switches always first, and nothing sent before it is journaled. An opening waits for
+//! the next slice, which hands it with its protection.
+
+mod support;
+
+use mandate_canon::Value;
+use mandate_executor::BrokerRequest;
+use mandate_process::State;
+use support::{
+    ACCOUNT_STREAM, AGENT, Error, Journal, NOON, OTHER_AGENT, Paper, agent_stream, at, deploy,
+    deployed, kill, object, propose, start,
+};
+
+const OPEN: &str = "01JINTENT0000000000000000A";
+const OTHER_EXIT: &str = "01JINTENT0000000000000000B";
+const EXIT: &str = "01JINTENT0000000000000000C";
+const SWITCH: &str = "01JKILL00000000000000000AA";
+
+fn exit(journal: &Journal, agent: &str, id: &str) -> Result<(), Error> {
+    propose(journal, agent, id, "sell", "10", "150", "risk_exit")
+}
+
+fn held(broker: &Paper) -> Result<(), Error> {
+    broker.holding("AAPL", "10")
+}
+
+fn submitted(broker: &Paper) -> Vec<BrokerRequest> {
+    broker
+        .seen()
+        .into_iter()
+        .map(|seen| seen.request)
+        .filter(|request| matches!(request, BrokerRequest::Submit(_)))
+        .collect()
+}
+
+/// An exit is handed whether or not the process is ready: risk reduction never waits on the
+/// startup reconciliation (`AGENTS.md` rule 13).
+#[test]
+fn an_exit_is_handed_while_not_ready() -> Result<(), Error> {
+    let journal = deployed()?;
+    exit(&journal, AGENT, EXIT)?;
+    let broker = Paper::new(&journal);
+    held(&broker)?;
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert!(!process.ready());
+    assert_eq!(journal.received(), [EXIT]);
+    Ok(())
+}
+
+/// An exit is decided by the gate once, in the batch that receives it: the agent holds none of the
+/// account's position here, so the gate refuses it and nothing reaches the broker (trading-domain
+/// spec §9, DEC-410 item 3).
+#[test]
+fn an_exit_is_received_and_decided_in_one_batch() -> Result<(), Error> {
+    let journal = deployed()?;
+    exit(&journal, AGENT, EXIT)?;
+    let broker = Paper::new(&journal);
+    held(&broker)?;
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    process.step(at(NOON)?);
+    let types = journal.types(ACCOUNT_STREAM);
+    let received = types.iter().position(|t| t == "IntentReceived");
+    let decided = types.iter().position(|t| t == "GateDecided");
+    assert_eq!(decided, received.map(|at| at + 1), "{types:?}");
+    assert!(submitted(&broker).is_empty());
+    Ok(())
+}
+
+/// An opening is not handed by this slice: neither received nor sent, and it stops nothing.
+#[test]
+fn an_opening_waits_for_its_protection() -> Result<(), Error> {
+    let journal = deployed()?;
+    propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    process.step(at(NOON)?);
+    assert!(process.ready());
+    assert!(journal.received().is_empty());
+    assert!(submitted(&broker).is_empty());
+    assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
+    Ok(())
+}
+
+/// An exit before a change of the agent's mode is still handed (DEC-2032 item 2).
+#[test]
+fn a_mode_change_keeps_a_waiting_exit() -> Result<(), Error> {
+    let journal = deployed()?;
+    exit(&journal, AGENT, EXIT)?;
+    journal.write(
+        &agent_stream(AGENT),
+        "m1",
+        "AgentModeChanged",
+        1,
+        None,
+        object(vec![
+            ("from", Value::Str("normal".to_owned())),
+            ("to", Value::Str("paused".to_owned())),
+            ("reason", Value::Str("owner".to_owned())),
+        ])?,
+    )?;
+    let broker = Paper::new(&journal);
+    held(&broker)?;
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.received(), [EXIT]);
+    Ok(())
+}
+
+/// Within a pass, a kill switch goes before any other agent's order (ES-06): the switch of one
+/// agent is journaled before the exit another agent proposed earlier is received.
+#[test]
+fn a_kill_switch_goes_before_another_agents_earlier_exit() -> Result<(), Error> {
+    let journal = deployed()?;
+    deploy(&journal, "c3", OTHER_AGENT, "conn1")?;
+    exit(&journal, OTHER_AGENT, OTHER_EXIT)?;
+    kill(&journal, AGENT, SWITCH)?;
+    let broker = Paper::new(&journal);
+    held(&broker)?;
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    let types = journal.types(ACCOUNT_STREAM);
+    let switch = types
+        .iter()
+        .position(|t| t == "KillSwitchActivated")
+        .ok_or("no switch")?;
+    let received = types
+        .iter()
+        .position(|t| t == "IntentReceived")
+        .ok_or("no intent")?;
+    assert!(switch < received, "{types:?}");
+    assert_eq!(journal.received(), [OTHER_EXIT]);
+    Ok(())
+}
+
+/// A proposal is taken once: a second pass and a restart never receive it again (the core's own
+/// intent fold, journal spec §5.2); what the core does with an intent it holds is its own.
+#[test]
+fn a_proposal_is_taken_once_across_passes_and_restarts() -> Result<(), Error> {
+    let journal = deployed()?;
+    exit(&journal, AGENT, EXIT)?;
+    let broker = Paper::new(&journal);
+    held(&broker)?;
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    process.step(at(NOON)?);
+    let mut restarted = start(&journal, &broker)?;
+    restarted.step(at(NOON)?);
+    restarted.step(at(NOON)?);
+    assert_eq!(journal.received(), [EXIT]);
+    Ok(())
+}
+
+/// Every exit waiting in a pass is handed in it, each agent's in its own stream order.
+#[test]
+fn every_exit_waiting_in_a_pass_is_handed_in_it() -> Result<(), Error> {
+    let journal = deployed()?;
+    deploy(&journal, "c3", OTHER_AGENT, "conn1")?;
+    exit(&journal, AGENT, EXIT)?;
+    exit(&journal, OTHER_AGENT, OTHER_EXIT)?;
+    let broker = Paper::new(&journal);
+    held(&broker)?;
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.received(), [EXIT, OTHER_EXIT]);
+    Ok(())
+}
+
+/// A proposal whose members do not read stops the process rather than be skipped (DEC-85).
+#[test]
+fn an_unreadable_proposal_stops_the_process() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.write(
+        &agent_stream(AGENT),
+        EXIT,
+        "IntentProposed",
+        1,
+        Some("decision"),
+        object(vec![("type", Value::Str("limit".to_owned()))])?,
+    )?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert!(matches!(process.lifecycle().state(), State::Exited(_)));
+    assert!(journal.received().is_empty());
+    Ok(())
+}
+
+/// An owner's exit at the market is not handed by this slice, since the core takes only limit
+/// orders from a handoff (DEC-2032 item 4); it is neither received nor sent, and it stops nothing.
+#[test]
+fn an_owner_exit_at_the_market_is_not_handed() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.write(
+        &agent_stream(AGENT),
+        EXIT,
+        "IntentProposed",
+        1,
+        Some("decision"),
+        object(vec![
+            ("instrument_id", Value::Str("AAPL".to_owned())),
+            ("purpose", Value::Str("owner_exit".to_owned())),
+            ("qty", Value::Str("10".to_owned())),
+            ("side", Value::Str("sell".to_owned())),
+            ("tif", Value::Str("day".to_owned())),
+            ("type", Value::Str("market".to_owned())),
+        ])?,
+    )?;
+    let broker = Paper::new(&journal);
+    held(&broker)?;
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert!(journal.received().is_empty());
+    assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
+    Ok(())
+}
