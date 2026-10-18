@@ -51,7 +51,6 @@ fn refused(output: &Output, code: &str) {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn outside_dev_and_ci_it_writes_its_refusal_alone() {
     for tier in [None, Some("staging"), Some("production"), Some("Dev")] {
         refused(&output(stub(tier, "127.0.0.1:8899")), "stub_issuer_tier");
@@ -59,7 +58,6 @@ fn outside_dev_and_ci_it_writes_its_refusal_alone() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_bind_that_is_not_a_loopback_ip_literal_is_refused() {
     for bind in ["0.0.0.0:8899", "localhost:8899", "127.0.0.1:0"] {
         refused(&output(stub(Some("dev"), bind)), "stub_issuer_bind");
@@ -67,7 +65,6 @@ fn a_bind_that_is_not_a_loopback_ip_literal_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_port_in_use_is_refused() {
     let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
     let bind = taken.local_addr().expect("its address").to_string();
@@ -138,7 +135,6 @@ fn started(
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn it_announces_its_issuer_serves_and_stops_on_sigterm_or_sigint_writing_nothing_else() {
     for signal in ["-TERM", "-INT"] {
         let (mut child, mut stdout, addr) = started(&[], "authenticated");
@@ -182,7 +178,6 @@ fn it_announces_its_issuer_serves_and_stops_on_sigterm_or_sigint_writing_nothing
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn the_audience_given_is_announced_and_signed() {
     let (_child, _stdout, addr) = started(&["--audience", "mandate-demo"], "mandate-demo");
     let reply = common::mint(addr, r#"{"subject":"alice"}"#);
