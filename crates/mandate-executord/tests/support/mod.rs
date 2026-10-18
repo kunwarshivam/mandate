@@ -13,18 +13,26 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 use std::time::Duration;
 
-use mandate_accounting::{AssetClass, InstrumentId, Side};
+use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Object, Value, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountRef, AccountScope, AgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
-    BrokerAccount, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest, BrokerUnknown,
-    ConnectorError, EventId, ExecutorConfig, ExitTier, IdGen, InstrumentSnapshot, MandateVersion,
-    MandateView, Seq, WorkspaceId, WriterEpoch,
+    AccountRef, AccountScope, AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
+    BindingGateSource, BrokerAccount, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest,
+    BrokerUnknown, ConnectorError, EventId, ExecutorConfig, ExitTier, IdGen, InstrumentSnapshot,
+    MandateVersion, MandateView, ProtectionPrices, Seq, WorkspaceId, WriterEpoch,
+    equity_bracket_prices,
 };
-use mandate_executord::{Broker, Config, ExecutorProcess, Wiring};
+use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
-use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
+use mandate_num::{Fraction, Price, Qty, Ratio, ShareIncrement, SignedQty, Usd};
+use mandate_risk::spec_types::{GoalState, RiskLimits};
+use mandate_risk::{
+    AccountSnapshot, AccountState as GateAccountState, AgentId as GateAgentId, AgentMode,
+    AgentSnapshot, AssetId, ClientOrderId as GateOrderId, ConductState, DayTradeLedger,
+    DayTradeRegime, EtpClass, Exchange, GateConfig, InstrumentSnapshot as GateInstrumentSnapshot,
+    MarketSnapshot, QuoteCurrency, RiskSnapshot, SaneQuote, ValidatedMandate, WorkingUniverse,
+};
 use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes};
 use mandate_time::UtcNanos;
@@ -603,13 +611,22 @@ pub fn fees() -> Result<mandate_accounting::Config, Error> {
 }
 
 pub fn wiring() -> Result<Wiring, Error> {
+    wired(Box::new(NoFacts), Box::new(TwoPercentStop))
+}
+
+/// The wiring with this gate and these protections.
+pub fn wired(
+    gate: Box<dyn BindingGateSource>,
+    protections: Box<dyn Protections>,
+) -> Result<Wiring, Error> {
     Ok(Wiring {
         ids: Box::new(Ids),
         mandates: Box::new(Mandate),
         instruments: Box::new(Instruments),
         config: config(),
         fees: fees()?,
-        gate: Box::new(NoFacts),
+        gate,
+        protections,
     })
 }
 
@@ -630,10 +647,30 @@ pub fn chained(environment: Environment, max_chain: usize) -> Config {
 }
 
 pub fn start(journal: &Journal, broker: &Paper) -> Result<ExecutorProcess<Journal, Paper>, Error> {
+    start_wired(journal, broker, wiring()?)
+}
+
+/// A process whose gate admits every AAPL opening and protects it 2 % below.
+pub fn start_allowing(
+    journal: &Journal,
+    broker: &Paper,
+) -> Result<ExecutorProcess<Journal, Paper>, Error> {
+    start_wired(
+        journal,
+        broker,
+        wired(Box::new(Allowing), Box::new(TwoPercentStop))?,
+    )
+}
+
+pub fn start_wired(
+    journal: &Journal,
+    broker: &Paper,
+    wiring: Wiring,
+) -> Result<ExecutorProcess<Journal, Paper>, Error> {
     Ok(ExecutorProcess::start(
         journal.clone(),
         broker.clone(),
-        wiring()?,
+        wiring,
         &process_config(Environment::Paper),
         at(NOON)?,
     ))
@@ -789,6 +826,40 @@ pub fn kill_scoped(
     )
 }
 
+/// The mandate's protection, 2 % below and 5 % above the entry, through the same function the
+/// executor derives it with in one process.
+pub struct TwoPercentStop;
+
+impl Protections for TwoPercentStop {
+    fn protection(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+        entry: Price,
+    ) -> Result<Option<ProtectionPrices>, Unplanned> {
+        let stop = Fraction::parse("0.02").map_err(|_| Unplanned)?;
+        let take = Fraction::parse("0.05").map_err(|_| Unplanned)?;
+        let bracket = equity_bracket_prices(entry, stop, Some(take)).map_err(|_| Unplanned)?;
+        Ok(Some(ProtectionPrices {
+            stop: bracket.stop,
+            take_profit: bracket.take_profit,
+        }))
+    }
+}
+
+pub struct CannotProtect;
+
+impl Protections for CannotProtect {
+    fn protection(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+        _entry: Price,
+    ) -> Result<Option<ProtectionPrices>, Unplanned> {
+        Err(Unplanned)
+    }
+}
+
 /// The runtime's `IntentProposed` of an AAPL limit order (journal spec §9.1).
 pub fn propose(
     journal: &Journal,
@@ -815,4 +886,153 @@ pub fn propose(
             ("type", text("limit")),
         ])?,
     )
+}
+
+/// The binding gate's facts for an AAPL opening that every limit admits: a large, empty margin
+/// account, a fresh quote at the order's limit, and a mandate whose limits do not bind.
+pub struct Allowing;
+
+impl BindingGateSource for Allowing {
+    fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        if !request.purpose.adds_risk() {
+            return None;
+        }
+        let asset = AssetId::new(request.instrument.as_str()).ok()?;
+        let now = UtcNanos::parse_rfc3339(NOON).ok()?;
+        let quote_at = UtcNanos::parse_rfc3339("2026-09-21T14:59:59Z").ok()?;
+        let held = Qty::parse("1000000").ok()?;
+        let equity = Usd::parse("1000000000").ok()?;
+        let one = Fraction::parse("1").ok()?;
+        let half = Fraction::parse("0.5").ok()?;
+        let gate_agent = GateAgentId(1);
+        let hash = |digit: &str| format!("sha256:{}", digit.repeat(64));
+        Some(BindingGateInput {
+            config_refs: BindingGateConfigRefs::complete(
+                hash("1"),
+                hash("2"),
+                hash("3"),
+                hash("4"),
+                VERSION,
+            ),
+            now,
+            config: GateConfig {
+                price_floor: Usd::parse("0.01").ok()?,
+                liquidity_floor_usd: Usd::ZERO,
+                crypto_liquidity_floor_usd: Usd::ZERO,
+                collar_liquid_threshold_usd: Usd::ZERO,
+                collar_liquid_x: half,
+                collar_other_x: half,
+                collar_crypto_x: half,
+                collar_passive_band: half,
+                opposite_fill_interval_s: 0,
+                min_resting_time_s: 0,
+                order_to_fill_max: u32::MAX,
+                order_to_fill_min_orders: u32::MAX,
+                order_size_participation: one,
+                daily_participation: one,
+                close_window_minutes: 0,
+                legacy_pdt_equity_threshold: Usd::ZERO,
+                etp_classification_max_age_s: u32::MAX,
+            },
+            mandate: ValidatedMandate::from_validated_parts(
+                RiskLimits {
+                    max_position_usd: equity,
+                    max_position_fraction: one,
+                    max_order_usd: equity,
+                    max_gross_exposure_usd: equity,
+                    max_orders_per_day: u32::MAX,
+                    reentry_cooldown_s: 0,
+                    rebalance_band: one,
+                    breach_confirm_s: 0,
+                    drawdown_ladder: Vec::new(),
+                },
+                GoalState::Running,
+                true,
+                true,
+            ),
+            risk: RiskSnapshot {
+                agent_equity: equity,
+                high_water_mark: equity,
+                day_start_equity: equity,
+                capital_base: equity,
+                inherited_loss: Usd::ZERO,
+                latched: BTreeSet::new(),
+                active_rungs: BTreeMap::new(),
+                size_factor: Ratio::parse("1").ok()?,
+                agent_mode: AgentMode::Normal,
+            },
+            account: AccountSnapshot {
+                account_type: AccountType::Margin,
+                state: GateAccountState::Active,
+                crypto_active: true,
+                regime: DayTradeRegime::IntradayMargin {
+                    maintenance_excess: equity,
+                },
+                equity,
+                prior_close_equity: equity,
+                model_buying_power: equity,
+                broker_buying_power: equity,
+                broker_non_marginable_buying_power: equity,
+                positions: BTreeMap::new(),
+                market_values: BTreeMap::new(),
+                working_orders: BTreeMap::new(),
+                unknown_orders: BTreeSet::new(),
+                related_account_resting: BTreeMap::new(),
+            },
+            agent: AgentSnapshot {
+                agent: gate_agent,
+                mode: AgentMode::Normal,
+                instrument_restrictions: BTreeMap::new(),
+                positions: BTreeMap::new(),
+                market_values: BTreeMap::new(),
+                working_orders: BTreeSet::new(),
+                instrument_groups: BTreeMap::new(),
+                last_exit_fill_at: BTreeMap::new(),
+                orders_today: 0,
+                day_trades: DayTradeLedger::default(),
+            },
+            instrument: GateInstrumentSnapshot {
+                instrument: asset.clone(),
+                asset_class: AssetClass::UsEquity,
+                exchange: Some(Exchange::Nasdaq),
+                status_active: true,
+                tradable: true,
+                fractionable: true,
+                ipo: false,
+                ptp_no_exception: false,
+                etp: EtpClass::Plain,
+                etp_classified_at: Some(now),
+                quote_currency: Some(QuoteCurrency::Usd),
+                prior_close: Some(request.limit),
+                median_dollar_volume_20d: Some(equity),
+                median_dollar_volume_30d: Some(equity),
+                min_order_size: Qty::parse("1").ok()?,
+                qty_increment: Qty::parse("1").ok()?,
+                halted: false,
+                status_feed_current: true,
+            },
+            market: MarketSnapshot {
+                quote: Some(SaneQuote {
+                    bid: request.limit,
+                    ask: request.limit,
+                    at: quote_at,
+                }),
+                last_trade: Some((request.limit, quote_at)),
+                trailing_5m_volume: Some(held),
+                adv_20d: Some(held),
+            },
+            conduct: ConductState::default(),
+            universe: WorkingUniverse::Known {
+                instruments: BTreeSet::from([asset.clone()]),
+                pinned: true,
+            },
+            asset,
+            gate_agent,
+            gate_client_order_id: GateOrderId(1),
+            owner_confirmed_bid: None,
+            fee_reservation: Usd::ZERO,
+            data_profile: "test".to_owned(),
+            feed: "test".to_owned(),
+        })
+    }
 }

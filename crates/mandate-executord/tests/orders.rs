@@ -1,16 +1,18 @@
-//! The orders the account's agents propose (E21-30, DEC-2032): each exit's `IntentProposed`
-//! handed to the core as the runtime's handoff would be, once, whether or not the process is
-//! ready, kill switches always first, and nothing sent before it is journaled. An opening waits for
-//! the next slice, which hands it with its protection.
+//! The orders the account's agents propose (E21-30, DEC-2032): each `IntentProposed` handed to the
+//! core as the runtime's handoff would be, once, an exit whether or not the process is ready and an
+//! opening only while it is and with its mandate's protection, kill switches always first, and
+//! nothing sent before it is journaled.
 
 mod support;
 
 use mandate_canon::Value;
 use mandate_executor::BrokerRequest;
-use mandate_process::State;
+use mandate_executord::Alert;
+use mandate_process::{Exit, State};
 use support::{
-    ACCOUNT_STREAM, AGENT, Error, Journal, NOON, OTHER_AGENT, Paper, agent_stream, at, deploy,
-    deployed, kill, object, propose, start,
+    ACCOUNT_STREAM, AGENT, Allowing, CannotProtect, Error, Journal, NOON, OTHER_AGENT, Paper,
+    agent_stream, at, deploy, deployed, kill, object, propose, start, start_allowing, start_wired,
+    wired,
 };
 
 const OPEN: &str = "01JINTENT0000000000000000A";
@@ -20,6 +22,10 @@ const SWITCH: &str = "01JKILL00000000000000000AA";
 
 fn exit(journal: &Journal, agent: &str, id: &str) -> Result<(), Error> {
     propose(journal, agent, id, "sell", "10", "150", "risk_exit")
+}
+
+fn opening(journal: &Journal, agent: &str, id: &str) -> Result<(), Error> {
+    propose(journal, agent, id, "buy", "10", "150", "open")
 }
 
 fn held(broker: &Paper) -> Result<(), Error> {
@@ -70,27 +76,81 @@ fn an_exit_is_received_and_decided_in_one_batch() -> Result<(), Error> {
     Ok(())
 }
 
-/// An opening is not handed by this slice: neither received nor sent, and it stops nothing.
+/// An opening reaches the broker only after its `OrderSubmitted` is journaled (`AGENTS.md` rule
+/// 5), as a bracket whose stop is the mandate's: 2 % below the 150 limit is 147, and 5 % above is
+/// 157.5.
 #[test]
-fn an_opening_waits_for_its_protection() -> Result<(), Error> {
+fn an_opening_is_journaled_before_it_is_sent_with_its_stop_beside_it() -> Result<(), Error> {
     let journal = deployed()?;
-    propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
+    opening(&journal, AGENT, OPEN)?;
     let broker = Paper::new(&journal);
-    let mut process = start(&journal, &broker)?;
-    process.step(at(NOON)?);
+    let mut process = start_allowing(&journal, &broker)?;
     process.step(at(NOON)?);
     assert!(process.ready());
-    assert!(journal.received().is_empty());
-    assert!(submitted(&broker).is_empty());
-    assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
+    assert_eq!(journal.received(), [OPEN]);
+    let seen = broker.seen();
+    let submits: Vec<_> = seen
+        .iter()
+        .filter(|seen| matches!(seen.request, BrokerRequest::Submit(_)))
+        .collect();
+    assert_eq!(submits.len(), 1, "{:?}", journal.types(ACCOUNT_STREAM));
+    assert!(submits.iter().all(|seen| seen.journaled_first));
+    let Some(BrokerRequest::Submit(order)) = submits.first().map(|seen| seen.request.clone())
+    else {
+        return Err("no submission".into());
+    };
+    let bracket = order.bracket.ok_or("no bracket")?;
+    assert_eq!(bracket.stop.to_string(), "147");
+    assert_eq!(bracket.take_profit.to_string(), "157.5");
     Ok(())
 }
 
-/// An exit before a change of the agent's mode is still handed (DEC-2032 item 2).
+/// A process that is not ready takes no opening, and still applies the kill switch and hands an
+/// exit (design §3.4, `AGENTS.md` rule 13).
 #[test]
-fn a_mode_change_keeps_a_waiting_exit() -> Result<(), Error> {
+fn a_process_that_is_not_ready_takes_no_opening_but_still_switches() -> Result<(), Error> {
     let journal = deployed()?;
-    exit(&journal, AGENT, EXIT)?;
+    opening(&journal, AGENT, OPEN)?;
+    let broker = Paper::new(&journal);
+    broker.holding("AAPL", "10")?;
+    let mut process = start_allowing(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert!(!process.ready());
+    assert!(journal.received().is_empty());
+    kill(&journal, AGENT, SWITCH)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT]);
+    assert!(journal.received().is_empty());
+    assert!(submitted(&broker).is_empty());
+    Ok(())
+}
+
+/// An opening that a later kill switch follows on the same stream is never handed, and the switch
+/// is applied once, across passes and a restart (DEC-2032 item 2, `AGENTS.md` rule 3).
+#[test]
+fn an_opening_before_a_kill_switch_never_goes() -> Result<(), Error> {
+    let journal = deployed()?;
+    opening(&journal, AGENT, OPEN)?;
+    kill(&journal, AGENT, SWITCH)?;
+    let broker = Paper::new(&journal);
+    let mut process = start_allowing(&journal, &broker)?;
+    process.step(at(NOON)?);
+    process.step(at(NOON)?);
+    let mut restarted = start_allowing(&journal, &broker)?;
+    restarted.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT]);
+    assert!(journal.received().is_empty());
+    assert!(submitted(&broker).is_empty());
+    Ok(())
+}
+
+/// An opening that a later change of the agent's mode to anything but `normal` follows is never
+/// handed; an exit before the change still is (DEC-2032 item 2).
+#[test]
+fn a_mode_change_drops_a_waiting_opening_but_not_an_exit() -> Result<(), Error> {
+    let journal = deployed()?;
+    opening(&journal, AGENT, OPEN)?;
+    propose(&journal, AGENT, EXIT, "sell", "5", "150", "risk_exit")?;
     journal.write(
         &agent_stream(AGENT),
         "m1",
@@ -104,10 +164,58 @@ fn a_mode_change_keeps_a_waiting_exit() -> Result<(), Error> {
         ])?,
     )?;
     let broker = Paper::new(&journal);
-    held(&broker)?;
-    let mut process = start(&journal, &broker)?;
+    broker.holding("AAPL", "10")?;
+    let mut process = start_allowing(&journal, &broker)?;
     process.step(at(NOON)?);
     assert_eq!(journal.received(), [EXIT]);
+    Ok(())
+}
+
+/// The gate decides: the process's default wiring has no binding-gate fact, so the core refuses
+/// the opening before anything is journaled. The process holds it, alerts once, and keeps going:
+/// an exit proposed after it is still received (DEC-2032 item 5, `AGENTS.md` rules 3 and 13).
+#[test]
+fn an_opening_without_gate_facts_is_held_and_an_exit_behind_it_still_goes() -> Result<(), Error> {
+    let journal = deployed()?;
+    opening(&journal, AGENT, OPEN)?;
+    propose(&journal, AGENT, EXIT, "sell", "10", "150", "risk_exit")?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    let first = process.step(at(NOON)?);
+    let second = process.step(at(NOON)?);
+    assert!(process.ready());
+    assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
+    assert_eq!(journal.received(), [EXIT]);
+    let held = |alerts: &[Alert]| {
+        alerts
+            .iter()
+            .filter(|alert| alert.key == "intent_held" && alert.subject.as_deref() == Some(OPEN))
+            .count()
+    };
+    assert_eq!((held(&first), held(&second)), (1, 0));
+    Ok(())
+}
+
+/// An opening whose protection cannot be read stops the process before anything is journaled for
+/// it: never an opening handed unprotected (TI-4, DEC-2032 item 3).
+#[test]
+fn an_opening_whose_protection_cannot_be_read_stops_the_process() -> Result<(), Error> {
+    let journal = deployed()?;
+    opening(&journal, AGENT, OPEN)?;
+    let broker = Paper::new(&journal);
+    let wiring = wired(Box::new(Allowing), Box::new(CannotProtect))?;
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    process.step(at(NOON)?);
+    assert!(
+        matches!(
+            process.lifecycle().state(),
+            State::Exited(Exit::CycleFailed)
+        ),
+        "{:?}",
+        journal.types(ACCOUNT_STREAM)
+    );
+    assert!(journal.received().is_empty());
+    assert!(submitted(&broker).is_empty());
     Ok(())
 }
 

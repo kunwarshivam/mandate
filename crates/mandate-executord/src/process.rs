@@ -3,15 +3,18 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::time::Duration;
 
+use mandate_accounting::InstrumentId;
 use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
     BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
     ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff, IntentId,
-    KillScope, MandateView, Ports, ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
+    KillScope, MandateView, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch,
+    fold, handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
+use mandate_num::Price;
 use mandate_process::{Action, Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
@@ -30,7 +33,27 @@ pub trait Broker {
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError>;
 }
 
-/// The executor core's ports for one account.
+/// The protections port could not answer. The process stops rather than hand an opening without
+/// the protection its mandate asks for (TI-4); the restart asks again (DEC-2032 item 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Unplanned;
+
+/// The protective prices an opening is handed with: the mandate's protection for an entry at its
+/// limit, as the order builder derives it in one process, or none when the mandate turns
+/// protection off. `IntentProposed` does not journal them, so the handoff takes them from the
+/// mandate the agent is deployed under (DEC-2032 item 3).
+pub trait Protections {
+    /// # Errors
+    /// [`Unplanned`] when the mandate's protection cannot be read.
+    fn protection(
+        &self,
+        agent: &AgentId,
+        instrument: &InstrumentId,
+        entry: Price,
+    ) -> Result<Option<ProtectionPrices>, Unplanned>;
+}
+
+/// The executor core's ports for one account, with the protections an opening is handed with.
 pub struct Wiring {
     pub ids: Box<dyn IdGen>,
     pub mandates: Box<dyn MandateView>,
@@ -38,6 +61,7 @@ pub struct Wiring {
     pub config: ExecutorConfig,
     pub fees: mandate_accounting::Config,
     pub gate: Box<dyn BindingGateSource>,
+    pub protections: Box<dyn Protections>,
 }
 
 impl Wiring {
@@ -206,8 +230,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// One pass of the loop at the injected time `now`: an input in doubt first, then requests
     /// left unsent and a due reconciliation, then (once started) every kill switch the account's
-    /// agents' streams hold that the fold has not applied, then the latest tick, then every exit
-    /// they propose that the fold has not taken (DEC-2032 item 1). Before the start,
+    /// agents' streams hold that the fold has not applied, then the latest tick, then every order
+    /// they propose that the fold has not taken, an opening or an increase only while ready
+    /// (DEC-2032 item 1). Before the start,
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
     /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
@@ -424,7 +449,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         self.hand(now, now, Input::Command(command), alerts, 0)
     }
 
-    /// Hands one exit as the handoff the runtime would make in one process (DEC-2032 item 1).
+    /// Hands one proposal as the handoff the runtime would make in one process, an opening or an
+    /// increase with its mandate's protection. A protections port that cannot answer stops the
+    /// process rather than hand an opening unprotected (DEC-2032 item 3).
     fn take(
         &mut self,
         now: UtcNanos,

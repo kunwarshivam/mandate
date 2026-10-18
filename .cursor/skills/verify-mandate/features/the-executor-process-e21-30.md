@@ -14,15 +14,18 @@
   `src/follow.rs` (`agents_of`: the account's agents from version-2 `ConnectionEstablished` and
   `AgentDeployed`; `switches`: an agent stream's `KillSwitchActivated` records with the bid the
   same command's `OwnerExitRequested` confirmed; `proposals`: its `IntentProposed` limit orders,
-  less an opening a later switch or mode change follows, DEC-2032 item 2), and each exit handed
-  once as the runtime's handoff, ready or not (DEC-2032 item 1); `src/paper.rs` (`FixturePaper`, the fixture
+  less an opening a later switch or mode change follows, DEC-2032 item 2), and each handed once
+  as the runtime's handoff, an exit ready or not and an opening only once ready with its mandate's
+  protection from the `Protections` port, an unreadable protection stopping the process, and a
+  handoff the gate has no input for held with one `intent_held` alert, DEC-2032 items 1, 3, 5);
+  `src/paper.rs` (`FixturePaper`, the fixture
   paper broker below `mandate-alpaca`'s client, DEC-2007 item 1) and `src/alpaca.rs`
   (`AlpacaBroker`, the client as the process's `Broker`, DEC-2007 item 2), `src/connect.rs`
   (`connect_check`: `StreamOpened` and `ConnectionChecked` for a paper Alpaca connection, DEC-2007
-  item 4), `src/fixture.rs` (the binary's wiring, which admits no opening), and `mandate-store`'s
+  item 4), `src/fixture.rs` (the binary's wiring, which admits no opening and protects none), and `mandate-store`'s
   `draft_bytes_with_pii`; `src/launch.rs` (the account from `run`'s flags or the deployment
   manager's variables) and the `mandate-executord` binary (`run`, `connect-check`, `probe`;
-  SIGTERM drains, DEC-2007 item 3). Openings are slice X1b-2.
+  SIGTERM drains, DEC-2007 item 3).
 - **Tests:** `crates/mandate-executord/tests/process.rs`: paper only, the stream opened once, the
   start waiting for a tick, readiness only after a clean startup reconciliation, a lost read read
   again without holding the kill switch, a process that is not ready applying the kill switch, a
@@ -37,7 +40,10 @@
   bound, a fence, drain, an unreadable switch stopping the process, and an unreadable control
   stream holding nothing back for good.
   `tests/orders.rs`: an exit handed while not ready and decided in the batch that receives it, an
-  opening waiting, a mode change keeping an exit, a switch going before another agent's earlier
+  opening journaled before it is sent with its stop beside it, no opening before ready while the
+  switch still goes, an opening a later switch or mode change follows never going while an exit
+  does, an opening without gate facts held while the exit behind it goes, an unreadable protection
+  stopping the process, a switch going before another agent's earlier
   exit, a proposal taken once across passes and restarts, every exit in a pass, an unreadable
   proposal stopping the process, and an owner's market exit not handed.
   `tests/properties.rs`: over random runs of restarts, crashes at any append, lost journal and

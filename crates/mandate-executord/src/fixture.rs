@@ -7,12 +7,13 @@
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_executor::{
     AgentId, BindingGateInput, BindingGateRequest, BindingGateSource, EventId, ExecutorConfig,
-    ExitTier, IdGen, InstrumentSnapshot, MandateVersion, MandateView, Seq, WriterEpoch,
+    ExitTier, IdGen, InstrumentSnapshot, MandateVersion, MandateView, ProtectionPrices, Seq,
+    WriterEpoch,
 };
-use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Fraction, ShareIncrement};
+use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Fraction, Price, ShareIncrement};
 use mandate_time::{Date, TradingCalendar};
 
-use crate::Wiring;
+use crate::{Protections, Unplanned, Wiring};
 
 /// The account stream's deterministic event ids: space `1`, then epoch, head, and ordinal, 26
 /// digits as a ULID is (the agent stream's runtime uses space `0`).
@@ -67,6 +68,21 @@ impl BindingGateSource for NoFacts {
     }
 }
 
+/// No mandate version, so no protection to read. An opening handed without one is held at the
+/// gate all the same, since [`NoFacts`] admits none (DEC-2032 item 3).
+struct NoProtection;
+
+impl Protections for NoProtection {
+    fn protection(
+        &self,
+        _agent: &AgentId,
+        _instrument: &InstrumentId,
+        _entry: Price,
+    ) -> Result<Option<ProtectionPrices>, Unplanned> {
+        Ok(None)
+    }
+}
+
 /// The fixture wiring.
 ///
 /// # Errors
@@ -79,6 +95,7 @@ pub fn wiring() -> Result<Wiring, &'static str> {
         config: ExecutorConfig::PROPOSED,
         fees: fees().ok_or("fee_config_invalid")?,
         gate: Box::new(NoFacts),
+        protections: Box::new(NoProtection),
     })
 }
 
