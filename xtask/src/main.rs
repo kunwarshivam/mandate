@@ -747,7 +747,8 @@ fn tofu_checks() -> Result<()> {
         return Ok(());
     }
     let tofu_root = repo_root()?.join(TOFU_DIR);
-    let forbidden = tofu_forbidden_blocks(&tofu_sources(&tofu_root)?);
+    let mut forbidden = tofu_symlinks(&tofu_root)?;
+    forbidden.extend(tofu_forbidden_blocks(&tofu_sources(&tofu_root)?));
     if !forbidden.is_empty() {
         bail!("tofu:\n  {}", forbidden.join("\n  "));
     }
@@ -884,6 +885,9 @@ fn tofu_forbidden_blocks(files: &[(String, String)]) -> Vec<String> {
             let mut refuse = |why: &str| {
                 problems.push(format!("{path}:{number}: {why} (DEC-2014)"));
             };
+            if raw.contains('\\') {
+                refuse("holds a backslash, an escape the scan would not decode");
+            }
             if whole_words(&line, "provisioner").next().is_some() {
                 refuse("names `provisioner`, which deploy/tofu never may");
             }
@@ -908,6 +912,34 @@ fn tofu_forbidden_blocks(files: &[(String, String)]) -> Vec<String> {
         }
     }
     problems
+}
+
+/// Every symlink under `dir`, `.terraform` working directories aside: a link could point the raw
+/// scan at one file and OpenTofu at another, so `deploy/tofu/` holds none (DEC-2014 item 6).
+fn tofu_symlinks(dir: &Path) -> Result<Vec<String>> {
+    let mut links = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
+            let path = entry?.path();
+            if path.file_name().is_some_and(|name| name == ".terraform") {
+                continue;
+            }
+            let kind = fs::symlink_metadata(&path)
+                .with_context(|| format!("reading {}", path.display()))?
+                .file_type();
+            if kind.is_symlink() {
+                links.push(format!(
+                    "{}: a symlink, which deploy/tofu never holds (DEC-2014)",
+                    path.display()
+                ));
+            } else if kind.is_dir() {
+                pending.push(path);
+            }
+        }
+    }
+    links.sort();
+    Ok(links)
 }
 
 /// Every file under `dir` the raw scan reads, with its text: `.tf`, `.tofu`, `.hcl` and `.json`,
@@ -1183,6 +1215,37 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     ),
 ];
 
+/// The only workflow lines that may hold a backslash beside a quote or a `${{` expression, exactly,
+/// after trimming (DEC-2014 item 7): a backslash in a quoted YAML scalar or an expression is an
+/// escape (`\x73ecrets`) or a line continuation the raw scan would not decode, so outside these
+/// reviewed shell lines it is refused.
+const BACKSLASH_WORKFLOW_LINES: &[(&str, &str)] = &[
+    (
+        ".github/workflows/ci.yml",
+        r##"printf 'Affected-set selection (DEC-1190): %s\n' "$REASONS" | tee -a "$GITHUB_STEP_SUMMARY""##,
+    ),
+    (
+        ".github/workflows/ci.yml",
+        r##"printf 'mutants=0\nshards=[]\ntotal=0\n' >> "$GITHUB_OUTPUT""##,
+    ),
+    (
+        ".github/workflows/codeql.yml",
+        r##"echo 'If you are using a "manual" build mode for one or more of the' \"##,
+    ),
+    (
+        ".github/workflows/codeql.yml",
+        r##"'languages you are analyzing, replace this with the commands to build' \"##,
+    ),
+    (
+        ".github/workflows/merge.yml",
+        r##"prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \"##,
+    ),
+    (
+        ".github/workflows/web-e2e.yml",
+        r##"run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
+    ),
+];
+
 /// Every line of `file` that names `secrets`, `environment` or `inherit` as a whole word, case
 /// aside and comments included, and is not one of [`GUARDED_WORKFLOW_LINES`] for that file: raw
 /// text, no parser (DEC-2014 item 7). `inherit` is never allowed, since it passes every secret on
@@ -1201,6 +1264,19 @@ fn guarded_word_problems(file: &CiFile) -> Vec<String> {
         let allowed = GUARDED_WORKFLOW_LINES
             .iter()
             .any(|(path, allowed)| *path == file.path && *allowed == raw.trim());
+        let escaped = raw.contains('\\')
+            && (raw.contains('"') || raw.contains('\'') || raw.contains("${{"))
+            && !BACKSLASH_WORKFLOW_LINES
+                .iter()
+                .any(|(path, allowed)| *path == file.path && *allowed == raw.trim());
+        if escaped {
+            problems.push(format!(
+                "{}:{number}: a backslash beside a quote or an expression, an escape the scan \
+                 would not decode, on a line xtask's BACKSLASH_WORKFLOW_LINES has not reviewed \
+                 (DEC-2014)",
+                file.path
+            ));
+        }
         if (names("secrets") || names("environment")) && !allowed {
             problems.push(format!(
                 "{}:{number}: names `secrets` or `environment` on a line xtask's \
@@ -10047,7 +10123,7 @@ mod tests {
     use std::env;
     use std::ffi::OsStr;
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{PermissionsExt, symlink};
     use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
     use std::process::{Command, ExitStatus, Stdio};
@@ -10087,7 +10163,9 @@ mod tests {
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
-    use super::{TOFU_DIR, guarded_word_problems, tofu_forbidden_blocks, tofu_sources};
+    use super::{
+        TOFU_DIR, guarded_word_problems, tofu_forbidden_blocks, tofu_sources, tofu_symlinks,
+    };
     use super::{unoptimised_config, unoptimised_packages};
 
     #[test]
@@ -15185,6 +15263,35 @@ mod tests {
             "any JSON file is refused"
         );
         for text in [
+            "data \"ext\\u0065rnal\" \"x\" {}\n",
+            "data \"h\\u0074tp\" \"x\" {}\n",
+            "x = \"a\\nb\"\n",
+        ] {
+            assert!(
+                !one("m/a.tf", text).is_empty(),
+                "{text:?}: a backslash is refused"
+            );
+        }
+        let root = env::temp_dir().join(format!("mandate-tofu-links-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fs::create_dir_all(root.join("modules/x/.terraform"))?;
+        fs::write(root.join("modules/x/main.tf"), "")?;
+        symlink(
+            root.join("modules/x/main.tf"),
+            root.join("modules/x/link.tf"),
+        )?;
+        symlink(root.join("modules/x"), root.join("modules/x/.terraform/ok"))?;
+        let links = tofu_symlinks(&root)?;
+        fs::remove_dir_all(&root)?;
+        assert_eq!(links.len(), 1, "{links:?}");
+        assert!(links[0].contains("link.tf"), "{links:?}");
+        assert_eq!(
+            tofu_symlinks(&repo_root()?.join(TOFU_DIR))?,
+            Vec::<String>::new()
+        );
+        for text in [
             "api_origin = \"http://127.0.0.1:8080\"\n",
             "condition = can(regex(\"^https?://\", var.api_origin))\n",
             "service = \"http_status:404\"\n",
@@ -15228,6 +15335,9 @@ mod tests {
             "jobs:\n  x:\n    environment: infra-\n      ${{ inputs.e }}\n",
             "jobs:\n  x:\n    environment: production\n",
             "# no secrets in this file\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo \"${{ \\x73ecrets.A }}\"\n",
+            "jobs:\n  x:\n    \"envir\\x6fnment\": infra-staging\n",
+            "jobs:\n  x:\n    steps:\n      - run: \"echo ${{ sec\\\n          rets.A }}\"\n",
         ] {
             assert!(!guarded(text).is_empty(), "{text}");
         }
@@ -22293,7 +22403,7 @@ jq -r "$filter" "$src"
             "build-file-unreadable",
             &[(".github/workflows/a.yml", "x\n")],
         )?;
-        std::os::unix::fs::symlink(root.join("missing"), root.join("Makefile"))?;
+        symlink(root.join("missing"), root.join("Makefile"))?;
         fs::write(root.join("justfile"), [0xff_u8, 0xfe, b'\n'])?;
         fs::write(root.join("Dockerfile"), "RUN echo hi\0\n")?;
         let read = ci_files(&root);
