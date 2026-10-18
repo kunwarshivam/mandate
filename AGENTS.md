@@ -211,8 +211,10 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   doctests, pending tests, and the rehearsal and Postgres runs cover only those crates, and a
   crate handed another's binary (`MANDATE_RH_SIM_BIN`) follows that crate.
   `fast-python`, `fast-portable` (the runner's crates), `fast-rh-sim-live`, `full-checks` (any
-  path outside the documentation and `web/`), and `schema-mutants` (`schemas/`, the specs, the
-  backlog, the pinned Python requirements) start only when the diff needs them. Lint, the spec
+  path outside the documentation and `web/`), `schema-mutants` (`schemas/`, the specs, the
+  backlog, the pinned Python requirements), and the five cell jobs (`deploy/`, the cell's Python
+  pins, and any crate the cell's images hold or are built on; DEC-2609) start only when the diff
+  needs them. Lint, the spec
   guard and mutants on the diff of safety-critical crates run as always. `Cargo.lock`, any
   `Cargo.toml`, `rust-toolchain.toml`, `xtask/`, `.github/`, `.cargo/`, `deny.toml`,
   `clippy.toml`, an unknown path, and a run with no diff base select everything. `fast` and

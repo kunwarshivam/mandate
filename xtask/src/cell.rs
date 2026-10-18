@@ -59,6 +59,7 @@ const ARCHIVE_STORE_NAMESPACE: &str = "archive-store";
 /// The workspace vault's chart (E21-32, DEC-2019), in the workspace's namespace, and its one pod.
 pub const VAULT_CHART: &str = "deploy/cell/charts/vault";
 const VAULT_MANAGED_VALUES: &str = "deploy/cell/values/vault-managed.yaml";
+const VAULT_STAGING_VALUES: &str = "deploy/cell/values/vault-staging.yaml";
 const VAULT_POD: &str = "vault-0";
 /// Where under `target/cell` the local cell keeps its vault's one unseal key and root token, mode
 /// 0600. They guard fake secrets only; a hosted cell's are the founder's (DEC-977 item 5).
@@ -313,6 +314,7 @@ pub fn chart_checks() -> Result<()> {
         (PLUGIN_TLS_CHART, "", CNPG_NAMESPACE),
         (VAULT_CHART, "", NAMESPACE),
         (VAULT_CHART, VAULT_MANAGED_VALUES, NAMESPACE),
+        (VAULT_CHART, VAULT_STAGING_VALUES, NAMESPACE),
     ] {
         let mut args = vec![chart];
         if !values.is_empty() {
@@ -511,6 +513,31 @@ fn image_tag() -> Result<String> {
 
 /// The backtest runner (DEC-1144), built with the CLI and copied into its image.
 const RUNNER: &str = "mandate-backtest-runner";
+
+/// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
+/// them.
+const BUILT_PACKAGES: [&str; 5] = [
+    "mandate-cli",
+    RUNNER,
+    "mandate-api-server",
+    "mandate-daemon",
+    "mandate-deployd",
+];
+
+/// The stub issuer's package, which [`build_binary`] adds once [`stub_ready`].
+const STUB_PACKAGE: &str = "mandate-stub-issuer";
+
+/// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
+/// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
+/// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
+pub const IMAGE_PACKAGES: [&str; 6] = [
+    BUILT_PACKAGES[0],
+    BUILT_PACKAGES[1],
+    BUILT_PACKAGES[2],
+    BUILT_PACKAGES[3],
+    BUILT_PACKAGES[4],
+    STUB_PACKAGE,
+];
 
 /// The cell's `api` image, this checkout's build of `mandate-api-server`: none when the cell pulls
 /// its `mandate` image, since no published API image exists yet, so the chart leaves the API out.
@@ -896,22 +923,12 @@ const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 /// assertions are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes
 /// (DEC-464): it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
-    let mut args = vec![
-        "build",
-        "--locked",
-        "--package",
-        "mandate-cli",
-        "--package",
-        RUNNER,
-        "--package",
-        "mandate-api-server",
-        "--package",
-        "mandate-daemon",
-        "--package",
-        "mandate-deployd",
-    ];
+    let mut args = vec!["build", "--locked"];
+    for package in BUILT_PACKAGES {
+        args.extend(["--package", package]);
+    }
     if stub_ready(Path::new(".")) {
-        args.extend(["--package", "mandate-stub-issuer"]);
+        args.extend(["--package", STUB_PACKAGE]);
     }
     args.extend(["--target", STATIC_TRIPLE, "--target-dir", STATIC_TARGET]);
     eprintln!(
@@ -1280,7 +1297,8 @@ fn bao(args: &[&str], stdin: &[u8]) -> Result<(bool, String)> {
 
 /// The workspace vault (E21-32, DEC-2019): installed without `--wait`, since it is ready only once
 /// unsealed, then initialized once with one unseal key, kept with the root token under
-/// `target/cell` (mode 0600; the cell holds fake secrets only), and unsealed with it, the key
+/// `target/cell` (mode 0600, set again on a file that was already there; the cell holds fake
+/// secrets only), and unsealed with it, the key
 /// passed on stdin and never as an argument. A hosted cell is initialized and unsealed by hand
 /// (deploy/cell/README.md, "The vault").
 fn vault() -> Result<()> {
@@ -1328,6 +1346,7 @@ fn vault() -> Result<()> {
             .mode(0o600)
             .open(&init)
             .with_context(|| format!("writing {}", init.display()))?;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
         file.write_all(made.as_bytes())?;
         seal = VaultState::Sealed;
     }
@@ -4315,6 +4334,17 @@ pub fn signed_in(status: u16, reply: &str) -> bool {
                 l.to_ascii_lowercase()
                     .starts_with("set-cookie: __host-mandate_session=")
             })
+}
+
+/// The `name=value` pair of the `__Host-` session cookie an answer to `POST /v1/sessions` sets,
+/// as a `Cookie` header carries it back.
+fn session_cookie(reply: &str) -> Option<String> {
+    reply.split("\r\n\r\n").next()?.lines().find_map(|l| {
+        let (name, value) = l.split_once(':')?;
+        let pair = value.trim().split(';').next()?.trim();
+        (name.eq_ignore_ascii_case("set-cookie") && pair.starts_with("__Host-mandate_session="))
+            .then(|| pair.to_owned())
+    })
 }
 
 /// The body of an HTTP/1.1 reply: what follows its header block.

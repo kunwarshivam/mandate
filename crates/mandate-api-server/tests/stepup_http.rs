@@ -11,9 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use common::{MemJournal, Reply, WORKSPACE, b64url, hosted, send, serve};
 use mandate_api::envelope::StepUpActionKind as WireKind;
-use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
 use mandate_api::problem::{Effect, Problem, ProblemCode, Violation};
-use mandate_api::wire::{Id, decode};
+use mandate_api::wire::decode;
 use mandate_api_server::challenges::{Challenges, HELD, OPERATION, PER_PRINCIPAL};
 use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
 use mandate_api_server::http::{self, App, Settings};
@@ -210,19 +209,38 @@ fn approve(f: &Fixture, cookie: &str, key: &str) -> Reply {
 
 /// §3.4's id for `key` under `principal`, the route's operation, and the hosted workspace.
 fn derived(principal: &str, key: &str) -> String {
-    let workspace = Id::try_from(WORKSPACE.to_owned()).expect("an id");
-    let principal = Id::try_from(principal.to_owned()).expect("an id");
-    let key = IdempotencyKey::parse(key).expect("a key");
-    let id = event_id(&Derivation {
-        workspace: &workspace,
-        principal: &principal,
-        operation: OPERATION,
-        key: &key,
-        position: None,
-    })
-    .expect("an id");
-    let text = String::from_utf8(mandate_api::wire::encode(&id).expect("encodes")).expect("UTF-8");
-    text.trim_matches('"').to_owned()
+    derived_in(WORKSPACE, principal, OPERATION, key)
+}
+
+/// §3.4's derivation written out from the spec, independent of `mandate_api::idempotency`: the
+/// canonical object of four ASCII members in byte order, its SHA-256 by `ring`, and the first 128
+/// bits as 26 Crockford base-32 digits after two zero bits.
+fn derived_in(workspace: &str, principal: &str, operation: &str, key: &str) -> String {
+    let object = format!(
+        r#"{{"key":"{key}","operation":"{operation}","principal":"{principal}","workspace":"{workspace}"}}"#
+    );
+    let sha = ring::digest::digest(&ring::digest::SHA256, object.as_bytes());
+    let (head, _) = sha
+        .as_ref()
+        .split_first_chunk::<16>()
+        .expect("SHA-256 has 32 bytes");
+    let value = u128::from_be_bytes(*head);
+    let digits = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    (0..26_u32)
+        .rev()
+        .map(|place| {
+            char::from(digits[usize::try_from((value >> (5 * place)) & 31).expect("a digit")])
+        })
+        .collect()
+}
+
+/// The oracle reproduces §3.4's worked vector before it is trusted.
+#[test]
+fn the_derivation_oracle_reproduces_the_specs_worked_vector() {
+    assert_eq!(
+        derived_in("ws_01", "user_7", "kill_switch", "k1Z-9_aaaaaaaaaa"),
+        "7KXV6BGDW36KYC7RE5BPQG28Z0"
+    );
 }
 
 /// Identity spec §7.2 step 2: SHA-256 of the canonical record, its seven members in byte order,
@@ -295,7 +313,6 @@ fn nothing_journaled(f: &Fixture) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_approver_obtains_the_challenge_bound_to_the_approval_it_names() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -340,7 +357,6 @@ fn an_approver_obtains_the_challenge_bound_to_the_approval_it_names() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn each_kind_is_bound_into_the_record_the_authenticator_signs() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -364,7 +380,6 @@ fn each_kind_is_bound_into_the_record_the_authenticator_signs() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_principal_who_may_not_act_cannot_obtain_a_challenge() {
     let f = paper();
     let viewer = signed_in(&f, BOB);
@@ -387,7 +402,6 @@ fn a_principal_who_may_not_act_cannot_obtain_a_challenge() {
 /// one but the two `own` rows' issues a challenge to a principal holding its row, the record
 /// binding that kind.
 #[test]
-#[ignore = "pending E9-4"]
 fn every_kind_the_schema_names_issues_a_challenge_bound_to_it() {
     let schema: serde_json::Value = serde_json::from_str(ENVELOPE).expect("JSON");
     let listed: BTreeSet<String> = schema["$defs"]["StepUpAction"]["properties"]["kind"]["enum"]
@@ -496,7 +510,6 @@ fn the_wire_and_identity_kinds_are_the_same_variants() {
 
 /// A challenge is never kept by a cache between the server and the browser (DEC-2103 item 3).
 #[test]
-#[ignore = "pending E9-4"]
 fn a_challenge_is_answered_no_store() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -510,7 +523,6 @@ fn a_challenge_is_answered_no_store() {
 /// The two `own` rows are authorized at the principal's scope, which their own routes will use;
 /// until then the route answers them the one 404 and issues nothing (DEC-2103 item 1).
 #[test]
-#[ignore = "pending E9-4"]
 fn the_kinds_of_own_rows_wait_for_their_routes() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -522,7 +534,6 @@ fn the_kinds_of_own_rows_wait_for_their_routes() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_reduction_only_session_cannot_obtain_a_challenge() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -544,7 +555,6 @@ fn a_reduction_only_session_cannot_obtain_a_challenge() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_session_the_csrf_mark_and_the_key_come_before_the_body() {
     let f = paper();
     let nowhere = send(f.addr, "GET", "/nowhere", &[], b"");
@@ -611,7 +621,6 @@ fn schema_paths(reply: &Reply) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_body_the_schema_refuses_is_invalid_at_its_member() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -640,7 +649,6 @@ fn a_body_the_schema_refuses_is_invalid_at_its_member() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_retry_answers_the_same_challenge_and_another_action_under_the_key_conflicts() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -671,7 +679,6 @@ fn a_retry_answers_the_same_challenge_and_another_action_under_the_key_conflicts
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_expired_challenge_is_dropped_and_its_key_issues_a_new_one() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -689,7 +696,6 @@ fn an_expired_challenge_is_dropped_and_its_key_issues_a_new_one() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_live_workspace_is_refused_before_any_challenge_is_issued() {
     let f = fixture("live", Challenges::default());
     let cookie = signed_in(&f, ALICE);
@@ -702,6 +708,29 @@ fn a_live_workspace_is_refused_before_any_challenge_is_issued() {
     refused(&approve(&f, &viewer, KEY), 403, ProblemCode::Forbidden);
 }
 
+/// A workspace the server does not host is the one 404, whoever asks, and issues nothing
+/// (workspace API spec §3.3).
+#[test]
+fn another_workspaces_path_is_not_found() {
+    let f = paper();
+    let cookie = format!("{COOKIE_NAME}={}", signed_in(&f, ERIN));
+    let path = "/v1/workspaces/01JB3K6F0C9R2V7N4M8Q1T5W50/step-up/challenges";
+    let reply = send(
+        f.addr,
+        "POST",
+        path,
+        &[
+            ("Origin", APP),
+            ("X-Mandate-Request", "1"),
+            ("Cookie", cookie.as_str()),
+            ("Idempotency-Key", KEY),
+        ],
+        body_for("approve", CONTENT_HASH).as_bytes(),
+    );
+    refused(&reply, 404, ProblemCode::NotFound);
+    nothing_journaled(&f);
+}
+
 #[test]
 fn the_deployment_holds_thirty_two_a_principal_and_four_thousand_ninety_six_in_all() {
     assert_eq!((PER_PRINCIPAL, HELD), (32, 4_096));
@@ -712,7 +741,6 @@ fn keyed(n: usize) -> String {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn past_a_principals_bound_a_request_is_rate_limited_until_one_expires() {
     let f = fixture("paper", Challenges::bounded(3, 10));
     let alice = signed_in(&f, ALICE);
@@ -735,7 +763,6 @@ fn past_a_principals_bound_a_request_is_rate_limited_until_one_expires() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn past_the_stores_bound_a_request_is_rate_limited_for_everyone() {
     let f = fixture("paper", Challenges::bounded(3, 4));
     let alice = signed_in(&f, ALICE);
@@ -762,7 +789,6 @@ fn past_the_stores_bound_a_request_is_rate_limited_for_everyone() {
 /// binds the requester and the requested action and is the model's answer, and the store never
 /// holds more than its bounds, which the model counts from the answers it saw.
 #[test]
-#[ignore = "pending E9-4"]
 fn the_store_answers_as_an_independent_model_of_held_challenges_does() {
     for seed in [1_u64, 7, 2026, 0x5eed] {
         let f = fixture("paper", Challenges::bounded(4, 6));
