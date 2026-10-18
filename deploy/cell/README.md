@@ -207,7 +207,7 @@ The run's own report is the up-to-date list; on 2026-10-18 it read:
 |---|---|---|---|
 | 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found`; the cell's API refusing a read with no session (the one 401) | SI (E21-52, #1591): the stub issuer's entry point; E2E (E21-54): sign in and read the API's own workspace |
 | 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy`, each code shown then typed | SI and W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
-| 3. Research, through the gateway's recorded fake | skipped | Nothing yet | D1: the runtime started; I2 (E19-2): a deployment's research configured (DEC-2208); AH (E19-13): the agentic loop's tools |
+| 3. Research, through the gateway's recorded fake | skipped | Nothing yet | D1: the runtime started; I2 (E19-2): a deployment's research configured (DEC-2208); AH (E19-13): the agentic loop over its state (#1551, #1561, #1566, #1569 on `main`) |
 | 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4, #1592) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
 | 5. A backtest of the same version | skipped | Nothing yet | E2E: run the runner and `mandate backtest record` (#1581) in the gestures' pod; SI: the API read with a session |
 | 6. The kill switch | skipped | Nothing yet | SI and W2: from `web/`; E2E: `mandate agent kill` (#1537) as a gesture; D1 and X: the processes stop on it |

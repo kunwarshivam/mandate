@@ -399,7 +399,10 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                        recorded fake",
                 on_main: "the runtime and its image (#1521, #1560), the research driver in the \
                           runtime behind a deny-all default (#1575), the loop through the \
-                          gateway's recorded fake (#1520), and E19-5's invalidation (#1559)",
+                          gateway's recorded fake (#1520), E19-5's invalidation (#1559), and \
+                          E19-13's agentic run so far: the gateway's tool calls (#1551), its run \
+                          records (#1561), the loop's pure state (#1566) and the runtime's side \
+                          (#1569)",
                 waits: vec![
                     D1_RUNTIME,
                     wait(
@@ -413,7 +416,8 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                         "AH",
                         "E19-13",
                         None,
-                        "the agentic loop's read and think tools (ADR-0005, claim #1534)",
+                        "the agentic loop itself over that state, with its read and think tools \
+                         (ADR-0005, claim #1534)",
                     ),
                 ],
             })],
@@ -864,6 +868,7 @@ pub fn ci() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::Readiness::{Partial, Ready, Skipped};
     use super::*;
 
     fn mandate() -> Vec<u8> {
@@ -1153,7 +1158,6 @@ mod tests {
     fn each_step_reads_ready_partial_or_skipped_from_its_parts() {
         let steps = plan("demo1", &mandate());
         let read: Vec<Readiness> = steps.iter().map(readiness).collect();
-        use Readiness::{Partial, Ready, Skipped};
         assert_eq!(
             read,
             [Partial, Partial, Skipped, Partial, Skipped, Skipped, Ready]
