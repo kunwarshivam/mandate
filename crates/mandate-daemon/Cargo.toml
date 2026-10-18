@@ -12,7 +12,10 @@ workspace = true
 [dependencies]
 mandate-artifacts-fs.workspace = true
 mandate-canon.workspace = true
+mandate-domain.workspace = true
+mandate-gateway.workspace = true
 mandate-journal.workspace = true
+mandate-num.workspace = true
 mandate-process.workspace = true
 mandate-research.workspace = true
 mandate-research-driver.workspace = true
@@ -24,9 +27,7 @@ mandate-time.workspace = true
 tokio = { workspace = true, features = ["rt", "signal"] }
 
 [dev-dependencies]
-mandate-gateway.workspace = true
 mandate-journal-pg.workspace = true
-mandate-num.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

@@ -8,7 +8,6 @@ use mandate_authn::{Algorithm, IssuerConfig, Jwks, TokenKind, UtcNanos, verify};
 use mandate_stub_issuer::serve::MAX_BODY_BYTES;
 
 #[test]
-#[ignore = "pending E21-52"]
 fn the_key_set_is_served_as_json() {
     let (issuer, addr) = serve("authenticated");
     let reply = send(addr, &addr.to_string(), "GET", "/jwks.json", &[], b"");
@@ -28,7 +27,6 @@ fn the_key_set_is_served_as_json() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_json_token_request_gets_a_token_the_server_verifies() {
     let (issuer, addr) = serve("authenticated");
     let reply = mint(addr, r#"{"subject":"alice"}"#);
@@ -46,7 +44,6 @@ fn a_json_token_request_gets_a_token_the_server_verifies() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn json_with_parameters_or_another_case_is_json() {
     let (_, addr) = serve("authenticated");
     for media in [
@@ -67,7 +64,6 @@ fn json_with_parameters_or_another_case_is_json() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn another_host_is_421_for_every_route() {
     let (_, addr) = serve("authenticated");
     let port = addr.port();
@@ -94,7 +90,6 @@ fn another_host_is_421_for_every_route() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_token_request_that_is_not_json_is_415() {
     let (_, addr) = serve("authenticated");
     let body = br#"{"subject":"a"}"#;
@@ -121,7 +116,6 @@ fn a_token_request_that_is_not_json_is_415() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_bad_body_or_subject_is_400() {
     let (_, addr) = serve("authenticated");
     for body in [
@@ -139,7 +133,6 @@ fn a_bad_body_or_subject_is_400() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_body_of_the_limit_is_read_and_one_byte_more_is_413() {
     let (_, addr) = serve("authenticated");
     assert_eq!(MAX_BODY_BYTES, 4096);
@@ -153,7 +146,6 @@ fn a_body_of_the_limit_is_read_and_one_byte_more_is_413() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_subject_of_the_limit_is_signed_over_http() {
     let (_, addr) = serve("authenticated");
     let body = format!(r#"{{"subject":"{}"}}"#, "a".repeat(1024));
@@ -161,7 +153,6 @@ fn a_subject_of_the_limit_is_signed_over_http() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn no_host_two_hosts_or_http_1_0_is_refused() {
     let (_, addr) = serve("authenticated");
     let body = r#"{"subject":"a"}"#;
@@ -182,7 +173,6 @@ fn no_host_two_hosts_or_http_1_0_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn another_host_is_421_before_any_other_answer() {
     let (_, addr) = serve("authenticated");
     let oversize = vec![b' '; MAX_BODY_BYTES + 1];
@@ -228,7 +218,6 @@ fn another_host_is_421_before_any_other_answer() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn every_other_request_is_404_with_no_cors_header() {
     let (_, addr) = serve("authenticated");
     let host = addr.to_string();

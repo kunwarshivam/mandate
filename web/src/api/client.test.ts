@@ -323,6 +323,7 @@ describe("no order ticket (DEC-528)", () => {
     reads: ["emptyWorkspace"],
     session: ["REFRESH_EVERY_MS", "SESSION_LOCK", "createSessionKeeper"],
     types: ["COMMAND_PHASES", "EFFECTS", "STEP_UP_STATUSES"],
+    versions: ["prepareCreateVersion", "readConfirmation", "versionCreated"],
   };
   const MODULES = Object.fromEntries(
     Object.entries(import.meta.glob(["./*.ts", "!./*.test.ts"], { eager: true }) as Record<string, Record<string, unknown>>).map(([path, module]) => [path.replace(/^\.\/(.*)\.ts$/, "$1"), module]),

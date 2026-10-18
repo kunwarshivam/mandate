@@ -1,0 +1,50 @@
+[
+  {
+    "label": "no action",
+    "remove": [
+      "/action"
+    ]
+  },
+  {
+    "label": "a workspace named in the body",
+    "set": {
+      "/workspace_id": "01JB3K6F0C9R2V7N4M8Q1T5W3Y"
+    }
+  },
+  {
+    "label": "a principal named in the action",
+    "set": {
+      "/action/principal_id": "01JB3K6F0C9R2V7N4M8Q1T5W3Z"
+    }
+  },
+  {
+    "label": "no kind",
+    "remove": [
+      "/action/kind"
+    ]
+  },
+  {
+    "label": "no digest",
+    "remove": [
+      "/action/digest"
+    ]
+  },
+  {
+    "label": "an org-scope kind, which this API does not serve",
+    "set": {
+      "/action/kind": "sso_configuration"
+    }
+  },
+  {
+    "label": "a digest in upper case",
+    "set": {
+      "/action/digest": "sha256:5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E"
+    }
+  },
+  {
+    "label": "an action that is not an object",
+    "set": {
+      "/action": "approve"
+    }
+  }
+]
