@@ -19,6 +19,7 @@ mod image;
 mod mail;
 mod mutant_costs;
 mod release;
+mod tofu_audit;
 
 const USAGE: &str = "\
 usage: cargo xtask <command>
@@ -1003,12 +1004,15 @@ fn infra_commands(environment: &str, action: &str, plan_file: &str) -> Result<Ve
             chdir.clone(),
             "init".to_owned(),
             "-input=false".to_owned(),
+            "-no-color".to_owned(),
             "-lockfile=readonly".to_owned(),
         ],
         vec![
             chdir.clone(),
             "plan".to_owned(),
             "-input=false".to_owned(),
+            "-no-color".to_owned(),
+            "-compact-warnings".to_owned(),
             format!("-out={plan_file}"),
         ],
     ];
@@ -1017,6 +1021,8 @@ fn infra_commands(environment: &str, action: &str, plan_file: &str) -> Result<Ve
             chdir,
             "apply".to_owned(),
             "-input=false".to_owned(),
+            "-no-color".to_owned(),
+            "-compact-warnings".to_owned(),
             plan_file.to_owned(),
         ]);
     }
@@ -1027,6 +1033,9 @@ fn infra_commands(environment: &str, action: &str, plan_file: &str) -> Result<Ve
 /// It refuses to run anywhere but a GitHub Actions run on `main`, so the only place it reaches a
 /// cloud account is `infra.yml`'s job, which the founder approves; agents never run it (AGENTS.md
 /// rule 8). The providers and the backend read their credentials from that job's environment.
+/// The public log gets no `tofu` output (DEC-2014 item 4): each command's output is captured,
+/// only a failure's diagnostics, which OpenTofu redacts for every sensitive value, are printed,
+/// and after `plan` the saved plan's addresses and actions alone.
 fn infra() -> Result<()> {
     let actions = env::var("GITHUB_ACTIONS").unwrap_or_default();
     let reference = env::var("GITHUB_REF").unwrap_or_default();
@@ -1041,15 +1050,40 @@ fn infra() -> Result<()> {
     let work = repo_root()?.join("target").join("tofu");
     fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
     let plan_file = work.join(format!("{environment}.tfplan"));
+    let tofu = |args: &[String]| {
+        let mut command = Command::new("tofu");
+        command.args(args).env("TF_IN_AUTOMATION", "1");
+        command
+    };
     for args in infra_commands(&environment, &action, &plan_file.to_string_lossy())? {
         eprintln!("    $ tofu {}", args.join(" "));
-        let status = Command::new("tofu")
-            .args(&args)
-            .env("TF_IN_AUTOMATION", "1")
-            .status()
-            .context("starting `tofu`")?;
-        if !status.success() {
-            bail!("`tofu {}` failed with {status}", args.join(" "));
+        let out = tofu(&args).output().context("starting `tofu`")?;
+        if !out.status.success() {
+            eprintln!("{}", String::from_utf8_lossy(&out.stderr).trim());
+            bail!("`tofu {}` failed with {}", args.join(" "), out.status);
+        }
+        match args.get(1).map(String::as_str) {
+            Some("plan") => {
+                let shown = tofu(&[
+                    args.first().cloned().unwrap_or_default(),
+                    "show".to_owned(),
+                    "-json".to_owned(),
+                    plan_file.to_string_lossy().into_owned(),
+                ])
+                .output()
+                .context("starting `tofu`")?;
+                if !shown.status.success() {
+                    bail!("`tofu show -json` of the saved plan failed");
+                }
+                let plan: serde_json::Value = serde_json::from_slice(&shown.stdout)
+                    .context("the saved plan's JSON could not be read")?;
+                eprintln!("    the plan, by address (values stay out of the log):");
+                for line in tofu_audit::plan_summary(&plan) {
+                    eprintln!("      {line}");
+                }
+            }
+            Some("apply") => eprintln!("    applied exactly the plan above"),
+            _ => {}
         }
     }
     Ok(())
@@ -15408,7 +15442,8 @@ mod tests {
         assert_eq!(
             plan.first().map(|c| c.join(" ")),
             Some(
-                "-chdir=deploy/tofu/environments/staging init -input=false -lockfile=readonly"
+                "-chdir=deploy/tofu/environments/staging init -input=false -no-color \
+                 -lockfile=readonly"
                     .to_owned()
             )
         );
@@ -15421,8 +15456,8 @@ mod tests {
         assert_eq!(
             apply.last().map(|c| c.join(" ")),
             Some(
-                "-chdir=deploy/tofu/environments/production apply -input=false \
-                 /t/production.tfplan"
+                "-chdir=deploy/tofu/environments/production apply -input=false -no-color \
+                 -compact-warnings /t/production.tfplan"
                     .to_owned()
             ),
             "apply applies the saved plan: {apply:?}"
