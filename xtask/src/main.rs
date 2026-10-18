@@ -66,7 +66,7 @@ commands:
                         (main only, from CI, after each arch's publish)
   release publish-charts <out>
                         package the hosted clusters' charts, push them to GHCR and sign each
-                        digest keyless (main only, from CI; E21-56)
+                        digest keyless (main only, from CI; E21-58)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
   cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...

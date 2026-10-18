@@ -787,7 +787,7 @@ pub(crate) fn publish_index(root: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The charts a hosted cluster installs from `deploy/cell/charts/` (E21-56, DEC-2015 item 3).
+/// The charts a hosted cluster installs from `deploy/cell/charts/` (E21-58, DEC-2015 item 3).
 /// `archive-store` is the local cell's test stand-in and is never published (DEC-1050 item 5).
 pub(crate) const HOSTED_CHARTS: [&str; 3] = ["backup-plugin-tls", "journal-db", "workspace"];
 
@@ -824,7 +824,7 @@ fn pushed_digest(output: &str) -> Result<String> {
     Ok(digest.to_owned())
 }
 
-/// `cargo xtask release publish-charts <out>` (E21-56, DEC-2015 item 3): only from a push to
+/// `cargo xtask release publish-charts <out>` (E21-58, DEC-2015 item 3): only from a push to
 /// `main`, where `release.yml`'s `publish-index` job runs it (ES-12). Packages each of
 /// [`HOSTED_CHARTS`] with `helm package`, which reads through the charts' symlinks that Flux's git
 /// sources would drop, versioned by [`chart_version`]; pushes each to GHCR under

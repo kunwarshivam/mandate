@@ -10,7 +10,7 @@
 # Only a push to `main` publishes: each arch's `publish` job rebuilds, requires its `build-a`'s
 # digest, pushes that arch's images to GHCR by digest, signs each keyless with the run's OIDC
 # identity and attests its SBOM; then `publish-index` pushes and signs the multi-arch index a cell
-# pulls on any arch, and the hosted clusters' charts (E21-56). A pull request that changes the
+# pulls on any arch, and the hosted clusters' charts (E21-58). A pull request that changes the
 # release build runs the builds and the drills and keeps and publishes nothing (ES-12). Nothing
 # here builds a feature, so no release build holds `live` (DEC-529 item 3).
 name: release
@@ -39,7 +39,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # helm for `publish-charts`, at ci.yml's pin (E21-56).
+  # helm for `publish-charts`, at ci.yml's pin (E21-58).
   HELM_VERSION: "4.3.0"
   HELM_SHA256: "86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"
 
@@ -300,6 +300,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: cargo xtask release publish-index published
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-${{ github.sha }}
+          path: published/PUBLISHED
+          if-no-files-found: error
+          retention-days: 90
       - name: Install helm (checksum-verified)
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
@@ -307,16 +313,15 @@ jobs:
           tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
           sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
       # The hosted clusters' charts, packaged through their symlinks, pushed and signed by the
-      # same identity as the images (E21-56, DEC-2015 item 3); CHARTS names each digest.
+      # same identity as the images (E21-58, DEC-2015 item 3), after PUBLISHED is kept, so a chart
+      # failure never loses the index's list; CHARTS names each chart's digest.
       - name: Push and sign the hosted clusters' charts
         env:
           GH_TOKEN: ${{ github.token }}
         run: cargo xtask release publish-charts published
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: published-${{ github.sha }}
-          path: |
-            published/PUBLISHED
-            published/CHARTS
+          name: charts-${{ github.sha }}
+          path: published/CHARTS
           if-no-files-found: error
           retention-days: 90

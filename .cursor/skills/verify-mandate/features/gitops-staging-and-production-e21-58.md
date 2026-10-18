@@ -1,4 +1,4 @@
-# GitOps for staging and production on DOKS (E21-56)
+# GitOps for staging and production on DOKS (E21-58)
 
 - **Spec:** DEC-2015 (Flux, read-only from `main`; every chart by OCI digest; interim workload
   secrets from a GitHub environment); the founder's DEC-2011; infrastructure design §7.1; DEC-971
