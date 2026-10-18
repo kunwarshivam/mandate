@@ -62,6 +62,9 @@ commands:
                         ephemeral test key with --test-sign (E21-35)
   release drill <dist> <out>
                         run the signed, unsigned and wrongly signed images' start-up check
+  release check-signed <dist> <signatures>
+                        verify the release key's signatures over each binary and SHA256SUMS, then
+                        require the signed agentd to start at tier production (DEC-2024)
   release publish <dist> <out>
                         push this arch's images to GHCR, sign them keyless and attest their SBOMs
                         (main only, from CI)
@@ -291,6 +294,9 @@ fn run() -> Result<()> {
             release::images(&root, Path::new(dist), Path::new(out), true)
         }
         ["release", "drill", dist, out] => release::drill(&root, Path::new(dist), Path::new(out)),
+        ["release", "check-signed", dist, signatures] => {
+            release::check_signed(&root, Path::new(dist), Path::new(signatures))
+        }
         ["release", "publish", dist, out] => {
             release::publish(&root, Path::new(dist), Path::new(out))
         }
@@ -3828,7 +3834,7 @@ const READ_LINES: &[(&str, &str)] = &[
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
 /// while its whole text, comments included, holds no cargo word, no `.cargo` and no `CARGO_`
 /// (DEC-873 item 2). `ci.yml` runs the first four and the credential guard (DEC-964), `merge.yml`
-/// the fifth.
+/// the fifth, and `release.yml`'s `release-signing` job the release signer (DEC-2024).
 const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
@@ -3836,6 +3842,7 @@ const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/start-openbao.sh",
     ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
+    ".github/scripts/release-sign.sh",
     CREDENTIAL_GUARD,
 ];
 
@@ -3863,12 +3870,17 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// reports' `RUN_URL` and `VERDICTS` (DEC-1190), `merge.yml` the merge inputs, `web.yml` and
 /// `web-e2e.yml` the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and
 /// `web-deploy.yml` the build's public Supabase values and the deploy step's Cloudflare token and
-/// account (DEC-1005).
+/// account (DEC-1005), and `release.yml`'s `release-signing` job the release key, its password, the pinned
+/// cosign it signs with, and the digest it checks (DEC-2024).
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
     "CLOUDFLARE_ACCOUNT_ID",
     "CLOUDFLARE_API_TOKEN",
+    "COSIGN_PASSWORD",
+    "COSIGN_SHA256",
+    "COSIGN_URL",
+    "DIGEST",
     "DOCS_ONLY",
     "DO_NOT_TRACK",
     "EVENT",
@@ -3925,6 +3937,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "PYTHON_RESULT",
     "PYTHON_SELECTED",
     "REASONS",
+    "RELEASE_SIGNING_KEY",
     "RH_SIM_LIVE_RESULT",
     "RH_SIM_LIVE_SELECTED",
     "RUN_PRS",
@@ -3990,6 +4003,10 @@ const READ_ACTIONS: &[(&str, Option<&str>)] = &[
     (
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         None,
+    ),
+    (
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        Some(".github/workflows/release.yml"),
     ),
     ("actions/checkout@v7", Some(".github/workflows/codeql.yml")),
     (
