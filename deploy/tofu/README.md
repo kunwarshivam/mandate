@@ -75,18 +75,19 @@ wait until staging is up.
    | Zone | DNS | Edit | the API host's record |
    | Zone | Zone | Read | finding the zone by name |
    | Account | Workers R2 Storage | Edit | the journal archive's R2 bucket and its lock rule |
+   | Account | Account API Tokens | Edit | minting Barman's bucket-scoped R2 token (DEC-2029) |
 
    Account resources: only the account that holds `owlhead.ai`. Zone resources: only
    `owlhead.ai`. Set an expiry and, if you like, restrict client IPs to none, since the runner's
    address changes. This is not `web-deploy.yml`'s `CLOUDFLARE_API_TOKEN`, which stays as it is.
    R2 Storage Edit can also lift the archive's lock rule: R2's lock is governance-equivalent
-   (DEC-973 item 5), so keep this token in the environment alone.
+   (DEC-973 item 5). Account API Tokens Edit makes the token admin-level: it can mint any token,
+   which you accepted for the automation (DEC-2029). Keep it in the environment alone. Each run
+   checks the token's permissions first and names any that are missing.
 2. **The account id, `CF_ACCOUNT_ID`.** From the account's overview page (32 hex characters). It is
    not a secret, so it is a variable.
-3. **Barman's R2 token, after the first apply.** In **R2 → Manage R2 API Tokens → Create API
-   token**, permission **Object Read & Write**, applied to the bucket `mandate-journal-archive-staging`
-   only (later `-production`). It is not a GitHub secret, since `infra.yml` never needs it. It goes
-   into the cluster only at the Flux bootstrap (§4.4), never into git or a log.
+3. **Barman's R2 token is not yours to make.** OpenTofu mints it, scoped to the archive bucket with
+   Object Read and Write only, and hands it on as sensitive outputs (DEC-2029).
 4. **Before production only:** `api.owlhead.ai` already has DEC-822's hand-made record. The
    production apply refuses to create a second one, so delete that record (or tell lane IAC to
    adopt it) when production is to take the name. Staging uses `api-staging.owlhead.ai`, which
@@ -149,8 +150,9 @@ No repository-level secret or variable is used, so no other workflow can read th
    - From an address in `KUBE_API_ALLOWED_CIDRS`, run lane GO's `cargo xtask gitops bootstrap
      staging` (its runbook is `deploy/gitops/BOOTSTRAP.md`, #1651). It writes, through kubectl's
      stdin, the Secrets `ws-ws1/cloudflared-tunnel` (key `token`, the tunnel token) and
-     `ws-ws1/journal-archive-key` (keys `ACCESS_KEY_ID` and `ACCESS_SECRET_KEY`, Barman's R2 token
-     from §2.3). Nothing goes into git or into `infra-staging`.
+     `ws-ws1/journal-archive-key` (keys `ACCESS_KEY_ID` and `ACCESS_SECRET_KEY`, the minted R2
+     token's outputs). Nothing goes into git or into `infra-staging`. Once the automated bootstrap
+     lands (DEC-2028), `infra.yml`'s apply does this itself and this step goes away.
    - Flux pulls from then on, so neither CI nor `apply` needs the cluster's API again.
 
 ## What this does not guard, said plainly

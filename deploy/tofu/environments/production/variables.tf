@@ -49,3 +49,9 @@ variable "api_origin" {
     error_message = "The API origin is a loopback or in-cluster Service address with a port, never a public host."
   }
 }
+
+variable "bootstrap_runner_cidr" {
+  description = "Set only by `cargo xtask infra apply` for its own run, then cleared (DEC-2028)."
+  type        = string
+  default     = ""
+}
