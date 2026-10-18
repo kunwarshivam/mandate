@@ -43,7 +43,8 @@ pub fn folded(row: &StoredEvent) -> Result<FoldedEvent, Unreadable> {
 /// `environment`: an agent whose latest version-2 `AgentDeployed` names a connection whose latest
 /// establishment or revocation is a version-2 `ConnectionEstablished` naming this `account_ref`
 /// (journal spec §9.8, §9.24, DEC-1171). A version-1 deployment names no connection, so it reaches
-/// no executor (DEC-1171 item 3). An agent whose deployment stopped is still followed, since it may
+/// no executor (DEC-1171 item 3), nor ends the following an earlier version-2 one began: an agent
+/// followed one switch too many only has its own orders cancelled (`AGENTS.md` rule 13). An agent whose deployment stopped is still followed, since it may
 /// still hold orders or a position its kill switch must reach (`AGENTS.md` rule 13).
 ///
 /// # Errors
@@ -86,9 +87,6 @@ pub fn agents_of(
             }
             ("AgentDeployed", 2) => {
                 deployed.insert(text("agent_id")?, Some(text("connection_id")?));
-            }
-            ("AgentDeployed", _) => {
-                deployed.insert(text("agent_id")?, None);
             }
             _ => {
                 text("agent_id")?;

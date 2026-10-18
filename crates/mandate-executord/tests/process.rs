@@ -256,6 +256,31 @@ fn only_the_accounts_agents_are_followed() -> Result<(), Error> {
     Ok(())
 }
 
+/// A version-1 `AgentDeployed` names no connection, so it neither reaches the executor nor ends
+/// the following an earlier version-2 deployment on the account's connection began: the agent's
+/// switch is still applied (DEC-1171 item 3, `AGENTS.md` rule 13).
+#[test]
+fn a_later_version_1_deployment_keeps_the_agent_followed() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.write(
+        CONTROL_STREAM,
+        "c4",
+        "AgentDeployed",
+        1,
+        None,
+        object(vec![
+            ("agent_id", Value::Str(AGENT.to_owned())),
+            ("mandate_version", Value::Str(support::VERSION.to_owned())),
+        ])?,
+    )?;
+    kill(&journal, AGENT, SWITCH)?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT]);
+    Ok(())
+}
+
 /// An agent whose deployment stopped is still followed: a switch on its stream is applied, since
 /// a stopped agent may still hold orders or a position (`AGENTS.md` rule 13).
 #[test]

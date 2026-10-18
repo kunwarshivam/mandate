@@ -19,7 +19,8 @@
   again without holding the kill switch, a process that is not ready applying the kill switch, a
   switch applied once across passes and restarts, a workspace or connection switch applied to the
   agent alone with no account-wide request, every waiting switch applied in one pass, only the
-  account's agents followed, a stopped agent's switch still applied, a revoked connection
+  account's agents followed, a stopped agent's switch still applied, a later version-1 deployment
+  keeping the agent followed, a revoked connection
   followed again once established again, no pause of every agent, earlier pause of the agent or
   blocked account swallowing a switch, a lifted switch not applied again, an unreadable row
   stopping the process after the readable switches, an unreadable control record stopping it, an
