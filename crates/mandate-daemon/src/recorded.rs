@@ -21,7 +21,8 @@ pub enum BundleError {
     Unimplemented,
     /// A file is missing or unreadable.
     Unreadable { file: &'static str },
-    /// A file is not strict JSON, or a member is missing or out of its range.
+    /// A file is not strict JSON, or a member is missing or out of its range. `member` names the
+    /// member, or is empty when the file as a whole is not strict JSON or not the array it must be.
     Malformed {
         file: &'static str,
         member: &'static str,
