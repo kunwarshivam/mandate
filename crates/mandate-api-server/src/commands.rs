@@ -46,6 +46,37 @@ pub enum Command {
         approval: String,
         content_hash: String,
     },
+    /// Resume the agent, with the evidence the step-up port verified, or `null` (DEC-2102 item 4).
+    Resume { agent: String, step_up: Value },
+    /// The owner's Stop (DEC-136): with `release`, the positions become the owner's and the
+    /// command names the release warning shown.
+    Stop {
+        agent: String,
+        release: bool,
+        step_up: Value,
+    },
+    /// The owner's exit of one instrument, with the confirmed `bid`, `bid_size`, and `floor` when
+    /// all three were sent (§5.4); its step-up is never forwarded (DEC-2102 item 4).
+    OwnerExit {
+        agent: String,
+        instrument: String,
+        bid: Option<[String; 3]>,
+    },
+}
+
+/// The warning a Stop with release names (DEC-136, PX-13 (a)), the text `mandate agent stop
+/// --release` shows; a Stop through the API names the content reference of exactly this text
+/// (DEC-2102 item 3).
+pub const RELEASE_WARNING: &str = "The positions become yours and unprotected: this agent's \
+     protective orders are canceled and nothing watches them. This warning is recorded with your \
+     confirmation.";
+
+/// The content reference of [`RELEASE_WARNING`].
+pub fn release_warning() -> String {
+    format!(
+        "sha256:{}",
+        mandate_canon::Digest::of(RELEASE_WARNING.as_bytes()).to_hex()
+    )
 }
 
 impl Command {
@@ -55,6 +86,9 @@ impl Command {
             Self::Pause(_) => "pause",
             Self::KillSwitch(_) => "kill_switch",
             Self::Skip { .. } => "approval_response",
+            Self::Resume { .. } => "resume",
+            Self::Stop { .. } => "stop",
+            Self::OwnerExit { .. } => "owner_exit",
         }
     }
 
@@ -65,16 +99,18 @@ impl Command {
             Self::KillSwitch(KillScope::Agent(_)) => Permission::KillSwitchAgent,
             Self::KillSwitch(_) => Permission::KillSwitchConnectionOrWorkspace,
             Self::Skip { .. } => Permission::Skip,
+            Self::Resume { .. } | Self::Stop { .. } => Permission::ResumeOrStop,
+            Self::OwnerExit { .. } => Permission::OwnerExit,
         }
     }
 
     /// What it is to the session (identity spec §6.4): pause and the kill switch survive an
-    /// outage; a Skip is not one of a reduction-only session's rows.
+    /// outage; no other command is one of a reduction-only session's rows.
     pub fn request(&self) -> Request {
         match self {
             Self::Pause(_) => Request::Pause,
             Self::KillSwitch(_) => Request::KillSwitch,
-            Self::Skip { .. } => Request::Other,
+            _ => Request::Other,
         }
     }
 
@@ -82,7 +118,7 @@ impl Command {
     pub fn id_member(&self) -> &'static str {
         match self {
             Self::Skip { .. } => "response_id",
-            Self::Pause(_) | Self::KillSwitch(_) => "command_id",
+            _ => "command_id",
         }
     }
 
@@ -90,16 +126,18 @@ impl Command {
     fn event_type(&self) -> &'static str {
         match self {
             Self::Skip { .. } => "ApprovalResponseSubmitted",
-            Self::Pause(_) | Self::KillSwitch(_) => "OwnerCommandIssued",
+            _ => "OwnerCommandIssued",
         }
     }
 
     /// The digest references its payload names, which the envelope's `artifact_refs` lists
-    /// (journal spec §3): a Skip's content hash, and none for an owner command.
+    /// (journal spec §3): a Skip's content hash, a releasing Stop's warning, and none for any
+    /// other command.
     fn artifact_refs(&self) -> Vec<Value> {
         match self {
             Self::Skip { content_hash, .. } => vec![text(content_hash)],
-            Self::Pause(_) | Self::KillSwitch(_) => Vec::new(),
+            Self::Stop { release: true, .. } => vec![text(&release_warning())],
+            _ => Vec::new(),
         }
     }
 
@@ -124,24 +162,40 @@ impl Command {
             ]);
         }
         let (agent, scope, subject) = self.named(workspace);
+        let (release, warning_shown) = match self {
+            Self::Stop { release: true, .. } => (Value::Bool(true), text(&release_warning())),
+            Self::Stop { release: false, .. } => (Value::Bool(false), Value::Null),
+            _ => (Value::Null, Value::Null),
+        };
+        let confirmed = |index: usize| match self {
+            Self::OwnerExit { bid: Some(bid), .. } => {
+                bid.get(index).map_or(Value::Null, |v| text(v))
+            }
+            _ => Value::Null,
+        };
+        let step_up = match self {
+            Self::Resume { step_up, .. } | Self::Stop { step_up, .. } => step_up.clone(),
+            _ => Value::Null,
+        };
         object(vec![
             ("agent", agent.map_or(Value::Null, text)),
             ("command", text(self.operation())),
             ("scope", text(scope)),
             ("subject", text(subject)),
-            ("release", Value::Null),
-            ("warning_shown", Value::Null),
-            ("bid", Value::Null),
-            ("bid_size", Value::Null),
-            ("floor", Value::Null),
+            ("release", release),
+            ("warning_shown", warning_shown),
+            ("bid", confirmed(0)),
+            ("bid_size", confirmed(1)),
+            ("floor", confirmed(2)),
             ("user", text(principal)),
             ("submitted_at", Value::Int(second)),
-            ("step_up", Value::Null),
+            ("step_up", step_up),
         ])
     }
 
     /// The payload's `agent`, `scope`, and `subject` (journal spec §9.11, rule 91): the agent for
-    /// an agent's command, and for a kill switch the scope it stops.
+    /// an agent's command, the instrument for an owner exit, and for a kill switch the scope it
+    /// stops.
     fn named<'a>(&'a self, workspace: &'a str) -> (Option<&'a str>, &'static str, &'a str) {
         match self {
             Self::Pause(agent) | Self::KillSwitch(KillScope::Agent(agent)) => {
@@ -149,7 +203,25 @@ impl Command {
             }
             Self::KillSwitch(KillScope::Connection(connection)) => (None, "connection", connection),
             Self::KillSwitch(KillScope::Workspace) => (None, "workspace", workspace),
-            Self::Skip { agent, .. } => (Some(agent), "agent", agent),
+            Self::Skip { agent, .. } | Self::Resume { agent, .. } | Self::Stop { agent, .. } => {
+                (Some(agent), "agent", agent)
+            }
+            Self::OwnerExit {
+                agent, instrument, ..
+            } => (Some(agent), "instrument", instrument),
+        }
+    }
+
+    /// The agent it addresses, or `None` for a connection's or the workspace's kill switch.
+    fn agent(&self) -> Option<&str> {
+        match self {
+            Self::Pause(agent)
+            | Self::KillSwitch(KillScope::Agent(agent))
+            | Self::Skip { agent, .. }
+            | Self::Resume { agent, .. }
+            | Self::Stop { agent, .. }
+            | Self::OwnerExit { agent, .. } => Some(agent),
+            Self::KillSwitch(_) => None,
         }
     }
 }
@@ -307,11 +379,10 @@ pub fn in_workspace(control: &[StoredEvent], command: &Command) -> bool {
             })
         })
     };
-    match command {
-        Command::Pause(id) | Command::KillSwitch(KillScope::Agent(id)) => agent(id),
-        Command::Skip { agent: id, .. } => agent(id),
-        Command::KillSwitch(KillScope::Connection(id)) => connection(id),
-        Command::KillSwitch(KillScope::Workspace) => !control.is_empty(),
+    match (command.agent(), command) {
+        (Some(id), _) => agent(id),
+        (None, Command::KillSwitch(KillScope::Connection(id))) => connection(id),
+        (None, _) => !control.is_empty(),
     }
 }
 

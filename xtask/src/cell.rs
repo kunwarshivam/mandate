@@ -12,7 +12,7 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpStream, ToSocketAddrs};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
@@ -39,6 +39,20 @@ const CNPG_CHART_SHA256: &str = "b53d3991fe84bcf38767e7702cae78666265427a127a26f
 const CNPG_OPERATOR_TAG: &str =
     "1.30.1@sha256:923c267ec29636db3bee20f993d0ec4973fa22998e1adad37da79e4d32b5bc07";
 const CNPG_NAMESPACE: &str = "cnpg-system";
+/// CloudNativePG's Barman Cloud plugin, which archives the journal's WAL and takes its base backups
+/// (E21-41): its chart from the GitHub release, checked by SHA-256, and its two images pinned by
+/// digest (D-5). Its certificates come from [`PLUGIN_TLS_CHART`], not cert-manager (DEC-1050).
+const PLUGIN_CHART_URL: &str = "https://github.com/cloudnative-pg/charts/releases/download/plugin-barman-cloud-v0.8.1/plugin-barman-cloud-0.8.1.tgz";
+const PLUGIN_CHART_SHA256: &str =
+    "9ad0b9e56da2777a1a0269feaf7215e18297e9c8b5730e04acb27b5d462e9456";
+const PLUGIN_IMAGE_TAG: &str =
+    "v0.15.1@sha256:c75acad19a36e8176cfe2885761ff1b836c6ef977d7257e298c99a28b5c302ef";
+const PLUGIN_SIDECAR_TAG: &str =
+    "v0.15.1@sha256:2287a793a804db751edd0d07d44cd549e357677e98a800eb12e2cf7c0d53f9b0";
+pub const PLUGIN_TLS_CHART: &str = "deploy/cell/charts/backup-plugin-tls";
+/// The local cell's stand-in for the S1 endpoint, in its own namespace (DEC-1050 item 5).
+pub const ARCHIVE_STORE_CHART: &str = "deploy/cell/charts/archive-store";
+const ARCHIVE_STORE_NAMESPACE: &str = "archive-store";
 pub const WORKSPACE_CHART: &str = "deploy/cell/charts/workspace";
 pub const JOURNAL_CHART: &str = "deploy/cell/charts/journal-db";
 const WORKSPACE_VALUES: &str = "deploy/cell/values/k3d.yaml";
@@ -48,6 +62,20 @@ pub const COMPOSE_FILE: &str = "deploy/cell/compose/compose.json";
 const IMAGE_DOCKERFILE: &str = "deploy/cell/images/mandate.Dockerfile";
 /// The workspace API server's image, built beside `mandate` from the same static build.
 const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
+/// The local stub token issuer's image (DEC-2100, DEC-1025), a sidecar in the API pod.
+const STUB_DOCKERFILE: &str = "deploy/cell/images/stub-issuer.Dockerfile";
+/// Lane SI's stub issuer crate (E21-52); the cell runs it only once it is in the workspace.
+const STUB_CRATE: &str = "crates/mandate-stub-issuer/Cargo.toml";
+/// The stub's entry point: its tests land before its code, with this file a `todo!()` stub
+/// (DEC-137), which the cell must not run, since the pod would never start.
+const STUB_MAIN: &str = "crates/mandate-stub-issuer/src/main.rs";
+/// What marks an entry point still pending (DEC-137).
+const PENDING_BODY: &str = "todo!(";
+/// The server's key-set tier check (E21-53); DEC-2100 item 9 runs the stub only once it is in.
+const KEY_SET_TIER_CHECK: (&str, &str) = (
+    "crates/mandate-api-server/src/config.rs",
+    "pub fn check_key_set_tier(",
+);
 /// Where a Linux host keeps its CA bundle, in the order `cell up` looks after `SSL_CERT_FILE`:
 /// Debian and Ubuntu, Fedora and RHEL, openSUSE, Alpine. The bundle is copied into the `api`
 /// image: on an empty base the server finds no roots, cannot build its key-set client, and refuses
@@ -97,16 +125,31 @@ pub enum Drill {
     /// The kill switch with the exporter, the API and the deployment manager down (OPS-4, E21-34);
     /// skipped, and named, until its processes and `mandate agent kill` are on `main`.
     KillSwitch,
+    /// With the synchronous standby fenced, an append waits: nothing commits on the primary alone,
+    /// and once the standby is back the cluster takes appends again and every stream it holds
+    /// verifies (OPS-2, E21-41).
+    StandbyDown,
+    /// A closed WAL segment and a base backup reach the archive: Postgres reports the segment
+    /// archived, and Barman's own tools, reading the store with the archive's key, list the backup
+    /// and fetch the segment back (E21-41).
+    Archive,
 }
 
-pub const DRILLS: [Drill; 6] = [
+pub const DRILLS: [Drill; 5] = [
     Drill::Boot,
     Drill::Journal,
     Drill::Egress,
     Drill::Compose,
-    Drill::Restart,
     Drill::KillSwitch,
 ];
+
+/// The journal's own drills (E21-41), which `cargo xtask ci cell-journal` runs in a job of their
+/// own so each cell job stays within its ten minutes (DEC-464).
+pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
+
+/// The drill that kills the journal's primary, which with a synchronous standby is a failover and
+/// the old primary's rejoin; `cargo xtask ci cell-failover` runs it in a job of its own (DEC-464).
+pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 
 impl Drill {
     pub fn name(self) -> &'static str {
@@ -117,12 +160,16 @@ impl Drill {
             Self::Compose => "compose",
             Self::Restart => "restart",
             Self::KillSwitch => "kill-switch",
+            Self::StandbyDown => "standby-down",
+            Self::Archive => "archive",
         }
     }
 
     pub fn parse(name: &str) -> Result<Self> {
         DRILLS
             .into_iter()
+            .chain(JOURNAL_DRILLS)
+            .chain(FAILOVER_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
     }
@@ -144,6 +191,10 @@ impl Drill {
                 "the stream lost across the restart: a stream id the restart did not keep"
             }
             Self::KillSwitch => "none until the drill runs",
+            Self::StandbyDown => {
+                "the cluster's durability set to `preferred`, so the primary commits alone"
+            }
+            Self::Archive => "the archive pointed at another bucket of the same store",
         }
     }
 }
@@ -159,6 +210,8 @@ impl Drill {
             Self::Egress => "reached the live trading host",
             Self::Restart => "export_stream_empty",
             Self::KillSwitch => "",
+            Self::StandbyDown => "committed with the standby fenced",
+            Self::Archive => "is not in the archive",
         }
     }
 }
@@ -207,22 +260,60 @@ pub fn ci() -> Result<()> {
     demo(false)
 }
 
-/// helm lint and a strict schema check of every rendering of both charts, then the chart's
-/// invariant tests, which render it themselves (deploy/tests/test_cell.py).
+/// `cargo xtask ci cell-journal` and `ci cell-failover`: the cell, then `drills`, plain and seeded
+/// (E21-41). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
+    if let Some(reason) = tools_missing() {
+        if env::var_os(CELL_REQUIRED_ENV).is_some() {
+            bail!("{CELL_REQUIRED_ENV} is set but {reason}");
+        }
+        eprintln!("    {job}: {reason}; skipping (see deploy/cell/README.md)");
+        return Ok(());
+    }
+    up()?;
+    drill(drills, false)?;
+    drill(drills, true)
+}
+
+/// The Kubernetes API's address for a rendering with no cluster to read it from: k3s's
+/// `kubernetes` Service, the first address of its default service range.
+const KUBE_API_RENDERED: &str = r#"kubeApi={"cidrs":["10.43.0.1/32"],"ports":[443]}"#;
+
+/// helm lint and a strict schema check of every rendering of every chart, then the charts'
+/// invariant tests, which render them themselves (deploy/tests/).
 pub fn chart_checks() -> Result<()> {
-    for (chart, values) in [
-        (WORKSPACE_CHART, "deploy/cell/values/k3d.yaml"),
-        (WORKSPACE_CHART, "deploy/cell/values/k3s.yaml"),
-        (WORKSPACE_CHART, "deploy/cell/values/managed.yaml"),
-        (JOURNAL_CHART, "deploy/cell/values/k3d-journal-db.yaml"),
+    for (chart, values, namespace) in [
+        (WORKSPACE_CHART, "deploy/cell/values/k3d.yaml", NAMESPACE),
+        (WORKSPACE_CHART, "deploy/cell/values/k3s.yaml", NAMESPACE),
+        (
+            WORKSPACE_CHART,
+            "deploy/cell/values/managed.yaml",
+            NAMESPACE,
+        ),
+        (
+            JOURNAL_CHART,
+            "deploy/cell/values/k3d-journal-db.yaml",
+            NAMESPACE,
+        ),
+        (ARCHIVE_STORE_CHART, "", ARCHIVE_STORE_NAMESPACE),
+        (PLUGIN_TLS_CHART, "", CNPG_NAMESPACE),
     ] {
-        sh("helm", &["lint", "--strict", chart, "-f", values])?;
-        let rendered = output(
-            "helm",
-            &["template", "cell", chart, "-n", NAMESPACE, "-f", values],
-        )?;
+        let mut args = vec![chart];
+        if !values.is_empty() {
+            args.extend(["-f", values]);
+        }
+        if chart == JOURNAL_CHART {
+            args.extend(["--set-json", KUBE_API_RENDERED]);
+        }
+        let mut lint = vec!["lint", "--strict"];
+        lint.extend(&args);
+        sh("helm", &lint)?;
+        let mut template = vec!["template", "cell", "-n", namespace];
+        template.extend(&args);
+        let rendered = output("helm", &template)?;
         kubeconform(&rendered)?;
-        no_live_host_allowed(values, &parse_documents(&rendered)?, &live_addresses()?)?;
+        let named = if values.is_empty() { chart } else { values };
+        no_live_host_allowed(named, &parse_documents(&rendered)?, &live_addresses()?)?;
     }
     let status = Command::new("uv")
         .args([
@@ -232,7 +323,7 @@ pub fn chart_checks() -> Result<()> {
             "python",
             "pytest",
             "-q",
-            "../deploy/tests/test_cell.py",
+            "../deploy/tests",
         ])
         .env("MANDATE_CELL_HELM_REQUIRED", "1")
         .status()
@@ -243,8 +334,9 @@ pub fn chart_checks() -> Result<()> {
     Ok(())
 }
 
-/// Every rendered object against the Kubernetes 1.35 schemas; CloudNativePG's `Cluster` has no
-/// schema there and is skipped by kind, never by a missing-schema wildcard.
+/// Every rendered object against the Kubernetes 1.35 schemas; CloudNativePG's `Cluster` and
+/// `ScheduledBackup` and the Barman Cloud plugin's `ObjectStore` have no schema there and are
+/// skipped by kind, never by a missing-schema wildcard.
 fn kubeconform(rendered: &str) -> Result<()> {
     let mut child = Command::new("kubeconform")
         .args([
@@ -253,7 +345,7 @@ fn kubeconform(rendered: &str) -> Result<()> {
             "-kubernetes-version",
             "1.35.0",
             "-skip",
-            "Cluster",
+            "Cluster,ObjectStore,ScheduledBackup",
         ])
         .stdin(Stdio::piped())
         .spawn()
@@ -409,6 +501,38 @@ fn api_image_tag() -> Result<Option<String>> {
     local_tag("api", "mandate-api-server").map(Some)
 }
 
+/// Whether this checkout can run the stub issuer in the cell: lane SI's crate is in the workspace
+/// with its entry point implemented, not still the `todo!()` its tests land with, and the server
+/// refuses an `http` key set outside dev and CI (DEC-2100 item 9). Until all hold, the cell runs
+/// no stub, mounts no subject links, and every sign-in is refused.
+pub fn stub_ready(root: &Path) -> bool {
+    let (server, check) = KEY_SET_TIER_CHECK;
+    root.join(STUB_CRATE).is_file()
+        && fs::read_to_string(root.join(STUB_MAIN)).is_ok_and(|main| !main.contains(PENDING_BODY))
+        && fs::read_to_string(root.join(server)).is_ok_and(|code| code.contains(check))
+}
+
+/// The cell's stub issuer image: this checkout's dev-profile build, since the stub is compiled
+/// only with debug assertions (DEC-2100 item 2); none without an API image or a ready stub.
+fn stub_image_tag() -> Result<Option<String>> {
+    if api_image_tag()?.is_none() || !stub_ready(Path::new(".")) {
+        return Ok(None);
+    }
+    local_tag("stub-issuer", "mandate-stub-issuer").map(Some)
+}
+
+/// The values the API's sign-in pieces take: the stub's image, and the subject-link ConfigMap the
+/// demo writes, both empty without a stub, so nothing is mounted and every sign-in is refused.
+fn signin_values(stub: Option<&str>) -> [String; 2] {
+    [
+        format!("images.stub-issuer={}", stub.unwrap_or_default()),
+        format!(
+            "api.subjectLinks={}",
+            if stub.is_some() { LINKS_CONFIGMAP } else { "" }
+        ),
+    ]
+}
+
 /// `mandate.local/<name>:<the first 12 hex digits of the binary's SHA-256>`.
 fn local_tag(name: &str, binary: &str) -> Result<String> {
     let digest = sha256(&static_binary(binary))?;
@@ -438,6 +562,7 @@ fn image_sets() -> Result<Vec<String>> {
         format!("images.mandate={}", image_tag()?),
         format!("images.api={}", api_image_tag()?.unwrap_or_default()),
     ];
+    sets.extend(signin_values(stub_image_tag()?.as_deref()));
     if let Some(runtime) = runtime_image()? {
         sets.push(format!("images.runtime={runtime}"));
     }
@@ -456,11 +581,15 @@ pub fn up() -> Result<()> {
     let image = image_tag()?;
     let api = api_image_tag()?;
     let runtime = runtime_image()?;
+    let stub = stub_image_tag()?;
     if source == ImageSource::Build {
         build_image(&image, IMAGE_DOCKERFILE, "mandate", &[])?;
     }
     if let Some(runtime) = &runtime {
         build_image(runtime, RUNTIME_DOCKERFILE, "mandate-daemon", &[])?;
+    }
+    if let Some(stub) = &stub {
+        build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
     }
     if let Some(api) = &api {
         build_image(
@@ -482,6 +611,9 @@ pub fn up() -> Result<()> {
     if let Some(runtime) = &runtime {
         sh("k3d", &["image", "import", "--cluster", CLUSTER, runtime])?;
     }
+    if let Some(stub) = &stub {
+        sh("k3d", &["image", "import", "--cluster", CLUSTER, stub])?;
+    }
     let config = kubeconfig()?;
     sh(
         "k3d",
@@ -494,7 +626,7 @@ pub fn up() -> Result<()> {
             "--overwrite",
         ],
     )?;
-    let chart = operator_chart()?;
+    let chart = fetched_chart("cloudnative-pg.tgz", CNPG_CHART_URL, CNPG_CHART_SHA256)?;
     let operator_tag = format!("image.tag={CNPG_OPERATOR_TAG}");
     helm(&[
         "upgrade",
@@ -510,6 +642,8 @@ pub fn up() -> Result<()> {
         "--timeout",
         "5m",
     ])?;
+    backup_plugin()?;
+    archive_store()?;
     helm(&[
         "upgrade",
         "--install",
@@ -531,7 +665,20 @@ pub fn up() -> Result<()> {
         "--for=condition=Ready",
         "cluster.postgresql.cnpg.io/journal",
         "--timeout=300s",
+    ])
+    .with_context(|| format!("the journal cluster was not Ready: {}", cluster_state()))?;
+    let domain = kubectl(&[
+        "get",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.metadata.annotations.mandate\\.dev/failure-domain}",
     ])?;
+    eprintln!("    journal: failure domains: {}", domain.trim());
+    if stub.is_some() {
+        demo_links(&image)?;
+    }
     let sets = image_sets()?;
     let mut install = vec![
         "upgrade",
@@ -620,10 +767,11 @@ const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, `mandate-api-server` and the runtime's `mandate-daemon` (DEC-1013) linked
 /// statically, so their images need no base (DEC-993 item 9), with no feature at all: never
-/// `live`. The dev profile, for the CI job's ten minutes (DEC-464): it keeps overflow checks, and
-/// the cell's journals are small.
+/// `live`; with them the stub issuer once [`stub_ready`], which the dev profile's debug assertions
+/// are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes (DEC-464):
+/// it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
-    let args = [
+    let mut args = vec![
         "build",
         "--locked",
         "--package",
@@ -632,11 +780,11 @@ fn build_binary() -> Result<()> {
         "mandate-api-server",
         "--package",
         "mandate-daemon",
-        "--target",
-        STATIC_TRIPLE,
-        "--target-dir",
-        STATIC_TARGET,
     ];
+    if stub_ready(Path::new(".")) {
+        args.extend(["--package", "mandate-stub-issuer"]);
+    }
+    args.extend(["--target", STATIC_TRIPLE, "--target-dir", STATIC_TARGET]);
     eprintln!(
         "    $ RUSTFLAGS='-C target-feature=+crt-static' cargo {}",
         args.join(" ")
@@ -647,10 +795,7 @@ fn build_binary() -> Result<()> {
         .status()
         .context("starting cargo")?;
     if !status.success() {
-        bail!(
-            "the static build of mandate-cli, mandate-api-server and mandate-daemon failed with \
-             {status}"
-        );
+        bail!("the static build of the cell's binaries failed with {status}");
     }
     Ok(())
 }
@@ -758,12 +903,12 @@ fn create_cluster() -> Result<()> {
     bail!("the cell's API server never became ready")
 }
 
-/// The operator chart from its GitHub release, kept under `target/cell` and checked by SHA-256
+/// A chart from its GitHub release, kept under `target/cell` as `name` and checked by SHA-256
 /// every time it is used.
-fn operator_chart() -> Result<String> {
-    let path = state()?.join("cloudnative-pg.tgz");
+fn fetched_chart(name: &str, url: &str, want: &str) -> Result<String> {
+    let path = state()?.join(name);
     let file = path.display().to_string();
-    if !path.exists() || sha256(&file)? != CNPG_CHART_SHA256 {
+    if !path.exists() || sha256(&file)? != want {
         sh(
             "curl",
             &[
@@ -773,15 +918,129 @@ fn operator_chart() -> Result<String> {
                 "--retry-all-errors",
                 "-o",
                 &file,
-                CNPG_CHART_URL,
+                url,
             ],
         )?;
     }
     let found = sha256(&file)?;
-    if found != CNPG_CHART_SHA256 {
-        bail!("the CloudNativePG chart's SHA-256 is {found}, not {CNPG_CHART_SHA256}");
+    if found != want {
+        bail!("the chart {name}'s SHA-256 is {found}, not {want}");
     }
     Ok(file)
+}
+
+/// The Barman Cloud plugin beside the operator, with the certificates the TLS chart makes in place
+/// of cert-manager's; when an upgrade remade them, the plugin restarts, since it reads them only
+/// at start.
+fn backup_plugin() -> Result<()> {
+    let before = plugin_certificate_end()?;
+    helm(&[
+        "upgrade",
+        "--install",
+        "backup-plugin-tls",
+        PLUGIN_TLS_CHART,
+        "--namespace",
+        CNPG_NAMESPACE,
+    ])?;
+    let chart = fetched_chart(
+        "plugin-barman-cloud.tgz",
+        PLUGIN_CHART_URL,
+        PLUGIN_CHART_SHA256,
+    )?;
+    let image = format!("image.tag={PLUGIN_IMAGE_TAG}");
+    let sidecar = format!("sidecarImage.tag={PLUGIN_SIDECAR_TAG}");
+    helm(&[
+        "upgrade",
+        "--install",
+        "barman-cloud",
+        &chart,
+        "--namespace",
+        CNPG_NAMESPACE,
+        "--set",
+        &image,
+        "--set",
+        &sidecar,
+        "--set",
+        "certificate.createClientCertificate=false",
+        "--set",
+        "certificate.createServerCertificate=false",
+        "--set",
+        "certificate.createIssuer=false",
+        "--wait",
+        "--timeout",
+        "5m",
+    ])?;
+    if !before.is_empty() && before != plugin_certificate_end()? {
+        kubectl(&[
+            "rollout",
+            "restart",
+            "deployment/barman-cloud",
+            "--namespace",
+            CNPG_NAMESPACE,
+        ])?;
+        kubectl(&[
+            "rollout",
+            "status",
+            "deployment/barman-cloud",
+            "--namespace",
+            CNPG_NAMESPACE,
+            "--timeout=300s",
+        ])?;
+    }
+    Ok(())
+}
+
+/// When each of the plugin's two certificates ends, as the TLS chart records it; empty before the
+/// first install. Either changing means the plugin must restart.
+fn plugin_certificate_end() -> Result<String> {
+    let mut ends = String::new();
+    for secret in ["barman-cloud-server-tls", "barman-cloud-client-tls"] {
+        let end = kubectl(&[
+            "get",
+            "secret",
+            secret,
+            "--namespace",
+            CNPG_NAMESPACE,
+            "--ignore-not-found",
+            "-o",
+            "jsonpath={.metadata.annotations.mandate\\.dev/not-after}",
+        ])?;
+        ends.push_str(end.trim());
+        ends.push('/');
+    }
+    Ok(if ends == "//" { String::new() } else { ends })
+}
+
+/// The test store the journal archives to in the local cell, and the workspace's namespace, where
+/// it puts the archive's key.
+fn archive_store() -> Result<()> {
+    kubectl(&[
+        "create",
+        "namespace",
+        NAMESPACE,
+        "--dry-run=client",
+        "-o",
+        "json",
+    ])
+    .and_then(|ns| {
+        let ns: Value = serde_json::from_str(&ns).context("reading the namespace")?;
+        apply(&[ns])
+    })?;
+    let client = format!("clientNamespace={NAMESPACE}");
+    helm(&[
+        "upgrade",
+        "--install",
+        "archive-store",
+        ARCHIVE_STORE_CHART,
+        "--namespace",
+        ARCHIVE_STORE_NAMESPACE,
+        "--create-namespace",
+        "--set",
+        &client,
+        "--wait",
+        "--timeout",
+        "5m",
+    ])
 }
 
 fn sha256(file: &str) -> Result<String> {
@@ -891,6 +1150,8 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Compose => compose_drill(seeded),
             Drill::Restart => restart(seeded),
             Drill::KillSwitch => kill_switch(),
+            Drill::StandbyDown => standby_down(seeded),
+            Drill::Archive => archive(seeded),
         };
         if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
             restore()?;
@@ -1085,6 +1346,15 @@ fn tamper_segment(jobs: &mut [Value]) -> Result<()> {
 
 /// Applies a rendered Job and waits until it succeeds or fails; returns which, with its logs.
 fn run_job(objects: Vec<Value>) -> Result<(bool, String)> {
+    run_job_watching(objects, || Ok(()))
+}
+
+/// [`run_job`], calling `watch` at each poll while the Job runs, as a drill that must see what the
+/// database does during the Job.
+fn run_job_watching(
+    objects: Vec<Value>,
+    mut watch: impl FnMut() -> Result<()>,
+) -> Result<(bool, String)> {
     let job = objects
         .iter()
         .find(|o| o["kind"] == "Job")
@@ -1108,6 +1378,7 @@ fn run_job(objects: Vec<Value>) -> Result<(bool, String)> {
         if succeeded == "1" || failed == "1" {
             return Ok((succeeded == "1", job_logs(&name, job)));
         }
+        watch()?;
         sleep(Duration::from_secs(2));
     }
     bail!("Job {name} neither succeeded nor failed in time")
@@ -1892,6 +2163,52 @@ fn generate_in(root: &Path, write: bool) -> Result<()> {
     Ok(())
 }
 
+/// What the journal cluster says of itself, each instance's role and readiness, and the last lines
+/// of every container of an instance that is not Ready (the init Job's too), for a drill's report.
+/// Only the local cell's paper journal is ever read, so a statement in those lines leaves nothing.
+fn cluster_state() -> String {
+    let status = kubectl(&[
+        "get",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.status.phase} ({.status.phaseReason}); primary {.status.currentPrimary}, target {.status.targetPrimary}",
+    ])
+    .unwrap_or_default();
+    let pods = kubectl(&[
+        "get",
+        "pod",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        "cnpg.io/cluster=journal",
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}|{.metadata.labels.cnpg\\.io/instanceRole}|{.status.conditions[?(@.type==\"Ready\")].status}{\"\\n\"}{end}",
+    ])
+    .unwrap_or_default();
+    let mut report = format!("{}; instances:", status.trim());
+    for line in pods.lines().filter(|l| !l.is_empty()) {
+        report.push_str(&format!(" {line};"));
+        let mut fields = line.split('|');
+        let name = fields.next().unwrap_or_default();
+        if fields.nth(1) != Some("True") {
+            let tail = kubectl(&[
+                "logs",
+                name,
+                "--namespace",
+                NAMESPACE,
+                "--all-containers",
+                "--prefix",
+                "--tail=15",
+            ])
+            .unwrap_or_default();
+            report.push_str(&format!("\n[{name}]\n{tail}"));
+        }
+    }
+    report
+}
+
 /// Writes a control stream, kills the journal's primary, waits for CloudNativePG to bring the
 /// cluster back, and verifies the stream. Seeded, it asks for a stream id the restart did not keep,
 /// which must read as lost (`export_stream_empty`).
@@ -1952,14 +2269,21 @@ fn restart(seeded: bool) -> Result<Verdict> {
             "the journal's primary pod was not Ready again within the drill's polls".into(),
         ));
     }
-    kubectl(&[
+    if kubectl(&[
         "wait",
         "--namespace",
         NAMESPACE,
         "--for=condition=Ready",
         "cluster.postgresql.cnpg.io/journal",
         "--timeout=300s",
-    ])?;
+    ])
+    .is_err()
+    {
+        return Ok(Verdict::Broken(format!(
+            "the journal cluster was not Ready within 300s of its primary's restart: {}",
+            cluster_state()
+        )));
+    }
     let stream = if seeded {
         format!("ctl:{workspace}lost")
     } else {
@@ -2002,6 +2326,612 @@ fn kill_switch() -> Result<Verdict> {
     }))
 }
 
+/// The name of the journal's pod in `role` (`primary` or `replica`).
+fn journal_pod(role: &str) -> Result<String> {
+    let selector = format!("cnpg.io/cluster=journal,cnpg.io/instanceRole={role}");
+    let name = kubectl(&[
+        "get",
+        "pod",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        &selector,
+        "-o",
+        "jsonpath={.items[0].metadata.name}",
+    ])?;
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("the journal has no {role} pod");
+    }
+    Ok(name.to_string())
+}
+
+/// One query on the primary as its local superuser, through the pod's own socket: the drills
+/// read what Postgres itself holds, not what a process reports.
+fn on_primary(sql: &str) -> Result<String> {
+    let primary = journal_pod("primary")?;
+    Ok(kubectl(&[
+        "exec",
+        "--namespace",
+        NAMESPACE,
+        &primary,
+        "-c",
+        "postgres",
+        "--",
+        "psql",
+        "-X",
+        "-d",
+        "mandate",
+        "-tAc",
+        sql,
+    ])?
+    .trim()
+    .to_string())
+}
+
+/// Polls `check` until it is true or the drill's polls run out.
+fn until(mut check: impl FnMut() -> Result<bool>) -> Result<bool> {
+    for _ in 0..POLLS {
+        if check()? {
+            return Ok(true);
+        }
+        sleep(Duration::from_secs(2));
+    }
+    Ok(false)
+}
+
+/// How many standbys stream to the primary and count for its synchronous commits.
+fn synchronous_standbys() -> Result<String> {
+    on_primary(
+        "SELECT count(*) FROM pg_stat_replication WHERE sync_state IN ('sync', 'quorum') AND state = 'streaming'",
+    )
+}
+
+/// The journal's events stored for `stream`, as the primary sees them.
+fn stored_events(stream: &str) -> Result<String> {
+    on_primary(&format!(
+        "SELECT count(*) FROM journal.events WHERE stream_id = '{stream}'"
+    ))
+}
+
+/// The control CLI's `workspace open` for `workspace` as a run Job, ended after `deadline` seconds.
+fn open_job(id: &str, workspace: &str, deadline: u32) -> Result<Vec<Value>> {
+    let args = json!([
+        "workspace",
+        "open",
+        "--workspace",
+        workspace,
+        "--environment",
+        "paper",
+        "--journal",
+        "$(MANDATE_JOURNAL_DSN)",
+        "--store",
+        "/work/store"
+    ]);
+    let mut open = render(
+        &[format!("run.id=\"{id}\""), format!("run.args={args}")],
+        Some("templates/run.yaml"),
+    )?;
+    for job in open.iter_mut().filter(|o| o["kind"] == "Job") {
+        job["spec"]["activeDeadlineSeconds"] = json!(deadline);
+    }
+    Ok(open)
+}
+
+/// The verify Job over `streams`, and whether it passed, with its logs.
+fn verify_streams(id: &str, streams: &[String]) -> Result<(bool, String)> {
+    let verify = render(
+        &[
+            format!("verify.id=\"{id}\""),
+            format!("verify.streams={}", json!(streams)),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    run_job(verify)
+}
+
+/// How long the drill's append waits on the fenced standby before the drill ends it: long enough
+/// that a primary committing alone would have answered many times over.
+const FENCED_APPEND_SECS: u32 = 60;
+
+/// OPS-2 with the synchronous standby down: the standby is fenced (CloudNativePG stops its
+/// Postgres), an append is tried, and it must wait on the standby rather than commit: the primary
+/// shows a backend waiting for synchronous replication, the CLI never reports the commit, the
+/// primary shows none of its events, and the Job ends on its deadline. Whatever happened, the
+/// standby is then unfenced, the durability put back, and the cluster waited for until a
+/// synchronous standby streams again; then it must take a new append, and every stream written
+/// verifies. Seeded, the cluster's durability is `preferred` first, so the primary drops the
+/// standby and commits alone, which the drill must report.
+fn standby_down(seeded: bool) -> Result<Verdict> {
+    if !until(|| Ok(synchronous_standbys()? == "1"))? {
+        return Ok(Verdict::Broken(
+            "before the drill, no synchronous standby streams to the primary".into(),
+        ));
+    }
+    let fenced = if seeded {
+        set_durability("preferred").and_then(|()| fenced_append(seeded))
+    } else {
+        fenced_append(seeded)
+    };
+    let restored = restore_standby(seeded);
+    let (verdict, fenced) = fenced?;
+    let streaming = restored?;
+    if verdict != Verdict::Held {
+        return Ok(verdict);
+    }
+    if !streaming {
+        return Ok(Verdict::Broken(
+            "the standby never streamed synchronously again after it was unfenced".into(),
+        ));
+    }
+    let id = run_id()?;
+    let workspace = format!("standby{id}");
+    let (opened, logs) = run_job(open_job(&format!("{id}b"), &workspace, 120)?)?;
+    if !opened {
+        return Ok(Verdict::Broken(format!(
+            "with the standby back, `mandate workspace open` failed:\n{logs}"
+        )));
+    }
+    let mut streams = vec![format!("ctl:{workspace}")];
+    if stored_events(&fenced)? != "0" {
+        streams.push(fenced);
+    }
+    let (verified, logs) = verify_streams(&id, &streams)?;
+    if verified {
+        Ok(Verdict::Held)
+    } else {
+        Ok(Verdict::Broken(format!(
+            "with the standby back, the streams did not verify:\n{logs}"
+        )))
+    }
+}
+
+/// Unfences the standby, puts `required` back after a seeded run, and waits for the cluster to be
+/// Ready with a synchronous standby streaming, so the next drill starts from a whole cluster;
+/// whether one streams again. Every step runs even when an earlier one failed.
+fn restore_standby(seeded: bool) -> Result<bool> {
+    let unfenced = kubectl(&[
+        "annotate",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "cnpg.io/fencedInstances-",
+    ]);
+    let durable = if seeded {
+        set_durability("required")
+    } else {
+        Ok(())
+    };
+    let ready = kubectl(&[
+        "wait",
+        "--namespace",
+        NAMESPACE,
+        "--for=condition=Ready",
+        "cluster.postgresql.cnpg.io/journal",
+        "--timeout=300s",
+    ]);
+    let streaming = until(|| Ok(synchronous_standbys()? == "1"));
+    unfenced?;
+    durable?;
+    ready?;
+    streaming
+}
+
+/// Backends on the primary waiting for a standby to confirm their commit.
+fn waiting_on_standby() -> Result<String> {
+    on_primary("SELECT count(*) FROM pg_stat_activity WHERE wait_event = 'SyncRep'")
+}
+
+/// Fences the standby, waits until the primary has no synchronous standby, and tries one append,
+/// watching the primary for the commit that waits on the standby; the verdict, and the stream the
+/// append was for, which the drill checks once the standby is back.
+fn fenced_append(seeded: bool) -> Result<(Verdict, String)> {
+    let standby = journal_pod("replica")?;
+    let fence = format!("cnpg.io/fencedInstances=[\"{standby}\"]");
+    kubectl(&[
+        "annotate",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "--overwrite",
+        &fence,
+    ])?;
+    let id = run_id()?;
+    let stream = format!("ctl:fenced{id}");
+    if !until(|| Ok(synchronous_standbys()? == "0"))? {
+        let broken =
+            format!("{standby} was fenced, but the primary still streams to a synchronous standby");
+        return Ok((Verdict::Broken(broken), stream));
+    }
+    let workspace = format!("fenced{id}");
+    let deadline = if seeded { 120 } else { FENCED_APPEND_SECS };
+    let mut waited = false;
+    let (opened, logs) = run_job_watching(open_job(&id, &workspace, deadline)?, || {
+        if !waited {
+            waited = waiting_on_standby()? != "0";
+        }
+        Ok(())
+    })?;
+    let stored = stored_events(&stream)?;
+    let verdict = if opened {
+        Verdict::Broken(format!(
+            "an append committed with the standby fenced: `mandate workspace open` succeeded, and the primary holds {stored} of its events"
+        ))
+    } else if stored != "0" {
+        Verdict::Broken(format!(
+            "an append committed with the standby fenced: the primary holds {stored} events of {stream}, though the CLI never had its commit\n{logs}"
+        ))
+    } else {
+        let end = job_end(&format!("control-{id}"))?;
+        if end != "DeadlineExceeded" {
+            let reason = if end.is_empty() {
+                "no terminal condition"
+            } else {
+                end.as_str()
+            };
+            Verdict::Broken(format!(
+                "the append with the standby fenced failed (`{reason}`) rather than waited:\n{logs}"
+            ))
+        } else if !waited {
+            Verdict::Broken(format!(
+                "the append's Job ran out its deadline, but no commit ever waited on the standby, so the drill did not see what stopped it:\n{logs}"
+            ))
+        } else {
+            Verdict::Held
+        }
+    };
+    Ok((verdict, stream))
+}
+
+/// Why a Job that failed ended, as its `Failed` condition says, or its `FailureTarget` while the
+/// controller is still stopping its pod (`DeadlineExceeded` for one its deadline stopped); waited
+/// for, since a Job counts its failed pod before it sets either.
+fn job_end(name: &str) -> Result<String> {
+    let mut reason = String::new();
+    until(|| {
+        reason = kubectl(&[
+            "get",
+            "job",
+            name,
+            "--namespace",
+            NAMESPACE,
+            "-o",
+            "jsonpath={.status.conditions[?(@.type==\"FailureTarget\")].reason} {.status.conditions[?(@.type==\"Failed\")].reason}",
+        ])?
+        .split_whitespace()
+        .last()
+        .unwrap_or_default()
+        .to_string();
+        Ok(!reason.is_empty())
+    })?;
+    Ok(reason)
+}
+
+/// Sets the journal cluster's `dataDurability`, as only a seeded drill does.
+fn set_durability(durability: &str) -> Result<()> {
+    let patch = json!({"spec": {"postgresql": {"synchronous": {"dataDurability": durability}}}});
+    kubectl(&[
+        "patch",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "--type",
+        "merge",
+        "-p",
+        &patch.to_string(),
+    ])
+    .map(|_| ())
+}
+
+/// The archive's destination and endpoint, as the installed ObjectStore holds them.
+fn archive_destination() -> Result<(String, String)> {
+    let both = kubectl(&[
+        "get",
+        "objectstore.barmancloud.cnpg.io/journal-archive",
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.spec.configuration.destinationPath} {.spec.configuration.endpointURL}",
+    ])?;
+    let (path, url) = both
+        .trim()
+        .split_once(' ')
+        .context("the archive's ObjectStore names no destination or endpoint")?;
+    Ok((path.to_string(), url.to_string()))
+}
+
+/// Points the archive at `path`, as only a seeded drill does, and back.
+fn set_destination(path: &str) -> Result<()> {
+    let patch = json!({"spec": {"configuration": {"destinationPath": path}}});
+    kubectl(&[
+        "patch",
+        "objectstore.barmancloud.cnpg.io/journal-archive",
+        "--namespace",
+        NAMESPACE,
+        "--type",
+        "merge",
+        "-p",
+        &patch.to_string(),
+    ])
+    .map(|_| ())
+}
+
+/// Writes a stream, closes the WAL segment that holds it, takes a base backup, and reads both back
+/// from the store with Barman's own tools. Seeded, the archive goes to another bucket of the same
+/// store first, which Postgres cannot tell, so only the read from the store can catch it; the
+/// destination is put back whatever happened. A seeded run leaves its segment and base backup under
+/// that other path, so the archive at the real one has a gap: a later restore takes its own base
+/// backup first.
+fn archive(seeded: bool) -> Result<Verdict> {
+    let (path, url) = archive_destination()?;
+    let verdict = if seeded {
+        set_destination(&format!("{path}-elsewhere")).and_then(|()| archived(&path, &url))
+    } else {
+        archived(&path, &url)
+    };
+    let restored = if seeded {
+        set_destination(&path)
+    } else {
+        Ok(())
+    };
+    let verdict = verdict?;
+    restored?;
+    Ok(verdict)
+}
+
+fn archived(path: &str, url: &str) -> Result<Verdict> {
+    let id = run_id()?;
+    let workspace = format!("archive{id}");
+    let (opened, logs) = run_job(open_job(&id, &workspace, 120)?)?;
+    if !opened {
+        return Ok(Verdict::Broken(format!(
+            "`mandate workspace open` failed before the archive check:\n{logs}"
+        )));
+    }
+    let segment = on_primary("SELECT pg_walfile_name(pg_current_wal_lsn())")?;
+    on_primary("SELECT pg_switch_wal()")?;
+    let reported = until(|| {
+        let last = on_primary("SELECT coalesce(last_archived_wal, '') FROM pg_stat_archiver")?;
+        Ok(last.len() == segment.len() && last >= segment)
+    })?;
+    if !reported {
+        return Ok(Verdict::Broken(format!(
+            "Postgres never reported {segment} archived: {}",
+            on_primary("SELECT failed_count, last_failed_wal FROM pg_stat_archiver")?
+        )));
+    }
+    let backup = format!("journal-drill-{id}");
+    let backup_id = base_backup(&backup);
+    let _ = kubectl(&[
+        "delete",
+        "backup",
+        &backup,
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "--wait=false",
+    ]);
+    let backup_id = match backup_id? {
+        Ok(backup_id) => backup_id,
+        Err(phase) => {
+            let sidecars = kubectl(&[
+                "get",
+                "pod",
+                "--namespace",
+                NAMESPACE,
+                "--selector",
+                "cnpg.io/cluster=journal",
+                "-o",
+                "jsonpath={range .items[*]}{.metadata.name}: {.status.containerStatuses[?(@.name==\"plugin-barman-cloud\")].lastState.terminated.reason} {.status.containerStatuses[?(@.name==\"plugin-barman-cloud\")].restartCount} restarts; {end}",
+            ])
+            .unwrap_or_default();
+            return Ok(Verdict::Broken(format!(
+                "the base backup {backup} did not complete (phase `{phase}`); the plugin's sidecars: {}",
+                sidecars.trim()
+            )));
+        }
+    };
+    let read = read_archive(&id, path, url, &segment);
+    let _ = kubectl(&[
+        "delete",
+        "pod",
+        &format!("archive-check-{id}"),
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "--wait=false",
+    ]);
+    let _ = kubectl(&[
+        "delete",
+        "networkpolicy",
+        "archive-check",
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+    ]);
+    let read = read?;
+    if !read.listed {
+        return Ok(Verdict::Broken(format!(
+            "Barman could not list the store at {path}, so the drill read nothing:\n{}",
+            read.logs
+        )));
+    }
+    if !read.fetched {
+        return Ok(Verdict::Broken(if read.logs.contains("does not exist") {
+            format!("{segment} is not in the archive at {path}:\n{}", read.logs)
+        } else {
+            format!(
+                "Barman failed to fetch {segment} from {path} for another reason than its absence:\n{}",
+                read.logs
+            )
+        }));
+    }
+    if !read.logs.contains(&backup_id) {
+        return Ok(Verdict::Broken(format!(
+            "the base backup {backup_id} is not in the archive at {path}:\n{}",
+            read.logs
+        )));
+    }
+    Ok(Verdict::Held)
+}
+
+/// Takes a base backup through the plugin: its Barman id once it completes, or the phase it ended
+/// in when it did not.
+fn base_backup(backup: &str) -> Result<std::result::Result<String, String>> {
+    apply(&[json!({
+        "apiVersion": "postgresql.cnpg.io/v1",
+        "kind": "Backup",
+        "metadata": {"name": backup},
+        "spec": {
+            "cluster": {"name": "journal"},
+            "method": "plugin",
+            "pluginConfiguration": {"name": "barman-cloud.cloudnative-pg.io"}
+        }
+    })])?;
+    let mut phase = String::new();
+    until(|| {
+        phase = kubectl(&[
+            "get",
+            "backup",
+            backup,
+            "--namespace",
+            NAMESPACE,
+            "-o",
+            "jsonpath={.status.phase}/{.status.backupId}/{.status.error}",
+        ])?
+        .trim()
+        .to_string();
+        Ok(phase.starts_with("completed/") || phase.starts_with("failed/"))
+    })?;
+    Ok(match phase.strip_prefix("completed/") {
+        Some(rest) if !rest.starts_with('/') => {
+            Ok(rest.split('/').next().unwrap_or_default().to_string())
+        }
+        _ => Err(phase),
+    })
+}
+
+/// What the check pod read from the store: whether Barman listed it, whether it fetched the
+/// segment, and both tools' logs.
+struct ArchiveRead {
+    listed: bool,
+    fetched: bool,
+    logs: String,
+}
+
+/// A pod with the plugin's own sidecar image and the archive's key that lists the base backups and
+/// fetches `segment` back from `path`, as a restore would, under a network policy of its own that
+/// reaches the store and nothing else. The caller removes the pod and the policy.
+fn read_archive(id: &str, path: &str, url: &str, segment: &str) -> Result<ArchiveRead> {
+    let image = format!("ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:{PLUGIN_SIDECAR_TAG}");
+    let name = format!("archive-check-{id}");
+    let key = |env: &str, key: &str| json!({"name": env, "valueFrom": {"secretKeyRef": {"name": "journal-archive-key", "key": key}}});
+    let tool = |name: &str, args: Vec<&str>| {
+        json!({
+            "name": name,
+            "image": image,
+            "command": args,
+            "env": [
+                key("AWS_ACCESS_KEY_ID", "ACCESS_KEY_ID"),
+                key("AWS_SECRET_ACCESS_KEY", "ACCESS_SECRET_KEY"),
+                {"name": "AWS_DEFAULT_REGION", "value": "us-east-1"},
+                {"name": "HOME", "value": "/tmp"}
+            ],
+            "securityContext": {
+                "allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true,
+                "capabilities": {"drop": ["ALL"]}
+            },
+            "resources": {
+                "limits": {"cpu": "200m", "memory": "256Mi"},
+                "requests": {"cpu": "200m", "memory": "256Mi"}
+            },
+            "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}]
+        })
+    };
+    let fetched = format!("/tmp/{segment}");
+    let policy = json!({
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {"name": "archive-check"},
+        "spec": {
+            "podSelector": {"matchLabels": {"mandate.dev/archive-check": "true"}},
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [],
+            "egress": [
+                {"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
+                         "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}}}],
+                 "ports": [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}]},
+                {"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": ARCHIVE_STORE_NAMESPACE}},
+                         "podSelector": {"matchLabels": {"app.kubernetes.io/name": "mandate-archive-store"}}}],
+                 "ports": [{"protocol": "TCP", "port": 9000}]}
+            ]
+        }
+    });
+    let pod = json!({
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": name,
+            "labels": {"mandate.dev/archive-check": "true", "mandate.dev/archive-client": "true"}
+        },
+        "spec": {
+            "restartPolicy": "Never",
+            "automountServiceAccountToken": false,
+            "securityContext": {
+                "runAsNonRoot": true, "runAsUser": 26, "runAsGroup": 26,
+                "seccompProfile": {"type": "RuntimeDefault"}
+            },
+            "initContainers": [tool(
+                "list",
+                vec!["barman-cloud-backup-list", "--endpoint-url", url, path, "journal"]
+            )],
+            "containers": [tool(
+                "fetch",
+                vec!["barman-cloud-wal-restore", "--endpoint-url", url, path, "journal", segment, &fetched]
+            )],
+            "volumes": [{"name": "tmp", "emptyDir": {}}]
+        }
+    });
+    apply(&[policy, pod])?;
+    let mut phase = String::new();
+    until(|| {
+        phase = kubectl(&[
+            "get",
+            "pod",
+            &name,
+            "--namespace",
+            NAMESPACE,
+            "-o",
+            "jsonpath={.status.phase}",
+        ])?
+        .trim()
+        .to_string();
+        Ok(phase == "Succeeded" || phase == "Failed")
+    })?;
+    let listed = kubectl(&[
+        "get",
+        "pod",
+        &name,
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.status.initContainerStatuses[0].state.terminated.exitCode}",
+    ])?;
+    let mut logs = String::new();
+    for container in ["list", "fetch"] {
+        if let Ok(out) = kubectl(&["logs", &name, "--namespace", NAMESPACE, "-c", container]) {
+            for line in out.lines() {
+                logs.push_str(&format!("[{container}] {line}\n"));
+            }
+        }
+    }
+    Ok(ArchiveRead {
+        listed: listed.trim() == "0",
+        fetched: phase == "Succeeded",
+        logs,
+    })
+}
+
 const COMPOSE_DIR: &str = "deploy/cell/compose";
 /// Where the compose drill keeps the secrets and the exported segment, owned by the Compose user;
 /// `secrets/` is ignored by git.
@@ -2041,11 +2971,11 @@ fn compose_api_settings(api_image: &str) -> [(&'static str, String); 8] {
         ("MANDATE_API_WORKSPACE", DEMO_WORKSPACE.to_string()),
         ("MANDATE_API_ISSUER", LOCAL_ISSUER.to_string()),
         ("MANDATE_API_AUDIENCE", "authenticated".to_string()),
-        ("MANDATE_API_JWKS_URL", format!("{LOCAL_ISSUER}/jwks")),
         (
-            "MANDATE_API_APP_ORIGIN",
-            "https://localhost:4317".to_string(),
+            "MANDATE_API_JWKS_URL",
+            format!("{LOCAL_ISSUER}{STUB_KEY_SET}"),
         ),
+        ("MANDATE_API_APP_ORIGIN", DEMO_APP_ORIGIN.to_string()),
         ("MANDATE_DEPLOYMENT_TIER", "dev".to_string()),
     ]
 }
@@ -2200,8 +3130,22 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
 const DEMO_WORKSPACE: &str = "01KDEM0000000000000000000W";
 /// The demo workspace's organization (`api.org` in the local cell's values).
 const DEMO_ORG: &str = "01KDEM0000000000000000000R";
-/// The local stub issuer's address on the API pod's loopback (DEC-2100, lane SI).
+/// The local stub issuer's address on the API pod's loopback (DEC-2100, lane SI), exactly as its
+/// tokens carry it in `iss`: no trailing slash.
 const LOCAL_ISSUER: &str = "http://127.0.0.1:8090";
+/// The stub's port on the API pod's loopback, which the demo forwards to the same local port, so
+/// the `Host` the stub requires (`127.0.0.1:8090`, any other gets 421) is the one the demo sends.
+const STUB_PORT: u16 = 8090;
+/// The stub's key-set path under [`LOCAL_ISSUER`].
+const STUB_KEY_SET: &str = "/jwks.json";
+/// The ConfigMap holding the demo's subject links, which the chart mounts at the fixed path.
+const LINKS_CONFIGMAP: &str = "subject-links";
+/// The demo owner's subject at the stub issuer: a name for a demo principal, never a person's.
+const DEMO_SUBJECT: &str = "demo-owner";
+/// The user principal the demo owner signs in as.
+const DEMO_OWNER: &str = "01KDEM0000000000000000000P";
+/// The app origin the local cell's API takes (`api.appOrigin` in its values).
+const DEMO_APP_ORIGIN: &str = "https://localhost:4317";
 /// Where `web/` serves on the developer's machine (its `npm run dev`).
 const WEB_URL: &str = "http://127.0.0.1:4317";
 /// The process-list name lane A1 gives the workspace API server; `api_is_a_planned_name` checks
@@ -2224,7 +3168,7 @@ pub struct DemoPart {
 
 /// Which demo parts this checkout can bring up: a process is there once the process list marks
 /// it built (its lane's image exists), and the founding membership once the CLI has its gesture.
-pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
+pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<DemoPart> {
     let built = |name: &str| {
         processes
             .iter()
@@ -2280,6 +3224,14 @@ pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
             ),
         },
         DemoPart {
+            name: SIGNIN_PART,
+            skipped: lane(
+                built(API_PROCESS) && stub_ready,
+                "the local stub issuer (lane SI, E21-52) and the server's key-set tier check \
+                 (E21-53) are not both on main (DEC-2100 item 9)",
+            ),
+        },
+        DemoPart {
             name: "web/ against the cell's API",
             skipped: lane(
                 built(API_PROCESS),
@@ -2311,15 +3263,9 @@ pub fn demo(web: bool) -> Result<()> {
             p["built"] = json!(false);
         }
     }
-    let mut parts = demo_parts(&listed, &help);
+    let mut parts = demo_parts(&listed, &help, stub_ready(Path::new(".")));
     if api_image_tag()?.is_none() {
-        for part in parts.iter_mut().filter(|p| p.skipped.is_none()) {
-            if part.name.contains("API") {
-                part.skipped = Some(format!(
-                    "{IMAGE_ENV} names a pulled `mandate` image, and no API image is published yet"
-                ));
-            }
-        }
+        skip_without_api_image(&mut parts);
     }
     let api_ready = parts
         .iter()
@@ -2335,8 +3281,15 @@ pub fn demo(web: bool) -> Result<()> {
         "    kubectl: docker exec {NODE} kubectl --namespace {NAMESPACE} get pods; \
          stop: cargo xtask cell down"
     );
+    let signin_ready = api_ready
+        && parts
+            .iter()
+            .any(|p| p.name == SIGNIN_PART && p.skipped.is_none());
     if api_ready {
-        api_port_forward()?;
+        api_port_forward(signin_ready)?;
+    }
+    if signin_ready {
+        demo_sign_in()?;
     }
     if !web {
         return Ok(());
@@ -2370,24 +3323,46 @@ pub fn demo(web: bool) -> Result<()> {
     }
 }
 
+/// Names every part that needs this checkout's API image as skipped, sign-in among them, for a
+/// cell that pulls its `mandate` image and so has no API image.
+pub fn skip_without_api_image(parts: &mut [DemoPart]) {
+    for part in parts.iter_mut().filter(|p| p.skipped.is_none()) {
+        if part.name.contains("API") || part.name == SIGNIN_PART {
+            part.skipped = Some(format!(
+                "{IMAGE_ENV} names a pulled `mandate` image, and no API image is published yet"
+            ));
+        }
+    }
+}
+
 /// The local port the demo forwards to the API server's listener on its pod's loopback.
 const API_LOCAL_PORT: u16 = 8787;
 
 /// The demo part that is the API server; `api_port_forward` runs only once it is ready.
 const API_PART: &str = "the workspace API server, through a port-forward";
 
+/// The demo part that is sign-in; `demo_sign_in` runs only once it is ready.
+const SIGNIN_PART: &str =
+    "sign-in as the demo owner, through the local stub issuer (dev cell only, DEC-2100)";
+
 /// Forwards [`API_LOCAL_PORT`] on this machine to the API server's listener, with the host's own
 /// `kubectl` (the cell's nodes publish no port), and checks that `/v1` answers: with no session,
 /// the one 401 (API-1). The forward keeps running after the demo returns, until its pod goes or it
 /// is stopped; a later demo whose port still answers that way reuses it rather than starting one.
-fn api_port_forward() -> Result<()> {
+fn api_port_forward(stub: bool) -> Result<()> {
     let config = kubeconfig()?;
-    let forward = port_forward_args(&config);
+    let forward = port_forward_args(&config, stub);
     let shown = forward.join(" ");
     let path = format!("/v1/workspaces/{DEMO_WORKSPACE}/agents");
     if http_status(API_LOCAL_PORT, &path).is_ok_and(|status| status == 401) {
-        eprintln!("    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (an earlier forward)");
-        return Ok(());
+        if !stub || stub_answers() {
+            eprintln!("    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (an earlier forward)");
+            return Ok(());
+        }
+        bail!(
+            "an earlier forward holds 127.0.0.1:{API_LOCAL_PORT} without the stub issuer's port \
+             {STUB_PORT}; stop it with `pkill -f 'port-forward deployment/api'` and run the demo again"
+        );
     }
     if output("kubectl", &["version", "--client"]).is_err() {
         eprintln!("    api: no kubectl on this machine; forward it with `kubectl {shown}`");
@@ -2408,17 +3383,21 @@ fn api_port_forward() -> Result<()> {
             bail!("`kubectl {shown}` exited with {status}:\n{}", said());
         }
         if let Ok(status) = http_status(API_LOCAL_PORT, &path) {
-            if status == 401 {
+            if status == 401 && (!stub || stub_answers()) {
                 eprintln!(
                     "    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (GET {path} is 401 \
                      with no session, API-1)"
                 );
                 return Ok(());
             }
-            bail!("the API server answered GET {path} with {status}, not the one 401");
+            if status != 401 {
+                let _ = child.kill();
+                bail!("the API server answered GET {path} with {status}, not the one 401");
+            }
         }
         sleep(Duration::from_secs(1));
     }
+    let _ = child.kill();
     bail!(
         "the API server did not answer on 127.0.0.1:{API_LOCAL_PORT} within 30 s through \
          `kubectl {shown}`, which said:\n{}",
@@ -2427,9 +3406,10 @@ fn api_port_forward() -> Result<()> {
 }
 
 /// `kubectl` arguments forwarding [`API_LOCAL_PORT`] on this machine's loopback to the API
-/// listener's port 8080: the address is its own flag, since a port spec is `LOCAL:REMOTE` only.
-pub fn port_forward_args(kubeconfig: &str) -> Vec<String> {
-    [
+/// listener's port 8080, and with `stub` [`STUB_PORT`] to the stub issuer's: the address is its
+/// own flag, since a port spec is `LOCAL:REMOTE` only.
+pub fn port_forward_args(kubeconfig: &str, stub: bool) -> Vec<String> {
+    let mut args: Vec<String> = [
         "--kubeconfig",
         kubeconfig,
         "--namespace",
@@ -2441,20 +3421,175 @@ pub fn port_forward_args(kubeconfig: &str) -> Vec<String> {
         &format!("{API_LOCAL_PORT}:8080"),
     ]
     .map(String::from)
-    .to_vec()
+    .to_vec();
+    if stub {
+        args.push(format!("{STUB_PORT}:{STUB_PORT}"));
+    }
+    args
+}
+
+/// Whether the stub issuer answers through the forward: its key set, with the `Host` it requires.
+fn stub_answers() -> bool {
+    http(STUB_PORT, "GET", STUB_KEY_SET, &[], "").is_ok_and(|(status, _)| status == 200)
+}
+
+/// Signs in as the demo owner the way `web/` does: a token for [`DEMO_SUBJECT`] from the stub
+/// issuer, then `POST /v1/sessions` from the app origin, which must answer 204 with the session
+/// cookie (workspace API spec §3.11 item 5).
+fn demo_sign_in() -> Result<()> {
+    let body = json!({"subject": DEMO_SUBJECT}).to_string();
+    let (status, reply) = http(
+        STUB_PORT,
+        "POST",
+        "/token",
+        &[("Content-Type", "application/json")],
+        &body,
+    )
+    .context("asking the stub issuer for a token")?;
+    if status != 200 {
+        bail!("the stub issuer answered POST /token with {status}");
+    }
+    let token: Value = serde_json::from_str(reply_body(&reply))
+        .context("the stub issuer's token reply is not JSON")?;
+    let token = token["access_token"]
+        .as_str()
+        .context("the stub issuer's reply carries no access_token")?;
+    let body = json!({"access_token": token}).to_string();
+    let (status, reply) = http(
+        API_LOCAL_PORT,
+        "POST",
+        "/v1/sessions",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", DEMO_APP_ORIGIN),
+            ("X-Mandate-Request", "1"),
+        ],
+        &body,
+    )
+    .context("opening a session")?;
+    if !signed_in(status, &reply) {
+        bail!("POST /v1/sessions answered {status}, not 204 with the session cookie");
+    }
+    eprintln!("    sign-in: the demo owner opened a session through the local stub issuer");
+    Ok(())
+}
+
+/// Whether an answer to `POST /v1/sessions` opened a session: 204 and the `__Host-` cookie.
+pub fn signed_in(status: u16, reply: &str) -> bool {
+    status == 204
+        && reply
+            .split("\r\n\r\n")
+            .next()
+            .unwrap_or_default()
+            .lines()
+            .any(|l| {
+                l.to_ascii_lowercase()
+                    .starts_with("set-cookie: __host-mandate_session=")
+            })
+}
+
+/// The body of an HTTP/1.1 reply: what follows its header block.
+fn reply_body(reply: &str) -> &str {
+    reply.split_once("\r\n\r\n").map_or("", |(_, body)| body)
+}
+
+/// One HTTP/1.1 request to 127.0.0.1:`port`, with `Host: 127.0.0.1:port` (the stub issuer takes
+/// no other), and its status code and whole reply.
+fn http(
+    port: u16,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> Result<(u16, String)> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let mut request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\
+         Content-Length: {}\r\n",
+        body.len()
+    );
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    request.push_str(body);
+    stream.write_all(request.as_bytes())?;
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply)?;
+    let status = status_of(&reply).context("the reply is not HTTP/1.1")?;
+    Ok((status, reply))
+}
+
+/// Writes the demo owner's subject link with the CLI's own `mandate identity link`, in the image
+/// this checkout built and with no network, then applies it as the [`LINKS_CONFIGMAP`] ConfigMap
+/// the chart mounts at the server's fixed path (DEC-1023). The subject reaches the CLI on standard
+/// input only, as it requires.
+fn demo_links(image: &str) -> Result<()> {
+    let dir = state()?.join("links");
+    if dir.exists() {
+        fs::remove_dir_all(&dir).context("clearing the demo's links directory")?;
+    }
+    fs::create_dir_all(&dir)?;
+    let owner = fs::metadata(&dir)?;
+    let user = format!("{}:{}", owner.uid(), owner.gid());
+    let mount = format!("{}:/out", fs::canonicalize(&dir)?.display());
+    let mut child = Command::new("docker")
+        .args([
+            "run",
+            "--rm",
+            "-i",
+            "--network",
+            "none",
+            "--user",
+            &user,
+            "-v",
+            &mount,
+            image,
+            "identity",
+            "link",
+            "--issuer",
+            LOCAL_ISSUER,
+            "--member",
+            DEMO_OWNER,
+            "--links",
+            "/out/subject-links",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .context("starting `mandate identity link` in the cell's image")?;
+    child
+        .stdin
+        .take()
+        .context("the CLI's standard input")?
+        .write_all(DEMO_SUBJECT.as_bytes())?;
+    let status = child.wait()?;
+    if !status.success() {
+        bail!(
+            "`mandate identity link` for the demo owner failed with {status}; it runs as this \
+             user ({user}) writing into {}, which rootless docker maps to another owner",
+            dir.display()
+        );
+    }
+    let links = fs::read_to_string(dir.join("subject-links"))
+        .context("reading the demo's subject-link file")?;
+    apply(&[links_configmap(&links)])
+}
+
+/// The ConfigMap holding the subject-link file `links` under the key the chart mounts.
+pub fn links_configmap(links: &str) -> Value {
+    json!({
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {"name": LINKS_CONFIGMAP, "labels": {"mandate.dev/workspace": WORKSPACE}},
+        "data": {"subject-links": links}
+    })
 }
 
 /// The status code of an HTTP/1.1 `GET path` to 127.0.0.1:`port`.
 fn http_status(port: u16, path: &str) -> Result<u16> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    write!(
-        stream,
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-    )?;
-    let mut reply = String::new();
-    stream.read_to_string(&mut reply)?;
-    status_of(&reply).context("the reply is not HTTP/1.1")
+    http(port, "GET", path, &[], "").map(|(status, _)| status)
 }
 
 /// The status code on an HTTP/1.1 reply's first line.
@@ -2541,6 +3676,7 @@ mod tests {
         let parts = demo_parts(
             &today,
             "Commands:\n  workspace  Open the workspace control stream\n",
+            false,
         );
         let skipped: Vec<&str> = parts
             .iter()
@@ -2549,8 +3685,8 @@ mod tests {
             .collect();
         assert_eq!(
             skipped.len(),
-            6,
-            "API, runtime, agent, research, membership and web/ wait on their lanes: {skipped:?}"
+            7,
+            "API, runtime, agent, research, membership, sign-in and web/ wait on their lanes: {skipped:?}"
         );
         assert!(
             skipped.contains(&RESEARCH_GATEWAY),
@@ -2569,8 +3705,20 @@ mod tests {
         let parts = demo_parts(
             &later,
             "Commands:\n  membership  Grant the founding membership\n",
+            true,
         );
         assert!(parts.iter().all(|p| p.skipped.is_none()), "{parts:?}");
+        let no_stub = demo_parts(
+            &later,
+            "Commands:\n  membership  Grant the founding membership\n",
+            false,
+        );
+        let waiting: Vec<&str> = no_stub
+            .iter()
+            .filter(|p| p.skipped.is_some())
+            .map(|p| p.name)
+            .collect();
+        assert_eq!(waiting, [SIGNIN_PART], "only sign-in waits on the stub");
     }
 
     #[test]
@@ -2582,7 +3730,7 @@ mod tests {
             "the API server is a built service named `{API_PROCESS}`"
         );
         let help = "Commands:\n  workspace  Open\n      membership is named in a wrapped line\n";
-        let membership = demo_parts(&[], help)
+        let membership = demo_parts(&[], help, false)
             .into_iter()
             .find(|p| p.name == "the founding membership");
         assert!(
@@ -2643,7 +3791,7 @@ mod tests {
     #[test]
     fn the_runtime_is_ready_once_built_and_the_agent_still_waits_on_its_executor() {
         let list = [process("runtime", true), process("executor", false)];
-        let parts = demo_parts(&list, "");
+        let parts = demo_parts(&list, "", false);
         let skipped = |prefix: &str| {
             parts
                 .iter()
@@ -2660,7 +3808,7 @@ mod tests {
             Some(true),
             "a deny-all runtime runs no research"
         );
-        let unbuilt = demo_parts(&[process("runtime", false)], "");
+        let unbuilt = demo_parts(&[process("runtime", false)], "", false);
         assert!(
             unbuilt
                 .iter()
@@ -2711,7 +3859,7 @@ mod tests {
     fn an_agent_needs_both_its_runtime_and_its_executor() {
         for (runtime, executor) in [(true, false), (false, true)] {
             let list = [process("runtime", runtime), process("executor", executor)];
-            let agent = demo_parts(&list, "")
+            let agent = demo_parts(&list, "", false)
                 .into_iter()
                 .find(|p| p.name.starts_with("a paper agent"));
             assert!(agent.is_some_and(|a| a.skipped.is_some()));
@@ -2765,7 +3913,7 @@ mod tests {
             format!("org: {DEMO_ORG}"),
             format!("workspace: {DEMO_WORKSPACE}"),
             format!("issuer: {LOCAL_ISSUER}"),
-            format!("jwksUrl: {LOCAL_ISSUER}/jwks"),
+            format!("jwksUrl: {LOCAL_ISSUER}{STUB_KEY_SET}"),
             "tier: dev".to_string(),
         ] {
             assert!(
@@ -2857,7 +4005,14 @@ mod tests {
 
     #[test]
     fn the_api_forward_binds_loopback_and_names_local_then_remote_port() {
-        let args = port_forward_args("k");
+        let with_stub = port_forward_args("k", true);
+        assert_eq!(
+            with_stub.last().map(String::as_str),
+            Some("8090:8090"),
+            "the stub's port is forwarded to the same local port, so its Host matches"
+        );
+        assert_eq!(with_stub.len(), port_forward_args("k", false).len() + 1);
+        let args = port_forward_args("k", false);
         let at = |flag: &str| {
             args.iter()
                 .position(|a| a == flag)
@@ -2873,6 +4028,128 @@ mod tests {
             "{spec}"
         );
         assert!(ports.iter().all(|p| p.parse::<u16>().is_ok()));
+    }
+
+    #[test]
+    fn the_stub_runs_only_with_its_crate_and_the_servers_tier_check() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("xtask-stub-ready-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (server, check) = KEY_SET_TIER_CHECK;
+        let write = |path: &str, text: &str| -> Result<()> {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().context("a parent")?)?;
+            fs::write(path, text)?;
+            Ok(())
+        };
+        assert!(!stub_ready(&root), "neither");
+        write(STUB_CRATE, "[package]")?;
+        write(STUB_MAIN, "fn main() { serve() }")?;
+        assert!(!stub_ready(&root), "the crate without the server's check");
+        write(server, "fn other() {}")?;
+        assert!(!stub_ready(&root), "a server without the check");
+        write(server, &format!("{check}url: &str, tier: Tier)"))?;
+        assert!(stub_ready(&root), "both");
+        write(STUB_MAIN, "fn main() {\n    todo!()\n}")?;
+        assert!(
+            !stub_ready(&root),
+            "the crate's tests landed, its entry point still pending"
+        );
+        fs::remove_file(root.join(STUB_MAIN))?;
+        assert!(!stub_ready(&root), "a crate with no entry point");
+        write(STUB_MAIN, "fn main() { serve() }")?;
+        fs::remove_file(root.join(STUB_CRATE))?;
+        assert!(!stub_ready(&root), "the check without the crate");
+        let _ = fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    #[test]
+    fn without_a_stub_the_api_mounts_no_links_and_names_no_stub() {
+        assert_eq!(
+            signin_values(None),
+            ["images.stub-issuer=", "api.subjectLinks="]
+        );
+        assert_eq!(
+            signin_values(Some("mandate.local/stub-issuer:0123456789ab")),
+            [
+                "images.stub-issuer=mandate.local/stub-issuer:0123456789ab".to_string(),
+                format!("api.subjectLinks={LINKS_CONFIGMAP}")
+            ]
+        );
+    }
+
+    #[test]
+    fn the_demo_links_are_the_configmap_the_chart_mounts() {
+        let links = "sha256:ab 01KDEM0000000000000000000P\n";
+        let map = links_configmap(links);
+        assert_eq!(map["kind"], "ConfigMap");
+        assert_eq!(map["metadata"]["name"], LINKS_CONFIGMAP);
+        assert_eq!(map["data"]["subject-links"], links);
+        assert_eq!(
+            map.as_object().map(|o| o.contains_key("binaryData")),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn a_pulled_image_skips_sign_in_with_the_api() {
+        let later = [
+            process("api", true),
+            process("runtime", true),
+            process("executor", true),
+        ];
+        let mut parts = demo_parts(&later, "", true);
+        skip_without_api_image(&mut parts);
+        for name in [API_PART, SIGNIN_PART] {
+            assert!(
+                parts.iter().any(|p| p.name == name && p.skipped.is_some()),
+                "{name} is skipped without an API image"
+            );
+        }
+        assert!(
+            parts
+                .iter()
+                .any(|p| p.name.starts_with("a paper agent") && p.skipped.is_none()),
+            "parts that need no API image stay ready"
+        );
+    }
+
+    #[test]
+    fn a_session_opens_only_with_204_and_the_host_cookie() {
+        let reply = |status: &str, cookie: &str| {
+            format!("HTTP/1.1 {status}\r\n{cookie}content-length: 0\r\n\r\n")
+        };
+        let good = "set-cookie: __Host-mandate_session=v1.a.b; Path=/; Secure; HttpOnly\r\n";
+        assert!(signed_in(204, &reply("204 No Content", good)));
+        assert!(!signed_in(401, &reply("401 Unauthorized", good)));
+        assert!(!signed_in(204, &reply("204 No Content", "")));
+        assert!(!signed_in(
+            204,
+            &reply("204 No Content", "set-cookie: other=1\r\n")
+        ));
+        assert!(
+            !signed_in(
+                204,
+                "HTTP/1.1 204 No Content\r\n\r\nset-cookie: __Host-mandate_session=x\r\n"
+            ),
+            "a cookie in the body is not a header"
+        );
+        assert_eq!(
+            reply_body("HTTP/1.1 200 OK\r\na: b\r\n\r\n{\"x\":1}"),
+            "{\"x\":1}"
+        );
+    }
+
+    #[test]
+    fn the_demo_owner_is_a_ulid_and_the_stub_key_set_is_its_published_path() {
+        assert_eq!(STUB_KEY_SET, "/jwks.json");
+        assert!(!LOCAL_ISSUER.ends_with('/'));
+        assert!(
+            DEMO_OWNER.len() == 26
+                && DEMO_OWNER.bytes().all(
+                    |b| b.is_ascii_digit() || (b.is_ascii_uppercase() && !b"ILOU".contains(&b))
+                )
+        );
     }
 
     #[test]

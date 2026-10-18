@@ -19,7 +19,7 @@ api:
   workspace: 01KDEM0000000000000000000W
   issuer: http://127.0.0.1:8090
   audience: authenticated
-  jwksUrl: http://127.0.0.1:8090/jwks
+  jwksUrl: http://127.0.0.1:8090/jwks.json
   appOrigin: https://localhost:4317
   tier: dev
   subjectLinks: ""

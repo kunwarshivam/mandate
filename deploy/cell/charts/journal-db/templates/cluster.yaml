@@ -1,3 +1,9 @@
+{{- /*
+A primary and a synchronous standby (E21-41). `synchronous` asks for one standby out of the others,
+and `dataDurability: required` keeps it asked when that standby is down, so every commit waits for
+it instead of committing on the primary alone (OPS-2, DEC-1050 item 1). These are not values: a
+value could only weaken them.
+*/ -}}
 {{- define "journal.cluster" -}}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -5,11 +11,20 @@ metadata:
   name: journal
   labels:
     {{- include "journal.labels" . | nindent 4 }}
+  annotations:
+    mandate.dev/failure-domain: {{ include "journal.failureDomain" . | quote }}
 spec:
   instances: {{ .Values.instances }}
   imageName: {{ .Values.image | quote }}
   enableSuperuserAccess: false
   smartShutdownTimeout: {{ .Values.smartShutdownTimeout }}
+  inheritedMetadata:
+    labels:
+      mandate.dev/archive-client: "true"
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: {{ ternary "required" "preferred" (eq .Values.failureDomain "separate") }}
   storage:
     size: {{ .Values.storage.size | quote }}
     {{- with .Values.storage.storageClass }}
@@ -27,12 +42,29 @@ spec:
       synchronous_commit: "on"
       fsync: "on"
       full_page_writes: "on"
+    synchronous:
+      method: any
+      number: 1
+      dataDurability: required
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: journal-archive
   bootstrap:
     initdb:
       database: mandate
       owner: mandate_migrator
       secret:
         name: journal-role-mandate-migrator
+      # roles.sql revokes CONNECT on `postgres` from PUBLIC; pg_rewind connects there as
+      # CloudNativePG's replication role when a former primary rejoins after a failover. The
+      # operator makes that role only when the primary first starts, after this, and takes one
+      # that exists (it ensures LOGIN REPLICATION), so it is made here first. This runs once, on
+      # a fresh cluster, as the init Job's arguments, where Kubernetes reads `$`: none is used.
+      postInitSQL:
+        - CREATE ROLE streaming_replica WITH LOGIN REPLICATION
+        - GRANT CONNECT ON DATABASE postgres TO streaming_replica
       postInitApplicationSQLRefs:
         configMapRefs:
           - name: journal-roles
@@ -50,11 +82,54 @@ spec:
       {{- end }}
 {{- end -}}
 {{- /*
+What the Cluster says about its failure domains, which `cargo xtask cell up` prints.
+*/ -}}
+{{- define "journal.failureDomain" -}}
+{{- if eq .Values.failureDomain "separate" -}}
+separate nodes: each instance must be scheduled on a node of its own
+{{- else -}}
+shared: the instances may share one node, so the standby is no second failure domain
+{{- end -}}
+{{- end -}}
+{{- /*
+The Kubernetes API's addresses and ports, from values or else read from the cluster: the
+`kubernetes` Service's address and its EndpointSlice's, since a policy controller may see either.
+*/ -}}
+{{- define "journal.kubeApi" -}}
+{{- $cidrs := .Values.kubeApi.cidrs -}}
+{{- $ports := .Values.kubeApi.ports -}}
+{{- if not $cidrs -}}
+{{- $service := lookup "v1" "Service" "default" "kubernetes" -}}
+{{- $slice := lookup "discovery.k8s.io/v1" "EndpointSlice" "default" "kubernetes" -}}
+{{- if and $service $slice -}}
+{{- $cidrs = list (printf "%s/32" $service.spec.clusterIP) -}}
+{{- $ports = list -}}
+{{- range $service.spec.ports -}}
+{{- $ports = append $ports (int .port) -}}
+{{- end -}}
+{{- range $slice.endpoints -}}
+{{- range .addresses -}}
+{{- $cidrs = append $cidrs (printf "%s/32" .) -}}
+{{- end -}}
+{{- end -}}
+{{- range $slice.ports -}}
+{{- $ports = append $ports (int .port) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if or (not $cidrs) (not $ports) -}}
+{{- fail "the Kubernetes API's address is unknown: install into a cluster, or set kubeApi.cidrs and kubeApi.ports" -}}
+{{- end -}}
+{{- dict "cidrs" (uniq $cidrs) "ports" (uniq $ports) | toJson -}}
+{{- end -}}
+{{- /*
 The journal's pods accept only the processes the workspace chart labels as Postgres clients, the
-operator, and each other. Their egress stays open in this slice (the API server, peers, and later
-the S1 archive endpoint); lane S2 narrows it.
+operator, and each other; they reach only the cluster DNS, the Kubernetes API, each other, and the
+archive's endpoint (E21-41).
 */ -}}
 {{- define "journal.policy" -}}
+{{- $api := include "journal.kubeApi" . | fromJson -}}
+{{- $egress := .Values.archive.egress -}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -88,8 +163,69 @@ spec:
         - {protocol: TCP, port: 5432}
         - {protocol: TCP, port: 8000}
   egress:
-    - {}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.dns.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.dns.podSelector | nindent 14 }}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        {{- range $api.cidrs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports:
+        {{- range $api.ports }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: journal
+      ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 8000}
+    - to:
+        {{- if $egress.namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $egress.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $egress.podSelector | nindent 14 }}
+        {{- else }}
+        {{- range $egress.cidrs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: {{ $egress.port }}}
 {{- end -}}
+{{- define "journal.archiveCheck" -}}
+{{- $egress := .Values.archive.egress -}}
+{{- if not .Values.archive.endpointURL -}}
+{{- fail "archive.endpointURL is required: the journal's WAL is archived (E21-41)" -}}
+{{- end -}}
+{{- if not .Values.archive.destinationPath -}}
+{{- fail "archive.destinationPath is required: the journal's WAL is archived (E21-41)" -}}
+{{- end -}}
+{{- if eq (empty $egress.cidrs) (empty $egress.namespace) -}}
+{{- fail "archive.egress names either CIDRs or a namespace, exactly one" -}}
+{{- end -}}
+{{- if and $egress.namespace (empty $egress.podSelector) -}}
+{{- fail "archive.egress.podSelector is required with archive.egress.namespace" -}}
+{{- end -}}
+{{- if hasPrefix "http://" .Values.archive.endpointURL -}}
+{{- $host := trimPrefix "http://" .Values.archive.endpointURL | splitList ":" | first -}}
+{{- if not (and $egress.namespace (eq (index (splitList "." $host) 1) $egress.namespace)) -}}
+{{- fail "a plain-HTTP archive endpoint must be a Service in this cluster, in the namespace archive.egress.namespace names" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- include "journal.archiveCheck" . -}}
 ---
 {{ include "journal.emit" (include "journal.cluster" .) }}
 ---

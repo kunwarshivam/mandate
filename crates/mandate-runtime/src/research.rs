@@ -31,17 +31,22 @@
 //! record or the invalidation verdict (E19-5) yet, so [`Preconditions`] keeps every run from
 //! starting until it does.
 
+mod agentic;
 mod judge;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
 use mandate_canon::{Digest, Value};
+use mandate_gateway::money::Usd6;
 use mandate_gateway::{CallRecord, Outcome, Purpose, RequestError, Verdict};
 use mandate_research::drift::{DriftState, InputClass, InputObservation};
 use mandate_research::{
     AdmissionFacts, ContentHash, LineageState, PolicyOverlay, SourceId as ResearchSource,
     ValidatedMandate, WorkingUniverse, next_proposal_at,
+};
+use mandate_research_run::agentic::{
+    Code, EndReason, LoopBounds, OutputMode, Tool, ToolCall, ToolCallId, ToolOutcome, TurnPlan,
 };
 use mandate_research_run::{
     CallPlan, InstrumentFact, ItemId, ItemKind, ModelPin, OutputBounds, RetrievalPlan,
@@ -74,6 +79,21 @@ pub struct ResearchConfig {
     /// Whether §8.6 item 5 allows revisions. `false` in v0.1, so every revision is refused
     /// `revisions_not_enabled` (§6.5).
     pub revisions_enabled: bool,
+    /// An agentic entry's loop (§6.9, DEC-2206 item 1); `None` for a `single_call` entry.
+    pub agentic: Option<AgenticConfig>,
+}
+
+/// An agentic entry's pinned loop and the workspace's run ceiling (§6.9 to §6.11, DEC-2206 item 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgenticConfig {
+    pub output: OutputMode,
+    pub bounds: LoopBounds,
+    /// The tools an `ideate` run may call.
+    pub ideate_menu: BTreeSet<Tool>,
+    /// The tools a `monitor` run may call: never one that adds risk (§6.9).
+    pub monitor_menu: BTreeSet<Tool>,
+    /// The workspace's `research_run_cost_cap_usd` (§6.11).
+    pub cost_ceiling: Usd6,
 }
 
 /// A record spec §6.2's preconditions need the journal to hold.
@@ -91,22 +111,33 @@ pub trait RecordCatalog {
     fn registers(&self, record: ResearchRecord) -> bool;
 }
 
-/// `mandate-journal`'s own catalogue. The candidates' verdicts are registered once the agent
-/// stream's `ModelInvocationRecorded` is closed with its `verdicts` (journal spec §9.19, E15-8); no
-/// invalidation verdict is registered until E19-5 adds the record, so no research run starts in any
-/// deployment until then.
-pub struct JournalCatalog;
+/// Which closed agent-stream records register the research records, read through a catalogue's
+/// `closes`: the candidates' verdicts are registered once the agent stream's
+/// `ModelInvocationRecorded` is closed with its `verdicts` (journal spec §9.19, E15-8), and the
+/// invalidation verdict once `ThesisInvalidated` is (§9.22, E19-5). The shell passes
+/// [`JournalCatalog::JOURNAL`], `mandate-journal`'s own catalogue.
+#[derive(Clone, Copy)]
+pub struct JournalCatalog {
+    closes: fn(&str, u64, mandate_journal::StreamType) -> bool,
+}
+
+impl JournalCatalog {
+    /// `mandate-journal`'s own catalogue.
+    pub const JOURNAL: Self = Self::over(mandate_journal::closes);
+
+    /// The research records as registered by a catalogue whose `closes` answers as `closes` does.
+    pub const fn over(closes: fn(&str, u64, mandate_journal::StreamType) -> bool) -> Self {
+        Self { closes }
+    }
+}
 
 impl RecordCatalog for JournalCatalog {
     fn registers(&self, record: ResearchRecord) -> bool {
-        match record {
-            ResearchRecord::CandidateVerdicts => mandate_journal::closes(
-                "ModelInvocationRecorded",
-                1,
-                mandate_journal::StreamType::Agent,
-            ),
-            ResearchRecord::InvalidationVerdict => false,
-        }
+        let (event_type, version) = match record {
+            ResearchRecord::CandidateVerdicts => ("ModelInvocationRecorded", 1),
+            ResearchRecord::InvalidationVerdict => ("ThesisInvalidated", 1),
+        };
+        (self.closes)(event_type, version, mandate_journal::StreamType::Agent)
     }
 }
 
@@ -159,6 +190,9 @@ pub struct ResearchContext<'a> {
     pub active_theses: &'a [ActiveThesis],
     /// The latest reservation the gateway's meter stream holds for this agent (inference spec §3.6).
     pub last_reservation: Option<RiskClock>,
+    /// The data universe's symbols, from the same fold as `facts.data_universe`: an agentic run's
+    /// read scope (§6.9 step 1).
+    pub data_symbols: &'a BTreeSet<Symbol>,
 }
 
 /// What the core keeps of one retrieved item: its identity, source, kind, instruments, and the
@@ -271,6 +305,58 @@ pub enum ResearchInput {
     /// The worker's acknowledgment of a cancellation: `dispatched` says whether a call had left,
     /// whose late answer is still journaled (§5.3).
     Cancelled { run_id: String, dispatched: bool },
+    /// An agentic run's dispatched reads and thinks, in reply order, each result's content
+    /// artifact already stored (§6.9 step 5, DEC-2206 item 6).
+    Dispatched {
+        run_id: String,
+        at: RiskClock,
+        results: Vec<DispatchedResult>,
+    },
+}
+
+/// One dispatched read's or think's result, as the worker ran it (§6.9 step 5, §6.10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchedResult {
+    pub call: ToolCallId,
+    pub outcome: ToolOutcome,
+    pub code: Option<Code>,
+    /// The result as the model is given it, stored as an artifact (`content_ref`).
+    pub content: Digest,
+    pub bytes: u32,
+    pub truncated: bool,
+    pub untrusted: bool,
+    /// Every item the result holds, the run's earlier ones included, each with its observation.
+    pub items: Vec<RetrievedObservation>,
+}
+
+/// An agentic turn's call (§6.9 step 3, DEC-2206 item 5): the call, the loop's plan for it, and the
+/// transcript as artifact references the worker loads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnRequest {
+    pub call: CallPlan,
+    pub plan: TurnPlan,
+    pub transcript: Vec<TurnRef>,
+}
+
+/// One earlier turn of the transcript: its reply's response artifact and each tool result's
+/// content artifact, by the call's index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnRef {
+    pub response: Digest,
+    pub results: Vec<Digest>,
+}
+
+/// A reply's read and think calls for the worker, in reply order (§6.9 step 5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchRequest {
+    pub run_id: String,
+    pub turn: u32,
+    pub calls: Vec<ToolCall>,
+    /// The run's result bytes left, which the worker lowers read by read.
+    pub result_bytes_left: u32,
+    /// The run's frozen read scope (§6.9 step 1).
+    pub cut_off: RiskClock,
+    pub allowlist_version: u32,
 }
 
 /// What the core asks the worker to do.
@@ -282,6 +368,10 @@ pub enum ResearchRequest {
     Call(CallPlan),
     /// Stop the run; a call already sent is never used.
     Cancel { run_id: String },
+    /// Send an agentic run's next turn.
+    Turn(Box<TurnRequest>),
+    /// Run a reply's reads and thinks.
+    Dispatch(DispatchRequest),
 }
 
 /// One research step's answer: the effects to run in order, then the requests for the worker.
@@ -289,6 +379,13 @@ pub enum ResearchRequest {
 pub struct ResearchStep {
     pub effects: Vec<Effect>,
     pub requests: Vec<ResearchRequest>,
+    /// The bytes of every artifact a draft of the step names that the core made itself, which the
+    /// shell stores before it appends the batch (DEC-2206 item 4).
+    pub artifacts: Vec<Vec<u8>>,
+    /// The run every draft of the step belongs to, which the shell writes as each draft's
+    /// `correlation_id` (journal spec §9.23 rule 171, DEC-1120 item 9, DEC-2206 item 8); `None` for a
+    /// step that journals nothing of a run.
+    pub correlation_id: Option<String>,
 }
 
 /// Where a run in flight is (§5.3's states between `Due` and `Idle`).
@@ -303,6 +400,8 @@ enum Phase {
         observations: Vec<EventId>,
         items: Vec<ItemFacts>,
     },
+    /// An agentic run, from its start to its end (§6.9).
+    Agentic(Box<agentic::Agentic>),
 }
 
 #[derive(Debug, Clone)]
@@ -452,21 +551,23 @@ pub fn handle_research(
     let epoch = state.epoch().ok_or(RuntimeError::NotStarted)?;
     let mut batch = Batch::new(ports.ids, epoch, state.agent_head());
     let mut requests = Vec::new();
+    let mut step = Step {
+        batch: &mut batch,
+        requests: &mut requests,
+        artifacts: Vec::new(),
+        correlation_id: None,
+    };
     match &input {
         ResearchInput::Poll(now) => {
             not_behind(state, *now)?;
-            polled(state, research, *now, context, &mut batch, &mut requests)?;
+            polled(state, research, *now, context, &mut step)?;
         }
         ResearchInput::Retrieved { run_id, items } => {
-            let mut step = Step {
-                batch: &mut batch,
-                requests: &mut requests,
-            };
             retrieved(state, research, run_id, items, context, &mut step)?;
         }
         ResearchInput::Called { run_id, at, record } => {
             not_behind(state, *at)?;
-            called(state, research, run_id, record, context, &mut batch)?;
+            called(state, research, run_id, *at, record, context, &mut step)?;
         }
         ResearchInput::Refused { run_id, at, error } => {
             not_behind(state, *at)?;
@@ -475,10 +576,30 @@ pub fn handle_research(
         ResearchInput::Cancelled { run_id, dispatched } => {
             acknowledged(research, run_id, *dispatched);
         }
+        ResearchInput::Dispatched {
+            run_id,
+            at,
+            results,
+        } => {
+            not_behind(state, *at)?;
+            dispatched(state, research, run_id, *at, results, context, &mut step)?;
+        }
     }
+    let Step {
+        artifacts,
+        correlation_id,
+        ..
+    } = step;
+    let correlation_id = correlation_id.or_else(|| {
+        input_run(&input)
+            .filter(|_| !batch.drafts.is_empty())
+            .map(str::to_owned)
+    });
     let step = ResearchStep {
         effects: batch.effects.clone(),
         requests,
+        artifacts,
+        correlation_id,
     };
     if !batch.drafts.is_empty() {
         state.remember(UnresolvedAppend {
@@ -491,10 +612,26 @@ pub fn handle_research(
     Ok(step)
 }
 
+/// The run a worker input names; `None` for a poll.
+fn input_run(input: &ResearchInput) -> Option<&str> {
+    match input {
+        ResearchInput::Poll(_) => None,
+        ResearchInput::Retrieved { run_id, .. }
+        | ResearchInput::Called { run_id, .. }
+        | ResearchInput::Refused { run_id, .. }
+        | ResearchInput::Cancelled { run_id, .. }
+        | ResearchInput::Dispatched { run_id, .. } => Some(run_id),
+    }
+}
+
 /// What one step writes: its batch and its requests for the worker.
 struct Step<'s, 'b> {
     batch: &'s mut Batch<'b>,
     requests: &'s mut Vec<ResearchRequest>,
+    /// The artifacts the core made for this step's drafts (DEC-2206 item 4).
+    artifacts: Vec<Vec<u8>>,
+    /// The run this step's drafts belong to (DEC-2206 item 8).
+    correlation_id: Option<String>,
 }
 
 /// The risk clock never moves back (mandate spec §5.2).
@@ -518,8 +655,13 @@ fn research_allowed(
 ) -> Option<ModelPin> {
     let config = context.config?;
     let envelope = context.mandate.envelope();
+    let mode = state.effective_mode();
     let enabled = context.preconditions.hold()
-        && state.effective_mode() == Mode::Normal
+        && if config.agentic.is_some() {
+            agentic::runs_in(mode)
+        } else {
+            mode == Mode::Normal
+        }
         && !research.withdrawn.contains(&config.pin)
         && envelope.research.is_some()
         && envelope.admits_instruments
@@ -568,18 +710,19 @@ fn polled(
     research: &mut ResearchState,
     now: RiskClock,
     context: &ResearchContext<'_>,
-    batch: &mut Batch<'_>,
-    requests: &mut Vec<ResearchRequest>,
+    step: &mut Step<'_, '_>,
 ) -> Result<(), RuntimeError> {
     let allowed = research_allowed(state, research, context);
     if let Some(run) = research.run.take() {
         if allowed.as_ref() == Some(&run.pin) && now <= run.bound {
             research.run = Some(run);
         } else {
-            requests.push(ResearchRequest::Cancel {
-                run_id: run.run_id.clone(),
-            });
-            remember_cancelled(research, run);
+            let reason = if now > run.bound {
+                EndReason::Deadline
+            } else {
+                EndReason::Mode
+            };
+            cancel(research, run, reason, step)?;
         }
         return Ok(());
     }
@@ -589,9 +732,34 @@ fn polled(
     if !due(research, now, context)? {
         return Ok(());
     }
+    if let Some(loop_config) = &config.agentic {
+        let Some((kind, menu)) = agentic::due_kind(state.effective_mode(), loop_config, context)
+        else {
+            return Ok(());
+        };
+        let ordinal = u32::MAX.saturating_sub(research.starts.saturating_mul(2));
+        let run_id = step.batch.id_at(ordinal);
+        research.starts = research.starts.saturating_add(1);
+        let (loop_, universe) = agentic::start(kind, menu, loop_config, now, context, step.batch)?;
+        step.artifacts.push(universe);
+        step.correlation_id = Some(run_id.0.clone());
+        research.run = Some(Run {
+            run_id: run_id.0.clone(),
+            call_id: String::new(),
+            pin,
+            cut_off: now,
+            bound: loop_.deadline,
+            phase: Phase::Agentic(Box::new(loop_)),
+        });
+        step.requests.push(ResearchRequest::Start {
+            run_id: run_id.0,
+            cut_off: now,
+        });
+        return Ok(());
+    }
     let ordinal = u32::MAX.saturating_sub(research.starts.saturating_mul(2));
-    let run_id = batch.id_at(ordinal);
-    let call_id = batch.id_at(ordinal.saturating_sub(1));
+    let run_id = step.batch.id_at(ordinal);
+    let call_id = step.batch.id_at(ordinal.saturating_sub(1));
     research.starts = research.starts.saturating_add(1);
     let bound = now
         .secs()
@@ -606,10 +774,89 @@ fn polled(
         bound: RiskClock::from_secs(bound),
         phase: Phase::Retrieving,
     });
-    requests.push(ResearchRequest::Start {
+    step.requests.push(ResearchRequest::Start {
         run_id: run_id.0,
         cut_off: now,
     });
+    Ok(())
+}
+
+/// Cancels `run`: the worker is told to stop, an agentic run ends with `reason` in this step (the
+/// core never waits for the worker's acknowledgment, §6.9), and the run is remembered until the
+/// worker acknowledges it.
+fn cancel(
+    research: &mut ResearchState,
+    mut run: Run,
+    reason: EndReason,
+    step: &mut Step<'_, '_>,
+) -> Result<(), RuntimeError> {
+    step.requests.push(ResearchRequest::Cancel {
+        run_id: run.run_id.clone(),
+    });
+    if let Phase::Agentic(loop_) = &mut run.phase {
+        agentic::end(loop_, reason, step.batch)?;
+        step.correlation_id = Some(run.run_id.clone());
+    }
+    remember_cancelled(research, run);
+    Ok(())
+}
+
+/// One step of an agentic run: `f` gets the run and its loop apart, then the run is put back, or
+/// forgotten once it ended. The step's requests and artifacts are the run's, and so is its
+/// correlation id. A refused step leaves the run as it was.
+fn drive(
+    research: &mut ResearchState,
+    mut run: Run,
+    step: &mut Step<'_, '_>,
+    f: impl FnOnce(
+        &mut Run,
+        &mut agentic::Agentic,
+        &mut Batch<'_>,
+    ) -> Result<agentic::Out, RuntimeError>,
+) -> Result<(), RuntimeError> {
+    let run_id = run.run_id.clone();
+    let mut phase = std::mem::replace(&mut run.phase, Phase::Retrieving);
+    let out = match &mut phase {
+        Phase::Agentic(loop_) => {
+            let before = (**loop_).clone();
+            let out = f(&mut run, loop_, step.batch);
+            if out.is_err() {
+                **loop_ = before;
+            }
+            out
+        }
+        _ => Ok(agentic::Out::default()),
+    };
+    run.phase = phase;
+    let out = match out {
+        Ok(out) => out,
+        Err(error) => {
+            research.run = Some(run);
+            return Err(error);
+        }
+    };
+    step.requests.extend(out.requests);
+    step.artifacts.extend(out.artifacts);
+    step.correlation_id = Some(run_id);
+    if out.ended {
+        research.last_attempt = Some(run.cut_off);
+    } else {
+        research.run = Some(run);
+    }
+    Ok(())
+}
+
+/// A retrieval's items are all at the run's cut-off, each item once.
+fn well_formed(run: &Run, items: &[RetrievedObservation]) -> Result<(), RuntimeError> {
+    let mut ids = BTreeSet::new();
+    for item in items {
+        if item.observation.as_of != run.cut_off || !ids.insert(&item.item.item_id) {
+            return Err(RuntimeError::NotInterpreted {
+                what: "a retrieval off its run's cut-off, or with an item twice".to_owned(),
+                story: "E19-2",
+            });
+        }
+    }
     Ok(())
 }
 
@@ -622,7 +869,12 @@ fn remember_cancelled(research: &mut ResearchState, run: Run) {
             pin: run.pin,
             observations,
         }),
-        Phase::Retrieving => None,
+        Phase::Agentic(loop_) if loop_.turning() => Some(Cancelled {
+            call_id: run.call_id,
+            pin: run.pin,
+            observations: loop_.observations,
+        }),
+        Phase::Retrieving | Phase::Agentic(_) => None,
     };
     research.cancelled.insert(run.run_id, call);
 }
@@ -641,7 +893,7 @@ fn retrieved(
     let Some(run) = research.run.take() else {
         return not_ours(research, run_id, "a retrieval");
     };
-    if run.run_id != run_id || !matches!(run.phase, Phase::Retrieving) {
+    if run.run_id != run_id || !matches!(run.phase, Phase::Retrieving | Phase::Agentic(_)) {
         research.run = Some(run);
         return not_ours(research, run_id, "a retrieval");
     }
@@ -649,14 +901,17 @@ fn retrieved(
         Some(config) if research_allowed(state, research, context).as_ref() == Some(&run.pin) => {
             config
         }
-        _ => {
-            step.requests.push(ResearchRequest::Cancel {
-                run_id: run.run_id.clone(),
-            });
-            remember_cancelled(research, run);
-            return Ok(());
-        }
+        _ => return cancel(research, run, EndReason::Mode, step),
     };
+    if matches!(run.phase, Phase::Agentic(_)) {
+        if let Err(error) = well_formed(&run, items) {
+            research.run = Some(run);
+            return Err(error);
+        }
+        return drive(research, run, step, |run, loop_, batch| {
+            agentic::seeded(run, loop_, items, config, state, batch)
+        });
+    }
     if items.is_empty() {
         research.last_attempt = Some(run.cut_off);
         return Ok(());
@@ -762,11 +1017,19 @@ fn called(
     state: &RuntimeState,
     research: &mut ResearchState,
     run_id: &str,
+    at: RiskClock,
     record: &CallRecord,
     context: &ResearchContext<'_>,
-    batch: &mut Batch<'_>,
+    step: &mut Step<'_, '_>,
 ) -> Result<(), RuntimeError> {
     let agent = state.deployment().agent.0.as_str();
+    let turn = research
+        .run
+        .take_if(|run| run.run_id == run_id && matches!(run.phase, Phase::Agentic(_)));
+    if let Some(run) = turn {
+        return turned(state, research, run, at, record, context, step);
+    }
+    let batch = &mut *step.batch;
     let in_flight = research
         .run
         .take_if(|run| run.run_id == run_id && matches!(run.phase, Phase::Calling { .. }));
@@ -822,11 +1085,14 @@ fn called(
         }
         _ => Judged::default(),
     };
-    let (body, theses) = match invocation(record, &judged.verdicts) {
-        Ok(body) => (body, judged.theses),
-        Err(_) => (invocation(record, &[])?, Vec::new()),
+    let (body, invalidations, theses) = match invocation(record, &judged.verdicts) {
+        Ok(body) => (body, judged.invalidations, judged.theses),
+        Err(_) => (invocation(record, &[])?, Vec::new(), Vec::new()),
     };
     let id = batch.journal("ModelInvocationRecorded", None, body)?;
+    for invalidation in invalidations {
+        batch.journal("ThesisInvalidated", Some(id.clone()), invalidation)?;
+    }
     for thesis in theses {
         let thesis_record = batch.journal(thesis.event_type, Some(id.clone()), thesis.body)?;
         if let Some(output) = thesis.output {
@@ -836,6 +1102,60 @@ fn called(
     note_call(research, record);
     treat(research, &run.pin, record.outcome, id, batch);
     Ok(())
+}
+
+/// An agentic turn's reply (§6.9 step 4): refused, and never journaled as the run's, unless it is
+/// the record of the turn's own call; judged and recorded through the loop while research may still
+/// run and the run's deadline has not passed; otherwise journaled with nothing used, and the run
+/// ends (`mode` or `deadline`), as a cancelled run's late answer is (§5.3).
+fn turned(
+    state: &RuntimeState,
+    research: &mut ResearchState,
+    run: Run,
+    at: RiskClock,
+    record: &CallRecord,
+    context: &ResearchContext<'_>,
+    step: &mut Step<'_, '_>,
+) -> Result<(), RuntimeError> {
+    let agent = state.deployment().agent.0.as_str();
+    let Phase::Agentic(loop_) = &run.phase else {
+        research.run = Some(run);
+        return Ok(());
+    };
+    if !loop_.turning() || !owns(record, &run.call_id, &run.pin, &loop_.observations, agent) {
+        research.run = Some(run);
+        return Err(RuntimeError::NotInterpreted {
+            what: "a call record of another call, pin, agent, or retrieved context".to_owned(),
+            story: "E19-13",
+        });
+    }
+    let pin = run.pin.clone();
+    let allowed = research_allowed(state, research, context).as_ref() == Some(&run.pin);
+    let on_time = record.completed_at.secs() <= run.bound.secs();
+    let config = context.config.filter(|_| allowed && on_time);
+    let outcome = drive(research, run, step, |run, loop_, batch| match config {
+        Some(config) => agentic::replied(run, loop_, record, at, config, context, state, batch),
+        None => {
+            let reason = if on_time {
+                EndReason::Mode
+            } else {
+                EndReason::Deadline
+            };
+            agentic::abandoned(loop_, record, reason, batch)
+        }
+    });
+    if outcome.is_ok() {
+        note_call(research, record);
+        if let Some(head) = step
+            .batch
+            .drafts
+            .first()
+            .map(|draft| draft.event_id.clone())
+        {
+            treat(research, &pin, record.outcome, head, step.batch);
+        }
+    }
+    outcome
 }
 
 /// Whether `record` is the record of this call: its id, pin, purpose, agent, and exactly the
@@ -941,6 +1261,44 @@ fn invocation(record: &CallRecord, verdicts: &[Verdict]) -> Result<Value, Runtim
     record
         .agent_payload(verdicts)
         .map_err(|_| payload::non_canonical("model_invocation"))
+}
+
+/// An agentic run's dispatched results (§6.9 step 5). Results for a run that may no longer run
+/// end it (`mode`), and nothing they hold is journaled, so nothing the model never sees is shown.
+fn dispatched(
+    state: &RuntimeState,
+    research: &mut ResearchState,
+    run_id: &str,
+    at: RiskClock,
+    results: &[DispatchedResult],
+    context: &ResearchContext<'_>,
+    step: &mut Step<'_, '_>,
+) -> Result<(), RuntimeError> {
+    let Some(run) = research
+        .run
+        .take_if(|run| run.run_id == run_id && matches!(run.phase, Phase::Agentic(_)))
+    else {
+        return not_ours(research, run_id, "a dispatch's results");
+    };
+    let config = match context.config {
+        Some(config)
+            if research_allowed(state, research, context).as_ref() == Some(&run.pin)
+                && at <= run.bound =>
+        {
+            config
+        }
+        _ => {
+            let reason = if at > run.bound {
+                EndReason::Deadline
+            } else {
+                EndReason::Mode
+            };
+            return cancel(research, run, reason, step);
+        }
+    };
+    drive(research, run, step, |run, loop_, batch| {
+        agentic::dispatched(run, loop_, results, at, config, state, batch)
+    })
 }
 
 /// The worker's acknowledgment of a cancellation, its own or the core's. One that never

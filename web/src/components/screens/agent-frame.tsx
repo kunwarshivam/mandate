@@ -17,6 +17,7 @@ import { useRuntime } from "@/lib/mock-runtime";
 import { allOrders } from "@/lib/orders";
 import { useCan } from "@/lib/roles";
 import { AGENT_SECTIONS, type AgentSectionKey, agentHref } from "@/lib/screens";
+import { cn } from "@/lib/utils";
 
 export function AgentNotFound() {
   return (
@@ -104,15 +105,29 @@ function PhoneSectionLinks({ agent }: { agent: Agent }) {
  * sits beside the title at every width and on every tab, the first thing the page says (DEC-512, C-8).
  * On a phone Stop this agent is a quiet "Stop" at the end of the title's row: the tab bar's Stop is
  * always a press away and opens on this agent too, so the page's own need not take a row (DEC-482).
+ * A gate decision passes `compact`: the owl is 32px and the frame's gap is the ledger's, so the
+ * checks sit on the first screen instead of under an agent-page header.
  */
-export function AgentFrame({ agent, title, description, children }: { agent: Agent; title?: string; description?: ReactNode; children: ReactNode }) {
+export function AgentFrame({
+  agent,
+  title,
+  description,
+  children,
+  compact = false,
+}: {
+  agent: Agent;
+  title?: string;
+  description?: ReactNode;
+  children: ReactNode;
+  compact?: boolean;
+}) {
   const canStop = useCan("stop.open");
   const { ws, now } = useRuntime();
   return (
-    <div className="grid grid-cols-1 gap-(--section-gap) max-lg:gap-8">
+    <div className={cn("grid grid-cols-1 gap-(--section-gap) max-lg:gap-8", compact && "gap-4 max-lg:gap-6")}>
       <PageHeader
         title={title ?? agent.label}
-        icon={<AgentOwl agent={agent} className="size-12 sm:size-16" />}
+        icon={<AgentOwl agent={agent} className={compact ? "size-8" : "size-12 sm:size-16"} />}
         environment={ws.environment}
         status={<ModeBadge mode={agent.mode} />}
         description={description ?? agent.mandate.name}

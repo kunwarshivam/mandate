@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use mandate_research_driver::{
-    AppendFailure, Core, Driver, DriverError, JournalWriter, Stepped, Worker,
+    AppendFailure, Core, Driver, DriverError, JournalWriter, StepBatch, Stepped, Worker,
 };
 use mandate_runtime::{
     ActorKind, Effect, EventDraft, EventId, FoldedEvent, NotificationRef, ResearchInput,
@@ -52,6 +52,8 @@ impl Core for FakeCore {
             return Ok(ResearchStep {
                 effects: Vec::new(),
                 requests: Vec::new(),
+                artifacts: Vec::new(),
+                correlation_id: None,
             });
         }
         self.steps.remove(0)
@@ -83,7 +85,15 @@ struct FakeJournal {
 }
 
 impl JournalWriter for FakeJournal {
-    fn append(&mut self, drafts: &[EventDraft]) -> Result<Vec<FoldedEvent>, AppendFailure> {
+    fn append(&mut self, batch: &StepBatch<'_>) -> Result<Vec<FoldedEvent>, AppendFailure> {
+        let drafts = batch.drafts;
+        if !batch.artifacts.is_empty() || batch.correlation_id.is_some() {
+            self.log.borrow_mut().push(format!(
+                "store {} artifacts for {:?}",
+                batch.artifacts.len(),
+                batch.correlation_id
+            ));
+        }
         let ids: Vec<&str> = drafts.iter().map(|d| d.event_id.0.as_str()).collect();
         self.log
             .borrow_mut()
@@ -152,7 +162,12 @@ fn parts(
 }
 
 fn step_with(effects: Vec<Effect>, requests: Vec<ResearchRequest>) -> ResearchStep {
-    ResearchStep { effects, requests }
+    ResearchStep {
+        effects,
+        requests,
+        artifacts: Vec::new(),
+        correlation_id: None,
+    }
 }
 
 fn notice() -> Effect {
@@ -387,4 +402,28 @@ fn a_reply_that_is_not_the_batch_is_a_divergence_and_nothing_is_folded_or_handed
     assert!(!log.iter().any(|line| line.starts_with("fold")), "{log:?}");
     assert!(!log.iter().any(|line| line.starts_with("hand")), "{log:?}");
     assert_eq!(p.step(&mut driver, poll(2)), Err(DriverError::Halted));
+}
+
+/// DEC-2206 items 4 and 8: the journal writer is handed the step's own artifacts and run with its
+/// drafts, in one call before anything is handed on, so the artifacts are stored before the batch
+/// that names them and every draft carries its run.
+#[test]
+fn the_journal_is_handed_the_step_s_artifacts_and_run_with_its_drafts() {
+    let mut step = step_with(vec![Effect::Journal(draft("01A"))], vec![start("01RUN")]);
+    step.artifacts = vec![b"universe".to_vec(), b"arguments".to_vec()];
+    step.correlation_id = Some("01RUN".to_owned());
+    let mut p = parts(vec![Ok(step)], Vec::new());
+    let mut driver = Driver::new();
+    driver
+        .step(poll(100), &mut p.core, &mut p.journal, &mut p.worker)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let log = p.log.borrow();
+    let at = |prefix: &str| {
+        log.iter()
+            .position(|line| line.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no `{prefix}` in {log:?}"))
+    };
+    assert_eq!(log[at("store")], r#"store 2 artifacts for Some("01RUN")"#);
+    assert!(at("store") < at("append"), "{log:?}");
+    assert!(at("append") < at("hand"), "{log:?}");
 }
