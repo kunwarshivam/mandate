@@ -19,7 +19,7 @@ use std::path::Path;
 use mandate_deploy_manager::{
     Alerts, ControlJournal, Halt, OperatorAlert, Process, Resolver, Unavailable,
 };
-use mandate_journal::{AppendOutcome, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
 use mandate_journal_pg::PgJournal;
 use mandate_process::Input;
 use mandate_time::UtcNanos;
@@ -69,6 +69,49 @@ impl ControlJournal for PgControl {
             .append(&self.stream, head.seq, epoch, recorded_at, &[draft])
             .await
             .map_err(|_| Unavailable)
+    }
+}
+
+/// The control stream in memory, for `run --fixture`: the same append protocol as [`PgControl`],
+/// over a journal of the process's own, so the loop, its probes and its drain run without a
+/// database.
+#[derive(Debug)]
+pub struct MemoryControl {
+    journal: MemoryJournal,
+    stream: StreamId,
+}
+
+impl MemoryControl {
+    /// An empty control stream `stream`.
+    pub fn new(stream: StreamId) -> Self {
+        Self {
+            journal: MemoryJournal::new(),
+            stream,
+        }
+    }
+}
+
+impl ControlJournal for MemoryControl {
+    async fn rows_after(&mut self, seq: u64) -> Result<Vec<StoredEvent>, Unavailable> {
+        Ok(self
+            .journal
+            .rows(&self.stream)
+            .iter()
+            .filter(|r| r.seq > seq)
+            .cloned()
+            .collect())
+    }
+
+    async fn append(
+        &mut self,
+        draft: &[u8],
+        recorded_at: UtcNanos,
+    ) -> Result<AppendOutcome, Unavailable> {
+        let epoch = self.journal.take_ownership(&self.stream);
+        let head = self.journal.head(&self.stream).seq;
+        Ok(self
+            .journal
+            .append(&self.stream, head, epoch, recorded_at, &[draft]))
     }
 }
 

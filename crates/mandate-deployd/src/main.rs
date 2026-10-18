@@ -10,9 +10,10 @@
 )]
 //! `mandate-deployd`: one workspace's deployment manager (E21-33 slice 2, DEC-1172).
 //!
-//! `mandate-deployd run --workspace <id> --probe <socket> --templates <dir>` runs it over Postgres
-//! (`MANDATE_JOURNAL_DSN`) and the Kubernetes API, reached with the pod's service account files.
-//! It passes once a second, drains on SIGTERM, and exits with its lifecycle's status.
+//! `mandate-deployd run --workspace <id> --probe <socket> --templates <dir> [--fixture]` runs it
+//! over Postgres (`MANDATE_JOURNAL_DSN`) and the Kubernetes API, reached with the pod's service
+//! account files, or, with `--fixture`, over an in-memory journal and the fake orchestrator. It
+//! passes once a second, drains on SIGTERM, and exits with its lifecycle's status.
 //! `mandate-deployd probe livez|readyz --probe <socket>` is its `exec` probe (DEC-994 item 5).
 //! This is the one place the host clock is read (ES-05).
 
@@ -24,9 +25,10 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mandate_canon::Digest;
+use mandate_deploy_manager::fake::Fake;
 use mandate_deploy_manager::kubernetes::{InCluster, Kubernetes};
-use mandate_deploy_manager::{Deployer, Identity};
-use mandate_deployd::{NoStore, PgControl, StderrAlerts, input, templates};
+use mandate_deploy_manager::{Alerts, ControlJournal, Deployer, Identity, Orchestrator, Resolver};
+use mandate_deployd::{MemoryControl, NoStore, PgControl, StderrAlerts, input, templates};
 use mandate_journal::StreamId;
 use mandate_journal_pg::PgJournal;
 use mandate_process::probe::{self, Probe, Status};
@@ -63,7 +65,8 @@ fn main() -> ExitCode {
                 eprintln!("workspace_or_templates_missing");
                 return ExitCode::from(2);
             };
-            match run(&workspace, Path::new(&dir), &socket) {
+            let fixture = args.iter().any(|a| a == "--fixture");
+            match run(&workspace, Path::new(&dir), &socket, fixture) {
                 Ok(status) => ExitCode::from(status),
                 Err(code) => {
                     eprintln!("deploy_manager_start_failed: {code}");
@@ -90,10 +93,32 @@ fn host_now() -> UtcNanos {
     UtcNanos::from_parts(secs, since.subsec_nanos()).unwrap_or(UtcNanos::EPOCH)
 }
 
-fn run(workspace: &str, dir: &Path, socket: &Path) -> Result<u8, &'static str> {
+fn run(workspace: &str, dir: &Path, socket: &Path, fixture: bool) -> Result<u8, &'static str> {
     let terminate = Arc::new(AtomicBool::new(false));
     watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
     let templates = templates(dir).map_err(|e| e.code())?;
+    let identity = Identity {
+        workspace: workspace.to_owned(),
+        actor_id: "deploy_manager".to_owned(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        build: Digest::of(concat!("mandate-deployd/", env!("CARGO_PKG_VERSION")).as_bytes()),
+    };
+    let stream = StreamId::parse(&identity.stream()).ok_or("workspace_invalid")?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .map_err(|_| "runtime_unavailable")?;
+    if fixture {
+        let deployer = Deployer::new(
+            identity,
+            MemoryControl::new(stream),
+            Fake::new(),
+            StderrAlerts::default(),
+            NoStore,
+        );
+        return runtime.block_on(serve(deployer, socket, &terminate));
+    }
     let account = Path::new(ACCOUNT);
     let namespace =
         std::fs::read_to_string(account.join("namespace")).map_err(|_| "namespace_unreadable")?;
@@ -107,18 +132,6 @@ fn run(workspace: &str, dir: &Path, socket: &Path) -> Result<u8, &'static str> {
     })
     .map_err(|_| "orchestrator_unavailable")?;
     let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
-    let identity = Identity {
-        workspace: workspace.to_owned(),
-        actor_id: "deploy_manager".to_owned(),
-        version: env!("CARGO_PKG_VERSION").to_owned(),
-        build: Digest::of(concat!("mandate-deployd/", env!("CARGO_PKG_VERSION")).as_bytes()),
-    };
-    let stream = StreamId::parse(&identity.stream()).ok_or("workspace_invalid")?;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-        .map_err(|_| "runtime_unavailable")?;
     runtime.block_on(async {
         let journal = PgJournal::from_dsn(&dsn).map_err(|e| e.code())?;
         let deployer = Deployer::new(
@@ -132,8 +145,8 @@ fn run(workspace: &str, dir: &Path, socket: &Path) -> Result<u8, &'static str> {
     })
 }
 
-async fn serve(
-    mut deployer: Deployer<PgControl, Kubernetes, StderrAlerts, NoStore>,
+async fn serve<J: ControlJournal, O: Orchestrator, A: Alerts, R: Resolver>(
+    mut deployer: Deployer<J, O, A, R>,
     socket: &Path,
     terminate: &AtomicBool,
 ) -> Result<u8, &'static str> {
@@ -141,6 +154,7 @@ async fn serve(
     lifecycle.observe(host_now(), Input::StartupPassed);
     let status = Status::new(lifecycle.snapshot());
     probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
+    let mut last = Ok(());
     loop {
         if let State::Exited(stopped) = lifecycle.state() {
             status.publish(lifecycle.snapshot());
@@ -154,11 +168,14 @@ async fn serve(
         }
         let now = host_now();
         let pass = deployer.tick(now).await;
-        if let Err(halt) = &pass {
+        if let Err(halt) = &pass
+            && pass != last
+        {
             eprintln!("deploy_manager_pass_halted: {halt:?}");
         }
         lifecycle.observe(now, input(&pass));
         status.publish(lifecycle.snapshot());
+        last = pass;
         tokio::time::sleep(PASS).await;
     }
 }

@@ -1,11 +1,15 @@
 //! The process's wiring around the manager (E21-33 slice 2, DEC-1172): how a pass moves the
 //! lifecycle, the chart's pod templates, the resolver that knows no account, and the alerts.
 
+#[path = "../../mandate-deploy-manager/tests/common/mod.rs"]
+mod harness;
+
 use std::path::PathBuf;
 
 use mandate_deploy_manager::orchestrator::CRASH_LOOP;
-use mandate_deploy_manager::{Alerts, Halt, Process, Resolver};
-use mandate_deployd::{NoStore, StderrAlerts, TemplateError, input, templates};
+use mandate_deploy_manager::{Alerts, ControlJournal, Halt, Process, Resolver};
+use mandate_deployd::{MemoryControl, NoStore, StderrAlerts, TemplateError, input, templates};
+use mandate_journal::{AppendOutcome, StreamId};
 use mandate_process::{Input, Kind, Lifecycle, State};
 use mandate_time::UtcNanos;
 
@@ -108,4 +112,28 @@ fn an_alert_is_raised_with_its_code_and_runbook_only() {
     let mut alerts = StderrAlerts::default();
     alerts.raise(CRASH_LOOP);
     assert_eq!(alerts.raised, [CRASH_LOOP]);
+}
+
+#[test]
+fn the_fixtures_control_stream_appends_at_its_head_and_reads_after_a_position() {
+    let mut control = MemoryControl::new(StreamId::parse(harness::STREAM).unwrap());
+    harness::block_on(async {
+        assert!(control.rows_after(0).await.unwrap().is_empty());
+        let opened = harness::opened();
+        let first = control.append(&opened, harness::at(0)).await.unwrap();
+        assert!(matches!(first, AppendOutcome::Committed(_)), "{first:?}");
+        let account = "01J8Z2ACCT00000000000000A1";
+        let established = harness::established(&harness::connection_of(account), account);
+        let second = control.append(&established, harness::at(1)).await.unwrap();
+        assert!(matches!(second, AppendOutcome::Committed(_)), "{second:?}");
+        let again = control.append(&opened, harness::at(2)).await.unwrap();
+        assert!(
+            matches!(again, AppendOutcome::AlreadyCommitted(_)),
+            "{again:?}"
+        );
+        let rows = control.rows_after(0).await.unwrap();
+        assert_eq!(rows.iter().map(|r| r.seq).collect::<Vec<_>>(), [1, 2]);
+        let after = control.rows_after(1).await.unwrap();
+        assert_eq!(after.iter().map(|r| r.seq).collect::<Vec<_>>(), [2]);
+    });
 }
