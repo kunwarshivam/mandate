@@ -1,0 +1,69 @@
+# Plans, or plans and applies, one hosted environment's OpenTofu (E21-56, DEC-2011, DEC-2014).
+# This file and its one job are the only place the repository reaches a cloud account: the job runs
+# only on a manual dispatch from `main`, under the GitHub environment `infra-staging` or
+# `infra-production`, whose required reviewer is the founder and which alone holds the cloud
+# tokens. No pull-request job can reach them (ES-12, DEC-1005's pattern); pull requests run the
+# credential-free checks in `ci.yml` instead. xtask is built in a step that holds no secret, and
+# only the last step, `cargo xtask infra`, receives them. `cargo xtask lint` checks this shape.
+name: infra
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: The environment to plan or apply
+        required: true
+        type: choice
+        options: [staging, production]
+      action:
+        description: plan shows the changes; apply plans, shows, and applies that same plan
+        required: true
+        type: choice
+        default: plan
+        options: [plan, apply]
+
+permissions: {}
+
+concurrency:
+  group: infra-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  tofu:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: infra-${{ inputs.environment }}
+    # 45 minutes: a first DOKS cluster takes about ten; the cap clears a hung apply.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      TOFU_VERSION: "1.13.1"
+      TOFU_SHA256: "378ada19d4bc70c43732004e8159be771b23b9a5afdf059e5f8a2b3fa2c70a69"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install OpenTofu (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o tofu.tgz "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz"
+          echo "${TOFU_SHA256}  tofu.tgz" | sha256sum --check
+          tar xzf tofu.tgz tofu && sudo install tofu /usr/local/bin/ && rm tofu tofu.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      # Built here, with no secret in the environment, so no build script ever sees one.
+      - run: cargo build --locked --package xtask
+      - run: cargo xtask infra
+        env:
+          MANDATE_INFRA_ENVIRONMENT: ${{ inputs.environment }}
+          MANDATE_INFRA_ACTION: ${{ inputs.action }}
+          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+          SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+          SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+          TF_VAR_state_passphrase: ${{ secrets.TOFU_STATE_PASSPHRASE }}
+          TF_VAR_cloudflare_api_token: ${{ secrets.CF_INFRA_API_TOKEN }}
+          TF_VAR_cloudflare_account_id: ${{ vars.CF_ACCOUNT_ID }}
+          TF_VAR_kube_api_allowed_addresses: ${{ vars.KUBE_API_ALLOWED_CIDRS }}
+          TF_VAR_access_allowed_emails: ${{ vars.ACCESS_ALLOWED_EMAILS }}

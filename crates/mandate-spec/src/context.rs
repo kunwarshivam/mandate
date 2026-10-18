@@ -133,12 +133,15 @@ impl JournaledFact {
     ///
     /// `payload` is the record's payload as `append` stored it. `documents` returns the stored
     /// canonical mandate document a version names, which an `AgentDeployed` is read from: the
-    /// connection, environment, allocation, and pinned instruments are the document's, never restated
-    /// in the record. `account_connection` is the connection the record's account stream belongs to,
+    /// connection, environment, allocation, and pinned instruments are the document's. Version 2
+    /// restates the connection, and one that differs from the document's is refused at
+    /// `connection_id` (journal spec v0.54 §9.24 rule 200, DEC-1171): version 1 has no such member,
+    /// since `append` closes each version's payload. `account_connection` is the connection the record's account stream belongs to,
     /// which no record names yet (DEC-261 item 10), so an `AccountSnapshotRecorded` needs it.
     ///
     /// `Err` when the record cannot be mapped: a deployment or a version change whose document is not
-    /// stored, or does not hash to the version it is stored under; a version change whose
+    /// stored, or does not hash to the version it is stored under; a deployment that restates
+    /// another connection than its document's; a version change whose
     /// `classification` is not `change::classify`'s verdict of its two documents, applied or rejected
     /// alike (DEC-404 item 5); a snapshot with no connection given; or a member the fact needs that
     /// the payload does not hold in §9.2's or §9.3's form. A record that cannot be mapped is
@@ -221,6 +224,15 @@ impl JournaledFact {
                 let mandate = Mandate::parse(&stored).map_err(|_| malformed("mandate_version"))?;
                 if mandate.version()?.digest() != version {
                     return Err(malformed("mandate_version"));
+                }
+                let restated = payload
+                    .get("connection_id")
+                    .map(|_| record.connection("connection_id"));
+                if restated
+                    .transpose()?
+                    .is_some_and(|named| named != mandate.connection_id)
+                {
+                    return Err(malformed("connection_id"));
                 }
                 Self::AgentVersionActive {
                     agent: AgentId::new(record.id("agent_id")?),
