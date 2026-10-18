@@ -29,11 +29,37 @@
 //!   `head.sha`, `head.ref` or `head_ref`; a workflow holding an `environment:` triggers only on
 //!   `workflow_dispatch` or a push to `main`, and each job with one has an `if:` naming
 //!   `refs/heads/main`.
+//! - **L10, Rust in xtask and `crates/*/examples`:** no `{command:?}`, `{cmd:?}` or `{child:?}`
+//!   (a command's `Debug` form prints its environment), no `dbg!`, no `env::vars()` or
+//!   `env::vars_os()` but on reviewed lines, no `#[derive(Debug)]` on a struct with a token,
+//!   secret, password, passphrase, kubeconfig or credential field, no `env::var(..)` whose error
+//!   is wrapped by `.context(` or `.with_context(` unless its name is a literal naming no secret
+//!   (the error's `NotUnicode` case holds the value), and no `::add-mask::` but through
+//!   [`add_mask`]. This file is not read: its fixtures and messages name what the rules refuse.
 
 use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
+
+/// The Rust the guard reads (L10), under the repository root: xtask's sources and every crate's
+/// examples, which CI runs with secrets in reach (`r2-lockcheck.yml`).
+const RUST_DIRS: [&str; 2] = ["xtask/src", "crates"];
+
+/// The guard's own file, whose fixtures and messages name what the rules refuse.
+const SELF: &str = "xtask/src/leak.rs";
+
+/// The words a field or variable name holds when it carries a secret (L10). `key` is a variable
+/// name's word only: a field such as `key_count` is not a secret.
+const SECRET_WORDS: [&str; 7] = [
+    "token",
+    "secret",
+    "password",
+    "passphrase",
+    "kubeconfig",
+    "credential",
+    "key",
+];
 
 /// The directories the guard reads, under the repository root.
 const GUARDED_DIRS: [&str; 2] = [".github/workflows", ".github/scripts"];
@@ -51,6 +77,8 @@ const GUARDED_DIRS: [&str; 2] = [".github/workflows", ".github/scripts"];
 /// - `web-deploy.yml`'s deploy step runs `npx wrangler deploy`, the Worker deploy tool the earlier
 ///   `npm ci --ignore-scripts` installed from the lockfile, on `main` only; `web/scripts/workers.mjs`
 ///   pins the job's shape (#1700).
+/// - `main.rs`'s nextest command removes every `PROPTEST_*` variable by name, and `release.rs`'s
+///   refusal reads the environment's names only (DEC-2027); neither reads a value.
 /// - `merge.yml`'s `RUN_PRS` is the JSON list of the pull request numbers a `workflow_run` names,
 ///   which the event holds in public.
 const ALLOWED: &[(&str, &str, &str)] = &[
@@ -69,6 +97,16 @@ const ALLOWED: &[(&str, &str, &str)] = &[
         "L9",
         ".github/workflows/web-deploy.yml",
         "- run: npx wrangler deploy",
+    ),
+    (
+        "L10",
+        "xtask/src/main.rs",
+        "for (var, _) in env::vars_os() {",
+    ),
+    (
+        "L10",
+        "xtask/src/release.rs",
+        "env::vars_os().filter_map(|(name, _)| name.into_string().ok()),",
     ),
     (
         "L3",
@@ -168,13 +206,205 @@ pub(crate) fn sources(root: &Path) -> Result<Vec<Source>> {
     Ok(found)
 }
 
+/// The Rust files L10 reads under `root`: every `.rs` under `xtask/src`, and under each crate's
+/// `examples`, but [`SELF`].
+pub(crate) fn rust_sources(root: &Path) -> Result<Vec<Source>> {
+    let mut found = Vec::new();
+    let mut pending: Vec<std::path::PathBuf> = RUST_DIRS.iter().map(|dir| root.join(dir)).collect();
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            let shown = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            if path.is_dir() {
+                if !shown.ends_with("/target") {
+                    pending.push(path);
+                }
+                continue;
+            }
+            let wanted = shown.ends_with(".rs")
+                && shown != SELF
+                && (shown.starts_with("xtask/src/") || shown.contains("/examples/"));
+            if wanted {
+                let text = fs::read_to_string(&path)
+                    .with_context(|| format!("reading {}", path.display()))?;
+                found.push(Source { path: shown, text });
+            }
+        }
+    }
+    found.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(found)
+}
+
+/// Every refused line of the Rust `sources` (L10), less the [`ALLOWED`] ones.
+pub(crate) fn rust_findings(sources: &[Source]) -> Vec<Finding> {
+    let mut found = Vec::new();
+    for source in sources {
+        let lines: Vec<&str> = source.text.lines().collect();
+        for (index, raw) in lines.iter().enumerate() {
+            let trimmed = raw.trim();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            let ahead: String = lines
+                .get(index..index.saturating_add(4).min(lines.len()))
+                .unwrap_or_default()
+                .iter()
+                .map(|line| line.trim())
+                .collect::<Vec<_>>()
+                .join("");
+            let mut hits = Vec::new();
+            if ["{command:?}", "{cmd:?}", "{child:?}"]
+                .iter()
+                .any(|form| trimmed.contains(form))
+            {
+                hits.push("a command's `Debug` form prints its environment");
+            }
+            if trimmed.contains("dbg!") {
+                hits.push("`dbg!` prints its value to the log");
+            }
+            if trimmed.contains("env::vars()") || trimmed.contains("env::vars_os()") {
+                hits.push("`env::vars()` reads every variable, secrets among them");
+            }
+            if trimmed.contains("::add-mask::") {
+                hits.push(
+                    "`::add-mask::` is written only through `leak::add_mask`, which escapes it",
+                );
+            }
+            if trimmed.contains("env::var(") && var_context(&ahead) {
+                hits.push(
+                    "an `env::var` error wrapped by `.context` prints a non-Unicode value; read a \
+                     secret with `.ok()` first, or name it by a literal that names no secret",
+                );
+            }
+            if trimmed.starts_with("#[derive(")
+                && trimmed.contains("Debug")
+                && let Some(field) = secret_field(&lines, index)
+            {
+                found.push(Finding {
+                    rule: "L10",
+                    path: source.path.clone(),
+                    line: field,
+                    why: "a struct with a secret field derives no `Debug`",
+                });
+            }
+            for why in hits {
+                if !ALLOWED.contains(&("L10", source.path.as_str(), trimmed)) {
+                    found.push(Finding {
+                        rule: "L10",
+                        path: source.path.clone(),
+                        line: index.saturating_add(1),
+                        why,
+                    });
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Whether `text`, a line and the few after it joined, holds an `env::var(..)` whose result goes
+/// straight to `.context(` or `.with_context(` with a name that is not a string literal or an
+/// `UPPER_CASE` constant free of [`SECRET_WORDS`]: a lowercase name is computed, so it could be
+/// any variable's.
+fn var_context(text: &str) -> bool {
+    let Some(at) = text.find("env::var(") else {
+        return false;
+    };
+    let rest = text
+        .get(at.saturating_add("env::var(".len())..)
+        .unwrap_or_default();
+    let Some(close) = rest.find(')') else {
+        return false;
+    };
+    let name = rest.get(..close).unwrap_or_default().trim();
+    let after = rest.get(close.saturating_add(1)..).unwrap_or_default();
+    let wrapped = after.starts_with(".context(") || after.starts_with(".with_context(");
+    let constant = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+    let safe_literal = (name.starts_with('"') || constant)
+        && !SECRET_WORDS
+            .iter()
+            .any(|word| name.to_ascii_lowercase().contains(word));
+    wrapped && !safe_literal
+}
+
+/// The 1-based line of the first secret-named field of the struct a `#[derive(..Debug..)]` at
+/// `index` decorates, if it decorates a struct with braces.
+fn secret_field(lines: &[&str], index: usize) -> Option<usize> {
+    let mut at = index.saturating_add(1);
+    while lines
+        .get(at)
+        .is_some_and(|line| line.trim().starts_with("#[") || line.trim().starts_with("///"))
+    {
+        at = at.saturating_add(1);
+    }
+    let header = lines.get(at)?;
+    if !(header.contains("struct ") && header.trim_end().ends_with('{')) {
+        return None;
+    }
+    let indent = header.len().saturating_sub(header.trim_start().len());
+    for (offset, line) in lines.iter().enumerate().skip(at.saturating_add(1)) {
+        let trimmed = line.trim();
+        if trimmed.starts_with('}') && line.len().saturating_sub(line.trim_start().len()) <= indent
+        {
+            return None;
+        }
+        let name = trimmed
+            .trim_start_matches("pub(crate) ")
+            .trim_start_matches("pub ")
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if trimmed.contains(':')
+            && !trimmed.starts_with("//")
+            && SECRET_WORDS
+                .iter()
+                .filter(|word| **word != "key")
+                .any(|word| name.contains(word))
+        {
+            return Some(offset.saturating_add(1));
+        }
+    }
+    None
+}
+
+/// The `::add-mask::` workflow command for `value`, escaped as the runner reads it: `%` to `%25`
+/// first, then CR to `%0D` and LF to `%0A`, so no byte of the value can end the command or start
+/// another (DEC-2032, L8). The one way xtask writes it.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the one way xtask may write `::add-mask::` (L10); no xtask command masks a value yet"
+    )
+)]
+pub(crate) fn add_mask(value: &str) -> String {
+    let escaped = value
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A");
+    format!("::add-mask::{escaped}")
+}
+
 /// Runs the guard over the repository at `root`.
 pub(crate) fn guard_in(root: &Path) -> Result<()> {
     eprintln!(
-        "    leak-guard: checking workflows and scripts for what could leak a secret (DEC-2032)"
+        "    leak-guard: checking workflows, scripts and xtask's Rust for what could leak a secret \
+         (DEC-2032)"
     );
     let sources = sources(root)?;
-    let found = findings(&sources);
+    let mut found = findings(&sources);
+    found.extend(rust_findings(&rust_sources(root)?));
     if found.is_empty() {
         return Ok(());
     }
@@ -1346,6 +1576,103 @@ mod tests {
         let web = ".github/workflows/web-deploy.yml";
         let opened = read(web)?.replacen("on:\n", "on:\n  pull_request_target:\n", 1);
         assert!(rules(web, &opened).contains(&"L12"));
+        Ok(())
+    }
+
+    fn rust(text: &str) -> Vec<&'static str> {
+        rust_findings(&[Source {
+            path: "xtask/src/x.rs".to_owned(),
+            text: text.to_owned(),
+        }])
+        .into_iter()
+        .map(|f| f.rule)
+        .collect()
+    }
+
+    /// L10's failing and passing fixtures.
+    #[test]
+    fn rust_refuses_what_prints_a_secret() {
+        for text in [
+            "    eprintln!(\"running {command:?}\");",
+            "    bail!(\"{cmd:?} failed\");",
+            "    let x = dbg!(value);",
+            "    for (name, value) in env::vars() {",
+            "    for (name, _) in std::env::vars_os() {",
+            "    println!(\"::add-mask::{token}\");",
+            "    let token = env::var(\"GH_TOKEN\").context(\"GH_TOKEN is not set\")?;",
+            "    let key = env::var(SIGNING_KEY_ENV).context(\"unset\")?;",
+            "    let value =\n        env::var(var).with_context(|| format!(\"{var} is not set\"))?;",
+            "#[derive(Debug)]\nstruct Login {\n    user: String,\n    password: String,\n}",
+            "#[derive(Clone, Debug)]\n/// A cluster.\npub(crate) struct Cluster {\n    pub(crate) kubeconfig: PathBuf,\n}",
+        ] {
+            assert_eq!(rust(text), ["L10"], "{text:?}");
+        }
+        for text in [
+            "    eprintln!(\"running {}\", args.join(\" \"));",
+            "    let repo = env::var(\"GITHUB_REPOSITORY\").context(\"GITHUB_REPOSITORY is not set\")?;",
+            "    let token = env::var(\"GH_TOKEN\").ok().context(\"GH_TOKEN is not set\")?;",
+            "    let value = env::var(var).ok().with_context(|| format!(\"{var} is not set\"))?;",
+            "    let value = env::var(SWEEP_CLOCK_ENV).with_context(|| \"x\".to_owned())?;",
+            "#[derive(Debug)]\nstruct Paths {\n    root: PathBuf,\n    key_count: usize,\n}",
+            "struct Login {\n    password: String,\n}",
+            "// never dbg!(x)",
+            "    let line = leak::add_mask(&token);",
+        ] {
+            assert_eq!(rust(text), Vec::<&str>::new(), "{text:?}");
+        }
+    }
+
+    /// `add_mask` escapes `%` first, then CR and LF, so a value cannot end the command early.
+    #[test]
+    fn add_mask_escapes_percent_then_cr_and_lf() {
+        assert_eq!(add_mask("plain"), "::add-mask::plain");
+        assert_eq!(add_mask("a%0Ab"), "::add-mask::a%250Ab");
+        assert_eq!(
+            add_mask("line\r\n::warning::x"),
+            "::add-mask::line%0D%0A::warning::x"
+        );
+        assert!(!add_mask("a\nb\rc").contains(['\n', '\r']));
+    }
+
+    /// The repository's Rust passes; each L10 fixture seeded into each real file is refused there.
+    #[test]
+    fn the_repository_rust_passes_and_every_seeded_line_is_refused() -> Result<()> {
+        let real = rust_sources(&repo_root()?)?;
+        assert!(
+            real.iter().any(|s| s.path == "xtask/src/main.rs")
+                && real.iter().any(|s| s.path.contains("/examples/"))
+                && !real.iter().any(|s| s.path == SELF),
+            "{:?}",
+            real.iter().map(|s| &s.path).collect::<Vec<_>>()
+        );
+        assert_eq!(rust_findings(&real), Vec::new());
+        for seed in [
+            "dbg!(x);",
+            "eprintln!(\"{command:?}\");",
+            "for v in env::vars() {}",
+        ] {
+            for index in 0..real.len() {
+                let seeded: Vec<Source> = real
+                    .iter()
+                    .enumerate()
+                    .map(|(at, source)| Source {
+                        path: source.path.clone(),
+                        text: if at == index {
+                            format!("{}\n{seed}\n", source.text)
+                        } else {
+                            source.text.clone()
+                        },
+                    })
+                    .collect();
+                assert!(
+                    rust_findings(&seeded)
+                        .iter()
+                        .any(|f| f.path == real[index].path),
+                    "{seed} in {}",
+                    real[index].path
+                );
+            }
+        }
         Ok(())
     }
 

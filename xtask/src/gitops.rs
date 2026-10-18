@@ -264,8 +264,9 @@ fn secret_manifests() -> Result<Vec<(&'static str, String)>> {
     for secret in WORKLOAD_SECRETS {
         let mut values = Vec::new();
         for (key, var) in secret.keys {
-            let value =
-                env::var(var).with_context(|| format!("{var} is not set (BOOTSTRAP.md)"))?;
+            let value = env::var(var)
+                .ok()
+                .with_context(|| format!("{var} is not set (BOOTSTRAP.md)"))?;
             values.push((*key, value));
         }
         manifests.push((secret.name, secret_manifest(secret.name, &values)?));
