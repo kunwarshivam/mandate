@@ -296,7 +296,6 @@ fn an_action_past_either_edge_is_not_refused_as_in_range() {
 /// DEC-1000 item 8: a corporate action outside the bars does not refuse; the run completes, and
 /// its configuration names the action (DEC-2245 item 4).
 #[test]
-#[ignore = "pending E4-4"]
 fn a_corporate_action_outside_the_bars_completes_the_run() {
     let days = trading_days(DAYS);
     let outputs = daily_outputs(&days, "0.5");

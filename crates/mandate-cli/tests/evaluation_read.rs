@@ -85,7 +85,6 @@ fn workspace() -> Journal {
 
 /// DEC-2244 item 4, as DEC-1143 item 1 reads the API's setting.
 #[test]
-#[ignore = "pending E17-8"]
 fn the_setting_is_on_only_for_exactly_true() {
     assert_eq!(
         internal_paper_setting(Some(OsString::from("true"))),
@@ -106,7 +105,6 @@ fn the_setting_is_on_only_for_exactly_true() {
 /// The setting on and every control row paper: an internal paper workspace. The setting off, an
 /// empty stream, or one live row anywhere: refused.
 #[test]
-#[ignore = "pending E17-8"]
 fn only_a_paper_stream_with_the_setting_on_is_internal_paper() {
     let journal = workspace();
     assert_eq!(internal_paper(&journal, &owner(), true), Ok(()));
@@ -136,7 +134,6 @@ fn only_a_paper_stream_with_the_setting_on_is_internal_paper() {
 /// Every deployed agent's stream is read once, in agent id order, and only its thesis records,
 /// in stream order, each with its position, hash, bound version and payload.
 #[test]
-#[ignore = "pending E17-8"]
 fn every_deployed_agents_thesis_records_are_read_in_order() {
     let mut journal = workspace();
     deployed(&mut journal, OTHER_AGENT);
@@ -178,7 +175,6 @@ fn every_deployed_agents_thesis_records_are_read_in_order() {
 /// An agent stream the control stream names no deployment for is never read, however its records
 /// read.
 #[test]
-#[ignore = "pending E17-8"]
 fn an_undeployed_agents_stream_is_not_read() {
     let mut journal = workspace();
     deployed(&mut journal, AGENT);
@@ -192,7 +188,6 @@ fn an_undeployed_agents_stream_is_not_read() {
 /// A thesis record that binds no mandate version cannot be checked, so it refuses the read; no
 /// thesis record at all refuses too (rule 145 needs one stream or more).
 #[test]
-#[ignore = "pending E17-8"]
 fn an_unbound_record_or_no_record_refuses() {
     let mut journal = workspace();
     deployed(&mut journal, AGENT);
