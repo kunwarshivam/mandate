@@ -288,6 +288,19 @@ describe("only the deploy job deploys, from main, through the production environ
     }
     expect(hostingProblems(tree({ [r2]: `${yml}      - run: npx wrangler deploy\n` }))).toEqual(expect.arrayContaining([expect.stringContaining("r2-lockcheck.yml: runs")]));
   });
+
+  it("r2-lockcheck.yml builds the example with no secret and only runs the built binary beside R2's key and the token", () => {
+    const yml = real("../.github/workflows/r2-lockcheck.yml");
+    const steps = yml.split(/\n(?= {6}- )/);
+    const secretSteps = steps.filter((step) => /\bsecrets\./.test(step));
+    expect(secretSteps).toHaveLength(1);
+    expect(secretSteps[0].trimEnd()).toMatch(/\n {8}run: target\/debug\/examples\/r2_finding$/);
+    expect(secretSteps[0]).not.toMatch(/\bcargo\b/);
+    const build = steps.findIndex((step) => step.includes("run: cargo build --locked --package mandate-objectstore --example r2_finding"));
+    expect(build).toBeGreaterThan(-1);
+    expect(steps[build]).not.toMatch(/\bsecrets\.|\benv:/);
+    expect(build).toBeLessThan(steps.indexOf(secretSteps[0]));
+  });
 });
 
 /** A dry run's output directory holding `files`, removed after `check`. */
