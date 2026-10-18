@@ -15035,13 +15035,22 @@ mod tests {
         );
         assert!(
             workflow.contains(
-                "concurrency:\n  group: ci-${{ github.ref }}\n  cancel-in-progress: true\n"
+                "concurrency:\n  group: ci-${{ github.event_name == 'workflow_dispatch' && \
+                 !inputs.post_merge && github.run_id || github.ref }}\n  cancel-in-progress: \
+                 true\n"
             ),
-            "a newer run of the same ref cancels the older one"
+            "a newer run of the same ref cancels the older one, post-merge runs on main share \
+             one group, and any other dispatched run, the nightly's included, has a group of its \
+             own, so it is never cancelled (DEC-2610)"
         );
-        let report = "if: ${{ always() && github.event_name == 'workflow_dispatch' && \
-                      github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || \
-                      needs.full.result == 'failure') }}";
+        assert!(
+            workflow.contains("  push:\n    branches: [main]\n"),
+            "every push to main runs CI after the merge, and a push to any other branch does not \
+             (DEC-2610)"
+        );
+        let report = "if: ${{ always() && (github.event_name == 'workflow_dispatch' || \
+                      github.event_name == 'push') && github.ref == 'refs/heads/main' && \
+                      (needs.fast.result == 'failure' || needs.full.result == 'failure') }}";
         for (job, guard) in [
             ("select", "if: ${{ !github.event.pull_request.draft }}"),
             ("fast-lint", "if: ${{ !github.event.pull_request.draft }}"),
@@ -17608,6 +17617,71 @@ jq -r "$filter" "$src"
 "##;
 
     const APPROVED_HEAD: &str = "1111111111111111111111111111111111111111";
+
+    /// DEC-2610: a merge `merge.yml` makes pushes with its own token, which starts no workflow, so
+    /// it dispatches `ci` on `main` once after any merge, and only then, with the one right that
+    /// takes.
+    #[test]
+    fn the_merge_workflow_runs_ci_on_main_after_a_merge_it_made() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/merge.yml"))?;
+        let job = |name: &str| -> Result<Vec<String>> {
+            Ok(workflow_job(&workflow, name)
+                .with_context(|| format!("merge.yml has a `{name}` job"))?
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- ").to_owned())
+                .collect())
+        };
+        let merge = job("merge")?;
+        assert!(
+            merge
+                .iter()
+                .any(|l| l == "echo \"merged=true\" >> \"$GITHUB_OUTPUT\"")
+        );
+        assert!(
+            merge
+                .iter()
+                .any(|l| l == "if printf '%s\\n' \"$out\" | grep -q '^merged as '; then"),
+            "only a run that merged says so"
+        );
+        assert!(
+            !merge
+                .iter()
+                .filter(|l| !l.starts_with('#'))
+                .any(|l| l.contains("actions:") || l.contains("dispatches")),
+            "the merging job holds no `actions` right and dispatches nothing"
+        );
+        let dispatch = job("ci-on-main")?;
+        for line in [
+            "needs: merge",
+            "if: ${{ always() && needs.merge.outputs.merged == 'true' }}",
+            "actions: write",
+            "run: gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches\" \
+             -f ref=main -f \"inputs[post_merge]=true\"",
+        ] {
+            assert!(
+                dispatch.iter().any(|l| l == line),
+                "`ci-on-main` has `{line}`"
+            );
+        }
+        let rights: Vec<&String> = dispatch
+            .iter()
+            .skip_while(|l| *l != "permissions:")
+            .skip(1)
+            .take_while(|l| l.ends_with(": write") || l.ends_with(": read"))
+            .collect();
+        assert_eq!(
+            rights,
+            ["actions: write"],
+            "`actions: write` and nothing else"
+        );
+        assert!(
+            !dispatch
+                .iter()
+                .any(|l| l.contains("checkout") || l.contains("secrets.")),
+            "the dispatch job runs no code and reads no secret"
+        );
+        Ok(())
+    }
 
     #[test]
     fn merge_workflow_supplies_the_authorized_coordinator_identities() -> Result<()> {
