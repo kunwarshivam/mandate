@@ -12,7 +12,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::{Metadata, Token, files_by_extension, metadata_in, report, tokens, workspace_packages};
+use crate::{
+    Metadata, Token, files_by_extension, metadata_in, repo_root, report, tokens, workspace_packages,
+};
 
 /// The guard's configuration, beside the other `xtask` policy files.
 pub(crate) const GUARD: &str = "xtask/mail-guard.toml";
@@ -56,13 +58,15 @@ struct Locked {
     name: String,
 }
 
-/// Runs the guard over the repository at `root`, unless the spec no longer holds the footer's
-/// placeholder.
+/// Runs the guard over the workspace at `root`, unless the spec no longer holds the footer's
+/// placeholder. The configuration and the spec are always this repository's, as
+/// `decision_numbers`'s script is, so a tree without them is still guarded.
 pub(crate) fn guard_in(root: &Path) -> Result<()> {
     eprintln!("    mail-guard: checking that no mail can reach anyone but the founder (DEC-2511)");
-    let guard: Guard = toml::from_str(&fs::read_to_string(root.join(GUARD))?)
+    let home = repo_root()?;
+    let guard: Guard = toml::from_str(&fs::read_to_string(home.join(GUARD))?)
         .with_context(|| format!("parsing {GUARD}"))?;
-    let spec = fs::read_to_string(root.join(&guard.spec))
+    let spec = fs::read_to_string(home.join(&guard.spec))
         .with_context(|| format!("reading {}", guard.spec))?;
     if !spec.contains(&guard.placeholder) {
         return Ok(());

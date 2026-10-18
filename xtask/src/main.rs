@@ -21546,6 +21546,46 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// The lint job runs the mail guard over its own repository (DEC-2511): a fixture workspace
+    /// passes, and one whose crate implements `MailTransport` for a type the guard does not
+    /// allow fails the job naming the check, before the workspace checks run.
+    #[test]
+    fn the_lint_job_runs_the_mail_guard_on_its_repository() -> Result<()> {
+        let root = env::temp_dir().join(format!("mandate-xtask-lint-mail-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fixture_workspace(&root)?;
+        for dir in [".github/workflows", ".github/scripts", "deploy", "scripts"] {
+            fs::create_dir_all(root.join(dir))?;
+        }
+        let clean = lint(&root, || Ok(())).map_err(|err| format!("{err:#}"));
+        fs::write(
+            root.join("a/src/lib.rs"),
+            "//! A fixture crate.\npub trait MailTransport {}\npub struct Leak;\nimpl MailTransport for Leak {}\n",
+        )?;
+        let reached = Cell::new(false);
+        let planted = lint(&root, || {
+            reached.set(true);
+            Ok(())
+        })
+        .map_err(|err| format!("{err:#}"))
+        .err();
+        fs::remove_dir_all(&root).ok();
+        assert_eq!(clean, Ok(()), "a clean fixture workspace passes");
+        assert!(
+            planted
+                .as_deref()
+                .is_some_and(|err| err.contains("mail-guard")),
+            "an unlisted transport fails the lint job naming the check, got {planted:?}"
+        );
+        assert!(
+            !reached.get(),
+            "the workspace checks run only after it passes"
+        );
+        Ok(())
+    }
+
     /// A fixture git repository for the decision-number check, with `files` untracked, which
     /// the check reads as it reads a lane's new reservation before its first commit.
     fn decision_repository(name: &str, files: &[(&str, &str)]) -> Result<PathBuf> {
