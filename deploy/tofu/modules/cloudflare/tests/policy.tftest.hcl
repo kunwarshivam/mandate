@@ -2,6 +2,12 @@
 # checked on the plan against a mocked provider.
 
 mock_provider "cloudflare" {
+  mock_data "cloudflare_account_api_token_permission_groups_list" {
+    defaults = {
+      result = [{ id = "c0ffee00c0ffee00c0ffee00c0ffee00", name = "Workers R2 Storage Bucket Item Write", category = "r2", is_selectable = true, scopes = ["com.cloudflare.edge.r2.bucket"] }]
+    }
+  }
+
   mock_data "cloudflare_zone" {
     defaults = {
       zone_id = "0123456789abcdef0123456789abcdef"
@@ -90,6 +96,34 @@ run "the_archive_is_locked_for_its_retention" {
     condition     = cloudflare_r2_bucket_lock.journal_archive.bucket_name == cloudflare_r2_bucket.journal_archive.name
     error_message = "The lock is on the archive bucket."
   }
+}
+
+run "barman_token_reaches_the_archive_bucket_alone" {
+  command = plan
+
+  assert {
+    condition = (
+      length(cloudflare_account_token.journal_archive.policies) == 1 &&
+      cloudflare_account_token.journal_archive.policies[0].effect == "allow" &&
+      length(cloudflare_account_token.journal_archive.policies[0].permission_groups) == 1 &&
+      cloudflare_account_token.journal_archive.policies[0].permission_groups[0].id == "c0ffee00c0ffee00c0ffee00c0ffee00" &&
+      jsondecode(cloudflare_account_token.journal_archive.policies[0].resources) == { "com.cloudflare.edge.r2.bucket.fedcba9876543210fedcba9876543210_default_mandate-journal-archive-staging" = "*" }
+    )
+    error_message = "The minted token holds Object Read and Write on the archive bucket and nothing else."
+  }
+}
+
+run "refuses_an_ambiguous_permission_group" {
+  command = plan
+
+  override_data {
+    target = data.cloudflare_account_api_token_permission_groups_list.r2_object_write
+    values = {
+      result = []
+    }
+  }
+
+  expect_failures = [cloudflare_account_token.journal_archive]
 }
 
 run "refuses_a_lock_shorter_than_the_retention" {

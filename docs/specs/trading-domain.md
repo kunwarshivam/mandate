@@ -2,13 +2,19 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.14 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.19 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.19:** §5.7: a pending cancel ends only by the broker's answer to it. A working status
+  keeps a `PendingCancel` order whose cancel is unconfirmed in `PendingCancel`. A refusal takes the
+  "cancel rejected" edge, except for a kill switch's cancel. `Expired` and `Rejected` end a pending
+  cancel. Every start sends each unconfirmed pending cancel again, so a crash between a kill
+  switch's batch and its `Cancel` cannot leave the order working
+  ([DEC-2302](../project/decisions/DEC-2302.md)). A tightening under DEC-176.
 - **v0.18:** §6.2 and §2.1 add `fee_rounding`: under `per_fee_per_fill` each regulatory fee of
   each fill is rounded up to the cent before summing, for a broker that rounds each fee separately
   (Robinhood), so a live sell is never booked below the broker's figure (DEC-958 item 4,
@@ -654,7 +660,9 @@ stateDiagram-v2
     PartiallyFilled --> PendingCancel: cancel requested
     PendingCancel --> Canceled: confirmed
     PendingCancel --> Filled: filled first
-    PendingCancel --> PriorState: cancel rejected
+    PendingCancel --> PriorState: cancel rejected (never a kill switch's cancel)
+    PendingCancel --> Expired: expired
+    PendingCancel --> Rejected: rejected
     Accepted --> PendingReplace: broker replace pending
     PartiallyFilled --> PendingReplace: broker replace pending
     PendingReplace --> PriorState: replace rejected
@@ -681,7 +689,7 @@ PartiallyFilled); fills during either pending state update filled quantity witho
 
 | Broker status | Internal state |
 |---|---|
-| `new`, `accepted`, `pending_new`, `accepted_for_bidding`, `held` | Accepted |
+| `new`, `accepted`, `pending_new`, `accepted_for_bidding`, `held` | Accepted (but a `PendingCancel` order with its cancel unconfirmed stays `PendingCancel`; see the last rule below, [DEC-2302](../project/decisions/DEC-2302.md)) |
 | `partially_filled` / `filled` | PartiallyFilled / Filled (apply fill) |
 | `done_for_day`, `stopped`, `calculated` | Unchanged |
 | `pending_cancel` | PendingCancel |
@@ -707,6 +715,26 @@ PartiallyFilled); fills during either pending state update filled quantity witho
 - Per-event fill quantity and price are authoritative; cumulative quantity mismatches trigger
   reconciliation.
 - Every transition is journaled before it takes effect in state.
+- **A pending cancel ends only by the broker's answer to it** ([DEC-2302](../project/decisions/DEC-2302.md)).
+  - A cancel is unconfirmed from the `OrderStateChanged` that asks it (`cancel_requested`) until
+    one with `cancel_confirmed` true or a terminal state. A kill switch's cancel is one whose order
+    its `KillSwitchActivated` names in `cancels` (journal spec §9, DEC-2302 item 2).
+  - A status that maps to Accepted or PartiallyFilled, reported for a `PendingCancel` order whose
+    cancel is unconfirmed, keeps it `PendingCancel`. A fill it reports is still applied.
+  - A refusal of the cancel asks one lookup and no cancel. A working answer to that lookup takes
+    the "cancel rejected" edge to `PriorState`, except for a cancel a kill switch asked (§5.5),
+    which stays `PendingCancel`.
+  - Within one run, a kill switch's order stays `PendingCancel` until the broker reports a
+    terminal status. This holds whatever happens to the cancel's answer: a 429 or 5xx, an answer in doubt, no reply, or a lookup unanswered or answered 404.
+    Such an order never returns to `PriorState` and is never dropped. The bounded in-run retry of
+    that cancel is DEC-2302 item 7's.
+  - A terminal status ends the order, the reservation is released, and its cancel is never sent
+    again.
+  - On every start, each `PendingCancel` order whose cancel is unconfirmed has its cancel sent
+    again in place of the lookup, and its answer decides the order. No new record is written,
+    since the journal already names the request. Only an order still `PendingCancel` is covered.
+    A cancel that is not a kill switch's (§5.4 protection) and went back to `PriorState` on a
+    refusal is never sent again by a start. The sequence that asked it decides that.
 
 ## 6. Fills and fees
 

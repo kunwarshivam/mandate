@@ -724,6 +724,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("MandateVersionCreated", 1) => Some(&MANDATE_VERSION_CREATED),
         ("MandateConfirmed", 1) => Some(&MANDATE_CONFIRMED),
         ("AgentDeployed", 1) => Some(&AGENT_DEPLOYED),
+        ("AgentDeployed", 2) => Some(&AGENT_DEPLOYED_V2),
         ("AgentStopped", 1) => Some(&AGENT_STOPPED),
         ("OwnerCommandRefused", 1) => Some(&OWNER_COMMAND_REFUSED),
         (SNAPSHOT, 1) => Some(&ACCOUNT_SNAPSHOT_RECORDED),
@@ -1232,6 +1233,16 @@ static AGENT_DEPLOYED: Ty = Ty::Record(&[
     ("agent_id", Ty::Ident),
     ("mandate_version", Ty::DigestRef),
     ("record_ref", Ty::DigestRef),
+]);
+
+/// Journal spec v0.54 §9.24 (DEC-1171): version 1's members, then the connection of the stored
+/// document `mandate_version` names, so the deployment manager reads a deployment's account from
+/// the control stream alone. Rule 22 applies unchanged; rule 200 is the mapping's, never `append`'s.
+static AGENT_DEPLOYED_V2: Ty = Ty::Record(&[
+    ("agent_id", Ty::Ident),
+    ("mandate_version", Ty::DigestRef),
+    ("record_ref", Ty::DigestRef),
+    ("connection_id", Ty::Ident),
 ]);
 
 static AGENT_STOPPED: Ty = Ty::Record(&[

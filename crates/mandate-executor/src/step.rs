@@ -7,7 +7,8 @@ use crate::intent::{received, release_held, resume};
 use crate::kill::kill_switch;
 use crate::listing::{listed, query_unknown};
 use crate::orders::{
-    absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
+    absent, account, cancelled, described, duplicate, fill, kill_cancels_due, lookups_due, reject,
+    silence,
 };
 use crate::payload::optional_text;
 use crate::ports::{BindingGateSource, Ports};
@@ -186,6 +187,7 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
         Input::Market(_) => watchdog(batch),
         Input::Tick(_) => {
             lookups_due(batch);
+            kill_cancels_due(batch)?;
             release_held(batch)?;
             overdue_openings(batch)?;
             bound(batch)?;
