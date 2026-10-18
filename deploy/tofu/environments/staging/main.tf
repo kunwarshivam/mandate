@@ -28,6 +28,7 @@ module "cell" {
   kubernetes_version         = "1.35.1-do.0"
   node_size                  = "s-2vcpu-4gb"
   kube_api_allowed_addresses = var.kube_api_allowed_addresses
+  bootstrap_runner_cidr      = var.bootstrap_runner_cidr
   spaces_monthly_usd         = 5
   block_storage_gb           = 40
   cap_usd                    = 65
@@ -62,6 +63,16 @@ output "archive_endpoint" {
 
 output "archive_destination_path" {
   value = "s3://${module.cloudflare.archive_bucket}/journal-db"
+}
+
+output "archive_access_key_id" {
+  value     = module.cloudflare.archive_access_key_id
+  sensitive = true
+}
+
+output "archive_secret_access_key" {
+  value     = module.cloudflare.archive_secret_access_key
+  sensitive = true
 }
 
 output "archive_jurisdiction" {

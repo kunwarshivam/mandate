@@ -97,3 +97,135 @@ run "refuses_an_empty_control_plane_list" {
 
   expect_failures = [var.kube_api_allowed_addresses]
 }
+
+run "opens_the_window_to_one_runner_only" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "198.51.100.23/32"
+  }
+
+  assert {
+    condition     = digitalocean_kubernetes_cluster.this.control_plane_firewall[0].allowed_addresses == tolist(["203.0.113.7/32", "198.51.100.23/32"])
+    error_message = "The window adds exactly the runner's /32 to the founder's addresses."
+  }
+}
+
+run "the_window_is_closed_by_default" {
+  command = plan
+
+  assert {
+    condition     = var.bootstrap_runner_cidr == "" && length(digitalocean_kubernetes_cluster.this.control_plane_firewall[0].allowed_addresses) == 1
+    error_message = "With no runner the allowlist is the founder's alone."
+  }
+}
+
+run "refuses_a_wider_window" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "198.51.100.0/24"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_private_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "10.1.2.3/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_two_runners" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "198.51.100.23/32,198.51.100.24/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_an_ipv6_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "2001:db8::1/128"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_loopback_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "127.0.0.1/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_cgnat_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "100.64.1.2/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_link_local_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "169.254.1.1/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_unspecified_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "0.0.0.0/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_slash_31_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "198.51.100.22/31"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_leading_zero_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "198.051.100.23/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_multicast_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "224.0.0.1/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
