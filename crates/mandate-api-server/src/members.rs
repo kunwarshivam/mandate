@@ -94,6 +94,14 @@ pub fn membership_records(
     Ok(records)
 }
 
+/// The parser of the hosted `workspace`'s control stream: [`membership_records`], any refusal a
+/// failed lookup (DEC-2110 item 7).
+pub fn control_parser(
+    workspace: WorkspaceId,
+) -> impl Fn(&[StoredEvent]) -> Result<Vec<MembershipRecord>, LookupFailed> + Send + Sync {
+    move |rows| membership_records(workspace, rows).map_err(|_| LookupFailed)
+}
+
 /// The one workspace this deployment hosts, and its organization (§3.11 item 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Hosted {
