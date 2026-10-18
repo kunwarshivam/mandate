@@ -212,8 +212,18 @@ describe("only the deploy job deploys, from main, through the production environ
     }
     expect(deployWith((y) => y.replace(DEPLOY_ENV, `${DEPLOY_ENV}          KEY: \${{ vars.R2_ACCESS_KEY_ID }}\n`))).toEqual(only("the build may read only"));
     expect(deployWith((y) => y.replace('      WRANGLER_SEND_METRICS: "false"\n', '      WRANGLER_SEND_METRICS: "false"\n      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n'))).toEqual(only("never the whole job"));
-    expect(deployWith((y) => y.replace("      - run: npm ci\n", "      - run: npm ci\n      - run: npx wrangler deploy --minify\n"))).toEqual(only("Cloudflare command"));
+    expect(deployWith((y) => y.replace("      - run: npm ci --ignore-scripts\n", "      - run: npm ci --ignore-scripts\n      - run: npx wrangler deploy --minify\n"))).toEqual(only("Cloudflare command"));
     expect(deployWith((y) => `${y}      - run: npx wrangler login\n`)).toEqual([expect.stringContaining("must end with"), expect.stringContaining("Cloudflare command")]);
+  });
+
+  it("flags a deploy job that restores or saves a cache, or lets an install script run", () => {
+    const setup = "          node-version-file: web/.nvmrc\n";
+    expect(deployWith((y) => y.replace(setup, `${setup}          cache: npm\n`))).toEqual(only("no cache"));
+    expect(deployWith((y) => y.replace(setup, `${setup}          cache-dependency-path: web/package-lock.json\n`))).toEqual(only("no cache"));
+    expect(deployWith((y) => y.replace("      - run: npm ci --ignore-scripts\n", "      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5\n        with:\n          path: ~/.npm\n          key: npm\n      - run: npm ci --ignore-scripts\n"))).toEqual(only("no cache"));
+    expect(deployWith((y) => y.replace("npm ci --ignore-scripts", "npm ci"))).toEqual(only("--ignore-scripts"));
+    expect(deployWith((y) => y.replace("      - run: npm ci --ignore-scripts\n", ""))).toEqual(only("--ignore-scripts"));
+    expect(deployWith((y) => y.replace("      - run: npm ci --ignore-scripts\n", "      - run: npm ci --ignore-scripts\n      - run: npm install\n"))).toEqual(only("--ignore-scripts"));
   });
 
   it("pending E21-38: flags a secret or a variable read outside a step, a top-level env or defaults, and any other Cloudflare upload", () => {
@@ -277,6 +287,19 @@ describe("only the deploy job deploys, from main, through the production environ
       expect(hostingProblems(tree({ [r2]: edit })), edit).toEqual(expect.arrayContaining([expect.stringContaining("r2-lockcheck.yml: differs from the reviewed")]));
     }
     expect(hostingProblems(tree({ [r2]: `${yml}      - run: npx wrangler deploy\n` }))).toEqual(expect.arrayContaining([expect.stringContaining("r2-lockcheck.yml: runs")]));
+  });
+
+  it("r2-lockcheck.yml builds the example with no secret and only runs the built binary beside R2's key and the token", () => {
+    const yml = real("../.github/workflows/r2-lockcheck.yml");
+    const steps = yml.split(/\n(?= {6}- )/);
+    const secretSteps = steps.filter((step) => /\bsecrets\./.test(step));
+    expect(secretSteps).toHaveLength(1);
+    expect(secretSteps[0].trimEnd()).toMatch(/\n {8}run: target\/debug\/examples\/r2_finding$/);
+    expect(secretSteps[0]).not.toMatch(/\bcargo\b/);
+    const build = steps.findIndex((step) => step.includes("run: cargo build --locked --package mandate-objectstore --example r2_finding"));
+    expect(build).toBeGreaterThan(-1);
+    expect(steps[build]).not.toMatch(/\bsecrets\.|\benv:/);
+    expect(build).toBeLessThan(steps.indexOf(secretSteps[0]));
   });
 });
 

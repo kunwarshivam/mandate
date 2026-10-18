@@ -153,6 +153,7 @@ pub struct Fixture {
     pub failing: bool,
     pub calls: Cell<u32>,
     pub queries: std::cell::RefCell<Vec<TextQuery>>,
+    pub terms: std::cell::RefCell<Vec<Vec<String>>>,
 }
 
 impl Fixture {
@@ -195,6 +196,11 @@ impl NewsReader for Fixture {
     fn news(&self, query: &TextQuery) -> Result<Vec<NewsItem>, ReadError> {
         self.queries.borrow_mut().push(query.clone());
         self.answer(&self.news)
+    }
+
+    fn search(&self, query: &TextQuery, terms: &[String]) -> Result<Vec<NewsItem>, ReadError> {
+        self.terms.borrow_mut().push(terms.to_vec());
+        self.news(query)
     }
 }
 

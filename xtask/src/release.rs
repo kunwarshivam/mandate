@@ -602,8 +602,8 @@ const REPOSITORY: &str = "kunwarshivam/mandate";
 /// `<out>/images/<binary>`, with `<out>/IMAGES` listing each image's digest. With `--test-sign`,
 /// an ephemeral test key made here signs each binary (`<out>/signatures/<binary>.sig`, also the
 /// image's second layer); its private half is deleted once the binaries are signed and its public
-/// half kept as `<out>/test-key/cosign.pub`. Only the founder's hardware key signs a release for a
-/// hosted cell, and it is never here.
+/// half kept as `<out>/test-key/cosign.pub`. Only the release key signs a release for a hosted
+/// cell, in CI's `release-signing` job (DEC-2024), and it is never here.
 pub(crate) fn images(root: &Path, dist: &Path, out: &Path, test_sign: bool) -> Result<()> {
     let arch = Arch::host()?;
     let paths = Paths::from_env(root)?;
@@ -751,7 +751,7 @@ pub(crate) fn index_tag(revision: &str) -> String {
 /// push tokens, in a 0700 directory deleted when the session ends, and cosign logged in through its
 /// stdin. The token is read from `GH_TOKEN` and reaches nothing else.
 struct Registry {
-    secrets: PathBuf,
+    secrets: SecretDir,
     basic: PathBuf,
     /// The same credential as a registry config file in Docker's format, the one `helm push`
     /// reads (`--registry-config`).
@@ -759,16 +759,14 @@ struct Registry {
 }
 
 impl Registry {
-    fn sign_in(tools: &Path, out: &Path) -> Result<Self> {
+    fn sign_in(tools: &Path) -> Result<Self> {
         let token = env::var("GH_TOKEN").context("GH_TOKEN is not set")?;
         let actor = env::var("GITHUB_ACTOR").context("GITHUB_ACTOR is not set")?;
-        let secrets = out.join("auth");
-        fs::create_dir_all(&secrets).context("creating the auth directory")?;
-        fs::set_permissions(&secrets, fs::Permissions::from_mode(0o700))?;
-        let basic = secrets.join("basic");
+        let secrets = SecretDir::create()?;
+        let basic = secrets.0.join("basic");
         let auth = image::base64(format!("{actor}:{token}").as_bytes());
         write_secret(&basic, &format!("Authorization: Basic {auth}\n"))?;
-        let helm = secrets.join("helm-registry.json");
+        let helm = secrets.0.join("helm-registry.json");
         write_secret(
             &helm,
             &format!("{{\"auths\":{{\"{REGISTRY_HOST}\":{{\"auth\":\"{auth}\"}}}}}}\n"),
@@ -800,20 +798,43 @@ impl Registry {
     /// A header file carrying a push token for `repository`.
     fn bearer(&self, repository: &str) -> Result<PathBuf> {
         let token = image_token(&self.basic, repository)?;
-        let bearer = self.secrets.join("bearer");
+        let bearer = self.secrets.0.join("bearer");
         write_secret(&bearer, &format!("Authorization: Bearer {token}\n"))?;
         Ok(bearer)
     }
 
     fn sign_out(self) -> Result<()> {
-        fs::remove_dir_all(&self.secrets).context("deleting the auth directory")
+        fs::remove_dir_all(&self.secrets.0).context("deleting the auth directory")
+    }
+}
+
+/// The 0700 directory a registry session's credentials live in: under the runner's own temporary
+/// directory (`RUNNER_TEMP`, else the system's), never under an output directory a job uploads,
+/// and deleted when dropped, so a failure on any path out leaves no credential behind.
+struct SecretDir(PathBuf);
+
+impl SecretDir {
+    fn create() -> Result<Self> {
+        let base = env::var_os("RUNNER_TEMP").map_or_else(env::temp_dir, PathBuf::from);
+        let dir = base.join(format!("mandate-registry-auth-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).context("creating the auth directory")?;
+        let secrets = Self(dir);
+        fs::set_permissions(&secrets.0, fs::Permissions::from_mode(0o700))?;
+        Ok(secrets)
+    }
+}
+
+impl Drop for SecretDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
     }
 }
 
 /// `cargo xtask release publish <dist> <out>` (E21-35, DEC-1060): only from a push to `main`,
 /// where CI's per-arch `publish` jobs run it (ES-12), each on a runner of its own arch. Builds the
-/// host arch's images of `dist` without a binary signature (the founder's hardware key is not
-/// wired, so no binary is release-signed and none starts outside dev and CI), pushes each to GHCR
+/// host arch's images of `dist` without a binary signature (a push signs nothing with the release
+/// key, so no published binary starts outside dev and CI; DEC-2024), pushes each to GHCR
 /// as `main-<commit>-<arch>`, checks the registry reports the image's own digest, signs each
 /// image's digest keyless with cosign (the run's GitHub OIDC identity) and attaches its SBOM as a
 /// CycloneDX attestation, and writes `<out>/PUBLISHED`.
@@ -823,7 +844,7 @@ pub(crate) fn publish(root: &Path, dist: &Path, out: &Path) -> Result<()> {
     let paths = Paths::from_env(root)?;
     let tools = tools(&paths.cargo_home)?;
     let revision = git(root, &["rev-parse", "HEAD"])?;
-    let registry = Registry::sign_in(&tools, out)?;
+    let registry = Registry::sign_in(&tools)?;
     let sums = parse_sums(&fs::read_to_string(dist.join("SHA256SUMS"))?)?;
     let mut published = String::new();
     for name in sums.keys() {
@@ -863,7 +884,7 @@ pub(crate) fn publish_index(root: &Path, out: &Path) -> Result<()> {
     let paths = Paths::from_env(root)?;
     let tools = tools(&paths.cargo_home)?;
     let revision = git(root, &["rev-parse", "HEAD"])?;
-    let registry = Registry::sign_in(&tools, out)?;
+    let registry = Registry::sign_in(&tools)?;
     let mut published = String::new();
     for (_, name) in BINARIES {
         let repository = format!("{REPOSITORY}/{name}");
@@ -953,7 +974,7 @@ pub(crate) fn publish_charts(root: &Path, out: &Path) -> Result<()> {
     let revision = git(root, &["rev-parse", "HEAD"])?;
     let packages = out.join("charts");
     fs::create_dir_all(&packages).context("creating the charts directory")?;
-    let registry = Registry::sign_in(&tools, out)?;
+    let registry = Registry::sign_in(&tools)?;
     let mut charts = String::new();
     for chart in HOSTED_CHARTS {
         let dir = root.join("deploy/cell/charts").join(chart);
@@ -1037,8 +1058,8 @@ fn new_key(tools: &Path, dir: &Path) -> Result<PathBuf> {
     Ok(dir.join("cosign.key"))
 }
 
-/// Signs `file` with the cosign key `key` into `signature`, offline: no transparency log, the
-/// signature file cosign's `--output-signature` writes.
+/// Signs `file` with the ephemeral, passwordless cosign key `key` into `signature`, offline: no
+/// transparency log, the signature file cosign's `--output-signature` writes.
 fn sign(tools: &Path, key: &Path, file: &Path, signature: &Path) -> Result<()> {
     run(Command::new(tools.join("cosign"))
         .env("COSIGN_PASSWORD", "")
@@ -1054,6 +1075,89 @@ fn sign(tools: &Path, key: &Path, file: &Path, signature: &Path) -> Result<()> {
         .arg("--output-signature")
         .arg(signature)
         .arg(file))
+}
+
+/// Where the release key's public half is committed (#1689), the key `RELEASE_KEYS` compiles in.
+const RELEASE_PUBLIC_KEY: &str = "crates/mandate-release/release-keys/cosign.pub";
+
+/// `cargo xtask release check-signed <dist> <signatures>` (DEC-2024, as the founder decided in
+/// DEC-2605 rows 8 and 9): run by CI's `release-signing-check` job, after the `release-signing` job
+/// signed `dist` with the release key, and holding no secret. Each binary `SHA256SUMS` lists,
+/// checked against its line, and `SHA256SUMS` itself must carry a signature in `<signatures>` that
+/// verifies against the committed public half; then [`DRILLED`], unpacked from its image with its
+/// signature beside it, must start at tier `production`, so a key that is not the one the binaries
+/// compile in fails the run rather than leave a release nothing would start.
+pub(crate) fn check_signed(root: &Path, dist: &Path, signatures: &Path) -> Result<()> {
+    let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
+    let public = root.join(RELEASE_PUBLIC_KEY);
+    let sums_file = dist.join("SHA256SUMS");
+    let sums = parse_sums(
+        &fs::read_to_string(&sums_file)
+            .with_context(|| format!("reading {}", sums_file.display()))?,
+    )?;
+    for (name, hex) in &sums {
+        let binary = dist.join("bin").join(name);
+        ensure!(
+            sha256(&binary)? == *hex,
+            "{name} is not the binary SHA256SUMS lists"
+        );
+        verify_blob(
+            &tools,
+            &public,
+            &binary,
+            &signatures.join(format!("{name}.sig")),
+        )?;
+    }
+    verify_blob(
+        &tools,
+        &public,
+        &sums_file,
+        &signatures.join("SHA256SUMS.sig"),
+    )?;
+    drill_release_signed(dist, signatures, &dist.join("drill"))
+}
+
+/// Checks `signature` over `file` against the cosign public key `key`, offline, as `sign` wrote it.
+fn verify_blob(tools: &Path, key: &Path, file: &Path, signature: &Path) -> Result<()> {
+    run(Command::new(tools.join("cosign"))
+        .args(["verify-blob", "--insecure-ignore-tlog=true", "--key"])
+        .arg(key)
+        .arg("--signature")
+        .arg(signature)
+        .arg(file))
+}
+
+/// Runs [`DRILLED`] as its release-signed image would run, at tier `production`, and requires it
+/// to start.
+fn drill_release_signed(dist: &Path, signatures: &Path, drill: &Path) -> Result<()> {
+    let binary = dist.join("bin").join(DRILLED);
+    let bytes = fs::read(&binary).with_context(|| format!("reading {}", binary.display()))?;
+    let signature = fs::read(signatures.join(format!("{DRILLED}.sig")))
+        .context("reading the release signature")?;
+    let _ = fs::remove_dir_all(drill);
+    let layout = image::layout(
+        DRILLED,
+        Arch::host()?.oci(),
+        &bytes,
+        Some(&signature),
+        "release",
+    );
+    image::write(&layout, &drill.join("layout"))?;
+    image::unpack(&layout, &drill.join("layout"), &drill.join("rootfs"))?;
+    let output = Command::new(drill.join("rootfs").join(DRILLED))
+        .env_clear()
+        .env("MANDATE_DEPLOYMENT_TIER", "production")
+        .output()
+        .context("running the release-signed image")?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    ensure!(
+        output.status.code() == Some(2) && stderr.trim_end() == ADMITTED,
+        "the release-signed {DRILLED} did not start at tier production ({stderr:?}): the key's \
+         public half is not in RELEASE_KEYS (docs/runbooks/release-signing-key.md)"
+    );
+    eprintln!("    sign: the release-signed {DRILLED} starts at tier production");
+    Ok(())
 }
 
 /// The SHA-256 of the file at `path`, as `sha256sum` prints it.
@@ -1088,17 +1192,28 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
 }
 
 /// Runs `command` with its stdout sent to stderr, so the build's stdout holds only its
-/// `digest=` line for `$GITHUB_OUTPUT`.
+/// `digest=` line for `$GITHUB_OUTPUT`. It prints the program and its arguments only, never the
+/// variables set on it, which `Command`'s `Debug` would print with their values.
 fn run(command: &mut Command) -> Result<()> {
-    eprintln!("    $ {command:?}");
+    let shown = shown(command);
+    eprintln!("    $ {shown}");
     let status = command
         .stdout(io::stderr())
         .status()
-        .with_context(|| format!("starting {command:?}"))?;
+        .with_context(|| format!("starting {shown}"))?;
     if !status.success() {
-        bail!("{command:?} failed with {status}");
+        bail!("{shown} failed with {status}");
     }
     Ok(())
+}
+
+/// The program and arguments of `command`, each quoted, without its environment.
+fn shown(command: &Command) -> String {
+    std::iter::once(command.get_program())
+        .chain(command.get_args())
+        .map(|word| format!("{word:?}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// `cargo xtask release compare <a> <b>`: two output directories of [`build`].
@@ -1669,6 +1784,187 @@ mod tests {
             index.contains("needs: [publish-amd64, publish-arm64]"),
             "{index}"
         );
+        Ok(())
+    }
+
+    /// The three jobs that sign a release run only on a manual dispatch from `main`, with nothing
+    /// but `contents: read`. Only `release-signing` reads a secret or names an environment, the
+    /// `release-signing` one the founder approves, and it checks out nothing and runs no cargo and
+    /// no xtask: no build script, dependency or repository code runs beside the key. It signs only
+    /// the build that matched build-a, with cosign pinned to the same release and SHA-256 as
+    /// [`Arch::tools`], in a clean environment (DEC-2024; DEC-2605 rows 8 and 9).
+    #[test]
+    fn only_the_dispatched_signing_job_holds_the_release_key() -> Result<()> {
+        let jobs = release_jobs()?;
+        for (name, body) in &jobs {
+            let holds = body.contains("secrets.") || body.contains("environment:");
+            assert_eq!(holds, name == "release-signing", "{name}");
+        }
+        for name in [
+            "release-signing-build",
+            "release-signing",
+            "release-signing-check",
+        ] {
+            let job = jobs
+                .get(name)
+                .with_context(|| format!("release.yml has no {name}"))?;
+            for line in [
+                "    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}\n",
+                "    permissions:\n      contents: read\n    defaults:\n",
+            ] {
+                assert!(job.contains(line), "{name} lacks {line:?}");
+            }
+        }
+        let build = jobs
+            .get("release-signing-build")
+            .context("no release-signing-build")?;
+        assert!(build.contains("    needs: [build-a-amd64, build-a-arm64, compare]\n"));
+        assert!(build.contains("!= needs[format('build-a-{0}', matrix.arch)].outputs.digest"));
+        let job = jobs.get("release-signing").context("no release-signing")?;
+        for absent in ["cargo", "xtask", "rustup"] {
+            assert!(!job.contains(absent), "release-signing runs {absent}");
+        }
+        for line in [
+            "    needs: [build-a-amd64, build-a-arm64, release-signing-build]\n",
+            "    environment: release-signing\n",
+            "          sparse-checkout: .github/scripts\n",
+            "          DIGEST: ${{ needs[format('build-a-{0}', matrix.arch)].outputs.digest }}\n",
+            "          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}\n",
+            "          COSIGN_PASSWORD: ${{ secrets.RELEASE_SIGNING_PASSWORD }}\n",
+            "        run: .github/scripts/release-sign.sh\n",
+        ] {
+            assert!(job.contains(line), "release-signing lacks {line:?}");
+        }
+        assert_eq!(job.matches("secrets.").count(), 2, "{job}");
+        for arch in Arch::ALL {
+            let cosign = arch
+                .tools()
+                .into_iter()
+                .find(|tool| tool.name == "cosign")
+                .context("no pinned cosign")?;
+            assert!(
+                job.contains(&format!("cosign: {}\n", cosign.url)),
+                "{arch:?}"
+            );
+            assert!(
+                job.contains(&format!("cosign_sha256: {}\n", cosign.sha256)),
+                "{arch:?}"
+            );
+        }
+        let script = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh"),
+        )?;
+        let ordered = [
+            "grep -Evq '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' \"$sums\"",
+            "if [ \"${names[*]}\" != \"${present[*]}\" ]; then",
+            "(cd dist/bin && sha256sum --check --strict ../SHA256SUMS)",
+            "echo \"${DIGEST}  dist/SHA256SUMS\" | sha256sum --check --strict",
+            "trap 'rm -rf \"$key_dir\"' EXIT",
+            "sha256sum --check --strict \"$tools/cosign.sha256\"",
+            "base64 --decode \"$key_dir/cosign.key.base64\" > \"$key_dir/cosign.key\"",
+            "unset RELEASE_SIGNING_KEY",
+            "env -i HOME=\"$key_dir/home\" PATH=\"$tools:/usr/bin:/bin\" COSIGN_PASSWORD=\"$COSIGN_PASSWORD\"",
+        ];
+        let mut from = 0;
+        for line in ordered {
+            let at = script
+                .get(from..)
+                .and_then(|rest| rest.find(line))
+                .with_context(|| {
+                    format!("release-sign.sh lacks {line:?}, or holds it out of order")
+                })?;
+            from = from.saturating_add(at).saturating_add(line.len());
+        }
+        for absent in ["set -x", "cargo", "xtask", "dist/bin/*"] {
+            assert!(!script.contains(absent), "release-sign.sh holds {absent:?}");
+        }
+        assert!(
+            script.contains("for file in \"${names[@]/#/dist/bin/}\" \"$sums\"; do"),
+            "release-sign.sh must sign exactly the names SHA256SUMS lists"
+        );
+        let check = jobs
+            .get("release-signing-check")
+            .context("no release-signing-check")?;
+        assert!(check.contains("    needs: [release-signing]\n"));
+        assert!(check.contains("cargo xtask release check-signed dist signed/signatures"));
+        Ok(())
+    }
+
+    /// One case of [`the_signer_signs_only_what_sha256sums_lists`]: its name, the files in
+    /// `dist/bin` with their text, the name `SHA256SUMS` lists, and what the signer prints as it
+    /// stops.
+    type SignerCase<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a str, &'a str);
+
+    /// `release-sign.sh` signs only a `dist/bin` that holds exactly the names `SHA256SUMS` lists:
+    /// a planted extra file, a subdirectory, a missing binary or a malformed line stops it before
+    /// the key is decoded or cosign is fetched, so the key job is no signing oracle. The control,
+    /// an exact `dist`, passes that check and stops only at the wrong digest it is handed.
+    #[test]
+    fn the_signer_signs_only_what_sha256sums_lists() -> Result<()> {
+        let script =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
+        let root =
+            env::temp_dir().join(format!("mandate-xtask-release-sign-{}", std::process::id()));
+        let hex_a = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
+        let cases: [SignerCase<'_>; 6] = [
+            ("exact", &[("a", "a")], "a", "FAILED"),
+            ("extra", &[("a", "a"), ("b", "b")], "a", "nothing is signed"),
+            ("missing", &[], "a", "nothing is signed"),
+            (
+                "nested",
+                &[("a", "a"), ("sub/c", "c")],
+                "a",
+                "nothing is signed",
+            ),
+            (
+                "malformed",
+                &[("a", "a")],
+                "a extra",
+                "is not '<sha256>  <name>'",
+            ),
+            ("empty", &[], "", "is not '<sha256>  <name>'"),
+        ];
+        for (name, files, listed, expected) in cases {
+            let dir = root.join(name);
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(dir.join("dist/bin"))?;
+            for (path, text) in files {
+                let file = dir.join("dist/bin").join(path);
+                if let Some(parent) = file.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(file, text)?;
+            }
+            let sums = if listed.is_empty() {
+                String::new()
+            } else {
+                format!("{hex_a}  {listed}\n")
+            };
+            fs::write(dir.join("dist/SHA256SUMS"), sums)?;
+            let output = Command::new("bash")
+                .arg(&script)
+                .current_dir(&dir)
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("DIGEST", "0".repeat(64))
+                .env("RUNNER_TEMP", dir.join("runner"))
+                .output()?;
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(!output.status.success(), "{name}: the signer went on");
+            assert!(
+                stderr.contains(expected) || stdout.contains(expected),
+                "{name}: expected {expected:?}, got {stdout:?} {stderr:?}"
+            );
+            assert!(
+                !dir.join("runner").exists(),
+                "{name}: the signer reached the key"
+            );
+            assert!(
+                !dir.join("signatures").exists(),
+                "{name}: the signer reached signing"
+            );
+        }
         Ok(())
     }
 

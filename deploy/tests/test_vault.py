@@ -14,11 +14,15 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from test_cell import policies, render_all
+from test_cell import PROCESSES, policies, render_all, workloads
 
 CELL = Path(__file__).resolve().parents[1] / "cell"
 CHART = CELL / "charts" / "vault"
 MANAGED = CELL / "values" / "vault-managed.yaml"
+STAGING = CELL / "values" / "vault-staging.yaml"
+# Where the static seal reads its key: a file from the bootstrap-created Secret, never the
+# environment (DEC-2021).
+SEAL_KEY = "file:///openbao/seal/key"
 NAMESPACE = "ws-ws1"
 WORKSPACE = "ws1"
 PORT = 8200
@@ -243,6 +247,51 @@ def certificate(docs: list[dict]) -> list[str]:
     return found
 
 
+def seal_volume(docs: list[dict]) -> tuple[list[dict], list[dict]]:
+    spec = server(docs)["spec"]["template"]["spec"]
+    volumes = [v for v in spec["volumes"] if v["name"] == "seal"]
+    mounts = [m for m in container(docs)["volumeMounts"] if m["name"] == "seal" or "seal" in m["mountPath"]]
+    return volumes, mounts
+
+
+def sealed_by_hand(docs: list[dict]) -> list[str]:
+    """Outside staging the vault unseals by hand: no seal block, no seal key mounted (DEC-977
+    item 5, DEC-2021)."""
+    found = []
+    if blocks(config(docs), "seal"):
+        found.append(f"the config has the seal blocks {blocks(config(docs), 'seal')}")
+    if any(seal_volume(docs)):
+        found.append("a seal key is mounted")
+    return found
+
+
+def sealed_by_staging_key(docs: list[dict]) -> list[str]:
+    """Staging unseals itself with the static seal, its key a file from the Secret the bootstrap
+    makes, mounted read-only, and nothing else (DEC-2605 row 10, DEC-2021)."""
+    found = []
+    hcl = config(docs)
+    if blocks(hcl, "seal") != ["static"] or setting(hcl, "current_key") != [SEAL_KEY]:
+        found.append(f"the seal is {blocks(hcl, 'seal')} from {setting(hcl, 'current_key')}")
+    if setting(hcl, "previous_key") or not all(setting(hcl, "current_key_id")):
+        found.append("the seal names no key id, or a second key")
+    volumes, mounts = seal_volume(docs)
+    want_volume = [
+        {
+            "name": "seal",
+            "secret": {
+                "secretName": "vault-seal-key",
+                "defaultMode": 0o440,
+                "items": [{"key": "key", "path": "key"}],
+            },
+        }
+    ]
+    if volumes != want_volume:
+        found.append(f"the seal volume is {volumes}")
+    if mounts != [{"name": "seal", "mountPath": "/openbao/seal", "readOnly": True}]:
+        found.append(f"the seal key is mounted as {mounts}")
+    return found
+
+
 def every(docs: list[dict]) -> list[str]:
     return [
         *server_mode(docs),
@@ -256,13 +305,48 @@ def every(docs: list[dict]) -> list[str]:
 
 
 def test_every_invariant_holds_on_each_rendering():
-    assert every(render()) == []
-    assert every(render("-f", str(MANAGED))) == []
+    for docs in (render(), render("-f", str(MANAGED)), render("-f", str(STAGING))):
+        assert every(docs) == []
+
+
+def test_the_cell_and_production_unseal_by_hand_and_staging_by_its_key():
+    assert sealed_by_hand(render()) == []
+    assert sealed_by_hand(render("-f", str(MANAGED))) == []
+    assert sealed_by_staging_key(render("-f", str(STAGING))) == []
+
+
+def test_the_static_seal_is_refused_outside_staging():
+    static = ("--set", "seal.type=static", "--set", "seal.keyId=k1")
+    assert helm(*static).returncode != 0
+    assert helm("-f", str(MANAGED), *static).returncode != 0
+    assert helm("--set", "environment=staging", "--set", "seal.type=static").returncode != 0
+    assert helm("--set", "seal.type=awskms").returncode != 0
+    assert helm("--set", "environment=staging", *static).returncode == 0
+
+
+def test_the_seal_checks_catch_a_key_in_the_wrong_place():
+    hand = render()
+    assert sealed_by_hand(with_config(hand, 'storage "raft"', 'seal "static" {}\n    storage "raft"'))
+    staged = render("-f", str(STAGING))
+    assert sealed_by_staging_key(with_config(staged, SEAL_KEY, "env://BAO_SEAL_KEY"))
+    assert sealed_by_staging_key(
+        with_config(staged, 'current_key = "', 'previous_key = "x"\n      current_key = "')
+    )
+    assert sealed_by_hand(staged)
+    bad = copy.deepcopy(staged)
+    mount = next(m for m in container(bad)["volumeMounts"] if m["name"] == "seal")
+    mount["readOnly"] = False
+    assert sealed_by_staging_key(bad)
+    bad = copy.deepcopy(staged)
+    volume = next(v for v in server(bad)["spec"]["template"]["spec"]["volumes"] if v["name"] == "seal")
+    volume["secret"]["defaultMode"] = 0o444
+    assert sealed_by_staging_key(bad)
 
 
 def test_the_managed_values_change_only_the_volume():
-    claim = server(render("-f", str(MANAGED)))["spec"]["volumeClaimTemplates"][0]["spec"]
-    assert claim["storageClassName"] == "do-block-storage"
+    for values in (MANAGED, STAGING):
+        claim = server(render("-f", str(values)))["spec"]["volumeClaimTemplates"][0]["spec"]
+        assert claim["storageClassName"] == "do-block-storage"
     assert "storageClassName" not in server(render())["spec"]["volumeClaimTemplates"][0]["spec"]
 
 
@@ -386,7 +470,12 @@ def test_the_workspace_reaches_the_vault_it_selects():
                 assert all(pod_labels.get(k) == v for k, v in selected.items()), (name, selected)
                 assert [p["port"] for p in rule["ports"]] == [PORT], (name, rule["ports"])
     assert reaching, "no workspace process reaches the vault"
-    for d in workspace:
-        labels = d.get("spec", {}).get("template", {}).get("metadata", {}).get("labels", {})
+    labelled = set()
+    for w in workloads(workspace):
+        labels = w["spec"]["template"]["metadata"]["labels"]
         if labels.get("mandate.dev/egress-vault") == "true":
             assert all(labels.get(k) == v for k, v in admitted.items()), labels
+            labelled.add(labels["mandate.dev/process"])
+    declared = {p["name"] for p in PROCESSES if "vault" in p["egress"]}
+    assert declared, "no process in processes.json names the vault"
+    assert labelled == declared, f"admitted {sorted(labelled)}, declared {sorted(declared)}"
