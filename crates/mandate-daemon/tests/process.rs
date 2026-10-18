@@ -1,6 +1,7 @@
-//! The `mandate-daemon` process: it refuses without the fixture wiring, its `exec` probe answers
-//! ready over the probe socket, and on SIGTERM it drains and exits cleanly (E21-30 slice 1,
-//! DEC-1012; DEC-994 item 5). It runs over the in-memory journal, so no network is used.
+//! The `mandate-daemon` process: it refuses without a whole deployment or a journal, its `exec`
+//! probe answers ready over the probe socket, and on SIGTERM it drains and exits cleanly (E21-30
+//! slice 1, DEC-1012, DEC-1013; DEC-994 item 5). It runs over the in-memory journal, so no network
+//! is used; `pg.rs` runs it over Postgres.
 
 #![allow(
     clippy::disallowed_methods,
@@ -43,6 +44,7 @@ impl Guard {
                 .args(args)
                 .arg("--probe")
                 .arg(socket)
+                .env_remove("MANDATE_JOURNAL_DSN")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -80,8 +82,10 @@ fn probe(socket: &PathBuf, word: &str) -> Option<i32> {
         .and_then(|s| s.code())
 }
 
+/// Without `--fixture` the process runs only on the journal `MANDATE_JOURNAL_DSN` names, and with
+/// none it refuses rather than running on a journal of its own (DEC-1013 item 1).
 #[test]
-fn without_a_whole_deployment_or_the_fixture_wiring_the_process_refuses() {
+fn without_a_whole_deployment_or_a_journal_the_process_refuses() {
     let path = socket("refuse");
     let (status, stderr) = Guard::spawn(&["run", "--workspace", "ws1"], &path).exited();
     assert_eq!(status.code(), Some(2));
@@ -90,7 +94,7 @@ fn without_a_whole_deployment_or_the_fixture_wiring_the_process_refuses() {
     run.extend(DEPLOYMENT);
     let (status, stderr) = Guard::spawn(&run, &path).exited();
     assert_eq!(status.code(), Some(2));
-    assert_eq!(stderr, "deployment_ports_not_wired\n");
+    assert_eq!(stderr, "runtime_start_failed: journal_dsn_missing\n");
     assert!(!path.exists(), "a refused process serves no probe");
 }
 

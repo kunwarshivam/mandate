@@ -11,11 +11,13 @@
 //! `mandate-daemon`: one agent deployment's runtime process (E21-30 slice 1, DEC-1012).
 //!
 //! `mandate-daemon run --workspace <id> --agent <id> --connection <id> --owner <user> --probe
-//! <socket> --fixture` runs it on the fixture wiring over an in-memory journal: it passes once a
-//! second, or sooner on a wake hint, drains on SIGTERM, and exits with its lifecycle's status.
-//! Without `--fixture` it refuses: a deployment's production ports are the post-R0 hook (DEC-968
-//! item 6). `mandate-daemon probe livez|readyz --probe <socket>` is its `exec` probe (DEC-994
-//! item 5). This is the one place the host clock is read (ES-05).
+//! <socket> [--fixture]` runs it over Postgres (`MANDATE_JOURNAL_DSN`) or, with `--fixture`, an
+//! in-memory journal: it passes once a second, or sooner on a wake hint, drains on SIGTERM, and
+//! exits with its lifecycle's status. Either way it runs on the deny-all fixture wiring, which can
+//! propose no order: a deployment's production ports are the post-R0 hook (DEC-968 item 6,
+//! DEC-1013). Without `--fixture` and without a journal it refuses. `mandate-daemon probe
+//! livez|readyz --probe <socket>` is its `exec` probe (DEC-994 item 5). This is the one place the
+//! host clock is read (ES-05).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -30,7 +32,7 @@ use mandate_journal::Environment;
 use mandate_process::State;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
-use mandate_store::{MemoryStore, Store};
+use mandate_store::{MemoryStore, PgStore, Store};
 use mandate_time::UtcNanos;
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -62,10 +64,7 @@ fn main() -> ExitCode {
                 eprintln!("deployment_missing");
                 return ExitCode::from(2);
             };
-            if !args.iter().any(|a| a == "--fixture") {
-                eprintln!("deployment_ports_not_wired");
-                return ExitCode::from(2);
-            }
+            let fixture = args.iter().any(|a| a == "--fixture");
             let config = Config {
                 deployment: Deployment {
                     agent: AgentId(agent),
@@ -75,7 +74,7 @@ fn main() -> ExitCode {
                 environment: Environment::Paper,
                 liveness: LIVENESS,
             };
-            match run(&config, &owner, &socket) {
+            match run(&config, &owner, &socket, fixture) {
                 Ok(status) => ExitCode::from(status),
                 Err(code) => {
                     eprintln!("runtime_start_failed: {code}");
@@ -102,15 +101,17 @@ fn host_now() -> UtcNanos {
     UtcNanos::from_parts(secs, since.subsec_nanos()).unwrap_or(UtcNanos::EPOCH)
 }
 
-fn run(config: &Config, owner: &str, socket: &Path) -> Result<u8, &'static str> {
+fn run(config: &Config, owner: &str, socket: &Path, fixture: bool) -> Result<u8, &'static str> {
     let terminate = Arc::new(AtomicBool::new(false));
     watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
-    let process = RuntimeProcess::start(
-        MemoryStore::default(),
-        fixture::wiring(owner),
-        config,
-        host_now(),
-    );
+    let wiring = fixture::wiring(owner);
+    if fixture {
+        let process = RuntimeProcess::start(MemoryStore::default(), wiring, config, host_now());
+        return serve(process, &mut Sleep, socket, &terminate);
+    }
+    let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
+    let store = PgStore::connect(&dsn)?;
+    let process = RuntimeProcess::start(store, wiring, config, host_now());
     serve(process, &mut Sleep, socket, &terminate)
 }
 

@@ -10,6 +10,7 @@
     "image",
     "storage",
     "resources",
+    "smartShutdownTimeout",
     "operatorNamespace",
     "archive",
     "kubeApi",
@@ -63,6 +64,11 @@
           "type": "string"
         }
       }
+    },
+    "smartShutdownTimeout": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 180
     },
     "operatorNamespace": {
       "type": "string",
