@@ -291,12 +291,15 @@ the spec invariants (DP-n) its tests cover.
   *Registration landed* (claim [#1463](https://github.com/kunwarshivam/mandate/issues/1463), lane
   I4): `mandate-journal` registers `BacktestRunRecorded` (`src/backtest_records.rs`) with rules 143
   and 144, `rule` and `man` required, written by a `user` or `system` actor only
-  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors.
-  *Route ([DEC-1143](decisions/DEC-1143.md)):* `mandate-api-server` serves `GET /backtests/{id}`
-  from the control stream's one `BacktestRunRecorded` naming the id, under the view row; a
-  completed run's report comes from the store, digest-checked, and one the store lacks or that
-  fails its check is `journal_unavailable`, as is a duplicate id; `running` is not served until
-  `POST /backtests` journals a run in flight. The report and the run's append remain.
+  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors. *The
+  run's append landed* ([DEC-1144](decisions/DEC-1144.md)): `mandate-backtest-runner run` runs a
+  version over JSON inputs and stores the report, its input objects and the payload as artifacts,
+  and `mandate backtest record` re-checks them and journals the record as the `backtest_runner`
+  system. *Route ([DEC-1143](decisions/DEC-1143.md)):* `mandate-api-server` serves `GET
+  /backtests/{id}` from the control stream's one `BacktestRunRecorded` naming the id, under the view
+  row; a completed run's report comes from the store, digest-checked, and one the store lacks or
+  that fails its check is `journal_unavailable`, as is a duplicate id; `running` is not served until
+  `POST /backtests` journals a run in flight. `POST /backtests` and the local cell's Job remain.
 
 ### E5 Journal
 
@@ -2353,6 +2356,35 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   their debounce and rate limit (mandate spec change); the longer strategy brief exists, with the
   validator's warning where it contradicts the envelope; and a journaled turn start lets a restart
   resume a run within its deadline without losing a reservation from the ceiling's fold.
+
+- **E19-15 (Should, for the 2026-10-26 demo; SC: tenant isolation, roles; claim
+  [#1536](https://github.com/kunwarshivam/mandate/issues/1536), lane EX)** As an owner, I want to
+  ask my agent at the desk "why did you buy X?", "why did you ask me?", "what are you watching?", or
+  "why was this refused?" and get an answer from my own records, each claim linked to the record it
+  rests on, a plain-language explanation under each approval ask, and a transcript of every desk and explain run, so
+  that I understand what my agent did without reading the journal
+  ([agent harness spec §15](../specs/agent-harness.md#15-owner-and-explain-runs-the-desk),
+  [DEC-2240](decisions/DEC-2240.md); implements E12-5 and DEC-192 as `owner` and `explain` runs).
+  *Depends on:* E19-13 (lane AH): the loop, its run records, and the tool contract, which it reuses
+  and does not duplicate; E15-6 to E15-10 (the gateway); E21-31 (the API server). *Accepted when:*
+  - the owner and explain tool sets are read, `note`, and `answer` only, and every stream after any
+    run holds only that run's records more than before, under a compromised model (EX-1);
+  - cross-tenant and cross-agent reads: a property test over two workspaces and several agents with
+    canaries finds no foreign canary in any tool result, prompt, answer, or record, and identical
+    refusals (`unknown_item` to the model, `not_found` at the API) for foreign and absent refs (EX-2, EX-3), its oracle shown to catch a seeded
+    scope bug; and an API-2 matrix test of the desk, cited-record, transcript, and approval routes;
+  - no answer with an uncited segment, an unread citation, or a fixture advice phrase is shown
+    (EX-4, EX-5); no prompt holds a record's numeric field or a number from the question (EX-6);
+  - every shown answer's `written_after_reading` and every turn's menu are recomputed by an oracle
+    from the run's records (EX-12); every returned field is servable to the reader's row by the cited-record projections workspace API §4.6.1 defines (EX-13);
+  - spend is reserved against the agent's, workspace's, and deployment's configured budgets, never a
+    constant (EX-7); answers are journaled before shown (EX-8); approvals, exits, and kill switches
+    are byte-identical with the explain run absent, stalled, or failing (EX-9);
+  - CI and the demo use recorded fakes only; the disclaimer is the placeholder until DEC-2241, and
+    approval explanations stay behind both `desk.model_answers` and `desk.approval_explanations` until its item 3 is decided.
+  *Slice 2 (planned, spec §15.12):* desk actions become proposal cards built by deterministic code
+  through E19-13's action tools and sent only by the owner's own call with step-up (HI-26, lane SU);
+  its own spec change and DEC first.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 

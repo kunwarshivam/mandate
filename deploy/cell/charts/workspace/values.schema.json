@@ -13,6 +13,7 @@
     "egress",
     "run",
     "verify",
+    "runtime",
     "localImages",
     "ingress",
     "api",
@@ -276,6 +277,30 @@
             "type": "string",
             "pattern": "^(acct|agent|ctl|clock|meter):[A-Za-z0-9:_.-]+$"
           }
+        }
+      }
+    },
+    "runtime": {
+      "description": "The agent deployment the runtime process runs (DEC-1013); ids only, never a secret",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "connection",
+        "owner"
+      ],
+      "properties": {
+        "agent": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "connection": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "owner": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9][a-z0-9_-]{0,63}$"
         }
       }
     },
