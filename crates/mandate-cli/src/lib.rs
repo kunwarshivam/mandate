@@ -37,6 +37,7 @@ pub mod control;
 pub mod db;
 pub mod deploy;
 pub mod download;
+pub mod evaluation;
 pub mod gestures;
 pub mod identity;
 pub mod inbox;

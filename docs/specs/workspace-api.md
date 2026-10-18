@@ -683,13 +683,20 @@ per workspace deployment (item 6).
       never confirmed `invalid` at `/mandate_version`; one the control stream has confirmed a
       later version over `stale_base`, naming the latest; an agent already deployed with the same
       version answers `200` with its `AgentDeployed`, and with another version `invalid` at
-      `/agent_id`; every V-rule for the agent (V-002, V-006, and V-032 included) and the pinned
-      instruments, else `invalid` with the V-codes. V-002 reads the account's equity from the
-      latest `AccountSnapshotRecorded` on the account stream of the document's connection; with
+      `/agent_id`; an agent an `AgentStopped` names is `invalid` at `/agent_id` too, since an
+      agent id is deployed once ([DEC-1173](../project/decisions/DEC-1173.md) item 1); every
+      V-rule for the agent (V-002, V-006, and V-032 included) and the pinned instruments, else
+      `invalid` with the V-codes. V-002 reads the account's equity from the latest
+      `AccountSnapshotRecorded` on the account stream of the document's connection; with
       none, the equity is 0 and V-002 refuses (a tightening of the CLI, which leaves V-002 to the
       executor); then step-up, bound to the SHA-256 of the
-      canonical `{agent_id, mandate_version}`, kind `deploy`. It commits `AgentDeployed` version 1
-      with `config_refs.mandate_version`. A refusal commits nothing: `DeploymentRejected` is not
+      canonical `{agent_id, mandate_version}`, kind `deploy`. It commits `AgentDeployed` with
+      `config_refs.mandate_version`: version 2, naming the document's `connection_id`, exactly when
+      journal spec §9.24 rule 201 holds on the control stream (the connection established there at
+      version 2 and not since revoked), and version 1 otherwise; it refuses a version-2 draft whose
+      `connection_id` is not the document's (rule 200), appending nothing
+      ([DEC-1171](../project/decisions/DEC-1171.md)). Until the code change that follows DEC-1171
+      lands, it commits version 1. A refusal commits nothing: `DeploymentRejected` is not
       written until the deployment manager journals its own refusals. Its `202`, and the `200`
       of an agent already deployed with the version, are `commands/command-accepted`.
     - **Go live** answers `409` `live_unavailable` to every principal the deploy row authorizes,

@@ -181,6 +181,9 @@ REQUIRED_REFS = {
         "RiskLimitTriggered",
         "RiskLimitLifted",
         "HighWaterMarkReset",
+        "PositionReleased",
+        "InstrumentRestrictionChanged",
+        "GoalCompleted",
     )},
     "ThesisProposed": ("mandate_version", "model_version"),
     "ThesisRevised": ("mandate_version", "model_version"),
@@ -258,6 +261,7 @@ TRIGGER_REASONS = (
 LIFT_REASONS = ("owner_acknowledged", "version_loosened", "hard_breach_cleared")
 TRIPWIRE_METRICS = ("consecutive_losing_exits", "realized_loss_usd", "new_instruments")
 COUNTED_METRICS = ("consecutive_losing_exits", "new_instruments")
+ON_COMPLETE = ("hold_protected", "disarm_ladder", "release")
 SCHEMAS[("acct", "RiskDayStarted")] = rec(
     ("agent_id", IDENT_T),
     ("day", DATE),
@@ -290,6 +294,33 @@ SCHEMAS[("acct", "HighWaterMarkReset")] = rec(
     ("to", DEC),
     ("user_id", IDENT_T),
     ("step_up", STEP_UP),
+    ("risk_clock", RISK_CLOCK),
+)
+
+SCHEMAS[("acct", "PositionReleased")] = rec(
+    ("agent_id", IDENT_T),
+    ("instrument", ASSET_ID),
+    ("qty", DEC),
+    ("cause", one_of("owner_release", "goal_release")),
+    ("canceled_order_ids", list_of(IDENT_T)),
+    ("warning_ref", opt(REF)),
+    ("user_id", opt(IDENT_T)),
+    ("step_up", opt(STEP_UP)),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "InstrumentRestrictionChanged")] = rec(
+    ("agent_id", IDENT_T),
+    ("instrument", ASSET_ID),
+    ("restriction", one_of("stale_mark", "removed_instrument")),
+    ("reason", one_of("no_sane_mark", "sane_mark", *UNIVERSE_REASONS)),
+    ("active", BOOL),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "GoalCompleted")] = rec(
+    ("agent_id", IDENT_T),
+    ("reason", opt(one_of("profit_stop_reached", "target_qty", "max_spend", "end_date"))),
+    ("then", opt(one_of(*ON_COMPLETE, "discretionary_exit_all_then_retire"))),
+    ("on_complete", opt(one_of(*ON_COMPLETE))),
     ("risk_clock", RISK_CLOCK),
 )
 
@@ -1437,6 +1468,9 @@ RISK_LIMIT_RECORDS = (
     "RiskLimitTriggered",
     "RiskLimitLifted",
     "HighWaterMarkReset",
+    "PositionReleased",
+    "InstrumentRestrictionChanged",
+    "GoalCompleted",
 )
 
 
@@ -1445,6 +1479,8 @@ RISK_LIMIT_RECORDS = (
 RISK_LIMIT_READS = {
     "RiskLimitTriggered": ("limit", "action", "inherited_loss"),
     "RiskLimitLifted": ("limit", "inherited_loss"),
+    "PositionReleased": ("qty", "cause"),
+    "InstrumentRestrictionChanged": ("restriction", "reason", "active"),
 }
 
 
@@ -1454,7 +1490,7 @@ def whole(text: str) -> bool:
 
 
 def risk_limit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.27's rules 230 to 235 on a well-typed payload, each reported once, in the order the
+    """§9.27's rules 230 to 238 on a well-typed payload, each reported once, in the order the
     section states."""
     p = draft["payload"]
     out: list[Violation] = []
@@ -1515,6 +1551,28 @@ def risk_limit_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
     )
     if acknowledged:
         rule("235", draft["causation_id"] is not None, "causation_id")
+    if event_type == "PositionReleased":
+        owner = p["cause"] == "owner_release"
+        qty = Decimal(p["qty"])
+        if owner or "rule.236.goal_zero" in skip:
+            qty_ok = qty > 0
+        else:
+            qty_ok = qty >= 0
+        gesture = [(m, (p[m] is not None) == owner) for m in ("warning_ref", "user_id", "step_up")]
+        first_wrong("236", [("qty", qty_ok), *gesture])
+    if event_type == "InstrumentRestrictionChanged":
+        if p["restriction"] == "stale_mark":
+            reason_ok = p["reason"] in ("no_sane_mark", "sane_mark")
+            active_ok = p["active"] == (p["reason"] == "no_sane_mark")
+        else:
+            setting = REMOVING if "rule.237.removing" not in skip else UNIVERSE_REASONS
+            reason_ok = p["reason"] in (*setting, *ADMITTING)
+            active_ok = p["reason"] in (setting if p["active"] else ADMITTING)
+        first_wrong("237", [("reason", reason_ok), ("active", active_ok)])
+    if event_type == "GoalCompleted":
+        one_form = (p["then"] is None) != (p["on_complete"] is None)
+        reason_ok = p["reason"] is None or p["then"] is not None or "rule.238.reason" in skip
+        first_wrong("238", [("then", one_form), ("reason", reason_ok)])
     return out
 
 

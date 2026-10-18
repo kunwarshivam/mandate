@@ -12,13 +12,15 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 | `charts/workspace/` | The Helm chart `mandate-workspace`: one Deployment or Job per process type whose image is named, the migration hook, and the network policies |
 | `charts/journal-db/` | The journal's Postgres under the CloudNativePG operator: a primary and a synchronous standby, its roles (`files/roles.sql`), one credential Secret per process type, and the WAL archive and base backups through the Barman Cloud plugin (E21-41, [DEC-1050](../../docs/project/decisions/DEC-1050.md)). Installed before the workspace chart |
 | `charts/backup-plugin-tls/` | The two certificates the Barman Cloud plugin and the operator authenticate each other with, made in the cluster in place of cert-manager (DEC-1050 item 3) |
+| `charts/vault/` | The workspace vault: OpenBao, pinned by digest, in server mode on raft storage over TLS 1.3, reached only by the processes whose egress names it, unsealed by hand ([DEC-2019](../../docs/project/decisions/DEC-2019.md)). Installed before the workspace chart |
 | `charts/archive-store/` | The local cell's stand-in for the S1 endpoint the journal archives to: the pinned test store, in its own namespace, reachable only by the journal's archive clients (DEC-1050 item 5). Never in cell #1 |
 | `compose/compose.json` | The same processes for one host (infrastructure §3.2, hybrid), generated: `cargo xtask cell generate --write` |
-| `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ |
+| `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ ; cell #1's own settings on top of `k3s.yaml`, and its bring-up, are in [`../hosted/`](../hosted/README.md) |
 | `images/mandate.Dockerfile` | The interim `mandate` image the cell builds from the change; lane R2 (E21-35) replaces it |
 | `images/deploy-manager.Dockerfile` | The deployment manager's image (`mandate-deployd`, DEC-1172), built beside it the same way |
 | `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
 | `../tests/test_artifacts.py` | The shared artifact store: each process mounts it as it may, or not at all, each shown failing on a seeded bug |
+| `../tests/test_vault.py` | The vault chart's invariants, each shown failing on a seeded bug |
 | `../tests/test_journal_db.py` | The journal-db chart's invariants and those of the two charts beside it, each shown failing on a seeded bug |
 
 ## What the chart guarantees
@@ -58,6 +60,9 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   process's start (OPS-13);
 - `environment` is `paper` or `backtest` only, and every image is pinned by digest or is the
   cell's own `mandate.local/` build;
+- `MANDATE_DEPLOYMENT_TIER` on every process comes from the `deploymentTier` value alone:
+  `production` unless a values file says otherwise, `ci` in the local cell, `dev` on hosted cell #1
+  (DEC-971 item 2, [DEC-2001](../../docs/project/decisions/DEC-2001.md) item 6);
 - the cell's one ingress is a `cloudflared` pod dialing out to Cloudflare's tunnel edge, off in the
   local cell: no Service, NodePort, LoadBalancer or Ingress, and the tunnel token a mounted file;
 - no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and
@@ -102,7 +107,7 @@ Needs docker, plus k3d, helm and kubeconform at the versions in `.github/workflo
 (`bash .cursor/install.sh` installs them on x86_64 Linux; on a Mac, see "On a laptop").
 
 ```bash
-cargo xtask cell up               # build the image, start k3d, install the operator, its backup plugin, the test store, journal-db, workspace
+cargo xtask cell up               # build the image, start k3d, install the operator, its backup plugin, the test store, journal-db, vault, workspace
 cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch, standby-down, archive
 cargo xtask cell drill --seeded   # each drill with its bug planted; fails if one still holds
 cargo xtask cell down
@@ -259,6 +264,43 @@ flight (DEC-434 item 15) (DEC-1050 item 8).
 Residuals of the local cell, disclosed: its two journal instances share its one node, so the
 standby is no second failure domain (the Cluster says so); and its archive's traffic to the test
 store is plain HTTP inside the cluster.
+
+## The vault
+
+`charts/vault/` runs the workspace's OpenBao (E21-32, [DEC-2019](../../docs/project/decisions/DEC-2019.md)).
+In `deploy/tests/test_vault.py`:
+
+- server mode on raft storage alone, from a command the template fixes: no value adds an argument
+  or an environment variable, so the dev server cannot be turned on (DEC-977 item 6);
+- one TLS 1.3 listener, from a server certificate signed by a CA made for this vault, whose key is
+  never stored; clients mount the CA certificate from the ConfigMap `vault-ca`;
+- only the workspace's pods labelled `mandate.dev/egress-vault` reach it, on 8200, and it reaches
+  nothing;
+- sealed is not ready, and no probe restarts it, since a restart seals it;
+- hardened as the workspace's pods are, its image by digest, and no secret in a value or the
+  environment;
+- the workspace chart's vault egress selects exactly its pods and port.
+
+`cargo xtask cell up` installs it, initializes it once with one unseal key, kept with the root
+token in `target/cell/vault-init.json` (mode 0600; this cell holds fake secrets only), unseals it,
+and refuses a vault on any storage but raft. `cell down` discards both.
+
+A hosted cell, staging included, is initialized and unsealed by the founder, by hand (DEC-977 item
+5):
+
+```bash
+helm upgrade --install vault deploy/cell/charts/vault -n ws-ws1 -f deploy/cell/values/vault-managed.yaml
+kubectl exec -it -n ws-ws1 vault-0 -- bao operator init -key-shares=3 -key-threshold=2
+kubectl exec -it -n ws-ws1 vault-0 -- bao operator unseal    # twice, two different shares, typed
+```
+
+The shares and the root token are kept offline, never in the repository, CI, a file the cluster can
+read, or an environment variable. After every restart of `vault-0`, it is unsealed again. The chart
+keeps its TLS pair by Helm's `lookup`, so it is installed by Helm itself (or Flux's
+helm-controller), not rendered by `helm template` (DEC-2019, residuals).
+
+Not yet: provisioning policies and roles in the cell and handing each process its secret id as a
+mounted file, the egress drill's vault probe, and the vault's audit device.
 
 ## The Compose file
 
