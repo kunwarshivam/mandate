@@ -39,3 +39,13 @@ fn every_refusal_has_its_own_stable_code() {
         assert_eq!(refusal.code(), code);
     }
 }
+
+/// The form a client hands its authenticator, and `clientDataJSON` carries back: base64url, no
+/// padding (RFC 4648 §5), written out here for bytes that use both of its two extra digits.
+#[test]
+fn a_challenge_is_handed_out_as_unpadded_base64url() {
+    let challenge = Challenge::new(&[0xfb; 16]).expect("16 bytes");
+    assert_eq!(challenge.base64url(), "-_v7-_v7-_v7-_v7-_v7-w");
+    let thirty_two = Challenge::new(&[0x00; 32]).expect("32 bytes");
+    assert_eq!(thirty_two.base64url(), "A".repeat(43));
+}

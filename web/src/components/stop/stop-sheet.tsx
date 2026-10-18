@@ -12,12 +12,14 @@ import { cn } from "@/lib/utils";
 import { ModeBadge, SourceTag } from "@/components/domain/mode";
 import { AgentOwl } from "@/components/domain/owl";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
+import type { AgentDetail } from "@/api/read-models";
 import type { Agent } from "@/fixtures/types";
 import { quantity } from "@/lib/format";
 import { useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { CommandEntry, UnreachableAlert } from "./command-log";
 import { type SheetKind, needsStepUp, recordHref, stepUpLine } from "./commands";
+import { UNREAD_CONNECTION } from "./api-record";
 import { KillSwitchButton } from "./kill-switch-button";
 import { StepUpDialog } from "./step-up-dialog";
 
@@ -138,8 +140,53 @@ function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (k
   );
 }
 
+/**
+ * The agents' choices over the workspace API (DEC-1096), from the agents it serves: pausing, and
+ * each agent's kill switch, which opens its record screen. Release needs the positions it hands
+ * over, which the API does not serve per agent, so it is not offered here.
+ */
+function ApiAgentChoices({ agents, agentId, full, pause, leave }: { agents: AgentDetail[]; agentId: string | null; full: boolean; pause: (agentId: string) => void; leave: () => void }) {
+  const shown = agentId ? agents.filter((a) => a.agent_id === agentId) : agents;
+  if (shown.length === 0) return null;
+  return (
+    <section className="grid gap-(--block-gap)" aria-labelledby="stop-api-agents">
+      <h3 id="stop-api-agents" className="text-h3">
+        {agentId ? "This agent" : "One agent"}
+      </h3>
+      {shown.map((agent) => {
+        const label = agent.label ?? agent.agent_id;
+        return (
+          <div key={agent.agent_id} className="grid gap-2">
+            <p className="flex items-center justify-between gap-2 font-medium">
+              {label}
+              {agent.mode ? <ModeBadge mode={agent.mode} /> : null}
+            </p>
+            {agent.mode === "stopped" ? (
+              <p className="rounded-xl bg-ink px-4 py-3 text-sm text-ink-foreground">Stopped. There is nothing more to stop for this agent.</p>
+            ) : (
+              <>
+                {agent.mode === "paused" ? null : (
+                  <Choice tone="ink" title={`Pause ${label}`} onClick={() => pause(agent.agent_id)}>
+                    No new orders. Resting protection stays. You can resume later.
+                  </Choice>
+                )}
+                {full ? (
+                  <KillSwitchButton title="Kill switch: close and stop" href={recordHref("kill", agent.agent_id)} onClick={leave}>
+                    Cancels only this agent&apos;s orders, sells only its positions, and ends it. Other agents and your own holdings are untouched. Opens the full list to confirm
+                    with your passkey.
+                  </KillSwitchButton>
+                ) : null}
+              </>
+            )}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOpenChange: (open: boolean) => void; agentId: string | null }) {
-  const { ws, reachable, commands, send } = useRuntime();
+  const { ws, view, source, reachable, commands, send } = useRuntime();
   const full = useCan("stop.full");
   const [pending, setPending] = useState<Pending | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -169,7 +216,8 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
 
   const leave = () => onOpenChange(false);
 
-  const labelFor = (id: string | null) => (id ? ws.agents.find((a) => a.agent_id === id)?.label ?? "The agent" : "Account");
+  const labelFor = (id: string | null) =>
+    id ? (ws.agents.find((a) => a.agent_id === id)?.label ?? view?.agents.find((a) => a.agent_id === id)?.label ?? "The agent") : "Account";
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -203,7 +251,15 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
               <p className="rounded-xl bg-background px-4 py-3 text-sm">Agent details are still loading. The choices for the whole account below work without them.</p>
             ) : null}
 
-            {contextAgent ? (
+            {source === "api" ? (
+              view ? (
+                <ApiAgentChoices agents={view.agents} agentId={agentId} full={full} pause={(id) => send("pause", id)} leave={leave} />
+              ) : (
+                <p className="rounded-xl bg-background px-4 py-3 text-sm" data-slot="agents-unavailable">
+                  The agents could not be read, so each agent&apos;s own kill switch is not listed. The account&apos;s choices below work without them.
+                </p>
+              )
+            ) : contextAgent ? (
               <section className="grid gap-(--block-gap)" aria-labelledby="stop-this-agent">
                 <h3 id="stop-this-agent" className="flex items-center justify-between gap-2 text-h3">
                   This agent: {contextAgent.label}
@@ -252,15 +308,27 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
               </Choice>
               {full ? (
                 <>
-                  <KillSwitchButton appearance="outline" title="Stop all agents on this account" href={recordHref("stop_all", ws.connection.connection_id)} onClick={leave}>
+                  <KillSwitchButton appearance="outline" title="Stop all agents on this account" href={recordHref("stop_all", ws.connection.connection_id || UNREAD_CONNECTION)} onClick={leave}>
                     Each agent&apos;s own kill switch: cancels its orders, sells its positions, and ends it. Your own holdings are untouched. Opens the full list to confirm with
                     your passkey.
                   </KillSwitchButton>
-                  <KillSwitchButton appearance="outline" title="Close everything on this account" href={recordHref("close_all", ws.connection.connection_id)} onClick={leave}>
-                    The broker&apos;s cancel-all and close-all: it cancels every open order, including ones Owlhead did not place, closes every position, including your own
-                    {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages, and ends every agent. Opens
-                    the full list to confirm with your passkey.
-                  </KillSwitchButton>
+                  {ws.connection.connection_id ? (
+                    <KillSwitchButton appearance="outline" title="Close everything on this account" href={recordHref("close_all", ws.connection.connection_id)} onClick={leave}>
+                      {source === "api" ? (
+                        <>
+                          From here this sends the account&apos;s kill switch: each agent on the account is stopped by its own kill switch. Orders and holdings no agent
+                          placed are left as they are. Opens the full list to confirm with your passkey.
+                        </>
+                      ) : (
+                        <>
+                          The broker&apos;s cancel-all and close-all: it cancels every open order, including ones Owlhead did not place, closes every position, including your
+                          own
+                          {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages, and ends every
+                          agent. Opens the full list to confirm with your passkey.
+                        </>
+                      )}
+                    </KillSwitchButton>
+                  ) : null}
                 </>
               ) : (
                 <p className="px-1 text-sm text-muted-foreground">Stopping and closing are for an owner or operator.</p>

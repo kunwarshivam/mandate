@@ -16,7 +16,7 @@ use mandate_api::problem::Violation;
 use mandate_api::requests::{
     AcknowledgeRequest, ApprovalResponseRequest, ConfirmRequest, DelegationPreviewRequest,
     EndDelegationRequest, HoldRequest, KillSwitchRequest, LiftHoldRequest, OwnerExitRequest,
-    OwnerRequest, PauseRequest, ResumeRequest, RevokeRequest, StopRequest,
+    OwnerRequest, PauseRequest, ResumeRequest, RevokeRequest, StepUpChallengeRequest, StopRequest,
 };
 use mandate_api::wire::{Refused, Validate, decode};
 use serde::de::DeserializeOwned;
@@ -104,7 +104,7 @@ fn judge<T: DeserializeOwned + Validate + Debug>(body: &[u8]) -> Result<(), Vec<
 }
 
 /// Each request schema's decoder, by the schema's stem.
-const DECODERS: [(&str, Judge); 14] = [
+const DECODERS: [(&str, Judge); 15] = [
     ("acknowledge-request", judge::<AcknowledgeRequest>),
     (
         "approval-response-request",
@@ -124,6 +124,7 @@ const DECODERS: [(&str, Judge); 14] = [
     ("pause-request", judge::<PauseRequest>),
     ("resume-request", judge::<ResumeRequest>),
     ("revoke-request", judge::<RevokeRequest>),
+    ("step-up-challenge-request", judge::<StepUpChallengeRequest>),
     ("stop-request", judge::<StopRequest>),
 ];
 
@@ -132,7 +133,7 @@ const DECODERS: [(&str, Judge); 14] = [
 /// changes, this list naming its stem, then its schema, then its type and decoder row, which
 /// empties the list again. A listed stem has no request type and no row, and may not stay listed
 /// once its type lands.
-const SCHEMA_AHEAD_OF_TYPE: [&str; 1] = ["step-up-challenge-request"];
+const SCHEMA_AHEAD_OF_TYPE: [&str; 0] = [];
 
 /// The decoders cover every request schema and every request type the crate declares, so a shape
 /// added to either without a row here fails this test rather than escaping the next one. The only
@@ -145,7 +146,8 @@ fn the_decoders_cover_every_request_schema_and_request_type() {
     for stem in &ahead {
         assert!(
             !listed.contains(stem) && !types.contains(stem),
-            "{stem} has its type: remove it from SCHEMA_AHEAD_OF_TYPE in the change that adds it"
+            "{stem} has its type or its decoder row: remove it from SCHEMA_AHEAD_OF_TYPE in the \
+             change that adds them"
         );
     }
     let schemas = schema_stems();
@@ -205,13 +207,24 @@ struct Nested {
     tagged: Option<String>,
 }
 
+/// The objects, by request stem and shape, whose `kind` is a plain member rather than a serde tag:
+/// a step-up action's kind (§3.6) names the action, not a variant of the object.
+const PLAIN_KIND: [(&str, &str); 1] = [("step-up-challenge-request", "/action")];
+
 /// Every object in `node`, the root included. An object with a string `kind` is internally tagged
-/// (the request schemas tag every one-of object on `kind`), and serde reads it whole before its
-/// members, so a refusal inside it is located at it (DEC-681 item 10).
-fn objects(node: &Value, at: &str, shape: &str, tagged: Option<&str>, out: &mut Vec<Nested>) {
+/// (the request schemas tag every one-of object on `kind`), unless [`PLAIN_KIND`] lists it for
+/// `stem`, and serde reads it whole before its members, so a refusal inside it is located at it
+/// (DEC-681 item 10).
+fn objects(
+    node: &Value,
+    (stem, at, shape): (&str, &str, &str),
+    tagged: Option<&str>,
+    out: &mut Vec<Nested>,
+) {
     match node {
         Value::Object(map) => {
-            let own = map.get("kind").is_some_and(Value::is_string).then_some(at);
+            let plain = PLAIN_KIND.contains(&(stem, shape));
+            let own = (map.get("kind").is_some_and(Value::is_string) && !plain).then_some(at);
             let tagged = tagged.or(own);
             out.push(Nested {
                 at: at.to_owned(),
@@ -221,13 +234,13 @@ fn objects(node: &Value, at: &str, shape: &str, tagged: Option<&str>, out: &mut 
             for (name, child) in map {
                 let token = escaped(name);
                 let (at, shape) = (format!("{at}/{token}"), format!("{shape}/{token}"));
-                objects(child, &at, &shape, tagged, out);
+                objects(child, (stem, &at, &shape), tagged, out);
             }
         }
         Value::Array(items) => {
             for (index, child) in items.iter().enumerate() {
                 let shape = format!("{shape}/*");
-                objects(child, &format!("{at}/{index}"), &shape, tagged, out);
+                objects(child, (stem, &format!("{at}/{index}"), &shape), tagged, out);
             }
         }
         _ => {}
@@ -235,10 +248,10 @@ fn objects(node: &Value, at: &str, shape: &str, tagged: Option<&str>, out: &mut 
 }
 
 /// Every object in `bodies`, by its shape.
-fn object_shapes(bodies: &[Value]) -> BTreeSet<String> {
+fn object_shapes(stem: &str, bodies: &[Value]) -> BTreeSet<String> {
     let mut found = Vec::new();
     for body in bodies {
-        objects(body, "", "", None, &mut found);
+        objects(body, (stem, "", ""), None, &mut found);
     }
     found.into_iter().map(|nested| nested.shape).collect()
 }
@@ -282,7 +295,7 @@ fn the_bodies_reach_every_object_their_schema_describes() {
         let schema = json_file(&schemas().join(format!("commands/{stem}.schema.json")));
         let mut described = BTreeSet::new();
         schema_shapes(&schema, "", defs, &mut described);
-        let reached = object_shapes(&bodies(&stem));
+        let reached = object_shapes(&stem, &bodies(&stem));
         if described != reached {
             wrong.push(format!(
                 "{stem}: described {described:?}, reached {reached:?}"
@@ -307,7 +320,7 @@ fn a_request_body_naming_a_workspace_at_any_depth_is_refused() {
                 wrong.push(format!("{stem}'s body {base} is refused: {found:?}"));
             }
             let mut nested = Vec::new();
-            objects(&base, "", "", None, &mut nested);
+            objects(&base, (stem, "", ""), None, &mut nested);
             for object in nested {
                 for member in WORKSPACE_MEMBERS {
                     for workspace in [OTHER, OWN] {

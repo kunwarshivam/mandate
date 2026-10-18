@@ -398,9 +398,124 @@ pub(crate) fn build_env(
     vars
 }
 
-/// `cargo xtask release build <out>`.
+/// Whether `name`, a variable of the environment `release build` was started in, could change
+/// what a release compiles: rustflags in any of cargo's spellings, a compiler or a wrapper, or any
+/// profile setting (DEC-2100 item 2, DEC-2027). [`build_env`] already keeps every one of them from
+/// the build; refusing them makes a run that asked for one fail rather than ship without it.
+pub(crate) fn overriding_variable(name: &str) -> bool {
+    matches!(
+        name,
+        "RUSTFLAGS" | "RUSTC" | "RUSTC_WRAPPER" | "RUSTC_WORKSPACE_WRAPPER"
+    ) || name.starts_with("CARGO_PROFILE_")
+        || (name.starts_with("CARGO_") && name.ends_with("RUSTFLAGS"))
+        || matches!(
+            name,
+            "CARGO_BUILD_RUSTC"
+                | "CARGO_BUILD_RUSTC_WRAPPER"
+                | "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"
+        )
+}
+
+/// The cargo configuration files the build's `cargo` reads, in cargo's order: `.cargo/config.toml`
+/// and `.cargo/config` in the checkout and each directory above it, then `cargo_home`'s. Only the
+/// ones that exist are listed.
+pub(crate) fn config_files(root: &Path, cargo_home: &Path) -> Vec<PathBuf> {
+    root.ancestors()
+        .map(|dir| dir.join(".cargo"))
+        .chain(std::iter::once(cargo_home.to_path_buf()))
+        .flat_map(|dir| [dir.join("config.toml"), dir.join("config")])
+        .filter(|file| file.is_file())
+        .collect()
+}
+
+/// The settings in one cargo configuration, `text`, that could change what a release compiles:
+/// any `profile`, `env` or `include` (cargo follows an `include` without any `-Z` flag, so a file
+/// it names could set any of these; DEC-2027 item 2), rustflags under `build` or any `target`, and
+/// a compiler or wrapper under `build`. A `--config` argument would be one too, and
+/// [`build_args`] passes none.
+pub(crate) fn overriding_settings(text: &str) -> Result<Vec<String>> {
+    let config: toml::Table = toml::from_str(text).context("parsing a cargo configuration")?;
+    let mut found: Vec<String> = ["profile", "env", "include"]
+        .into_iter()
+        .filter(|key| config.contains_key(*key))
+        .map(str::to_owned)
+        .collect();
+    if let Some(build) = config.get("build").and_then(toml::Value::as_table) {
+        for key in [
+            "rustflags",
+            "rustc",
+            "rustc-wrapper",
+            "rustc-workspace-wrapper",
+        ] {
+            if build.contains_key(key) {
+                found.push(format!("build.{key}"));
+            }
+        }
+    }
+    if let Some(targets) = config.get("target").and_then(toml::Value::as_table) {
+        for (target, table) in targets {
+            if table.get("rustflags").is_some() {
+                found.push(format!("target.{target}.rustflags"));
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// Every override that would make `release build` refuse: the variables of `names` that
+/// [`overriding_variable`] names, then each setting [`overriding_settings`] finds in `configs`,
+/// written `<file>: <key>`.
+pub(crate) fn overrides(
+    names: impl IntoIterator<Item = String>,
+    configs: &[(PathBuf, String)],
+) -> Result<Vec<String>> {
+    let mut found: Vec<String> = names
+        .into_iter()
+        .filter(|name| overriding_variable(name))
+        .collect();
+    found.sort();
+    for (file, text) in configs {
+        for key in overriding_settings(text).with_context(|| format!("in {}", file.display()))? {
+            found.push(format!("{}: {key}", file.display()));
+        }
+    }
+    Ok(found)
+}
+
+/// Refuses when `names`, the variables of the environment, or a cargo configuration a build in
+/// `root` with `cargo_home` would read holds one of [`overrides`] (DEC-2100 item 2, DEC-2027).
+pub(crate) fn refuse_overrides(
+    root: &Path,
+    cargo_home: &Path,
+    names: impl IntoIterator<Item = String>,
+) -> Result<()> {
+    let configs = config_files(root, cargo_home)
+        .into_iter()
+        .map(|file| {
+            fs::read_to_string(&file)
+                .with_context(|| format!("reading {}", file.display()))
+                .map(|text| (file, text))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let refused = overrides(names, &configs)?;
+    ensure!(
+        refused.is_empty(),
+        "the release build refuses settings that could change what it compiles, such as turning \
+         debug assertions on (DEC-2100 item 2, DEC-2027): {}",
+        refused.join(", ")
+    );
+    Ok(())
+}
+
+/// `cargo xtask release build <out>`. It runs [`refuse_overrides`] before it installs a tool or
+/// builds anything.
 pub(crate) fn build(root: &Path, out: &Path) -> Result<()> {
     let paths = Paths::from_env(root)?;
+    refuse_overrides(
+        root,
+        &paths.cargo_home,
+        env::vars_os().filter_map(|(name, _)| name.into_string().ok()),
+    )?;
     let tools = tools(&paths.cargo_home)?;
     let epoch = git(root, &["log", "-1", "--format=%ct", "HEAD"])?;
     let commit = git(root, &["rev-parse", "HEAD"])?;
@@ -638,6 +753,9 @@ pub(crate) fn index_tag(revision: &str) -> String {
 struct Registry {
     secrets: PathBuf,
     basic: PathBuf,
+    /// The same credential as a registry config file in Docker's format, the one `helm push`
+    /// reads (`--registry-config`).
+    helm: PathBuf,
 }
 
 impl Registry {
@@ -648,12 +766,12 @@ impl Registry {
         fs::create_dir_all(&secrets).context("creating the auth directory")?;
         fs::set_permissions(&secrets, fs::Permissions::from_mode(0o700))?;
         let basic = secrets.join("basic");
+        let auth = image::base64(format!("{actor}:{token}").as_bytes());
+        write_secret(&basic, &format!("Authorization: Basic {auth}\n"))?;
+        let helm = secrets.join("helm-registry.json");
         write_secret(
-            &basic,
-            &format!(
-                "Authorization: Basic {}\n",
-                image::base64(format!("{actor}:{token}").as_bytes())
-            ),
+            &helm,
+            &format!("{{\"auths\":{{\"{REGISTRY_HOST}\":{{\"auth\":\"{auth}\"}}}}}}\n"),
         )?;
         let mut login = Command::new(tools.join("cosign"))
             .args([
@@ -672,7 +790,11 @@ impl Registry {
                 .context("handing cosign the token")?;
         }
         ensure!(login.wait()?.success(), "cosign login failed");
-        Ok(Self { secrets, basic })
+        Ok(Self {
+            secrets,
+            basic,
+            helm,
+        })
     }
 
     /// A header file carrying a push token for `repository`.
@@ -777,6 +899,101 @@ pub(crate) fn publish_index(root: &Path, out: &Path) -> Result<()> {
     registry.sign_out()?;
     fs::write(out.join("PUBLISHED"), &published).context("writing PUBLISHED")?;
     eprint!("    published the index of {revision}:\n{published}");
+    Ok(())
+}
+
+/// The charts a hosted cluster installs from `deploy/cell/charts/` (E21-58, DEC-2015 item 3).
+/// `archive-store` is the local cell's test stand-in and is never published (DEC-1050 item 5).
+pub(crate) const HOSTED_CHARTS: [&str; 4] =
+    ["backup-plugin-tls", "journal-db", "vault", "workspace"];
+
+/// A published chart's version: its `Chart.yaml` version with the commit's first twelve hex
+/// digits as build metadata, so a chart's tag names the commit it was packaged from.
+fn chart_version(chart_yaml: &str, revision: &str) -> Result<String> {
+    let base = chart_yaml
+        .lines()
+        .find_map(|line| line.strip_prefix("version: "))
+        .map(str::trim)
+        .filter(|version| !version.is_empty() && !version.contains('+'))
+        .context("Chart.yaml names no version, or one that already carries build metadata")?;
+    let short = revision
+        .get(..12)
+        .filter(|short| short.bytes().all(|b| b.is_ascii_hexdigit()))
+        .context("the commit is not a hex object name")?;
+    Ok(format!("{base}+g{short}"))
+}
+
+/// The manifest digest `helm push` reports on its `Digest:` line.
+fn pushed_digest(output: &str) -> Result<String> {
+    let digest = output
+        .lines()
+        .find_map(|line| line.strip_prefix("Digest: "))
+        .map(str::trim)
+        .context("helm push printed no digest")?;
+    let hex = digest
+        .strip_prefix("sha256:")
+        .context("helm push printed a digest that is not SHA-256")?;
+    ensure!(
+        hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+        "helm push printed a malformed digest: {digest}"
+    );
+    Ok(digest.to_owned())
+}
+
+/// `cargo xtask release publish-charts <out>` (E21-58, DEC-2015 item 3): only from a push to
+/// `main`, where `release.yml`'s `publish-index` job runs it (ES-12). Packages each of
+/// [`HOSTED_CHARTS`] with `helm package`, which reads through the charts' symlinks that Flux's git
+/// sources would drop, versioned by [`chart_version`]; pushes each to GHCR under
+/// `<repository>/charts`, signs its digest keyless with cosign (the run's GitHub OIDC identity,
+/// the same as the images'), and writes `<out>/CHARTS`, one `<reference>@<digest>  <chart>` line
+/// each, for the overlays' promotion (DEC-2016).
+pub(crate) fn publish_charts(root: &Path, out: &Path) -> Result<()> {
+    let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
+    let revision = git(root, &["rev-parse", "HEAD"])?;
+    let packages = out.join("charts");
+    fs::create_dir_all(&packages).context("creating the charts directory")?;
+    let registry = Registry::sign_in(&tools, out)?;
+    let mut charts = String::new();
+    for chart in HOSTED_CHARTS {
+        let dir = root.join("deploy/cell/charts").join(chart);
+        let manifest = fs::read_to_string(dir.join("Chart.yaml"))
+            .with_context(|| format!("reading {chart}'s Chart.yaml"))?;
+        let name = manifest
+            .lines()
+            .find_map(|line| line.strip_prefix("name: "))
+            .map(str::trim)
+            .with_context(|| format!("{chart}'s Chart.yaml names no chart"))?;
+        let version = chart_version(&manifest, &revision)?;
+        run(Command::new("helm")
+            .arg("package")
+            .arg(&dir)
+            .args(["--version", &version, "--destination"])
+            .arg(&packages))?;
+        let package = packages.join(format!("{name}-{version}.tgz"));
+        let pushed = Command::new("helm")
+            .arg("push")
+            .arg(&package)
+            .arg(format!("oci://{REGISTRY_HOST}/{REPOSITORY}/charts"))
+            .arg("--registry-config")
+            .arg(&registry.helm)
+            .output()
+            .context("starting `helm push`")?;
+        let printed = format!(
+            "{}{}",
+            String::from_utf8_lossy(&pushed.stdout),
+            String::from_utf8_lossy(&pushed.stderr)
+        );
+        eprint!("{printed}");
+        ensure!(pushed.status.success(), "helm push of {name} failed");
+        let digest = pushed_digest(&printed)?;
+        let reference = format!("{REGISTRY_HOST}/{REPOSITORY}/charts/{name}@{digest}");
+        run(Command::new(tools.join("cosign")).args(["sign", "--yes", &reference]))?;
+        charts.push_str(&format!("{reference}  {name}  {version}\n"));
+    }
+    registry.sign_out()?;
+    fs::write(out.join("CHARTS"), &charts).context("writing CHARTS")?;
+    eprint!("    published the charts of {revision}:\n{charts}");
     Ok(())
 }
 
@@ -896,6 +1113,7 @@ pub(crate) fn compare(a: &Path, b: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo_root;
 
     fn paths() -> Paths {
         Paths {
@@ -1058,6 +1276,202 @@ mod tests {
         assert_eq!(value("HOME").as_deref(), Some("inherited-HOME"));
     }
 
+    /// DEC-2027: every spelling of rustflags, a compiler or wrapper, and every profile variable is
+    /// refused, and what `cargo run`, rustup and a runner set is not.
+    #[test]
+    fn variables_that_could_change_the_build_are_refused() {
+        for name in [
+            "RUSTFLAGS",
+            "CARGO_ENCODED_RUSTFLAGS",
+            "CARGO_BUILD_RUSTFLAGS",
+            "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS",
+            "CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS",
+            "CARGO_PROFILE_RELEASE_PACKAGE_MANDATE_CLI_DEBUG_ASSERTIONS",
+            "CARGO_PROFILE_RELEASE_OPT_LEVEL",
+            "RUSTC",
+            "RUSTC_WRAPPER",
+            "RUSTC_WORKSPACE_WRAPPER",
+            "CARGO_BUILD_RUSTC",
+            "CARGO_BUILD_RUSTC_WRAPPER",
+            "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+        ] {
+            assert!(overriding_variable(name), "{name} is refused");
+        }
+        for name in [
+            "CARGO",
+            "CARGO_HOME",
+            "CARGO_MANIFEST_DIR",
+            "CARGO_PKG_NAME",
+            "CARGO_TERM_COLOR",
+            "CARGO_HTTP_CAINFO",
+            "RUSTUP_HOME",
+            "RUSTUP_TOOLCHAIN",
+            "RUSTDOCFLAGS",
+            "HOME",
+            "PATH",
+            "HTTPS_PROXY",
+        ] {
+            assert!(!overriding_variable(name), "{name} is not refused");
+        }
+    }
+
+    /// DEC-2027: a cargo configuration that sets a profile, rustflags, or a compiler or wrapper
+    /// is refused, naming each setting and its file; the repository's own configuration, an
+    /// alias, and registry or network settings are not.
+    #[test]
+    fn configurations_that_could_change_the_build_are_refused() -> Result<()> {
+        let repo = fs::read_to_string(repo_root()?.join(".cargo/config.toml"))?;
+        assert_eq!(overriding_settings(&repo)?, Vec::<String>::new());
+        assert_eq!(
+            overriding_settings(
+                "[alias]\nx = \"run\"\n[http]\ncainfo = \"/ca.pem\"\n[net]\nretry = 3\n\
+                 [build]\njobs = 4\n[target.x86_64-unknown-linux-musl]\nlinker = \"cc\"\n"
+            )?,
+            Vec::<String>::new()
+        );
+        let seeded = "include = [\"more.toml\"]\n[env]\nX = \"1\"\n\
+             [profile.release]\ndebug-assertions = true\n\
+             [build]\nrustflags = [\"-C\", \"debug-assertions\"]\nrustc-wrapper = \"w\"\n\
+             rustc = \"r\"\nrustc-workspace-wrapper = \"ww\"\n\
+             [target.x86_64-unknown-linux-musl]\nrustflags = [\"-Cdebug-assertions\"]\n\
+             [target.'cfg(unix)']\nrustflags = []\n";
+        assert_eq!(
+            overriding_settings(seeded)?,
+            [
+                "profile",
+                "env",
+                "include",
+                "build.rustflags",
+                "build.rustc",
+                "build.rustc-wrapper",
+                "build.rustc-workspace-wrapper",
+                "target.cfg(unix).rustflags",
+                "target.x86_64-unknown-linux-musl.rustflags",
+            ]
+        );
+        assert_eq!(
+            overrides(
+                [
+                    "PATH".to_owned(),
+                    "RUSTFLAGS".to_owned(),
+                    "CARGO_PROFILE_RELEASE_LTO".to_owned()
+                ],
+                &[
+                    (PathBuf::from("/repo/.cargo/config.toml"), repo),
+                    (
+                        PathBuf::from("/home/runner/.cargo/config.toml"),
+                        "[profile.release]\ndebug-assertions = true\n".to_owned()
+                    ),
+                ],
+            )?,
+            [
+                "CARGO_PROFILE_RELEASE_LTO",
+                "RUSTFLAGS",
+                "/home/runner/.cargo/config.toml: profile",
+            ]
+        );
+        assert!(overrides(Vec::new(), &[(PathBuf::from("/bad"), "[".to_owned())]).is_err());
+        Ok(())
+    }
+
+    /// DEC-2027: the configuration files are the checkout's and each parent's, in cargo's order,
+    /// then `CARGO_HOME`'s, and only those that exist.
+    #[test]
+    fn the_configuration_files_are_the_ones_cargo_reads() -> Result<()> {
+        let base = env::temp_dir().join(format!("mandate-release-config-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("work").join("mandate");
+        let home = base.join("cargo-home");
+        for dir in [root.join(".cargo"), base.join(".cargo"), home.clone()] {
+            fs::create_dir_all(&dir)?;
+        }
+        fs::write(root.join(".cargo/config.toml"), "")?;
+        fs::write(base.join(".cargo/config"), "")?;
+        fs::write(home.join("config.toml"), "")?;
+        fs::write(home.join("config"), "")?;
+        let found: Vec<PathBuf> = config_files(&root, &home)
+            .into_iter()
+            .filter(|file| file.starts_with(&base))
+            .collect();
+        let _ = fs::remove_dir_all(&base);
+        assert_eq!(
+            found,
+            [
+                root.join(".cargo/config.toml"),
+                base.join(".cargo/config"),
+                home.join("config.toml"),
+                home.join("config"),
+            ],
+            "the checkout's, then each parent's, then CARGO_HOME's, `config.toml` before `config`"
+        );
+        Ok(())
+    }
+
+    /// DEC-2027: `refuse_overrides` reads the files cargo would read and refuses a variable or a
+    /// setting in any of them, including a file that only includes another; a clean checkout and
+    /// environment pass.
+    #[test]
+    fn overrides_are_refused_from_the_environment_and_every_configuration() -> Result<()> {
+        let base = env::temp_dir().join(format!("mandate-release-refuse-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("mandate");
+        let home = base.join("cargo-home");
+        fs::create_dir_all(root.join(".cargo"))?;
+        fs::create_dir_all(&home)?;
+        fs::write(root.join(".cargo/config.toml"), "[alias]\nx = \"run\"\n")?;
+        let clean = refuse_overrides(&root, &home, ["PATH".to_owned(), "HOME".to_owned()]);
+        let variable = refuse_overrides(&root, &home, ["RUSTFLAGS".to_owned()]);
+        fs::write(home.join("config.toml"), "include = [\"release.toml\"]\n")?;
+        let included = refuse_overrides(&root, &home, Vec::new());
+        let _ = fs::remove_dir_all(&base);
+        assert!(clean.is_ok(), "{clean:?}");
+        for (refused, named) in [(variable, "RUSTFLAGS"), (included, "config.toml: include")] {
+            let message = format!("{:#}", refused.err().context("a refusal")?);
+            assert!(
+                message.contains("DEC-2027") && message.contains(named),
+                "{message}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-2027 item 4: `release build` refuses before it installs a tool, reads git, or builds:
+    /// a checkout whose configuration sets a profile is refused with the refusal, not with any
+    /// later step's error.
+    #[test]
+    fn the_build_refuses_before_anything_runs() -> Result<()> {
+        let base = env::temp_dir().join(format!("mandate-release-first-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("mandate");
+        fs::create_dir_all(root.join(".cargo"))?;
+        fs::write(
+            root.join(".cargo/config.toml"),
+            "[profile.release]\ndebug-assertions = true\n",
+        )?;
+        let built = build(&root, &base.join("out"));
+        let wrote = base.join("out").exists();
+        let _ = fs::remove_dir_all(&base);
+        let message = format!("{:#}", built.err().context("a refusal")?);
+        assert!(
+            message.contains("DEC-2027") && message.contains("config.toml: profile"),
+            "{message}"
+        );
+        assert!(!wrote, "a refused build writes nothing");
+        Ok(())
+    }
+
+    /// DEC-2027: the release build's own `cargo` arguments pass no `--config` and no `-Z`, so no
+    /// setting reaches it from its command line.
+    #[test]
+    fn the_build_passes_no_configuration_on_its_command_line() {
+        let args = build_args(Path::new("/t"), Arch::Amd64);
+        assert!(
+            args.iter()
+                .all(|arg| !arg.starts_with("--config") && !arg.starts_with("-Z")),
+            "{args:?}"
+        );
+    }
+
     #[test]
     fn sums_are_sha256sums_format_sorted_by_name() {
         let mut sums = BTreeMap::new();
@@ -1154,6 +1568,60 @@ mod tests {
             }
         }
         Ok(out)
+    }
+
+    #[test]
+    fn a_chart_version_carries_the_commit_as_build_metadata() -> Result<()> {
+        let manifest = "apiVersion: v2\nname: mandate-workspace\nversion: 0.1.0\n";
+        let revision = "545f4852774c1de0b2a4a1e3f0e9f6c2b8d7a0e1";
+        assert_eq!(chart_version(manifest, revision)?, "0.1.0+g545f4852774c");
+        assert!(chart_version("name: x\n", revision).is_err());
+        assert!(chart_version("version: 0.1.0+old\n", revision).is_err());
+        assert!(chart_version(manifest, "not-a-commit").is_err());
+        assert!(chart_version(manifest, "545f").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn only_a_sha256_digest_from_helm_push_is_taken() -> Result<()> {
+        let digest = format!("sha256:{}", hex('a'));
+        let printed = format!(
+            "Pushed: ghcr.io/kunwarshivam/mandate/charts/mandate-workspace:0.1.0_g545f4852774c\n\
+             Digest: {digest}\n"
+        );
+        assert_eq!(pushed_digest(&printed)?, digest);
+        assert!(pushed_digest("Pushed: x\n").is_err());
+        assert!(pushed_digest(&format!("Digest: sha512:{}\n", hex('a'))).is_err());
+        assert!(pushed_digest("Digest: sha256:abc\n").is_err());
+        assert!(pushed_digest(&format!("Digest: sha256:{}\n", hex('A'))).is_err());
+        Ok(())
+    }
+
+    /// The chart that is never published, beside [`HOSTED_CHARTS`].
+    const LOCAL_ONLY_CHARTS: [&str; 1] = ["archive-store"];
+
+    /// Every chart under `deploy/cell/charts/` is either published for the hosted clusters or
+    /// named as the local cell's alone, so a new chart cannot be left out of the hosted clusters
+    /// unnoticed.
+    #[test]
+    fn every_cell_chart_is_published_or_named_local_only() -> Result<()> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../deploy/cell/charts");
+        let mut found = Vec::new();
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
+            if entry.path().join("Chart.yaml").is_file() {
+                found.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+        found.sort();
+        let mut named: Vec<String> = HOSTED_CHARTS
+            .iter()
+            .chain(LOCAL_ONLY_CHARTS.iter())
+            .map(|chart| (*chart).to_owned())
+            .collect();
+        named.sort();
+        assert_eq!(found, named);
+        Ok(())
     }
 
     /// The jobs that publish, one a runner of each arch and the index over them.
