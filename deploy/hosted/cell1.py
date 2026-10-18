@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -779,6 +780,18 @@ ARCHIVE_ENDPOINT = re.compile(r"https://([a-z0-9.-]+)(:([0-9]+))?")
 ARCHIVE_CIDR = re.compile(r"([0-9]{1,3}\.){3}[0-9]{1,3}/(2[4-9]|3[0-2])")
 
 
+def archive_cidr_ok(cidr: str) -> bool:
+    """An IPv4 network written with its prefix, /24 to /32, with no host bits set and every octet
+    at most 255, so never 0.0.0.0/0 nor 999.1.1.1/24."""
+    if not ARCHIVE_CIDR.fullmatch(cidr):
+        return False
+    try:
+        network = ipaddress.ip_network(cidr, strict=True)
+    except ValueError:
+        return False
+    return network.version == 4 and 24 <= network.prefixlen <= 32
+
+
 def hosted_archive(args) -> list[str]:
     """Cell #1's journal archive, as helm arguments over values/cell1-journal-db.yaml. The bucket
     is the founder's choice and spend (DEC-79, DEC-995), so nothing here names one: without the
@@ -805,7 +818,7 @@ def hosted_archive(args) -> list[str]:
     if endpoint is None:
         raise Refused(f"--archive-endpoint {args.archive_endpoint!r} is not https://<host>[:<port>]")
     for cidr in args.archive_egress_cidr:
-        if not ARCHIVE_CIDR.fullmatch(cidr):
+        if not archive_cidr_ok(cidr):
             raise Refused(f"--archive-egress-cidr {cidr!r} is not an IPv4 CIDR of /24 or narrower")
     egress = {
         "cidrs": list(args.archive_egress_cidr),
@@ -942,16 +955,43 @@ def open_kube_tunnel(argv: list[str]) -> subprocess.Popen:
     return subprocess.Popen(argv, stdout=subprocess.DEVNULL)
 
 
+def require_dev_tier(plan: Plan, args) -> None:
+    if args.target == "hosted" and not args.accept_dev_tier and not plan.dry_run:
+        raise Refused(
+            "--accept-dev-tier is required: cell #1 runs unsigned builds as `dev` (DEC-2001 item 6), "
+            "only once the founder has answered DEC-971 item 7(b)"
+        )
+
+
+CLUSTER_SECRET_FILES = (
+    ("ghcr_token_file", "the GHCR read:packages token"),
+    ("cf_token_file", "the Cloudflare API token"),
+    ("r2_access_key_id_file", "the R2 access key id"),
+    ("r2_secret_access_key_file", "the R2 secret access key"),
+    ("archive_access_key_id_file", "the archive's access key id"),
+    ("archive_secret_access_key_file", "the archive's secret access key"),
+)
+
+
+def preflight(plan: Plan, args, order: list[str]) -> None:
+    """A real hosted run that reaches `cluster` refuses before its first step, with the messages
+    `cluster` would give, so `all` never buys droplets for a cluster step that cannot run: the
+    dev-tier answer, the founder's archive (DEC-2006), and each secret file `cluster` reads, in its
+    order. `cluster` checks them all again itself."""
+    if args.target != "hosted" or plan.dry_run or "cluster" not in order:
+        return
+    require_dev_tier(plan, args)
+    hosted_archive(args)
+    for flag, what in CLUSTER_SECRET_FILES:
+        secret_file(plan, getattr(args, flag), what)
+
+
 def step_cluster(plan: Plan, args) -> None:
     """The same on k3d and on cell #1: the namespace and its secrets, the pull secret on the
     namespace's default service account, the CloudNativePG operator, journal-db, the workspace."""
     namespace = CONFIG["namespace"]
     hosted = args.target == "hosted"
-    if hosted and not args.accept_dev_tier and not plan.dry_run:
-        raise Refused(
-            "--accept-dev-tier is required: cell #1 runs unsigned builds as `dev` (DEC-2001 item 6), "
-            "only once the founder has answered DEC-971 item 7(b)"
-        )
+    require_dev_tier(plan, args)
     archive = hosted_archive(args) if hosted else k3d_archive()
     kubeconfig = STATE / ("kubeconfig" if hosted else "kubeconfig-k3d")
     tunnel = None
@@ -1246,6 +1286,7 @@ def main(argv: list[str] | None = None, out=sys.stdout) -> int:
     if args.target == "k3d":
         order = [s for s in order if s not in ("cloudflare", "droplets")]
     try:
+        preflight(plan, args, order)
         for name in order:
             STEPS[name](plan, args)
     except Refused as refusal:

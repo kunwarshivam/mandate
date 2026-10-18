@@ -116,6 +116,9 @@ Download the multi-arch `PUBLISHED` list of the `release` run on `main` whose co
 cell1 --dry-run all | less
 ```
 
+The `cluster` part of the plan prints only once the archive's flags (gate 5) are given; otherwise
+the dry run ends with that refusal.
+
 ## 4. Cloudflare, then the droplets (this spends money)
 
 ```bash

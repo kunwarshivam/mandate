@@ -780,12 +780,112 @@ def test_hosted_cluster_refuses_without_an_archive(isolated, monkeypatch, capsys
         ("--archive-destination", "s3://Bad_Bucket"),
         ("--archive-endpoint", "http://archive.example.com"),
         ("--archive-egress-cidr", "0.0.0.0/0"),
+        ("--archive-egress-cidr", "999.1.1.1/24"),
     ):
         given = dict(zip(ARCHIVE_ARGS[::2], ARCHIVE_ARGS[1::2]), **{flag: bad})
         seeded = [*argv, *(arg for pair in given.items() for arg in pair)]
         assert cell1.main(seeded, io.StringIO()) == 1, flag
         assert flag in capsys.readouterr().err
     assert calls(log) == []
+
+
+def real_all(tmp_path: Path, key: Path) -> list[str]:
+    return ["all", *HOSTED_ARGS, *secret_files(tmp_path), "--ssh-public-key", str(key), "--published", "PUBLISHED"]
+
+
+def drop_flag(argv: list[str], flag: str) -> list[str]:
+    at = argv.index(flag)
+    return argv[:at] + argv[at + 2 :]
+
+
+def refused_before_any_step(argv: list[str], log: Path, capsys) -> str:
+    """A real hosted `all` that refuses up front: no doctl, cloudflared, ssh, kubectl or helm call,
+    and no Cloudflare request (urlopen is blocked), so nothing is bought."""
+    assert cell1.main(argv, io.StringIO()) == 1
+    assert calls(log) == [], "a tool ran before the pre-flight refused"
+    return capsys.readouterr().err
+
+
+def test_real_all_without_an_archive_refuses_before_cloudflare_and_droplets(isolated, monkeypatch, capsys):
+    """`all` would spend money in `cloudflare` and `droplets` before `cluster` refused for want of
+    the founder's archive (DEC-2006); the pre-flight refuses first, with `cluster`'s message."""
+    tmp_path, log, key = isolated
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", no_network)
+    argv = without_archive([*real_all(tmp_path, key), "--accept-dev-tier"])
+    err = refused_before_any_step(argv, log, capsys)
+    assert "has no destination" in err and "DEC-2006" in err and "--archive-destination" in err
+    for flag, bad in (
+        ("--archive-destination", "s3://Bad_Bucket"),
+        ("--archive-endpoint", "http://archive.example.com"),
+        ("--archive-egress-cidr", "999.1.1.1/24"),
+    ):
+        given = dict(zip(ARCHIVE_ARGS[::2], ARCHIVE_ARGS[1::2]), **{flag: bad})
+        seeded = [*argv, *(arg for pair in given.items() for arg in pair)]
+        assert flag in refused_before_any_step(seeded, log, capsys), flag
+
+
+def test_real_all_without_the_dev_tier_answer_refuses_up_front(isolated, monkeypatch, capsys):
+    tmp_path, log, key = isolated
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", no_network)
+    err = refused_before_any_step(real_all(tmp_path, key), log, capsys)
+    assert "--accept-dev-tier is required" in err
+
+
+SECRET_FLAGS = {
+    "--ghcr-token-file": "ghcr",
+    "--cf-token-file": "cf",
+    "--r2-access-key-id-file": "r2-id",
+    "--r2-secret-access-key-file": "r2-key",
+    "--archive-access-key-id-file": "archive-id",
+    "--archive-secret-access-key-file": "archive-key",
+}
+
+
+def test_the_pre_flight_checks_every_secret_file_cluster_reads():
+    """The pre-flight's list is exactly the secret files `cluster` reads on cell #1."""
+    flags = {"--" + attr.replace("_", "-") for attr, _ in cell1.CLUSTER_SECRET_FILES}
+    assert flags == set(SECRET_FLAGS)
+
+
+@pytest.mark.parametrize("flag", sorted(SECRET_FLAGS))
+@pytest.mark.parametrize("fault", ["missing", "readable"])
+def test_real_all_refuses_up_front_without_a_private_secret_file(isolated, monkeypatch, capsys, flag, fault):
+    tmp_path, log, key = isolated
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", no_network)
+    argv = [*real_all(tmp_path, key), "--accept-dev-tier"]
+    if fault == "missing":
+        argv = drop_flag(argv, flag)
+        expected = "no file given"
+    else:
+        (tmp_path / f"{SECRET_FLAGS[flag]}.secret").chmod(0o644)
+        expected = "chmod 600"
+    assert expected in refused_before_any_step(argv, log, capsys)
+
+
+def test_the_pre_flight_leaves_dry_runs_and_k3d_alone(isolated, monkeypatch):
+    """A dry run still prints every step up to `cluster`'s refusal, and k3d needs none of it."""
+    tmp_path, log, key = isolated
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", no_network)
+    out = io.StringIO()
+    assert cell1.main(["--dry-run", *without_archive(real_all(tmp_path, key))], out) == 1
+    assert "+ doctl compute droplet create cell1-a" in out.getvalue()
+    assert calls(log) == []
+
+
+@pytest.mark.parametrize(
+    "cidr, ok",
+    [
+        ("192.0.2.0/24", True),
+        ("192.0.2.7/32", True),
+        ("999.1.1.1/24", False),
+        ("192.0.2.1/24", False),
+        ("0.0.0.0/0", False),
+        ("192.0.0.0/16", False),
+        ("192.0.2.0", False),
+    ],
+)
+def test_archive_cidr(cidr, ok):
+    assert cell1.archive_cidr_ok(cidr) is ok
 
 
 def test_k3d_archive_is_the_local_cells():
