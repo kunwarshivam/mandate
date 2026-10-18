@@ -3,7 +3,7 @@
 - **Spec:** [infrastructure design](../../../../docs/design/infrastructure.md) §3.1, §3.4, §3.6;
   [journal spec](../../../../docs/specs/journal.md) §5.1 (writer epochs), §9 rule 12; ADR-0001
   ES-06, ES-20; DEC-17, DEC-914, DEC-968, DEC-994, DEC-1012, DEC-1013, DEC-1014, DEC-1015, DEC-1016,
-  DEC-2208; trading spec §11 (the startup hold).
+  DEC-2208, DEC-2210; trading spec §11 (the startup hold).
 - **Code:** `mandate-daemon` (`crates/mandate-daemon`): `src/runtime.rs` (`RuntimeProcess`: one
   writer epoch on the agent stream, the control stream read before the account stream and the
   account stream before the clock stream, the account stream the connection's establishment names
@@ -17,7 +17,9 @@
   journal, and `probe` for `exec` probes; SIGTERM drains). In the cell: the `runtime` image
   (`deploy/cell/images/runtime.Dockerfile`), its `args` and `probe` in
   `deploy/cell/charts/workspace/processes.json`, and `cargo xtask cell up` building it (DEC-1013). `mandate-store` (`crates/mandate-store`): the `Store` port and the shared envelope.
-  `mandate-runtime`'s `src/tail.rs` (`tailed`, shared with the shell).
+  `mandate-runtime`'s `src/tail.rs` (`tailed`, shared with the shell). `src/recorded.rs` (the cell's
+  recorded research bundle: the entry, its endpoint, the caps, the one recorded reply, and a data
+  plane stamped at ages before each read's cut-off, DEC-2210).
 - **Tests:** `crates/mandate-daemon/tests/runtime.rs`: the owner's kill switch journaled on the
   agent stream, the control stream read before the clock stream, an unreadable clock stream never
   holding the kill switch, a control stream handed again writing nothing twice, a lost answer
@@ -45,7 +47,10 @@
   its run with the universe stored first, an unstored artifact or an invalid batch halting research
   while the kill switch goes on, a batch in doubt retried first and written once, a retry needing
   neither the source nor the sink, an answer never handed twice, a fence, a stale head, and the seed
-  reaching the core.
+  reaching the core. `tests/recorded.rs`: the bundle loading, the registry offering its entry, a
+  missing file, a missing member, or text that is not strict JSON refusing the load, no filings,
+  and a property test that every recorded item is stamped at its age before any cut-off and kept
+  by `retrieve` (fixtures in `tests/fixtures/research/`).
 - **Run:** `cargo nextest run -p mandate-daemon -p mandate-store -p mandate-runtime -p mandate-shell`
   (with `MANDATE_PG_URL` for `tests/pg.rs`); `cargo xtask cell demo --no-web` shows the runtime
   ready in the local cell.

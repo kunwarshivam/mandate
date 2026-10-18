@@ -12,7 +12,6 @@ fn the_codes_are_the_decisions_names() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn only_dev_and_ci_start_it() {
     for tier in ["dev", "ci"] {
         assert_eq!(
@@ -35,7 +34,6 @@ fn only_dev_and_ci_start_it() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_build_without_debug_assertions_refuses_before_reading_anything() {
     for tier in [Some("dev"), Some("production"), None] {
         for bind in [BIND, "0.0.0.0:8899", ""] {
@@ -49,7 +47,6 @@ fn a_build_without_debug_assertions_refuses_before_reading_anything() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn the_tier_is_checked_before_the_bind() {
     assert_eq!(
         check(true, Some("production"), "0.0.0.0:8899"),
@@ -59,7 +56,6 @@ fn the_tier_is_checked_before_the_bind() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn only_a_loopback_ip_literal_with_a_port_binds() {
     for bind in ["127.0.0.1:8899", "[::1]:8899", "127.0.0.1:1", "[::1]:65535"] {
         assert_eq!(

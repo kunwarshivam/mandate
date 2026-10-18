@@ -34,6 +34,7 @@
 pub mod deployment;
 pub mod fixture;
 pub mod launch;
+pub mod recorded;
 pub mod runtime;
 pub mod wake;
 
