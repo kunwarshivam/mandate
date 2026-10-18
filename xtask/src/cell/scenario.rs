@@ -11,6 +11,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -225,16 +226,39 @@ pub enum Ask {
     SignIn,
 }
 
-/// One CLI command in the cell, the text its success prints, and what it shows the demo. A gesture
+/// One command in the cell, the text its success prints, and what it shows the demo. A gesture
 /// ran only when its container exited 0 and printed `expect`; a shown code is checked this way
-/// after the Job, and the CLI itself refuses a typed code that differs from the one it shows.
+/// after the Job, and the CLI itself refuses a typed code that differs from the one it shows. A
+/// gesture with a `command` runs that binary of the image instead of its `mandate` entry point.
 #[derive(Debug)]
 pub struct Gesture {
     pub container: String,
     pub shows: &'static str,
+    pub command: Option<&'static str>,
     pub args: Vec<String>,
     pub expect: String,
 }
+
+/// The backtest runner in the cell's `mandate` image (#1581), which step 5 runs beside the CLI
+/// (DEC-2023).
+pub const RUNNER_BIN: &str = "/usr/local/bin/mandate-backtest-runner";
+
+/// The runner's committed demo inputs (DEC-1144 item 3), mounted at [`BACKTEST_IN`].
+pub const BACKTEST_INPUTS: &str = "crates/mandate-backtest-runner/tests/fixtures/demo";
+
+/// Where the pod reads the runner's inputs: a directory of their own, since the runner's
+/// `instrument.json` is not the CLI's instrument snapshot.
+const BACKTEST_IN: &str = "/in/backtest";
+
+/// The demo backtest's id; each run's workspace is fresh, so the id is never another record's.
+pub const BACKTEST_ID: &str = "bt-demo-01";
+
+/// The payload and report the runner stores for the demo version and inputs, the committed golden
+/// store's (DEC-1144 item 8: the demo's payload reference is fixed).
+pub const DEMO_PAYLOAD: &str =
+    "sha256:1ab788b2c066c11d949e53929e1ed0332038f481da4d7d6624e6b2027cfdb240";
+pub const DEMO_REPORT: &str =
+    "sha256:9e672eb266902fc30120100af6bba87f135f0ecfe0a77a00cb4b1d15bcdc4a63";
 
 /// `sha256:` and the hex SHA-256 of `bytes`: an artifact reference (journal spec §4).
 pub fn reference(bytes: &[u8]) -> String {
@@ -281,9 +305,18 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
     let mut index = 0;
     let mut gesture = |shows: &'static str, args: Vec<String>, expect: String| {
         index += 1;
+        let (command, args) = match args.split_first() {
+            Some((first, rest)) if first == RUNNER_BIN => (Some(RUNNER_BIN), rest.to_vec()),
+            _ => (None, args),
+        };
+        let name = match command {
+            Some(_) => format!("runner-{}", args[0]),
+            None => args[..2].join("-"),
+        };
         Part::Gesture(Gesture {
-            container: format!("g{index:02}-{}", args[..2].join("-")),
+            container: format!("g{index:02}-{name}"),
             shows,
+            command,
             args,
             expect,
         })
@@ -504,23 +537,60 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
         Step {
             number: 5,
             title: "a backtest of the same mandate version is shown",
-            parts: vec![Part::Gap(Gap {
-                what: "the backtest of this version, its report read through the API and \
-                       shown in web/",
-                on_main: "the runner in the cell's image and `mandate backtest record` (#1581, \
-                          DEC-1144), the API's backtest read (#1555), web/'s report screen \
-                          (#1549), and the owner's session through the stub issuer (#1591)",
-                waits: vec![
-                    wait(
-                        "E2E",
-                        "E21-54",
-                        None,
-                        "this scenario runs the runner, records it in the gestures' pod and \
-                         reads it through the API with the owner's session",
+            parts: vec![
+                gesture(
+                    "the rule set the backtest runs under, registered: the demo run's settings",
+                    owner(&[
+                        "config",
+                        "register",
+                        "--kind",
+                        "rule_set",
+                        &format!("{BACKTEST_IN}/settings.json"),
+                    ]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "the backtest of the confirmed version, run on the demo inputs",
+                    with(
+                        &[
+                            RUNNER_BIN,
+                            "run",
+                            "--inputs",
+                            BACKTEST_IN,
+                            "--store",
+                            STORE,
+                            "--mandate-version",
+                            &version,
+                            "--backtest-id",
+                            BACKTEST_ID,
+                        ],
+                        &[],
                     ),
-                    MB_MEMBERS,
-                ],
-            })],
+                    format!("payload={DEMO_PAYLOAD}"),
+                ),
+                gesture(
+                    "the run, recorded by the backtest runner system after every check",
+                    with(
+                        &[
+                            "backtest",
+                            "record",
+                            "--workspace",
+                            workspace,
+                            "--payload",
+                            DEMO_PAYLOAD,
+                        ],
+                        &target,
+                    ),
+                    format!("report={DEMO_REPORT}"),
+                ),
+                Part::Gap(Gap {
+                    what: "the owner reads the backtest through the API, completed, and web/ \
+                           shows its report",
+                    on_main: "the API's backtest read (#1555), web/'s report screen (#1549), \
+                              and the owner's session through the stub issuer (#1591)",
+                    waits: vec![MB_MEMBERS, W2_WEB],
+                }),
+            ],
         },
         Step {
             number: 6,
@@ -583,7 +653,8 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
 
 /// The gestures' Job: the chart's own `control` run Job for the first gesture, its container
 /// repeated for each gesture in order as init containers after the chart's own, the last one as
-/// the pod's container, with the demo's files mounted read-only from a ConfigMap at [`INPUTS`].
+/// the pod's container, with the demo's files mounted read-only from a ConfigMap at [`INPUTS`],
+/// each at its path in `files`, which may name a directory (a ConfigMap key cannot).
 /// One pod, so the artifact store `version create` writes is the one `version confirm` and
 /// `agent deploy` read, and the one the closing `journal verify` checks every record's artifact
 /// against.
@@ -606,11 +677,18 @@ pub fn gestures_job(
         .and_then(|c| c.first())
         .cloned()
         .context("the run Job has no container")?;
+    let items: Vec<Value> = files
+        .iter()
+        .map(|(path, _)| json!({"key": key_of(path), "path": path}))
+        .collect();
     let mut containers = Vec::new();
     for gesture in all {
         let mut container = template.clone();
         container["name"] = json!(gesture.container);
         container["args"] = json!(gesture.args);
+        if let Some(command) = gesture.command {
+            container["command"] = json!([command]);
+        }
         container["volumeMounts"]
             .as_array_mut()
             .context("the run container has no mounts")?
@@ -626,10 +704,10 @@ pub fn gestures_job(
     spec["volumes"]
         .as_array_mut()
         .context("the run Job has no volumes")?
-        .push(json!({"name": "in", "configMap": {"name": configmap}}));
+        .push(json!({"name": "in", "configMap": {"name": configmap, "items": items}}));
     let data: serde_json::Map<String, Value> = files
         .iter()
-        .map(|(name, content)| (name.to_string(), json!(content)))
+        .map(|(path, content)| (key_of(path), json!(content)))
         .collect();
     objects.push(json!({
         "apiVersion": "v1",
@@ -638,6 +716,11 @@ pub fn gestures_job(
         "data": data,
     }));
     Ok(objects)
+}
+
+/// The ConfigMap key of the input at `path` under [`INPUTS`]: a key admits no `/`.
+fn key_of(path: &str) -> String {
+    path.replace('/', ".")
 }
 
 /// The lines `container` printed, from a Job's logs as `kubectl logs --prefix` or the per-container
@@ -675,6 +758,29 @@ pub fn exit_codes(pods: &Value) -> BTreeMap<String, i64> {
     codes
 }
 
+/// The runner's five demo inputs under the checkout at `root`, each at its path under
+/// [`BACKTEST_IN`] relative to [`INPUTS`].
+fn backtest_inputs(root: &Path) -> Result<Vec<(String, String)>> {
+    let dir = BACKTEST_IN
+        .strip_prefix(&format!("{INPUTS}/"))
+        .context("the runner's inputs are not under the pod's")?;
+    [
+        "bars.json",
+        "outputs.json",
+        "theses.json",
+        "instrument.json",
+        "settings.json",
+    ]
+    .iter()
+    .map(|name| {
+        let path = root.join(BACKTEST_INPUTS).join(name);
+        let text =
+            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        Ok((format!("{dir}/{name}"), text))
+    })
+    .collect()
+}
+
 /// `cargo xtask cell demo --scenario <name>`.
 pub fn run(name: &str) -> Result<()> {
     if !SCENARIOS.contains(&name) {
@@ -707,11 +813,15 @@ pub fn run(name: &str) -> Result<()> {
     )?;
     let files = [
         (
-            "mandate.json",
+            "mandate.json".to_string(),
             String::from_utf8(mandate).context("the mandate is not UTF-8")?,
         ),
-        ("instrument.json", instrument),
-    ];
+        ("instrument.json".into(), instrument),
+    ]
+    .into_iter()
+    .chain(backtest_inputs(Path::new("."))?)
+    .collect::<Vec<_>>();
+    let files: Vec<(&str, String)> = files.iter().map(|(p, c)| (p.as_str(), c.clone())).collect();
     let objects = gestures_job(rendered, &all, &format!("demo-in-{id}"), &files)?;
     eprintln!("==> the demo, end to end (paper and demo data only; local-cell results)");
     eprintln!("    workspace {workspace}, agent {AGENT}");
@@ -861,7 +971,7 @@ fn point_api(workspace: &str) -> Result<()> {
         "--wait",
         "--wait-for-jobs",
         "--timeout",
-        "5m",
+        "3m",
     ])?;
     for process in [API_PROCESS, DEPLOY_MANAGER_PROCESS] {
         let deployment = format!("deployment/{process}");
@@ -875,6 +985,7 @@ fn point_api(workspace: &str) -> Result<()> {
             "name",
         ])?;
         if present.trim().is_empty() {
+            eprintln!("    {process}: not in this cell, no rollout to wait on");
             continue;
         }
         kubectl(&[
@@ -1061,9 +1172,128 @@ mod tests {
         );
     }
 
+    /// The payload the scenario records is the one the runner's own test commits: of the demo's
+    /// version, under [`BACKTEST_ID`], completed, naming [`DEMO_REPORT`].
+    #[test]
+    fn the_demo_payload_is_the_runners_committed_run() {
+        let golden: Value = serde_json::from_str(
+            &fs::read_to_string("../crates/mandate-backtest-runner/tests/fixtures/demo-store.json")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(golden["payload"], DEMO_PAYLOAD);
+        let payload = golden["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["bytes"].as_str().unwrap())
+            .find(|bytes| reference(bytes.as_bytes()) == DEMO_PAYLOAD)
+            .expect("the store holds its payload");
+        let payload: Value = serde_json::from_str(payload).unwrap();
+        assert_eq!(payload["report"], DEMO_REPORT);
+        assert_eq!(payload["result"], "completed");
+        assert_eq!(payload["backtest_id"], BACKTEST_ID);
+        assert_eq!(payload["mandate_version"], reference(&mandate()));
+    }
+
+    /// Step 5 registers a rule set, runs the runner on the confirmed version in the pod's store,
+    /// and records the payload it prints, after the confirmation and before the kill switch; the
+    /// API read and web/'s report wait on the membership parser and web/.
+    #[test]
+    fn step_five_registers_a_rule_set_runs_the_backtest_and_records_it() {
+        let steps = plan("demo5", &mandate());
+        let all = gestures(&steps);
+        let at = |name: &str| {
+            all.iter()
+                .rposition(|g| g.container.ends_with(name))
+                .unwrap()
+        };
+        let (rule_set, runner, record) = (
+            at("config-register"),
+            at("runner-run"),
+            at("backtest-record"),
+        );
+        let (confirm, kill) = (
+            all.iter()
+                .rposition(|g| g.args[..2] == ["version", "confirm"])
+                .unwrap(),
+            at("agent-kill"),
+        );
+        assert!(confirm < rule_set && rule_set < runner && runner < record && record < kill);
+        assert!(
+            all[rule_set]
+                .args
+                .windows(2)
+                .any(|w| w == ["--kind", "rule_set"])
+        );
+        let run = all[runner];
+        assert_eq!(run.command, Some(RUNNER_BIN));
+        let version = reference(&mandate());
+        for pair in [
+            ["--inputs", BACKTEST_IN],
+            ["--store", STORE],
+            ["--mandate-version", version.as_str()],
+            ["--backtest-id", BACKTEST_ID],
+        ] {
+            assert!(
+                run.args.windows(2).any(|w| w == pair),
+                "{pair:?} in {:?}",
+                run.args
+            );
+        }
+        assert_eq!(run.expect, format!("payload={DEMO_PAYLOAD}"));
+        assert!(
+            all[record]
+                .args
+                .windows(2)
+                .any(|w| w == ["--payload", DEMO_PAYLOAD])
+        );
+        assert!(
+            !all[record].args.iter().any(|a| a == "--user"),
+            "the runner system records it"
+        );
+        assert_eq!(all[record].expect, format!("report={DEMO_REPORT}"));
+        assert!(all.iter().filter(|g| g.command.is_some()).count() == 1);
+        let lanes: Vec<&str> = steps[4]
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Gap(g) => Some(g.waits.iter().map(|w| w.lane)),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(lanes, ["MB", "W2"]);
+    }
+
+    /// The runner's five inputs are read from its committed fixtures into their own directory of
+    /// the pod's inputs, the one step 5 passes to `--inputs`.
+    #[test]
+    fn the_runners_inputs_go_to_their_own_directory() {
+        let files = backtest_inputs(Path::new("..")).unwrap();
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "backtest/bars.json",
+                "backtest/outputs.json",
+                "backtest/theses.json",
+                "backtest/instrument.json",
+                "backtest/settings.json"
+            ]
+        );
+        assert_eq!(format!("{INPUTS}/backtest"), BACKTEST_IN);
+        let settings: Value = serde_json::from_str(&files[4].1).unwrap();
+        assert!(
+            settings["gate"].is_object(),
+            "the rule set is the run's settings"
+        );
+    }
+
     /// Every gesture states the workspace it acts on, or its control stream, never the live
-    /// environment, and names the pod's own journal and store; the record is exported last and
-    /// verified against that store, so a record's missing artifact fails the run.
+    /// environment, and names the pod's own journal and store; the backtest runner, which holds no
+    /// journal, names only that store. The record is exported last and verified against that
+    /// store, so a record's missing artifact fails the run.
     #[test]
     fn every_gesture_is_in_the_demo_workspace_and_never_live() {
         let steps = plan("demo7", &mandate());
@@ -1077,12 +1307,20 @@ mod tests {
                 g.args[..2] == ["journal", "export"],
                 g.args[..2] == ["journal", "verify"],
             );
+            let runner = g.command == Some(RUNNER_BIN);
             let scoped = value(&g.args, "--workspace") == Some("demo7")
                 || (export && g.args[2] == "ctl:demo7")
-                || verify;
+                || verify
+                || runner;
             assert!(scoped, "{:?}", g.args);
             assert!(!g.args.iter().any(|a| a == "live"), "{:?}", g.args);
-            if !verify {
+            assert_eq!(
+                runner,
+                value(&g.args, "--journal").is_none() && !verify,
+                "{:?}",
+                g.args
+            );
+            if !verify && !runner {
                 assert_eq!(value(&g.args, "--journal"), Some(JOURNAL), "{:?}", g.args);
             }
             if !export {
@@ -1367,15 +1605,15 @@ mod tests {
         );
     }
 
-    /// Which steps run today: the gestures on `main` make steps 1, 2, 4 and 6 partial, steps 3
-    /// and 5 wait wholly on other lanes, and the record runs whole.
+    /// Which steps run today: the gestures on `main` make steps 1, 2, 4, 5 and 6 partial, step 3
+    /// waits wholly on other lanes, and the record runs whole.
     #[test]
     fn each_step_reads_ready_partial_or_skipped_from_its_parts() {
         let steps = plan("demo1", &mandate());
         let read: Vec<Readiness> = steps.iter().map(readiness).collect();
         assert_eq!(
             read,
-            [Partial, Partial, Skipped, Partial, Skipped, Partial, Ready]
+            [Partial, Partial, Skipped, Partial, Partial, Partial, Ready]
         );
         let step = |parts: Vec<Part>| Step {
             number: 9,
@@ -1454,7 +1692,10 @@ mod tests {
     fn the_job_runs_every_gesture_in_order_after_the_egress_gate() {
         let steps = plan("demo1", &mandate());
         let all = gestures(&steps);
-        let files = [("mandate.json", "{}".to_string())];
+        let files = [
+            ("mandate.json", "{}".to_string()),
+            ("backtest/bars.json", "{}".to_string()),
+        ];
         let objects = gestures_job(rendered(), &all, "demo-in-1", &files).unwrap();
         let spec = &objects[0]["spec"]["template"]["spec"];
         let names: Vec<&str> = spec["initContainers"]
@@ -1485,7 +1726,25 @@ mod tests {
         assert_eq!(objects[1]["metadata"]["labels"], json!({"app": "x"}));
         assert_eq!(
             spec["volumes"][1],
-            json!({"name": "in", "configMap": {"name": "demo-in-1"}})
+            json!({"name": "in", "configMap": {"name": "demo-in-1", "items": [
+                {"key": "mandate.json", "path": "mandate.json"},
+                {"key": "backtest.bars.json", "path": "backtest/bars.json"}
+            ]}})
+        );
+        assert_eq!(
+            objects[1]["data"],
+            json!({"mandate.json": "{}", "backtest.bars.json": "{}"})
+        );
+        let runner = spec["initContainers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"].as_str().unwrap().ends_with("runner-run"))
+            .unwrap();
+        assert_eq!(runner["command"], json!([RUNNER_BIN]));
+        assert!(
+            last.get("command").is_none(),
+            "the CLI keeps the image's entry point"
         );
     }
 

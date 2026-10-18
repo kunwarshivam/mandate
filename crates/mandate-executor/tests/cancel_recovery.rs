@@ -85,6 +85,7 @@ fn switch() -> Input {
         scope: KillScope::Agent(agent(common::AGENT)),
         initiator: Initiator::RiskLimit,
         confirmation: None,
+        cause: None,
     })
 }
 

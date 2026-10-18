@@ -2633,6 +2633,8 @@ items 13 to 20); no story here buys a service or touches live money.
   `crates/mandate-cli/src/control.rs` still name a placeholder `build` (a digest of the crate's
   name and version); switching both to `BuildDigest::running()` is this row's last slice, blocked
   on R0 closing (DEC-967 item 2, DEC-972 item 7). Signing and the start-up check are E21-35's.
+  The release build refuses rustflags, compiler, wrapper and profile overrides from its
+  environment or any cargo configuration it reads (DEC-2027, for E21-52).
 - **E21-9 (Proposed, M8; SC)** As an owner, I want my broker credential held in the workspace vault,
   leased only to the executor for my connection, and checked for scope, environment, and account at
   every start, so that no other process can use it (design §5). *Accepted when:* a runtime's
@@ -2900,8 +2902,9 @@ enables `live` (ES-23, OPS-5).
   *Status:* the images, the start-up check in `mandate-agentd`, the CI test-key drill and the
   `main`-only publish to GHCR land with DEC-971; images for amd64 and arm64, each built natively,
   under one signed multi-arch index, with DEC-1060. **After R0:** the CLI runs the check (with
-  E21-8's last slice). **Founder:** the hardware key's public half in `RELEASE_KEYS` (H8), until
-  which nothing starts outside dev and CI (DEC-971 item 7). Staging promotion waits on H1.
+  E21-8's last slice). **Founder:** the release key's public half is in `RELEASE_KEYS`
+  (`crates/mandate-release/release-keys/cosign.pub`), the CI key the founder chose over a hardware
+  key (DEC-2605 rows 8 and 9). Staging promotion waits on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
@@ -3121,6 +3124,9 @@ enables `live` (ES-23, OPS-5).
   linked under another issuer; and the E2E lane's `cell demo` runs it in the server's network
   namespace, started before the server, once E21-53 is on `main`. Lane R1's image build (E21-8)
   fails when `RUSTFLAGS` or `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` is set (DEC-2100 item 2).
+  *Status:* done. The tests (#1565), the cell wiring (#1572), the stub (#1591), xtask's release
+  check and profile guard (#1620), and the release build's refusal of rustflags, compiler, wrapper
+  and profile overrides from its environment or any cargo configuration it reads (DEC-2027).
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
   issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
