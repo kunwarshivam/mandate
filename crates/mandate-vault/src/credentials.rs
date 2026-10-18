@@ -23,15 +23,17 @@ pub const SECRET_ID_SUFFIX: &str = ".secret-id";
 const OPEN_TO_OTHERS: u32 = 0o077;
 
 /// Writes each identity's credentials into `dir`, `<role>.role-id` and `<role>.secret-id`, each a
-/// plain file of mode 0600 holding the value alone, replacing any earlier file of that name. `dir`
-/// is made with mode 0700 when it cannot be read, which fails unless it is absent; an existing one must be a directory, not a symbolic link,
-/// open to its owner alone. Returns the names written, sorted.
+/// plain file of mode 0600 holding the value alone, replacing any earlier plain file of that name.
+/// `dir` is made with mode 0700 when it cannot be read, which fails unless it is absent; an
+/// existing one must be a directory, not a symbolic link, of mode 0700 exactly. Every output name
+/// is checked before any is written, and one that is anything but a plain file, a planted link
+/// included, refuses the whole write. Returns the names written, sorted.
 pub fn write_credentials(
     dir: &Path,
     credentials: &[RoleCredentials],
 ) -> Result<Vec<String>, SourceError> {
     match fs::symlink_metadata(dir) {
-        Ok(meta) if meta.is_dir() && meta.permissions().mode() & OPEN_TO_OTHERS == 0 => {}
+        Ok(meta) if meta.is_dir() && meta.permissions().mode() & 0o777 == 0o700 => {}
         Ok(_) => return Err(SourceError::CredentialFile),
         Err(_) => {
             DirBuilder::new()
@@ -41,7 +43,7 @@ pub fn write_credentials(
                 .map_err(|_| SourceError::CredentialFile)?;
         }
     }
-    let mut written = Vec::new();
+    let mut files = Vec::new();
     for credential in credentials {
         let role = role_name(&credential.identity);
         for (suffix, value) in [
@@ -49,19 +51,23 @@ pub fn write_credentials(
             (SECRET_ID_SUFFIX, credential.secret_id.expose_secret()),
         ] {
             let name = format!("{role}{suffix}");
-            write_owner_only(&dir.join(&name), value)?;
-            written.push(name);
+            if fs::symlink_metadata(dir.join(&name)).is_ok_and(|meta| !meta.is_file()) {
+                return Err(SourceError::CredentialFile);
+            }
+            files.push((name, value));
         }
     }
+    for (name, value) in &files {
+        write_owner_only(&dir.join(name), value)?;
+    }
+    let mut written: Vec<String> = files.into_iter().map(|(name, _)| name).collect();
     written.sort();
     Ok(written)
 }
 
-/// Writes `value` to `path` as a plain file of mode 0600, whatever mode an earlier file had.
+/// Writes `value` to `path`, a plain file or absent, as a plain file of mode 0600, whatever mode
+/// an earlier file had.
 fn write_owner_only(path: &Path, value: &str) -> Result<(), SourceError> {
-    if fs::symlink_metadata(path).is_ok_and(|meta| !meta.is_file()) {
-        return Err(SourceError::CredentialFile);
-    }
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
@@ -85,7 +91,7 @@ pub fn read_token_file(path: &Path) -> Result<SecretString, SourceError> {
     }
     let text = fs::read_to_string(path).map_err(|_| SourceError::CredentialFile)?;
     let token = text.strip_suffix('\n').unwrap_or(&text);
-    if token.is_empty() || token.contains('\n') {
+    if token.is_empty() || token.contains(['\n', '\r']) {
         return Err(SourceError::CredentialFile);
     }
     Ok(SecretString::from(token.to_owned()))

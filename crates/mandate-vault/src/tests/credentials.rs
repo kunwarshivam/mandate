@@ -200,7 +200,6 @@ fn a_token_open_to_others_missing_empty_or_linked_is_refused() {
 /// A symbolic link planted at an output name is refused, not followed: the link stays, its target
 /// is neither read nor written, and nothing else is written (DEC-2022 item 1).
 #[test]
-#[ignore = "pending E21-32"]
 fn a_link_planted_at_an_output_name_is_refused_and_its_target_untouched() {
     let dir = fresh("planted");
     fs::create_dir(&dir).unwrap();
@@ -226,7 +225,6 @@ fn a_link_planted_at_an_output_name_is_refused_and_its_target_untouched() {
 /// A refusal changes no file: every output name is checked before any is written, so an earlier
 /// file stays as it was when a later name cannot be written (DEC-2022 item 1).
 #[test]
-#[ignore = "pending E21-32"]
 fn a_refusal_leaves_every_earlier_file_as_it_was() {
     let dir = fresh("partial");
     fs::create_dir(&dir).unwrap();
