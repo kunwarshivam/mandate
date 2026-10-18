@@ -119,6 +119,7 @@ upgrades every release in place.
 | The cell: k3d, CloudNativePG, the migration Job | Always |
 | The demo workspace, its control stream verified | Always |
 | The workspace API server, through a port-forward | Lane A1 (E21-31) marks `api` built in `processes.json` |
+| Sign-in as the demo owner, through the local stub issuer | Lane SI's stub issuer (E21-52) and the server's key-set tier check (E21-53) are both on `main` |
 | A paper agent on rh-sim and recorded Alpaca fixtures | Lane P1 (#1451) marks `runtime` and `executor` built |
 | The founding membership | Lane ID1's `mandate membership` gesture is in the CLI |
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
@@ -127,8 +128,23 @@ The API server listens only on its pod's loopback, so nothing in the cluster rea
 tunnel's route lands. The demo forwards http://127.0.0.1:8787 to it with the machine's own `kubectl`,
 or prints the `kubectl port-forward` command when there is none, and checks that `/v1` answers with
 the one 401. The forward outlives the demo until its pod goes or it is stopped; a later demo
-reuses one that still answers. Sign-in waits on lane SI's stub issuer (DEC-2100) and on subject links: until both are
-in the cell, every sign-in is refused. The session signing key is made in the pod's memory at each
+reuses one that still answers.
+
+Sign-in runs through lane SI's stub issuer (DEC-2100, DEC-1025).
+- It runs as a sidecar of the API pod on its loopback (`127.0.0.1:8090`), and the server starts
+  only once the stub answers.
+- It runs only in a dev or ci cell and only from a local build, so no hosted values file can name
+  it.
+- `cell up` runs it once lane SI's `crates/mandate-stub-issuer` and the server's E21-53 check are
+  both in the checkout. It then links the demo owner (`01KDEM0000000000000000000P`, subject
+  `demo-owner`) with `mandate identity link` and mounts the result as the `subject-links`
+  ConfigMap.
+- `cell demo` also forwards 127.0.0.1:8090 to the stub. It then asks the stub for a token and opens
+  a session with it through `POST /v1/sessions`, which must answer 204 with the session cookie.
+- Until both pieces are in, no stub runs, no links are mounted, every sign-in is refused, and the
+  demo names the sign-in step as skipped.
+
+The session signing key is made in the pod's memory at each
 start. The interim `api` image carries a CA bundle found on the building host (`SSL_CERT_FILE`, else
 the usual Debian, Fedora, openSUSE or Alpine path), without which the server refuses to start; when `cell up` cannot install the workspace release, it prints the API pod's
 state, logs and the namespace's events. A cell that pulls its `mandate` image (`MANDATE_CELL_IMAGE`) has no API image yet, so it
@@ -150,12 +166,12 @@ gestures wrote, so every artifact a record names is checked. Each run uses a fre
 
 | Step | Runs today | Gaps, and what closes each |
 |---|---|---|
-| 1. Sign in, see the workspace | `workspace open` (paper), `workspace found` | Sign-in and the workspace read through the API: the API server (#1457) and `mandate identity link` (#1529) are on `main`; still needed are the API's cell image (lane A1) and E21-52's stub token issuer (spec #1535, crate not built; lane SI) |
-| 2. Deploy under a confirmed envelope | `config register`, `model register`, `version create`, `version confirm` shown then typed, `agent deploy` shown then typed | The same from `web/`: E10-11, E10-12 (lane A2); the agent's processes started from `AgentDeployed`: E21-33 (lane D1) |
-| 3. Research, through the gateway's recorded fake | Nothing yet | The runtime process is on `main` (#1521); still needed are its image (lane P), the shell's research driver (DEC-996 item 2, lane I2), E15-8, and E19-5 (spec on `main`, #1543) |
-| 4. Sized, gated, asked, approved, filled, protected | `approvals list` (empty until the runtime asks) | The runtime's image (#1521 is on `main`; lane P); approval from `web/`: E9-4 (lane SU); the fill and the stop on a fixture broker: E21-30's executor slice (lane X) |
+| 1. Sign in, see the workspace | `workspace open` (paper), `workspace found`; the cell's API, through `cell demo`'s port-forward, refusing a read of the demo workspace with no session (the one 401) | Sign-in and the workspace read with a session: the API runs in the cell (#1554) and `mandate identity link` is on `main` (#1529); still needed is E21-52's stub token issuer beside the API (lanes SI and A1) |
+| 2. Deploy under a confirmed envelope | `config register`, `model register`, `version create`, `version confirm` shown then typed, `agent deploy` shown then typed | The same through the API and `web/`: the routes (#1552) and `web/`'s set-up (#1557) are on `main`; still needed is a session (E21-52); the agent's processes started from `AgentDeployed`: E21-33 (lane D1) |
+| 3. Research, through the gateway's recorded fake | Nothing yet | The runtime (#1521), the research driver (DEC-996 item 2), E15-8's records and the gateway's transport (#1519) are on `main`; still needed are the runtime's cell image (#1560, lane P), the driver run inside the runtime process (lane I2), and E19-5 (spec #1543) |
+| 4. Sized, gated, asked, approved, filled, protected | `approvals list` (empty until the runtime asks) | The runtime's cell image (#1560, lane P); approval from `web/`: E9-4 (lane SU); the fill and the stop on a fixture broker: E21-30's executor slice (lane X) |
 | 5. A backtest of the same version | Nothing yet | The backtest (#1482) and `web/`'s report screen (#1549) are on `main`; still needed are a way to run it in the cell and its API read (E4-4, lane I4) |
-| 6. The kill switch from `web/` | Nothing yet | The API's cell image (lane A1; #1457's route is on `main`); the processes stopping on it: the runtime's image (#1521 is on `main`), E21-30's executor slice, E21-34 (lane O4, #1537) |
+| 6. The kill switch from `web/` | Nothing yet | The route runs in the cell (#1457, #1554); still needed are a session (E21-52) and, for the processes stopping on it, the runtime's cell image (#1560), E21-30's executor slice and E21-34 (lane O4, #1537) |
 
 The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
 every opening asked, protection on. CI's `cell-demo` job, which no required check depends on, runs

@@ -1,5 +1,11 @@
-//! Tests of the local vault. Pending tests fail at an `Unimplemented` stub until E10-13 lands.
+//! Tests of the local vault.
 
+mod canary;
+mod entry;
 mod errors;
+mod fixtures;
+mod import;
 mod layout;
+mod port;
 mod startup;
+mod store;

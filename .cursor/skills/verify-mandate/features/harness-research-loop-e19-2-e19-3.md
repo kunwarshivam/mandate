@@ -41,7 +41,10 @@ neither the invalidation verdict (E19-5) nor the agent-stream `ModelInvocationRe
   `crates/mandate-runtime/tests/research_e2e.rs` (recorded bars and news to an ask, the injection
   fixture, and the demo's run through either backend), and `crates/mandate-runtime/tests/research_properties.rs` (random model
   outputs, failures, late and substituted answers, and a spent budget against an independent
-  oracle, which `the_oracle_catches_seeded_breaches` shows failing on seeded journals). Recorded
+  oracle, which `the_oracle_catches_seeded_breaches` shows failing on seeded journals),
+  `crates/mandate-runtime/tests/invalidation_properties.rs` (E19-5: random active theses,
+  invalidations, and theses against an oracle from the inputs, with its own seeded breaches), and
+  `crates/mandate-journal/tests/thesis_invalidation_records.rs` (§9.22's vectors). Recorded
   fixtures: `crates/mandate-runtime/tests/fixtures/research/`.
   The driver: `crates/mandate-research-driver/tests/trigger.rs`,
   `crates/mandate-research-driver/tests/driver.rs` (every journal outcome on fakes), and

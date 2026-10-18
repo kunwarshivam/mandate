@@ -83,7 +83,11 @@ const COMPANION: &str = "OrderRequestRecorded";
 
 /// Whether §9.2 governs `event_type` on `stream`; every other event keeps its own registration.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
-    if crate::notices::governs(stream, event_type) || crate::gateway::governs(stream, event_type) {
+    if crate::notices::governs(stream, event_type)
+        || crate::gateway::governs(stream, event_type)
+        || crate::invalidation::governs(event_type)
+        || crate::runs::governs(event_type)
+    {
         return true;
     }
     match stream.stream_type() {
@@ -124,6 +128,8 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::notices::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::membership::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::gateway::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::invalidation::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::runs::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
             _ => schema(event_type, schema_version),
@@ -143,6 +149,7 @@ pub(crate) fn payload(
         config_refs,
         actor,
         causation_id,
+        correlation_id,
         pii_refs,
         event_time,
     } = envelope;
@@ -177,6 +184,8 @@ pub(crate) fn payload(
     crate::control_plane::rules(event_type, &payload, actor)?;
     crate::deployment::rules(event_type, &payload, actor)?;
     crate::gateway::rules(event_type, stream_type, &payload, config_refs, actor)?;
+    crate::invalidation::rules(event_type, stream_type, &payload, actor, causation_id)?;
+    crate::runs::rules(event_type, &payload, actor, correlation_id)?;
     crate::notices::rules(event_type, &payload, causation_id)?;
     crate::membership::rules(event_type, &payload, actor, event_time)?;
     let p = Payload(&payload);
@@ -339,6 +348,7 @@ pub(crate) struct Envelope<'a> {
     pub(crate) config_refs: Option<&'a Value>,
     pub(crate) actor: Option<&'a Value>,
     pub(crate) causation_id: Option<&'a Value>,
+    pub(crate) correlation_id: Option<&'a Value>,
     pub(crate) pii_refs: Option<&'a Value>,
     pub(crate) event_time: Option<&'a Value>,
 }
