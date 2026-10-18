@@ -2633,6 +2633,8 @@ items 13 to 20); no story here buys a service or touches live money.
   `crates/mandate-cli/src/control.rs` still name a placeholder `build` (a digest of the crate's
   name and version); switching both to `BuildDigest::running()` is this row's last slice, blocked
   on R0 closing (DEC-967 item 2, DEC-972 item 7). Signing and the start-up check are E21-35's.
+  The release build refuses rustflags, compiler, wrapper and profile overrides from its
+  environment or any cargo configuration it reads (DEC-2027, for E21-52).
 - **E21-9 (Proposed, M8; SC)** As an owner, I want my broker credential held in the workspace vault,
   leased only to the executor for my connection, and checked for scope, environment, and account at
   every start, so that no other process can use it (design §5). *Accepted when:* a runtime's
@@ -2860,18 +2862,20 @@ enables `live` (ES-23, OPS-5).
   - The chart test of the gate seeds no 9153 allow in the manager's policy.
   - `PgControl`'s `rows_after` reads the whole control stream on every pass.
   - `pg.rs` has no competing-writer test for the writer epoch taken for each append.
-  Follow-ups from DEC-1171's review (minors, freeze rule):
-  - m1: the CLI lets a stopped agent's id be deployed again, while §9.21 reads `AgentStopped` as
-    final; decide whether agent ids are reused.
-  - m2: add a vector for a version-1 deployment, a stop, then a version-2 deployment of the same
-    agent; the Rust manager must treat that stop as final (code change).
-  - m3: a manager must not ship into a workspace holding version-1 deployments; say how an existing
-    one is retired or redeployed at version 2.
-  - m4: the `agent_deployed` oracle's case of a revocation after the deployment cannot fail a
-    mutant; and no vector shows an account-stream copy against rule 201.
-  - m5: the §9 catalogue row for `AgentDeployed` does not mention version 2.
-  - m6: `docs/specs/workspace-api.md` (near line 673) and `docs/design/infrastructure.md` (near line
-    277) still describe version 1; the code change updates them.
+  Follow-ups from DEC-1171's review (minors, freeze rule), decided in
+  [DEC-1173](decisions/DEC-1173.md) and specified in journal spec v0.56:
+  - m1 (decided, writers to build): an agent id is deployed once, so a writer refuses an agent an
+    `AgentStopped` names; the CLI's `agent_stopped` and the workspace API's refusal land with the
+    writers.
+  - m2 (done in the vectors; the manager to build): a stop is final even for a deployment the
+    manager never read.
+  - m3 (decided; the manager to build): a version-1 deployment is retired before the manager runs
+    its workspace, and the manager raises `deployment_unread` for one it finds.
+  - m4 (done): the oracle's revocation-after-deployment case now fails two seeded bugs, and a
+    vector shows rule 201 refusing an account stream's copy.
+  - m5 (done): the §9 catalogue row names version 2.
+  - m6 (half done): `docs/specs/workspace-api.md` states the version its deployment writes;
+    `docs/design/infrastructure.md` changes with the manager's code.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
@@ -2898,8 +2902,9 @@ enables `live` (ES-23, OPS-5).
   *Status:* the images, the start-up check in `mandate-agentd`, the CI test-key drill and the
   `main`-only publish to GHCR land with DEC-971; images for amd64 and arm64, each built natively,
   under one signed multi-arch index, with DEC-1060. **After R0:** the CLI runs the check (with
-  E21-8's last slice). **Founder:** the hardware key's public half in `RELEASE_KEYS` (H8), until
-  which nothing starts outside dev and CI (DEC-971 item 7). Staging promotion waits on H1.
+  E21-8's last slice). **Founder:** the release key's public half is in `RELEASE_KEYS`
+  (`crates/mandate-release/release-keys/cosign.pub`), the CI key the founder chose over a hardware
+  key (DEC-2605 rows 8 and 9). Staging promotion waits on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
@@ -3119,6 +3124,9 @@ enables `live` (ES-23, OPS-5).
   linked under another issuer; and the E2E lane's `cell demo` runs it in the server's network
   namespace, started before the server, once E21-53 is on `main`. Lane R1's image build (E21-8)
   fails when `RUSTFLAGS` or `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` is set (DEC-2100 item 2).
+  *Status:* done. The tests (#1565), the cell wiring (#1572), the stub (#1591), xtask's release
+  check and profile guard (#1620), and the release build's refusal of rustflags, compiler, wrapper
+  and profile overrides from its environment or any cargo configuration it reads (DEC-2027).
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
   issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
@@ -3158,6 +3166,26 @@ enables `live` (ES-23, OPS-5).
   environment other than the stream's each fail the whole lookup closed, never skipping the row;
   a revoked member is refused; and a property test folds random grant, revoke and role-change
   histories against an independent oracle that catches each seeded bug.
+- **E21-56 (Proposed, M8, staging for the 2026-10-26 demo; lane IAC; claim #1634; DEC-2011,
+  DEC-2012; ADR-0006)** As the founder, I want the hosted staging and production environments made
+  by OpenTofu from the repository, so that cell #1's infrastructure is reviewed code applied only
+  with my approval, never a script run by hand and never a token an agent holds (DEC-2011).
+  *Accepted when:* `deploy/tofu/` has one module per concern (network: a VPC and a firewall; DOKS:
+  one pool of two nodes, the Kubernetes version pinned and auto-upgrade off; Spaces: OpenTofu's
+  state bucket, versioned, and nothing else; Cloudflare: the tunnel, the API host's DNS record, its
+  Access application, and the R2 bucket for E21-41's WAL archive and base backups with a lock rule
+  over every key for at least the archive's 30-day retention (DEC-973 item 6); the budget: an
+  estimate the plan refuses past $65 per environment) and one root per environment (`staging`,
+  `production`), with state in Spaces, encrypted on the client, and the providers pinned by a
+  committed lock file; every pull request touching `deploy/tofu/` runs `tofu fmt -check`,
+  `tofu validate`, tflint and `tofu test` against mocked providers as the policy check (no public
+  firewall source, the state bucket private, the archive locked, no load balancer, the cap), with
+  no credential, selected by `cargo xtask ci select` (DEC-1190); `.github/workflows/infra.yml`
+  runs `plan` and `apply` only from `main` by manual dispatch, under the environments `infra-staging` and `infra-production`
+  with the founder as required reviewer (ES-12, DEC-1005); and the runbook names every token,
+  key, environment and secret the founder creates, each with the least permissions the plan
+  needs. It stops at a reachable, empty cluster with its buckets, DNS and Access: add-ons and
+  applications are lane GO's.
 
 ## Won't (v1)
 

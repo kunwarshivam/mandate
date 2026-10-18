@@ -25,7 +25,6 @@ const ALICE: PrincipalId = PrincipalId(7);
 const BOB: PrincipalId = PrincipalId(8);
 
 #[test]
-#[ignore = "pending E21-55"]
 fn grants_revokes_and_role_changes_fold_in_stream_order() {
     let mut rows = Rows::opened();
     let owner = [Role::Operator, Role::WorkspaceAdmin];
@@ -97,7 +96,6 @@ fn grants_revokes_and_role_changes_fold_in_stream_order() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn rows_of_other_workspaces_environments_and_types_are_ignored() {
     let mut rows = Rows::opened();
     let admin = roles(&[Role::WorkspaceAdmin]);
@@ -168,7 +166,6 @@ fn granted_then(last: impl FnOnce(&mut Rows)) -> Rows {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn an_unreadable_membership_row_fails_the_whole_lookup_and_is_never_skipped() {
     let unread = granted_then(|rows| {
         rows.edited("MemberDeactivated", T0 - 50, |e| {
@@ -282,7 +279,6 @@ fn authorized(lookup: &ControlLookup, principal: PrincipalId, now: i64) -> Resul
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn a_revoked_member_is_refused() {
     let mut rows = Rows::opened();
     let viewer = roles(&[Role::Viewer]);
@@ -321,7 +317,6 @@ fn a_revoked_member_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn the_time_base_is_the_lookups_now() {
     let mut rows = Rows::opened();
     let granted = [Role::Operator, Role::Viewer];
@@ -351,7 +346,6 @@ fn the_time_base_is_the_lookups_now() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn a_membership_row_of_another_environment_fails_the_lookup_closed() {
     let viewer = roles(&[Role::Viewer]);
     let revoke = granted_then(|rows| {
@@ -386,7 +380,6 @@ fn a_membership_row_of_another_environment_fails_the_lookup_closed() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn the_deployments_parser_answers_every_refusal_as_a_failed_lookup() {
     let parse = control_parser(hosted().workspace);
     let granted = granted_then(|_| {});
@@ -423,7 +416,6 @@ fn the_deployments_parser_answers_every_refusal_as_a_failed_lookup() {
 }
 
 #[test]
-#[ignore = "pending E21-55"]
 fn only_a_membership_record_of_the_workspace_must_be_at_version_1() {
     let passed_over = granted_then(|rows| {
         rows.edited("AgentDeployed", T0 - 60, |e| e["schema_version"] = json!(7));
