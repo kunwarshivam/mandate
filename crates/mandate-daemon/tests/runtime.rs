@@ -107,6 +107,7 @@ fn wiring() -> Wiring {
                 live_cli_confirm: None,
             },
         },
+        research: None,
     }
 }
 

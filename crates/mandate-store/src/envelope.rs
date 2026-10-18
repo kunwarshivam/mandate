@@ -30,6 +30,9 @@ pub struct Fields<'a> {
     pub event_type: &'a str,
     pub schema_version: u64,
     pub causation_id: Option<&'a str>,
+    /// The run the draft belongs to (journal spec §9.23 rule 171, DEC-2208 item 5); `None` for a
+    /// record of no run.
+    pub correlation_id: Option<&'a str>,
     pub config_refs: &'a Object,
     pub payload: &'a Value,
 }
@@ -59,7 +62,10 @@ pub fn draft_bytes(envelope: &Envelope<'_>, fields: &Fields<'_>) -> Option<Vec<u
         ),
         ("clock_source", text("scheduler")),
         ("config_refs", Value::Object(fields.config_refs.clone())),
-        ("correlation_id", Value::Null),
+        (
+            "correlation_id",
+            fields.correlation_id.map_or(Value::Null, text),
+        ),
         ("environment", text(envelope.environment.as_str())),
         ("envelope_version", int(1)?),
         ("event_id", text(fields.event_id)),
