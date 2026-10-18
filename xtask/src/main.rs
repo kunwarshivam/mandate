@@ -17,6 +17,7 @@ mod cell;
 mod image;
 mod infra_preflight;
 mod release;
+mod tofu_audit;
 
 const USAGE: &str = "\
 usage: cargo xtask <command>
@@ -773,6 +774,7 @@ fn tofu_checks() -> Result<()> {
     }
     let root = repo_root()?;
     let tofu_dir = root.join(TOFU_DIR);
+    let used = tofu_audit::used_types(&tofu_sources(&tofu_dir)?);
     let work = root.join("target").join("tofu");
     let cache = work.join("plugins");
     fs::create_dir_all(&cache).with_context(|| format!("creating {}", cache.display()))?;
@@ -788,6 +790,7 @@ fn tofu_checks() -> Result<()> {
             &config.to_string_lossy(),
         ],
     )?;
+    let mut covered = BTreeSet::new();
     for dir in tofu_roots(&tofu_dir)? {
         let name = dir
             .strip_prefix(&tofu_dir)
@@ -796,6 +799,15 @@ fn tofu_checks() -> Result<()> {
             .replace('/', "-");
         let data = work.join(&name);
         let chdir = format!("-chdir={}", dir.display());
+        let tofu = |args: &[&str]| {
+            let mut command = Command::new("tofu");
+            command
+                .args(args)
+                .env("TF_DATA_DIR", &data)
+                .env("TF_PLUGIN_CACHE_DIR", &cache)
+                .env("TF_IN_AUTOMATION", "1");
+            command
+        };
         for args in [
             vec![
                 chdir.as_str(),
@@ -808,19 +820,79 @@ fn tofu_checks() -> Result<()> {
             vec![chdir.as_str(), "test"],
         ] {
             eprintln!("    $ tofu {}", args.join(" "));
-            let status = Command::new("tofu")
-                .args(&args)
-                .env("TF_DATA_DIR", &data)
-                .env("TF_PLUGIN_CACHE_DIR", &cache)
-                .env("TF_IN_AUTOMATION", "1")
-                .status()
-                .context("starting `tofu`")?;
+            let status = tofu(&args).status().context("starting `tofu`")?;
             if !status.success() {
                 bail!("`tofu {}` failed with {status}", args.join(" "));
             }
+            if args.get(1) == Some(&"init") && dir.starts_with(tofu_dir.join("modules")) {
+                covered.extend(provider_schemas_mask(&tofu, &chdir, &used)?);
+            }
         }
     }
+    let unchecked: Vec<String> = used
+        .iter()
+        .filter(|(kind, name)| !(kind == "resource" && name == "terraform_data"))
+        .filter(|used| !covered.contains(*used))
+        .map(|(kind, name)| {
+            format!("{kind} {name}: no module's provider schema was checked for it")
+        })
+        .collect();
+    if !unchecked.is_empty() {
+        bail!("tofu:\n  {}", unchecked.join("\n  "));
+    }
     Ok(())
+}
+
+/// The audit's provider check (DEC-2030 item 6): in one initialised module, every
+/// credential-named attribute of a type the tree uses whose provider the module installs is
+/// `sensitive` in that provider's schema ([`tofu_audit::unmasked_attributes`]), so no plan diff
+/// prints one. Returns the types it checked. Roots carry an `s3` backend, which `providers schema`
+/// will not read uninitialised, so the modules, whose providers are the same pinned ones, stand in
+/// for them, and the caller fails any used type no module checked. The placeholder passphrase
+/// only satisfies configuration loading.
+fn provider_schemas_mask(
+    tofu: &dyn Fn(&[&str]) -> Command,
+    chdir: &str,
+    used: &BTreeSet<(String, String)>,
+) -> Result<BTreeSet<(String, String)>> {
+    eprintln!("    $ tofu {chdir} providers schema -json");
+    let out = tofu(&[chdir, "providers", "schema", "-json"])
+        .env(
+            "TF_VAR_state_passphrase",
+            "a-placeholder-the-schema-read-needs-and-encrypts-nothing-with",
+        )
+        .output()
+        .context("starting `tofu`")?;
+    if !out.status.success() {
+        bail!(
+            "`tofu {chdir} providers schema -json` failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    let schema: serde_json::Value =
+        serde_json::from_slice(&out.stdout).context("tofu's provider schema is not JSON")?;
+    let used_here: BTreeSet<(String, String)> = used
+        .iter()
+        .filter(|(_, name)| {
+            name == "terraform_data"
+                || schema
+                    .get("provider_schemas")
+                    .and_then(serde_json::Value::as_object)
+                    .is_some_and(|providers| {
+                        providers.keys().any(|source| {
+                            name.split('_')
+                                .next()
+                                .is_some_and(|prefix| source.ends_with(&format!("/{prefix}")))
+                        })
+                    })
+        })
+        .cloned()
+        .collect();
+    let problems = tofu_audit::unmasked_attributes(&schema, &used_here);
+    if !problems.is_empty() {
+        bail!("tofu:\n  {}", problems.join("\n  "));
+    }
+    Ok(used_here)
 }
 
 /// The provider sources `deploy/tofu/` may name (DEC-2012 item 4).
@@ -996,8 +1068,13 @@ fn tofu_roots(tofu_dir: &Path) -> Result<Vec<PathBuf>> {
 
 /// The workflow that alone plans and applies the hosted environments (E21-56, DEC-2014).
 const INFRA_WORKFLOW: &str = ".github/workflows/infra.yml";
-/// The one command `infra.yml`'s secret-holding step runs.
-const INFRA_RUN: &str = "cargo xtask infra";
+/// The one command `infra.yml`'s secret-holding step runs: the binary an earlier step built with
+/// no secret in its environment, so no build script runs beside one (the audit's item 4).
+const INFRA_RUN: &str = "target/debug/xtask infra";
+/// The only subcommand the closed world lets a workflow run through the built xtask binary rather
+/// than through cargo: [`INFRA_RUN`]'s, which an earlier step of the same job built from the
+/// checkout with `cargo build --locked --package xtask`.
+const INFRA_RUN_SUBCOMMAND: &str = "infra";
 /// The secrets that step reads, each from the environment `infra-<environment>` the founder
 /// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Spaces key is
 /// minted per run, never stored (DEC-2030 item 4). The Cloudflare token goes to OpenTofu as a
@@ -1033,12 +1110,15 @@ fn infra_commands(environment: &str, action: &str, plan_file: &str) -> Result<Ve
             chdir.clone(),
             "init".to_owned(),
             "-input=false".to_owned(),
+            "-no-color".to_owned(),
             "-lockfile=readonly".to_owned(),
         ],
         vec![
             chdir.clone(),
             "plan".to_owned(),
             "-input=false".to_owned(),
+            "-no-color".to_owned(),
+            "-compact-warnings".to_owned(),
             format!("-out={plan_file}"),
         ],
     ];
@@ -1047,6 +1127,8 @@ fn infra_commands(environment: &str, action: &str, plan_file: &str) -> Result<Ve
             chdir,
             "apply".to_owned(),
             "-input=false".to_owned(),
+            "-no-color".to_owned(),
+            "-compact-warnings".to_owned(),
             plan_file.to_owned(),
         ]);
     }
@@ -1074,6 +1156,12 @@ fn infra() -> Result<()> {
     if run.is_empty() || !run.chars().all(|c| c.is_ascii_digit()) {
         bail!("GITHUB_RUN_ID must be the run's number, which names its Spaces key");
     }
+    let sha = env::var(INFRA_SHA_ENV).unwrap_or_default();
+    reviewed_commit(
+        &sha,
+        &env::var("GITHUB_SHA").unwrap_or_default(),
+        &head_commit()?,
+    )?;
     let work = repo_root()?.join("target").join("tofu");
     fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
     let plan_file = work.join(format!("{environment}.tfplan"));
@@ -1082,7 +1170,7 @@ fn infra() -> Result<()> {
     let preflight = infra_preflight::preflight(&environment, &run, !commands.is_empty(), &read)?;
     eprint!("{}", preflight.checklist.render(&environment));
     let outcome = if preflight.checklist.complete() {
-        run_tofu(&commands, preflight.key.as_ref())
+        run_tofu(&commands, preflight.key.as_ref(), &sha, &plan_file)
     } else {
         Err(anyhow::anyhow!(
             "infra preflight: each MISSING line above is a step in deploy/tofu/README.md; nothing \
@@ -1101,15 +1189,64 @@ fn infra() -> Result<()> {
     outcome
 }
 
+/// The dispatch's `sha` input, which the founder approves the run for (the audit's item 5).
+const INFRA_SHA_ENV: &str = "MANDATE_INFRA_SHA";
+
+/// The commit `git` has checked out.
+fn head_commit() -> Result<String> {
+    let out = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .context("starting `git`")?;
+    if !out.status.success() {
+        bail!("`git rev-parse HEAD` failed");
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
+/// Refuses a run unless `sha`, the commit the founder named when dispatching, is a full commit and
+/// is both the run's commit and the one checked out, so an approval binds to a reviewed commit and
+/// never to whatever `main` became while the run waited for it.
+fn reviewed_commit(sha: &str, run_sha: &str, head: &str) -> Result<()> {
+    if sha.len() != 40
+        || !sha
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+    {
+        bail!("{INFRA_SHA_ENV} must be the full 40-character commit you reviewed");
+    }
+    if sha != run_sha || sha != head {
+        bail!(
+            "the dispatch names commit {sha}, but the run is at {run_sha} with {head} checked \
+             out: dispatch again with the commit you reviewed, once main is at it"
+        );
+    }
+    Ok(())
+}
+
+/// The paths a change to which changes what `infra.yml` does.
+const INFRA_PATHS: [&str; 3] = [TOFU_DIR, INFRA_WORKFLOW, "xtask/"];
+
 /// Runs each `tofu` command in turn, with the run's Spaces key in the child's environment alone,
-/// as both of the names the provider and the backend read. A blank or empty
-/// `KUBE_API_ALLOWED_CIDRS` is left out, so staging's root takes its empty default.
-fn run_tofu(commands: &[Vec<String>], key: Option<&infra_preflight::SpacesKey>) -> Result<()> {
+/// as both of the names the provider and the backend read, and `sha` as the commit the plan
+/// records. A blank or empty `KUBE_API_ALLOWED_CIDRS` is left out, so staging's root takes its
+/// empty default. The public log gets no `tofu` output (the audit's item 1): each command's
+/// output is captured, and only a failure's diagnostics, which OpenTofu redacts for every
+/// sensitive value, are printed. After `init` the log lists what changed since the commit state
+/// last applied; after `plan`, the saved plan's addresses and actions alone.
+fn run_tofu(
+    commands: &[Vec<String>],
+    key: Option<&infra_preflight::SpacesKey>,
+    sha: &str,
+    plan_file: &Path,
+) -> Result<()> {
     let cidrs = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
-    for args in commands {
-        eprintln!("    $ tofu {}", args.join(" "));
+    let tofu = |args: &[String]| {
         let mut command = Command::new("tofu");
-        command.args(args).env("TF_IN_AUTOMATION", "1");
+        command
+            .args(args)
+            .env("TF_IN_AUTOMATION", "1")
+            .env("TF_VAR_commit_sha", sha);
         if let Some(key) = key {
             for name in ["SPACES_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID"] {
                 command.env(name, &key.access_key);
@@ -1121,10 +1258,85 @@ fn run_tofu(commands: &[Vec<String>], key: Option<&infra_preflight::SpacesKey>) 
         if infra_preflight::no_cidrs(cidrs.as_deref()) {
             command.env_remove(infra_preflight::KUBE_CIDRS_ENV);
         }
-        let status = command.status().context("starting `tofu`")?;
-        if !status.success() {
-            bail!("`tofu {}` failed with {status}", args.join(" "));
+        command
+    };
+    for args in commands {
+        eprintln!("    $ tofu {}", args.join(" "));
+        let out = tofu(args).output().context("starting `tofu`")?;
+        if !out.status.success() {
+            eprintln!("{}", String::from_utf8_lossy(&out.stderr).trim());
+            bail!("`tofu {}` failed with {}", args.join(" "), out.status);
         }
+        let chdir = args.first().cloned().unwrap_or_default();
+        match args.get(1).map(String::as_str) {
+            Some("init") => changed_since_applied(&tofu, &chdir, sha)?,
+            Some("plan") => {
+                let shown = tofu(&[
+                    chdir,
+                    "show".to_owned(),
+                    "-json".to_owned(),
+                    plan_file.to_string_lossy().into_owned(),
+                ])
+                .output()
+                .context("starting `tofu`")?;
+                if !shown.status.success() {
+                    bail!("`tofu show -json` of the saved plan failed");
+                }
+                let plan: serde_json::Value = serde_json::from_slice(&shown.stdout)
+                    .context("the saved plan's JSON could not be read")?;
+                eprintln!("    the plan, by address (values stay out of the log):");
+                for line in tofu_audit::plan_summary(&plan) {
+                    eprintln!("      {line}");
+                }
+            }
+            Some("apply") => eprintln!("    applied exactly the plan above"),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Prints the files under [`INFRA_PATHS`] that changed between the commit this environment's
+/// state last applied and `sha`, so the founder approves a diff they can see. A first run, or a
+/// commit the checkout does not hold, says so instead.
+fn changed_since_applied(
+    tofu: &dyn Fn(&[String]) -> Command,
+    chdir: &str,
+    sha: &str,
+) -> Result<()> {
+    let out = tofu(&[
+        chdir.to_owned(),
+        "output".to_owned(),
+        "-no-color".to_owned(),
+        "-raw".to_owned(),
+        "applied_commit".to_owned(),
+    ])
+    .output()
+    .context("starting `tofu`")?;
+    let applied = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if !out.status.success()
+        || applied.len() != 40
+        || !applied.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        eprintln!("    no applied commit in state yet: this is the environment's first apply");
+        return Ok(());
+    }
+    if applied == sha {
+        eprintln!("    state was last applied at this same commit");
+        return Ok(());
+    }
+    let diff = Command::new("git")
+        .args(["diff", "--name-status", &applied, sha, "--"])
+        .args(INFRA_PATHS)
+        .output()
+        .context("starting `git`")?;
+    if !diff.status.success() {
+        eprintln!("    state was last applied at {applied}, which this checkout does not hold");
+        return Ok(());
+    }
+    eprintln!("    changed since the last apply ({applied}):");
+    for line in String::from_utf8_lossy(&diff.stdout).lines() {
+        eprintln!("      {line}");
     }
     Ok(())
 }
@@ -1424,6 +1636,10 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
         (
             "          persist-credentials: false",
             "the checkout must keep no credential",
+        ),
+        (
+            "          MANDATE_INFRA_SHA: ${{ inputs.sha }}",
+            "the secret step must receive the reviewed commit, which it checks against the checkout",
         ),
     ] {
         if !has(wanted) {
@@ -4533,6 +4749,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_S3_URL",
     "MANDATE_INFRA_ACTION",
     "MANDATE_INFRA_ENVIRONMENT",
+    "MANDATE_INFRA_SHA",
     "MANDATE_TOFU_REQUIRED",
     "DIGITALOCEAN_TOKEN",
     "TF_VAR_state_passphrase",
@@ -5016,6 +5233,7 @@ fn closed_world(
     let flags_free = |words: &[&str]| words.iter().all(|word| !word.starts_with('-'));
     let allowed = match command_word {
         word if names_cargo(word) => true,
+        "target/debug/xtask" => args == [INFRA_RUN_SUBCOMMAND],
         "echo" | "sha256sum" | "rm" | "test" | "[" | "[[" | "jq" | "grep" | "cat" | "exit"
         | "case" | "fi" | "done" | "esac" => true,
         "printf" => !args.iter().any(|arg| arg.starts_with("-v")),
@@ -15413,7 +15631,8 @@ mod tests {
         assert_eq!(
             plan.first().map(|c| c.join(" ")),
             Some(
-                "-chdir=deploy/tofu/environments/staging init -input=false -lockfile=readonly"
+                "-chdir=deploy/tofu/environments/staging init -input=false -no-color \
+                 -lockfile=readonly"
                     .to_owned()
             )
         );
@@ -15430,8 +15649,8 @@ mod tests {
         assert_eq!(
             apply.last().map(|c| c.join(" ")),
             Some(
-                "-chdir=deploy/tofu/environments/production apply -input=false \
-                 /t/production.tfplan"
+                "-chdir=deploy/tofu/environments/production apply -input=false -no-color \
+                 -compact-warnings /t/production.tfplan"
                     .to_owned()
             ),
             "apply applies the saved plan: {apply:?}"
@@ -15453,6 +15672,27 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    /// The audit's item 5: a run proceeds only at the full commit the founder named, which must be
+    /// both the run's commit and the checkout.
+    #[test]
+    fn infra_runs_only_at_the_reviewed_commit() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let other = "1123456789abcdef0123456789abcdef01234567";
+        assert!(crate::reviewed_commit(sha, sha, sha).is_ok());
+        for (named, run, head) in [
+            ("", sha, sha),
+            ("0123456", sha, sha),
+            ("0123456789ABCDEF0123456789ABCDEF01234567", sha, sha),
+            (sha, other, sha),
+            (sha, sha, other),
+        ] {
+            assert!(
+                crate::reviewed_commit(named, run, head).is_err(),
+                "{named:?} at {run} / {head} is refused"
+            );
+        }
     }
 
     /// E21-56 (DEC-2014): the committed `infra.yml` passes its guard, and each way of loosening
@@ -15482,7 +15722,7 @@ mod tests {
             assert!(text.contains(from), "the fixture still holds {from:?}");
             text.replacen(from, to, 1)
         };
-        let secret_step = "      - run: cargo xtask infra\n";
+        let secret_step = "      - run: target/debug/xtask infra\n";
         let cases = [
             (
                 "push",

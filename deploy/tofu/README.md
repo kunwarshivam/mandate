@@ -114,10 +114,15 @@ No repository-level secret or variable is used, so no other workflow can read th
 
 ### 4. The first run
 
-1. **Actions → infra → Run workflow**, branch `main`, environment `staging`, action `preflight`.
-   Approve the job. Every line should read `[ok]`; each `[MISSING]` line names the step above
-   that is still to do.
-2. Dispatch again with action `plan`. Read the plan:
+Every dispatch takes `sha`: paste the full commit of `main` you read (the repository's commit
+page has a copy button). The run refuses unless `main` is still at it, and lists what changed
+under `deploy/tofu/`, `infra.yml` and `xtask/` since the last apply, so you approve a commit you
+have seen. The log never shows a value: only addresses and actions.
+
+1. **Actions → infra → Run workflow**, branch `main`, environment `staging`, action `preflight`,
+   and `sha`. Approve the job. Every line should read `[ok]`; each `[MISSING]` line names the step
+   above that is still to do.
+2. Dispatch again with action `plan`. Read the plan's list of changes:
    - one VPC, a tag, a firewall and a cluster;
    - the state bucket, imported;
    - a tunnel and its configuration;

@@ -6,7 +6,10 @@
 # `infra-production`, whose required reviewer is the founder and which alone holds the cloud
 # tokens. No pull-request job can reach them (ES-12, DEC-1005's pattern); pull requests run the
 # credential-free checks in `ci.yml` instead. xtask is built in a step that holds no secret, and
-# only the last step, `cargo xtask infra`, receives them. `cargo xtask lint` checks this shape.
+# only the last step, which runs that built binary as `target/debug/xtask infra`, receives them, so
+# no build script ever runs beside a secret. The run refuses unless `sha` is the commit checked
+# out, so the founder's approval binds to the commit they reviewed. `cargo xtask lint` checks this
+# shape.
 name: infra
 
 on:
@@ -23,6 +26,10 @@ on:
         type: choice
         default: preflight
         options: [preflight, plan, apply]
+      sha:
+        description: The full commit you reviewed; the run refuses unless main is at it
+        required: true
+        type: string
 
 permissions: {}
 
@@ -46,6 +53,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Install OpenTofu (checksum-verified)
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o tofu.tgz "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz"
@@ -55,10 +63,11 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       # Built here, with no secret in the environment, so no build script ever sees one.
       - run: cargo build --locked --package xtask
-      - run: cargo xtask infra
+      - run: target/debug/xtask infra
         env:
           MANDATE_INFRA_ENVIRONMENT: ${{ inputs.environment }}
           MANDATE_INFRA_ACTION: ${{ inputs.action }}
+          MANDATE_INFRA_SHA: ${{ inputs.sha }}
           DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
           TF_VAR_state_passphrase: ${{ secrets.TOFU_STATE_PASSPHRASE }}
           TF_VAR_cloudflare_api_token: ${{ secrets.CF_INFRA_API_TOKEN }}

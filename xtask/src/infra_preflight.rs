@@ -12,6 +12,8 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
+use crate::tofu_audit;
+
 const DO_API: &str = "https://api.digitalocean.com/v2";
 const CF_API: &str = "https://api.cloudflare.com/client/v4";
 /// The region of every environment's state bucket (DEC-995 item 2).
@@ -320,16 +322,9 @@ pub(crate) fn delete_key(token: &str, access_key: &str) -> Result<bool> {
 }
 
 /// Mints this run's key, full access, since only that grant may create a bucket (DEC-2030 item 4).
+/// The answer is read as untyped JSON, whose errors cannot echo a value, and both halves of the
+/// key are masked in the log before anything else touches them (the audit's item 3).
 fn mint_key(token: &str, name: &str) -> Result<Option<SpacesKey>> {
-    #[derive(Deserialize)]
-    struct Minted {
-        key: MintedKey,
-    }
-    #[derive(Deserialize)]
-    struct MintedKey {
-        access_key: String,
-        secret_key: String,
-    }
     let body = serde_json::json!({
         "name": name,
         "grants": [{ "bucket": "", "permission": "fullaccess" }],
@@ -339,11 +334,24 @@ fn mint_key(token: &str, name: &str) -> Result<Option<SpacesKey>> {
     if !answer.ok() {
         return Ok(None);
     }
-    let minted: Minted =
-        serde_json::from_str(&answer.body).context("DigitalOcean's minted key is not its JSON")?;
+    let Ok(minted) = serde_json::from_str::<serde_json::Value>(&answer.body) else {
+        bail!("DigitalOcean's minted key is not JSON");
+    };
+    let field = |name: &str| {
+        minted
+            .get("key")
+            .and_then(|key| key.get(name))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    let (Some(access_key), Some(secret_key)) = (field("access_key"), field("secret_key")) else {
+        bail!("DigitalOcean's minted key lacks its access key or secret");
+    };
+    tofu_audit::mask(&access_key);
+    tofu_audit::mask(&secret_key);
     Ok(Some(SpacesKey {
-        access_key: minted.key.access_key,
-        secret_key: minted.key.secret_key,
+        access_key,
+        secret_key,
     }))
 }
 
@@ -481,6 +489,7 @@ fn cloudflare(list: &mut Checklist, token: &str) -> Result<()> {
         return Ok(());
     };
     let account = &account.id;
+    tofu_audit::mask(account);
     let mut record = None;
     for (verify, read) in [
         (
@@ -500,6 +509,7 @@ fn cloudflare(list: &mut Checklist, token: &str) -> Result<()> {
             .context("Cloudflare's token verification is not its JSON")?
             .result
             .id;
+        tofu_audit::mask(&id);
         record = Some(api("GET", &format!("{read}{id}"), token, None)?);
         break;
     }
