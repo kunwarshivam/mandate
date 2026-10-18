@@ -36,7 +36,7 @@ const JOURNAL: &str = "$(MANDATE_JOURNAL_DSN)";
 const STORE: &str = "/work/store";
 const SEGMENT: &str = "/work/segment.jsonl";
 /// The founding member: the demo owner, the member the stub issuer's `demo-owner` subject is
-/// linked to, so the owner who signs in is the one the run's workspace was founded for (DEC-2006).
+/// linked to, so the owner who signs in is the one the run's workspace was founded for (DEC-2010).
 /// An opaque ULID (identity spec §3.1), never a name; the CLI's owner gestures take the lower-case
 /// form, which is all `--user` accepts (DEC-527 item 3).
 pub const FOUNDER: &str = DEMO_OWNER;
@@ -47,7 +47,7 @@ pub const AGENT: &str = "demo-spy";
 /// written, before the polling gives up.
 const DEADLINE_S: u64 = 240;
 
-/// The run's workspace (DEC-2006): a ULID, since the API hosts only a ULID, fresh for each run id
+/// The run's workspace (DEC-2010): a ULID, since the API hosts only a ULID, fresh for each run id
 /// because a confirmed version refuses a second confirmation: `01KDEM`, the run id's ten digits,
 /// then a fixed tail that no other demo id uses.
 pub fn workspace_of(id: &str) -> String {
@@ -842,7 +842,7 @@ fn api_unaskable() -> Result<Option<String>> {
     Ok(None)
 }
 
-/// Points the cell's API and deployment manager at the run's `workspace` (DEC-2006): a `helm
+/// Points the cell's API and deployment manager at the run's `workspace` (DEC-2010): a `helm
 /// upgrade` of the workspace release that keeps every other value, then a wait until both
 /// Deployments have rolled out, so no pod of an earlier run still serves another workspace; and
 /// any earlier `kubectl port-forward` to the API is stopped, so the checks never reach an old pod

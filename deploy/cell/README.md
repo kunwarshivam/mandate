@@ -209,7 +209,7 @@ ULID made from the run id (`01KDEM<run id>000000000D`), founded for the demo own
 stub issuer's `demo-owner` subject is linked to; before the gestures, the scenario points the API
 and the deployment manager at it (`helm upgrade --reuse-values --set api.workspace=…`) and waits
 for both to roll out, so every step, through the CLI, the API or `web/`, acts on one workspace
-(DEC-2006).
+(DEC-2010).
 
 The run's own report is the up-to-date list; on 2026-10-18, after slice 5, it read:
 
