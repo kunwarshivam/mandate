@@ -41,7 +41,8 @@ claim issue or the decision file, not here.
   staging for the demo, Cloudflare R2 with a bucket lock for the archive, `cli_confirm` step-up for
   paper grants, a Robinhood sell booked at its limit price, a CI signing key with staging first
   and no hardware key, staging's vault unsealing itself, and staging's automation needing no step
-  from the founder; and CI no longer gates a merge (row 14), a break on `main` being fixed at once.
+  from the founder; and DEC-175 relaxed, so an approved PR merges right after its independent review without
+  waiting on `fast`, `full` or `web` (row 14).
   DEC-2300 merged Accepted (#1598). Lane E2E's slices 4 to 7 merged (#1614 `cb043cb5`, #1625,
   #1674, #1693): the demo cell now checks each run's own workspace, the owner's sign-in and
   signed-in reads, the backtest run, record and read, and the CLI kill switch; running main's API
