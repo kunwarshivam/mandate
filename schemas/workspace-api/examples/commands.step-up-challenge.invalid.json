@@ -1,0 +1,80 @@
+[
+  {
+    "label": "no challenge_id",
+    "remove": [
+      "/challenge_id"
+    ]
+  },
+  {
+    "label": "no webauthn_challenge",
+    "remove": [
+      "/webauthn_challenge"
+    ]
+  },
+  {
+    "label": "no action",
+    "remove": [
+      "/action"
+    ]
+  },
+  {
+    "label": "no issued_at",
+    "remove": [
+      "/issued_at"
+    ]
+  },
+  {
+    "label": "no expires_at",
+    "remove": [
+      "/expires_at"
+    ]
+  },
+  {
+    "label": "a padded webauthn_challenge",
+    "set": {
+      "/webauthn_challenge": "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA="
+    }
+  },
+  {
+    "label": "a standard-alphabet webauthn_challenge",
+    "set": {
+      "/webauthn_challenge": "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWe+A"
+    }
+  },
+  {
+    "label": "a 16-byte webauthn_challenge",
+    "set": {
+      "/webauthn_challenge": "q83vEjRWeJCrze8SNFZ4kA"
+    }
+  },
+  {
+    "label": "43 characters that no 32 bytes encode to",
+    "set": {
+      "/webauthn_challenge": "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJB"
+    }
+  },
+  {
+    "label": "the workspace echoed",
+    "set": {
+      "/workspace_id": "01JB3K6F0C9R2V7N4M8Q1T5W3Y"
+    }
+  },
+  {
+    "label": "a secret-named member",
+    "set": {
+      "/client_secret": "x"
+    }
+  },
+  {
+    "label": "no api_version",
+    "remove": [
+      "/api_version"
+    ]
+  },
+  {
+    "label": "an action with an unknown kind",
+    "set": {
+      "/action/kind": "anything"
+    }
+  }
+]
