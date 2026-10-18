@@ -24,7 +24,8 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | openbao | objectstore | mutants | schema-mutants | cell |
+                        postgres | openbao | objectstore | stub-release | mutants |
+                        schema-mutants | cell |
                         cell-demo | cell-journal | cell-failover | cell-kill-switch | sweep; or
                         one part of test: test-nextest | test-doc | test-rh-sim | test-python.
                         Tests, pending tests,
@@ -104,6 +105,7 @@ const FULL_JOB: &[&str] = &[
     "postgres",
     "openbao",
     "objectstore",
+    "stub-release",
 ];
 const PR_JOBS: &[&str] = &[
     "lint",
@@ -118,6 +120,7 @@ const PR_JOBS: &[&str] = &[
     "postgres",
     "openbao",
     "objectstore",
+    "stub-release",
     "mutants",
     "schema-mutants",
     "cell",
@@ -396,6 +399,7 @@ fn ci(job: &str) -> Result<()> {
         "postgres" => postgres(),
         "openbao" => openbao(),
         "objectstore" => objectstore(),
+        "stub-release" => stub_release(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "sweep" => sweep(Path::new(".")),
         "fast" => {
@@ -694,6 +698,95 @@ fn openbao() -> Result<()> {
         .context("starting `cargo nextest`")?;
     if !status.success() {
         bail!("the OpenBao conformance suite failed with {status}");
+    }
+    Ok(())
+}
+
+/// The stub token issuer's crate and binary (E21-52, DEC-2100).
+const STUB_ISSUER: &str = "mandate-stub-issuer";
+
+/// All a build of the stub without debug assertions may write, to standard error (DEC-2100 item 2).
+const STUB_NOT_BUILT: &str = "stub_issuer_not_built\n";
+
+/// How many 20 ms waits the release stub gets to exit before it is killed and the check fails: a
+/// stub that holds an issuer serves instead of exiting.
+const STUB_RELEASE_WAITS: u32 = 250;
+
+/// DEC-2100 item 2: a build without debug assertions holds no issuer. Builds the stub with
+/// `--release` once, only when the diff selects its crate (DEC-1190), runs it as a `dev` cell
+/// would, and requires [`release_stub_refused`]. It runs here rather than as a crate test, so the
+/// mutation gate never rebuilds the crate in release.
+fn stub_release() -> Result<()> {
+    if !selection()?.crates.contains(STUB_ISSUER) {
+        eprintln!("    stub-release: {STUB_ISSUER} is not affected (DEC-1190)");
+        return Ok(());
+    }
+    sh(
+        "cargo",
+        &[
+            "build",
+            "--locked",
+            "--release",
+            "--package",
+            STUB_ISSUER,
+            "--bin",
+            STUB_ISSUER,
+        ],
+    )?;
+    let meta: serde_json::Value = serde_json::from_str(&output_in(
+        Path::new("."),
+        "cargo",
+        &["metadata", "--format-version", "1", "--no-deps", "--locked"],
+    )?)
+    .context("parsing cargo metadata")?;
+    let target = meta["target_directory"]
+        .as_str()
+        .context("cargo metadata names no target directory")?;
+    let binary = Path::new(target).join("release").join(STUB_ISSUER);
+    eprintln!(
+        "    $ MANDATE_DEPLOYMENT_TIER=dev {} --bind 127.0.0.1:8899",
+        binary.display()
+    );
+    let mut child = Command::new(&binary)
+        .args(["--bind", "127.0.0.1:8899"])
+        .env("MANDATE_DEPLOYMENT_TIER", "dev")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("starting {}", binary.display()))?;
+    let mut exited = false;
+    for _ in 0..STUB_RELEASE_WAITS {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        if child.try_wait()?.is_some() {
+            exited = true;
+            break;
+        }
+    }
+    if !exited {
+        child.kill()?;
+    }
+    let output = child.wait_with_output()?;
+    if !exited {
+        bail!(
+            "the release build of {STUB_ISSUER} kept running instead of refusing: it holds an \
+             issuer (DEC-2100 item 2)"
+        );
+    }
+    release_stub_refused(&output)
+}
+
+/// Whether a release stub's run is DEC-2100 item 2's refusal: exit 2, [`STUB_NOT_BUILT`] alone on
+/// standard error, and nothing on standard output.
+fn release_stub_refused(output: &std::process::Output) -> Result<()> {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.code() != Some(2) || stderr != STUB_NOT_BUILT || !output.stdout.is_empty() {
+        bail!(
+            "the release build of {STUB_ISSUER} must exit 2 writing only {STUB_NOT_BUILT:?} to \
+             standard error (DEC-2100 item 2); it exited {} with stdout {:?} and stderr {stderr:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout)
+        );
     }
     Ok(())
 }
@@ -1514,6 +1607,15 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let cell = "xtask/src/cell.rs";
     let image = format!("                \"mandate.local/api:{}\",", "0123456789ab");
     let not_image = format!("                \"mandate.local/api:{page}\",");
+    let challenges = "schemas/workspace-api/examples/commands.step-up-challenge.json";
+    let challenge = format!(
+        "  \"webauthn_challenge\": \"{}\",",
+        concat!("q83vEjRWeJCrze8SNFZ4kKvN7xI0", "VniQq83vEjRWeJA")
+    );
+    let not_challenge = format!(
+        "  \"webauthn_challenge\": \"{}\",",
+        concat!("zz3vEjRWeJCrze8SNFZ4kKvN7xI0", "VniQq83vEjRWeJA")
+    );
     vec![
         (signer.to_owned(), example.clone(), None),
         (signer.to_owned(), near_example, Some("alpaca-key-id")),
@@ -1561,6 +1663,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (cell.to_owned(), image.clone(), None),
         ("stray-cell.rs".to_owned(), image, generic),
         (cell.to_owned(), not_image, generic),
+        (challenges.to_owned(), challenge.clone(), None),
+        ("stray-challenge.json".to_owned(), challenge, generic),
+        (challenges.to_owned(), not_challenge, generic),
     ]
 }
 
@@ -9387,10 +9492,11 @@ mod tests {
         mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
         plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems, registry_rows,
-        rehearsal_runs, repo_root, schema_mutants, shard_packages, shellcheck_scripts,
-        simulator_harnesses, simulator_oracles, spec_guard_problems, spec_guard_problems_for_pr,
-        status_flip_problems, test_binary, test_order_config, test_outcomes, unique_temp_path,
-        unjudged_mutants, used_by, verdicts, workspace_closure, workspace_packages,
+        rehearsal_runs, release_stub_refused, repo_root, schema_mutants, shard_packages,
+        shellcheck_scripts, simulator_harnesses, simulator_oracles, spec_guard_problems,
+        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_order_config,
+        test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts, workspace_closure,
+        workspace_packages,
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
@@ -10394,6 +10500,125 @@ mod tests {
             "the check names each setting a manifest turns off"
         );
         Ok(())
+    }
+
+    /// The settings in a manifest or `.cargo/config.toml` that turn debug assertions on for
+    /// `release` or for any profile inheriting from it, directly or not, the profile itself or
+    /// any package override in it (DEC-2100 item 2: the stub issuer compiles only with debug
+    /// assertions, so a release build must never have them).
+    fn release_assertions_on(manifest: &str) -> Result<Vec<String>> {
+        let manifest: toml::Table = toml::from_str(manifest)?;
+        let mut on = Vec::new();
+        let Some(profiles) = manifest.get("profile").and_then(toml::Value::as_table) else {
+            return Ok(on);
+        };
+        let from_release = |name: &str| {
+            let mut seen = BTreeSet::new();
+            let mut current = name.to_owned();
+            while current != "release" {
+                if !seen.insert(current.clone()) {
+                    return false;
+                }
+                let Some(parent) = profiles
+                    .get(&current)
+                    .and_then(|profile| profile.get("inherits"))
+                    .and_then(toml::Value::as_str)
+                else {
+                    return false;
+                };
+                current = parent.to_owned();
+            }
+            true
+        };
+        for (name, profile) in profiles {
+            let Some(profile) = profile.as_table().filter(|_| from_release(name)) else {
+                continue;
+            };
+            let mut tables = vec![(name.clone(), profile)];
+            if let Some(packages) = profile.get("package").and_then(toml::Value::as_table) {
+                tables.extend(packages.iter().filter_map(|(package, table)| {
+                    table
+                        .as_table()
+                        .map(|table| (format!("{name}.package.{package}"), table))
+                }));
+            }
+            for (path, table) in tables {
+                if table
+                    .get("debug-assertions")
+                    .is_some_and(|value| value.as_bool() != Some(false))
+                {
+                    on.push(format!("profile.{path}.debug-assertions"));
+                }
+            }
+        }
+        Ok(on)
+    }
+
+    /// DEC-2100 item 2: neither the workspace manifest nor `.cargo/config.toml` turns debug
+    /// assertions on for `release` or a profile built on it, so no release build holds the stub
+    /// issuer; the check is shown to catch each way a manifest could.
+    #[test]
+    fn release_builds_keep_debug_assertions_off() -> Result<()> {
+        for file in ["Cargo.toml", ".cargo/config.toml"] {
+            let text = fs::read_to_string(repo_root()?.join(file))?;
+            assert_eq!(
+                release_assertions_on(&text)?,
+                Vec::<String>::new(),
+                "{file} leaves debug assertions off in every release profile (DEC-2100 item 2)"
+            );
+        }
+        let seeded = "[profile.release]\ndebug-assertions = true\n\
+             [profile.release.package.mandate-stub-issuer]\ndebug-assertions = true\n\
+             [profile.dist]\ninherits = \"release\"\ndebug-assertions = true\n\
+             [profile.deep]\ninherits = \"dist\"\ndebug-assertions = \"yes\"\n\
+             [profile.loop-a]\ninherits = \"loop-b\"\ndebug-assertions = true\n\
+             [profile.loop-b]\ninherits = \"loop-a\"\n\
+             [profile.dev]\ndebug-assertions = true\n\
+             [profile.fast]\ninherits = \"dev\"\ndebug-assertions = true\n\
+             [profile.lean]\ninherits = \"release\"\ndebug-assertions = false\n";
+        assert_eq!(
+            release_assertions_on(seeded)?,
+            [
+                "profile.deep.debug-assertions",
+                "profile.dist.debug-assertions",
+                "profile.release.debug-assertions",
+                "profile.release.package.mandate-stub-issuer.debug-assertions",
+            ],
+            "the check names each release-derived setting that turns debug assertions on, and \
+             nothing for `dev`, a profile built on it, a cycle, or one turned off"
+        );
+        Ok(())
+    }
+
+    /// DEC-2100 item 2: `stub-release` accepts only exit 2 with `stub_issuer_not_built` alone on
+    /// standard error, and runs in `full` and in `check`.
+    #[test]
+    fn the_release_stub_check_accepts_only_the_lone_refusal() {
+        let run = |code: i32, stdout: &str, stderr: &str| std::process::Output {
+            status: ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        assert!(release_stub_refused(&run(2, "", "stub_issuer_not_built\n")).is_ok());
+        for (code, stdout, stderr) in [
+            (0, "", "stub_issuer_not_built\n"),
+            (1, "", "stub_issuer_not_built\n"),
+            (
+                2,
+                "issuer http://127.0.0.1:8899\n",
+                "stub_issuer_not_built\n",
+            ),
+            (2, "", "stub_issuer_not_built\nstub_issuer_not_built\n"),
+            (2, "", "stub_issuer_tier\n"),
+            (2, "", "stub_issuer_not_built"),
+            (2, "", ""),
+        ] {
+            assert!(
+                release_stub_refused(&run(code, stdout, stderr)).is_err(),
+                "{code} {stdout:?} {stderr:?}"
+            );
+        }
+        assert!(FULL_JOB.contains(&"stub-release") && PR_JOBS.contains(&"stub-release"));
     }
 
     /// DEC-931: every package built on a mutated one stays unoptimised, so a mutant rebuilds only

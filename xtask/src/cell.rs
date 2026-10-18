@@ -3843,6 +3843,16 @@ fn stub_answers() -> bool {
 /// issuer, then `POST /v1/sessions` from the app origin, which must answer 204 with the session
 /// cookie (workspace API spec §3.11 item 5).
 fn demo_sign_in() -> Result<()> {
+    let (status, reply) = open_session(&stub_token()?)?;
+    if !signed_in(status, &reply) {
+        bail!("POST /v1/sessions answered {status}, not 204 with the session cookie");
+    }
+    eprintln!("    sign-in: the demo owner opened a session through the local stub issuer");
+    Ok(())
+}
+
+/// A sign-in token for [`DEMO_SUBJECT`] from the stub issuer.
+fn stub_token() -> Result<String> {
     let body = json!({"subject": DEMO_SUBJECT}).to_string();
     let (status, reply) = http(
         STUB_PORT,
@@ -3857,11 +3867,16 @@ fn demo_sign_in() -> Result<()> {
     }
     let token: Value = serde_json::from_str(reply_body(&reply))
         .context("the stub issuer's token reply is not JSON")?;
-    let token = token["access_token"]
+    token["access_token"]
         .as_str()
-        .context("the stub issuer's reply carries no access_token")?;
+        .map(str::to_owned)
+        .context("the stub issuer's reply carries no access_token")
+}
+
+/// `POST /v1/sessions` with `token` from the app origin, and the API's status and whole reply.
+fn open_session(token: &str) -> Result<(u16, String)> {
     let body = json!({"access_token": token}).to_string();
-    let (status, reply) = http(
+    http(
         API_LOCAL_PORT,
         "POST",
         "/v1/sessions",
@@ -3872,12 +3887,7 @@ fn demo_sign_in() -> Result<()> {
         ],
         &body,
     )
-    .context("opening a session")?;
-    if !signed_in(status, &reply) {
-        bail!("POST /v1/sessions answered {status}, not 204 with the session cookie");
-    }
-    eprintln!("    sign-in: the demo owner opened a session through the local stub issuer");
-    Ok(())
+    .context("opening a session")
 }
 
 /// Whether an answer to `POST /v1/sessions` opened a session: 204 and the `__Host-` cookie.
