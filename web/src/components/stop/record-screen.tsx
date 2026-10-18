@@ -9,6 +9,7 @@ import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import { useFrozen } from "@/lib/frozen";
 import { useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
+import { buildApiRecord } from "./api-record";
 import { CommandEntry, UnreachableAlert } from "./command-log";
 import type { RecordKind } from "./commands";
 import { KillSwitchButton } from "./kill-switch-button";
@@ -111,13 +112,14 @@ function Modes({ modes }: { modes: AgentModeLine[] }) {
  * sits outside the record. The passkey check (G3) opens from this page; the Stop sheet only links here.
  */
 export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetId: string }) {
-  const { ws, send, commands } = useRuntime();
+  const { ws, view, source, send, commands } = useRuntime();
   const full = useCan("stop.full");
   const [asking, setAsking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [sent, setSent] = useState<string[]>([]);
   const confirmed = sent.length > 0;
-  const { shown, stale, refresh } = useFrozen(ws.status === "ready" ? buildRecord(kind, ws, targetId) : null, confirmed);
+  const live = source === "api" ? (view ? buildApiRecord(kind, view, ws.environment, ws.connection.connection_id, targetId) : null) : ws.status === "ready" ? buildRecord(kind, ws, targetId) : null;
+  const { shown, stale, refresh } = useFrozen(live, confirmed);
   if (stale && asking) setAsking(false);
 
   const confirm = () => {
