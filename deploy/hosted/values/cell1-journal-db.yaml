@@ -1,10 +1,15 @@
 # Cell #1's journal Postgres (E21-51, DEC-2001), on k3s's default local-path class, whose
-# directory, /var/lib/rancher, is the node's block volume. One instance until lane S2 (E21-41)
-# adds the synchronous standby on the second droplet.
-instances: 1
+# directory, /var/lib/rancher, is the node's block volume: a primary and its synchronous standby,
+# one on each droplet (E21-41, DEC-1050).
+instances: 2
+failureDomain: separate
 storage:
   size: 30Gi
   storageClass: ""
 resources:
   cpu: "1"
   memory: 2Gi
+# No archive destination here. On cell #1 it is an S3-compatible bucket the founder chooses and
+# pays for (DEC-79, DEC-995), so deploy/hosted/cell1.py sets it from --archive-destination,
+# --archive-endpoint and --archive-egress-cidr, and refuses `cluster` without them (DEC-2006). On
+# k3d, values/k3d-journal-archive.yaml points it at the local cell's test store.

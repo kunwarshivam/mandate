@@ -40,8 +40,13 @@ Each is a test in `deploy/tests/test_hosted.py` (or `test_cell.py` for the chart
   value and finds it in no argv and no output; a command line carrying one is refused.
 - **`MANDATE_DEPLOYMENT_TIER` comes from the chart's `deploymentTier`**: `production` unless
   values say otherwise, `ci` in the local cell, `dev` on cell #1 (DEC-2001 item 6, Proposed).
-- **The pins match the local cell's:** k3s and the CloudNativePG chart and operator are the
-  versions `xtask/src/cell.rs` runs the drills on.
+- **The pins match the local cell's:** k3s, the CloudNativePG chart and operator, and the Barman
+  Cloud plugin's chart and images are the versions `xtask/src/cell.rs` runs the drills on.
+- **No archive is invented** (DEC-2006): the journal's Postgres is a primary and a synchronous
+  standby that archive their WAL (E21-41), and cell #1's bucket is the founder's choice, so
+  `cluster` refuses until `--archive-destination`, `--archive-endpoint` and
+  `--archive-egress-cidr` name it (the runbook's gate 5). The tests render both targets' journal
+  values through the chart's schema.
 
 ## The local proof
 
@@ -52,8 +57,9 @@ cargo xtask cell hosted     # python3 deploy/hosted/cell1.py --target k3d all
 ```
 
 on every change that is not documentation only: a k3d cluster of a server and an agent,
-then the same namespace, secrets, service-account patch, CloudNativePG operator, journal-db and
-workspace chart as cell #1, with the tunnel off. With `--local-image mandate.local/mandate:<tag>`
+then the same namespace, secrets, service-account patch, CloudNativePG operator and backup
+plugin, journal-db and workspace chart as cell #1, with the tunnel off and the journal archiving
+to the local cell's test store (`deploy/cell/charts/archive-store`), as `cargo xtask cell up` does. With `--local-image mandate.local/mandate:<tag>`
 (the image `cargo xtask cell up` built) the CLI's image is imported too; without it the chart
 renders only the migration Job. `python3 deploy/hosted/cell1.py --dry-run all ...` prints cell
 #1's whole plan.

@@ -8,7 +8,7 @@ step prints one. Paper and demo data only (DEC-995, DEC-2001).
 Replace `owlhead.ai` below if the zone differs, and `you@example.com` with each operator's email
 (repeat `--access-email` for each).
 
-## 0. Gates: stop unless all four hold
+## 0. Gates: stop unless all five hold
 
 1. **Every C1 drill has passed on `main`** (DEC-990 item 2): the latest `ci` run on `main` shows
    the `cell` job green, with the drills `boot`, `journal`, `compose`, `restart` and `egress` held
@@ -19,6 +19,13 @@ Replace `owlhead.ai` below if the zone differs, and `you@example.com` with each 
    `deploymentTier: dev` (DEC-2001 item 6); if the answer is no, stop before step 6.
 4. **DEC-2001 item 7**: you accept `doctl` (or do step 4 by hand in the DigitalOcean console from
    the dry run's plan).
+5. **You have chosen the journal's archive** (DEC-2006, beside gate 2's DEC-995): the
+   S3-compatible bucket the journal's WAL and nightly base backups go to (E21-41, DEC-1050). It is
+   spending, so it is yours to choose (DEC-79); nothing in this repository names a provider or a
+   bucket. You need its `s3://<bucket>/<path>`, its HTTPS endpoint, the IPv4 CIDRs (/24 or
+   narrower) that endpoint answers on, and an access key scoped to that bucket alone. `cluster`
+   refuses, dry run included, until all of them are passed (`ARCHIVE_*` and the two key files in
+   step 2).
 
 ## 1. Tools, each checked
 
@@ -50,6 +57,7 @@ Make each token in its provider's dashboard with exactly these permissions, then
 | `cloudflare-api-token` | Cloudflare, *My Profile → API Tokens → Create Token → Custom* | Account: *Cloudflare Tunnel: Edit*, *Access: Apps and Policies: Edit*; Zone `owlhead.ai`: *DNS: Edit*. Nothing else |
 | `ghcr-read-token` | GitHub, *Settings → Developer settings → Personal access tokens (classic)* | `read:packages` only, 90-day expiry |
 | `r2-access-key-id`, `r2-secret-access-key` | Cloudflare, *R2 → Manage API tokens → Create* | *Object Read & Write*, bucket `mandate-cell1-journal-cold` only |
+| `archive-access-key-id`, `archive-secret-access-key` | The provider of the archive you chose at gate 5 | Read, write, list and delete on that bucket only (Barman's retention deletes old backups) |
 
 Save each one with this, pasting the value at the silent prompt:
 
@@ -60,6 +68,8 @@ save cloudflare-api-token
 save ghcr-read-token
 save r2-access-key-id
 save r2-secret-access-key
+save archive-access-key-id
+save archive-secret-access-key
 ```
 
 DigitalOcean: `doctl auth init --context mandate-cell1` (it prompts for the token without echo),
@@ -78,6 +88,9 @@ zone id of `owlhead.ai` (*the zone's Overview*, right column).
 export CF_ACCOUNT_ID=<account id>
 export CF_ZONE_ID=<zone id>
 export R2_ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
+export ARCHIVE_DESTINATION=<s3://bucket/path, gate 5>
+export ARCHIVE_ENDPOINT=<https://endpoint, gate 5>
+export ARCHIVE_CIDR=<a.b.c.d/24, gate 5; repeat --archive-egress-cidr below for each>
 S=~/.mandate-cell1-secrets
 cell1() {
   python3 deploy/hosted/cell1.py "$@" --zone owlhead.ai --cf-account-id "$CF_ACCOUNT_ID" \
@@ -85,7 +98,11 @@ cell1() {
     --access-email you@example.com --ssh-public-key ~/.ssh/mandate-cell1.pub \
     --ghcr-user <your GitHub user> --ghcr-token-file "$S/ghcr-read-token" \
     --r2-endpoint "$R2_ENDPOINT" --r2-access-key-id-file "$S/r2-access-key-id" \
-    --r2-secret-access-key-file "$S/r2-secret-access-key" --published ~/cell1-tools/PUBLISHED
+    --r2-secret-access-key-file "$S/r2-secret-access-key" --published ~/cell1-tools/PUBLISHED \
+    --archive-destination "$ARCHIVE_DESTINATION" --archive-endpoint "$ARCHIVE_ENDPOINT" \
+    --archive-egress-cidr "$ARCHIVE_CIDR" \
+    --archive-access-key-id-file "$S/archive-access-key-id" \
+    --archive-secret-access-key-file "$S/archive-secret-access-key"
 }
 ```
 
@@ -137,11 +154,13 @@ cell1 cluster --accept-dev-tier
 cell1 check
 ```
 
-`cluster` refuses to run without `--accept-dev-tier`, the flag that says gate 3 holds.
+`cluster` refuses to run without `--accept-dev-tier`, the flag that says gate 3 holds, and
+without the archive's flags, which say gate 5 holds.
 
-`cluster` makes the namespace's Secrets from your files on kubectl's stdin, then installs the
-CloudNativePG operator, the journal's Postgres and the workspace chart, and waits for the
-migration Job. `check` requires `https://api.owlhead.ai/` to send an unauthenticated caller to
+`cluster` makes the namespace's Secrets from your files on kubectl's stdin, the archive's key
+`journal-archive-key` among them, then installs the CloudNativePG operator and its Barman Cloud
+plugin, the journal's Postgres (a primary and a synchronous standby, one on each droplet) and the
+workspace chart, and waits for the migration Job. `check` requires `https://api.owlhead.ai/` to send an unauthenticated caller to
 Access.
 
 To use kubectl later: `cloudflared access tcp --hostname kube-cell1.owlhead.ai --url 127.0.0.1:16443 &`
@@ -160,4 +179,4 @@ doctl vpcs list                # then: doctl vpcs delete <id>
 
 The tunnels `cell1-ops` and `cell1-app`, their DNS records and the Access applications are deleted
 in the Cloudflare dashboard (*Zero Trust → Networks → Tunnels*, *Access → Applications*). Revoke
-the GHCR and R2 tokens there too, and `rm -r ~/.mandate-cell1 ~/.mandate-cell1-secrets`.
+the GHCR and R2 tokens there too, and the archive's key at its provider, and `rm -r ~/.mandate-cell1 ~/.mandate-cell1-secrets`.

@@ -14,7 +14,9 @@ import io
 import json
 import os
 import re
+import shutil
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -29,6 +31,10 @@ SPEC.loader.exec_module(cell1)
 CONFIG = json.loads((HOSTED / "cell1.json").read_text())
 FIREWALL = json.loads((HOSTED / "firewall.json").read_text())
 XTASK_CELL = (ROOT / "xtask" / "src" / "cell.rs").read_text()
+JOURNAL_CHART = ROOT / "deploy" / "cell" / "charts" / "journal-db"
+LOCAL_JOURNAL_VALUES = ROOT / "deploy" / "cell" / "values" / "k3d-journal-db.yaml"
+# The real helm, found before a test puts the recorders first on PATH.
+HELM = shutil.which("helm")
 KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl founder@laptop"
 TOOLS = ("doctl", "cloudflared", "ssh", "kubectl", "helm", "curl", "k3d")
 # Values planted in the secret files of the recorded run; none may reach argv or output.
@@ -37,6 +43,8 @@ SECRETS = {
     "ghcr": "ghp_readpackages0123456789abcdef",
     "r2-id": "r2-access-key-id-0123456789",
     "r2-key": "r2-secret-access-key-0123456789abcdef",
+    "archive-id": "archive-access-key-id-0123456789",
+    "archive-key": "archive-secret-access-key-0123456789abcdef",
 }
 OPS_TOKEN = "ops-tunnel-token-0123456789abcdef"
 APP_TOKEN = "app-tunnel-token-0123456789abcdef"
@@ -181,6 +189,15 @@ def pins_match_xtask() -> list[str]:
     tag = re.search(r'const CNPG_OPERATOR_TAG: &str =\s*"([^"]+)"', XTASK_CELL).group(1)
     if CONFIG["cnpg_chart"]["operator_tag"] != tag:
         problems.append("the operator tag differs")
+    for name, key in (
+        ("PLUGIN_CHART_URL", "url"),
+        ("PLUGIN_CHART_SHA256", "sha256"),
+        ("PLUGIN_IMAGE_TAG", "image_tag"),
+        ("PLUGIN_SIDECAR_TAG", "sidecar_tag"),
+    ):
+        value = re.search(rf'const {name}: &str =\s*"([^"]+)"', XTASK_CELL).group(1)
+        if CONFIG["barman_plugin"][key] != value:
+            problems.append(f"{name} differs")
     return problems
 
 
@@ -269,6 +286,12 @@ def test_pins_match_xtask():
         assert pins_match_xtask()
     finally:
         CONFIG["k3s"]["version"] = saved
+    saved = CONFIG["barman_plugin"]["sidecar_tag"]
+    CONFIG["barman_plugin"]["sidecar_tag"] = "v0.15.0"
+    try:
+        assert pins_match_xtask() == ["PLUGIN_SIDECAR_TAG differs"]
+    finally:
+        CONFIG["barman_plugin"]["sidecar_tag"] = saved
 
 
 SECRET_SETTING = re.compile(r"(token|secret|password|key)\"?\s*[:=]\s*\"?[A-Za-z0-9+/_-]{20,}", re.IGNORECASE)
@@ -322,7 +345,17 @@ def calls(log: Path) -> list[dict]:
     return [json.loads(line) for line in log.read_text().splitlines()]
 
 
+# The founder's archive, as the runbook's gate 5 has them pass it; documentation-range values only.
+ARCHIVE_ARGS = [
+    "--archive-destination",
+    "s3://cell1-archive-example/ws1",
+    "--archive-endpoint",
+    "https://archive.example.com",
+    "--archive-egress-cidr",
+    "192.0.2.0/24",
+]
 HOSTED_ARGS = [
+    *ARCHIVE_ARGS,
     "--zone",
     "owlhead.ai",
     "--cf-account-id",
@@ -354,6 +387,10 @@ def secret_files(tmp_path: Path) -> list[str]:
         paths["r2-id"],
         "--r2-secret-access-key-file",
         paths["r2-key"],
+        "--archive-access-key-id-file",
+        paths["archive-id"],
+        "--archive-secret-access-key-file",
+        paths["archive-key"],
     ]
 
 
@@ -444,7 +481,7 @@ def test_recorded_cluster_puts_every_secret_on_stdin_only(isolated, monkeypatch)
     tmp_path, log, _ = isolated
     requests = []
     monkeypatch.setattr(cell1.urllib.request, "urlopen", fake_cloudflare(requests))
-    monkeypatch.setattr(cell1, "fetch_cnpg_chart", lambda plan: tmp_path / "cnpg.tgz")
+    monkeypatch.setattr(cell1, "fetch_chart", lambda plan, key, file: tmp_path / file)
     monkeypatch.setattr(
         cell1, "open_kube_tunnel", lambda argv: type("P", (), {"terminate": lambda s: None})()
     )
@@ -476,7 +513,7 @@ def test_recorded_cluster_puts_every_secret_on_stdin_only(isolated, monkeypatch)
     ]
     assert all("--server-side" in c["argv"] for c in recorded if "apply" in c["argv"]), "no last-applied copy"
     secrets_made = {m["metadata"]["name"]: m for m in manifests if m["kind"] == "Secret"}
-    assert set(secrets_made) == {"ghcr-pull", "object-store-r2", "cloudflared-tunnel"}
+    assert set(secrets_made) == {"ghcr-pull", "object-store-r2", "cloudflared-tunnel", "journal-archive-key"}
 
     def decoded(name, key):
         return base64.b64decode(secrets_made[name]["data"][key]).decode()
@@ -486,6 +523,15 @@ def test_recorded_cluster_puts_every_secret_on_stdin_only(isolated, monkeypatch)
     assert secrets_made["ghcr-pull"]["type"] == "kubernetes.io/dockerconfigjson"
     assert decoded("cloudflared-tunnel", "token") == APP_TOKEN
     assert decoded("object-store-r2", "secret-access-key") == SECRETS["r2-key"]
+    assert decoded("journal-archive-key", "ACCESS_KEY_ID") == SECRETS["archive-id"]
+    assert decoded("journal-archive-key", "ACCESS_SECRET_KEY") == SECRETS["archive-key"]
+    journal = next(c["argv"] for c in recorded if c["argv"][:1] == ["helm"] and "journal" in c["argv"])
+    assert "archive.destinationPath=s3://cell1-archive-example/ws1" in journal
+    assert 'archive.egress={"cidrs":["192.0.2.0/24"],"port":443,"namespace":"","podSelector":{}}' in journal
+    helm_calls = [c["argv"] for c in recorded if c["argv"][:1] == ["helm"]]
+    assert not [a for a in helm_calls if "archive-store" in a], "cell #1 installed the local test store"
+    releases = [a[a.index("--install") + 1] for a in helm_calls if "--install" in a]
+    assert releases.index("barman-cloud") < releases.index("journal"), releases
     workspace = next(c["argv"] for c in recorded if c["argv"][:1] == ["helm"] and "workspace" in c["argv"])
     assert "images.mandate=ghcr.io/kunwarshivam/mandate/mandate@sha256:" + "a" * 64 in workspace
     assert "localImages=true" not in workspace
@@ -699,3 +745,148 @@ def test_recorded_droplets_twice_creates_nothing_again(isolated, monkeypatch):
     lines = [" ".join(c["argv"]) for c in calls(log)]
     assert not [line for line in lines if " create" in line or " import " in line], lines
     assert any(line.startswith("doctl compute firewall update fw-1 ") for line in lines)
+
+
+def without_archive(argv: list[str]) -> list[str]:
+    flags = {"--archive-destination", "--archive-endpoint", "--archive-egress-cidr"}
+    out, skip = [], False
+    for arg in argv:
+        if skip:
+            skip = False
+        elif arg in flags:
+            skip = True
+        else:
+            out.append(arg)
+    return out
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_hosted_cluster_refuses_without_an_archive(isolated, monkeypatch, capsys, dry_run):
+    """Cell #1's archive bucket is the founder's to choose and pay for (DEC-79, DEC-995): with
+    none named, `cluster` refuses before it calls a tool or the Cloudflare API, dry run included,
+    and names the gate (DEC-2006)."""
+    tmp_path, log, _ = isolated
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", no_network)
+    argv = ["cluster", *HOSTED_ARGS, *secret_files(tmp_path), "--published", "PUBLISHED", "--accept-dev-tier"]
+    argv = without_archive(argv)
+    assert "--archive-destination" not in argv
+    if dry_run:
+        argv.insert(0, "--dry-run")
+    assert cell1.main(argv, io.StringIO()) == 1
+    assert calls(log) == []
+    err = capsys.readouterr().err
+    assert "has no destination" in err and "DEC-2006" in err and "--archive-destination" in err
+    for flag, bad in (
+        ("--archive-destination", "s3://Bad_Bucket"),
+        ("--archive-endpoint", "http://archive.example.com"),
+        ("--archive-egress-cidr", "0.0.0.0/0"),
+    ):
+        given = dict(zip(ARCHIVE_ARGS[::2], ARCHIVE_ARGS[1::2]), **{flag: bad})
+        seeded = [*argv, *(arg for pair in given.items() for arg in pair)]
+        assert cell1.main(seeded, io.StringIO()) == 1, flag
+        assert flag in capsys.readouterr().err
+    assert calls(log) == []
+
+
+def test_k3d_archive_is_the_local_cells():
+    """The k3d trial archives exactly where the local cell does: the archive block of
+    values/k3d-journal-archive.yaml is deploy/cell/values/k3d-journal-db.yaml's."""
+
+    def block(path: Path) -> list[str]:
+        lines = path.read_text().splitlines()
+        return lines[lines.index("archive:") :]
+
+    assert block(HOSTED / "values" / "k3d-journal-archive.yaml") == block(LOCAL_JOURNAL_VALUES)
+    assert "destinationPath" not in (HOSTED / "values" / "cell1-journal-db.yaml").read_text()
+
+
+def recorded_journal_install(tmp_path: Path, monkeypatch, argv: list[str]) -> list[str]:
+    """The `helm upgrade --install journal` argv `cluster` runs, recorded."""
+    log = tmp_path / "calls.jsonl"
+    monkeypatch.setattr(cell1, "fetch_chart", lambda plan, key, file: tmp_path / file)
+    monkeypatch.setattr(
+        cell1, "open_kube_tunnel", lambda argv: type("P", (), {"terminate": lambda s: None})()
+    )
+    assert cell1.main(argv, io.StringIO()) == 0
+    return next(
+        c["argv"] for c in calls(log) if c["argv"][:1] == ["helm"] and "journal" in c["argv"][:6]
+    )
+
+
+def as_template(install: list[str]) -> list[str]:
+    """The recorded install as `helm template`, with the Kubernetes API named, since no cluster is
+    there to look it up, and without the flags only an install takes."""
+    args = install[1:]
+    if args[:1] == ["--kubeconfig"]:
+        args = args[2:]
+    assert args[:3] == ["upgrade", "--install", "journal"], args
+    rest, out, skip = args[3:], [], False
+    for arg in rest:
+        if skip:
+            skip = False
+        elif arg == "--timeout":
+            skip = True
+        elif arg != "--wait":
+            out.append(arg)
+    return [
+        HELM,
+        "template",
+        "journal",
+        *out,
+        "--set-json",
+        'kubeApi={"cidrs":["10.43.0.1/32"],"ports":[443]}',
+    ]
+
+
+def helm_or_skip() -> None:
+    if HELM is None:
+        if os.environ.get("MANDATE_CELL_HELM_REQUIRED"):
+            raise RuntimeError("MANDATE_CELL_HELM_REQUIRED is set but helm is not installed")
+        pytest.skip("helm is not installed (deploy/cell/README.md)")
+
+
+def rendered(argv: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, capture_output=True, text=True, check=False)
+
+
+def test_k3d_journal_values_meet_the_chart(isolated, monkeypatch):
+    """What `cell1.py --target k3d cluster` hands helm for journal-db passes the chart's schema and
+    renders a synchronous standby archiving to the test store. Nothing rendered this file before,
+    so the chart's E21-41 requirements reached it only in CI's hosted-k3d job."""
+    helm_or_skip()
+    tmp_path, _, _ = isolated
+    install = recorded_journal_install(tmp_path, monkeypatch, ["--target", "k3d", "cluster"])
+    done = rendered(as_template(install))
+    assert done.returncode == 0, done.stderr
+    docs = [json.loads(line) for line in done.stdout.splitlines() if line.strip().startswith("{")]
+    cluster = next(d for d in docs if d["kind"] == "Cluster")
+    store = next(d for d in docs if d["kind"] == "ObjectStore")
+    assert cluster["spec"]["instances"] == 2
+    assert cluster["spec"]["affinity"]["podAntiAffinityType"] == "required"
+    assert store["spec"]["configuration"]["destinationPath"] == "s3://journal-archive/ws1"
+    assert store["spec"]["configuration"]["endpointURL"] == "http://archive-store.archive-store.svc:9000"
+    seeded = as_template(install)
+    at = seeded.index(str(HOSTED / "values" / "k3d-journal-archive.yaml"))
+    del seeded[at - 1 : at + 1]
+    failed = rendered(seeded)
+    assert failed.returncode != 0 and "/archive/destinationPath" in failed.stderr, failed.stderr
+
+
+def test_hosted_journal_values_meet_the_chart(isolated, monkeypatch):
+    """Cell #1's journal-db, with the founder's archive given, passes the chart's schema and
+    archives only to the named CIDRs over HTTPS."""
+    helm_or_skip()
+    tmp_path, _, _ = isolated
+    requests = []
+    monkeypatch.setattr(cell1.urllib.request, "urlopen", fake_cloudflare(requests))
+    published = tmp_path / "PUBLISHED"
+    published.write_text("ghcr.io/kunwarshivam/mandate/mandate@sha256:" + "a" * 64 + "  mandate\n")
+    argv = ["cluster", *HOSTED_ARGS, *secret_files(tmp_path), "--published", str(published), "--accept-dev-tier"]
+    done = rendered(as_template(recorded_journal_install(tmp_path, monkeypatch, argv)))
+    assert done.returncode == 0, done.stderr
+    docs = [json.loads(line) for line in done.stdout.splitlines() if line.strip().startswith("{")]
+    assert next(d for d in docs if d["kind"] == "Cluster")["spec"]["instances"] == 2
+    store = next(d for d in docs if d["kind"] == "ObjectStore")["spec"]["configuration"]
+    assert store["destinationPath"] == "s3://cell1-archive-example/ws1"
+    assert store["endpointURL"] == "https://archive.example.com"
+    assert "192.0.2.0/24" in done.stdout

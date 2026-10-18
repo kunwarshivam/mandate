@@ -8,13 +8,16 @@ never do. Every step prints each command and each Cloudflare API request before 
     cell1.py [--dry-run] cloudflare   tunnels, their routes, DNS, the Access policy and applications
     cell1.py [--dry-run] droplets     tag, firewall, VPC, SSH key, volumes and droplets (spends money)
     cell1.py [--dry-run] nodes        waits for cloud-init, starts k3s, joins the agent, fetches kubeconfig
-    cell1.py [--dry-run] cluster      secrets, the CloudNativePG operator, journal-db, the workspace chart
+    cell1.py [--dry-run] cluster      secrets, the CloudNativePG operator and its backup plugin,
+                                      journal-db, the workspace chart; refused until the founder
+                                      names the journal's archive (--archive-*, DEC-2006)
     cell1.py [--dry-run] check        the pods, and the API hostname answering only through Access
     cell1.py [--dry-run] all          every step above, in order
 
     cell1.py --target k3d [--dry-run] nodes|cluster|all
         The same `cluster` step against a local two-node k3d cluster, the proof before anything is
-        bought: no Cloudflare and no DigitalOcean, the tunnel off, and the change's own image if named.
+        bought: no Cloudflare and no DigitalOcean, the tunnel off, the change's own image if named,
+        and the journal archiving to the local cell's test store, as `cargo xtask cell up` does.
 
 Secrets are only ever file paths (each must be a regular file, mode 0600 or narrower): the values
 are read into memory and reach their destination on a process's stdin or in a request header, never
@@ -757,17 +760,153 @@ def secret_manifest(name: str, namespace: str, data: dict[str, str], kind: str =
     return json.dumps({**body, "data": encoded}).encode()
 
 
-def fetch_cnpg_chart(plan: Plan) -> Path:
-    chart = CONFIG["cnpg_chart"]
-    path = STATE / "cloudnative-pg.tgz"
+def fetch_chart(plan: Plan, key: str, file: str) -> Path:
+    """A chart from its GitHub release, `CONFIG[key]`'s url, refused unless its SHA-256 matches."""
+    chart = CONFIG[key]
+    path = STATE / file
     plan.run(["curl", "-sSfL", "--retry", "5", "-o", str(path), chart["url"]])
     if not plan.dry_run:
         found = hashlib.sha256(path.read_bytes()).hexdigest()
         if found != chart["sha256"]:
             path.unlink()
-            raise Refused(f"the CloudNativePG chart's SHA-256 is {found}, not {chart['sha256']}")
+            raise Refused(f"the chart {file}'s SHA-256 is {found}, not {chart['sha256']}")
     plan.show(f"sha256 {path} == {chart['sha256']}")
     return path
+
+
+ARCHIVE_DESTINATION = re.compile(r"s3://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](/[A-Za-z0-9._-]+)*")
+ARCHIVE_ENDPOINT = re.compile(r"https://([a-z0-9.-]+)(:([0-9]+))?")
+ARCHIVE_CIDR = re.compile(r"([0-9]{1,3}\.){3}[0-9]{1,3}/(2[4-9]|3[0-2])")
+
+
+def hosted_archive(args) -> list[str]:
+    """Cell #1's journal archive, as helm arguments over values/cell1-journal-db.yaml. The bucket
+    is the founder's choice and spend (DEC-79, DEC-995), so nothing here names one: without the
+    founder's --archive-destination, --archive-endpoint and --archive-egress-cidr, `cluster`
+    refuses before it calls anything, dry run included (DEC-2006)."""
+    missing = [
+        flag
+        for flag, value in (
+            ("--archive-destination", args.archive_destination),
+            ("--archive-endpoint", args.archive_endpoint),
+            ("--archive-egress-cidr", args.archive_egress_cidr),
+        )
+        if not value
+    ]
+    if missing:
+        raise Refused(
+            "the journal's WAL archive has no destination: cell #1's journal-db needs an "
+            "S3-compatible bucket the founder chooses (founder-reserved spending, DEC-79, DEC-995; "
+            f"DEC-2006). Pass {', '.join(missing)} (deploy/hosted/RUNBOOK.md, gate 5)"
+        )
+    if not ARCHIVE_DESTINATION.fullmatch(args.archive_destination):
+        raise Refused(f"--archive-destination {args.archive_destination!r} is not s3://<bucket>/<path>")
+    endpoint = ARCHIVE_ENDPOINT.fullmatch(args.archive_endpoint)
+    if endpoint is None:
+        raise Refused(f"--archive-endpoint {args.archive_endpoint!r} is not https://<host>[:<port>]")
+    for cidr in args.archive_egress_cidr:
+        if not ARCHIVE_CIDR.fullmatch(cidr):
+            raise Refused(f"--archive-egress-cidr {cidr!r} is not an IPv4 CIDR of /24 or narrower")
+    egress = {
+        "cidrs": list(args.archive_egress_cidr),
+        "port": int(endpoint.group(3) or 443),
+        "namespace": "",
+        "podSelector": {},
+    }
+    return [
+        "--set",
+        f"archive.destinationPath={args.archive_destination}",
+        "--set",
+        f"archive.endpointURL={args.archive_endpoint}",
+        "--set-json",
+        f"archive.egress={json.dumps(egress, separators=(',', ':'))}",
+    ]
+
+
+def k3d_archive() -> list[str]:
+    """The k3d trial's journal archive: the local cell's test store, as `cargo xtask cell up` sets it."""
+    return ["-f", str(HERE / "values" / "k3d-journal-archive.yaml")]
+
+
+def backup_plugin(plan: Plan, helm: list[str], kubectl: list[str]) -> None:
+    """CloudNativePG's Barman Cloud plugin, which archives the journal's WAL and takes its base
+    backups (E21-41), with the certificates deploy/cell/charts/backup-plugin-tls makes in place of
+    cert-manager's, as `cargo xtask cell up` installs it. When an upgrade remade them, the plugin
+    restarts, since it reads them only at start."""
+
+    def certificate_ends() -> str:
+        ends = []
+        for name in ("barman-cloud-server-tls", "barman-cloud-client-tls"):
+            ends.append(
+                plan.run(
+                    [
+                        *kubectl,
+                        "get",
+                        "secret",
+                        name,
+                        "--namespace",
+                        "cnpg-system",
+                        "--ignore-not-found",
+                        "-o",
+                        "jsonpath={.metadata.annotations.mandate\\.dev/not-after}",
+                    ],
+                    capture=True,
+                    result=f"{name}'s end",
+                )
+            )
+        return "" if not any(ends) else "/".join(ends)
+
+    before = certificate_ends()
+    plan.run(
+        [
+            *helm,
+            "upgrade",
+            "--install",
+            "backup-plugin-tls",
+            str(CELL / "charts" / "backup-plugin-tls"),
+            "--namespace",
+            "cnpg-system",
+        ]
+    )
+    plugin = CONFIG["barman_plugin"]
+    chart = fetch_chart(plan, "barman_plugin", "plugin-barman-cloud.tgz")
+    plan.run(
+        [
+            *helm,
+            "upgrade",
+            "--install",
+            "barman-cloud",
+            str(chart),
+            "--namespace",
+            "cnpg-system",
+            "--set",
+            f"image.tag={plugin['image_tag']}",
+            "--set",
+            f"sidecarImage.tag={plugin['sidecar_tag']}",
+            "--set",
+            "certificate.createClientCertificate=false",
+            "--set",
+            "certificate.createServerCertificate=false",
+            "--set",
+            "certificate.createIssuer=false",
+            "--wait",
+            "--timeout",
+            "5m",
+        ]
+    )
+    if not plan.dry_run and before and before != certificate_ends():
+        plan.run([*kubectl, "rollout", "restart", "deployment/barman-cloud", "--namespace", "cnpg-system"])
+        plan.run(
+            [
+                *kubectl,
+                "rollout",
+                "status",
+                "deployment/barman-cloud",
+                "--namespace",
+                "cnpg-system",
+                "--timeout=300s",
+            ]
+        )
 
 
 def images(plan: Plan, args) -> dict[str, str]:
@@ -813,6 +952,7 @@ def step_cluster(plan: Plan, args) -> None:
             "--accept-dev-tier is required: cell #1 runs unsigned builds as `dev` (DEC-2001 item 6), "
             "only once the founder has answered DEC-971 item 7(b)"
         )
+    archive = hosted_archive(args) if hosted else k3d_archive()
     kubeconfig = STATE / ("kubeconfig" if hosted else "kubeconfig-k3d")
     tunnel = None
     picked = images(plan, args)
@@ -860,6 +1000,10 @@ def step_cluster(plan: Plan, args) -> None:
             key = secret_file(plan, args.r2_secret_access_key_file, "the R2 secret access key")
             if not args.r2_endpoint:
                 raise Refused("--r2-endpoint is required: https://<account id>.r2.cloudflarestorage.com")
+            archive_id = secret_file(plan, args.archive_access_key_id_file, "the archive's access key id")
+            archive_key = secret_file(
+                plan, args.archive_secret_access_key_file, "the archive's secret access key"
+            )
         else:
             config = json.dumps({"auths": {}})
             tunnel_token = ""
@@ -880,6 +1024,14 @@ def step_cluster(plan: Plan, args) -> None:
         ]
         if hosted:
             made.append((names["tunnel"], {"token": tunnel_token}, "Opaque", "the app tunnel's token"))
+            made.append(
+                (
+                    names["archive"],
+                    {"ACCESS_KEY_ID": archive_id, "ACCESS_SECRET_KEY": archive_key},
+                    "Opaque",
+                    "the journal archive's key pair",
+                )
+            )
         for name, data, kind, note in made:
             plan.run(
                 [*kubectl, "apply", "--server-side", "--field-manager=cell1", "-f", "-"],
@@ -914,7 +1066,7 @@ def step_cluster(plan: Plan, args) -> None:
 
         helm = ["helm", "--kubeconfig", str(kubeconfig)]
         plan.say("The CloudNativePG operator")
-        chart = fetch_cnpg_chart(plan)
+        chart = fetch_chart(plan, "cnpg_chart", "cloudnative-pg.tgz")
         plan.run(
             [
                 *helm,
@@ -932,6 +1084,27 @@ def step_cluster(plan: Plan, args) -> None:
                 "5m",
             ]
         )
+        plan.say("The Barman Cloud plugin, which archives the journal's WAL and base backups")
+        backup_plugin(plan, helm, kubectl)
+        if not hosted:
+            plan.say("The local cell's test store, the k3d trial's archive (it makes the archive's key)")
+            plan.run(
+                [
+                    *helm,
+                    "upgrade",
+                    "--install",
+                    "archive-store",
+                    str(CELL / "charts" / "archive-store"),
+                    "--namespace",
+                    CONFIG["k3d"]["archive_store_namespace"],
+                    "--create-namespace",
+                    "--set",
+                    f"clientNamespace={namespace}",
+                    "--wait",
+                    "--timeout",
+                    "5m",
+                ]
+            )
         plan.say("The journal's Postgres")
         plan.run(
             [
@@ -944,6 +1117,7 @@ def step_cluster(plan: Plan, args) -> None:
                 namespace,
                 "-f",
                 str(HERE / "values" / "cell1-journal-db.yaml"),
+                *archive,
                 "--wait",
                 "--timeout",
                 "10m",
@@ -1035,6 +1209,18 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--r2-endpoint", help="https://<account id>.r2.cloudflarestorage.com")
     p.add_argument("--r2-access-key-id-file")
     p.add_argument("--r2-secret-access-key-file")
+    p.add_argument(
+        "--archive-destination",
+        help="the journal's WAL archive, s3://<bucket>/<path>; the founder's choice (DEC-2006)",
+    )
+    p.add_argument("--archive-endpoint", help="the archive's S3 endpoint, https://<host>[:<port>]")
+    p.add_argument(
+        "--archive-egress-cidr",
+        action="append",
+        help="a CIDR (/24 or narrower) the archive's endpoint answers on; repeatable",
+    )
+    p.add_argument("--archive-access-key-id-file", help="a 0600 file holding the archive's access key id")
+    p.add_argument("--archive-secret-access-key-file", help="a 0600 file holding its secret access key")
     p.add_argument(
         "--accept-dev-tier",
         action="store_true",
