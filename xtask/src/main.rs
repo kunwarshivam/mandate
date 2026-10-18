@@ -25,8 +25,9 @@ commands:
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
                         postgres | openbao | objectstore | mutants | schema-mutants | cell |
-                        cell-demo | cell-journal | cell-failover | sweep; or one part of test:
-                        test-nextest | test-doc | test-rh-sim | test-python. Tests, pending tests,
+                        cell-demo | cell-journal | cell-failover | cell-kill-switch | sweep; or
+                        one part of test: test-nextest | test-doc | test-rh-sim | test-python.
+                        Tests, pending tests,
                         doctests, the rehearsal, Postgres, OpenBao and object-store runs and
                         `portable` run over the crates the diff selects (DEC-1190); with no diff
                         base, all of them
@@ -119,6 +120,7 @@ const PR_JOBS: &[&str] = &[
     "cell",
     "cell-journal",
     "cell-failover",
+    "cell-kill-switch",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -292,6 +294,7 @@ fn run() -> Result<()> {
                     .into_iter()
                     .chain(cell::JOURNAL_DRILLS)
                     .chain(cell::FAILOVER_DRILLS)
+                    .chain(cell::KILL_SWITCH_DRILLS)
                     .collect()
             } else {
                 names
@@ -331,6 +334,7 @@ fn ci(job: &str) -> Result<()> {
         "cell-demo" => cell::scenario::ci(),
         "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
+        "cell-kill-switch" => cell::ci_drills(job, &cell::KILL_SWITCH_DRILLS),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -15397,11 +15401,12 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            15,
+            16,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, \
-             `cell-demo` (DEC-2002), `cell-journal`, and `cell-failover`"
+             `cell-demo` (DEC-2002), `cell-journal`, `cell-failover`, and `cell-kill-switch` \
+             (DEC-2602)"
         );
         for checkout in checkouts {
             assert!(
