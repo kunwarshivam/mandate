@@ -4397,7 +4397,7 @@ fn closed_world(
                 READ_NPX.contains(&args.as_slice())
             } else {
                 match args.as_slice() {
-                    ["ci"] => true,
+                    ["ci"] | ["ci", "--ignore-scripts"] => true,
                     ["run", script] => scripts.contains(*script),
                     ["test"] | ["test", "--if-present"] => scripts.contains("test"),
                     _ => false,
@@ -19734,7 +19734,7 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
-    /// In a `web` job, `npm` runs only as `npm ci`, `npm run <script>` of a script its
+    /// In a `web` job, `npm` runs only as `npm ci` (with `--ignore-scripts` or nothing), `npm run <script>` of a script its
     /// `package.json` holds, and `npm test`, and `npx` only in the forms the repository uses:
     /// `npx`, `npm exec`, `npm pkg set`, `npm config set`, `npm install`, a missing script, a
     /// script given arguments and a `package.json` naming cargo cannot be read. Working
@@ -19765,6 +19765,7 @@ jq -r "$filter" "$src"
                 "npm config set registry https://example.com",
             ),
             ("npm-install", "web", "npm install left-pad"),
+            ("npm-ci-other-flag", "web", "npm ci --foreground-scripts"),
             ("npm-run-missing", "web", "npm run nope"),
             ("npm-run-arguments", "web", "npm run build -- --debug"),
             ("package-naming-it", "web/app", "npm run build"),
@@ -19783,7 +19784,7 @@ jq -r "$filter" "$src"
         );
         text.push_str(
             "  web-ok:\n    defaults:\n      run:\n        working-directory: web\n    steps:\n      \
-             - run: npm ci\n      - run: npm run build\n      - run: npm run lint\n      - run: npm \
+             - run: npm ci\n      - run: npm ci --ignore-scripts\n      - run: npm run build\n      - run: npm run lint\n      - run: npm \
              test --if-present\n      - run: npx playwright install --with-deps --only-shell \
              chromium\n      - run: npx playwright install-deps chromium\n      - run: npx --yes \
              impeccable@4.1.0 detect src/\n      - working-directory: web\n        run: npm ci\n",
