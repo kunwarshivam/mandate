@@ -3,6 +3,8 @@
 # change.
 workspace: ws1
 environment: paper
+# The local and CI cell runs the change's own unsigned build (DEC-971 item 2).
+deploymentTier: ci
 localImages: true
 # The demo agent deployment `cargo xtask cell up` starts the runtime for, on the deny-all wiring
 # until the post-R0 hook (DEC-1013). `images.runtime` is set to the image `cell up` built.
@@ -21,7 +23,6 @@ api:
   audience: authenticated
   jwksUrl: http://127.0.0.1:8090/jwks.json
   appOrigin: https://localhost:4317
-  tier: dev
   subjectLinks: ""
 # The deployment manager's one route to the API server (`egress.kube-api`, DEC-1172) is not written
 # here: docker picks the k3d network's subnet when the cluster is made, so the server node's address

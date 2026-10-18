@@ -14,7 +14,7 @@ use mandate_identity::{
     Session, SessionRef, TenantContext, WorkspaceId, authorize,
 };
 use mandate_identity_testkit::{FailingLookup, StaticLookup, membership, session};
-use mandate_passkey::stepup::{Action, IssueRefusal, Issued, issue_challenge};
+use mandate_passkey::stepup::{Action, IssueRefusal, Issued, issue_challenge, permission_for};
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
@@ -49,6 +49,15 @@ fn row_of(kind: K) -> (&'static str, P) {
         K::NotificationAddress => ("Add or remove one's own", P::NotificationAddress),
         K::BreakGlassApprove => ("Approve a break-glass", P::ApproveBreakGlass),
         K::LiftHold => ("Lift a hold a client set", P::LiftClientHold),
+    }
+}
+
+/// The row a caller authorizes before it asks for a challenge (workspace API spec §3.6, DEC-2103
+/// item 1) is, for every kind, the row the spec's table names for it.
+#[test]
+fn the_row_a_caller_authorizes_is_each_kinds_own() {
+    for kind in K::ALL {
+        assert_eq!(permission_for(kind), row_of(kind).1, "{kind:?}");
     }
 }
 

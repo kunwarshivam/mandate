@@ -146,6 +146,8 @@ pub struct ExecutorState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Switch {
     pub(crate) agent: AgentId,
+    /// The record on another stream this switch copied, from its `copied_from` (DEC-2003 item 4).
+    pub(crate) copied_from: Option<EventId>,
     pub(crate) purpose: Purpose,
     pub(crate) floor: Option<Price>,
     pub(crate) instruments: Vec<InstrumentId>,
@@ -562,6 +564,15 @@ impl ExecutorState {
     /// The writer epoch this state was folded under, once `Input::Started` has taken one.
     pub fn epoch(&self) -> Option<WriterEpoch> {
         self.epoch
+    }
+
+    /// Whether a switch this stream journaled copied `source`, another stream's record
+    /// (`copied_from`, DEC-2003 item 4): read from this stream's own `KillSwitchActivated`
+    /// records alone, so no mode another restriction set can make a switch count as applied.
+    pub fn applied_copy(&self, source: &EventId) -> bool {
+        self.switches
+            .values()
+            .any(|switch| switch.copied_from.as_ref() == Some(source))
     }
 
     pub fn started(&self) -> bool {
