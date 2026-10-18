@@ -65,9 +65,11 @@ commands:
   release publish-index <out>
                         push and sign the multi-arch index over every arch's published images
                         (main only, from CI, after each arch's publish)
-  gitops bootstrap      install Flux, pinned, write the workload secrets and apply the sync.yaml of
-                        $GITOPS_ENVIRONMENT (gitops-bootstrap.yml on main only; E21-58)
-  gitops secrets        write the workload secrets alone (gitops-bootstrap.yml on main only)
+  gitops bootstrap <staging|production>
+                        install Flux, pinned, write the workload secrets and apply the cluster's
+                        sync.yaml (the founder's terminal only; deploy/gitops/BOOTSTRAP.md, E21-58)
+  gitops secrets <staging|production>
+                        write the workload secrets alone (the founder's terminal only)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
   cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
@@ -281,8 +283,12 @@ fn run() -> Result<()> {
             release::publish(&root, Path::new(dist), Path::new(out))
         }
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
-        ["gitops", "bootstrap"] => gitops::bootstrap(&root, gitops::Environment::from_env()?),
-        ["gitops", "secrets"] => gitops::secrets(&root, gitops::Environment::from_env()?),
+        ["gitops", "bootstrap", environment] => {
+            gitops::bootstrap(&root, gitops::Environment::parse(environment)?)
+        }
+        ["gitops", "secrets", environment] => {
+            gitops::secrets(gitops::Environment::parse(environment)?)
+        }
         ["cell", "up"] => cell::up(),
         ["cell", "down"] => cell::down(),
         ["cell", "demo"] => cell::demo(true),
@@ -3710,9 +3716,7 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// case, cannot be read. `ci.yml` and `nightly.yml` set the tool versions and checksums, the
 /// `MANDATE_*`, `*_RESULT` and `*_SELECTED` names, the selection's `REASONS`, and the failure
 /// reports' `RUN_URL` and `VERDICTS` (DEC-1190), `merge.yml` the merge inputs, `web.yml` and
-/// `web-e2e.yml` the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`,
-/// `gitops-bootstrap.yml` its tool pins, the cluster's kubeconfig and the workload secrets (E21-58,
-/// DEC-2018), and
+/// `web-e2e.yml` the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and
 /// `web-deploy.yml` the build's public Supabase values and the deploy step's Cloudflare token and
 /// account (DEC-1005).
 const READ_ENV_NAMES: &[&str] = &[
@@ -3722,12 +3726,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "CLOUDFLARE_API_TOKEN",
     "DOCS_ONLY",
     "DO_NOT_TRACK",
-    "CLOUDFLARED_TUNNEL_TOKEN",
     "EVENT",
     "FAST_RESULT",
-    "FLUX_SHA256",
-    "FLUX_VERSION",
-    "GITOPS_ENVIRONMENT",
     "FULL_CHECKS_RESULT",
     "FULL_CHECKS_SELECTED",
     "FULL_RESULT",
@@ -3737,13 +3737,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "HELM_SHA256",
     "HELM_VERSION",
     "IMPECCABLE_NO_TELEMETRY",
-    "JOURNAL_ARCHIVE_ACCESS_KEY_ID",
-    "JOURNAL_ARCHIVE_SECRET_KEY",
     "K3D_SHA256",
     "K3D_VERSION",
-    "KUBECTL_SHA256",
-    "KUBECTL_VERSION",
-    "KUBECONFIG_DATA",
     "KUBECONFORM_SHA256",
     "KUBECONFORM_VERSION",
     "LABELED_PR",

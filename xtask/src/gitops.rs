@@ -1,24 +1,23 @@
 //! `cargo xtask gitops`: the founder's one bootstrap of a hosted cluster, and its workload secrets
 //! (E21-58, DEC-2015, DEC-2018).
 //!
-//! Both commands run only from `.github/workflows/gitops-bootstrap.yml`, dispatched from `main`
-//! under the environment's GitHub environment, whose required reviewer is the founder. They refuse
-//! to run anywhere else, so an agent never applies anything to a real cluster (DEC-2015 item 5).
-//! The cluster's credential and the workload secrets arrive as that environment's secrets in the
-//! process environment. Each is written only to a 0600 file or to `kubectl`'s stdin, and never
+//! The cluster's control-plane firewall admits only the founder's addresses (lane IAC's
+//! `KUBE_API_ALLOWED_CIDRS`), so these commands run on the founder's machine, with the founder's
+//! kubeconfig, and nowhere else. They refuse to run in CI or without a terminal, and they apply
+//! nothing until the founder types the kubeconfig's current context, so an agent never applies
+//! anything to a real cluster (DEC-2015 item 5). The workload secrets come from lane IAC's
+//! OpenTofu outputs in the process environment. Each reaches only `kubectl`'s stdin and is never
 //! printed.
 //!
-//! The environment is the dispatch's choice, from `GITOPS_ENVIRONMENT`.
-//! `gitops bootstrap` installs Flux's three controllers at the pinned version, each
+//! `gitops bootstrap <environment>` installs Flux's three controllers at the pinned version, each
 //! image pinned by digest, writes the workload secrets, and applies the environment's `sync.yaml`.
 //! From then on, Flux reconciles `deploy/gitops/clusters/<environment>` from `main`.
-//! `gitops secrets` writes the workload secrets alone, to set or rotate them.
+//! `gitops secrets <environment>` writes the workload secrets alone, to set or rotate them.
 
 use std::env;
 use std::fs;
-use std::io::Write as _;
-use std::os::unix::fs::PermissionsExt as _;
-use std::path::{Path, PathBuf};
+use std::io::{self, BufRead as _, IsTerminal as _, Write as _};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -41,12 +40,7 @@ impl Environment {
         }
     }
 
-    /// The environment the workflow's dispatch chose, from `GITOPS_ENVIRONMENT`.
-    pub(crate) fn from_env() -> Result<Self> {
-        Self::parse(&env::var("GITOPS_ENVIRONMENT").context("GITOPS_ENVIRONMENT is not set")?)
-    }
-
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Staging => "staging",
             Self::Production => "production",
@@ -100,8 +94,8 @@ const WORKLOAD_SECRETS: [WorkloadSecret; 2] = [
     },
 ];
 
-/// The environment secret holding the cluster's kubeconfig.
-const KUBECONFIG_VAR: &str = "KUBECONFIG_DATA";
+/// The `flux` the pins in [`FLUX_IMAGES`] belong to.
+const FLUX_VERSION: &str = "2.9.6";
 
 /// `manifest`, from `flux install --export`, with every image pinned by digest. It refuses an image
 /// that [`FLUX_IMAGES`] does not name, and a pinned image the manifest never uses, since either
@@ -161,37 +155,61 @@ fn secret_manifest(name: &str, values: &[(&str, String)]) -> Result<String> {
     Ok(secret.to_string())
 }
 
-/// Refuses to run outside a GitHub Actions run of `main`: only the founder's approved workflow
-/// may touch a hosted cluster (DEC-2015 item 5).
-fn approved_run() -> Result<()> {
-    let actions = env::var("GITHUB_ACTIONS").unwrap_or_default();
-    let reference = env::var("GITHUB_REF").unwrap_or_default();
-    ensure!(
-        actions == "true" && reference == "refs/heads/main",
-        "`cargo xtask gitops` runs only from gitops-bootstrap.yml on main, under the environment's \
-         required reviewers (DEC-2018); never by hand or from an agent"
+/// Why a run in this environment must not touch a cluster, if it must not: in CI, or with no
+/// terminal to confirm on, as an agent's shell has none (DEC-2015 item 5).
+fn refusal(ci: bool, terminal: bool) -> Option<&'static str> {
+    if ci {
+        Some(
+            "`cargo xtask gitops` never runs in CI: the cluster's API admits only the founder's addresses",
+        )
+    } else if !terminal {
+        Some("`cargo xtask gitops` runs only at the founder's terminal, which confirms the cluster")
+    } else {
+        None
+    }
+}
+
+/// Whether `typed`, the founder's answer, names `context` exactly.
+fn confirmed(typed: &str, context: &str) -> bool {
+    !context.is_empty() && typed.trim() == context
+}
+
+/// Refuses unless the founder, at a terminal outside CI, types the kubeconfig's current context,
+/// which this prints with the environment it will change. Returns that context.
+fn founder_confirms(environment: Environment, action: &str) -> Result<String> {
+    let ci = env::var_os("CI").is_some() || env::var_os("GITHUB_ACTIONS").is_some();
+    if let Some(reason) = refusal(ci, io::stdin().is_terminal()) {
+        bail!("{reason} (DEC-2018)");
+    }
+    let out = Command::new("kubectl")
+        .args(["config", "current-context"])
+        .output()
+        .context("starting kubectl (deploy/gitops/BOOTSTRAP.md)")?;
+    ensure!(out.status.success(), "kubectl has no current context");
+    let context = String::from_utf8(out.stdout)
+        .context("kubectl printed non-UTF-8")?
+        .trim()
+        .to_owned();
+    eprint!(
+        "    gitops: this will {action} the {} cluster through the context {context:?}.\n    Type the context's name to go on: ",
+        environment.name()
     );
-    Ok(())
+    let mut typed = String::new();
+    io::stdin()
+        .lock()
+        .read_line(&mut typed)
+        .context("reading the answer")?;
+    ensure!(
+        confirmed(&typed, &context),
+        "not confirmed; nothing was applied"
+    );
+    Ok(context)
 }
 
-/// The cluster's kubeconfig from [`KUBECONFIG_VAR`], written to a 0600 file in a 0700 directory
-/// under `out`, which the caller deletes.
-fn kubeconfig(out: &Path) -> Result<PathBuf> {
-    let data = env::var(KUBECONFIG_VAR).with_context(|| format!("{KUBECONFIG_VAR} is not set"))?;
-    ensure!(!data.trim().is_empty(), "{KUBECONFIG_VAR} is empty");
-    fs::create_dir_all(out).context("creating the kubeconfig directory")?;
-    fs::set_permissions(out, fs::Permissions::from_mode(0o700))?;
-    let path = out.join("kubeconfig");
-    fs::write(&path, data).context("writing the kubeconfig")?;
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
-    Ok(path)
-}
-
-/// Runs `kubectl` against `config` with `stdin` as its input.
-fn kubectl(config: &Path, args: &[&str], stdin: Option<&str>) -> Result<()> {
+/// Runs `kubectl` against `context` with `stdin` as its input.
+fn kubectl(context: &str, args: &[&str], stdin: Option<&str>) -> Result<()> {
     let mut child = Command::new("kubectl")
-        .arg("--kubeconfig")
-        .arg(config)
+        .args(["--context", context])
         .args(args)
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -199,7 +217,7 @@ fn kubectl(config: &Path, args: &[&str], stdin: Option<&str>) -> Result<()> {
             Stdio::null()
         })
         .spawn()
-        .context("starting kubectl (gitops-bootstrap.yml installs it)")?;
+        .context("starting kubectl (deploy/gitops/BOOTSTRAP.md)")?;
     if let Some(text) = stdin {
         child
             .stdin
@@ -213,97 +231,109 @@ fn kubectl(config: &Path, args: &[&str], stdin: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Writes every [`WORKLOAD_SECRETS`] entry from its environment secrets, after the workspace
-/// namespace, which Flux would otherwise create only on its first reconcile.
-fn write_secrets(config: &Path) -> Result<()> {
+/// Reads every [`WORKLOAD_SECRETS`] value from the process environment, each required.
+fn secret_manifests() -> Result<Vec<(&'static str, String)>> {
+    let mut manifests = Vec::new();
+    for secret in WORKLOAD_SECRETS {
+        let mut values = Vec::new();
+        for (key, var) in secret.keys {
+            let value =
+                env::var(var).with_context(|| format!("{var} is not set (BOOTSTRAP.md)"))?;
+            values.push((*key, value));
+        }
+        manifests.push((secret.name, secret_manifest(secret.name, &values)?));
+    }
+    Ok(manifests)
+}
+
+/// Writes `manifests`, after the workspace namespace, which Flux would otherwise create only on
+/// its first reconcile.
+fn write_secrets(context: &str, manifests: &[(&str, String)]) -> Result<()> {
     let namespace = serde_json::json!({
         "apiVersion": "v1",
         "kind": "Namespace",
         "metadata": {"name": WORKSPACE_NAMESPACE},
     });
     kubectl(
-        config,
+        context,
         &["apply", "--server-side", "-f", "-"],
         Some(&namespace.to_string()),
     )?;
-    for secret in WORKLOAD_SECRETS {
-        let mut values = Vec::new();
-        for (key, var) in secret.keys {
-            let value = env::var(var).with_context(|| format!("{var} is not set"))?;
-            values.push((*key, value));
-        }
-        let manifest = secret_manifest(secret.name, &values)?;
+    for (name, manifest) in manifests {
         kubectl(
-            config,
+            context,
             &["apply", "--server-side", "-f", "-"],
-            Some(&manifest),
+            Some(manifest),
         )?;
-        eprintln!(
-            "    gitops: wrote the Secret {WORKSPACE_NAMESPACE}/{}",
-            secret.name
-        );
+        eprintln!("    gitops: wrote the Secret {WORKSPACE_NAMESPACE}/{name}");
     }
     Ok(())
 }
 
-/// `cargo xtask gitops secrets`: the workload secrets alone.
-pub(crate) fn secrets(root: &Path, environment: Environment) -> Result<()> {
-    approved_run()?;
-    let dir = root.join("target").join("gitops").join(environment.name());
-    let config = kubeconfig(&dir)?;
-    let written = write_secrets(&config);
-    fs::remove_dir_all(&dir).context("deleting the kubeconfig")?;
-    written
+/// `cargo xtask gitops secrets <environment>`: the workload secrets alone.
+pub(crate) fn secrets(environment: Environment) -> Result<()> {
+    let manifests = secret_manifests()?;
+    let context = founder_confirms(environment, "write the workload secrets of")?;
+    write_secrets(&context, &manifests)
 }
 
-/// `cargo xtask gitops bootstrap`: Flux's controllers, pinned; the workload
-/// secrets; and the environment's `sync.yaml`, after which Flux reconciles the rest.
+/// `cargo xtask gitops bootstrap <environment>`: Flux's controllers, pinned; the workload
+/// secrets; and the environment's `sync.yaml`, after which Flux reconciles the rest. Everything
+/// is read and checked before the founder confirms, so a refusal applies nothing.
 pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
-    approved_run()?;
     let sync = root
         .join("deploy/gitops/clusters")
         .join(environment.name())
         .join("sync.yaml");
-    ensure!(sync.is_file(), "{} is missing", sync.display());
+    let sync = fs::read_to_string(&sync).with_context(|| format!("reading {}", sync.display()))?;
+    let version = Command::new("flux")
+        .args(["version", "--client"])
+        .output()
+        .context("starting flux (deploy/gitops/BOOTSTRAP.md)")?;
+    let printed = String::from_utf8_lossy(&version.stdout);
+    ensure!(
+        printed.trim() == format!("flux: v{FLUX_VERSION}"),
+        "flux {} is not the pinned v{FLUX_VERSION}",
+        printed.trim()
+    );
     let exported = Command::new("flux")
         .args(["install", "--export", "--components", FLUX_COMPONENTS])
         .output()
-        .context("starting flux (gitops-bootstrap.yml installs it)")?;
+        .context("starting flux")?;
     ensure!(exported.status.success(), "flux install --export failed");
     let manifest =
         pin_images(&String::from_utf8(exported.stdout).context("flux printed non-UTF-8")?)?;
-    let dir = root.join("target").join("gitops").join(environment.name());
-    let config = kubeconfig(&dir)?;
-    let applied = (|| {
+    let secrets = secret_manifests()?;
+    let context = founder_confirms(environment, "bootstrap Flux on")?;
+    kubectl(
+        &context,
+        &["apply", "--server-side", "--force-conflicts", "-f", "-"],
+        Some(&manifest),
+    )?;
+    for controller in [
+        "source-controller",
+        "kustomize-controller",
+        "helm-controller",
+    ] {
         kubectl(
-            &config,
-            &["apply", "--server-side", "--force-conflicts", "-f", "-"],
-            Some(&manifest),
+            &context,
+            &[
+                "rollout",
+                "status",
+                &format!("deployment/{controller}"),
+                "--namespace",
+                "flux-system",
+                "--timeout=300s",
+            ],
+            None,
         )?;
-        for controller in [
-            "source-controller",
-            "kustomize-controller",
-            "helm-controller",
-        ] {
-            kubectl(
-                &config,
-                &[
-                    "rollout",
-                    "status",
-                    &format!("deployment/{controller}"),
-                    "--namespace",
-                    "flux-system",
-                    "--timeout=300s",
-                ],
-                None,
-            )?;
-        }
-        write_secrets(&config)?;
-        let sync = fs::read_to_string(&sync).context("reading sync.yaml")?;
-        kubectl(&config, &["apply", "--server-side", "-f", "-"], Some(&sync))
-    })();
-    fs::remove_dir_all(&dir).context("deleting the kubeconfig")?;
-    applied?;
+    }
+    write_secrets(&context, &secrets)?;
+    kubectl(
+        &context,
+        &["apply", "--server-side", "-f", "-"],
+        Some(&sync),
+    )?;
     eprintln!(
         "    gitops: {} bootstrapped; Flux now reconciles deploy/gitops/clusters/{} from main",
         environment.name(),
@@ -393,35 +423,38 @@ mod tests {
         Ok(())
     }
 
-    /// The bootstrap workflow runs only by dispatch, only on `main`, only under the chosen
-    /// environment's reviewers, and reads no pull request (ES-12, DEC-1005, DEC-2018).
+    /// Nothing runs in CI or without a terminal, so an agent's shell can never apply anything.
     #[test]
-    fn the_bootstrap_workflow_runs_only_from_main_under_its_environment() -> Result<()> {
-        let path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/gitops-bootstrap.yml");
-        let text = fs::read_to_string(path)?;
-        let on = text
-            .split_once("\non:\n")
-            .and_then(|(_, rest)| rest.split_once("\npermissions:"))
-            .map(|(on, _)| on)
-            .context("no on: block")?;
-        assert!(on.starts_with("  workflow_dispatch:\n"), "{on}");
-        for trigger in [
-            "pull_request",
-            "push:",
-            "workflow_run",
-            "schedule",
-            "issue_comment",
-        ] {
-            assert!(!on.contains(trigger), "{trigger}");
+    fn only_the_founders_terminal_outside_ci_may_apply() {
+        assert!(refusal(true, true).is_some());
+        assert!(refusal(true, false).is_some());
+        assert!(refusal(false, false).is_some());
+        assert!(refusal(false, true).is_none());
+    }
+
+    #[test]
+    fn only_the_exact_context_confirms() {
+        assert!(confirmed(
+            "do-nyc3-mandate-staging\n",
+            "do-nyc3-mandate-staging"
+        ));
+        assert!(!confirmed("yes\n", "do-nyc3-mandate-staging"));
+        assert!(!confirmed(
+            "do-nyc3-mandate-staging-old\n",
+            "do-nyc3-mandate-staging"
+        ));
+        assert!(!confirmed("\n", ""));
+    }
+
+    /// No workflow may run the bootstrap: the cluster's API admits only the founder's addresses.
+    #[test]
+    fn no_workflow_runs_the_bootstrap() -> Result<()> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows");
+        for entry in fs::read_dir(dir)? {
+            let text = fs::read_to_string(entry?.path())?;
+            assert!(!text.contains("xtask gitops bootstrap"));
+            assert!(!text.contains("xtask gitops secrets"));
         }
-        assert!(text.contains("\npermissions: {}\n"));
-        assert!(text.contains("    if: github.ref == 'refs/heads/main'\n"));
-        assert!(text.contains("    environment: ${{ inputs.environment }}\n"));
-        assert!(
-            !text.contains(": write"),
-            "the workflow grants no write permission"
-        );
         Ok(())
     }
 }
