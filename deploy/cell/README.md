@@ -177,6 +177,12 @@ Sign-in runs through lane SI's stub issuer (DEC-2100, DEC-1025).
   a session with it through `POST /v1/sessions`, which must answer 204 with the session cookie.
 - Until both pieces are in, no stub runs, no links are mounted, every sign-in is refused, and the
   demo names the sign-in step as skipped.
+- Once that session opens, `cell demo` runs `web/` with `npm run dev:cell` at
+  https://localhost:4317, the API's app origin, reading the demo workspace through
+  http://localhost:8787 as the demo owner (DEC-2406). Under `next dev` only, `web/`'s server asks
+  the stub for `demo-owner`'s token, and the browser opens its own session with it. Next's
+  `--experimental-https` makes a local certificate with mkcert the first time, which may ask to
+  trust its CA. Without sign-in, `web/` runs on its own fixtures at http://127.0.0.1:4317, as before.
 
 The session signing key is made in the pod's memory at each
 start. The interim `api` image carries a CA bundle found on the building host (`SSL_CERT_FILE`, else
