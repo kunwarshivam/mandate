@@ -15,6 +15,9 @@ import { type AgentModeLine, RECORD_TITLE, type RecordList, type StopRecord } fr
 const ORDERS_NOT_REPORTED = "Not reported: the deployment does not serve open orders yet. The kill switch cancels them whatever this list shows.";
 const POSITIONS_NOT_REPORTED = "Not reported for one agent: the deployment serves the account's holdings, not each agent's. The kill switch sells only this agent's.";
 const STOPPED = "Stopped. There is nothing more to stop for this agent.";
+const AGENTS_UNAVAILABLE = "Not available: the agents could not be read. The switch stops every one of them whatever this list shows.";
+/** The connection segment of the account's record route when no connection has been read: the switch still works (rule 13). */
+export const UNREAD_CONNECTION = "unread";
 
 const labelOf = (a: AgentDetail) => a.label ?? a.agent_id;
 
@@ -49,9 +52,9 @@ function killRecord(view: ApiView, environment: ShownEnvironment, agent: AgentDe
   };
 }
 
-function accountRecord(kind: "stop_all" | "close_all", view: ApiView, environment: ShownEnvironment): StopRecord {
-  const active = view.agents.filter((a) => a.mode !== "stopped");
-  const agents: RecordList = { key: "agents", heading: "Agents it stops", items: active.map(labelOf), empty: "No agent is running." };
+function accountRecord(kind: "stop_all" | "close_all", view: ApiView | null, environment: ShownEnvironment, connectionRead: boolean): StopRecord {
+  const active = view ? view.agents.filter((a) => a.mode !== "stopped") : [];
+  const agents: RecordList = { key: "agents", heading: "Agents it stops", items: active.map(labelOf), empty: view ? "No agent is running." : AGENTS_UNAVAILABLE };
   const orders = notReported("orders", "Orders it cancels", ORDERS_NOT_REPORTED);
   const closeAll = kind === "close_all";
   return {
@@ -59,8 +62,10 @@ function accountRecord(kind: "stop_all" | "close_all", view: ApiView, environmen
     environment,
     title: RECORD_TITLE[kind],
     label: "Account",
-    subject: "The workspace's account",
-    scope: closeAll
+    subject: connectionRead ? "The workspace's account" : "Every agent in this workspace",
+    scope: !connectionRead
+      ? "The account has not been read, so this is the workspace's kill switch: it stops every agent in this workspace, each by its own kill switch. Your own holdings are untouched."
+      : closeAll
       ? "The broker's cancel-all and close-position for the whole account. It does not stop at what Owlhead manages: every open order and every position on the account is affected, including ones no agent placed."
       : "Each agent's own kill switch: cancels only that agent's orders, sells only its positions, and ends it. Your own holdings are untouched.",
     warning: null,
@@ -68,24 +73,29 @@ function accountRecord(kind: "stop_all" | "close_all", view: ApiView, environmen
     afterwards: closeAll
       ? "Every order is canceled, every position closed, your own holdings included, and every agent stopped. Each step is journaled and shown below as it is recorded."
       : "Every agent on this account is stopped for good, and their approval requests are canceled. Each step is journaled and shown below as it is recorded.",
-    nothingToDo: !closeAll && view.agents.length > 0 && active.length === 0 ? "Every agent on this account is already stopped." : null,
+    nothingToDo: !closeAll && view && view.agents.length > 0 && active.length === 0 ? "Every agent on this account is already stopped." : null,
     agentId: null,
-    modes: modesOf(view.agents),
+    modes: view ? modesOf(view.agents) : [],
     stepUp: stepUpLine(kind, "", 0),
     back: { href: "/", label: "Dashboard" },
   };
 }
 
-/** The record over the API, or null: no such agent or connection, or a release, which the API cannot show. */
-export function buildApiRecord(kind: StopRecord["kind"], view: ApiView, environment: ShownEnvironment, connectionId: string, targetId: string): StopRecord | null {
+/**
+ * The record over the API, or null: no such agent or connection, or a release, which the API cannot
+ * show. The account's records build with no read at all, since the kill switch never waits on one;
+ * with no connection read, only "Stop all agents" is offered, as the workspace's switch, and it says so.
+ */
+export function buildApiRecord(kind: StopRecord["kind"], view: ApiView | null, environment: ShownEnvironment, connectionId: string, targetId: string): StopRecord | null {
   switch (kind) {
     case "kill": {
-      const agent = view.agents.find((a) => a.agent_id === targetId);
-      return agent ? killRecord(view, environment, agent) : null;
+      const agent = view?.agents.find((a) => a.agent_id === targetId);
+      return view && agent ? killRecord(view, environment, agent) : null;
     }
     case "stop_all":
     case "close_all":
-      return connectionId !== "" && connectionId === targetId ? accountRecord(kind, view, environment) : null;
+      if (connectionId !== "" && connectionId === targetId) return accountRecord(kind, view, environment, true);
+      return connectionId === "" && targetId === UNREAD_CONNECTION && kind === "stop_all" ? accountRecord(kind, view, environment, false) : null;
     case "release":
       return null;
     default: {

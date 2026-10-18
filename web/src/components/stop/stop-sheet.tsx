@@ -19,6 +19,7 @@ import { useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { CommandEntry, UnreachableAlert } from "./command-log";
 import { type SheetKind, needsStepUp, recordHref, stepUpLine } from "./commands";
+import { UNREAD_CONNECTION } from "./api-record";
 import { KillSwitchButton } from "./kill-switch-button";
 import { StepUpDialog } from "./step-up-dialog";
 
@@ -251,7 +252,13 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
             ) : null}
 
             {source === "api" ? (
-              <ApiAgentChoices agents={view?.agents ?? []} agentId={agentId} full={full} pause={(id) => send("pause", id)} leave={leave} />
+              view ? (
+                <ApiAgentChoices agents={view.agents} agentId={agentId} full={full} pause={(id) => send("pause", id)} leave={leave} />
+              ) : (
+                <p className="rounded-xl bg-background px-4 py-3 text-sm" data-slot="agents-unavailable">
+                  The agents could not be read, so each agent&apos;s own kill switch is not listed. The account&apos;s choices below work without them.
+                </p>
+              )
             ) : contextAgent ? (
               <section className="grid gap-(--block-gap)" aria-labelledby="stop-this-agent">
                 <h3 id="stop-this-agent" className="flex items-center justify-between gap-2 text-h3">
@@ -301,15 +308,17 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
               </Choice>
               {full ? (
                 <>
-                  <KillSwitchButton appearance="outline" title="Stop all agents on this account" href={recordHref("stop_all", ws.connection.connection_id)} onClick={leave}>
+                  <KillSwitchButton appearance="outline" title="Stop all agents on this account" href={recordHref("stop_all", ws.connection.connection_id || UNREAD_CONNECTION)} onClick={leave}>
                     Each agent&apos;s own kill switch: cancels its orders, sells its positions, and ends it. Your own holdings are untouched. Opens the full list to confirm with
                     your passkey.
                   </KillSwitchButton>
-                  <KillSwitchButton appearance="outline" title="Close everything on this account" href={recordHref("close_all", ws.connection.connection_id)} onClick={leave}>
-                    The broker&apos;s cancel-all and close-all: it cancels every open order, including ones Owlhead did not place, closes every position, including your own
-                    {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages, and ends every agent. Opens
-                    the full list to confirm with your passkey.
-                  </KillSwitchButton>
+                  {ws.connection.connection_id ? (
+                    <KillSwitchButton appearance="outline" title="Close everything on this account" href={recordHref("close_all", ws.connection.connection_id)} onClick={leave}>
+                      The broker&apos;s cancel-all and close-all: it cancels every open order, including ones Owlhead did not place, closes every position, including your own
+                      {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages, and ends every agent. Opens
+                      the full list to confirm with your passkey.
+                    </KillSwitchButton>
+                  ) : null}
                 </>
               ) : (
                 <p className="px-1 text-sm text-muted-foreground">Stopping and closing are for an owner or operator.</p>

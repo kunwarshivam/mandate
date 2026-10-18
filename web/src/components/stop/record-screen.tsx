@@ -118,7 +118,7 @@ export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetI
   const [notice, setNotice] = useState<string | null>(null);
   const [sent, setSent] = useState<string[]>([]);
   const confirmed = sent.length > 0;
-  const live = source === "api" ? (view ? buildApiRecord(kind, view, ws.environment, ws.connection.connection_id, targetId) : null) : ws.status === "ready" ? buildRecord(kind, ws, targetId) : null;
+  const live = source === "api" ? buildApiRecord(kind, view, ws.environment, ws.connection.connection_id, targetId) : ws.status === "ready" ? buildRecord(kind, ws, targetId) : null;
   const { shown, stale, refresh } = useFrozen(live, confirmed);
   if (stale && asking) setAsking(false);
 

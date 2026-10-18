@@ -4,7 +4,7 @@ import { type Fetch } from "@/api/client";
 import { createMockServer } from "@/api/mock-server";
 import type { AgentDetail, ApiView } from "@/api/read-models";
 import { ApiRuntimeProvider } from "@/lib/api-runtime";
-import { buildApiRecord } from "./api-record";
+import { UNREAD_CONNECTION, buildApiRecord } from "./api-record";
 import { recordHref } from "./commands";
 import { recordLines } from "./record";
 import { StopRecordScreen } from "./record-screen";
@@ -18,8 +18,8 @@ const ORIGIN = "https://api.owlhead.ai";
  * build from what the API serves, so the switch is reachable there, and nothing the API does not
  * serve is shown as "none".
  */
-function mount(ui: React.ReactNode) {
-  const server = createMockServer({ workspaceId: WS, scenario: "normal" });
+function mount(ui: React.ReactNode, scenario: "normal" | "unreachable" = "normal") {
+  const server = createMockServer({ workspaceId: WS, scenario });
   const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
   const fetch: Fetch = (input, init) => {
     if ((init.method ?? "GET") === "POST") posts.push({ path: new URL(input).pathname, body: JSON.parse(typeof init.body === "string" ? init.body : "{}") as Record<string, unknown> });
@@ -69,6 +69,18 @@ describe("the kill switch's record over the API", () => {
     expect(buildApiRecord("kill", view, "paper", "con_1", "agt_2")?.nothingToDo).toMatch(/^Stopped/);
     expect(buildApiRecord("stop_all", view, "paper", "con_1", "con_1")?.lists.find((l) => l.key === "agents")?.items).toEqual(["Agent 1"]);
   });
+
+  it("builds the account's switch with no read at all, says the agents are not available, and names the workspace scope when no connection was read", () => {
+    const unread = buildApiRecord("stop_all", null, "unknown", "", UNREAD_CONNECTION);
+    expect(unread).not.toBeNull();
+    expect(unread).toMatchObject({ nothingToDo: null, agentId: null, modes: [], subject: "Every agent in this workspace" });
+    expect(unread!.scope).toMatch(/^The account has not been read, so this is the workspace's kill switch/);
+    expect(recordLines(unread!).some((l) => l.startsWith("Not available: the agents could not be read"))).toBe(true);
+    expect(buildApiRecord("stop_all", null, "paper", "con_1", "con_1")?.subject).toBe("The workspace's account");
+    expect(buildApiRecord("close_all", null, "unknown", "", UNREAD_CONNECTION)).toBeNull();
+    expect(buildApiRecord("stop_all", null, "unknown", "con_1", UNREAD_CONNECTION)).toBeNull();
+    expect(buildApiRecord("kill", null, "unknown", "", "agt_1")).toBeNull();
+  });
 });
 
 describe("the Stop sheet and D10 over the API (rule 13)", () => {
@@ -87,6 +99,24 @@ describe("the Stop sheet and D10 over the API (rule 13)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Use passkey" }));
     await waitFor(() => expect(posts.filter((p) => p.path.endsWith("/kill-switch"))).toHaveLength(1), { timeout: 5000 });
     expect(posts.find((p) => p.path.endsWith("/kill-switch"))?.body).toMatchObject({ scope: { kind: "agent", id: "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC" }, environment_shown: "paper" });
+  });
+
+  it("says the agents are unavailable when they cannot be read, and keeps the account's kill switch", async () => {
+    mount(<StopSheet open onOpenChange={() => {}} agentId={null} />, "unreachable");
+    const sheet = await screen.findByRole("dialog", { name: /^Stop/ });
+    await waitFor(() => expect(sheet.querySelector("[data-slot=agents-unavailable]")).not.toBeNull());
+    expect(within(sheet).queryAllByRole("link", { name: /^Kill switch:/ })).toHaveLength(0);
+    expect(within(sheet).getByRole("link", { name: /^Stop all agents on this account/ }).getAttribute("href")).toBe(`/connections/${UNREAD_CONNECTION}/stop-all`);
+    expect(within(sheet).queryByRole("link", { name: /^Close everything/ })).toBeNull();
+  });
+
+  it("sends the account's switch with no read, as the workspace's, which its screen named", async () => {
+    const { posts } = mount(<StopRecordScreen kind="stop_all" targetId={UNREAD_CONNECTION} />, "unreachable");
+    expect(await screen.findByText(/^The account has not been read, so this is the workspace's kill switch/)).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /^Stop all agents|^Activate/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use passkey" }));
+    await waitFor(() => expect(posts.filter((p) => p.path.endsWith("/kill-switch")).length).toBeGreaterThan(0), { timeout: 5000 });
+    for (const p of posts.filter((p) => p.path.endsWith("/kill-switch"))) expect(p.body).toMatchObject({ scope: { kind: "workspace", id: null } });
   });
 
   it("sends stop-all scoped to the served connection", async () => {
