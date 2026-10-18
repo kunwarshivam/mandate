@@ -3135,6 +3135,18 @@ enables `live` (ES-23, OPS-5).
   API's image (A1), its version and deploy routes (A2), the runtime's image (P), the executor (X),
   the research driver (I2), step-up (SU), the backtest's API read and `web/` screen (I4, W2), the
   kill switch's CLI (O4) and the deployment manager (D1).
+- **E21-55 (Proposed, M8, for the 2026-10-26 demo; SC; lane MB; after E21-31; claim #1623;
+  DEC-2110)** As a workspace member, I want the API server to read my membership from the
+  workspace's control stream, so that my signed-in reads are answered rather than refused as
+  `membership_unavailable` (workspace API spec §3.11 item 8; DEC-978 item 8; DEC-991 item 4).
+  *Accepted when:* `mandate-api-server` wires `members::control_parser` instead of the placeholder
+  that fails every lookup; every `Member*` record of the hosted workspace's stream maps through
+  `mandate_identity::control_entry` and folds in stream order at the lookup's instant; rows of
+  another workspace's stream and records of other types are passed over; an unreadable row, a
+  stream not opened by `StreamOpened`, a `Member*` record of an unknown schema version or of an
+  environment other than the stream's each fail the whole lookup closed, never skipping the row;
+  a revoked member is refused; and a property test folds random grant, revoke and role-change
+  histories against an independent oracle that catches each seeded bug.
 
 ## Won't (v1)
 
