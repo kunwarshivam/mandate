@@ -7,13 +7,18 @@
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 
-use mandate_canon::{Value, parse};
-use mandate_evaluation::{InputFiles, ThesisRecord};
-use mandate_journal::{ArtifactRef, ArtifactStore, StoredEvent};
+use mandate_canon::{Digest, Value, parse, to_canonical};
+use mandate_evaluation::{
+    Baselines, EvaluationError, EvaluationRecord, EvaluationRequest, InputFiles, ThesisRecord,
+    decode, evaluate, evaluation_run_recorded, input_objects,
+};
+use mandate_journal::{ArtifactError, ArtifactRef, ArtifactStore, StoredEvent, get_artifact};
 use mandate_time::UtcNanos;
 
+use crate::backtest::{is_id, rule_set};
 use crate::control::{
-    ControlError, ControlJournal, Now, Owner, Submitted, agent_stream, control_stream,
+    Confirmation, ControlError, ControlJournal, Decision, EVALUATION_TYPE, Now, Owner, Repeat,
+    Shape, Submitted, agent_stream, commit_evaluation, control_stream, decide,
 };
 use crate::version::{refused, rows};
 
@@ -136,7 +141,8 @@ pub struct Request<'a> {
 /// # Errors
 /// [`ControlError::Refused`], having appended nothing: `internal_paper` refusals,
 /// `evaluation_id_invalid`, `input_invalid`, [`thesis_records`]' refusals, the evaluator's own
-/// code when it refuses the evaluation (having stored nothing), `artifact_corrupt` for a stored
+/// code when it refuses the evaluation (having stored nothing), `rule_set_missing` when the stream
+/// has registered no rule set to bind, `artifact_corrupt` for a stored
 /// object that does not re-hash, and `evaluation_id_taken` for an id another record holds.
 /// [`ControlError::Journal`] as `commit` reports.
 pub fn run(
@@ -147,6 +153,129 @@ pub fn run(
     request: &Request<'_>,
     now: Now,
 ) -> Result<Evaluated, ControlError> {
-    let _ = (journal, store, owner, setting, request, now);
-    Err(ControlError::Unimplemented { story: "E17-8" })
+    internal_paper(journal, owner, setting)?;
+    if !is_id(request.evaluation_id) {
+        return Err(refused("evaluation_id_invalid"));
+    }
+    let inputs = decode(&request.files).map_err(|_| refused("input_invalid"))?;
+    let records = thesis_records(journal, owner)?;
+    let source: &dyn ArtifactStore = store;
+    let documents = |digest: &Digest| {
+        let bytes = get_artifact(source, &ArtifactRef::from_digest(*digest)).ok()?;
+        parse(&bytes).ok()
+    };
+    let evaluation = EvaluationRequest {
+        decision_id: &inputs.decision_id,
+        decision: &inputs.decision,
+        cut_off: request.cut_off,
+        records: &records,
+        documents: &documents,
+        closes: &inputs.closes,
+        baselines: Baselines {
+            basket: &inputs.basket,
+            index: &inputs.index,
+        },
+        cost: &inputs.cost,
+    };
+    let evaluator = |e: EvaluationError| refused(e.code());
+    let report = evaluate(&evaluation).map_err(evaluator)?;
+    let objects = input_objects(&evaluation).map_err(evaluator)?;
+    let build = format!("mandate-cli/{}", env!("CARGO_PKG_VERSION"));
+    let payload = evaluation_run_recorded(&EvaluationRecord {
+        evaluation_id: request.evaluation_id,
+        report: &report,
+        records: &records,
+        code_build: Digest::of(build.as_bytes()),
+    })
+    .map_err(evaluator)?;
+    let report_ref = ArtifactRef::from_digest(report.digest().map_err(evaluator)?).to_string();
+    let evaluated = |submitted| Evaluated {
+        evaluation_id: request.evaluation_id.to_owned(),
+        report: report_ref.clone(),
+        passed: report.passed(),
+        submitted,
+    };
+    let control = rows(journal, owner)?;
+    let rule_set = rule_set(&control)?;
+    let earlier = control.into_iter().find(|r| {
+        r.event_type == EVALUATION_TYPE && r.member("evaluation_id") == Some(request.evaluation_id)
+    });
+    if let Some(earlier) = earlier {
+        return if *earlier.payload() == payload {
+            Ok(evaluated(earlier.submitted()))
+        } else {
+            Err(refused("evaluation_id_taken"))
+        };
+    }
+    let report_bytes = report.canonical_bytes().map_err(evaluator)?;
+    let mut artifact_refs = BTreeSet::new();
+    for bytes in [
+        build.as_bytes(),
+        &to_canonical(&objects.theses),
+        &to_canonical(&objects.closes),
+        &to_canonical(&objects.cost_model),
+        &report_bytes,
+    ] {
+        artifact_refs.insert(put_checked(store, bytes)?);
+    }
+    put_checked(store, &to_canonical(&payload))?;
+    let key = payload
+        .as_object()
+        .map(|members| {
+            MEMBERS
+                .iter()
+                .map(|name| (*name, members.get(*name).cloned().unwrap_or(Value::Null)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let decided = match decide(
+        journal,
+        owner,
+        EVALUATION_TYPE,
+        key,
+        Confirmation::Fixed(false),
+        Repeat::FindsEarlier,
+    )? {
+        Decision::Committed(earlier) => return Ok(evaluated(earlier)),
+        Decision::Fresh(decided) => decided,
+    };
+    let shape = Shape {
+        schema_version: 1,
+        artifact_refs: artifact_refs.into_iter().collect(),
+        config_refs: vec![("rule_set", Value::Str(rule_set))],
+    };
+    commit_evaluation(journal, owner, decided, shape, now).map(evaluated)
+}
+
+/// The payload's members, exactly (journal spec §9.18).
+const MEMBERS: [&str; 13] = [
+    "closes",
+    "code_build",
+    "cost_model",
+    "cut_off",
+    "decision",
+    "evaluation_id",
+    "passed",
+    "report",
+    "report_version",
+    "theses",
+    "theses_from",
+    "theses_head",
+    "theses_to",
+];
+
+/// Stores `bytes`, then re-reads them by their reference and re-hashes them; returns the reference.
+fn put_checked(store: &mut dyn ArtifactStore, bytes: &[u8]) -> Result<String, ControlError> {
+    let stored = |e: ArtifactError| match e {
+        ArtifactError::Missing | ArtifactError::Corrupt => refused("artifact_corrupt"),
+        ArtifactError::Unavailable => {
+            ControlError::Journal(format!("the artifact store: {}", e.code()))
+        }
+    };
+    let reference = store.put_artifact(bytes).map_err(stored)?;
+    let read = get_artifact(store, &reference).map_err(stored)?;
+    if read != bytes {
+        return Err(refused("artifact_corrupt"));
+    }
+    Ok(reference.to_string())
 }

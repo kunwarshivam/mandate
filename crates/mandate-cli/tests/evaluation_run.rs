@@ -208,7 +208,6 @@ fn stored(store: &Store, reference: &str) -> Value {
 /// the report's inputs are the stored objects; the range is the agent stream's first and last
 /// thesis record, and the head its last record's hash. A re-run finds the record.
 #[test]
-#[ignore = "pending E17-8"]
 fn an_evaluation_is_stored_and_recorded_once_as_the_evaluator() {
     let mut world = World::new();
     let before = world.rows().len();
@@ -287,7 +286,6 @@ fn an_evaluation_is_stored_and_recorded_once_as_the_evaluator() {
 
 /// An id another record holds, with another evaluation's payload, refuses; nothing is appended.
 #[test]
-#[ignore = "pending E17-8"]
 fn a_taken_id_refuses() {
     let mut world = World::new();
     world.run("ev_1", CUT_OFF).unwrap();
@@ -304,7 +302,6 @@ fn a_taken_id_refuses() {
 /// Outside an internal paper workspace, or with an id the API cannot name, or inputs that do not
 /// decode, the run refuses having stored and appended nothing.
 #[test]
-#[ignore = "pending E17-8"]
 fn a_refused_run_stores_and_appends_nothing() {
     let mut world = World::new();
     world.setting = false;
@@ -333,7 +330,6 @@ fn a_refused_run_stores_and_appends_nothing() {
 /// A control stream with no registered rule set has nothing for the record to bind (journal spec
 /// §9.18 requires `config_refs.rule_set`), so the run refuses having stored and appended nothing.
 #[test]
-#[ignore = "pending E17-8"]
 fn a_stream_with_no_rule_set_refuses() {
     let mut world = World::new();
     world.journal = Journal::default();
@@ -357,7 +353,6 @@ fn a_stream_with_no_rule_set_refuses() {
 /// An evaluation the evaluator refuses as a whole is refused by its own code, with nothing stored
 /// or appended: here a thesis bound to a version the store does not hold fails its record check.
 #[test]
-#[ignore = "pending E17-8"]
 fn the_evaluators_refusal_is_the_runs() {
     let mut world = World::new();
     world.version =
