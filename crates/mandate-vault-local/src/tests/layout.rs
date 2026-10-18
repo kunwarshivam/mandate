@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::startup::{Ids, Inputs, PENDING_KEY_CREDENTIAL, Role, TOKEN_KEY_CREDENTIAL};
+use crate::store::{ApiVault, ExecutorVault, open};
 
 pub const PENDING_KEY: [u8; 32] = [7; 32];
 pub const TOKEN_KEY: [u8; 32] = [9; 32];
@@ -70,6 +71,36 @@ impl Layout {
             environment: &self.environment,
             ids: self.ids,
         }
+    }
+
+    /// Both roles over one vault: the executor opens with both keys, then the API with the token
+    /// key moved aside, as its own unit would load it.
+    pub fn both(&self) -> (ApiVault, ExecutorVault) {
+        let executor = open(&self.inputs(Role::Executor))
+            .unwrap()
+            .into_executor()
+            .unwrap();
+        let token_key = self.credentials.join(TOKEN_KEY_CREDENTIAL);
+        let aside = self.root.join("token-key-aside");
+        fs::rename(&token_key, &aside).unwrap();
+        let api = open(&self.inputs(Role::Api)).unwrap().into_api().unwrap();
+        fs::rename(&aside, &token_key).unwrap();
+        (api, executor)
+    }
+
+    /// The path of `entry`'s file.
+    pub fn file(&self, entry: &crate::entry::Entry) -> PathBuf {
+        self.vault.join(entry.kind().dir()).join(entry.file_name())
+    }
+
+    /// The names in one vault subdirectory, sorted.
+    pub fn names(&self, dir: &str) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(self.vault.join(dir))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
     }
 
     pub fn without_token_key(self) -> Self {

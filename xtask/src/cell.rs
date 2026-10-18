@@ -12,7 +12,7 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpStream, ToSocketAddrs};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
@@ -48,6 +48,20 @@ pub const COMPOSE_FILE: &str = "deploy/cell/compose/compose.json";
 const IMAGE_DOCKERFILE: &str = "deploy/cell/images/mandate.Dockerfile";
 /// The workspace API server's image, built beside `mandate` from the same static build.
 const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
+/// The local stub token issuer's image (DEC-2100, DEC-1025), a sidecar in the API pod.
+const STUB_DOCKERFILE: &str = "deploy/cell/images/stub-issuer.Dockerfile";
+/// Lane SI's stub issuer crate (E21-52); the cell runs it only once it is in the workspace.
+const STUB_CRATE: &str = "crates/mandate-stub-issuer/Cargo.toml";
+/// The stub's entry point: its tests land before its code, with this file a `todo!()` stub
+/// (DEC-137), which the cell must not run, since the pod would never start.
+const STUB_MAIN: &str = "crates/mandate-stub-issuer/src/main.rs";
+/// What marks an entry point still pending (DEC-137).
+const PENDING_BODY: &str = "todo!(";
+/// The server's key-set tier check (E21-53); DEC-2100 item 9 runs the stub only once it is in.
+const KEY_SET_TIER_CHECK: (&str, &str) = (
+    "crates/mandate-api-server/src/config.rs",
+    "pub fn check_key_set_tier(",
+);
 /// Where a Linux host keeps its CA bundle, in the order `cell up` looks after `SSL_CERT_FILE`:
 /// Debian and Ubuntu, Fedora and RHEL, openSUSE, Alpine. The bundle is copied into the `api`
 /// image: on an empty base the server finds no roots, cannot build its key-set client, and refuses
@@ -409,6 +423,38 @@ fn api_image_tag() -> Result<Option<String>> {
     local_tag("api", "mandate-api-server").map(Some)
 }
 
+/// Whether this checkout can run the stub issuer in the cell: lane SI's crate is in the workspace
+/// with its entry point implemented, not still the `todo!()` its tests land with, and the server
+/// refuses an `http` key set outside dev and CI (DEC-2100 item 9). Until all hold, the cell runs
+/// no stub, mounts no subject links, and every sign-in is refused.
+pub fn stub_ready(root: &Path) -> bool {
+    let (server, check) = KEY_SET_TIER_CHECK;
+    root.join(STUB_CRATE).is_file()
+        && fs::read_to_string(root.join(STUB_MAIN)).is_ok_and(|main| !main.contains(PENDING_BODY))
+        && fs::read_to_string(root.join(server)).is_ok_and(|code| code.contains(check))
+}
+
+/// The cell's stub issuer image: this checkout's dev-profile build, since the stub is compiled
+/// only with debug assertions (DEC-2100 item 2); none without an API image or a ready stub.
+fn stub_image_tag() -> Result<Option<String>> {
+    if api_image_tag()?.is_none() || !stub_ready(Path::new(".")) {
+        return Ok(None);
+    }
+    local_tag("stub-issuer", "mandate-stub-issuer").map(Some)
+}
+
+/// The values the API's sign-in pieces take: the stub's image, and the subject-link ConfigMap the
+/// demo writes, both empty without a stub, so nothing is mounted and every sign-in is refused.
+fn signin_values(stub: Option<&str>) -> [String; 2] {
+    [
+        format!("images.stub-issuer={}", stub.unwrap_or_default()),
+        format!(
+            "api.subjectLinks={}",
+            if stub.is_some() { LINKS_CONFIGMAP } else { "" }
+        ),
+    ]
+}
+
 /// `mandate.local/<name>:<the first 12 hex digits of the binary's SHA-256>`.
 fn local_tag(name: &str, binary: &str) -> Result<String> {
     let digest = sha256(&static_binary(binary))?;
@@ -438,6 +484,7 @@ fn image_sets() -> Result<Vec<String>> {
         format!("images.mandate={}", image_tag()?),
         format!("images.api={}", api_image_tag()?.unwrap_or_default()),
     ];
+    sets.extend(signin_values(stub_image_tag()?.as_deref()));
     if let Some(runtime) = runtime_image()? {
         sets.push(format!("images.runtime={runtime}"));
     }
@@ -456,11 +503,15 @@ pub fn up() -> Result<()> {
     let image = image_tag()?;
     let api = api_image_tag()?;
     let runtime = runtime_image()?;
+    let stub = stub_image_tag()?;
     if source == ImageSource::Build {
         build_image(&image, IMAGE_DOCKERFILE, "mandate", &[])?;
     }
     if let Some(runtime) = &runtime {
         build_image(runtime, RUNTIME_DOCKERFILE, "mandate-daemon", &[])?;
+    }
+    if let Some(stub) = &stub {
+        build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
     }
     if let Some(api) = &api {
         build_image(
@@ -481,6 +532,9 @@ pub fn up() -> Result<()> {
     }
     if let Some(runtime) = &runtime {
         sh("k3d", &["image", "import", "--cluster", CLUSTER, runtime])?;
+    }
+    if let Some(stub) = &stub {
+        sh("k3d", &["image", "import", "--cluster", CLUSTER, stub])?;
     }
     let config = kubeconfig()?;
     sh(
@@ -532,6 +586,9 @@ pub fn up() -> Result<()> {
         "cluster.postgresql.cnpg.io/journal",
         "--timeout=300s",
     ])?;
+    if stub.is_some() {
+        demo_links(&image)?;
+    }
     let sets = image_sets()?;
     let mut install = vec![
         "upgrade",
@@ -620,10 +677,11 @@ const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, `mandate-api-server` and the runtime's `mandate-daemon` (DEC-1013) linked
 /// statically, so their images need no base (DEC-993 item 9), with no feature at all: never
-/// `live`. The dev profile, for the CI job's ten minutes (DEC-464): it keeps overflow checks, and
-/// the cell's journals are small.
+/// `live`; with them the stub issuer once [`stub_ready`], which the dev profile's debug assertions
+/// are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes (DEC-464):
+/// it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
-    let args = [
+    let mut args = vec![
         "build",
         "--locked",
         "--package",
@@ -632,11 +690,11 @@ fn build_binary() -> Result<()> {
         "mandate-api-server",
         "--package",
         "mandate-daemon",
-        "--target",
-        STATIC_TRIPLE,
-        "--target-dir",
-        STATIC_TARGET,
     ];
+    if stub_ready(Path::new(".")) {
+        args.extend(["--package", "mandate-stub-issuer"]);
+    }
+    args.extend(["--target", STATIC_TRIPLE, "--target-dir", STATIC_TARGET]);
     eprintln!(
         "    $ RUSTFLAGS='-C target-feature=+crt-static' cargo {}",
         args.join(" ")
@@ -647,10 +705,7 @@ fn build_binary() -> Result<()> {
         .status()
         .context("starting cargo")?;
     if !status.success() {
-        bail!(
-            "the static build of mandate-cli, mandate-api-server and mandate-daemon failed with \
-             {status}"
-        );
+        bail!("the static build of the cell's binaries failed with {status}");
     }
     Ok(())
 }
@@ -2041,11 +2096,11 @@ fn compose_api_settings(api_image: &str) -> [(&'static str, String); 8] {
         ("MANDATE_API_WORKSPACE", DEMO_WORKSPACE.to_string()),
         ("MANDATE_API_ISSUER", LOCAL_ISSUER.to_string()),
         ("MANDATE_API_AUDIENCE", "authenticated".to_string()),
-        ("MANDATE_API_JWKS_URL", format!("{LOCAL_ISSUER}/jwks")),
         (
-            "MANDATE_API_APP_ORIGIN",
-            "https://localhost:4317".to_string(),
+            "MANDATE_API_JWKS_URL",
+            format!("{LOCAL_ISSUER}{STUB_KEY_SET}"),
         ),
+        ("MANDATE_API_APP_ORIGIN", DEMO_APP_ORIGIN.to_string()),
         ("MANDATE_DEPLOYMENT_TIER", "dev".to_string()),
     ]
 }
@@ -2200,8 +2255,22 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
 const DEMO_WORKSPACE: &str = "01KDEM0000000000000000000W";
 /// The demo workspace's organization (`api.org` in the local cell's values).
 const DEMO_ORG: &str = "01KDEM0000000000000000000R";
-/// The local stub issuer's address on the API pod's loopback (DEC-2100, lane SI).
+/// The local stub issuer's address on the API pod's loopback (DEC-2100, lane SI), exactly as its
+/// tokens carry it in `iss`: no trailing slash.
 const LOCAL_ISSUER: &str = "http://127.0.0.1:8090";
+/// The stub's port on the API pod's loopback, which the demo forwards to the same local port, so
+/// the `Host` the stub requires (`127.0.0.1:8090`, any other gets 421) is the one the demo sends.
+const STUB_PORT: u16 = 8090;
+/// The stub's key-set path under [`LOCAL_ISSUER`].
+const STUB_KEY_SET: &str = "/jwks.json";
+/// The ConfigMap holding the demo's subject links, which the chart mounts at the fixed path.
+const LINKS_CONFIGMAP: &str = "subject-links";
+/// The demo owner's subject at the stub issuer: a name for a demo principal, never a person's.
+const DEMO_SUBJECT: &str = "demo-owner";
+/// The user principal the demo owner signs in as.
+const DEMO_OWNER: &str = "01KDEM0000000000000000000P";
+/// The app origin the local cell's API takes (`api.appOrigin` in its values).
+const DEMO_APP_ORIGIN: &str = "https://localhost:4317";
 /// Where `web/` serves on the developer's machine (its `npm run dev`).
 const WEB_URL: &str = "http://127.0.0.1:4317";
 /// The process-list name lane A1 gives the workspace API server; `api_is_a_planned_name` checks
@@ -2224,7 +2293,7 @@ pub struct DemoPart {
 
 /// Which demo parts this checkout can bring up: a process is there once the process list marks
 /// it built (its lane's image exists), and the founding membership once the CLI has its gesture.
-pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
+pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<DemoPart> {
     let built = |name: &str| {
         processes
             .iter()
@@ -2280,6 +2349,14 @@ pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
             ),
         },
         DemoPart {
+            name: SIGNIN_PART,
+            skipped: lane(
+                built(API_PROCESS) && stub_ready,
+                "the local stub issuer (lane SI, E21-52) and the server's key-set tier check \
+                 (E21-53) are not both on main (DEC-2100 item 9)",
+            ),
+        },
+        DemoPart {
             name: "web/ against the cell's API",
             skipped: lane(
                 built(API_PROCESS),
@@ -2311,15 +2388,9 @@ pub fn demo(web: bool) -> Result<()> {
             p["built"] = json!(false);
         }
     }
-    let mut parts = demo_parts(&listed, &help);
+    let mut parts = demo_parts(&listed, &help, stub_ready(Path::new(".")));
     if api_image_tag()?.is_none() {
-        for part in parts.iter_mut().filter(|p| p.skipped.is_none()) {
-            if part.name.contains("API") {
-                part.skipped = Some(format!(
-                    "{IMAGE_ENV} names a pulled `mandate` image, and no API image is published yet"
-                ));
-            }
-        }
+        skip_without_api_image(&mut parts);
     }
     let api_ready = parts
         .iter()
@@ -2335,8 +2406,15 @@ pub fn demo(web: bool) -> Result<()> {
         "    kubectl: docker exec {NODE} kubectl --namespace {NAMESPACE} get pods; \
          stop: cargo xtask cell down"
     );
+    let signin_ready = api_ready
+        && parts
+            .iter()
+            .any(|p| p.name == SIGNIN_PART && p.skipped.is_none());
     if api_ready {
-        api_port_forward()?;
+        api_port_forward(signin_ready)?;
+    }
+    if signin_ready {
+        demo_sign_in()?;
     }
     if !web {
         return Ok(());
@@ -2370,24 +2448,46 @@ pub fn demo(web: bool) -> Result<()> {
     }
 }
 
+/// Names every part that needs this checkout's API image as skipped, sign-in among them, for a
+/// cell that pulls its `mandate` image and so has no API image.
+pub fn skip_without_api_image(parts: &mut [DemoPart]) {
+    for part in parts.iter_mut().filter(|p| p.skipped.is_none()) {
+        if part.name.contains("API") || part.name == SIGNIN_PART {
+            part.skipped = Some(format!(
+                "{IMAGE_ENV} names a pulled `mandate` image, and no API image is published yet"
+            ));
+        }
+    }
+}
+
 /// The local port the demo forwards to the API server's listener on its pod's loopback.
 const API_LOCAL_PORT: u16 = 8787;
 
 /// The demo part that is the API server; `api_port_forward` runs only once it is ready.
 const API_PART: &str = "the workspace API server, through a port-forward";
 
+/// The demo part that is sign-in; `demo_sign_in` runs only once it is ready.
+const SIGNIN_PART: &str =
+    "sign-in as the demo owner, through the local stub issuer (dev cell only, DEC-2100)";
+
 /// Forwards [`API_LOCAL_PORT`] on this machine to the API server's listener, with the host's own
 /// `kubectl` (the cell's nodes publish no port), and checks that `/v1` answers: with no session,
 /// the one 401 (API-1). The forward keeps running after the demo returns, until its pod goes or it
 /// is stopped; a later demo whose port still answers that way reuses it rather than starting one.
-fn api_port_forward() -> Result<()> {
+fn api_port_forward(stub: bool) -> Result<()> {
     let config = kubeconfig()?;
-    let forward = port_forward_args(&config);
+    let forward = port_forward_args(&config, stub);
     let shown = forward.join(" ");
     let path = format!("/v1/workspaces/{DEMO_WORKSPACE}/agents");
     if http_status(API_LOCAL_PORT, &path).is_ok_and(|status| status == 401) {
-        eprintln!("    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (an earlier forward)");
-        return Ok(());
+        if !stub || stub_answers() {
+            eprintln!("    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (an earlier forward)");
+            return Ok(());
+        }
+        bail!(
+            "an earlier forward holds 127.0.0.1:{API_LOCAL_PORT} without the stub issuer's port \
+             {STUB_PORT}; stop it with `pkill -f 'port-forward deployment/api'` and run the demo again"
+        );
     }
     if output("kubectl", &["version", "--client"]).is_err() {
         eprintln!("    api: no kubectl on this machine; forward it with `kubectl {shown}`");
@@ -2408,17 +2508,21 @@ fn api_port_forward() -> Result<()> {
             bail!("`kubectl {shown}` exited with {status}:\n{}", said());
         }
         if let Ok(status) = http_status(API_LOCAL_PORT, &path) {
-            if status == 401 {
+            if status == 401 && (!stub || stub_answers()) {
                 eprintln!(
                     "    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (GET {path} is 401 \
                      with no session, API-1)"
                 );
                 return Ok(());
             }
-            bail!("the API server answered GET {path} with {status}, not the one 401");
+            if status != 401 {
+                let _ = child.kill();
+                bail!("the API server answered GET {path} with {status}, not the one 401");
+            }
         }
         sleep(Duration::from_secs(1));
     }
+    let _ = child.kill();
     bail!(
         "the API server did not answer on 127.0.0.1:{API_LOCAL_PORT} within 30 s through \
          `kubectl {shown}`, which said:\n{}",
@@ -2427,9 +2531,10 @@ fn api_port_forward() -> Result<()> {
 }
 
 /// `kubectl` arguments forwarding [`API_LOCAL_PORT`] on this machine's loopback to the API
-/// listener's port 8080: the address is its own flag, since a port spec is `LOCAL:REMOTE` only.
-pub fn port_forward_args(kubeconfig: &str) -> Vec<String> {
-    [
+/// listener's port 8080, and with `stub` [`STUB_PORT`] to the stub issuer's: the address is its
+/// own flag, since a port spec is `LOCAL:REMOTE` only.
+pub fn port_forward_args(kubeconfig: &str, stub: bool) -> Vec<String> {
+    let mut args: Vec<String> = [
         "--kubeconfig",
         kubeconfig,
         "--namespace",
@@ -2441,20 +2546,175 @@ pub fn port_forward_args(kubeconfig: &str) -> Vec<String> {
         &format!("{API_LOCAL_PORT}:8080"),
     ]
     .map(String::from)
-    .to_vec()
+    .to_vec();
+    if stub {
+        args.push(format!("{STUB_PORT}:{STUB_PORT}"));
+    }
+    args
+}
+
+/// Whether the stub issuer answers through the forward: its key set, with the `Host` it requires.
+fn stub_answers() -> bool {
+    http(STUB_PORT, "GET", STUB_KEY_SET, &[], "").is_ok_and(|(status, _)| status == 200)
+}
+
+/// Signs in as the demo owner the way `web/` does: a token for [`DEMO_SUBJECT`] from the stub
+/// issuer, then `POST /v1/sessions` from the app origin, which must answer 204 with the session
+/// cookie (workspace API spec §3.11 item 5).
+fn demo_sign_in() -> Result<()> {
+    let body = json!({"subject": DEMO_SUBJECT}).to_string();
+    let (status, reply) = http(
+        STUB_PORT,
+        "POST",
+        "/token",
+        &[("Content-Type", "application/json")],
+        &body,
+    )
+    .context("asking the stub issuer for a token")?;
+    if status != 200 {
+        bail!("the stub issuer answered POST /token with {status}");
+    }
+    let token: Value = serde_json::from_str(reply_body(&reply))
+        .context("the stub issuer's token reply is not JSON")?;
+    let token = token["access_token"]
+        .as_str()
+        .context("the stub issuer's reply carries no access_token")?;
+    let body = json!({"access_token": token}).to_string();
+    let (status, reply) = http(
+        API_LOCAL_PORT,
+        "POST",
+        "/v1/sessions",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", DEMO_APP_ORIGIN),
+            ("X-Mandate-Request", "1"),
+        ],
+        &body,
+    )
+    .context("opening a session")?;
+    if !signed_in(status, &reply) {
+        bail!("POST /v1/sessions answered {status}, not 204 with the session cookie");
+    }
+    eprintln!("    sign-in: the demo owner opened a session through the local stub issuer");
+    Ok(())
+}
+
+/// Whether an answer to `POST /v1/sessions` opened a session: 204 and the `__Host-` cookie.
+pub fn signed_in(status: u16, reply: &str) -> bool {
+    status == 204
+        && reply
+            .split("\r\n\r\n")
+            .next()
+            .unwrap_or_default()
+            .lines()
+            .any(|l| {
+                l.to_ascii_lowercase()
+                    .starts_with("set-cookie: __host-mandate_session=")
+            })
+}
+
+/// The body of an HTTP/1.1 reply: what follows its header block.
+fn reply_body(reply: &str) -> &str {
+    reply.split_once("\r\n\r\n").map_or("", |(_, body)| body)
+}
+
+/// One HTTP/1.1 request to 127.0.0.1:`port`, with `Host: 127.0.0.1:port` (the stub issuer takes
+/// no other), and its status code and whole reply.
+fn http(
+    port: u16,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> Result<(u16, String)> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let mut request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\
+         Content-Length: {}\r\n",
+        body.len()
+    );
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    request.push_str(body);
+    stream.write_all(request.as_bytes())?;
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply)?;
+    let status = status_of(&reply).context("the reply is not HTTP/1.1")?;
+    Ok((status, reply))
+}
+
+/// Writes the demo owner's subject link with the CLI's own `mandate identity link`, in the image
+/// this checkout built and with no network, then applies it as the [`LINKS_CONFIGMAP`] ConfigMap
+/// the chart mounts at the server's fixed path (DEC-1023). The subject reaches the CLI on standard
+/// input only, as it requires.
+fn demo_links(image: &str) -> Result<()> {
+    let dir = state()?.join("links");
+    if dir.exists() {
+        fs::remove_dir_all(&dir).context("clearing the demo's links directory")?;
+    }
+    fs::create_dir_all(&dir)?;
+    let owner = fs::metadata(&dir)?;
+    let user = format!("{}:{}", owner.uid(), owner.gid());
+    let mount = format!("{}:/out", fs::canonicalize(&dir)?.display());
+    let mut child = Command::new("docker")
+        .args([
+            "run",
+            "--rm",
+            "-i",
+            "--network",
+            "none",
+            "--user",
+            &user,
+            "-v",
+            &mount,
+            image,
+            "identity",
+            "link",
+            "--issuer",
+            LOCAL_ISSUER,
+            "--member",
+            DEMO_OWNER,
+            "--links",
+            "/out/subject-links",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .context("starting `mandate identity link` in the cell's image")?;
+    child
+        .stdin
+        .take()
+        .context("the CLI's standard input")?
+        .write_all(DEMO_SUBJECT.as_bytes())?;
+    let status = child.wait()?;
+    if !status.success() {
+        bail!(
+            "`mandate identity link` for the demo owner failed with {status}; it runs as this \
+             user ({user}) writing into {}, which rootless docker maps to another owner",
+            dir.display()
+        );
+    }
+    let links = fs::read_to_string(dir.join("subject-links"))
+        .context("reading the demo's subject-link file")?;
+    apply(&[links_configmap(&links)])
+}
+
+/// The ConfigMap holding the subject-link file `links` under the key the chart mounts.
+pub fn links_configmap(links: &str) -> Value {
+    json!({
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {"name": LINKS_CONFIGMAP, "labels": {"mandate.dev/workspace": WORKSPACE}},
+        "data": {"subject-links": links}
+    })
 }
 
 /// The status code of an HTTP/1.1 `GET path` to 127.0.0.1:`port`.
 fn http_status(port: u16, path: &str) -> Result<u16> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    write!(
-        stream,
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-    )?;
-    let mut reply = String::new();
-    stream.read_to_string(&mut reply)?;
-    status_of(&reply).context("the reply is not HTTP/1.1")
+    http(port, "GET", path, &[], "").map(|(status, _)| status)
 }
 
 /// The status code on an HTTP/1.1 reply's first line.
@@ -2541,6 +2801,7 @@ mod tests {
         let parts = demo_parts(
             &today,
             "Commands:\n  workspace  Open the workspace control stream\n",
+            false,
         );
         let skipped: Vec<&str> = parts
             .iter()
@@ -2549,8 +2810,8 @@ mod tests {
             .collect();
         assert_eq!(
             skipped.len(),
-            6,
-            "API, runtime, agent, research, membership and web/ wait on their lanes: {skipped:?}"
+            7,
+            "API, runtime, agent, research, membership, sign-in and web/ wait on their lanes: {skipped:?}"
         );
         assert!(
             skipped.contains(&RESEARCH_GATEWAY),
@@ -2569,8 +2830,20 @@ mod tests {
         let parts = demo_parts(
             &later,
             "Commands:\n  membership  Grant the founding membership\n",
+            true,
         );
         assert!(parts.iter().all(|p| p.skipped.is_none()), "{parts:?}");
+        let no_stub = demo_parts(
+            &later,
+            "Commands:\n  membership  Grant the founding membership\n",
+            false,
+        );
+        let waiting: Vec<&str> = no_stub
+            .iter()
+            .filter(|p| p.skipped.is_some())
+            .map(|p| p.name)
+            .collect();
+        assert_eq!(waiting, [SIGNIN_PART], "only sign-in waits on the stub");
     }
 
     #[test]
@@ -2582,7 +2855,7 @@ mod tests {
             "the API server is a built service named `{API_PROCESS}`"
         );
         let help = "Commands:\n  workspace  Open\n      membership is named in a wrapped line\n";
-        let membership = demo_parts(&[], help)
+        let membership = demo_parts(&[], help, false)
             .into_iter()
             .find(|p| p.name == "the founding membership");
         assert!(
@@ -2643,7 +2916,7 @@ mod tests {
     #[test]
     fn the_runtime_is_ready_once_built_and_the_agent_still_waits_on_its_executor() {
         let list = [process("runtime", true), process("executor", false)];
-        let parts = demo_parts(&list, "");
+        let parts = demo_parts(&list, "", false);
         let skipped = |prefix: &str| {
             parts
                 .iter()
@@ -2660,7 +2933,7 @@ mod tests {
             Some(true),
             "a deny-all runtime runs no research"
         );
-        let unbuilt = demo_parts(&[process("runtime", false)], "");
+        let unbuilt = demo_parts(&[process("runtime", false)], "", false);
         assert!(
             unbuilt
                 .iter()
@@ -2711,7 +2984,7 @@ mod tests {
     fn an_agent_needs_both_its_runtime_and_its_executor() {
         for (runtime, executor) in [(true, false), (false, true)] {
             let list = [process("runtime", runtime), process("executor", executor)];
-            let agent = demo_parts(&list, "")
+            let agent = demo_parts(&list, "", false)
                 .into_iter()
                 .find(|p| p.name.starts_with("a paper agent"));
             assert!(agent.is_some_and(|a| a.skipped.is_some()));
@@ -2765,7 +3038,7 @@ mod tests {
             format!("org: {DEMO_ORG}"),
             format!("workspace: {DEMO_WORKSPACE}"),
             format!("issuer: {LOCAL_ISSUER}"),
-            format!("jwksUrl: {LOCAL_ISSUER}/jwks"),
+            format!("jwksUrl: {LOCAL_ISSUER}{STUB_KEY_SET}"),
             "tier: dev".to_string(),
         ] {
             assert!(
@@ -2857,7 +3130,14 @@ mod tests {
 
     #[test]
     fn the_api_forward_binds_loopback_and_names_local_then_remote_port() {
-        let args = port_forward_args("k");
+        let with_stub = port_forward_args("k", true);
+        assert_eq!(
+            with_stub.last().map(String::as_str),
+            Some("8090:8090"),
+            "the stub's port is forwarded to the same local port, so its Host matches"
+        );
+        assert_eq!(with_stub.len(), port_forward_args("k", false).len() + 1);
+        let args = port_forward_args("k", false);
         let at = |flag: &str| {
             args.iter()
                 .position(|a| a == flag)
@@ -2873,6 +3153,128 @@ mod tests {
             "{spec}"
         );
         assert!(ports.iter().all(|p| p.parse::<u16>().is_ok()));
+    }
+
+    #[test]
+    fn the_stub_runs_only_with_its_crate_and_the_servers_tier_check() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("xtask-stub-ready-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (server, check) = KEY_SET_TIER_CHECK;
+        let write = |path: &str, text: &str| -> Result<()> {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().context("a parent")?)?;
+            fs::write(path, text)?;
+            Ok(())
+        };
+        assert!(!stub_ready(&root), "neither");
+        write(STUB_CRATE, "[package]")?;
+        write(STUB_MAIN, "fn main() { serve() }")?;
+        assert!(!stub_ready(&root), "the crate without the server's check");
+        write(server, "fn other() {}")?;
+        assert!(!stub_ready(&root), "a server without the check");
+        write(server, &format!("{check}url: &str, tier: Tier)"))?;
+        assert!(stub_ready(&root), "both");
+        write(STUB_MAIN, "fn main() {\n    todo!()\n}")?;
+        assert!(
+            !stub_ready(&root),
+            "the crate's tests landed, its entry point still pending"
+        );
+        fs::remove_file(root.join(STUB_MAIN))?;
+        assert!(!stub_ready(&root), "a crate with no entry point");
+        write(STUB_MAIN, "fn main() { serve() }")?;
+        fs::remove_file(root.join(STUB_CRATE))?;
+        assert!(!stub_ready(&root), "the check without the crate");
+        let _ = fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    #[test]
+    fn without_a_stub_the_api_mounts_no_links_and_names_no_stub() {
+        assert_eq!(
+            signin_values(None),
+            ["images.stub-issuer=", "api.subjectLinks="]
+        );
+        assert_eq!(
+            signin_values(Some("mandate.local/stub-issuer:0123456789ab")),
+            [
+                "images.stub-issuer=mandate.local/stub-issuer:0123456789ab".to_string(),
+                format!("api.subjectLinks={LINKS_CONFIGMAP}")
+            ]
+        );
+    }
+
+    #[test]
+    fn the_demo_links_are_the_configmap_the_chart_mounts() {
+        let links = "sha256:ab 01KDEM0000000000000000000P\n";
+        let map = links_configmap(links);
+        assert_eq!(map["kind"], "ConfigMap");
+        assert_eq!(map["metadata"]["name"], LINKS_CONFIGMAP);
+        assert_eq!(map["data"]["subject-links"], links);
+        assert_eq!(
+            map.as_object().map(|o| o.contains_key("binaryData")),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn a_pulled_image_skips_sign_in_with_the_api() {
+        let later = [
+            process("api", true),
+            process("runtime", true),
+            process("executor", true),
+        ];
+        let mut parts = demo_parts(&later, "", true);
+        skip_without_api_image(&mut parts);
+        for name in [API_PART, SIGNIN_PART] {
+            assert!(
+                parts.iter().any(|p| p.name == name && p.skipped.is_some()),
+                "{name} is skipped without an API image"
+            );
+        }
+        assert!(
+            parts
+                .iter()
+                .any(|p| p.name.starts_with("a paper agent") && p.skipped.is_none()),
+            "parts that need no API image stay ready"
+        );
+    }
+
+    #[test]
+    fn a_session_opens_only_with_204_and_the_host_cookie() {
+        let reply = |status: &str, cookie: &str| {
+            format!("HTTP/1.1 {status}\r\n{cookie}content-length: 0\r\n\r\n")
+        };
+        let good = "set-cookie: __Host-mandate_session=v1.a.b; Path=/; Secure; HttpOnly\r\n";
+        assert!(signed_in(204, &reply("204 No Content", good)));
+        assert!(!signed_in(401, &reply("401 Unauthorized", good)));
+        assert!(!signed_in(204, &reply("204 No Content", "")));
+        assert!(!signed_in(
+            204,
+            &reply("204 No Content", "set-cookie: other=1\r\n")
+        ));
+        assert!(
+            !signed_in(
+                204,
+                "HTTP/1.1 204 No Content\r\n\r\nset-cookie: __Host-mandate_session=x\r\n"
+            ),
+            "a cookie in the body is not a header"
+        );
+        assert_eq!(
+            reply_body("HTTP/1.1 200 OK\r\na: b\r\n\r\n{\"x\":1}"),
+            "{\"x\":1}"
+        );
+    }
+
+    #[test]
+    fn the_demo_owner_is_a_ulid_and_the_stub_key_set_is_its_published_path() {
+        assert_eq!(STUB_KEY_SET, "/jwks.json");
+        assert!(!LOCAL_ISSUER.ends_with('/'));
+        assert!(
+            DEMO_OWNER.len() == 26
+                && DEMO_OWNER.bytes().all(
+                    |b| b.is_ascii_digit() || (b.is_ascii_uppercase() && !b"ILOU".contains(&b))
+                )
+        );
     }
 
     #[test]

@@ -1514,7 +1514,10 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   compile, validate, diffs, and an agent's later versions (with `MandateConfirmed` version 2,
   E10-15); the confirmation screen's worst-case figures, unasked dollars, and provenance badges;
   `DeploymentRejected`; the acknowledgment route, until `mandate-journal` registers
-  `OwnerAcknowledged` on the control stream (DEC-2102 item 7); the hold and its lift (after the runtime folds them, DEC-1007 item 1); and
+  `OwnerAcknowledged` on the control stream (DEC-2102 item 7); when E9-4 binds the step-up port,
+  an owner command's append made conditional on the `control_head` its evidence names (DEC-279
+  item 1's digest binds the head read before step-up is judged, and the append does not yet check
+  it); the hold and its lift (after the runtime folds them, DEC-1007 item 1); and
   the deploy request's schema with its `mandate-api` type, which must land together (DEC-2101
   item 6).
 - **E10-13 (Must, M8, with the connections spec; SC)** As a workspace admin, I want to connect and
@@ -2738,7 +2741,13 @@ enables `live` (ES-23, OPS-5).
   an agent the control stream does not deploy, and a property test over random event sequences
   with an independent oracle shows it; after the crash-loop bound the agent is left `Paused`, the
   pause is journaled and an opaque alert raised; it holds no broker credential and sends no order;
-  and its own outage stops no running process and no kill switch (OPS-4).
+  and its own outage stops no running process and no kill switch (OPS-4). *Slice 1* ([DEC-1170](decisions/DEC-1170.md)): journal spec v0.48 §9.21's records, the
+  crate's fold, driver, fake and Kubernetes adapter, with the property test. *Left:* the process
+  binary (loop, probes, Postgres journal port, the resolver over stored mandates), the chart's
+  templates, RBAC and Deployment, the Compose adapter, the restart drill through `cargo xtask cell
+  drill`; the owner's resume lifting a crash-loop pause once the runtime copies the pause (E21-30);
+  an alert for an instance stuck `Pending` or `Unknown`; deleting exited pods; a check that the
+  pod templates mount no service-account token.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*

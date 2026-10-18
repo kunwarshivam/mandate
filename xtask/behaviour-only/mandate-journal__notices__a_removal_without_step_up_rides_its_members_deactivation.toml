@@ -1,0 +1,10 @@
+file = "crates/mandate-journal/tests/notices.rs"
+test = "a_removal_without_step_up_rides_its_members_deactivation"
+reason = """
+DEC-2505 item 4 (journal spec v0.51 §9.15, rule 214 (c) and (d)): a `removed` without step-up
+rides a `MemberDeactivated` or `MemberRemoved` in its batch. The journal registers neither of those
+two records (E9-7, journal spec §9.12) nor `NotificationAddressChanged` (E8-14) today, so it refuses
+this test's drafts as `unknown_event_type` at `event_type`, an answer of the journal's own rather
+than a stub's report. The later of E9-7's registration and E8-14's deletes this file with the
+test's `#[ignore]` line.
+"""

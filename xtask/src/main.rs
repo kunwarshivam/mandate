@@ -24,10 +24,11 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | objectstore | mutants | schema-mutants | cell | cell-demo | sweep; or one part
-                        of test: test-nextest | test-doc | test-rh-sim | test-python. Tests,
-                        pending tests, doctests, the rehearsal, Postgres and object-store runs and `portable` run over
-                        the crates the diff selects (DEC-1190); with no diff base, all of them
+                        postgres | openbao | objectstore | mutants | schema-mutants | cell |
+                        cell-demo | sweep; or one part of test: test-nextest | test-doc |
+                        test-rh-sim | test-python. Tests, pending tests, doctests, the rehearsal,
+                        Postgres, OpenBao and object-store runs and `portable` run over the crates
+                        the diff selects (DEC-1190); with no diff base, all of them
   ci select             print which scoped jobs this diff runs, as GITHUB_OUTPUT lines
   ci sweep --plan       print tonight's share of the whole-crate mutation sweep (DEC-1190)
   ci test-nextest       run the workspace's nextest run, only partition K/N of it when
@@ -96,6 +97,7 @@ const FULL_JOB: &[&str] = &[
     "schemas",
     "supply-chain",
     "postgres",
+    "openbao",
     "objectstore",
 ];
 const PR_JOBS: &[&str] = &[
@@ -109,6 +111,7 @@ const PR_JOBS: &[&str] = &[
     "supply-chain",
     "spec-guard",
     "postgres",
+    "openbao",
     "objectstore",
     "mutants",
     "schema-mutants",
@@ -124,6 +127,11 @@ const SCHEMA_DIR: &str = "schemas/workspace-api";
 /// rather than a skip (DEC-109). CI's `full` and nightly jobs set both.
 const PG_URL: &str = "MANDATE_PG_URL";
 const PG_REQUIRED: &str = "MANDATE_PG_REQUIRED";
+/// The OpenBao dev server `mandate-vault`'s conformance suite runs against (E21-32, DEC-977), and
+/// the switch that makes its absence a failure rather than a skip. CI's `full` job starts the
+/// server with `.github/scripts/start-openbao.sh` and sets both.
+const OPENBAO_ADDR: &str = "MANDATE_OPENBAO_ADDR";
+const OPENBAO_REQUIRED: &str = "MANDATE_OPENBAO_REQUIRED";
 /// The S3-compatible test store `mandate-objectstore`'s conformance suite uses, and the switch that
 /// makes its absence a failure rather than a skip (E21-40, DEC-973). CI's `full` and mutants jobs
 /// set both, with the store `.github/scripts/start-minio.sh` starts.
@@ -365,6 +373,7 @@ fn ci(job: &str) -> Result<()> {
             spec_guard()
         }
         "postgres" => postgres(),
+        "openbao" => openbao(),
         "objectstore" => objectstore(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "sweep" => sweep(Path::new(".")),
@@ -629,6 +638,45 @@ fn postgres() -> Result<()> {
     Ok(())
 }
 
+/// `mandate-vault`'s conformance suite against a real OpenBao dev server (E21-32, DEC-977). `test`
+/// runs it too, but it skips there unless `MANDATE_OPENBAO_ADDR` is set; here it must run, when
+/// the diff selects `mandate-vault` (DEC-1190).
+fn openbao() -> Result<()> {
+    if env::var_os(OPENBAO_ADDR).is_none() {
+        if env::var_os(OPENBAO_REQUIRED).is_some() {
+            bail!("{OPENBAO_REQUIRED} is set but {OPENBAO_ADDR} is not");
+        }
+        eprintln!(
+            "    openbao: {OPENBAO_ADDR} is unset; skipping (see .github/scripts/start-openbao.sh)"
+        );
+        return Ok(());
+    }
+    if selection()?.among(&OPENBAO_TESTED).is_empty() {
+        eprintln!("    openbao: mandate-vault is not affected (DEC-1190)");
+        return Ok(());
+    }
+    let args = [
+        "nextest",
+        "run",
+        "--package",
+        "mandate-vault",
+        "--lib",
+        "--filterset",
+        "test(/^tests::openbao_server::/)",
+        "--locked",
+    ];
+    eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));
+    let status = Command::new("cargo")
+        .args(args)
+        .env(OPENBAO_REQUIRED, "1")
+        .status()
+        .context("starting `cargo nextest`")?;
+    if !status.success() {
+        bail!("the OpenBao conformance suite failed with {status}");
+    }
+    Ok(())
+}
+
 /// The object store's conformance suite against a real S3-compatible store (E21-40, DEC-973),
 /// run only when the selection holds `mandate-objectstore` (DEC-1190). `test` runs it too, but it
 /// skips there unless `MANDATE_S3_URL` is set; here it must run.
@@ -741,6 +789,10 @@ const BINARY_REFERENCE: &str = "bin:";
 /// adapter among them (E8-10 slice D10a, DEC-2500 item 8): `cargo xtask ci postgres` runs those of
 /// them the selection holds.
 const PG_TESTED: [&str; 3] = ["mandate-journal-pg", "mandate-cli", "mandate-dispatcher"];
+
+/// The package whose tests need the OpenBao dev server (E21-32, DEC-977): `cargo xtask ci openbao`
+/// runs its suite when the selection holds it.
+const OPENBAO_TESTED: [&str; 1] = ["mandate-vault"];
 
 /// Whether `path` is `entry`, lies under it when `entry` names a directory (ends in `/`), or
 /// starts with it when `entry` ends in `*`.
@@ -3587,6 +3639,7 @@ const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
     ".github/scripts/start-postgres.sh",
+    ".github/scripts/start-openbao.sh",
     ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
     CREDENTIAL_GUARD,
@@ -3645,6 +3698,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
     "MANDATE_MUTANT_SHARD",
+    "MANDATE_OPENBAO_ADDR",
+    "MANDATE_OPENBAO_CA",
+    "MANDATE_OPENBAO_OPERATOR_TOKEN_FILE",
+    "MANDATE_OPENBAO_REQUIRED",
     "MANDATE_PG_REQUIRED",
     "MANDATE_PG_URL",
     "MANDATE_PR_BODY",
@@ -3658,7 +3715,9 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_TEST_PARTITION",
     "MERGE_APPROVERS",
     "MUTANTS_RESULT",
+    "NEXT_PUBLIC_OWLHEAD_APP_ORIGIN",
     "NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN",
+    "NEXT_PUBLIC_OWLHEAD_SITE_ORIGIN",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_TELEMETRY_DISABLED",
@@ -7944,18 +8003,42 @@ const UNIMPLEMENTED_VARIANT: &str = "Unimplemented";
 const TODO_PANIC: &str = "not yet implemented";
 
 /// The tokens inside the braces of the function whose `fn` is at or after `from`, or `None` for a
-/// signature without a body.
+/// signature without a body or a body that does not end the tokens. A `{` or `;` inside the
+/// signature's `[...]` or `<...>` is part of a type (`[u8; 65]`, `Result<[u8; 64], E>`,
+/// `Foo<{ N }>`), not the body or the end of a declaration (#1563); the `>` of an `->` closes no
+/// `<`, and a `<` or `>` inside a const-generic `{ ... }` (`Foo<{ A < B }>`) is a comparison.
+/// Requiring the body's `}` to be the last token keeps any misreading failing closed: a block
+/// inside the real body is never taken for it.
 fn function_body(toks: &[(Token, usize)], from: usize) -> Option<&[(Token, usize)]> {
-    let open = toks
-        .iter()
-        .enumerate()
-        .skip(from)
-        .find_map(|(i, (t, _))| match t {
-            Token::Punct('{') => Some(Some(i)),
-            Token::Punct(';') => Some(None),
-            _ => None,
-        })??;
+    let (mut brackets, mut angles, mut braces) = (0usize, 0usize, 0usize);
+    let mut previous = None;
+    let mut open = None;
+    for (i, (t, _)) in toks.iter().enumerate().skip(from) {
+        let in_type = brackets > 0 || angles > 0;
+        match t {
+            Token::Punct('{') if in_type => braces = braces.saturating_add(1),
+            Token::Punct('}') if in_type => braces = braces.saturating_sub(1),
+            _ if braces > 0 => {}
+            Token::Punct('[') => brackets = brackets.saturating_add(1),
+            Token::Punct(']') => brackets = brackets.saturating_sub(1),
+            Token::Punct('<') => angles = angles.saturating_add(1),
+            Token::Punct('>') if previous != Some(&Token::Punct('-')) => {
+                angles = angles.saturating_sub(1);
+            }
+            Token::Punct('{') => {
+                open = Some(i);
+                break;
+            }
+            Token::Punct(';') if !in_type => return None,
+            _ => {}
+        }
+        previous = Some(t);
+    }
+    let open = open?;
     let close = delimited_end(toks, open, '{', '}')?;
+    if close != toks.len() {
+        return None;
+    }
     toks.get(open.saturating_add(1)..close.saturating_sub(1))
 }
 
@@ -9787,6 +9870,7 @@ mod tests {
                 "mandate-cli",
                 "mandate-cp-agent",
                 "mandate-cp-site",
+                "mandate-deploy-manager",
                 "mandate-dispatcher"
             ]
         );
@@ -11544,6 +11628,113 @@ mod tests {
             "nor is `NoArtifacts::read_artifact`, which is live code"
         );
         assert!(!stub(17, 19), "nor is an implemented function");
+    }
+
+    /// Each case's signature written with array types, then with `;`-free aliases standing for
+    /// them, over the same body: the stub verdict may depend only on the body, never on how the
+    /// signature spells its types.
+    const ARRAY_SIGNATURES: [(&str, &str, &str); 13] = [
+        (
+            "pub fn less() -> Foo<{ A < B }>",
+            "pub fn less() -> Foo<Lt>",
+            "{\n    if c > 0 { todo!() }\n    real()\n}",
+        ),
+        (
+            "pub fn more() -> Foo<{ A > 1 }, { M }>",
+            "pub fn more() -> Foo<Gt, Em>",
+            "{ todo!() }",
+        ),
+        (
+            "pub fn sized<const N: usize>() -> Buffer<{ N }>",
+            "pub fn sized<const N: usize>() -> Buffer<Size>",
+            "{ todo!() }",
+        ),
+        (
+            "pub fn wrap() -> Wrap<Box<dyn Fn() -> u8>, { 2 }>",
+            "pub fn wrap() -> Wrapped",
+            "{ Err(WrapError::Unimplemented) }",
+        ),
+        (
+            "pub fn sign() -> [u8; 65]",
+            "pub fn sign() -> Sig",
+            "{ todo!() }",
+        ),
+        (
+            "pub fn key() -> Result<[u8; 64], KeyError>",
+            "pub fn key() -> Result<Key, KeyError>",
+            "{ Err(KeyError::Unimplemented) }",
+        ),
+        (
+            "pub fn digest(input: [u8; 4]) -> u8",
+            "pub fn digest(input: Word) -> u8",
+            "{\n    let _ = input;\n    todo!()\n}",
+        ),
+        (
+            "pub fn widen<const N: usize>(x: [u8; N]) -> Option<[u8; N]>",
+            "pub fn widen<const N: usize>(x: Bytes) -> Option<Bytes>",
+            "{\n    let _ = x;\n    Err(Missing::Unimplemented)\n}",
+        ),
+        (
+            "pub fn apply<F: Fn([u8; 2]) -> [u8; 3]>(f: F) -> [[u8; 3]; 2]",
+            "pub fn apply<F: Fn(Pair) -> Triple>(f: F) -> Grid",
+            "{\n    let _ = f;\n    todo!()\n}",
+        ),
+        (
+            "pub fn split(x: u8) -> Vec<Vec<[u8; 2]>>",
+            "pub fn split(x: u8) -> Vec<Vec<Pair>>",
+            "{\n    let _ = x;\n    Err(SplitError::Unimplemented(\"split\", \"E1-8\"))\n}",
+        ),
+        (
+            "pub fn convert<T>(t: T) -> [u8; 2]\nwhere\n    T: Into<[u8; 2]>,",
+            "pub fn convert<T>(t: T) -> Pair\nwhere\n    T: Into<Pair>,",
+            "{\n    let _ = t;\n    todo!()\n}",
+        ),
+        (
+            "pub fn checksum(x: [u8; 8]) -> [u8; 4]",
+            "pub fn checksum(x: Block) -> Word",
+            "{\n    let _ = x;\n    Err(SumError::Overflow)\n}",
+        ),
+        (
+            "pub fn first(x: [u8; 8]) -> u8",
+            "pub fn first(x: Block) -> u8",
+            "{\n    x[0]\n}",
+        ),
+    ];
+
+    #[test]
+    fn an_array_in_the_signature_never_hides_the_body() {
+        let verdict = |signature: &str, body: &str| {
+            let src = format!("{signature} {body}\n");
+            is_stub_function(&src, 1, src.lines().count())
+        };
+        for (arrays, aliases, body) in ARRAY_SIGNATURES {
+            assert_eq!(
+                verdict(arrays, body),
+                verdict(aliases, body),
+                "`{arrays}` must be judged by its body alone, as `{aliases}` is"
+            );
+        }
+        let stubs = ARRAY_SIGNATURES
+            .iter()
+            .filter(|(arrays, _, body)| verdict(arrays, body))
+            .count();
+        assert_eq!(
+            stubs, 10,
+            "the ten todo!() and Unimplemented bodies are stubs; another error and a real body, even one \
+             holding a todo!() block, are not"
+        );
+        assert!(
+            !is_stub_function(
+                "pub fn answer() -> u8 { todo!() }\npub fn next() -> u8 { 1 }\n",
+                1,
+                2
+            ),
+            "a body counts only when its closing brace ends the span, so a block inside a stub-like body is never taken for it"
+        );
+        assert!(
+            !is_stub_function("fn sign(&self) -> [u8; 65];\n", 1, 1),
+            "a trait method's signature without a body is not a stub"
+        );
     }
 
     /// A git repository in a temporary directory holding a one-crate workspace laid out like this

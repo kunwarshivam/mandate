@@ -624,6 +624,93 @@ def test_api_contained():
         assert helm(CHART, *args).returncode != 0, refused
 
 
+STUB = "mandate.local/stub-issuer:0123456789ab"
+STUB_BIND = "127.0.0.1:8090"
+
+
+def render_with_stub(*extra: str) -> list[dict]:
+    return render_all(
+        "--set", f"images.stub-issuer={STUB}", "--set", "api.subjectLinks=subject-links", *extra
+    )
+
+
+def stub_sidecar(docs: list[dict]) -> list[str]:
+    """The local stub issuer (DEC-2100, DEC-1025), when rendered, is a native sidecar of the API pod
+    on its loopback alone, in a dev or ci tier, from a local build; a readiness wait follows it, so
+    the server starts only once the stub answers, and the server's key set is the stub's."""
+    problems = []
+    for w in [w for w in workloads(docs) if w["metadata"]["name"] == "api"]:
+        inits = pod_spec(w).get("initContainers", [])
+        names = [c["name"] for c in inits]
+        if "stub-issuer" not in names:
+            continue
+        at = names.index("stub-issuer")
+        stub = inits[at]
+        if stub.get("restartPolicy") != "Always":
+            problems.append("the stub issuer is not a sidecar, so it would block the pod's start")
+        if stub.get("args") != ["--bind", STUB_BIND]:
+            problems.append(f"the stub issuer binds beyond loopback: {stub.get('args')}")
+        if not stub.get("image", "").startswith("mandate.local/"):
+            problems.append(f"the stub issuer is not a local build: {stub.get('image')}")
+        tier = {e["name"]: e.get("value") for e in stub.get("env", [])}.get("MANDATE_DEPLOYMENT_TIER")
+        if tier not in ("dev", "ci"):
+            problems.append(f"the stub issuer runs in tier {tier!r}")
+        ready = names[at + 1] if at + 1 < len(names) else None
+        script = " ".join(inits[at + 1].get("command", [])) if ready else ""
+        if ready != "stub-issuer-ready" or "/dev/tcp/127.0.0.1/8090" not in script or "exit 1" not in script:
+            problems.append("the server may start before the stub issuer answers")
+        api = next(c for c in pod_spec(w)["containers"] if c["name"] == "api")
+        env = {e["name"]: e.get("value") for e in api.get("env", [])}
+        if (
+            env.get("MANDATE_API_JWKS_URL") != f"http://{STUB_BIND}/jwks.json"
+            or env.get("MANDATE_API_ISSUER") != f"http://{STUB_BIND}"
+        ):
+            problems.append(f"the server does not trust the stub it runs beside: {env}")
+        if env.get("MANDATE_DEPLOYMENT_TIER") not in ("dev", "ci"):
+            problems.append("the server beside the stub is not in a dev or ci tier")
+    return problems
+
+
+def test_stub_sidecar():
+    docs = render_with_stub()
+    assert stub_sidecar(docs) == [] and api_contained(docs) == []
+    assert hardened(docs) == [] and gated(docs) == [] and secrets_as_files(docs) == []
+    names = [c["name"] for c in pod_spec(owner_workload(docs))["initContainers"]]
+    assert names.index("stub-issuer") < names.index("stub-issuer-ready")
+    plain = render_all()
+    assert "stub-issuer" not in [c["name"] for c in pod_spec(owner_workload(plain))["initContainers"]]
+    for refused in (
+        ["-f", str(CELL / "values" / "k3s.yaml"), "--set", f"images.stub-issuer={STUB}"],
+        ["-f", str(CELL / "values" / "managed.yaml"), "--set", f"images.stub-issuer={STUB}"],
+        [
+            "-f",
+            str(CELL / "values" / "k3d.yaml"),
+            *every_image(),
+            "--set",
+            f"images.stub-issuer={STUB}",
+            "--set",
+            "api.tier=staging",
+        ],
+        [
+            "-f",
+            str(CELL / "values" / "k3d.yaml"),
+            *every_image(),
+            "--set",
+            f"images.stub-issuer={STUB}",
+            "--set",
+            "api.tier=production",
+        ],
+        [
+            "-f",
+            str(CELL / "values" / "k3d.yaml"),
+            *every_image(),
+            "--set",
+            "images.stub-issuer=registry.example/stub@sha256:" + "0" * 64,
+        ],
+    ):
+        assert helm(CHART, *refused).returncode != 0, refused
+
+
 def owner_workload(docs: list[dict]) -> dict:
     return next(w for w in workloads(docs) if w["metadata"]["name"] == "api")
 
@@ -856,6 +943,39 @@ SEEDED = [
     (
         portable,
         lambda d: [*d, {"kind": "HelmChart", "apiVersion": "helm.cattle.io/v1", "metadata": {"name": "x"}}],
+    ),
+    (
+        stub_sidecar,
+        lambda d: mutate(
+            render_with_stub(),
+            "api",
+            "Deployment",
+            lambda w: next(c for c in pod_spec(w)["initContainers"] if c["name"] == "stub-issuer").update(
+                args=["--bind", "0.0.0.0:8090"]
+            ),
+        ),
+    ),
+    (
+        stub_sidecar,
+        lambda d: mutate(
+            render_with_stub(),
+            "api",
+            "Deployment",
+            lambda w: pod_spec(w).update(
+                initContainers=[c for c in pod_spec(w)["initContainers"] if c["name"] != "stub-issuer-ready"]
+            ),
+        ),
+    ),
+    (
+        stub_sidecar,
+        lambda d: mutate(
+            render_with_stub(),
+            "api",
+            "Deployment",
+            lambda w: next(c for c in pod_spec(w)["initContainers"] if c["name"] == "stub-issuer").pop(
+                "restartPolicy"
+            ),
+        ),
     ),
     (
         api_contained,

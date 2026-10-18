@@ -2,9 +2,12 @@
 
 - **Spec:** [infrastructure design](../../../../docs/design/infrastructure.md) §3.1, §3.4, §3.6;
   [journal spec](../../../../docs/specs/journal.md) §5.1 (writer epochs), §9 rule 12; ADR-0001
-  ES-06, ES-20; DEC-17, DEC-914, DEC-968, DEC-994, DEC-1012, DEC-1013.
+  ES-06, ES-20; DEC-17, DEC-914, DEC-968, DEC-994, DEC-1012, DEC-1013, DEC-1014; trading spec §11
+  (the startup hold).
 - **Code:** `mandate-daemon` (`crates/mandate-daemon`): `src/runtime.rs` (`RuntimeProcess`: one
-  writer epoch on the agent stream, the control stream read before the clock stream, a batch in
+  writer epoch on the agent stream, the control stream read before the account stream and the
+  account stream before the clock stream, the account stream the connection's establishment names
+  folded before the start and on each pass, a batch in
   doubt offered again as the same bytes, `mandate-process`'s lifecycle), `src/wake.rs` (`Wake`, a
   hint that only shortens a wait), `src/fixture.rs` (the binary's deny-all wiring until the post-R0
   hook), and the `mandate-daemon` binary (`run` over Postgres, or `--fixture` over an in-memory
@@ -16,8 +19,15 @@
   agent stream, the control stream read before the clock stream, an unreadable clock stream never
   holding the kill switch, a control stream handed again writing nothing twice, a lost answer
   written once, a hint deciding nothing, a second process fencing the first, paper only, drain, a
-  draft without references stopping the process, and a property test over interleavings of kill
-  switches, ticks, lost answers, and restarts with an oracle from the control rows.
+  draft without references stopping the process, a property test over interleavings of kill
+  switches, ticks, lost answers, and restarts with an oracle from the control rows; and for the
+  account stream, the startup hold lifting on a clean reconciliation, the account folded before the
+  start, the latest establishment followed and another connection's or environment's ignored, an
+  unreadable account holding neither the kill switch nor the tick, an unfoldable record, another environment's row, or a changed
+  account stopping the process, and a property test whose oracle derives the effective mode and the
+  startup hold from the account rows alone. `mandate-runtime`'s
+  `a_reconciliation_from_before_the_start_does_not_lift_a_hold_taken_with_an_intent_outstanding`
+  (DEC-1014 item 6).
   `tests/process.rs`: the binary's refusals, probes, and SIGTERM drain. `tests/pg.rs`: the binary
   on Postgres opening its agent stream once across two runs and draining. `deploy/tests/test_cell.py`:
   each service started and probed as its process list says, and no runtime rendered for no

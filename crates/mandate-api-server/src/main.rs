@@ -39,7 +39,7 @@ use mandate_api_server::clock::SystemClock;
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
     StartRefusal, artifact_store, check_bind, check_database_url, check_environment,
-    read_session_key,
+    check_key_set_tier, read_session_key,
 };
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::Postgres;
@@ -56,6 +56,7 @@ use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_identity::{OrgId, WorkspaceId};
 use mandate_journal::ArtifactSource;
 use mandate_journal_pg::PgJournal;
+use mandate_release::startup::{TIER_VAR, Tier};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{mpsc, watch};
@@ -186,10 +187,12 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
     .map_err(|_| StartRefusal::Setting {
         name: "MANDATE_API_ISSUER",
     })?;
-    let keys =
-        FetchedKeys::new(&setting("MANDATE_API_JWKS_URL")?).map_err(|_| StartRefusal::Setting {
-            name: "MANDATE_API_JWKS_URL",
-        })?;
+    let key_set = setting("MANDATE_API_JWKS_URL")?;
+    let tier = Tier::from_setting(env::var(TIER_VAR).ok().as_deref());
+    check_key_set_tier(&key_set, tier)?;
+    let keys = FetchedKeys::new(&key_set).map_err(|_| StartRefusal::Setting {
+        name: "MANDATE_API_JWKS_URL",
+    })?;
     let artifacts = artifact_store(env::var_os("MANDATE_API_ARTIFACTS").as_deref())?;
     let start = Start {
         settings,
