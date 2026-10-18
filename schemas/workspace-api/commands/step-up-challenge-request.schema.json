@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/step-up-challenge-request.schema.json",
+  "type": "object",
+  "required": [
+    "action"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "$ref": "../envelope.schema.json#/$defs/StepUpAction"
+    }
+  },
+  "description": "POST /step-up/challenges (\u00a73.6, DEC-2103): the one action the challenge binds. No workspace or principal member: both are the session's (identity spec \u00a77.2 step 1)."
+}
