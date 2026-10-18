@@ -17,6 +17,7 @@ mod cell;
 mod gitops;
 mod image;
 mod mail;
+mod mask;
 mod mutant_costs;
 mod release;
 
