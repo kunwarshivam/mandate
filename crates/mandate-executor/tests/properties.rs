@@ -1301,6 +1301,7 @@ fn play(script: &[Step]) -> Run {
                             scope: KillScope::Agent(common::agent(common::AGENT)),
                             initiator: Initiator::RiskLimit,
                             confirmation: None,
+                            cause: None,
                         }),
                         &ports,
                     ),

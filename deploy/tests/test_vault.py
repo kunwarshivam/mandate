@@ -1,0 +1,392 @@
+"""Invariants of the workspace vault's chart (E21-32, DEC-977, DEC-2019), on what it renders.
+
+As in test_cell.py, each property is one function returning the problems it finds, asserted empty on
+the real rendering and shown non-empty on a seeded bug. The expected settings are written out here
+from the story and the decisions, not read from the chart, so a chart that drifts fails.
+"""
+
+import copy
+import json
+import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+import pytest
+from test_cell import policies, render_all
+
+CELL = Path(__file__).resolve().parents[1] / "cell"
+CHART = CELL / "charts" / "vault"
+MANAGED = CELL / "values" / "vault-managed.yaml"
+NAMESPACE = "ws-ws1"
+WORKSPACE = "ws1"
+PORT = 8200
+# The one command the server runs: server mode from the chart's config file, no dev flag (DEC-977
+# item 6).
+COMMAND = ["bao", "server", "-config=/openbao/config/config.hcl"]
+DIGEST = re.compile(r"^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$")
+# What the server certificate must name: the Service, from the namespace and the cluster, and the
+# pod's loopback.
+NAMES = {
+    "DNS:vault",
+    f"DNS:vault.{NAMESPACE}",
+    f"DNS:vault.{NAMESPACE}.svc",
+    f"DNS:vault.{NAMESPACE}.svc.cluster.local",
+    "DNS:localhost",
+    "IP Address:127.0.0.1",
+}
+
+if shutil.which("openssl") is None:
+    pytest.skip("openssl is not installed", allow_module_level=True)
+
+
+def helm(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["helm", "template", "cell", str(CHART), "--namespace", NAMESPACE, *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def render(*args: str) -> list[dict]:
+    done = helm(*args)
+    assert done.returncode == 0, done.stderr
+    lines = (line.strip() for line in done.stdout.splitlines())
+    return [json.loads(line) for line in lines if line and line != "---" and not line.startswith("#")]
+
+
+def one(docs: list[dict], kind: str, name: str) -> dict:
+    found = [d for d in docs if d["kind"] == kind and d["metadata"]["name"] == name]
+    assert len(found) == 1, f"{kind}/{name} rendered {len(found)} times"
+    return found[0]
+
+
+def server(docs: list[dict]) -> dict:
+    return one(docs, "StatefulSet", "vault")
+
+
+def container(docs: list[dict]) -> dict:
+    (only,) = server(docs)["spec"]["template"]["spec"]["containers"]
+    return only
+
+
+def config(docs: list[dict]) -> str:
+    return one(docs, "ConfigMap", "vault-config")["data"]["config.hcl"]
+
+
+def blocks(hcl: str, kind: str) -> list[str]:
+    """The labels of every `kind "label" {` block in `hcl`."""
+    return re.findall(rf'^\s*{kind}\s+"([^"]+)"\s*\{{', hcl, re.MULTILINE)
+
+
+def setting(hcl: str, key: str) -> list[str]:
+    return re.findall(rf'^\s*{key}\s*=\s*"?([^"\n]*)"?\s*$', hcl, re.MULTILINE)
+
+
+def server_mode(docs: list[dict]) -> list[str]:
+    """Server mode on integrated storage, never the dev server: the one command, no argument and
+    no environment variable that turns dev mode on, and raft storage alone (DEC-977 item 6)."""
+    found = []
+    c = container(docs)
+    if c.get("command") != COMMAND or c.get("args"):
+        found.append(f"the server runs {c.get('command')} {c.get('args')}, not {COMMAND}")
+    for e in c.get("env", []):
+        if "DEV" in e["name"]:
+            found.append(f"the environment sets {e['name']}")
+    hcl = config(docs)
+    if blocks(hcl, "storage") != ["raft"]:
+        found.append(f"the storage is {blocks(hcl, 'storage')}, not raft alone")
+    if "inmem" in hcl or "dev" in "".join(setting(hcl, "storage")):
+        found.append("the config names in-memory storage")
+    return found
+
+
+def tls_only(docs: list[dict]) -> list[str]:
+    """One listener, TLS 1.3 from the chart's certificate, never disabled, and the pod's own client
+    (the probe's and the operator's `bao`) speaking HTTPS and checking the certificate."""
+    found = []
+    hcl = config(docs)
+    if blocks(hcl, "listener") != ["tcp"]:
+        found.append(f"the listeners are {blocks(hcl, 'listener')}")
+    if setting(hcl, "tls_disable"):
+        found.append("a listener disables TLS")
+    if setting(hcl, "tls_min_version") != ["tls13"]:
+        found.append(f"the TLS floor is {setting(hcl, 'tls_min_version')}")
+    if setting(hcl, "tls_cert_file") != ["/openbao/tls/tls.crt"] or setting(hcl, "tls_key_file") != [
+        "/openbao/tls/tls.key"
+    ]:
+        found.append("the listener does not use the chart's certificate")
+    env = {e["name"]: e.get("value") for e in container(docs).get("env", [])}
+    if not str(env.get("BAO_ADDR")).startswith("https://") or env.get("BAO_CACERT") != "/openbao/tls/ca.crt":
+        found.append(f"the pod's own client speaks to {env.get('BAO_ADDR')} trusting {env.get('BAO_CACERT')}")
+    if any(k in env for k in ("BAO_SKIP_VERIFY", "VAULT_SKIP_VERIFY", "BAO_TLS_SERVER_NAME")):
+        found.append("the pod's own client skips the server's certificate")
+    return found
+
+
+def sealed_is_not_ready(docs: list[dict]) -> list[str]:
+    """A sealed or uninitialized vault is not ready, so the Service routes nothing to it, and
+    nothing restarts it on its own, since a restart seals it again (DEC-977 item 5)."""
+    found = []
+    c = container(docs)
+    if c.get("readinessProbe", {}).get("exec", {}).get("command") != ["bao", "status"]:
+        found.append(f"the readiness probe is {c.get('readinessProbe')}, which a sealed vault may pass")
+    if c.get("livenessProbe") or c.get("startupProbe"):
+        found.append("a probe restarts the vault, which seals it")
+    if one(docs, "Service", "vault")["spec"].get("publishNotReadyAddresses"):
+        found.append("the Service routes to a sealed vault")
+    return found
+
+
+def reached_only_by_its_processes(docs: list[dict]) -> list[str]:
+    """Only the workspace's pods whose egress names the vault reach it, on 8200; it reaches
+    nothing."""
+    found = []
+    policy = one(docs, "NetworkPolicy", "vault")["spec"]
+    labels = server(docs)["spec"]["template"]["metadata"]["labels"]
+    if any(labels.get(k) != v for k, v in policy["podSelector"]["matchLabels"].items()):
+        found.append("the policy does not select the vault's pods")
+    if sorted(policy.get("policyTypes", [])) != ["Egress", "Ingress"] or policy.get("egress"):
+        found.append(f"the vault's egress is {policy.get('egress')}")
+    want_from = [
+        {
+            "podSelector": {
+                "matchLabels": {"mandate.dev/workspace": WORKSPACE, "mandate.dev/egress-vault": "true"}
+            }
+        }
+    ]
+    want_ports = [{"protocol": "TCP", "port": PORT}]
+    rules = policy.get("ingress", [])
+    if len(rules) != 1 or rules[0].get("from") != want_from or rules[0].get("ports") != want_ports:
+        found.append(f"the vault accepts {rules}")
+    service = one(docs, "Service", "vault")["spec"]
+    if service.get("type", "ClusterIP") != "ClusterIP" or [p["port"] for p in service["ports"]] != [PORT]:
+        found.append(f"the Service exposes {service.get('type')} {service['ports']}")
+    return found
+
+
+def hardened(docs: list[dict]) -> list[str]:
+    """Non-root, a read-only root filesystem, no capability, no escalation, the runtime's seccomp
+    profile, no service-account token, requests equal to limits, and the image by digest."""
+    found = []
+    spec = server(docs)["spec"]["template"]["spec"]
+    c = container(docs)
+    pod_sc = spec.get("securityContext", {})
+    sc = c.get("securityContext", {})
+    if spec.get("automountServiceAccountToken") is not False:
+        found.append("the pod mounts a service-account token")
+    if (
+        pod_sc.get("runAsNonRoot") is not True
+        or pod_sc.get("seccompProfile", {}).get("type") != "RuntimeDefault"
+    ):
+        found.append(f"the pod runs as {pod_sc}")
+    if sc.get("allowPrivilegeEscalation") is not False or sc.get("readOnlyRootFilesystem") is not True:
+        found.append(f"the container runs as {sc}")
+    if sc.get("capabilities", {}).get("drop") != ["ALL"] or sc.get("capabilities", {}).get("add"):
+        found.append(f"the container's capabilities are {sc.get('capabilities')}")
+    if spec.get("hostNetwork") or spec.get("hostPID") or sc.get("privileged"):
+        found.append("the pod shares the host's")
+    resources = c.get("resources", {})
+    if not resources.get("limits") or resources.get("requests") != resources.get("limits"):
+        found.append(f"the container's resources are {resources}")
+    if not DIGEST.match(c["image"]):
+        found.append(f"the image {c['image']} is not pinned by digest")
+    return found
+
+
+def secrets_as_files(docs: list[dict]) -> list[str]:
+    """No secret in the environment: the only Secret is the server's TLS pair, mounted read-only,
+    and the CA's key is in nothing the chart renders (DEC-822 item 4)."""
+    found = []
+    c = container(docs)
+    if c.get("envFrom") or any("valueFrom" in e for e in c.get("env", [])):
+        found.append("the environment reads a Secret")
+    secrets = [d["metadata"]["name"] for d in docs if d["kind"] == "Secret"]
+    if secrets != ["vault-tls"]:
+        found.append(f"the chart renders the Secrets {secrets}")
+    tls = one(docs, "Secret", "vault-tls")["stringData"]
+    if sorted(tls) != ["ca.crt", "tls.crt", "tls.key"]:
+        found.append(f"the TLS Secret holds {sorted(tls)}")
+    ca = one(docs, "ConfigMap", "vault-ca")["data"]
+    if sorted(ca) != ["ca.crt"] or "PRIVATE KEY" in ca["ca.crt"]:
+        found.append("the CA's ConfigMap holds more than its certificate")
+    if sum(json.dumps(d).count("PRIVATE KEY-----") for d in docs) != 2:
+        found.append("a private key other than the server's is rendered")
+    return found
+
+
+def certificate(docs: list[dict]) -> list[str]:
+    """The server certificate names the Service and the loopback and is signed by the CA the
+    clients are given."""
+    found = []
+    tls = one(docs, "Secret", "vault-tls")["stringData"]
+    with tempfile.TemporaryDirectory() as tmp:
+        crt, ca = Path(tmp) / "tls.crt", Path(tmp) / "ca.crt"
+        crt.write_text(tls["tls.crt"])
+        ca.write_text(one(docs, "ConfigMap", "vault-ca")["data"]["ca.crt"])
+        verified = subprocess.run(
+            ["openssl", "verify", "-CAfile", str(ca), str(crt)], capture_output=True, text=True, check=False
+        )
+        if verified.returncode != 0:
+            found.append(f"the CA does not sign the server certificate: {verified.stderr.strip()}")
+        sans = subprocess.run(
+            ["openssl", "x509", "-noout", "-ext", "subjectAltName", "-in", str(crt)],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    named = {n.strip() for n in sans.splitlines()[-1].split(",")}
+    if named != NAMES:
+        found.append(f"the certificate names {sorted(named)}")
+    return found
+
+
+def every(docs: list[dict]) -> list[str]:
+    return [
+        *server_mode(docs),
+        *tls_only(docs),
+        *sealed_is_not_ready(docs),
+        *reached_only_by_its_processes(docs),
+        *hardened(docs),
+        *secrets_as_files(docs),
+        *certificate(docs),
+    ]
+
+
+def test_every_invariant_holds_on_each_rendering():
+    assert every(render()) == []
+    assert every(render("-f", str(MANAGED))) == []
+
+
+def test_the_managed_values_change_only_the_volume():
+    claim = server(render("-f", str(MANAGED)))["spec"]["volumeClaimTemplates"][0]["spec"]
+    assert claim["storageClassName"] == "do-block-storage"
+    assert "storageClassName" not in server(render())["spec"]["volumeClaimTemplates"][0]["spec"]
+
+
+def with_container(docs: list[dict], **changes) -> list[dict]:
+    bad = copy.deepcopy(docs)
+    container(bad).update(changes)
+    return bad
+
+
+def with_config(docs: list[dict], old: str, new: str) -> list[dict]:
+    bad = copy.deepcopy(docs)
+    data = one(bad, "ConfigMap", "vault-config")["data"]
+    assert old in data["config.hcl"]
+    data["config.hcl"] = data["config.hcl"].replace(old, new)
+    return bad
+
+
+def test_server_mode_catches_the_dev_server():
+    docs = render()
+    assert server_mode(with_container(docs, args=["-dev"]))
+    assert server_mode(with_container(docs, command=["bao", "server", "-dev", "-dev-tls"]))
+    assert server_mode(with_container(docs, env=[{"name": "BAO_DEV_ROOT_TOKEN_ID", "value": "x"}]))
+    assert server_mode(with_config(docs, 'storage "raft"', 'storage "inmem"'))
+
+
+def test_tls_only_catches_plain_http():
+    docs = render()
+    assert tls_only(with_config(docs, "tls_min_version", 'tls_disable = "true"\n      tls_min_version'))
+    assert tls_only(with_config(docs, '"tls13"', '"tls12"'))
+    assert tls_only(with_container(docs, env=[{"name": "BAO_ADDR", "value": "http://127.0.0.1:8200"}]))
+    env = [*container(docs)["env"], {"name": "BAO_SKIP_VERIFY", "value": "true"}]
+    assert tls_only(with_container(docs, env=env))
+
+
+def test_sealed_is_not_ready_catches_a_restart_or_a_sealed_route():
+    docs = render()
+    assert sealed_is_not_ready(with_container(docs, livenessProbe={"tcpSocket": {"port": PORT}}))
+    assert sealed_is_not_ready(
+        with_container(docs, readinessProbe={"exec": {"command": ["sh", "-c", "bao status || true"]}})
+    )
+    bad = copy.deepcopy(docs)
+    one(bad, "Service", "vault")["spec"]["publishNotReadyAddresses"] = True
+    assert sealed_is_not_ready(bad)
+
+
+def test_reached_only_by_its_processes_catches_a_wider_policy():
+    docs = render()
+    for mutate in (
+        lambda p: p["ingress"][0]["from"].append({"namespaceSelector": {}}),
+        lambda p: p["ingress"][0]["from"][0]["podSelector"]["matchLabels"].pop("mandate.dev/egress-vault"),
+        lambda p: p["ingress"][0]["ports"].append({"protocol": "TCP", "port": 8201}),
+        lambda p: p.update(egress=[{}]),
+        lambda p: p.update(policyTypes=["Ingress"]),
+    ):
+        bad = copy.deepcopy(docs)
+        mutate(one(bad, "NetworkPolicy", "vault")["spec"])
+        assert reached_only_by_its_processes(bad)
+    bad = copy.deepcopy(docs)
+    one(bad, "Service", "vault")["spec"]["type"] = "NodePort"
+    assert reached_only_by_its_processes(bad)
+
+
+def test_hardened_catches_each_weakening():
+    docs = render()
+    assert hardened(with_container(docs, image="ghcr.io/openbao/openbao:2.7.1"))
+    assert hardened(
+        with_container(docs, securityContext={"capabilities": {"add": ["IPC_LOCK"], "drop": ["ALL"]}})
+    )
+    assert hardened(with_container(docs, resources={"limits": {"cpu": "1"}}))
+    bad = copy.deepcopy(docs)
+    server(bad)["spec"]["template"]["spec"]["automountServiceAccountToken"] = True
+    assert hardened(bad)
+
+
+def test_secrets_as_files_catches_a_secret_in_the_environment_or_a_kept_ca_key():
+    docs = render()
+    assert secrets_as_files(
+        with_container(
+            docs, env=[{"name": "BAO_TOKEN", "valueFrom": {"secretKeyRef": {"name": "x", "key": "t"}}}]
+        )
+    )
+    bad = copy.deepcopy(docs)
+    one(bad, "Secret", "vault-tls")["stringData"]["ca.key"] = "-----BEGIN RSA PRIVATE KEY-----"
+    assert secrets_as_files(bad)
+
+
+def test_certificate_catches_a_foreign_ca():
+    docs = render()
+    other = render()
+    bad = copy.deepcopy(docs)
+    one(bad, "ConfigMap", "vault-ca")["data"]["ca.crt"] = one(other, "ConfigMap", "vault-ca")["data"][
+        "ca.crt"
+    ]
+    assert certificate(bad)
+
+
+def test_values_refuse_a_secret_a_tag_or_a_server_argument():
+    assert helm("--set", "rootToken=x").returncode != 0
+    assert helm("--set", "unsealKey=x").returncode != 0
+    assert helm("--set-json", 'args=["-dev"]').returncode != 0
+    assert helm("--set", "image=ghcr.io/openbao/openbao:2.7.1").returncode != 0
+
+
+def test_the_workspace_reaches_the_vault_it_selects():
+    """The workspace chart's vault egress selects this chart's pods on its port, and every workspace
+    pod that may reach the vault carries the label the vault's ingress admits (cross-chart trace)."""
+    vault = render()
+    pod_labels = server(vault)["spec"]["template"]["metadata"]["labels"]
+    admitted = one(vault, "NetworkPolicy", "vault")["spec"]["ingress"][0]["from"][0]["podSelector"][
+        "matchLabels"
+    ]
+    workspace = render_all()
+    reaching = []
+    for name, policy in policies(workspace).items():
+        for rule in policy["spec"].get("egress", []):
+            for to in rule.get("to", []):
+                selected = to.get("podSelector", {}).get("matchLabels", {})
+                if selected.get("mandate.dev/process") != "vault":
+                    continue
+                reaching.append(name)
+                assert all(pod_labels.get(k) == v for k, v in selected.items()), (name, selected)
+                assert [p["port"] for p in rule["ports"]] == [PORT], (name, rule["ports"])
+    assert reaching, "no workspace process reaches the vault"
+    for d in workspace:
+        labels = d.get("spec", {}).get("template", {}).get("metadata", {}).get("labels", {})
+        if labels.get("mandate.dev/egress-vault") == "true":
+            assert all(labels.get(k) == v for k, v in admitted.items()), labels
