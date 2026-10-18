@@ -1892,6 +1892,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-artifacts-fs",
  "mandate-canon",
+ "mandate-domain",
  "mandate-gateway",
  "mandate-journal",
  "mandate-journal-pg",
