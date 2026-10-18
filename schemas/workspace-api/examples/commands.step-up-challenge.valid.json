@@ -1,0 +1,8 @@
+[
+  {
+    "label": "a challenge id with every base-32 digit kind",
+    "set": {
+      "/challenge_id": "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
+    }
+  }
+]
