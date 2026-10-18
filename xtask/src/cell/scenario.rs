@@ -17,12 +17,11 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use super::web;
 use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS, NAMESPACE,
     NODE, WORKSPACE_CHART, api_image_tag, api_port_forward, helm, http, kubectl, open_session,
     processes, render, reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag,
-    stub_token, tools_missing, up,
+    stub_token, tools_missing, up, web,
 };
 use crate::output;
 
@@ -996,7 +995,7 @@ pub fn run(name: &str) -> Result<()> {
                 }
                 Part::Web(check) => {
                     let outcome = if failed.is_some() {
-                        WebOutcome::Unaskable("an earlier part failed".into())
+                        WebOutcome::AfterFailure
                     } else {
                         web_outcome(check, &workspace)?
                     };
@@ -1189,11 +1188,13 @@ pub fn api_verdict(
     }
 }
 
-/// What became of a [`WebCheck`]: the API could not be asked; this machine lacks `web/`'s tools;
+/// What became of a [`WebCheck`]: an earlier part failed, so it was not tried; the API could not
+/// be asked; this machine lacks `web/`'s tools;
 /// the gesture failed; or it recorded a command, with the agent and workspace it acted on and
 /// the signed-in read of that command.
 #[derive(Debug)]
 pub enum WebOutcome {
+    AfterFailure,
     Unaskable(String),
     NoTools(String),
     Failed(String),
@@ -1259,6 +1260,7 @@ pub fn web_verdict(
     required: bool,
 ) -> (&'static str, String, bool) {
     match outcome {
+        WebOutcome::AfterFailure => ("not run", "an earlier part failed".into(), false),
         WebOutcome::Unaskable(why) if required => ("failed", why.clone(), true),
         WebOutcome::Unaskable(why) | WebOutcome::NoTools(why) => ("not run", why.clone(), false),
         WebOutcome::Failed(why) => ("failed", why.clone(), true),
@@ -1797,6 +1799,13 @@ mod tests {
         let unaskable = WebOutcome::Unaskable("no kubectl".into());
         assert!(!web_verdict(&unaskable, &check, ws, false).2);
         assert!(web_verdict(&unaskable, &check, ws, true).2);
+        for required in [false, true] {
+            assert_eq!(
+                web_verdict(&WebOutcome::AfterFailure, &check, ws, required),
+                ("not run", "an earlier part failed".into(), false),
+                "the first failure is the run's; this one only reads not run"
+            );
+        }
         let read = command_read(ws, "C1");
         assert_eq!(read.path, format!("/v1/workspaces/{ws}/commands/C1"));
         assert_eq!(read.ask, Ask::Session);
