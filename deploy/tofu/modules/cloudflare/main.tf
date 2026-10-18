@@ -3,7 +3,8 @@
 # proxied DNS record for the API's hostname pointing at the tunnel; one Access application on that
 # hostname that admits only the named emails; and the journal's WAL and base-backup archive, an R2
 # bucket whose one lock rule keeps every key for at least the archive's retention (DEC-973 item 6,
-# DEC-2012 item 9). Barman's R2 token is the founder's, scoped to that bucket, and is not made here.
+# DEC-2012 item 9); and Barman's token for that bucket alone, Object Read and Write, minted here
+# (DEC-2029) and handed on only as sensitive outputs.
 
 terraform {
   required_version = "1.13.1"
@@ -37,7 +38,7 @@ variable "api_hostname" {
   type = string
 
   validation {
-    condition     = can(regex("^[a-z0-9-]+(\\.[a-z0-9-]+)+$", var.api_hostname))
+    condition     = can(regex("^[a-z0-9-]+([.][a-z0-9-]+)+$", var.api_hostname))
     error_message = "The API hostname is a plain DNS name."
   }
 }
@@ -48,7 +49,7 @@ variable "api_origin" {
 
   validation {
     condition     = can(regex("^https?://", var.api_origin))
-    error_message = "The API origin is an http or https URL."
+    error_message = "The API origin must be a web URL, plain or over TLS."
   }
 }
 
@@ -57,7 +58,7 @@ variable "access_allowed_emails" {
   type        = list(string)
 
   validation {
-    condition     = length(var.access_allowed_emails) > 0 && alltrue([for email in var.access_allowed_emails : can(regex("^[^@\\s*]+@[^@\\s*]+\\.[^@\\s*]+$", email))])
+    condition     = length(var.access_allowed_emails) > 0 && alltrue([for email in var.access_allowed_emails : can(regex("^[^@[:space:]*]+@[^@[:space:]*]+[.][^@[:space:]*]+$", email))])
     error_message = "Access needs at least one email, each a full address; a wildcard or a domain alone is refused."
   }
 }
@@ -174,6 +175,38 @@ resource "cloudflare_r2_bucket_lock" "journal_archive" {
       }
     },
   ]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+data "cloudflare_account_api_token_permission_groups_list" "r2_object_write" {
+  account_id = var.account_id
+  name       = "Workers R2 Storage Bucket Item Write"
+  scope      = "com.cloudflare.edge.r2.bucket"
+}
+
+resource "cloudflare_account_token" "journal_archive" {
+  account_id = var.account_id
+  name       = "${var.name}-journal-archive"
+
+  policies = [
+    {
+      effect            = "allow"
+      permission_groups = [for group in data.cloudflare_account_api_token_permission_groups_list.r2_object_write.result : { id = group.id }]
+      resources = jsonencode({
+        "com.cloudflare.edge.r2.bucket.${var.account_id}_default_${cloudflare_r2_bucket.journal_archive.name}" = "*"
+      })
+    },
+  ]
+
+  lifecycle {
+    precondition {
+      condition     = length(data.cloudflare_account_api_token_permission_groups_list.r2_object_write.result) == 1
+      error_message = "Cloudflare must list exactly one Workers R2 Storage Bucket Item Write group for a bucket."
+    }
+  }
 }
 
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "this" {
@@ -200,6 +233,18 @@ output "archive_bucket" {
 
 output "archive_endpoint" {
   value = "https://${var.account_id}.r2.cloudflarestorage.com"
+}
+
+output "archive_access_key_id" {
+  description = "Barman's R2 access key id: the minted token's id (DEC-2029)."
+  value       = cloudflare_account_token.journal_archive.id
+  sensitive   = true
+}
+
+output "archive_secret_access_key" {
+  description = "Barman's R2 secret: the SHA-256 of the minted token's value, R2's S3 derivation (DEC-2029)."
+  value       = sha256(cloudflare_account_token.journal_archive.value)
+  sensitive   = true
 }
 
 output "archive_jurisdiction" {

@@ -34,7 +34,7 @@ variable "kubernetes_version" {
   type        = string
 
   validation {
-    condition     = can(regex("^1\\.[0-9]+\\.[0-9]+-do\\.[0-9]+$", var.kubernetes_version))
+    condition     = can(regex("^1[.][0-9]+[.][0-9]+-do[.][0-9]+$", var.kubernetes_version))
     error_message = "The version must be an exact DOKS slug such as 1.35.1-do.0, never a prefix or latest."
   }
 }
@@ -61,8 +61,27 @@ variable "kube_api_allowed_addresses" {
   }
 }
 
+variable "bootstrap_runner_cidr" {
+  description = "One run's GitHub runner, opened for the bootstrap and closed again (DEC-2028); empty otherwise."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = var.bootstrap_runner_cidr == "" || (
+      can(regex("^((0|[1-9][0-9]{0,2})[.]){3}(0|[1-9][0-9]{0,2})/32$", var.bootstrap_runner_cidr)) &&
+      can(cidrhost(var.bootstrap_runner_cidr, 0)) &&
+      !can(regex("^(0|10|127|169[.]254|172[.](1[6-9]|2[0-9]|3[01])|192[.]168|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])|22[4-9]|2[3-5][0-9])[.]", var.bootstrap_runner_cidr))
+    )
+    error_message = "The runner window is empty or exactly one public IPv4 /32, written without leading zeros."
+  }
+}
+
 locals {
   node_count = 2
+  allowed_addresses = concat(
+    var.kube_api_allowed_addresses,
+    var.bootstrap_runner_cidr == "" ? [] : [var.bootstrap_runner_cidr],
+  )
 }
 
 data "digitalocean_kubernetes_versions" "offered" {}
@@ -88,7 +107,7 @@ resource "digitalocean_kubernetes_cluster" "this" {
 
   control_plane_firewall {
     enabled           = true
-    allowed_addresses = var.kube_api_allowed_addresses
+    allowed_addresses = local.allowed_addresses
   }
 
   lifecycle {

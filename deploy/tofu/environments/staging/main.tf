@@ -1,11 +1,13 @@
 # Staging (DEC-2011 item 1): one DOKS cluster of two nodes in nyc3, its buckets, and the API host
-# behind the tunnel and Access. The providers read their credentials from the environment
-# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, CLOUDFLARE_API_TOKEN), which
-# only infra.yml's jobs under infra-staging receive.
+# behind the tunnel and Access. DigitalOcean's provider reads its credentials from the environment
+# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
+# token as a variable; only infra.yml's job under infra-staging receives either.
 
 provider "digitalocean" {}
 
-provider "cloudflare" {}
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
+}
 
 locals {
   environment = "staging"
@@ -26,6 +28,7 @@ module "cell" {
   kubernetes_version         = "1.35.1-do.0"
   node_size                  = "s-2vcpu-4gb"
   kube_api_allowed_addresses = var.kube_api_allowed_addresses
+  bootstrap_runner_cidr      = var.bootstrap_runner_cidr
   spaces_monthly_usd         = 5
   block_storage_gb           = 40
   cap_usd                    = 65
@@ -60,6 +63,16 @@ output "archive_endpoint" {
 
 output "archive_destination_path" {
   value = "s3://${module.cloudflare.archive_bucket}/journal-db"
+}
+
+output "archive_access_key_id" {
+  value     = module.cloudflare.archive_access_key_id
+  sensitive = true
+}
+
+output "archive_secret_access_key" {
+  value     = module.cloudflare.archive_secret_access_key
+  sensitive = true
 }
 
 output "archive_jurisdiction" {
