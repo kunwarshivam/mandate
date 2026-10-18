@@ -162,10 +162,11 @@ each command and answer through the API's idempotent write routes (`src/api/comm
 following it through `GET /commands/{id}`. A misconfigured or silent API shows the deployment
 unreachable, never the fixtures. `src/api/operations.ts` lists every operation the app calls, and
 `src/api/contract.test.ts` fails a call the spec does not document (E21-45). Setting up an agent is
-three recorded steps (DEC-2401): creating its version and deploying it have no request schema yet, so
-over the API they answer "not sent" and nothing is recorded, and so does the confirm between them, until
-the client reads the served confirmation whose digest it binds (its body is built exactly as
-`confirm-request.schema.json` states it); changing a mandate is not sent yet, step-up is not sent until E9-4 gives the browser its ceremony,
+three recorded steps (DEC-2401, DEC-2407): the version is created from the mandate document
+(`POST /mandate-versions`), the confirm binds the confirmation screen the server serves for it (read
+again just before), and deploying is not sent, since `POST /agents` needs an agent stream no route
+creates yet. Until E9-4 gives the browser its step-up ceremony, a first version's confirm carries no
+step-up and the API answers `step_up_required` with nothing recorded, which the set-up shows; changing a mandate is not sent yet,
 and the charts and sample headlines are not drawn over the API: DEC-975 has the detail, including the
 provisional read bodies the API server serves until `schemas/workspace-api/read-models/` lands.
 `/demo` always reads the fixtures. With sign-in on, the browser first opens an API session with
@@ -182,6 +183,21 @@ npm run test:e2e:api   # the e2e build with the API as its source, on port 4319
 
 The scenario switcher's cookie picks what the mock API serves. A production build answers 404 at
 `/v1` (`scripts/no-scenarios.mjs`).
+
+#### Signing in to a dev cell (DEC-2406)
+
+A dev or CI cell's API trusts E21-52's stub issuer, not Supabase. Under `next dev` only, two more
+server-side variables make the stub the sign-in client's stand-in: the dev server asks the stub for
+the subject's token on loopback at `POST /dev/stub-token`, and the browser trades it at
+`POST /v1/sessions` as it would Supabase's.
+
+| Variable | What it is |
+|---|---|
+| `OWLHEAD_STUB_ISSUER` | The stub's issuer exactly as it printed it: `http://127.0.0.1:<port>` or `http://[::1]:<port>` |
+| `OWLHEAD_STUB_SUBJECT` | The demo subject an operator linked for that issuer (`mandate identity link --issuer`) |
+
+A production build compiles no such route (`route.dev.ts`), its middleware answers 404 under `/dev/`,
+and `scripts/no-scenarios.mjs` checks the e2e and production builds both answer 404 there.
 
 ## The mock-data rule
 

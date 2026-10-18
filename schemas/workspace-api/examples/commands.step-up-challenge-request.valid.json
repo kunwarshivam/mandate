@@ -1,0 +1,8 @@
+[
+  {
+    "label": "a command's kind, resume, as a resume's challenge names it",
+    "set": {
+      "/action/kind": "resume"
+    }
+  }
+]
