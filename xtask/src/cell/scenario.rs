@@ -53,15 +53,147 @@ pub struct Step {
     pub parts: Vec<Part>,
 }
 
-/// A piece of a step: a CLI gesture the scenario runs in the cell, or a link not on `main` yet.
+/// A piece of a step: a CLI gesture the scenario runs in the cell, a check of the cell's API, or
+/// a link not on `main` yet.
 #[derive(Debug)]
 pub enum Part {
     Gesture(Gesture),
     Api(ApiCheck),
-    Gap {
-        what: &'static str,
-        closes: &'static str,
-    },
+    Gap(Gap),
+}
+
+/// A link of the story not on `main` yet (DEC-2004): what it would show, what of it is already on
+/// `main`, and every lane whose work it still waits on. A gap with no lane waits on nobody, which
+/// the plan's tests refuse.
+#[derive(Debug)]
+pub struct Gap {
+    pub what: &'static str,
+    pub on_main: &'static str,
+    pub waits: Vec<Wait>,
+}
+
+/// One lane's work a gap waits on: the lane, the backlog story, the open PR when there is one, and
+/// what the lane still has to land for this gap.
+#[derive(Debug)]
+pub struct Wait {
+    pub lane: &'static str,
+    pub story: &'static str,
+    pub pr: Option<u32>,
+    pub lands: &'static str,
+}
+
+impl Wait {
+    /// The lane, its story and its PR, as the report names them: `SI (E21-52, #1591)`.
+    pub fn named(&self) -> String {
+        match self.pr {
+            Some(pr) => format!("{} ({}, #{pr})", self.lane, self.story),
+            None => format!("{} ({})", self.lane, self.story),
+        }
+    }
+}
+
+/// How much of a step runs: all of it, some of it with gaps, or none of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Readiness {
+    Ready,
+    Partial,
+    Skipped,
+}
+
+impl Readiness {
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Partial => "partial",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+/// A step is ready with no gap, skipped when it is nothing but gaps, and partial otherwise.
+pub fn readiness(step: &Step) -> Readiness {
+    let gaps = step
+        .parts
+        .iter()
+        .filter(|p| matches!(p, Part::Gap(_)))
+        .count();
+    match gaps {
+        0 => Readiness::Ready,
+        n if n == step.parts.len() => Readiness::Skipped,
+        _ => Readiness::Partial,
+    }
+}
+
+/// The lanes `step`'s gaps wait on, each once, in the order the step first names them.
+pub fn lanes(step: &Step) -> Vec<&'static str> {
+    let mut lanes = Vec::new();
+    for part in &step.parts {
+        if let Part::Gap(gap) = part {
+            for wait in &gap.waits {
+                if !lanes.contains(&wait.lane) {
+                    lanes.push(wait.lane);
+                }
+            }
+        }
+    }
+    lanes
+}
+
+/// Every wait of every gap, grouped by lane: the step it holds back, the gap, and the wait.
+pub fn by_lane(steps: &[Step]) -> BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>> {
+    let mut lanes: BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>> = BTreeMap::new();
+    for step in steps {
+        for part in &step.parts {
+            if let Part::Gap(gap) = part {
+                for wait in &gap.waits {
+                    lanes
+                        .entry(wait.lane)
+                        .or_default()
+                        .push((step.number, gap, wait));
+                }
+            }
+        }
+    }
+    lanes
+}
+
+/// The waits several gaps share: a session from the stub issuer, the agent's runtime started by
+/// the deployment manager, web/ driven against the cell, and the executor in the cell.
+const SI_SESSION: Wait = Wait {
+    lane: "SI",
+    story: "E21-52",
+    pr: Some(1591),
+    lands: "the stub issuer's entry point, so the API opens a session (DEC-2100 item 9)",
+};
+const D1_RUNTIME: Wait = Wait {
+    lane: "D1",
+    story: "E21-33",
+    pr: None,
+    lands: "the deployment manager reads a deployment's account from AgentDeployed version 2 and \
+            starts its runtime (DEC-1171, claim #1491); until then it starts none",
+};
+const W2_WEB: Wait = Wait {
+    lane: "W2",
+    story: "E11-9",
+    pr: None,
+    lands: "web/ sends the demo's gestures through the API, and `cell demo` drives web/ against \
+            the cell (claim #1443)",
+};
+const X_EXECUTOR: Wait = Wait {
+    lane: "X",
+    story: "E21-30",
+    pr: None,
+    lands: "the executor as its own process in the cell, reading the runtime through the journal \
+            and applying the kill switch first (DEC-2003, claim #1498)",
+};
+
+fn wait(lane: &'static str, story: &'static str, pr: Option<u32>, lands: &'static str) -> Wait {
+    Wait {
+        lane,
+        story,
+        pr,
+        lands,
+    }
 }
 
 /// One request to the cell's workspace API through `cell demo`'s port-forward, and the status it
@@ -180,12 +312,22 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     path: format!("/v1/workspaces/{DEMO_WORKSPACE}/agents"),
                     status: 401,
                 }),
-                Part::Gap {
-                    what: "sign-in to web/ and the workspace read through the API with a session",
-                    closes: "the API runs in the cell (#1554) and `mandate identity link` is on \
-                             main (#1529); still needed: E21-52's stub token issuer beside the \
-                             API for POST /v1/sessions (lanes SI and A1)",
-                },
+                Part::Gap(Gap {
+                    what: "the demo owner signs in and reads the workspace through the API",
+                    on_main: "the API in the cell (#1554) with the stub issuer's sidecar wired \
+                              (#1572), `mandate identity link` (#1529), `cell demo`'s own sign-in, \
+                              and web/'s sign-in to a dev cell (#1588)",
+                    waits: vec![
+                        SI_SESSION,
+                        wait(
+                            "E2E",
+                            "E21-54",
+                            None,
+                            "this scenario signs in and reads the API's own workspace with the \
+                             session, a partial step while the gestures use a fresh one",
+                        ),
+                    ],
+                }),
             ],
         },
         Step {
@@ -233,85 +375,150 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     owner(&["agent", "deploy", AGENT, &version, "--code", &deploy]),
                     "deployed as event".into(),
                 ),
-                Part::Gap {
+                Part::Gap(Gap {
                     what: "the same gestures from web/",
-                    closes: "the API's version, confirm and deploy routes (#1552) and web/'s \
-                             set-up (#1557) are on main and the API runs in the cell (#1554); \
-                             still needed: a session, E21-52's stub issuer (lanes SI and A1)",
-                },
-                Part::Gap {
-                    what: "the agent's processes started from AgentDeployed",
-                    closes: "E21-33, the deployment manager (claim #1491, lane D1)",
-                },
+                    on_main: "the API's version, confirm and deploy routes (#1552) in the cell \
+                              (#1554), web/'s set-up (#1557) and its sign-in to a dev cell \
+                              (#1588)",
+                    waits: vec![SI_SESSION, W2_WEB],
+                }),
+                Part::Gap(Gap {
+                    what: "the agent's runtime started from AgentDeployed",
+                    on_main: "the deployment manager in the cell (#1582), the runtime's image \
+                              (#1560), and the runtime reading its deployment and mandate from \
+                              the manager (#1576, #1577)",
+                    waits: vec![D1_RUNTIME],
+                }),
             ],
         },
         Step {
             number: 3,
             title: "the research loop reads news and filings and asks the model",
-            parts: vec![Part::Gap {
+            parts: vec![Part::Gap(Gap {
                 what: "a research run in the agent's runtime, through mandate-gateway's \
                        recorded fake",
-                closes: "the runtime (#1521), the research driver (DEC-996 item 2), E15-8's \
-                         records and the gateway's transport (#1519) are on main; still needed: \
-                         the runtime's cell image (#1560, lane P), the driver run inside the \
-                         runtime process (lane I2), and E19-5's invalidation (spec #1543)",
-            }],
+                on_main: "the runtime and its image (#1521, #1560), the research driver in the \
+                          runtime behind a deny-all default (#1575), the loop through the \
+                          gateway's recorded fake (#1520), and E19-5's invalidation (#1559)",
+                waits: vec![
+                    D1_RUNTIME,
+                    wait(
+                        "I2",
+                        "E19-2",
+                        None,
+                        "a deployment's research configured, its context folded from the \
+                         account and meter streams (DEC-2208, claim #1531)",
+                    ),
+                    wait(
+                        "AH",
+                        "E19-13",
+                        None,
+                        "the agentic loop's read and think tools (ADR-0005, claim #1534)",
+                    ),
+                ],
+            })],
         },
         Step {
             number: 4,
             title: "deterministic code sizes the order, the gate and autonomy rules ask, the \
                     owner approves, the paper order fills and the stop goes out",
             parts: vec![
-                Part::Gap {
+                Part::Gap(Gap {
                     what: "the runtime sizes the opening and the gate and autonomy rules ask",
-                    closes: "the runtime process (#1521) is on main; its cell image (#1560, \
-                             lane P)",
-                },
+                    on_main: "the runtime and its image (#1521, #1560), on the deny-all wiring \
+                              that proposes nothing (DEC-1013 item 2)",
+                    waits: vec![
+                        D1_RUNTIME,
+                        wait(
+                            "P5",
+                            "E21-2",
+                            None,
+                            "the runtime's production ports, the post-R0 hook (DEC-968 item 6)",
+                        ),
+                    ],
+                }),
                 gesture(
                     "the owner's inbox, read (empty until the runtime asks)",
                     owner(&["approvals", "list", "--agent", AGENT]),
                     "no approvals".into(),
                 ),
-                Part::Gap {
+                Part::Gap(Gap {
                     what: "the owner approves the ask in web/",
-                    closes: "E9-4, step-up the API can verify before a grant (claim #759, \
-                             lane SU; DEC-1007 item 3); `mandate approvals approve` is the CLI's \
-                             path",
-                },
-                Part::Gap {
+                    on_main: "the approval answer in web/ and the API's responses route in the \
+                              cell (#1554); `mandate approvals approve` is the CLI's path, with \
+                              nothing to approve until the runtime asks",
+                    waits: vec![
+                        wait(
+                            "L1",
+                            "E9-4",
+                            Some(1592),
+                            "step-up the API verifies before a grant (DEC-1007 item 3, DEC-2103), \
+                             and passkey enrolment, without which every grant answers \
+                             `step_up_missing`",
+                        ),
+                        wait(
+                            "W2",
+                            "E11-9",
+                            None,
+                            "web/'s half of step-up on the approval answer (claim #1443)",
+                        ),
+                    ],
+                }),
+                Part::Gap(Gap {
                     what: "the paper fill and the protective stop on a fixture broker",
-                    closes: "E21-30's executor slice (claim #1498, lane X; processes.json \
-                             `executor`)",
-                },
+                    on_main: "the executor crate beside the runtime and its image (#1521, \
+                              #1560), with the runtime asking nothing yet",
+                    waits: vec![X_EXECUTOR],
+                }),
             ],
         },
         Step {
             number: 5,
             title: "a backtest of the same mandate version is shown",
-            parts: vec![Part::Gap {
+            parts: vec![Part::Gap(Gap {
                 what: "the backtest of this version, its report read through the API and \
                        shown in web/",
-                closes: "the backtest (#1482) and web/'s report screen (#1549) are on \
-                         main; still needed: a way to run it in the cell and its API read \
-                         (E4-4, lane I4)",
-            }],
+                on_main: "the runner in the cell's image and `mandate backtest record` (#1581, \
+                          DEC-1144), the API's backtest read (#1555), and web/'s report screen \
+                          (#1549)",
+                waits: vec![
+                    wait(
+                        "E2E",
+                        "E21-54",
+                        None,
+                        "this scenario runs the runner and records it in the gestures' pod",
+                    ),
+                    SI_SESSION,
+                ],
+            })],
         },
         Step {
             number: 6,
             title: "the kill switch from the web app stops the agent",
             parts: vec![
-                Part::Gap {
+                Part::Gap(Gap {
                     what: "the kill switch from web/, recorded through the API",
-                    closes: "POST /v1/workspaces/{ws}/kill-switch runs in the cell (#1457, \
-                             #1554); still needed: a session, E21-52's stub issuer (lanes SI and \
-                             A1)",
-                },
-                Part::Gap {
+                    on_main: "POST /v1/workspaces/{ws}/kill-switch in the cell (#1457, #1554), \
+                              web/'s kill switch sent through the API, and its sign-in to a dev \
+                              cell (#1588)",
+                    waits: vec![SI_SESSION, W2_WEB],
+                }),
+                Part::Gap(Gap {
+                    what: "the kill switch through the CLI, at agent scope",
+                    on_main: "`mandate agent kill` at agent, connection and workspace scope \
+                              (#1537, DEC-2000)",
+                    waits: vec![wait(
+                        "E2E",
+                        "E21-54",
+                        None,
+                        "this scenario runs it as a gesture and the closing verify covers it",
+                    )],
+                }),
+                Part::Gap(Gap {
                     what: "the agent's processes stop on it",
-                    closes: "the runtime reads it first (#1521, on main; its cell image #1560, \
-                             lane P), E21-30's executor slice (lane X), E21-34 (`mandate agent \
-                             kill`, lane O4, #1537)",
-                },
+                    on_main: "the runtime reads the kill switch first (#1521, image #1560)",
+                    waits: vec![D1_RUNTIME, X_EXECUTOR],
+                }),
             ],
         },
         Step {
@@ -345,7 +552,7 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
         .flat_map(|s| &s.parts)
         .filter_map(|p| match p {
             Part::Gesture(g) => Some(g),
-            Part::Api(_) | Part::Gap { .. } => None,
+            Part::Api(_) | Part::Gap(_) => None,
         })
         .collect()
 }
@@ -502,7 +709,18 @@ pub fn run(name: &str) -> Result<()> {
     let mut failed = None;
     let mut gaps = 0;
     for step in &steps {
-        eprintln!("  step {}  {}", step.number, step.title);
+        let waiting = lanes(step);
+        let on = if waiting.is_empty() {
+            String::new()
+        } else {
+            format!(" (waits on {})", waiting.join(", "))
+        };
+        eprintln!(
+            "  step {}  {:<8} {}{on}",
+            step.number,
+            readiness(step).word(),
+            step.title
+        );
         for part in &step.parts {
             match part {
                 Part::Gesture(g) => {
@@ -537,11 +755,27 @@ pub fn run(name: &str) -> Result<()> {
                         failed.get_or_insert_with(|| format!("GET {}: {said}", check.path));
                     }
                 }
-                Part::Gap { what, closes } => {
+                Part::Gap(gap) => {
                     gaps += 1;
-                    eprintln!("    gap      {what}: {closes}");
+                    eprintln!("    gap      {}", gap.what);
+                    eprintln!("             on main: {}", gap.on_main);
+                    for wait in &gap.waits {
+                        eprintln!("             waits:   {}: {}", wait.named(), wait.lands);
+                    }
                 }
             }
+        }
+    }
+    eprintln!("==> what the story waits on, by lane");
+    for (lane, waits) in by_lane(&steps) {
+        eprintln!("    {lane}");
+        for (step, gap, wait) in waits {
+            eprintln!(
+                "      step {step}  {}: {} ({})",
+                gap.what,
+                wait.lands,
+                wait.named()
+            );
         }
     }
     if let Some(container) = failed {
@@ -837,43 +1071,156 @@ mod tests {
         );
     }
 
-    /// A gap is named, never faked: each names a PR (`#n`) or a story (`E<epic>-<n>`) that closes
-    /// it, and every step that is not wholly on `main` has one.
-    #[test]
-    fn every_gap_names_the_pr_or_story_that_closes_it() {
-        let steps = plan("demo1", &mandate());
-        let names = |text: &str| {
-            let words: Vec<&str> = text
-                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '#' || c == '-'))
-                .collect();
-            words.iter().any(|w| {
+    /// Whether `text` cites a PR, `#` and digits, as a word.
+    fn cites_a_pr(text: &str) -> bool {
+        text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '#'))
+            .any(|w| {
                 w.strip_prefix('#')
                     .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-                    || w.strip_prefix('E')
-                        .and_then(|r| r.split_once('-'))
-                        .is_some_and(|(e, n)| {
-                            !e.is_empty()
-                                && !n.is_empty()
-                                && e.bytes().all(|b| b.is_ascii_digit())
-                                && n.bytes().all(|b| b.is_ascii_digit())
-                        })
             })
-        };
+    }
+
+    /// Whether `story` is a backlog story, `E<epic>-<n>`, with its own entry in the backlog.
+    fn a_backlog_story(story: &str, backlog: &str) -> bool {
+        let shaped = story
+            .strip_prefix('E')
+            .and_then(|r| r.split_once('-'))
+            .is_some_and(|(e, n)| {
+                !e.is_empty()
+                    && !n.is_empty()
+                    && e.bytes().all(|b| b.is_ascii_digit())
+                    && n.bytes().all(|b| b.is_ascii_digit())
+            });
+        let entry = format!("- **{story}");
+        shaped
+            && backlog.lines().any(|l| {
+                l.trim_start()
+                    .strip_prefix(&entry)
+                    .is_some_and(|rest| rest.starts_with([' ', '*', '(', ':']))
+            })
+    }
+
+    /// A gap is named, never faked (DEC-2004): it says what of it is on `main`, citing a PR, and
+    /// waits on at least one lane, each wait naming a lane, a story the backlog holds, and what
+    /// that lane still lands; a PR, when named, is a real number.
+    #[test]
+    fn every_gap_waits_on_a_named_lane_and_its_backlog_story() {
+        let backlog = fs::read_to_string("../docs/project/06-backlog-v1.md").unwrap();
+        let steps = plan("demo1", &mandate());
         for step in &steps {
             for part in &step.parts {
-                if let Part::Gap { what, closes } = part {
-                    assert!(names(closes), "step {}: {what}: {closes}", step.number);
+                let Part::Gap(gap) = part else { continue };
+                let at = format!("step {}: {}", step.number, gap.what);
+                assert!(cites_a_pr(gap.on_main), "{at}: on main cites no PR");
+                assert!(!gap.waits.is_empty(), "{at}: waits on nobody");
+                for wait in &gap.waits {
+                    assert!(
+                        (1..=4).contains(&wait.lane.len())
+                            && wait
+                                .lane
+                                .bytes()
+                                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()),
+                        "{at}: lane {:?}",
+                        wait.lane
+                    );
+                    assert!(
+                        a_backlog_story(wait.story, &backlog),
+                        "{at}: {} is not a backlog story",
+                        wait.story
+                    );
+                    assert!(!wait.lands.is_empty(), "{at}: {} lands nothing", wait.lane);
+                    assert_ne!(wait.pr, Some(0), "{at}");
                 }
             }
         }
-        for number in [3_usize, 5] {
-            let step = &steps[number - 1];
-            assert!(
-                step.parts.iter().all(|p| matches!(p, Part::Gap { .. })),
-                "step {number} has no gesture on main yet, so it is all gaps"
-            );
+        assert!(
+            !cites_a_pr("no PR, E21-54"),
+            "the oracle refuses a story alone"
+        );
+        assert!(
+            !a_backlog_story("E99-999", &backlog),
+            "the oracle refuses a made-up story"
+        );
+        assert!(
+            !a_backlog_story("E21-5", "- **E21-54 (Proposed)"),
+            "a prefix is not a story"
+        );
+    }
+
+    /// Which steps run today: the gestures on `main` make steps 1, 2 and 4 partial, steps 3, 5
+    /// and 6 wait wholly on other lanes, and the record runs whole.
+    #[test]
+    fn each_step_reads_ready_partial_or_skipped_from_its_parts() {
+        let steps = plan("demo1", &mandate());
+        let read: Vec<Readiness> = steps.iter().map(readiness).collect();
+        use Readiness::{Partial, Ready, Skipped};
+        assert_eq!(
+            read,
+            [Partial, Partial, Skipped, Partial, Skipped, Skipped, Ready]
+        );
+        let step = |parts: Vec<Part>| Step {
+            number: 9,
+            title: "t",
+            parts,
+        };
+        let gap = |lanes: &[&'static str]| {
+            Part::Gap(Gap {
+                what: "w",
+                on_main: "#1",
+                waits: lanes.iter().map(|l| wait(l, "E1-1", None, "x")).collect(),
+            })
+        };
+        let check = || {
+            Part::Api(ApiCheck {
+                shows: "s",
+                path: "/".into(),
+                status: 401,
+            })
+        };
+        assert_eq!(readiness(&step(vec![check()])), Ready);
+        assert_eq!(readiness(&step(vec![check(), gap(&["A"])])), Partial);
+        assert_eq!(readiness(&step(vec![gap(&["A"]), gap(&["B"])])), Skipped);
+        assert_eq!(
+            lanes(&step(vec![gap(&["B", "A"]), check(), gap(&["A", "C"])])),
+            ["B", "A", "C"],
+            "each lane once, in the order first named"
+        );
+        assert!(lanes(&step(vec![check()])).is_empty());
+    }
+
+    /// The closing summary lists every wait of every gap once, under its own lane, with the step it
+    /// holds back.
+    #[test]
+    fn the_summary_lists_every_wait_once_under_its_lane() {
+        let steps = plan("demo1", &mandate());
+        let grouped = by_lane(&steps);
+        let mut counted = BTreeMap::<&str, usize>::new();
+        for step in &steps {
+            for part in &step.parts {
+                if let Part::Gap(gap) = part {
+                    for wait in &gap.waits {
+                        *counted.entry(wait.lane).or_default() += 1;
+                        let listed = &grouped[wait.lane];
+                        assert!(
+                            listed.iter().any(|(n, g, w)| *n == step.number
+                                && std::ptr::eq(*g, gap)
+                                && std::ptr::eq(*w, wait)),
+                            "step {}: {} under {}",
+                            step.number,
+                            gap.what,
+                            wait.lane
+                        );
+                    }
+                }
+            }
         }
-        assert!(!names("no story"), "the oracle refuses text naming nothing");
+        let sizes: BTreeMap<&str, usize> = grouped.iter().map(|(l, w)| (*l, w.len())).collect();
+        assert_eq!(sizes, counted);
+        assert_eq!(
+            wait("SI", "E21-52", Some(1591), "x").named(),
+            "SI (E21-52, #1591)"
+        );
+        assert_eq!(wait("D1", "E21-33", None, "x").named(), "D1 (E21-33)");
     }
 
     fn rendered() -> Vec<Value> {
