@@ -17,8 +17,6 @@ use crate::control::{ControlError, ControlJournal, Ids, Now, Owner};
 use crate::postgres::JournalArgs;
 use crate::register::OwnerArgs;
 
-const STORY: &str = "E8-3";
-
 #[derive(Debug, Args)]
 pub struct StatusArgs {
     /// The agent's id.
@@ -193,7 +191,7 @@ pub fn answer(
         now,
         RELEASE_WARNING,
     );
-    Err(ControlError::Unimplemented { story: STORY })
+    Err(ControlError::Unimplemented { story: "E8-3" })
 }
 
 /// `status`'s lines: `mode`, `startup_hold`, `pending_approvals`, each restriction or `restrictions
@@ -203,7 +201,7 @@ pub fn answer(
 /// None once implemented: every status has its lines. The `Result` is the stub API's shape.
 pub fn status_lines(status: &Status) -> Result<Vec<String>, ControlError> {
     let _ = status;
-    Err(ControlError::Unimplemented { story: STORY })
+    Err(ControlError::Unimplemented { story: "E8-3" })
 }
 
 /// Runs `agent status` and prints [`status_lines`].
@@ -212,7 +210,7 @@ pub fn status_lines(status: &Status) -> Result<Vec<String>, ControlError> {
 /// The owner's refusals before the journal is opened, then the journal's.
 pub fn run_status(args: &StatusArgs, report: &mut impl Write) -> anyhow::Result<()> {
     let _ = (args, report);
-    Err(ControlError::Unimplemented { story: STORY }.into())
+    Err(ControlError::Unimplemented { story: "E8-3" }.into())
 }
 
 /// Runs `agent resume` and prints [`answer`]'s lines.
@@ -221,7 +219,7 @@ pub fn run_status(args: &StatusArgs, report: &mut impl Write) -> anyhow::Result<
 /// The owner's refusals before the journal is opened, then [`answer`]'s.
 pub fn run_resume(args: &ResumeArgs, now: Now, report: &mut impl Write) -> anyhow::Result<()> {
     let _ = (args, now, report);
-    Err(ControlError::Unimplemented { story: STORY }.into())
+    Err(ControlError::Unimplemented { story: "E8-3" }.into())
 }
 
 /// Runs `agent stop` and prints [`answer`]'s lines.
@@ -230,7 +228,7 @@ pub fn run_resume(args: &ResumeArgs, now: Now, report: &mut impl Write) -> anyho
 /// As [`run_resume`].
 pub fn run_stop(args: &StopArgs, now: Now, report: &mut impl Write) -> anyhow::Result<()> {
     let _ = (args, now, report);
-    Err(ControlError::Unimplemented { story: STORY }.into())
+    Err(ControlError::Unimplemented { story: "E8-3" }.into())
 }
 
 /// Runs `agent exit` and prints [`answer`]'s lines.
@@ -239,5 +237,5 @@ pub fn run_stop(args: &StopArgs, now: Now, report: &mut impl Write) -> anyhow::R
 /// As [`run_resume`]; never a refusal of the exit itself.
 pub fn run_exit(args: &ExitArgs, now: Now, report: &mut impl Write) -> anyhow::Result<()> {
     let _ = (args, now, report);
-    Err(ControlError::Unimplemented { story: STORY }.into())
+    Err(ControlError::Unimplemented { story: "E8-3" }.into())
 }
