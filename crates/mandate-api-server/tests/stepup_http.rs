@@ -11,9 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use common::{MemJournal, Reply, WORKSPACE, b64url, hosted, send, serve};
 use mandate_api::envelope::StepUpActionKind as WireKind;
-use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
 use mandate_api::problem::{Effect, Problem, ProblemCode, Violation};
-use mandate_api::wire::{Id, decode};
+use mandate_api::wire::decode;
 use mandate_api_server::challenges::{Challenges, HELD, OPERATION, PER_PRINCIPAL};
 use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
 use mandate_api_server::http::{self, App, Settings};
@@ -210,19 +209,38 @@ fn approve(f: &Fixture, cookie: &str, key: &str) -> Reply {
 
 /// §3.4's id for `key` under `principal`, the route's operation, and the hosted workspace.
 fn derived(principal: &str, key: &str) -> String {
-    let workspace = Id::try_from(WORKSPACE.to_owned()).expect("an id");
-    let principal = Id::try_from(principal.to_owned()).expect("an id");
-    let key = IdempotencyKey::parse(key).expect("a key");
-    let id = event_id(&Derivation {
-        workspace: &workspace,
-        principal: &principal,
-        operation: OPERATION,
-        key: &key,
-        position: None,
-    })
-    .expect("an id");
-    let text = String::from_utf8(mandate_api::wire::encode(&id).expect("encodes")).expect("UTF-8");
-    text.trim_matches('"').to_owned()
+    derived_in(WORKSPACE, principal, OPERATION, key)
+}
+
+/// §3.4's derivation written out from the spec, independent of `mandate_api::idempotency`: the
+/// canonical object of four ASCII members in byte order, its SHA-256 by `ring`, and the first 128
+/// bits as 26 Crockford base-32 digits after two zero bits.
+fn derived_in(workspace: &str, principal: &str, operation: &str, key: &str) -> String {
+    let object = format!(
+        r#"{{"key":"{key}","operation":"{operation}","principal":"{principal}","workspace":"{workspace}"}}"#
+    );
+    let sha = ring::digest::digest(&ring::digest::SHA256, object.as_bytes());
+    let (head, _) = sha
+        .as_ref()
+        .split_first_chunk::<16>()
+        .expect("SHA-256 has 32 bytes");
+    let value = u128::from_be_bytes(*head);
+    let digits = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    (0..26_u32)
+        .rev()
+        .map(|place| {
+            char::from(digits[usize::try_from((value >> (5 * place)) & 31).expect("a digit")])
+        })
+        .collect()
+}
+
+/// The oracle reproduces §3.4's worked vector before it is trusted.
+#[test]
+fn the_derivation_oracle_reproduces_the_specs_worked_vector() {
+    assert_eq!(
+        derived_in("ws_01", "user_7", "kill_switch", "k1Z-9_aaaaaaaaaa"),
+        "7KXV6BGDW36KYC7RE5BPQG28Z0"
+    );
 }
 
 /// Identity spec §7.2 step 2: SHA-256 of the canonical record, its seven members in byte order,
@@ -688,6 +706,29 @@ fn a_live_workspace_is_refused_before_any_challenge_is_issued() {
     );
     let viewer = signed_in(&f, BOB);
     refused(&approve(&f, &viewer, KEY), 403, ProblemCode::Forbidden);
+}
+
+/// A workspace the server does not host is the one 404, whoever asks, and issues nothing
+/// (workspace API spec §3.3).
+#[test]
+fn another_workspaces_path_is_not_found() {
+    let f = paper();
+    let cookie = format!("{COOKIE_NAME}={}", signed_in(&f, ERIN));
+    let path = "/v1/workspaces/01JB3K6F0C9R2V7N4M8Q1T5W50/step-up/challenges";
+    let reply = send(
+        f.addr,
+        "POST",
+        path,
+        &[
+            ("Origin", APP),
+            ("X-Mandate-Request", "1"),
+            ("Cookie", cookie.as_str()),
+            ("Idempotency-Key", KEY),
+        ],
+        body_for("approve", CONTENT_HASH).as_bytes(),
+    );
+    refused(&reply, 404, ProblemCode::NotFound);
+    nothing_journaled(&f);
 }
 
 #[test]
