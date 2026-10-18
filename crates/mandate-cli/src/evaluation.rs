@@ -59,7 +59,8 @@ pub fn internal_paper(
 
 /// Every `ThesisProposed` and `ThesisRevised` of the workspace's agents (DEC-2244 item 2): the
 /// agents are the `agent_id`s of the control stream's `AgentDeployed` records, each read once, in
-/// id order, and each stream's records in stream order.
+/// id order, and each stream's records in stream order. It reads agent streams whatever the
+/// workspace is, so a caller runs [`internal_paper`] first, as [`run`] does.
 ///
 /// # Errors
 /// [`ControlError::Refused`] with `record_unbound` for a record with no
