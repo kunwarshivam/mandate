@@ -47,11 +47,13 @@ pub trait ResearchSource {
 /// The research worker: retrieval and the gateway's calls. It stores the artifacts its answers name
 /// (retrieved records, prompts, responses) before it hands an answer back.
 pub trait ResearchWorker {
-    /// Takes one of the core's requests, after the batch that authorises it committed.
-    fn hand(&mut self, request: &ResearchRequest);
+    /// Takes one of the core's requests, after the batch that authorises it committed, with the
+    /// parts of the pass that made it, which a run's retrieval reads its scope from (DEC-2210).
+    fn hand(&mut self, request: &ResearchRequest, parts: &ResearchParts);
 
-    /// The answers ready since the last pass, in the order they arrived.
-    fn answers(&mut self) -> Vec<ResearchInput>;
+    /// The answers ready since the last pass, in the order they arrived, each that carries a risk
+    /// clock stamped `at`, the risk clock of the pass it is handed in (DEC-2210 item 3).
+    fn answers(&mut self, at: RiskClock) -> Vec<ResearchInput>;
 }
 
 /// Where the artifacts the core makes are stored (DEC-2206 item 4): content-addressed, put before
@@ -112,12 +114,12 @@ enum Fatal {
     Failed,
 }
 
-/// The driver's worker over the wiring's.
-struct Hands<'a>(&'a mut dyn ResearchWorker);
+/// The driver's worker over the wiring's, with the parts of the pass it is handed in.
+struct Hands<'a>(&'a mut dyn ResearchWorker, &'a ResearchParts);
 
 impl Worker for Hands<'_> {
     fn hand(&mut self, request: &ResearchRequest) {
-        self.0.hand(request);
+        self.0.hand(request, self.1);
     }
 }
 
@@ -246,7 +248,7 @@ impl<S: Store> RuntimeProcess<S> {
         if research.driver.halted() {
             return;
         }
-        let answers = research.wiring.worker.answers();
+        let answers = research.wiring.worker.answers(at);
         research.inbox.extend(answers);
         if !matches!(
             self.research_hand(now, now, ResearchInput::Poll(at), alerts),
@@ -335,7 +337,7 @@ impl<S: Store> RuntimeProcess<S> {
             ports: &ports,
             context: &context,
         };
-        let mut hands = Hands(research.wiring.worker.as_mut());
+        let mut hands = Hands(research.wiring.worker.as_mut(), &parts);
         let stepped = research
             .driver
             .step(input, &mut core, &mut writer, &mut hands);

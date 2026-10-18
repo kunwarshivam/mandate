@@ -91377,6 +91377,109 @@
     },
     "artifact_refs": [],
     "pii_refs": []
+   },
+   "owner_released": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B7",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "PositionReleased",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+     "qty": "0.15",
+     "cause": "owner_release",
+     "canceled_order_ids": [
+      "order_stop_1"
+     ],
+     "warning_ref": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+     "user_id": "user_owner",
+     "step_up": {
+      "assertion_id": "assert_owner_01",
+      "authenticated_at": "2026-09-22T14:29:10.000000000Z",
+      "method": "webauthn"
+     },
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [
+     "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    ],
+    "pii_refs": []
+   },
+   "mark_stale": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B8",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "InstrumentRestrictionChanged",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "instrument": "7b4a1c2e-1111-4a2b-9c3d-000000000001",
+     "restriction": "stale_mark",
+     "reason": "no_sane_mark",
+     "active": true,
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "goal_completed": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4R1A000000000000000B9",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "GoalCompleted",
+    "schema_version": 1,
+    "event_time": "2026-09-22T14:30:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "payload": {
+     "agent_id": "agent_a",
+     "reason": null,
+     "then": null,
+     "on_complete": "release",
+     "risk_clock": "2026-09-22T14:30:00.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
    }
   },
   "invalid_drafts": [
@@ -92069,6 +92172,398 @@
     }
    },
    {
+    "name": "owner_released.instrument.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "owner_released.instrument.form",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "7B4A1C2E-1111-4A2B-9C3D-000000000001"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "owner_released.qty.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "owner_released.qty.form",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "0,15"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "owner_released.cause.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "owner_released.cause.form",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "release"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "owner_released.canceled_order_ids.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.canceled_order_ids",
+      "value": "order_stop_1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.canceled_order_ids"
+    }
+   },
+   {
+    "name": "owner_released.warning_ref.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.warning_ref",
+      "value": 7
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.warning_ref"
+    }
+   },
+   {
+    "name": "owner_released.warning_ref.form",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.warning_ref",
+      "value": "sha256:short"
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.warning_ref"
+    }
+   },
+   {
+    "name": "owner_released.user_id.kind",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.user_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.user_id"
+    }
+   },
+   {
+    "name": "owner_released.user_id.form",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.user_id",
+      "value": "user owner"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.user_id"
+    }
+   },
+   {
+    "name": "mark_stale.instrument.kind",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "mark_stale.instrument.form",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": "not-an-asset"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "mark_stale.restriction.kind",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restriction"
+    }
+   },
+   {
+    "name": "mark_stale.restriction.form",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "halted"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.restriction"
+    }
+   },
+   {
+    "name": "mark_stale.reason.kind",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "mark_stale.reason.form",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "quote_gap"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "mark_stale.active.kind",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.active",
+      "value": "true"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.active"
+    }
+   },
+   {
+    "name": "goal_completed.reason.kind",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "goal_completed.reason.form",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "done"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "goal_completed.then.kind",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.then",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.then"
+    }
+   },
+   {
+    "name": "goal_completed.then.form",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.then",
+      "value": "retire"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.then"
+    }
+   },
+   {
+    "name": "goal_completed.on_complete.kind",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.on_complete",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.on_complete"
+    }
+   },
+   {
+    "name": "goal_completed.on_complete.form",
+    "clause": "§9.27 types",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.on_complete",
+      "value": "sell_all"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.on_complete"
+    }
+   },
+   {
     "name": "day_started.day.null",
     "clause": "§9.27 types",
     "base_draft": "day_started",
@@ -92338,6 +92833,134 @@
      "outcome": "Invalid",
      "reason": "schema",
      "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "owner_released.instrument.null",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "owner_released.qty.null",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "owner_released.cause.null",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "owner_released.canceled_order_ids.null",
+    "clause": "§9.27 types",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.canceled_order_ids",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.canceled_order_ids"
+    }
+   },
+   {
+    "name": "mark_stale.instrument.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.instrument",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument"
+    }
+   },
+   {
+    "name": "mark_stale.restriction.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.restriction"
+    }
+   },
+   {
+    "name": "mark_stale.reason.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "mark_stale.active.null",
+    "clause": "§9.27 types",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.active",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.active"
     }
    },
    {
@@ -92821,6 +93444,246 @@
     }
    },
    {
+    "name": "owner_released.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "owner_released.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "owner_released.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "owner_released.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "owner_released.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "mark_stale.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "mark_stale.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "mark_stale.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "mark_stale.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "mark_stale.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "goal_completed.missing",
+    "clause": "§9.27 closed",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "goal_completed.extra",
+    "clause": "§9.27 closed",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.notes",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.notes"
+    }
+   },
+   {
+    "name": "goal_completed.without_its_mandate",
+    "clause": "§9 row: the risk-state records name `mandate_version`",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "config_refs",
+      "value": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
+    "name": "goal_completed.on_the_control_stream",
+    "clause": "§9 row: an account-stream record",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "goal_completed.at_version_2",
+    "clause": "§9.27: closed at schema version 1 only",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
     "name": "rung_triggered.limit.sixth_rung",
     "clause": "§9.27 `limit_key`: a ladder has at most five rungs",
     "base_draft": "rung_triggered",
@@ -93211,6 +94074,262 @@
      "reason": "schema",
      "path": "causation_id"
     }
+   },
+   {
+    "name": "236.owner_releases_nothing",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "236.goal_releases_a_negative",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "goal_release"
+     },
+     {
+      "path": "payload.warning_ref",
+      "value": null
+     },
+     {
+      "path": "payload.user_id",
+      "value": null
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     },
+     {
+      "path": "payload.qty",
+      "value": "-0.1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "236.owner_release_without_its_warning",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.warning_ref",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.warning_ref"
+    }
+   },
+   {
+    "name": "236.owner_release_without_step_up",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.step_up",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "236.goal_release_with_a_user",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "goal_release"
+     },
+     {
+      "path": "payload.warning_ref",
+      "value": null
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.user_id"
+    }
+   },
+   {
+    "name": "237.stale_mark_for_a_removal",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "operator_halt"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "237.stale_mark_cleared_as_set",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.active",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.active"
+    }
+   },
+   {
+    "name": "237.removed_for_no_mark",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "237.removed_by_an_admission",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "thesis_admitted"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.active"
+    }
+   },
+   {
+    "name": "237.cleared_by_a_removal",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "eligibility_lost"
+     },
+     {
+      "path": "payload.active",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.active"
+    }
+   },
+   {
+    "name": "238.both_forms",
+    "clause": "rule 238",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.then",
+      "value": "discretionary_exit_all_then_retire"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.then"
+    }
+   },
+   {
+    "name": "238.neither_form",
+    "clause": "rule 238",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.on_complete",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.then"
+    }
+   },
+   {
+    "name": "238.reason_with_on_complete",
+    "clause": "rule 238",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "target_qty"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
    }
   ],
   "valid_drafts": [
@@ -93464,6 +94583,230 @@
      {
       "path": "payload.limit",
       "value": "drawdown_ladder[3]"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "goal_release",
+    "clause": "rule 236",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "goal_release"
+     },
+     {
+      "path": "payload.warning_ref",
+      "value": null
+     },
+     {
+      "path": "payload.user_id",
+      "value": null
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     },
+     {
+      "path": "payload.canceled_order_ids",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "goal_releases_nothing",
+    "clause": "rule 236: a goal completes flat or not",
+    "base_draft": "owner_released",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "goal_release"
+     },
+     {
+      "path": "payload.warning_ref",
+      "value": null
+     },
+     {
+      "path": "payload.user_id",
+      "value": null
+     },
+     {
+      "path": "payload.step_up",
+      "value": null
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     },
+     {
+      "path": "payload.qty",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "sane_mark_clears",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "sane_mark"
+     },
+     {
+      "path": "payload.active",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_thesis_expired",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "thesis_expired"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_operator_halt",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "operator_halt"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_version_applied",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "version_applied"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "readmitted_thesis_admitted",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "thesis_admitted"
+     },
+     {
+      "path": "payload.active",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "readmitted_version_applied",
+    "clause": "rule 237",
+    "base_draft": "mark_stale",
+    "changes": [
+     {
+      "path": "payload.restriction",
+      "value": "removed_instrument"
+     },
+     {
+      "path": "payload.reason",
+      "value": "version_applied"
+     },
+     {
+      "path": "payload.active",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "profit_stop_confirmed",
+    "clause": "rule 238",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "profit_stop_reached"
+     },
+     {
+      "path": "payload.then",
+      "value": "discretionary_exit_all_then_retire"
+     },
+     {
+      "path": "payload.on_complete",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "goal_with_no_on_complete",
+    "clause": "rule 238",
+    "base_draft": "goal_completed",
+    "changes": [
+     {
+      "path": "payload.then",
+      "value": "discretionary_exit_all_then_retire"
+     },
+     {
+      "path": "payload.on_complete",
+      "value": null
      }
     ],
     "expect": {

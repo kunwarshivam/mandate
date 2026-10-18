@@ -35,6 +35,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mandate_api_server::challenges::Challenges;
 use mandate_api_server::clock::SystemClock;
 use mandate_api_server::config::SessionKey;
 use mandate_api_server::config::{
@@ -280,6 +281,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
             store
         }),
         step_up: Arc::new(Unbound),
+        challenges: Arc::new(Challenges::default()),
     };
     let api = spawn_listener(
         serve(
