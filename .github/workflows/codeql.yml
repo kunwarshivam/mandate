@@ -11,6 +11,13 @@
 #
 name: "CodeQL Advanced"
 
+# DEC-2606. A pull request's runs share one group, so a new push cancels the analysis of the head
+# it replaced; a push to `main` and the weekly schedule each have a group of their own and are
+# never cancelled.
+concurrency:
+  group: codeql-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [ "main" ]
