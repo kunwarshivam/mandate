@@ -170,7 +170,9 @@ impl ExitArgs {
 /// committed or found (DEC-2507 item 2).
 ///
 /// # Errors
-/// [`crate::agent::command`]'s, a refused resume or Stop committing nothing.
+/// [`crate::agent::command`]'s, a refused resume or Stop committing nothing; `bid_invalid` for an
+/// exit whose confirmed bid, bid size or floor is not positive or whose floor is above its bid,
+/// committing nothing.
 pub fn answer(
     journal: &mut dyn ControlJournal,
     ids: &mut dyn Ids,

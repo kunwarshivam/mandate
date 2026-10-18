@@ -21,11 +21,11 @@ use mandate_cli::{Cli, Command};
 const INSTRUMENT: &str = "SPY";
 const BID: [&str; 6] = [
     "--confirm-bid",
-    "501.20",
+    "501.2",
     "--bid-size",
     "300",
     "--floor",
-    "495.00",
+    "495",
 ];
 
 /// `mandate agent <args>` as `user` of `workspace` in `environment`, on the journal `dsn`.
@@ -92,7 +92,7 @@ fn committed_line(fx: &Fixture, named: &str) -> String {
 
 fn exit(floor: Option<&str>) -> Owned {
     let bid = floor.map(|floor| Confirmed {
-        bid: "501.20".into(),
+        bid: "501.2".into(),
         bid_size: "300".into(),
         floor: floor.into(),
     });
@@ -157,7 +157,7 @@ fn the_binary_offers_status_resume_stop_and_exit() {
             exit(None),
             Typed::Commit(None),
         ),
-        (with_bid, exit(Some("495.00")), Typed::Commit(None)),
+        (with_bid, exit(Some("495")), Typed::Commit(None)),
         (
             vec!["exit", AGENT, INSTRUMENT, "--show-code"],
             exit(None),
@@ -271,7 +271,7 @@ fn an_exit_is_never_refused_and_only_its_code_carries_step_up() {
     assert_eq!(lines, [format!("code {shown}")]);
     assert!(controls(&fx).is_empty(), "--show-code commits nothing");
     let named = format!("owner_exit {AGENT} {INSTRUMENT}");
-    for (n, command) in [exit(None), exit(Some("495.00")), exit(Some("494.00"))]
+    for (n, command) in [exit(None), exit(Some("495")), exit(Some("494"))]
         .into_iter()
         .enumerate()
     {
@@ -299,6 +299,79 @@ fn an_exit_is_never_refused_and_only_its_code_carries_step_up() {
             "only the right code carries step-up: {typed:?}"
         );
     }
+}
+
+/// DEC-2507 item 1, lane LV's note on trading spec §9: a confirmed bid the exit price ladder
+/// cannot use, or one not in canonical fixed-point text, is refused `bid_invalid` with nothing committed, whether the code is shown or the
+/// exit committed; the same exit without the bid flags still commits.
+#[test]
+#[ignore = "pending E8-3"]
+fn an_exit_with_an_unusable_bid_confirmation_is_refused_and_commits_nothing() {
+    let (mut fx, mut ids) = (Fixture::new(), FixedIds::default());
+    for (bid, bid_size, floor) in [
+        ("501.2x", "300", "495"),
+        ("501.20", "300", "495"),
+        ("0", "300", "0"),
+        ("-501.20", "300", "-510"),
+        ("501.2", "0", "495"),
+        ("501.2", "-1", "495"),
+        ("501.2", "300", "0"),
+        ("501.2", "300", "501.21"),
+        ("501.2", "300.0", "495"),
+        ("501.2000000001", "300", "495"),
+    ] {
+        let command = Owned::Exit {
+            instrument: INSTRUMENT.to_owned(),
+            bid: Some(Confirmed {
+                bid: bid.into(),
+                bid_size: bid_size.into(),
+                floor: floor.into(),
+            }),
+        };
+        for typed in [Typed::Show, Typed::Commit(None)] {
+            match answer(
+                &mut fx.journal,
+                &mut ids,
+                &owner(),
+                AGENT,
+                &command,
+                typed,
+                at(ASKED_AT),
+            ) {
+                Err(ControlError::Refused {
+                    reason: "bid_invalid",
+                }) => {}
+                Err(e) => panic!("{bid} {bid_size} {floor} is refused bid_invalid, not: {e}"),
+                Ok(lines) => panic!("{bid} {bid_size} {floor} is refused, not: {lines:?}"),
+            }
+        }
+    }
+    assert!(
+        controls(&fx).is_empty(),
+        "a refused confirmation commits nothing"
+    );
+    let lines = answered(
+        &mut fx,
+        &mut ids,
+        &exit(Some("501.2")),
+        Typed::Commit(None),
+        1,
+    );
+    assert_eq!(
+        lines,
+        [committed_line(
+            &fx,
+            &format!("owner_exit {AGENT} {INSTRUMENT}")
+        )]
+    );
+    let lines = answered(&mut fx, &mut ids, &exit(None), Typed::Commit(None), 2);
+    assert_eq!(
+        lines,
+        [committed_line(
+            &fx,
+            &format!("owner_exit {AGENT} {INSTRUMENT}")
+        )]
+    );
 }
 
 /// The M7 brief's `status` row and PX-3: the mode, the startup hold, the pending count, each
