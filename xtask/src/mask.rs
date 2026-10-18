@@ -18,9 +18,15 @@ pub(crate) fn command_escaped(data: &str) -> String {
         .replace('\n', "%0A")
 }
 
-/// Every form of `value` a log line could carry, none empty: the value, its standard and URL-safe
-/// base64 with and without padding, its percent-encoding (every byte but `[A-Za-z0-9-._~]`), its
-/// JSON-escaped form, and each of its lines.
+/// Every form of `value` a log line could carry, none empty or whitespace only: the value, its
+/// standard and URL-safe base64 with and without padding, its percent-encoding (every byte but
+/// `[A-Za-z0-9-._~]`), its JSON-escaped form, and each of its lines at least
+/// [`MIN_LINE_FORM`] characters long once trimmed.
+/// The shortest line of a multi-line value masked on its own. A shorter line would hide every
+/// match of it anywhere in the log, and is too short to be secret on its own; the whole value
+/// and its encodings are masked whatever their length.
+const MIN_LINE_FORM: usize = 4;
+
 pub(crate) fn forms(value: &str) -> BTreeSet<String> {
     let base64 = image::base64(value.as_bytes());
     let base64url = base64.replace('+', "-").replace('/', "_");
@@ -47,8 +53,15 @@ pub(crate) fn forms(value: &str) -> BTreeSet<String> {
         url,
         json,
     ];
-    all.extend(value.lines().map(str::to_owned));
-    all.into_iter().filter(|form| !form.is_empty()).collect()
+    all.extend(
+        value
+            .lines()
+            .filter(|line| line.trim().chars().count() >= MIN_LINE_FORM)
+            .map(str::to_owned),
+    );
+    all.into_iter()
+        .filter(|form| !form.trim().is_empty())
+        .collect()
 }
 
 /// The `::add-mask::` command for each of `value`'s [`forms`], its data escaped.
@@ -122,6 +135,35 @@ mod tests {
                 "{line:?} masks something else"
             );
         }
+    }
+
+    /// No form is whitespace only, and a line shorter than the floor is not masked on its own,
+    /// though the whole value still is.
+    #[test]
+    fn whitespace_and_short_lines_are_not_masked_alone() {
+        let value = "a\n \n\t\nb\n  long line  ";
+        let forms = forms(value);
+        assert!(
+            forms.iter().all(|form| !form.trim().is_empty()),
+            "{forms:?}"
+        );
+        assert!(forms.contains(value));
+        assert!(forms.contains("  long line  "));
+        for short in ["a", "b", " ", "\t", "abc"] {
+            assert!(
+                !forms.contains(short),
+                "{short:?} masked alone in {forms:?}"
+            );
+        }
+        assert!(commands(value).iter().all(|line| line != "::add-mask:: "));
+        assert!(super::forms("abc\nabcd").contains("abcd"));
+        assert!(!super::forms("abc\nabcd").contains("abc"));
+        assert!(super::forms("ab").contains("ab"));
+        assert!(
+            super::forms(" \n\t")
+                .iter()
+                .all(|form| !form.trim().is_empty())
+        );
     }
 
     /// Every printable form of a secret is among its forms, and none is empty.
