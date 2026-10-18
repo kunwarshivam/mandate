@@ -299,7 +299,7 @@ fn the_bundle_s_halts_and_ineligible_instruments_reach_the_floor() {
 }
 
 /// Without a deployed mandate it can read, the pass has no context: the agent never deployed or
-/// since stopped, its document missing or unparseable, or a stream unreadable.
+/// since stopped, its document missing, or a stream unreadable.
 #[test]
 #[ignore = "pending E21-54"]
 fn no_context_without_a_deployed_mandate_it_can_read() {
