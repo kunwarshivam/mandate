@@ -74,6 +74,8 @@ commands:
   cell demo --scenario demo
                         the demo's six steps in order on the local cell: each gesture on main run
                         in the cell, each missing link named by its PR or story (E21-54)
+  cell web-kill-switch  step 6 from web/ against a running cell with sign-in ready: next dev, then
+                        Playwright presses one listed agent's kill switch (DEC-2406)
   cell down             delete the local cell
   cell generate [--write]
                         the Compose file and the journal's roles file from processes.json
@@ -282,6 +284,12 @@ fn run() -> Result<()> {
         ["cell", "demo"] => cell::demo(true),
         ["cell", "demo", "--no-web"] => cell::demo(false),
         ["cell", "demo", "--scenario", name] => cell::scenario::run(name),
+        ["cell", "web-kill-switch"] => cell::web::kill_switch_from_web().map(|gesture| {
+            eprintln!(
+                "==> {}: agent {} in workspace {}, command {}",
+                gesture.shows, gesture.agent_id, gesture.workspace, gesture.command_id
+            );
+        }),
         ["cell", "generate"] => cell::generate(false),
         ["cell", "generate", "--write"] => cell::generate(true),
         ["cell", "drill", rest @ ..] => {
