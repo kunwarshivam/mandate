@@ -1482,11 +1482,21 @@ fn run_job_watching(
             "--namespace",
             NAMESPACE,
             "-o",
-            "jsonpath={.status.succeeded}/{.status.failed}",
+            "jsonpath={.status.succeeded}/{.status.failed}/{.status.conditions[*].type} {.status.conditions[*].reason}",
         ])?;
-        let (succeeded, failed) = status.trim().split_once('/').unwrap_or(("", ""));
-        if succeeded == "1" || failed == "1" {
-            return Ok((succeeded == "1", job_logs(&name, job)));
+        let mut fields = status.trim().splitn(3, '/');
+        let succeeded = fields.next().unwrap_or_default();
+        let failed = fields.next().unwrap_or_default();
+        let conditions = fields.next().unwrap_or_default();
+        if succeeded == "1" {
+            return Ok((true, job_logs(&name, job, "")));
+        }
+        let failing = conditions
+            .split_whitespace()
+            .any(|c| c == "FailureTarget" || c == "DeadlineExceeded");
+        if failed == "1" || failing {
+            let report = failure_report(&name);
+            return Ok((false, job_logs(&name, job, &report)));
         }
         watch()?;
         sleep(Duration::from_secs(2));
@@ -1496,8 +1506,9 @@ fn run_job_watching(
 
 /// Every container's logs of a finished Job. `--all-containers` refuses a pod with a container that
 /// never started, as when an init container failed, so it falls back to each container in turn,
-/// keeping the failed init container's report, which is where a seeded symptom is.
-fn job_logs(name: &str, job: &Value) -> String {
+/// keeping the failed init container's report, which is where a seeded symptom is. With no logs at
+/// all, as when the deadline deleted the pod, `report` from [`failure_report`] says why instead.
+fn job_logs(name: &str, job: &Value, report: &str) -> String {
     let job_ref = format!("job/{name}");
     let all = kubectl(&[
         "logs",
@@ -1525,10 +1536,199 @@ fn job_logs(name: &str, job: &Value) -> String {
         }
     }
     if logs.is_empty() {
-        format!("(no logs: {refused:#})")
+        format!("(no logs: {refused:#})\n{report}")
     } else {
         logs
     }
+}
+
+/// Seconds each diagnostic `kubectl get` may take, so a failed Job's report costs seconds, not
+/// minutes, of a drill's budget (DEC-464).
+const REPORT_TIMEOUT: &str = "--request-timeout=5s";
+
+/// What a failing Job's status, pods, and events say, read before its logs while its pod may still
+/// exist: a Job its deadline stopped has its pod deleted, and then `kubectl logs` says nothing.
+fn failure_report(name: &str) -> String {
+    let selector = format!("job-name={name}");
+    let get = |args: &[&str]| -> Result<Value> {
+        let mut full = vec!["get"];
+        full.extend_from_slice(args);
+        full.extend_from_slice(&["--namespace", NAMESPACE, REPORT_TIMEOUT, "-o", "json"]);
+        Ok(serde_json::from_str(&kubectl(&full)?)?)
+    };
+    let mut unread = Vec::new();
+    let job = get(&["job", name]).unwrap_or_else(|e| {
+        unread.push(format!("job: {e:#}"));
+        Value::Null
+    });
+    let pods = get(&["pods", "-l", &selector]).unwrap_or_else(|e| {
+        unread.push(format!("pods: {e:#}"));
+        Value::Null
+    });
+    let pod_names: Vec<String> = items(&pods)
+        .iter()
+        .filter_map(|p| p["metadata"]["name"].as_str())
+        .map(String::from)
+        .collect();
+    let mut events = Vec::new();
+    for involved in std::iter::once(name.to_string()).chain(pod_names) {
+        let field = format!("involvedObject.name={involved}");
+        match get(&["events", "--field-selector", &field]) {
+            Ok(list) => events.extend(items(&list).iter().cloned()),
+            Err(e) => unread.push(format!("events of {involved}: {e:#}")),
+        }
+    }
+    let mut report = describe_failure(&job, &pods, &events);
+    for line in unread {
+        report.push_str(&format!("unread {}\n", clipped(&line)));
+    }
+    report
+}
+
+/// A list's `items`, or none.
+fn items(list: &Value) -> &[Value] {
+    list["items"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+}
+
+/// The longest free text, in characters, one line of a failure report quotes.
+const REPORT_TEXT: usize = 160;
+/// The most pods, and the most of the latest events, a failure report lists.
+const REPORT_PODS: usize = 3;
+const REPORT_EVENTS: usize = 8;
+
+/// `text` on one line, cut to [`REPORT_TEXT`] characters.
+fn clipped(text: &str) -> String {
+    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.chars().count() <= REPORT_TEXT {
+        line
+    } else {
+        format!("{}...", line.chars().take(REPORT_TEXT).collect::<String>())
+    }
+}
+
+/// `type=status (reason: message)` for each of an object's conditions.
+fn conditions_of(status: &Value) -> String {
+    let all: Vec<String> = status["conditions"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .map(|c| {
+            let why = [&c["reason"], &c["message"]]
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(": ");
+            let head = format!("{}={}", text_of(&c["type"]), text_of(&c["status"]));
+            if why.is_empty() {
+                head
+            } else {
+                format!("{head} ({})", clipped(&why))
+            }
+        })
+        .collect();
+    if all.is_empty() {
+        "none".into()
+    } else {
+        all.join("; ")
+    }
+}
+
+/// A string or number field as text, `?` when absent.
+fn text_of(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Null => "?".into(),
+        other => other.to_string(),
+    }
+}
+
+/// One container state (`waiting`, `running`, or `terminated`) as its reason, exit code, and message.
+fn state_of(state: &Value) -> String {
+    let Some((kind, detail)) = state.as_object().and_then(|o| o.iter().next()) else {
+        return "none".into();
+    };
+    let mut parts = vec![kind.clone()];
+    if let Some(reason) = detail["reason"].as_str() {
+        parts.push(reason.into());
+    }
+    if let Some(code) = detail["exitCode"].as_i64() {
+        parts.push(format!("exit {code}"));
+    }
+    if let Some(at) = detail["startedAt"].as_str() {
+        parts.push(format!("since {at}"));
+    }
+    if let Some(message) = detail["message"].as_str() {
+        parts.push(clipped(message));
+    }
+    parts.join(", ")
+}
+
+/// A failing Job's report from its `kubectl get -o json` object, its pods' list, and the events on
+/// either: the Job's counts and conditions, each pod's phase, conditions, and every container's
+/// state and last state, then the latest events. It names fields it reads, never a pod's spec, so
+/// no env value is shown, and each count and text is bounded so a report stays a few lines.
+fn describe_failure(job: &Value, pods: &Value, events: &[Value]) -> String {
+    let status = &job["status"];
+    let mut out = format!(
+        "job: active={} failed={} conditions: {}\n",
+        text_of(&status["active"]),
+        text_of(&status["failed"]),
+        conditions_of(status)
+    );
+    let pods = items(pods);
+    if pods.is_empty() {
+        out.push_str("pods: none\n");
+    }
+    for pod in pods.iter().take(REPORT_PODS) {
+        out.push_str(&format!(
+            "pod {}: phase={} conditions: {}\n",
+            text_of(&pod["metadata"]["name"]),
+            text_of(&pod["status"]["phase"]),
+            conditions_of(&pod["status"])
+        ));
+        for key in ["initContainerStatuses", "containerStatuses"] {
+            for c in pod["status"][key]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+            {
+                out.push_str(&format!(
+                    "  {} {}: {}; last: {}\n",
+                    if key == "initContainerStatuses" {
+                        "init"
+                    } else {
+                        "container"
+                    },
+                    text_of(&c["name"]),
+                    state_of(&c["state"]),
+                    state_of(&c["lastState"])
+                ));
+            }
+        }
+    }
+    if pods.len() > REPORT_PODS {
+        out.push_str(&format!("({} more pods)\n", pods.len() - REPORT_PODS));
+    }
+    let latest = &events[events.len().saturating_sub(REPORT_EVENTS)..];
+    if latest.is_empty() {
+        out.push_str("events: none\n");
+    }
+    for e in latest {
+        out.push_str(&format!(
+            "event {} {} {}/{} x{}: {}\n",
+            text_of(&e["type"]),
+            text_of(&e["reason"]),
+            text_of(&e["involvedObject"]["kind"]),
+            text_of(&e["involvedObject"]["name"]),
+            e["count"].as_u64().unwrap_or(1),
+            clipped(e["message"].as_str().unwrap_or_default())
+        ));
+    }
+    out
 }
 
 /// The process list, as `processes.json` holds it.
@@ -4080,6 +4280,135 @@ mod tests {
         assert_ne!(both, a);
         assert_ne!(both, combined(&[a.clone(), c]));
         assert_ne!(both, combined(&[b, a]));
+    }
+
+    fn deadline_job() -> Value {
+        json!({
+            "spec": {"template": {"spec": {"containers": [{"name": "cli", "env": [{"name": "TOKEN", "value": "s3cret-value"}]}]}}},
+            "status": {
+                "active": 1,
+                "conditions": [{
+                    "type": "FailureTarget",
+                    "status": "True",
+                    "reason": "DeadlineExceeded",
+                    "message": "Job was active longer than specified deadline"
+                }]
+            }
+        })
+    }
+
+    fn pods_of(pod: Value) -> Value {
+        json!({"kind": "List", "items": [pod]})
+    }
+
+    /// A Job its deadline stopped while its pod could not be scheduled: the report names the
+    /// deadline, the pod stuck `Pending` with why, and the scheduler's event.
+    #[test]
+    fn the_failure_report_shows_a_deadline_with_a_pending_pod() {
+        let pods = pods_of(json!({
+            "metadata": {"name": "control-a-x1"},
+            "spec": {"containers": [{"name": "cli", "env": [{"name": "TOKEN", "value": "s3cret-value"}]}]},
+            "status": {
+                "phase": "Pending",
+                "conditions": [{"type": "PodScheduled", "status": "False", "reason": "Unschedulable", "message": "0/1 nodes are available: 1 Insufficient cpu."}],
+                "containerStatuses": [{"name": "cli", "state": {"waiting": {"reason": "ContainerCreating"}}, "lastState": {}}]
+            }
+        }));
+        let events = [json!({
+            "type": "Warning",
+            "reason": "FailedScheduling",
+            "involvedObject": {"kind": "Pod", "name": "control-a-x1"},
+            "count": 4,
+            "message": "0/1 nodes are available: 1 Insufficient cpu."
+        })];
+        let report = describe_failure(&deadline_job(), &pods, &events);
+        assert!(
+            report.contains("FailureTarget=True (DeadlineExceeded: Job was active"),
+            "{report}"
+        );
+        assert!(
+            report.contains("pod control-a-x1: phase=Pending"),
+            "{report}"
+        );
+        assert!(
+            report.contains("PodScheduled=False (Unschedulable"),
+            "{report}"
+        );
+        assert!(
+            report.contains("container cli: waiting, ContainerCreating; last: none"),
+            "{report}"
+        );
+        assert!(
+            report.contains("event Warning FailedScheduling Pod/control-a-x1 x4"),
+            "{report}"
+        );
+        assert!(
+            !report.contains("s3cret"),
+            "an env value was shown: {report}"
+        );
+    }
+
+    /// A Job its deadline stopped while its pod still ran: the report shows the container running
+    /// since its start, and the restart before it as its last state.
+    #[test]
+    fn the_failure_report_shows_a_deadline_with_a_running_pod() {
+        let pods = pods_of(json!({
+            "metadata": {"name": "control-b-y2"},
+            "status": {
+                "phase": "Running",
+                "conditions": [{"type": "Ready", "status": "True"}],
+                "initContainerStatuses": [{"name": "seed", "state": {"terminated": {"reason": "Completed", "exitCode": 0}}}],
+                "containerStatuses": [{
+                    "name": "cli",
+                    "state": {"running": {"startedAt": "2026-10-18T10:00:00Z"}},
+                    "lastState": {"terminated": {"reason": "Error", "exitCode": 1, "message": "connection refused"}}
+                }]
+            }
+        }));
+        let report = describe_failure(&deadline_job(), &pods, &[]);
+        assert!(
+            report.contains("job: active=1 failed=? conditions: FailureTarget=True"),
+            "{report}"
+        );
+        assert!(
+            report.contains("pod control-b-y2: phase=Running conditions: Ready=True\n"),
+            "{report}"
+        );
+        assert!(
+            report.contains("init seed: terminated, Completed, exit 0; last: none"),
+            "{report}"
+        );
+        assert!(
+            report.contains("container cli: running, since 2026-10-18T10:00:00Z; last: terminated, Error, exit 1, connection refused"),
+            "{report}"
+        );
+        assert!(report.contains("events: none"), "{report}");
+        assert!(
+            !report.contains("s3cret"),
+            "an env value was shown: {report}"
+        );
+    }
+
+    /// However many pods and events, and however long their messages, a report stays bounded.
+    #[test]
+    fn the_failure_report_is_bounded() {
+        let long = "m".repeat(5000);
+        let pod = json!({"metadata": {"name": "p"}, "status": {"phase": "Failed", "conditions": [{"type": "Ready", "status": "False", "message": long}]}});
+        let pods = json!({"items": vec![pod; 50]});
+        let events: Vec<Value> = (0..100)
+            .map(|i| json!({"type": "Normal", "reason": format!("R{i}"), "message": long}))
+            .collect();
+        let report = describe_failure(&Value::Null, &pods, &events);
+        assert!(report.len() < 3000, "{} bytes", report.len());
+        assert!(report.contains("(47 more pods)"), "{report}");
+        assert!(
+            report.contains("R99") && !report.contains("R91 "),
+            "{report}"
+        );
+        assert!(
+            report.starts_with("job: active=? failed=? conditions: none\n"),
+            "{report}"
+        );
     }
 
     fn process(name: &str, built: bool) -> Value {
