@@ -708,6 +708,27 @@ fn a_live_workspace_is_refused_before_any_challenge_is_issued() {
     refused(&approve(&f, &viewer, KEY), 403, ProblemCode::Forbidden);
 }
 
+/// A control stream opened in paper with a later `live` row is not a paper workspace: every row,
+/// not the first, decides it (DEC-1143 item 2).
+#[test]
+fn a_later_live_row_makes_the_workspace_live() {
+    let f = paper();
+    {
+        let mut streams = f.journal.streams.lock().expect("unpoisoned");
+        let rows = streams.get_mut(&ctl()).expect("the seeded stream");
+        let mut later = rows[0].clone();
+        later.seq = 2;
+        later.environment = "live".to_owned();
+        rows.push(later);
+    }
+    let cookie = signed_in(&f, ALICE);
+    refused(
+        &approve(&f, &cookie, KEY),
+        409,
+        ProblemCode::LiveUnavailable,
+    );
+}
+
 /// A workspace the server does not host is the one 404, whoever asks, and issues nothing
 /// (workspace API spec §3.3).
 #[test]

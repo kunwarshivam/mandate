@@ -149,9 +149,10 @@ const WEB_WORKFLOW = "../.github/workflows/web.yml";
 /**
  * The other workflows that may use the `production` environment, each pinned to the SHA-256 of the
  * text a reviewer read (DEC-1091): `r2-lockcheck.yml` (E21-40, #1454), dispatched from `main` only,
- * one job, R2's key and the token in its one step. Any edit fails until the pin is re-read and moved.
+ * one job, R2's key and the token in its one step, which runs the example a step with no secret
+ * built, so no build script runs beside them. Any edit fails until the pin is re-read and moved.
  */
-const PINNED_PRODUCTION_WORKFLOWS = { "../.github/workflows/r2-lockcheck.yml": "fb00fb81f15b06337dce27c44a9d124cc9a817f7986643439c26d34dca3c2d8e" };
+const PINNED_PRODUCTION_WORKFLOWS = { "../.github/workflows/r2-lockcheck.yml": "e8774b31a9a984e4ee1f26e807b3fdc68004b356d03762bc283386a62784c059" };
 const DEPLOY_WORKFLOW = "../.github/workflows/web-deploy.yml";
 const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".github", "workflows");
 /** The deploy workflow's triggers, exactly: a push to `main` touching the app, or a dispatch (DEC-1005 item 1). */
@@ -249,6 +250,9 @@ function deployWorkflowProblems(tree) {
   const runOf = (step) => step.find((line) => /^ {6}- run: |^ {8}run: /.test(line))?.replace(/^ {6}- run: |^ {8}run: /, "");
   const deploying = steps.filter((step) => runOf(step) === DEPLOY_STEP.run);
   if (deploying.length !== 1 || steps.at(-1) !== deploying[0]) fail(`must end with the one step that runs ${DEPLOY_STEP.run} (DEC-1005 item 1)`);
+  if (job.some((line) => /^\s*(?:-\s+)?cache(?:-dependency-path)?:|actions\/cache@/.test(line))) fail("the deploy job may restore or save no cache, which pull request runs could share with the job that holds the token");
+  const installs = steps.map(runOf).filter((run) => /^npm (?:ci|install|i)\b/.test(run ?? ""));
+  if (installs.length !== 1 || installs[0] !== "npm ci --ignore-scripts") fail("the deploy job must install once, with npm ci --ignore-scripts, so no dependency's install script runs beside the token");
   const buildAt = steps.findIndex((step) => runOf(step) === "npm run cf:build");
   if (buildAt < 0 || buildAt > steps.length - 2) fail("must build the Worker with npm run cf:build before it deploys (DEC-1005 item 1)");
   for (const step of steps) {

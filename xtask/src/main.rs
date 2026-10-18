@@ -16,6 +16,7 @@ use serde::Deserialize;
 mod cell;
 mod gitops;
 mod image;
+mod mail;
 mod mutant_costs;
 mod release;
 
@@ -61,6 +62,9 @@ commands:
                         ephemeral test key with --test-sign (E21-35)
   release drill <dist> <out>
                         run the signed, unsigned and wrongly signed images' start-up check
+  release check-signed <dist> <signatures>
+                        verify the release key's signatures over each binary and SHA256SUMS, then
+                        require the signed agentd to start at tier production (DEC-2024)
   release publish <dist> <out>
                         push this arch's images to GHCR, sign them keyless and attest their SBOMs
                         (main only, from CI)
@@ -114,6 +118,7 @@ const FULL_JOB: &[&str] = &[
     "postgres",
     "openbao",
     "objectstore",
+    "tofu",
     "stub-release",
 ];
 const PR_JOBS: &[&str] = &[
@@ -157,6 +162,11 @@ const OPENBAO_REQUIRED: &str = "MANDATE_OPENBAO_REQUIRED";
 /// set both, with the store `.github/scripts/start-minio.sh` starts.
 const S3_URL: &str = "MANDATE_S3_URL";
 const S3_REQUIRED: &str = "MANDATE_S3_REQUIRED";
+/// Set by CI's `full-checks` so that `tofu` fails rather than skips when OpenTofu or tflint is
+/// missing (E21-56, DEC-2013).
+const TOFU_REQUIRED: &str = "MANDATE_TOFU_REQUIRED";
+/// The hosted environments' OpenTofu (E21-56): a change under it selects the `tofu` checks.
+const TOFU_DIR: &str = "deploy/tofu/";
 const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
 /// The `K/N` shard CI's `schema-mutants` matrix passes to `cargo xtask ci schema-mutants`, through
 /// the environment because the live-feature check refuses cargo words the shell expands (DEC-688).
@@ -275,6 +285,7 @@ fn run() -> Result<()> {
         ["deps", "--used-by"] => deps_used_by(),
         ["decisions"] => decision_numbers(Path::new(".")),
         ["live-feature"] => live_feature_in(Path::new(".")),
+        ["mail-guard"] => mail::guard_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
         ["release", "tools"] => {
@@ -289,6 +300,9 @@ fn run() -> Result<()> {
             release::images(&root, Path::new(dist), Path::new(out), true)
         }
         ["release", "drill", dist, out] => release::drill(&root, Path::new(dist), Path::new(out)),
+        ["release", "check-signed", dist, signatures] => {
+            release::check_signed(&root, Path::new(dist), Path::new(signatures))
+        }
         ["release", "publish", dist, out] => {
             release::publish(&root, Path::new(dist), Path::new(out))
         }
@@ -409,6 +423,7 @@ fn ci(job: &str) -> Result<()> {
         "postgres" => postgres(),
         "openbao" => openbao(),
         "objectstore" => objectstore(),
+        "tofu" => tofu_checks(),
         "stub-release" => stub_release(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "mutants-costs" => mutant_costs::ci(),
@@ -837,6 +852,116 @@ fn objectstore() -> Result<()> {
     Ok(())
 }
 
+/// The credential-free checks of `deploy/tofu/` (E21-56, DEC-2012 item 8, DEC-2013): `tofu fmt
+/// -check`, tflint with its bundled ruleset, and in every module and environment root `tofu init
+/// -backend=false` against the committed lock file, `tofu validate` and `tofu test`, whose mocked
+/// providers are the policy check. Nothing here reads a credential or reaches a cloud API; the
+/// providers come from the OpenTofu registry, by the lock file's hashes. The working directories
+/// and the provider cache live under `target/tofu`, so the tree stays clean. It runs only when
+/// the diff changes `deploy/tofu/` or selects everything (DEC-1190), and skips without the tools
+/// unless [`TOFU_REQUIRED`] is set.
+fn tofu_checks() -> Result<()> {
+    if !selection()?.tofu {
+        eprintln!("    tofu: nothing under {TOFU_DIR} changed (DEC-1190)");
+        return Ok(());
+    }
+    let installed = |tool: &str| {
+        Command::new(tool)
+            .arg("--version")
+            .output()
+            .is_ok_and(|out| out.status.success())
+    };
+    if !installed("tofu") || !installed("tflint") {
+        if env::var_os(TOFU_REQUIRED).is_some() {
+            bail!("{TOFU_REQUIRED} is set but tofu or tflint is not installed");
+        }
+        eprintln!(
+            "    tofu: tofu or tflint is not installed; skipping (`bash .cursor/install.sh` installs both)"
+        );
+        return Ok(());
+    }
+    let root = repo_root()?;
+    let tofu_dir = root.join(TOFU_DIR);
+    let work = root.join("target").join("tofu");
+    let cache = work.join("plugins");
+    fs::create_dir_all(&cache).with_context(|| format!("creating {}", cache.display()))?;
+    sh("tofu", &["fmt", "-check", "-recursive", "-diff", TOFU_DIR])?;
+    let config = tofu_dir.join(".tflint.hcl");
+    sh(
+        "tflint",
+        &[
+            "--chdir",
+            TOFU_DIR,
+            "--recursive",
+            "--config",
+            &config.to_string_lossy(),
+        ],
+    )?;
+    for dir in tofu_roots(&tofu_dir)? {
+        let name = dir
+            .strip_prefix(&tofu_dir)
+            .with_context(|| format!("{} is outside {TOFU_DIR}", dir.display()))?
+            .to_string_lossy()
+            .replace('/', "-");
+        let data = work.join(&name);
+        let chdir = format!("-chdir={}", dir.display());
+        for args in [
+            vec![
+                chdir.as_str(),
+                "init",
+                "-backend=false",
+                "-input=false",
+                "-lockfile=readonly",
+            ],
+            vec![chdir.as_str(), "validate"],
+            vec![chdir.as_str(), "test"],
+        ] {
+            eprintln!("    $ tofu {}", args.join(" "));
+            let status = Command::new("tofu")
+                .args(&args)
+                .env("TF_DATA_DIR", &data)
+                .env("TF_PLUGIN_CACHE_DIR", &cache)
+                .env("TF_IN_AUTOMATION", "1")
+                .status()
+                .context("starting `tofu`")?;
+            if !status.success() {
+                bail!("`tofu {}` failed with {status}", args.join(" "));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Every OpenTofu root under `tofu_dir` that the checks run in: each directory directly under
+/// `modules/` and `environments/` holding a `.tf` file, in path order. A module with no root of
+/// its own, or a directory the checks would miss, fails here rather than passing unchecked.
+fn tofu_roots(tofu_dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut roots = Vec::new();
+    for group in ["modules", "environments"] {
+        let parent = tofu_dir.join(group);
+        for entry in
+            fs::read_dir(&parent).with_context(|| format!("reading {}", parent.display()))?
+        {
+            let dir = entry?.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let has_tf = fs::read_dir(&dir)?
+                .filter_map(Result::ok)
+                .any(|file| file.path().extension().is_some_and(|ext| ext == "tf"));
+            if !has_tf {
+                bail!("{} holds no .tf file", dir.display());
+            }
+            roots.push(dir);
+        }
+    }
+    roots.sort();
+    if roots.is_empty() {
+        bail!("{} holds no OpenTofu root", tofu_dir.display());
+    }
+    Ok(roots)
+}
+
 /// The packages whose tests need the S3 test store (E21-40): `cargo xtask ci objectstore` runs
 /// those of them the selection holds.
 const S3_TESTED: [&str; 1] = ["mandate-objectstore"];
@@ -1165,6 +1290,8 @@ struct Selection {
     full_checks: bool,
     /// Whether `schema-mutants` runs: a path the schema sweep reads changed ([`SCHEMA_SWEEP_INPUTS`]).
     schema_mutants: bool,
+    /// Whether `full-checks`' `tofu` part runs: a path under [`TOFU_DIR`] changed (E21-56).
+    tofu: bool,
     /// Whether the cell jobs run (DEC-2609): a path they read changed ([`CELL_INPUTS`]), or the
     /// selection holds a crate the cell's images hold ([`cell::IMAGE_PACKAGES`]), which it does
     /// whenever any crate those are built on changed.
@@ -1180,6 +1307,7 @@ impl Selection {
             python: true,
             full_checks: true,
             schema_mutants: true,
+            tofu: true,
             cell: true,
         }
     }
@@ -1216,13 +1344,14 @@ impl Selection {
             ),
         };
         format!(
-            "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {}; \
-             schema-mutants {}; cell {}; lint, the spec guard and mutants run as always \
+            "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {} \
+             (tofu {}); schema-mutants {}; cell {}; lint, the spec guard and mutants run as always \
              (DEC-1190)",
             yes(self.tests()),
             yes(self.python),
             yes(self.runner()),
             yes(self.full_checks),
+            yes(self.tofu),
             yes(self.schema_mutants),
             yes(self.cell),
         )
@@ -1270,6 +1399,7 @@ fn select(
     let mut python = false;
     let mut full_checks = false;
     let mut schema_mutants = false;
+    let mut tofu = false;
     let mut cell = false;
     for path in changed {
         if selects_everything(path) {
@@ -1302,6 +1432,7 @@ fn select(
         schema_mutants |= SCHEMA_SWEEP_INPUTS
             .iter()
             .any(|entry| path_under(path, entry));
+        tofu |= path_under(path, TOFU_DIR) && !docs;
         cell |= CELL_INPUTS.iter().any(|entry| path_under(path, entry));
     }
     let mut crates = dependents_closure(graph, &seeds);
@@ -1333,6 +1464,7 @@ fn select(
         python,
         full_checks,
         schema_mutants,
+        tofu,
         cell,
     }
 }
@@ -1438,6 +1570,7 @@ fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()
     shellcheck_scripts(&root.join("scripts"))?;
     actionlint_workflows(&root.join(".github/workflows"))?;
     live_feature_in(root)?;
+    mail::guard_in(root)?;
     workspace_checks()
 }
 
@@ -3792,8 +3925,14 @@ const PROGRAM_IN_AN_ARGUMENT: &str = "a shell or interpreter given its program i
 /// `xargs -r sudo rm -f` removes the Microsoft apt source files `grep` lists; `web.yml` and
 /// `web-deploy.yml` measure the Worker's dry run with `web/scripts/workers.mjs` (DEC-731 item 6).
 /// `nightly.yml`'s clock line writes the runner's time, in seconds, to the step's outputs for the
-/// sweep's rotation (DEC-1190 item 5).
+/// sweep's rotation (DEC-1190 item 5). `r2-lockcheck.yml` runs the example its earlier step built
+/// with `cargo build`, which this check reads, so the step holding R2's key and the Cloudflare
+/// token compiles nothing.
 const READ_LINES: &[(&str, &str)] = &[
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "target/debug/examples/r2_finding",
+    ),
     (
         ".github/workflows/nightly.yml",
         r##"echo "seconds=$(date -u +%s)" >> "$GITHUB_OUTPUT""##,
@@ -3819,7 +3958,7 @@ const READ_LINES: &[(&str, &str)] = &[
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
 /// while its whole text, comments included, holds no cargo word, no `.cargo` and no `CARGO_`
 /// (DEC-873 item 2). `ci.yml` runs the first four and the credential guard (DEC-964), `merge.yml`
-/// the fifth.
+/// the fifth, and `release.yml`'s `release-signing` job the release signer (DEC-2024).
 const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
@@ -3827,6 +3966,7 @@ const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/start-openbao.sh",
     ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
+    ".github/scripts/release-sign.sh",
     CREDENTIAL_GUARD,
 ];
 
@@ -3854,12 +3994,17 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// reports' `RUN_URL` and `VERDICTS` (DEC-1190), `merge.yml` the merge inputs, `web.yml` and
 /// `web-e2e.yml` the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and
 /// `web-deploy.yml` the build's public Supabase values and the deploy step's Cloudflare token and
-/// account (DEC-1005).
+/// account (DEC-1005), and `release.yml`'s `release-signing` job the release key, its password, the pinned
+/// cosign it signs with, and the digest it checks (DEC-2024).
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
     "CLOUDFLARE_ACCOUNT_ID",
     "CLOUDFLARE_API_TOKEN",
+    "COSIGN_PASSWORD",
+    "COSIGN_SHA256",
+    "COSIGN_URL",
+    "DIGEST",
     "DOCS_ONLY",
     "DO_NOT_TRACK",
     "EVENT",
@@ -3896,6 +4041,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_S3_REQUIRED",
     "MANDATE_S3_SECRET_ACCESS_KEY",
     "MANDATE_S3_URL",
+    "MANDATE_TOFU_REQUIRED",
     "MANDATE_SCHEMA_SHARD",
     "MANDATE_SWEEP_CLOCK",
     "MANDATE_TEST_PARTITION",
@@ -3916,6 +4062,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "PYTHON_RESULT",
     "PYTHON_SELECTED",
     "REASONS",
+    "RELEASE_SIGNING_KEY",
     "RH_SIM_LIVE_RESULT",
     "RH_SIM_LIVE_SELECTED",
     "RUN_PRS",
@@ -3930,6 +4077,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "R2_ACCESS_KEY_ID",
     "R2_ENDPOINT",
     "R2_SECRET_ACCESS_KEY",
+    "TFLINT_SHA256",
+    "TFLINT_VERSION",
+    "TOFU_SHA256",
+    "TOFU_VERSION",
 ];
 
 /// Whether `name` may be an `env:` key or a command-prefix assignment: exactly one of
@@ -3981,6 +4132,10 @@ const READ_ACTIONS: &[(&str, Option<&str>)] = &[
     (
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         None,
+    ),
+    (
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        Some(".github/workflows/release.yml"),
     ),
     ("actions/checkout@v7", Some(".github/workflows/codeql.yml")),
     (
@@ -4379,6 +4534,9 @@ fn closed_world(
             .filter(|arg| !arg.starts_with('-'))
             .all(|arg| writes_harmlessly(arg)),
         "curl" => curl_writes_harmlessly(&args),
+        "unzip" => {
+            args.len() >= 2 && flags_free(&args) && args.iter().all(|m| writes_harmlessly(m))
+        }
         "tar" => {
             args.len() >= 3
                 && flags_free(args.get(1..).unwrap_or_default())
@@ -4409,7 +4567,7 @@ fn closed_world(
                 READ_NPX.contains(&args.as_slice())
             } else {
                 match args.as_slice() {
-                    ["ci"] => true,
+                    ["ci"] | ["ci", "--ignore-scripts"] => true,
                     ["run", script] => scripts.contains(*script),
                     ["test"] | ["test", "--if-present"] => scripts.contains("test"),
                     _ => false,
@@ -14938,6 +15096,50 @@ mod tests {
         names.iter().map(|name| (*name).to_owned()).collect()
     }
 
+    /// E21-56 (DEC-2013): `full-checks`' `tofu` part runs for a change under `deploy/tofu/` that
+    /// is not documentation, and for a selection of everything; another `deploy/` path, a
+    /// Markdown file under `deploy/tofu/`, and documentation elsewhere leave it off.
+    #[test]
+    fn the_tofu_checks_follow_deploy_tofu() {
+        let graph = sample_graph();
+        let references = sample_references();
+        let tofu = |paths: Option<&[&str]>| {
+            let changed: Option<Vec<String>> =
+                paths.map(|paths| paths.iter().map(|p| (*p).to_owned()).collect());
+            select(changed.as_deref(), &graph, &references).tofu
+        };
+        for paths in [
+            &["deploy/tofu/modules/doks/main.tf"][..],
+            &["deploy/tofu/environments/staging/.terraform.lock.hcl"],
+            &[
+                "deploy/tofu/.tflint.hcl",
+                "docs/adr/0006-hosted-infrastructure-as-code.md",
+            ],
+            &[
+                "deploy/cell/values/k3d.yaml",
+                "deploy/tofu/modules/cell/tests/wiring.tftest.hcl",
+            ],
+        ] {
+            assert!(tofu(Some(paths)), "{paths:?} runs the tofu checks");
+        }
+        for paths in [
+            &["deploy/cell/values/k3d.yaml"][..],
+            &["deploy/tofu/README.md"],
+            &["docs/project/decisions/DEC-2013.md"],
+            &["crates/mandate-num/src/lib.rs"],
+        ] {
+            assert!(!tofu(Some(paths)), "{paths:?} leaves the tofu checks off");
+        }
+        assert!(
+            tofu(None),
+            "no diff base selects everything, the tofu checks included"
+        );
+        assert!(
+            tofu(Some(&["xtask/src/main.rs"])),
+            "xtask selects everything, the tofu checks included"
+        );
+    }
+
     /// DEC-1190 items 2 and 3 over sample diffs: each diff's selected crates and scoped jobs,
     /// written out by hand. A safety-critical crate touched only through a dependency is
     /// selected; documentation selects only the crates whose sources read it; every build input,
@@ -19632,6 +19834,11 @@ jq -r "$filter" "$src"
             ("tar-directory", "tar xzf t.tgz crates"),
             ("tar-no-members", "tar xzf t.tgz"),
             ("tar-flags", "tar xzf t.tgz -C crates tool"),
+            ("unzip-manifest", "unzip t.zip Cargo.toml"),
+            ("unzip-path", "unzip t.zip src/lib.rs"),
+            ("unzip-no-members", "unzip t.zip"),
+            ("unzip-flags", "unzip -d crates t.zip tool"),
+            ("hidden-unzip", "unzip t.zip .profile"),
             ("hidden-redirect", "echo x > .npmrc"),
             ("hidden-tee", "echo x | tee .profile"),
             ("hidden-curl", "curl -sSfL -o .bashrc https://example.com/x"),
@@ -19644,7 +19851,8 @@ jq -r "$filter" "$src"
         all.push((
             "writes",
             "echo x > notes.txt && curl -sSfL -o tool.tgz https://example.com/x && tar xzf \
-             tool.tgz tool && echo x | tee -a \"$GITHUB_OUTPUT\" && cargo test -p a-lib",
+             tool.tgz tool && unzip tool.zip tool && echo x | tee -a \"$GITHUB_OUTPUT\" && \
+             cargo test -p a-lib",
         ));
         let flows = [
             workflow(&all),
@@ -19746,7 +19954,7 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
-    /// In a `web` job, `npm` runs only as `npm ci`, `npm run <script>` of a script its
+    /// In a `web` job, `npm` runs only as `npm ci` (with `--ignore-scripts` or nothing), `npm run <script>` of a script its
     /// `package.json` holds, and `npm test`, and `npx` only in the forms the repository uses:
     /// `npx`, `npm exec`, `npm pkg set`, `npm config set`, `npm install`, a missing script, a
     /// script given arguments and a `package.json` naming cargo cannot be read. Working
@@ -19777,6 +19985,7 @@ jq -r "$filter" "$src"
                 "npm config set registry https://example.com",
             ),
             ("npm-install", "web", "npm install left-pad"),
+            ("npm-ci-other-flag", "web", "npm ci --foreground-scripts"),
             ("npm-run-missing", "web", "npm run nope"),
             ("npm-run-arguments", "web", "npm run build -- --debug"),
             ("package-naming-it", "web/app", "npm run build"),
@@ -19795,7 +20004,7 @@ jq -r "$filter" "$src"
         );
         text.push_str(
             "  web-ok:\n    defaults:\n      run:\n        working-directory: web\n    steps:\n      \
-             - run: npm ci\n      - run: npm run build\n      - run: npm run lint\n      - run: npm \
+             - run: npm ci\n      - run: npm ci --ignore-scripts\n      - run: npm run build\n      - run: npm run lint\n      - run: npm \
              test --if-present\n      - run: npx playwright install --with-deps --only-shell \
              chromium\n      - run: npx playwright install-deps chromium\n      - run: npx --yes \
              impeccable@4.1.0 detect src/\n      - working-directory: web\n        run: npm ci\n",
@@ -21911,6 +22120,46 @@ jq -r "$filter" "$src"
                 .as_deref()
                 .is_some_and(|err| err.contains("live-feature")),
             "a workflow that runs `live` fails the lint job naming the check, got {planted:?}"
+        );
+        assert!(
+            !reached.get(),
+            "the workspace checks run only after it passes"
+        );
+        Ok(())
+    }
+
+    /// The lint job runs the mail guard over its own repository (DEC-2511): a fixture workspace
+    /// passes, and one whose crate implements `MailTransport` for a type the guard does not
+    /// allow fails the job naming the check, before the workspace checks run.
+    #[test]
+    fn the_lint_job_runs_the_mail_guard_on_its_repository() -> Result<()> {
+        let root = env::temp_dir().join(format!("mandate-xtask-lint-mail-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fixture_workspace(&root)?;
+        for dir in [".github/workflows", ".github/scripts", "deploy", "scripts"] {
+            fs::create_dir_all(root.join(dir))?;
+        }
+        let clean = lint(&root, || Ok(())).map_err(|err| format!("{err:#}"));
+        fs::write(
+            root.join("a/src/lib.rs"),
+            "//! A fixture crate.\npub trait MailTransport {}\npub struct Leak;\nimpl MailTransport for Leak {}\n",
+        )?;
+        let reached = Cell::new(false);
+        let planted = lint(&root, || {
+            reached.set(true);
+            Ok(())
+        })
+        .map_err(|err| format!("{err:#}"))
+        .err();
+        fs::remove_dir_all(&root).ok();
+        assert_eq!(clean, Ok(()), "a clean fixture workspace passes");
+        assert!(
+            planted
+                .as_deref()
+                .is_some_and(|err| err.contains("mail-guard")),
+            "an unlisted transport fails the lint job naming the check, got {planted:?}"
         );
         assert!(
             !reached.get(),
