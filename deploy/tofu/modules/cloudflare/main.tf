@@ -48,7 +48,7 @@ variable "api_origin" {
 
   validation {
     condition     = can(regex("^https?://", var.api_origin))
-    error_message = "The API origin is an http or https URL."
+    error_message = "The API origin must be a web URL, plain or over TLS."
   }
 }
 
