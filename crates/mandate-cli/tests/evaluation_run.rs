@@ -12,8 +12,11 @@ use common::{AGENT, CONTROL, Journal, agent_stream, at, owner, stream};
 use mandate_canon::{Digest, Int, Key, Object, Value, parse, to_canonical};
 use mandate_cli::control::{ControlError, ControlJournal};
 use mandate_cli::evaluation::{Evaluated, Request, run};
+use mandate_cli::evaluation::{internal_paper, thesis_records};
 use mandate_evaluation::InputFiles;
-use mandate_journal::{AppendOutcome, ArtifactRef, ArtifactStore, Draft, get_artifact};
+use mandate_journal::{
+    AppendOutcome, ArtifactRef, ArtifactStore, Draft, Head, StoredEvent, StreamId, get_artifact,
+};
 use mandate_spec::Mandate;
 use mandate_time::UtcNanos;
 
@@ -361,4 +364,104 @@ fn the_evaluators_refusal_is_the_runs() {
     let (rows, objects) = (world.rows().len(), world.store.len());
     assert_eq!(world.run("ev_1", CUT_OFF), refused("record_rejected"));
     assert_eq!((world.rows().len(), world.store.len()), (rows, objects));
+}
+
+/// A journal that cannot read one stream: every other call is the inner journal's.
+struct Unreadable {
+    inner: Journal,
+    stream: String,
+}
+
+impl ControlJournal for Unreadable {
+    fn rows(&self, stream: &StreamId) -> Result<Vec<StoredEvent>, ControlError> {
+        if stream.as_str() == self.stream {
+            return Err(ControlError::Journal("unreadable".to_owned()));
+        }
+        self.inner.rows(stream)
+    }
+
+    fn head(&self, stream: &StreamId) -> Result<Head, ControlError> {
+        self.inner.head(stream)
+    }
+
+    fn take_ownership(&mut self, stream: &StreamId) -> Result<u64, ControlError> {
+        self.inner.take_ownership(stream)
+    }
+
+    fn append(
+        &mut self,
+        stream: &StreamId,
+        expected_head: u64,
+        writer_epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[&[u8]],
+    ) -> Result<AppendOutcome, ControlError> {
+        self.inner
+            .append(stream, expected_head, writer_epoch, recorded_at, drafts)
+    }
+
+    fn wait(&mut self, delay: std::time::Duration) {
+        self.inner.wait(delay);
+    }
+}
+
+fn unreadable(world: World, stream: &str) -> Unreadable {
+    Unreadable {
+        inner: world.journal,
+        stream: stream.to_owned(),
+    }
+}
+
+/// A control or agent stream that cannot be read refuses the reads, never admits: the gate and
+/// the thesis records each answer the journal's error.
+#[test]
+fn an_unreadable_stream_refuses_and_never_admits() {
+    let control = unreadable(World::new(), CONTROL);
+    assert!(matches!(
+        internal_paper(&control, &owner(), true),
+        Err(ControlError::Journal(_))
+    ));
+    assert!(matches!(
+        thesis_records(&control, &owner()),
+        Err(ControlError::Journal(_))
+    ));
+    let agent = unreadable(World::new(), &agent_stream(AGENT));
+    assert_eq!(internal_paper(&agent, &owner(), true), Ok(()));
+    assert!(matches!(
+        thesis_records(&agent, &owner()),
+        Err(ControlError::Journal(_))
+    ));
+}
+
+/// The internal paper gate runs before any agent stream is read (DEC-2244 item 4): with the
+/// setting off, a run whose agent stream cannot be read refuses `not_internal_paper`, not the
+/// journal's error; with it on, the same run answers the journal's error.
+#[test]
+fn the_gate_runs_before_any_agent_stream_is_read() {
+    let mut world = World::new();
+    let mut store = std::mem::take(&mut world.store);
+    let mut journal = unreadable(world, &agent_stream(AGENT));
+    let request = Request {
+        files: files(),
+        evaluation_id: "ev_1",
+        cut_off: instant(CUT_OFF),
+    };
+    for (setting, expected) in [(false, "not_internal_paper"), (true, "")] {
+        let answer = run(
+            &mut journal,
+            &mut store,
+            &owner(),
+            setting,
+            &request,
+            at(NOW),
+        );
+        if expected.is_empty() {
+            assert!(
+                matches!(answer, Err(ControlError::Journal(_))),
+                "{answer:?}"
+            );
+        } else {
+            assert_eq!(answer, refused(expected));
+        }
+    }
 }
