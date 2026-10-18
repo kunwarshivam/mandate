@@ -8,7 +8,9 @@
     reason = "the tests bound their waits on a child process; no core code reads the clock"
 )]
 
+use std::ffi::OsStr;
 use std::io::Read;
+use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
@@ -45,6 +47,10 @@ impl Guard {
                 .arg("--probe")
                 .arg(socket)
                 .env_remove("MANDATE_JOURNAL_DSN")
+                .env_remove("MANDATE_PROCESS")
+                .env_remove("MANDATE_WORKSPACE")
+                .env_remove("MANDATE_SUBJECT")
+                .env_remove("MANDATE_ARTIFACTS")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -96,6 +102,120 @@ fn without_a_whole_deployment_or_a_journal_the_process_refuses() {
     assert_eq!(status.code(), Some(2));
     assert_eq!(stderr, "runtime_start_failed: journal_dsn_missing\n");
     assert!(!path.exists(), "a refused process serves no probe");
+}
+
+/// A pod the deployment manager starts names its runtime by variables (DEC-1015). Until the
+/// connection and owner are read from the agent's mandate document, such a launch refuses before
+/// it is ready, and a pod for another process is refused outright.
+#[test]
+fn a_manager_launch_refuses_until_its_deployment_is_resolved() {
+    let path = socket("manager");
+    let launch = |process: &str| {
+        let mut child = Command::new(BIN)
+            .args(["run", "--probe"])
+            .arg(&path)
+            .env_remove("MANDATE_JOURNAL_DSN")
+            .env("MANDATE_WORKSPACE", "ws1")
+            .env("MANDATE_PROCESS", process)
+            .env("MANDATE_SUBJECT", "agent-a")
+            .env("MANDATE_GENERATION", "1")
+            .env_remove("MANDATE_ARTIFACTS")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        let mut stderr = String::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
+        (child.wait().unwrap().code(), stderr)
+    };
+    assert_eq!(
+        launch("runtime"),
+        (Some(2), "deployment_unresolved\n".to_owned())
+    );
+    assert_eq!(
+        launch("executor"),
+        (Some(2), "process_not_runtime\n".to_owned())
+    );
+    let unreadable = Command::new(BIN)
+        .args(["run", "--probe"])
+        .arg(&path)
+        .args(DEPLOYMENT)
+        .env_remove("MANDATE_JOURNAL_DSN")
+        .env_remove("MANDATE_WORKSPACE")
+        .env_remove("MANDATE_SUBJECT")
+        .env("MANDATE_PROCESS", OsStr::from_bytes(b"run\xfftime"))
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(unreadable.status.code(), Some(2));
+    assert_eq!(
+        unreadable.stderr, b"process_not_runtime\n",
+        "an unreadable value is not taken as unset"
+    );
+    assert!(!path.exists(), "a refused process serves no probe");
+}
+
+/// A launch that leaves its connection and owner to be resolved reads them from the journal and
+/// the artifact store `MANDATE_ARTIFACTS` names (DEC-1016). A root that is not a store, a store with
+/// no journal, a fixture run with nothing to read them from, and a launch naming only one of the two
+/// each refuse before the process is ready.
+#[test]
+fn a_launch_that_cannot_resolve_its_deployment_refuses() {
+    let path = socket("resolve");
+    let store = std::env::temp_dir().join(format!("daemon-{}-store", std::process::id()));
+    std::fs::create_dir_all(store.join("sha256")).unwrap();
+    let not_a_store = std::env::temp_dir().join(format!("daemon-{}-empty", std::process::id()));
+    std::fs::create_dir_all(&not_a_store).unwrap();
+    let launch = |args: &[&str], root: &PathBuf| {
+        let out = Command::new(BIN)
+            .args(args)
+            .arg("--probe")
+            .arg(&path)
+            .env_remove("MANDATE_JOURNAL_DSN")
+            .env("MANDATE_WORKSPACE", "ws1")
+            .env("MANDATE_PROCESS", "runtime")
+            .env("MANDATE_SUBJECT", "agent-a")
+            .env("MANDATE_ARTIFACTS", root)
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        (out.status.code(), String::from_utf8(out.stderr).unwrap())
+    };
+    let refused = |code: &str| (Some(2), format!("{code}\n"));
+    assert_eq!(
+        launch(&["run"], &not_a_store),
+        refused("runtime_start_failed: artifact_store_unavailable")
+    );
+    assert!(
+        !not_a_store.join("sha256").exists(),
+        "a runtime never creates a store"
+    );
+    assert_eq!(
+        launch(&["run"], &store),
+        refused("runtime_start_failed: journal_dsn_missing")
+    );
+    assert_eq!(
+        launch(&["run", "--fixture"], &store),
+        refused("deployment_unresolved")
+    );
+    assert_eq!(
+        launch(&["run", "--connection", "conn-1"], &store),
+        refused("deployment_missing")
+    );
+    assert!(
+        !store.join("tmp").exists(),
+        "a runtime creates nothing in a store it reads"
+    );
+    assert!(!path.exists(), "a refused process serves no probe");
+    std::fs::remove_dir_all(&store).ok();
+    std::fs::remove_dir_all(&not_a_store).ok();
 }
 
 #[test]

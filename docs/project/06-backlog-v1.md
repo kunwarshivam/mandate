@@ -295,7 +295,11 @@ the spec invariants (DP-n) its tests cover.
   run's append landed* ([DEC-1144](decisions/DEC-1144.md)): `mandate-backtest-runner run` runs a
   version over JSON inputs and stores the report, its input objects and the payload as artifacts,
   and `mandate backtest record` re-checks them and journals the record as the `backtest_runner`
-  system. `POST /backtests` and the local cell's Job remain.
+  system. *Route ([DEC-1143](decisions/DEC-1143.md)):* `mandate-api-server` serves `GET
+  /backtests/{id}` from the control stream's one `BacktestRunRecorded` naming the id, under the view
+  row; a completed run's report comes from the store, digest-checked, and one the store lacks or
+  that fails its check is `journal_unavailable`, as is a duplicate id; `running` is not served until
+  `POST /backtests` journals a run in flight. `POST /backtests` and the local cell's Job remain.
 
 ### E5 Journal
 
@@ -2161,8 +2165,11 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   §9.18, rule 145). `GET /evaluations/{id}` serves it in an internal paper workspace only.
   *Registration landed* (lane I4): `mandate-journal` registers `EvaluationRunRecorded` with rule
   145, `rule` required, written by a `user` or `system` actor only
-  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors; the harness
-  and the route remain.
+  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors.
+  *Route ([DEC-1143](decisions/DEC-1143.md)):* `mandate-api-server` serves it only with
+  `MANDATE_API_INTERNAL_PAPER_WORKSPACE=true`, which start refuses unless the hosted control stream
+  is paper throughout; otherwise every evaluation id is the 404 an absent one gets. The harness
+  remains.
 - **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
   forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
   its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
@@ -2813,6 +2820,11 @@ enables `live` (ES-23, OPS-5).
   run` with only the journal's role; a local-cell test with the API, the deployment manager, the
   metrics exporter, the model gateway and the control plane all unreachable shows each scope's
   `KillSwitchActivated` in every stream owner; and the runbook RB-03 names the command.
+  *Status:* slice 1 (DEC-2000): `pause` and `kill` in the binary at each scope (`brake.rs`), run as
+  the chart's `control` Job and `docker compose run control`. The `kill-switch` drill commits and
+  verifies each scope's kill switch and a pause with the five processes down. RB-03 is written.
+  **Open:** each stream owner's `KillSwitchActivated` in the cell waits on the runtime and executor
+  running there and on the executor's connection and workspace scopes (E7-4).
 - **E21-35 (Proposed, M8 then M11; SC; lane RL2)** As the founder, I want the cell's images built
   from `main` by digest, signed, and checked at start, so that only a release I can identify runs
   against a broker (design §7.1, OPS-15, ES-17). *Accepted when:* images hold E21-8's static

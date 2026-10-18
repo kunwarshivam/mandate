@@ -5,10 +5,11 @@ use anyhow::{Context, bail};
 use clap::Parser;
 use mandate_cli::artifact::ArtifactCommand;
 use mandate_cli::backtest::BacktestCommand;
+use mandate_cli::brake::AgentCommand;
 use mandate_cli::connection::ConnectionCommand;
 use mandate_cli::control::Now;
 use mandate_cli::db::DbCommand;
-use mandate_cli::gestures::{AgentCommand, VersionCommand};
+use mandate_cli::gestures::VersionCommand;
 use mandate_cli::identity::IdentityCommand;
 use mandate_cli::inbox::ApprovalsCommand;
 use mandate_cli::journal::JournalCommand;
@@ -18,8 +19,8 @@ use mandate_cli::sim_clock::from_env;
 use mandate_cli::vault::VaultCommand;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
-    Cli, Command, artifact, backtest, connection, db, download, gestures, identity, inbox, inspect,
-    journal, register, vault, workspace,
+    Cli, Command, artifact, backtest, brake, connection, db, download, gestures, identity, inbox,
+    inspect, journal, register, vault, workspace,
 };
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
@@ -138,9 +139,15 @@ fn main() -> anyhow::Result<()> {
             gestures::confirm(&args, now()?, &mut io::stdout().lock())?;
             Ok(())
         }
-        Command::Agent(AgentCommand::Deploy(args)) => {
+        Command::Agent(AgentCommand::Gesture(gestures::AgentCommand::Deploy(args))) => {
             gestures::deploy(&args, now()?, &mut io::stdout().lock())?;
             Ok(())
+        }
+        Command::Agent(AgentCommand::Pause(args)) => {
+            brake::run_pause(&args, now()?, &mut io::stdout().lock())
+        }
+        Command::Agent(AgentCommand::Kill(args)) => {
+            brake::run_kill(&args, now()?, &mut io::stdout().lock()).map(drop)
         }
         Command::Vault(VaultCommand::Import(args)) => {
             let environment: Vec<(String, String)> = std::env::vars_os()

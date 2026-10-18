@@ -142,6 +142,42 @@ fn a_root_that_cannot_be_created_is_unavailable() {
     assert_eq!(FsArtifactStore::open(&dir), Err(ArtifactError::Unavailable));
 }
 
+/// A reader opens a store that already exists and creates nothing in it, so a read-only mount of a
+/// store with no temporary directory still reads (DEC-1016).
+#[test]
+fn an_existing_store_opens_for_reading_without_creating_anything() {
+    let (dir, mut store) = open("existing");
+    let reference = store.put_artifact(b"mandate document").unwrap();
+    drop(store);
+    fs::remove_dir_all(dir.join("tmp")).unwrap();
+    let reader = FsArtifactStore::open_existing(&dir).unwrap();
+    assert_eq!(
+        get_artifact(&reader, &reference),
+        Ok(b"mandate document".to_vec())
+    );
+    assert!(!dir.join("tmp").exists(), "opening to read created tmp/");
+}
+
+#[test]
+fn a_root_that_is_not_a_store_never_opens_for_reading() {
+    let missing = fresh_dir("existing-missing");
+    assert_eq!(
+        FsArtifactStore::open_existing(&missing),
+        Err(ArtifactError::Unavailable)
+    );
+    assert!(!missing.exists(), "opening to read created the root");
+    let empty = fresh_dir("existing-empty");
+    fs::create_dir_all(&empty).unwrap();
+    assert_eq!(
+        FsArtifactStore::open_existing(&empty),
+        Err(ArtifactError::Unavailable)
+    );
+    assert!(
+        !empty.join("sha256").exists(),
+        "opening to read created sha256/"
+    );
+}
+
 #[test]
 fn objects_survive_reopening_the_store() {
     let (dir, mut store) = open("reopen");

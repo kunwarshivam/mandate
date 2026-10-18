@@ -32,7 +32,7 @@ use mandate_cli::deploy::deploy;
 use mandate_cli::gestures::{AgentCommand, Shown, VersionCommand, confirmation, deployment};
 use mandate_cli::postgres::{JournalArgs, read_stream};
 use mandate_cli::version;
-use mandate_cli::{Cli, Command};
+use mandate_cli::{Cli, Command, brake};
 use mandate_journal::StreamId;
 use mandate_journal::{AppendOutcome, ArtifactRef, ArtifactSource, ArtifactStore, StoredEvent};
 use mandate_journal_pg::APP_ROLE;
@@ -292,7 +292,7 @@ fn the_commands_take_the_owner_flags_and_an_optional_environment() {
                 assert_eq!(args.version, "sha256:aa");
                 args.code
             }
-            Ok(Command::Agent(AgentCommand::Deploy(args))) => {
+            Ok(Command::Agent(brake::AgentCommand::Gesture(AgentCommand::Deploy(args)))) => {
                 let named = (args.agent.as_str(), args.version.as_str());
                 assert_eq!(named, ("agent-a", "sha256:aa"));
                 args.code
