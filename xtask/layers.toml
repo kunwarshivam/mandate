@@ -135,6 +135,7 @@ agent_process = [
     "mandate-alpaca",
     "mandate-daemon",
     "mandate-executor",
+    "mandate-executord",
     "mandate-mcp",
     "mandate-paper",
     "mandate-robinhood",
@@ -745,6 +746,17 @@ safety_critical = true
 pure = false
 allowed_external = ["tokio"]
 forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-paper", "mandate-cli", "mandate-rh-sim"]
+
+# The account executor as a long-running process (E21-30, DEC-2003): one account's executor core
+# over mandate-store, with mandate-process's lifecycle and probes. It reads the runtime only through
+# the journal, so it may never reach the runtime's process, the shell, the paper runner, the MCP
+# client, the CLI, or the broker simulator; its broker is a port, and no host is named here.
+[crates.mandate-executord]
+layer = 8
+safety_critical = true
+pure = false
+allowed_external = []
+forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mandate-paper", "mandate-mcp", "mandate-cli", "mandate-rh-sim", "mandate-robinhood"]
 
 # The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over
 # mandate-store, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
