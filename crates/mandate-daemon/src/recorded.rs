@@ -13,6 +13,7 @@ use mandate_gateway::registry::{
     Endpoint, Identity, Locality, Registry, Reported, Route, Snapshot, Status,
 };
 use mandate_num::{Price, Qty};
+use mandate_research::{AllowlistVersion, SourceAllowlist, SourceId as AllowedSource};
 use mandate_research_run::{
     Bar, BarReader, Filing, FilingReader, InstrumentFact, InstrumentReader, ItemId, NewsItem,
     NewsReader, OutputBounds, ReadError, ResearchEntry, RetrievalPlan, SourceId, Symbol, TextQuery,
@@ -107,6 +108,8 @@ pub struct Bundle {
     pub plane: RecordedPlane,
     /// The recorded instruments halted at the bundle's as-of time (DEC-2214 item 1).
     pub halted: BTreeSet<AssetId>,
+    /// The source allowlist the bundle's items were recorded under (DEC-2214 item 1).
+    pub allowlist: SourceAllowlist,
 }
 
 const RESEARCH: &str = "research.json";
@@ -158,6 +161,7 @@ impl Bundle {
                 .collect::<Result<_, _>>()?,
         };
         let halted = halts(&research, &plane.instruments)?;
+        let allowlist = allowlist(&research)?;
         Ok(Self {
             entry: ResearchEntry {
                 model_id: entry.text("model_id")?.to_owned(),
@@ -202,6 +206,7 @@ impl Bundle {
             },
             plane,
             halted,
+            allowlist,
         })
     }
 
@@ -444,6 +449,36 @@ fn halts(
                 .ok_or_else(|| malformed.clone())
         })
         .collect()
+}
+
+/// `research.json`'s `allowlist`: its version and its sources.
+fn allowlist(research: &Read) -> Result<SourceAllowlist, BundleError> {
+    let malformed = || BundleError::Malformed {
+        file: RESEARCH,
+        member: "allowlist",
+    };
+    let allowlist = research.value.get("allowlist").ok_or_else(malformed)?;
+    let version = allowlist
+        .get("version")
+        .and_then(Value::as_int)
+        .and_then(|version| u32::try_from(version).ok())
+        .ok_or_else(malformed)?;
+    let sources = allowlist
+        .get("sources")
+        .and_then(Value::as_array)
+        .ok_or_else(malformed)?
+        .iter()
+        .map(|source| {
+            source
+                .as_str()
+                .and_then(|text| AllowedSource::new(text).ok())
+                .ok_or_else(malformed)
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(SourceAllowlist {
+        version: AllowlistVersion(version),
+        sources,
+    })
 }
 
 fn bar(row: &Doc<'_>) -> Result<RecordedBar, BundleError> {
