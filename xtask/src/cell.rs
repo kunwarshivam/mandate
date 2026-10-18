@@ -52,6 +52,11 @@ const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
 const STUB_DOCKERFILE: &str = "deploy/cell/images/stub-issuer.Dockerfile";
 /// Lane SI's stub issuer crate (E21-52); the cell runs it only once it is in the workspace.
 const STUB_CRATE: &str = "crates/mandate-stub-issuer/Cargo.toml";
+/// The stub's entry point: its tests land before its code, with this file a `todo!()` stub
+/// (DEC-137), which the cell must not run, since the pod would never start.
+const STUB_MAIN: &str = "crates/mandate-stub-issuer/src/main.rs";
+/// What marks an entry point still pending (DEC-137).
+const PENDING_BODY: &str = "todo!(";
 /// The server's key-set tier check (E21-53); DEC-2100 item 9 runs the stub only once it is in.
 const KEY_SET_TIER_CHECK: (&str, &str) = (
     "crates/mandate-api-server/src/config.rs",
@@ -418,11 +423,13 @@ fn api_image_tag() -> Result<Option<String>> {
 }
 
 /// Whether this checkout can run the stub issuer in the cell: lane SI's crate is in the workspace
-/// and the server refuses an `http` key set outside dev and CI (DEC-2100 item 9). Until both are,
-/// the cell runs no stub, mounts no subject links, and every sign-in is refused.
+/// with its entry point implemented, not still the `todo!()` its tests land with, and the server
+/// refuses an `http` key set outside dev and CI (DEC-2100 item 9). Until all hold, the cell runs
+/// no stub, mounts no subject links, and every sign-in is refused.
 pub fn stub_ready(root: &Path) -> bool {
     let (server, check) = KEY_SET_TIER_CHECK;
     root.join(STUB_CRATE).is_file()
+        && fs::read_to_string(root.join(STUB_MAIN)).is_ok_and(|main| !main.contains(PENDING_BODY))
         && fs::read_to_string(root.join(server)).is_ok_and(|code| code.contains(check))
 }
 
@@ -2981,11 +2988,20 @@ mod tests {
         };
         assert!(!stub_ready(&root), "neither");
         write(STUB_CRATE, "[package]")?;
+        write(STUB_MAIN, "fn main() { serve() }")?;
         assert!(!stub_ready(&root), "the crate without the server's check");
         write(server, "fn other() {}")?;
         assert!(!stub_ready(&root), "a server without the check");
         write(server, &format!("{check}url: &str, tier: Tier)"))?;
         assert!(stub_ready(&root), "both");
+        write(STUB_MAIN, "fn main() {\n    todo!()\n}")?;
+        assert!(
+            !stub_ready(&root),
+            "the crate's tests landed, its entry point still pending"
+        );
+        fs::remove_file(root.join(STUB_MAIN))?;
+        assert!(!stub_ready(&root), "a crate with no entry point");
+        write(STUB_MAIN, "fn main() { serve() }")?;
         fs::remove_file(root.join(STUB_CRATE))?;
         assert!(!stub_ready(&root), "the check without the crate");
         let _ = fs::remove_dir_all(&root);
