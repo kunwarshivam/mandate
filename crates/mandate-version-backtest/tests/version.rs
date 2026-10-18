@@ -264,6 +264,35 @@ fn a_corporate_action_in_range_refuses_the_run() {
     }
 }
 
+/// DEC-1000 item 8's range is closed at both edges and holds nothing past them: an action the day
+/// before the first bar, or the day after the last, is not refused as in range. Whatever else the
+/// run answers, a range read as "after the first bar *or* before the last" would refuse both.
+#[test]
+fn an_action_past_either_edge_is_not_refused_as_in_range() {
+    let days = trading_days(DAYS);
+    let outputs = daily_outputs(&days, "0.5");
+    let bars = flat_bars(DAYS);
+    let after_the_last = days[DAYS - 1]
+        .next()
+        .unwrap_or_else(|e| panic!("{}", e.code()));
+    for date in [day("2026-08-31"), after_the_last] {
+        let outside = run_with(
+            &pinned(),
+            &settings(),
+            &xyz(),
+            &bars,
+            &outputs,
+            &[],
+            &[split_on(date)],
+        );
+        assert_ne!(
+            outside.err().map(|e| e.code()),
+            Some("corporate_action_in_range"),
+            "{date}"
+        );
+    }
+}
+
 /// DEC-1000 item 8: a corporate action outside the bars does not refuse; the run completes, and
 /// its configuration names the action (DEC-2245 item 4).
 #[test]
