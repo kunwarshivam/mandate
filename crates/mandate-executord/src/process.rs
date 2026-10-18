@@ -1,4 +1,4 @@
-//! One broker account's executor as a long-running process (E21-30, DEC-2003, DEC-2032).
+//! One broker account's executor as a long-running process (E21-30, DEC-2003, DEC-2033).
 
 use std::collections::{BTreeSet, VecDeque};
 use std::time::Duration;
@@ -34,14 +34,14 @@ pub trait Broker {
 }
 
 /// The protections port could not answer. The process stops rather than hand an opening without
-/// the protection its mandate asks for (TI-4); the restart asks again (DEC-2032 item 3).
+/// the protection its mandate asks for (TI-4); the restart asks again (DEC-2033 item 3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Unplanned;
 
 /// The protective prices an opening is handed with: the mandate's protection for an entry at its
 /// limit, as the order builder derives it in one process, or none when the mandate turns
 /// protection off. `IntentProposed` does not journal them, so the handoff takes them from the
-/// mandate the agent is deployed under (DEC-2032 item 3).
+/// mandate the agent is deployed under (DEC-2033 item 3).
 pub trait Protections {
     /// # Errors
     /// [`Unplanned`] when the mandate's protection cannot be read.
@@ -138,6 +138,9 @@ pub struct ExecutorProcess<S, B> {
     /// again every pass, and never a stop, so the exits behind them still go (`AGENTS.md` rule 13).
     /// Any other input refused for it stops the process, as every other refusal does.
     held: BTreeSet<String>,
+    /// The owner's exits at the market with no confirmed floor to price them at, each alerted once
+    /// and asked again every pass; never dropped, refused or held in silence (DEC-2033 item 4).
+    unpriced: BTreeSet<String>,
     max_chain: usize,
     written_at: UtcNanos,
 }
@@ -167,6 +170,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             reconcile: false,
             unreadable: BTreeSet::new(),
             held: BTreeSet::new(),
+            unpriced: BTreeSet::new(),
             max_chain: config.max_chain,
             written_at: now,
         };
@@ -237,7 +241,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// left unsent and a due reconciliation, then (once started) every kill switch the account's
     /// agents' streams hold that the fold has not applied, then the latest tick, then every order
     /// they propose that the fold has not taken, an opening or an increase only while ready
-    /// (DEC-2032 item 1). Before the start,
+    /// (DEC-2033 item 1). Before the start,
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
     /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
@@ -458,7 +462,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// Hands one proposal as the handoff the runtime would make in one process, an opening or an
     /// increase with its mandate's protection. A protections port that cannot answer stops the
-    /// process rather than hand an opening unprotected (DEC-2032 item 3).
+    /// process rather than hand an opening unprotected (DEC-2033 item 3). An owner's exit at the
+    /// market with no confirmed floor raises one opaque `owner_exit_unpriced` alert naming the
+    /// intent and stops nothing, since the core takes only limit orders from a handoff (DEC-2033
+    /// item 4).
     fn take(
         &mut self,
         now: UtcNanos,
@@ -466,11 +473,21 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         proposal: Proposal,
         alerts: &mut Vec<Alert>,
     ) -> bool {
+        let Some(limit) = proposal.limit else {
+            let intent = proposal.intent.0;
+            if self.unpriced.insert(intent.clone()) {
+                alerts.push(Alert {
+                    key: "owner_exit_unpriced",
+                    subject: Some(intent),
+                });
+            }
+            return true;
+        };
         let protection = if proposal.purpose.adds_risk() {
             match self
                 .wiring
                 .protections
-                .protection(&agent, &proposal.instrument, proposal.limit)
+                .protection(&agent, &proposal.instrument, limit)
             {
                 Ok(protection) => protection,
                 Err(Unplanned) => {
@@ -489,7 +506,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 instrument: proposal.instrument,
                 side: proposal.side,
                 qty: proposal.qty,
-                limit: proposal.limit,
+                limit,
                 purpose: proposal.purpose,
                 protection,
             },

@@ -1,4 +1,4 @@
-//! The orders the account's agents propose (E21-30, DEC-2032): each `IntentProposed` handed to the
+//! The orders the account's agents propose (E21-30, DEC-2033): each `IntentProposed` handed to the
 //! core as the runtime's handoff would be, once, an exit whether or not the process is ready and an
 //! opening only while it is and with its mandate's protection, kill switches always first, and
 //! nothing sent before it is journaled.
@@ -11,14 +11,15 @@ use mandate_executord::Alert;
 use mandate_process::{Exit, State};
 use support::{
     ACCOUNT_STREAM, AGENT, Allowing, CannotProtect, Error, Journal, NOON, OTHER_AGENT, Paper,
-    agent_stream, at, deploy, deployed, kill, object, propose, start, start_allowing, start_wired,
-    wired,
+    agent_stream, at, deploy, deployed, kill, object, owner_exit, propose,
+    propose_owner_market_exit, start, start_allowing, start_wired, wired,
 };
 
 const OPEN: &str = "01JINTENT0000000000000000A";
 const OTHER_EXIT: &str = "01JINTENT0000000000000000B";
 const EXIT: &str = "01JINTENT0000000000000000C";
 const SWITCH: &str = "01JKILL00000000000000000AA";
+const OWNER: &str = "01JOWNER0000000000000000AA";
 
 fn exit(journal: &Journal, agent: &str, id: &str) -> Result<(), Error> {
     propose(journal, agent, id, "sell", "10", "150", "risk_exit")
@@ -126,7 +127,7 @@ fn a_process_that_is_not_ready_takes_no_opening_but_still_switches() -> Result<(
 }
 
 /// An opening that a later kill switch follows on the same stream is never handed, and the switch
-/// is applied once, across passes and a restart (DEC-2032 item 2, `AGENTS.md` rule 3).
+/// is applied once, across passes and a restart (DEC-2033 item 2, `AGENTS.md` rule 3).
 #[test]
 fn an_opening_before_a_kill_switch_never_goes() -> Result<(), Error> {
     let journal = deployed()?;
@@ -145,7 +146,7 @@ fn an_opening_before_a_kill_switch_never_goes() -> Result<(), Error> {
 }
 
 /// An opening that a later change of the agent's mode to anything but `normal` follows is never
-/// handed; an exit before the change still is (DEC-2032 item 2).
+/// handed; an exit before the change still is (DEC-2033 item 2).
 #[test]
 fn a_mode_change_drops_a_waiting_opening_but_not_an_exit() -> Result<(), Error> {
     let journal = deployed()?;
@@ -173,7 +174,7 @@ fn a_mode_change_drops_a_waiting_opening_but_not_an_exit() -> Result<(), Error> 
 
 /// The gate decides: the process's default wiring has no binding-gate fact, so the core refuses
 /// the opening before anything is journaled. The process holds it, alerts once, and keeps going:
-/// an exit proposed after it is still received (DEC-2032 item 5, `AGENTS.md` rules 3 and 13).
+/// an exit proposed after it is still received (DEC-2033 item 5, `AGENTS.md` rules 3 and 13).
 #[test]
 fn an_opening_without_gate_facts_is_held_and_an_exit_behind_it_still_goes() -> Result<(), Error> {
     let journal = deployed()?;
@@ -197,7 +198,7 @@ fn an_opening_without_gate_facts_is_held_and_an_exit_behind_it_still_goes() -> R
 }
 
 /// An opening whose protection cannot be read stops the process before anything is journaled for
-/// it: never an opening handed unprotected (TI-4, DEC-2032 item 3).
+/// it: never an opening handed unprotected (TI-4, DEC-2033 item 3).
 #[test]
 fn an_opening_whose_protection_cannot_be_read_stops_the_process() -> Result<(), Error> {
     let journal = deployed()?;
@@ -298,31 +299,52 @@ fn an_unreadable_proposal_stops_the_process() -> Result<(), Error> {
     Ok(())
 }
 
-/// An owner's exit at the market is not handed by this slice, since the core takes only limit
-/// orders from a handoff (DEC-2032 item 4); it is neither received nor sent, and it stops nothing.
+/// An owner's exit at the market goes as a limit at the floor the owner confirmed in the
+/// `OwnerExitRequested` it follows from: the worst price they accepted (DEC-2033 item 4).
 #[test]
-fn an_owner_exit_at_the_market_is_not_handed() -> Result<(), Error> {
+fn an_owner_exit_at_the_market_goes_as_a_limit_at_its_confirmed_floor() -> Result<(), Error> {
     let journal = deployed()?;
-    journal.write(
-        &agent_stream(AGENT),
-        EXIT,
-        "IntentProposed",
-        1,
-        Some("decision"),
-        object(vec![
-            ("instrument_id", Value::Str("AAPL".to_owned())),
-            ("purpose", Value::Str("owner_exit".to_owned())),
-            ("qty", Value::Str("10".to_owned())),
-            ("side", Value::Str("sell".to_owned())),
-            ("tif", Value::Str("day".to_owned())),
-            ("type", Value::Str("market".to_owned())),
-        ])?,
-    )?;
+    owner_exit(&journal, AGENT, OWNER, Some("142.5"))?;
+    propose_owner_market_exit(&journal, AGENT, EXIT, OWNER)?;
     let broker = Paper::new(&journal);
     held(&broker)?;
     let mut process = start(&journal, &broker)?;
     process.step(at(NOON)?);
-    assert!(journal.received().is_empty());
+    assert_eq!(journal.received(), [EXIT]);
+    let limits: Vec<_> = journal
+        .payloads("IntentReceived")
+        .iter()
+        .filter_map(|payload| payload.get("limit_price").cloned())
+        .collect();
+    assert_eq!(limits, [Value::Str("142.5".to_owned())]);
+    Ok(())
+}
+
+/// An owner's exit at the market with no confirmed floor is neither refused nor handed: it raises
+/// one opaque alert naming the intent, stops nothing, and the exit behind it still goes (DEC-2033
+/// item 4, `AGENTS.md` rule 13).
+#[test]
+fn an_owner_exit_at_the_market_without_a_floor_alerts_and_stops_nothing() -> Result<(), Error> {
+    let journal = deployed()?;
+    owner_exit(&journal, AGENT, OWNER, None)?;
+    propose_owner_market_exit(&journal, AGENT, OTHER_EXIT, OWNER)?;
+    exit(&journal, AGENT, EXIT)?;
+    let broker = Paper::new(&journal);
+    held(&broker)?;
+    let mut process = start(&journal, &broker)?;
+    let first = process.step(at(NOON)?);
+    let second = process.step(at(NOON)?);
     assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
+    assert_eq!(journal.received(), [EXIT]);
+    assert!(journal.payloads("GateDecided").len() <= 1);
+    let unpriced = |alerts: &[Alert]| {
+        alerts
+            .iter()
+            .filter(|alert| {
+                alert.key == "owner_exit_unpriced" && alert.subject.as_deref() == Some(OTHER_EXIT)
+            })
+            .count()
+    };
+    assert_eq!((unpriced(&first), unpriced(&second)), (1, 0));
     Ok(())
 }

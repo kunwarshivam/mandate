@@ -69,7 +69,7 @@ impl BindingGateSource for NoFacts {
 }
 
 /// No mandate version, so no protection to read. An opening handed without one is held at the
-/// gate all the same, since [`NoFacts`] admits none (DEC-2032 item 3).
+/// gate all the same, since [`NoFacts`] admits none (DEC-2033 item 3).
 struct NoProtection;
 
 impl Protections for NoProtection {

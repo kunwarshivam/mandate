@@ -3,7 +3,7 @@
 - **Spec:** [infrastructure design](../../../../docs/design/infrastructure.md) §3.1, §3.4, §3.6;
   [journal spec](../../../../docs/specs/journal.md) §2 (the copy rules), §5.1 (writer epochs),
   §9.1 (`KillSwitchActivated`, `OwnerExitRequested`, `IntentProposed`); trading spec §5.5 (the agent-scoped kill
-  switch), §11 (reconciliation); connections spec §8.1 (the connect check); ADR-0001 ES-06, ES-20; DEC-17, DEC-1171, DEC-2003, DEC-2007, DEC-2032.
+  switch), §11 (reconciliation); connections spec §8.1 (the connect check); ADR-0001 ES-06, ES-20; DEC-17, DEC-1171, DEC-2003, DEC-2007, DEC-2033.
 - **Code:** `mandate-executord` (`crates/mandate-executord`): `src/process.rs` (`ExecutorProcess`:
   one writer epoch on the account stream, `StreamOpened` on an empty one, `Input::Started` on the
   first pass that reads a tick, every draft journaled before the broker sees what it names, an
@@ -14,10 +14,12 @@
   `src/follow.rs` (`agents_of`: the account's agents from version-2 `ConnectionEstablished` and
   `AgentDeployed`; `switches`: an agent stream's `KillSwitchActivated` records with the bid the
   same command's `OwnerExitRequested` confirmed; `proposals`: its `IntentProposed` limit orders,
-  less an opening a later switch or mode change follows, DEC-2032 item 2), and each handed once
-  as the runtime's handoff, an exit ready or not and an opening only once ready with its mandate's
-  protection from the `Protections` port, an unreadable protection stopping the process, and a
-  handoff the gate has no input for held with one `intent_held` alert, DEC-2032 items 1, 3, 5);
+  less an opening a later switch or mode change follows, DEC-2033 item 2, and an owner's exit at
+  the market at the floor its `OwnerExitRequested` confirmed, item 4), and each handed once as the
+  runtime's handoff, an exit ready or not and an opening only once ready with its mandate's
+  protection from the `Protections` port, an unreadable protection stopping the process, a handoff
+  the gate has no input for held with one `intent_held` alert, DEC-2033 items 1, 3, 5, and an
+  owner's market exit without a floor raising one `owner_exit_unpriced` alert;
   `src/paper.rs` (`FixturePaper`, the fixture
   paper broker below `mandate-alpaca`'s client, DEC-2007 item 1) and `src/alpaca.rs`
   (`AlpacaBroker`, the client as the process's `Broker`, DEC-2007 item 2), `src/connect.rs`
@@ -45,7 +47,11 @@
   does, an opening without gate facts held while the exit behind it goes, an unreadable protection
   stopping the process, a switch going before another agent's earlier
   exit, a proposal taken once across passes and restarts, every exit in a pass, an unreadable
-  proposal stopping the process, and an owner's market exit not handed.
+  proposal stopping the process, and an owner's market exit going as a limit at its confirmed
+  floor, or without one alerting and stopping nothing. `tests/owner_exits.rs`: over random owner
+  exits, none dropped, refused or held in silence, and no gate check of eligibility, session,
+  conduct, buying power or the day-trade budget failing one. `tests/fixture_only.rs`: the layers
+  entry that leaves the in-process fixture the only broker in reach (DEC-2033 item 7).
   `tests/properties.rs`: over random runs of restarts, crashes at any append, lost journal and
   broker answers and switches, every switch applied exactly once and no account-wide request; and
   a pass with nothing new changing nothing. `src/follow.rs`'s unit tests: each initiator, and the
