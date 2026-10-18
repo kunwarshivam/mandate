@@ -50,6 +50,12 @@ variable "kube_api_allowed_addresses" {
   type = list(string)
 }
 
+variable "bootstrap_runner_cidr" {
+  description = "The runner window of one bootstrap run (DEC-2028); the doks module validates it."
+  type        = string
+  default     = ""
+}
+
 variable "spaces_monthly_usd" {
   description = "Spaces' subscription, counted in every environment though it is per account (DEC-2012 item 12)."
   type        = number
@@ -94,6 +100,7 @@ module "doks" {
   kubernetes_version         = var.kubernetes_version
   node_size                  = var.node_size
   kube_api_allowed_addresses = var.kube_api_allowed_addresses
+  bootstrap_runner_cidr      = var.bootstrap_runner_cidr
 }
 
 module "spaces" {

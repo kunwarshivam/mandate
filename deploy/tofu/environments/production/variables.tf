@@ -17,8 +17,14 @@ variable "kube_api_allowed_addresses" {
   type        = list(string)
 }
 
+variable "cloudflare_api_token" {
+  description = "CF_INFRA_API_TOKEN: the Cloudflare token scoped to what this plan needs."
+  type        = string
+  sensitive   = true
+}
+
 variable "cloudflare_account_id" {
-  description = "CLOUDFLARE_ACCOUNT_ID."
+  description = "CF_ACCOUNT_ID."
   type        = string
 }
 
@@ -39,7 +45,13 @@ variable "api_origin" {
   default     = "http://127.0.0.1:8080"
 
   validation {
-    condition     = can(regex("^http://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+(\\.[a-z0-9-]+)*\\.svc\\.cluster\\.local):[0-9]{1,5}$", var.api_origin))
+    condition     = can(regex("^http://(127[.]0[.]0[.]1|localhost|[a-z0-9-]+([.][a-z0-9-]+)*[.]svc[.]cluster[.]local):[0-9]{1,5}$", var.api_origin))
     error_message = "The API origin is a loopback or in-cluster Service address with a port, never a public host."
   }
+}
+
+variable "bootstrap_runner_cidr" {
+  description = "Set only by `cargo xtask infra apply` for its own run, then cleared (DEC-2028)."
+  type        = string
+  default     = ""
 }
