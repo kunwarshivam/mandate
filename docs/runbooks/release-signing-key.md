@@ -65,9 +65,9 @@ its password anywhere but GitHub's secret form.
      --insecure-ignore-tlog=true SHA256SUMS
    ```
 
-**If `release-signing-check` fails at a signature or at "did not start at tier production",** the key in the environment is not
-the one in `RELEASE_KEYS`: the secrets hold a different pair from the committed public half.
-Nothing was published, and nothing changes until the two match.
+**If `release-signing-check` fails at a signature or at "did not start at tier production",** the
+key in the environment is not the one in `RELEASE_KEYS`: the secrets hold a different pair from
+the committed public half. Nothing was published, and nothing changes until the two match.
 
 ## Rotating or revoking the key
 

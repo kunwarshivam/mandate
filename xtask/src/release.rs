@@ -1855,6 +1855,8 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh"),
         )?;
         let ordered = [
+            "grep -Evq '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' \"$sums\"",
+            "if [ \"${names[*]}\" != \"${present[*]}\" ]; then",
             "(cd dist/bin && sha256sum --check --strict ../SHA256SUMS)",
             "echo \"${DIGEST}  dist/SHA256SUMS\" | sha256sum --check --strict",
             "trap 'rm -rf \"$key_dir\"' EXIT",
@@ -1873,14 +1875,96 @@ mod tests {
                 })?;
             from = from.saturating_add(at).saturating_add(line.len());
         }
-        for absent in ["set -x", "cargo", "xtask"] {
+        for absent in ["set -x", "cargo", "xtask", "dist/bin/*"] {
             assert!(!script.contains(absent), "release-sign.sh holds {absent:?}");
         }
+        assert!(
+            script.contains("for file in \"${names[@]/#/dist/bin/}\" \"$sums\"; do"),
+            "release-sign.sh must sign exactly the names SHA256SUMS lists"
+        );
         let check = jobs
             .get("release-signing-check")
             .context("no release-signing-check")?;
         assert!(check.contains("    needs: [release-signing]\n"));
         assert!(check.contains("cargo xtask release check-signed dist signed/signatures"));
+        Ok(())
+    }
+
+    /// One case of [`the_signer_signs_only_what_sha256sums_lists`]: its name, the files in
+    /// `dist/bin` with their text, the name `SHA256SUMS` lists, and what the signer prints as it
+    /// stops.
+    type SignerCase<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a str, &'a str);
+
+    /// `release-sign.sh` signs only a `dist/bin` that holds exactly the names `SHA256SUMS` lists:
+    /// a planted extra file, a subdirectory, a missing binary or a malformed line stops it before
+    /// the key is decoded or cosign is fetched, so the key job is no signing oracle. The control,
+    /// an exact `dist`, passes that check and stops only at the wrong digest it is handed.
+    #[test]
+    fn the_signer_signs_only_what_sha256sums_lists() -> Result<()> {
+        let script =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
+        let root =
+            env::temp_dir().join(format!("mandate-xtask-release-sign-{}", std::process::id()));
+        let hex_a = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
+        let cases: [SignerCase<'_>; 6] = [
+            ("exact", &[("a", "a")], "a", "FAILED"),
+            ("extra", &[("a", "a"), ("b", "b")], "a", "nothing is signed"),
+            ("missing", &[], "a", "nothing is signed"),
+            (
+                "nested",
+                &[("a", "a"), ("sub/c", "c")],
+                "a",
+                "nothing is signed",
+            ),
+            (
+                "malformed",
+                &[("a", "a")],
+                "a extra",
+                "is not '<sha256>  <name>'",
+            ),
+            ("empty", &[], "", "is not '<sha256>  <name>'"),
+        ];
+        for (name, files, listed, expected) in cases {
+            let dir = root.join(name);
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(dir.join("dist/bin"))?;
+            for (path, text) in files {
+                let file = dir.join("dist/bin").join(path);
+                if let Some(parent) = file.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(file, text)?;
+            }
+            let sums = if listed.is_empty() {
+                String::new()
+            } else {
+                format!("{hex_a}  {listed}\n")
+            };
+            fs::write(dir.join("dist/SHA256SUMS"), sums)?;
+            let output = Command::new("bash")
+                .arg(&script)
+                .current_dir(&dir)
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("DIGEST", "0".repeat(64))
+                .env("RUNNER_TEMP", dir.join("runner"))
+                .output()?;
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(!output.status.success(), "{name}: the signer went on");
+            assert!(
+                stderr.contains(expected) || stdout.contains(expected),
+                "{name}: expected {expected:?}, got {stdout:?} {stderr:?}"
+            );
+            assert!(
+                !dir.join("runner").exists(),
+                "{name}: the signer reached the key"
+            );
+            assert!(
+                !dir.join("signatures").exists(),
+                "{name}: the signer reached signing"
+            );
+        }
         Ok(())
     }
 
