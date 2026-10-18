@@ -4332,6 +4332,17 @@ pub fn signed_in(status: u16, reply: &str) -> bool {
             })
 }
 
+/// The `name=value` pair of the `__Host-` session cookie an answer to `POST /v1/sessions` sets,
+/// as a `Cookie` header carries it back.
+fn session_cookie(reply: &str) -> Option<String> {
+    reply.split("\r\n\r\n").next()?.lines().find_map(|l| {
+        let (name, value) = l.split_once(':')?;
+        let pair = value.trim().split(';').next()?.trim();
+        (name.eq_ignore_ascii_case("set-cookie") && pair.starts_with("__Host-mandate_session="))
+            .then(|| pair.to_owned())
+    })
+}
+
 /// The body of an HTTP/1.1 reply: what follows its header block.
 fn reply_body(reply: &str) -> &str {
     reply.split_once("\r\n\r\n").map_or("", |(_, body)| body)
