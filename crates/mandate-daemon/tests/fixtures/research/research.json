@@ -1,4 +1,5 @@
 {
+ "allowlist": {"sources": ["src.newswire", "src.wire_two"], "version": 3},
  "caps": {"deployment_usd": "20", "workspace_monthly_usd": "50"},
  "endpoint": {
   "cached_per_million": "0.3",
@@ -21,6 +22,7 @@
   "seed": 7,
   "snapshot": "claude-sonnet-4-5-20250929"
  },
+ "halted_instruments": [],
  "reply": {
   "cached_tokens": 0,
   "input_tokens": 1800,
