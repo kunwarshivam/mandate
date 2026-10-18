@@ -8,13 +8,14 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 mod cell;
 mod image;
+mod mutant_costs;
 mod release;
 
 const USAGE: &str = "\
@@ -397,6 +398,7 @@ fn ci(job: &str) -> Result<()> {
         "objectstore" => objectstore(),
         "stub-release" => stub_release(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
+        "mutants-costs" => mutant_costs::ci(),
         "sweep" => sweep(Path::new(".")),
         "fast" => {
             for part in FAST_JOB {
@@ -6895,7 +6897,8 @@ fn gate_run(
     simulator_oracles(&mut test_packages, &harnesses);
     let unoptimised = unoptimised_config(&unoptimised_packages(listed, &closure));
     live_tests_judge_every_mutant(root, listed, &test_packages, &unoptimised)?;
-    let first = TestOrder::write(&shard_packages(root, diff.path()?, shard, listed)?)?;
+    let in_shard = shard_packages(root, diff.path()?, shard, listed)?;
+    let first = TestOrder::write(&in_shard)?;
     let args = mutants_args(
         diff.path()?,
         shard,
@@ -6909,11 +6912,68 @@ fn gate_run(
         .and_then(|meta| meta.modified())
         .context("timing the diff this run reads")?;
     let unmutated = UnmutatedSource::read(root, &diff.touched)?;
+    let before = launched_after(root, started);
     let status = mutants_job_cargo(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
         .status()
         .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
     unmutated.restored(root)?;
-    mutants_outcome(root, &diff.crates, status?.code(), started)
+    let code = status?.code();
+    record_shard_cost(root, shard, in_shard, before, code, started);
+    mutants_outcome(root, &diff.crates, code, started)
+}
+
+/// The file whose modification time marks cargo-mutants' launch, read against the diff's own
+/// timestamp as [`gate_run`] reads its outcomes, because a clock read is disallowed here
+/// (ADR-0001 ES-05).
+const MUTANTS_LAUNCH_MARK: &str = "target/mutants-launch";
+
+/// How long after `started`, the diff's timestamp, cargo-mutants is about to launch: zero when the
+/// mark cannot be written or reads earlier, so a record never claims time it did not measure.
+fn launched_after(root: &Path, started: SystemTime) -> Duration {
+    let mark = root.join(MUTANTS_LAUNCH_MARK);
+    fs::write(&mark, b"")
+        .and_then(|()| fs::metadata(&mark))
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|launched| launched.duration_since(started).ok())
+        .unwrap_or_default()
+}
+
+/// Writes this shard's [`mutant_costs::ShardCost`] (DEC-2607 item 1). The record only informs
+/// later plans, so a record that cannot be written is said and the gate's verdict stands alone.
+fn record_shard_cost(
+    root: &Path,
+    shard: Option<MutantShard>,
+    packages: Vec<String>,
+    before: Duration,
+    code: Option<i32>,
+    started: SystemTime,
+) {
+    let outcomes_path = root.join(MUTANTS_OUT).join("outcomes.json");
+    let outcomes = fs::metadata(&outcomes_path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .filter(|written| *written >= started)
+        .and_then(|_| fs::read_to_string(&outcomes_path).ok());
+    let written = u64::try_from(before.as_millis())
+        .context("the time before cargo-mutants overflows")
+        .and_then(|before_ms| {
+            mutant_costs::record(
+                mutant_costs::run_id(),
+                shard.map_or_else(|| "all".to_owned(), |s| s.argument()),
+                packages,
+                before_ms,
+                outcomes.as_deref(),
+                code,
+                false,
+            )
+        })
+        .and_then(|cost| mutant_costs::write_record(root, &cost));
+    if let Err(err) = written {
+        eprintln!(
+            "    mutants: no cost record for this shard ({err:#}); DEC-2607's plan reads none"
+        );
+    }
 }
 
 /// The diff's source files as they were before an [`MUTANTS_IN_PLACE`] run mutated them, so that
@@ -13908,6 +13968,7 @@ mod tests {
             "if: ${{ !github.event.pull_request.draft }}",
             "if: ${{ always() && !github.event.pull_request.draft }}",
             "needs: mutants-plan",
+            "needs: [mutants-plan, mutants]",
             "needs: select",
             report,
         ];
@@ -15783,12 +15844,12 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            17,
+            18,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, \
-             `cell-demo` (DEC-2002), `cell-journal`, `cell-failover`, and `cell-kill-switch` \
-             (DEC-2602), and `hosted-k3d` (E21-51)"
+             `full-checks`, the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
+             `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-journal`, `cell-failover`, \
+             `cell-kill-switch` (DEC-2602), and `hosted-k3d` (E21-51)"
         );
         for checkout in checkouts {
             assert!(
