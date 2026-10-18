@@ -1214,6 +1214,42 @@
         "unbound"
       ]
     },
+    "StepUpAction": {
+      "description": "The one action a step-up challenge is bound to (\u00a73.6, API-17): its kind, one per action identity spec ID-4 lists that this API serves, and the SHA-256 of the action's canonical object (the approval's content hash, the mandate version hash, or the command's canonical members).",
+      "type": "object",
+      "required": [
+        "kind",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "confirm_version",
+            "deploy",
+            "approve",
+            "connection",
+            "resume",
+            "stop",
+            "acknowledge",
+            "owner_exit",
+            "kill_switch_privilege",
+            "disclosure",
+            "policy_loosen",
+            "member_invite",
+            "role_grant",
+            "client_connect",
+            "credential_enrol",
+            "notification_address",
+            "break_glass_approve",
+            "lift_hold"
+          ]
+        },
+        "digest": {
+          "$ref": "common.schema.json#/$defs/ContentRef"
+        }
+      }
+    },
     "Record": {
       "description": "The rendered record screen and the build that rendered it (\u00a75, mandate spec \u00a710).",
       "type": "object",

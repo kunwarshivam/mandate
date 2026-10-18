@@ -28,7 +28,8 @@ export type ReadId =
   | "approval"
   | "connections"
   | "backtest"
-  | "command_status";
+  | "command_status"
+  | "confirmation";
 
 const READS: ReadonlyArray<DocumentedOperation & { id: ReadId }> = [
   { id: "health", method: "GET", route: "/health", query: [], section: "§4.7" },
@@ -39,6 +40,7 @@ const READS: ReadonlyArray<DocumentedOperation & { id: ReadId }> = [
   { id: "connections", method: "GET", route: "/connections", query: [], section: "§4.5" },
   { id: "backtest", method: "GET", route: "/backtests/{backtest}", query: [], section: "§4.2" },
   { id: "command_status", method: "GET", route: "/commands/{event}", query: [], section: "§5.5" },
+  { id: "confirmation", method: "GET", route: "/mandate-versions/{version}/confirmation", query: [], section: "§4.1, §3.11 item 11" },
 ];
 
 const COMMAND_SECTIONS: Readonly<Record<Operation, string>> = {
@@ -52,6 +54,7 @@ const COMMAND_SECTIONS: Readonly<Record<Operation, string>> = {
   approval_response: "§4.3, §5.2",
   end_delegation: "§4.4, §5.3",
   confirm_version: "§4.1, §5.1",
+  create_version: "§3.11 item 11",
 };
 
 export const WEB_OPERATIONS: readonly DocumentedOperation[] = [

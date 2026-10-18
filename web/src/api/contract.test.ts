@@ -7,6 +7,8 @@ import { createMockServer } from "./mock-server";
 import { WEB_OPERATIONS, operationFor } from "./operations";
 import { type ApiView, loadApi } from "./read-models";
 import type { Operation } from "./types";
+import { prepareCreateVersion, readConfirmation, versionCreated } from "./versions";
+import { buildWorkspace } from "@/fixtures/workspace";
 import type { CommandKind, ConfirmRecord } from "@/lib/mock-runtime";
 
 /**
@@ -57,6 +59,7 @@ const SCHEMA_OF: Readonly<Record<Operation, string>> = {
   approval_response: "approval-response-request",
   end_delegation: "end-delegation-request",
   confirm_version: "confirm-request",
+  create_version: "../../mandate",
 };
 
 /** A new agent's A5 record, as the set-up's confirm sends it (DEC-2401). */
@@ -143,6 +146,11 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
         if (prepared.ok) for (const command of prepared.commands) sent.push(await client.send(command));
       }
     sent.push(await client.send(prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification: "risk_increasing" } })));
+    const created = await client.send(prepareCreateVersion(client, buildWorkspace("normal").agents[0].mandate));
+    const version = versionCreated(created.ok ? created.body : null);
+    expect(version.ok).toBe(true);
+    if (version.ok) expect((await readConfirmation(client, version.value.mandate_version)).ok).toBe(true);
+    sent.push(created);
     for (const outcome of sent) if (outcome.ok) await client.commandStatus(outcome.accepted.event_id);
     expect(sent.length).toBeGreaterThan(KINDS.length);
     expect(calls.length).toBeGreaterThan(10);
