@@ -2,6 +2,8 @@
 # on demand, from `main` only, in the `production` environment, which holds R2's key and the
 # Cloudflare API token and is restricted to `main`; never from a pull request (ES-12). It creates a
 # scratch bucket, never the cell's, and deletes it at the end (crates/mandate-objectstore/README.md).
+# The example is built in a step that holds no secret, so no build script or proc macro runs beside
+# R2's key or the token; the step that holds them runs the built binary and compiles nothing.
 name: r2-lockcheck
 
 on:
@@ -26,6 +28,8 @@ jobs:
           persist-credentials: false
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
+      - name: Build the R2 finding (no secrets)
+        run: cargo build --locked --package mandate-objectstore --example r2_finding
       - name: Run the R2 finding against a scratch bucket
         env:
           R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
@@ -33,4 +37,4 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: cargo run --locked --package mandate-objectstore --example r2_finding
+        run: target/debug/examples/r2_finding
