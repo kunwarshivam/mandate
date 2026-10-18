@@ -1698,6 +1698,7 @@ dependencies = [
  "mandate-release",
  "mandate-spec",
  "mandate-time",
+ "proptest",
  "reqwest",
  "ring",
  "rustix",
