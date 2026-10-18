@@ -1,0 +1,25 @@
+#!/bin/sh
+# Starts k3s on this node. On the server, makes the agents' join token first, from the kernel's
+# random source, straight into a 0600 file (never printed). On the agent, the token must already
+# be in /etc/rancher/k3s/agent-token: `cell1-token agent-token` installs it from stdin.
+# Idempotent: a node already running k3s is left as it is.
+set -eu
+token=/etc/rancher/k3s/agent-token
+if [ -f /etc/systemd/system/k3s.service ]; then
+  unit=k3s
+else
+  echo "k3s.service is not installed" >&2
+  exit 1
+fi
+if grep -q '^agent-token-file:' /etc/rancher/k3s/config.yaml; then
+  if [ ! -s "$token" ]; then
+    umask 077
+    head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$token"
+  fi
+elif [ ! -s "$token" ]; then
+  echo "no join token at $token; install it with: cell1-token agent-token" >&2
+  exit 1
+fi
+chmod 0600 "$token"
+systemctl daemon-reload
+systemctl enable --now "$unit"
