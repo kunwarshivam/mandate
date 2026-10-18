@@ -82,7 +82,6 @@ fn refused(output: &Output, code: &str, out: &Path, case: &str) {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_token_file_open_to_others_or_missing_is_refused_before_any_vault_is_reached() {
     for mode in [0o640, 0o604, 0o644] {
         let out = fresh("out");
@@ -101,7 +100,6 @@ fn a_token_file_open_to_others_or_missing_is_refused_before_any_vault_is_reached
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_unreachable_vault_is_an_outage_and_writes_nothing() {
     let out = fresh("out");
     let token = token_file(CANARY, 0o600);
@@ -110,7 +108,6 @@ fn an_unreachable_vault_is_an_outage_and_writes_nothing() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_plain_http_address_a_bad_ca_or_a_bad_connection_is_refused() {
     let token = token_file(CANARY, 0o600);
     let out = fresh("out");
@@ -151,7 +148,6 @@ fn server() -> Option<(String, PathBuf, PathBuf)> {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn provisioning_writes_each_identitys_files_and_prints_only_their_names() {
     a_token_file_open_to_others_or_missing_is_refused_before_any_vault_is_reached();
     let Some((address, ca, operator)) = server() else {
