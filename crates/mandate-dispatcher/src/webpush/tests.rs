@@ -467,7 +467,6 @@ fn no_type_holding_an_address_or_a_key_prints() -> std::io::Result<()> {
 }
 
 #[test]
-#[ignore = "pending E8-10"]
 fn off_withholds_every_web_push_pair_and_on_keeps_the_audience() -> Checked {
     let audience = [
         ("p_a", PushChannel::WebPush),
@@ -493,7 +492,6 @@ fn off_withholds_every_web_push_pair_and_on_keeps_the_audience() -> Checked {
 /// and zeros to 128 octets; the request goes once, to the stored endpoint unchanged, in its class's
 /// fixed envelope (DEC-700 item 3), and is accepted.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_accepted_push_carries_exactly_the_closed_pair_to_the_subscription() -> Checked {
     for text in [
         TextKey::ApprovalNeeded,
@@ -529,7 +527,6 @@ fn an_accepted_push_carries_exactly_the_closed_pair_to_the_subscription() -> Che
 /// `sub` the deployment's role mailbox, and the signature verifies against the key the subscription
 /// was made under.
 #[test]
-#[ignore = "pending E8-10"]
 fn each_attempt_signs_a_fresh_header_with_the_role_mailbox_and_twelve_hours() -> Checked {
     let mut rig = rigged(Setup::accepting()?)?;
     let mut headers = Vec::new();
@@ -566,7 +563,6 @@ fn each_attempt_signs_a_fresh_header_with_the_role_mailbox_and_twelve_hours() ->
 /// DEC-2503 item 6, DEC-727: a direct send is held to the role-mailbox rule too, so a provider
 /// with a person's address, or an `https:` subject, is never built.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_subject_that_is_not_a_role_mailbox_builds_no_provider() -> Checked {
     for subject in [PERSON, "https://example.invalid/contact", ROLE] {
         let ports = Ports {
@@ -610,7 +606,6 @@ fn a_subject_that_is_not_a_role_mailbox_builds_no_provider() -> Checked {
 /// Spec §4.6, DEC-792 items 1 and 4: an address on a host off the allowlist is never posted to,
 /// and its attempt is `permanent { address_rejected }`, which marks it.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_endpoint_off_the_allowlist_is_address_rejected_with_no_post() -> Checked {
     for endpoint in [
         OFF_LIST,
@@ -638,7 +633,6 @@ fn an_endpoint_off_the_allowlist_is_address_rejected_with_no_post() -> Checked {
 /// DEC-729 through `push_status`, against the independent table: each status a push service can
 /// answer is the outcome the decision gives it, a `2xx` carrying a message id.
 #[test]
-#[ignore = "pending E8-10"]
 fn each_status_is_dec_729s_outcome() -> Checked {
     for status in [
         0u16, 100, 199, 200, 201, 202, 204, 299, 300, 301, 302, 304, 307, 308, 399, 400, 401, 402,
@@ -664,7 +658,6 @@ fn each_status_is_dec_729s_outcome() -> Checked {
 /// could not be reached is the relay's `unreachable`, `retryable { timeout }` too (DEC-728,
 /// DEC-2506 item 3). Neither marks the address.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_push_service_that_does_not_answer_is_retried_as_a_timeout() -> Checked {
     for failure in [PostFailure::Timeout, PostFailure::Unreachable] {
         let mut rig = rigged(Setup::answering(Err(failure))?)?;
@@ -685,7 +678,6 @@ fn a_push_service_that_does_not_answer_is_retried_as_a_timeout() -> Checked {
 /// deadline. The vault is given all of it; the POST what the vault left. A vault that spends it
 /// all is `retryable { provider_error }`, with no POST.
 #[test]
-#[ignore = "pending E8-10"]
 fn the_vault_read_and_the_post_share_one_ten_second_deadline() -> Checked {
     let mut setup = Setup::accepting()?;
     setup.vault_takes_s = 3;
@@ -718,7 +710,6 @@ fn the_vault_read_and_the_post_share_one_ten_second_deadline() -> Checked {
 /// `retryable { provider_error }` and marks nothing; only its definite answer that no entry exists
 /// is `permanent { address_missing }`. Neither posts anything.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_vault_that_does_not_answer_is_retried_and_a_missing_entry_is_address_missing() -> Checked {
     let mut down = Setup::accepting()?;
     down.unavailable = true;
@@ -748,7 +739,6 @@ fn a_vault_that_does_not_answer_is_retried_and_a_missing_entry_is_address_missin
 /// DEC-2503 item 5: an address whose key this process does not hold is the deployment's fault,
 /// `permanent { provider_error }`, which marks nothing, and nothing is signed or posted.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_key_the_process_does_not_hold_is_provider_error_with_no_post() -> Checked {
     let mut setup = Setup::accepting()?;
     if let Some(entry) = setup.entry.as_mut() {
@@ -770,7 +760,6 @@ fn a_key_the_process_does_not_hold_is_provider_error_with_no_post() -> Checked {
 /// an uncompressed point, an `auth` that is not 16 octets) are `permanent { provider_error }`,
 /// marking nothing, and nothing is posted.
 #[test]
-#[ignore = "pending E8-10"]
 fn subscription_keys_that_do_not_parse_are_provider_error_with_no_post() -> Checked {
     let (_, good) = browser()?;
     let short_auth = AUTH.get(..15).ok_or("auth")?.to_vec();
@@ -800,7 +789,6 @@ fn subscription_keys_that_do_not_parse_are_provider_error_with_no_post() -> Chec
 /// DEC-2506 item 2: a handle on any channel but web push reaching this provider is a fault of the
 /// deployment's wiring, `permanent { provider_error }`, with no vault read and no POST.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_handle_on_another_channel_is_provider_error_with_no_vault_read() -> Checked {
     for channel in PushChannel::ALL
         .into_iter()
@@ -824,7 +812,6 @@ fn a_handle_on_another_channel_is_provider_error_with_no_vault_read() -> Checked
 /// fresh 128-bit draw from the provider's secure random source, never anything the push service
 /// said and nothing derived from the address.
 #[test]
-#[ignore = "pending E8-10"]
 fn the_message_id_is_a_fresh_random_draw() -> Checked {
     let mut rig = rigged(Setup::accepting()?)?;
     let mut ids = Vec::new();
@@ -867,7 +854,6 @@ fn the_message_id_is_a_fresh_random_draw() -> Checked {
 /// DEC-2500 item 2, spec §5.9: a random source that fails sends nothing and journals nothing: the
 /// send is not formed, so the step ends and the next one tries again.
 #[test]
-#[ignore = "pending E8-10"]
 fn a_random_source_that_fails_sends_nothing() -> Checked {
     let mut setup = Setup::accepting()?;
     setup.random_fails = true;
@@ -915,7 +901,6 @@ fn leaks(captured: &str, secrets: &[String]) -> Vec<String> {
 /// random source that fails) and a refused start; every outcome and error, `Debug` and `Display`,
 /// is scanned for them, and for NT-1's canaries.
 #[test]
-#[ignore = "pending E8-10"]
 fn no_address_key_or_header_reaches_any_outcome_or_error() -> Checked {
     let mut captured = String::new();
     let mut headers = Vec::new();
@@ -1009,7 +994,6 @@ fn case() -> impl Strategy<Value = (u16, usize, u8, u64)> {
 /// subscriptions' random draws: each attempt's outcome is the independent table's, no POST follows
 /// a vault that did not answer or an entry that is gone, and no outcome or error prints a secret.
 #[test]
-#[ignore = "pending E8-10"]
 fn any_status_and_vault_answer_maps_by_the_decisions_and_prints_no_secret() -> Checked {
     let texts = [
         TextKey::ApprovalNeeded,
