@@ -84,6 +84,10 @@ POINTER = T("pointer")
 ASSET_ID = T("asset_id")
 ASSET_ID_FORM = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 STREAM_ID = T("stream_id")
+LIMIT_KEY = T("limit_key")
+LIMIT_KEY_FORM = re.compile(
+    r"^(max_daily_loss|lifetime_floor|profit_stop|drawdown_ladder\[[0-4]\]|tripwire:[a-z][a-z0-9_]{0,31})\Z"
+)
 DIGEST_HEX = T("digest")
 DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
 STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2, "meter": 2}
@@ -172,6 +176,15 @@ REQUIRED_REFS = {
     "AgentStopped": ("mandate_version",),
     "MandateVersionApplied": ("mandate_version",),
     "UniverseChanged": ("mandate_version",),
+    **{event_type: ("mandate_version",) for event_type in (
+        "RiskDayStarted",
+        "RiskLimitTriggered",
+        "RiskLimitLifted",
+        "HighWaterMarkReset",
+        "PositionReleased",
+        "InstrumentRestrictionChanged",
+        "GoalCompleted",
+    )},
     "ThesisProposed": ("mandate_version", "model_version"),
     "ThesisRevised": ("mandate_version", "model_version"),
     "ThesisInvalidated": ("mandate_version",),
@@ -222,6 +235,92 @@ SCHEMAS[("acct", "UniverseChanged")] = rec(
     ("thesis_id", opt(IDENT_T)),
     ("lineage_id", opt(IDENT_T)),
     ("universe_size_after", INT),
+    ("risk_clock", RISK_CLOCK),
+)
+
+# §9.27 (DEC-2301): the account stream's risk-limit records, each the risk-state fold's event or its
+# snapshot after the input.
+SNAPSHOT_MEMBERS = (
+    ("agent_equity", DEC),
+    ("high_water_mark", DEC),
+    ("drawdown", DEC),
+    ("day_start_equity", DEC),
+    ("capital_base", DEC),
+    ("inherited_loss", DEC),
+    ("net_contributed", DEC),
+)
+LIMIT_ACTIONS = ("scale_sizes", "exits_only", "flatten_and_pause", "end_delegations")
+TRIGGER_REASONS = (
+    "hard_trigger",
+    "hard_breach_pending",
+    "resolved_at_rollover",
+    "new_day_breach",
+    "after_reset",
+    "tripwire_condition",
+)
+LIFT_REASONS = ("owner_acknowledged", "version_loosened", "hard_breach_cleared")
+TRIPWIRE_METRICS = ("consecutive_losing_exits", "realized_loss_usd", "new_instruments")
+COUNTED_METRICS = ("consecutive_losing_exits", "new_instruments")
+ON_COMPLETE = ("hold_protected", "disarm_ladder", "release")
+SCHEMAS[("acct", "RiskDayStarted")] = rec(
+    ("agent_id", IDENT_T),
+    ("day", DATE),
+    ("day_start_equity", DEC),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "RiskLimitTriggered")] = rec(
+    ("agent_id", IDENT_T),
+    *SNAPSHOT_MEMBERS,
+    ("limit", LIMIT_KEY),
+    ("action", one_of(*LIMIT_ACTIONS)),
+    ("reason", opt(one_of(*TRIGGER_REASONS))),
+    ("breach_time_s", opt(INT)),
+    ("metric", opt(one_of(*TRIPWIRE_METRICS))),
+    ("threshold", opt(DEC)),
+    ("value", opt(DEC)),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "RiskLimitLifted")] = rec(
+    ("agent_id", IDENT_T),
+    *SNAPSHOT_MEMBERS,
+    ("limit", LIMIT_KEY),
+    ("action", opt(one_of(*LIMIT_ACTIONS))),
+    ("reason", opt(one_of(*LIFT_REASONS))),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "HighWaterMarkReset")] = rec(
+    ("agent_id", IDENT_T),
+    ("from", DEC),
+    ("to", DEC),
+    ("user_id", IDENT_T),
+    ("step_up", STEP_UP),
+    ("risk_clock", RISK_CLOCK),
+)
+
+SCHEMAS[("acct", "PositionReleased")] = rec(
+    ("agent_id", IDENT_T),
+    ("instrument", ASSET_ID),
+    ("qty", DEC),
+    ("cause", one_of("owner_release", "goal_release")),
+    ("canceled_order_ids", list_of(IDENT_T)),
+    ("warning_ref", opt(REF)),
+    ("user_id", opt(IDENT_T)),
+    ("step_up", opt(STEP_UP)),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "InstrumentRestrictionChanged")] = rec(
+    ("agent_id", IDENT_T),
+    ("instrument", ASSET_ID),
+    ("restriction", one_of("stale_mark", "removed_instrument")),
+    ("reason", one_of("no_sane_mark", "sane_mark", *UNIVERSE_REASONS)),
+    ("active", BOOL),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "GoalCompleted")] = rec(
+    ("agent_id", IDENT_T),
+    ("reason", opt(one_of("profit_stop_reached", "target_qty", "max_spend", "end_date"))),
+    ("then", opt(one_of(*ON_COMPLETE, "discretionary_exit_all_then_retire"))),
+    ("on_complete", opt(one_of(*ON_COMPLETE))),
     ("risk_clock", RISK_CLOCK),
 )
 
@@ -1293,7 +1392,7 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
             return [Violation("types", "schema", path)]
         ok = (value.startswith("pii_") and is_ulid(value[4:])) or "types.pii_ref" in skip
         return [] if ok else [Violation("types", "non_canonical", path)]
-    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest"):
+    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
         if ty.kind == "pointer":
@@ -1302,6 +1401,10 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
             ok = is_stream_id(value)
         elif ty.kind == "digest":
             ok = bool(DIGEST_HEX_FORM.match(value))
+        elif ty.kind == "limit_key":
+            ok = bool(LIMIT_KEY_FORM.match(value)) or (
+                "types.limit_key_rung" in skip and bool(re.match(r"^drawdown_ladder\[[0-9]+\]\Z", value))
+            )
         elif ty.kind == "asset_id":
             ok = bool(ASSET_ID_FORM.match(value)) or (
                 "types.asset_id_trailing_newline" in skip and bool(ASSET_ID_FORM.match(value.removesuffix("\n")))
@@ -1359,6 +1462,118 @@ def encoded(texts: list) -> list[bytes]:
     """A list's elements as bytes to order; a seeded bug can let a `null` element through, which
     reads as empty text, as the journal's own reader does."""
     return [(t if isinstance(t, str) else "").encode() for t in texts]
+
+
+RISK_LIMIT_RECORDS = (
+    "RiskLimitTriggered",
+    "RiskLimitLifted",
+    "HighWaterMarkReset",
+    "PositionReleased",
+    "InstrumentRestrictionChanged",
+    "GoalCompleted",
+)
+
+
+# The non-nullable members the rules read. Only a seeded `nullable` bug lets one through as `null`,
+# and then the rules have nothing to judge.
+RISK_LIMIT_READS = {
+    "RiskLimitTriggered": ("limit", "action", "inherited_loss"),
+    "RiskLimitLifted": ("limit", "inherited_loss"),
+    "PositionReleased": ("qty", "cause"),
+    "InstrumentRestrictionChanged": ("restriction", "reason", "active"),
+}
+
+
+def whole(text: str) -> bool:
+    value = Decimal(text)
+    return value == value.to_integral_value()
+
+
+def risk_limit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.27's rules 230 to 238 on a well-typed payload, each reported once, in the order the
+    section states."""
+    p = draft["payload"]
+    out: list[Violation] = []
+    read = RISK_LIMIT_READS.get(event_type, ())
+    if any(p.get(member) is None for member in read):
+        return out
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    def first_wrong(name: str, members: list[tuple[str, bool]]) -> None:
+        wrong = next((m for m, ok in members if not ok), None)
+        rule(name, wrong is None, f"payload.{wrong}" if wrong else "")
+
+    tripwire = event_type in ("RiskLimitTriggered", "RiskLimitLifted") and p["limit"].startswith("tripwire:")
+    if "rule.230.prefix" in skip and event_type in ("RiskLimitTriggered", "RiskLimitLifted"):
+        tripwire = p["limit"].startswith("tripwire")
+    if event_type == "RiskLimitTriggered":
+        reason_ok = (p["reason"] == "tripwire_condition") == tripwire
+        action_ok = (p["action"] in ("end_delegations", "exits_only")) if tripwire else p["action"] != "end_delegations"
+        rung = p["limit"].startswith("drawdown_ladder[")
+        scale_ok = p["action"] != "scale_sizes" or rung or "rule.230.scale" in skip
+        first_wrong("230", [("reason", reason_ok), ("action", action_ok and scale_ok)])
+    if event_type in ("RiskLimitTriggered", "RiskLimitLifted"):
+        loss = Decimal(p["inherited_loss"])
+        rule("231", loss > 0 if "boundary.rule_231_strict" in skip else loss >= 0, "payload.inherited_loss")
+    if event_type == "RiskLimitTriggered":
+        counted = [("metric", p["metric"] is not None), ("threshold", p["threshold"] is not None),
+                   ("value", p["value"] is not None)]
+        timed = p["breach_time_s"] is not None
+        if tripwire:
+            first_wrong("232", [("breach_time_s", p["breach_time_s"] is None), *counted])
+        else:
+            first_wrong("232", [("breach_time_s", timed), *((m, not ok) for m, ok in counted)])
+        if tripwire and p["metric"] is not None and p["threshold"] is not None and p["value"] is not None:
+            threshold, value = Decimal(p["threshold"]), Decimal(p["value"])
+            if p["metric"] in COUNTED_METRICS:
+                threshold_ok = whole(p["threshold"]) and 1 <= threshold <= 1000
+                value_ok = whole(p["value"]) or "rule.233.whole" in skip
+            else:
+                threshold_ok = threshold > 0 and threshold == threshold.quantize(Decimal("0.01"))
+                value_ok = True
+            reached = value > threshold if "boundary.rule_233_strict" in skip else value >= threshold
+            first_wrong("233", [("threshold", threshold_ok), ("value", value_ok and reached)])
+    if event_type == "RiskLimitLifted":
+        rung = p["limit"].startswith("drawdown_ladder[")
+        action_ok = p["action"] is None or (p["action"] == "scale_sizes" and rung and p["reason"] is None)
+        if tripwire:
+            reason_ok = p["reason"] == "owner_acknowledged"
+        elif p["reason"] == "version_loosened":
+            reason_ok = p["limit"] == "lifetime_floor" or "rule.234.floor" in skip
+        else:
+            reason_ok = True
+        first_wrong("234", [("action", action_ok), ("reason", reason_ok)])
+    acknowledged = event_type == "HighWaterMarkReset" or (
+        event_type == "RiskLimitLifted" and p["reason"] == "owner_acknowledged"
+    )
+    if acknowledged:
+        rule("235", draft["causation_id"] is not None, "causation_id")
+    if event_type == "PositionReleased":
+        owner = p["cause"] == "owner_release"
+        qty = Decimal(p["qty"])
+        if owner or "rule.236.goal_zero" in skip:
+            qty_ok = qty > 0
+        else:
+            qty_ok = qty >= 0
+        gesture = [(m, (p[m] is not None) == owner) for m in ("warning_ref", "user_id", "step_up")]
+        first_wrong("236", [("qty", qty_ok), *gesture])
+    if event_type == "InstrumentRestrictionChanged":
+        if p["restriction"] == "stale_mark":
+            reason_ok = p["reason"] in ("no_sane_mark", "sane_mark")
+            active_ok = p["active"] == (p["reason"] == "no_sane_mark")
+        else:
+            setting = REMOVING if "rule.237.removing" not in skip else UNIVERSE_REASONS
+            reason_ok = p["reason"] in (*setting, *ADMITTING)
+            active_ok = p["reason"] in (setting if p["active"] else ADMITTING)
+        first_wrong("237", [("reason", reason_ok), ("active", active_ok)])
+    if event_type == "GoalCompleted":
+        one_form = (p["then"] is None) != (p["on_complete"] is None)
+        reason_ok = p["reason"] is None or p["then"] is not None or "rule.238.reason" in skip
+        first_wrong("238", [("then", one_form), ("reason", reason_ok)])
+    return out
 
 
 def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
@@ -1474,6 +1689,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
         for check in [rule_32, rule_31] if "order.rule_32_first" in skip else [rule_31, rule_32]:
             check()
+    if event_type in RISK_LIMIT_RECORDS:
+        out += risk_limit_violations(event_type, draft, skip)
     if event_type in ("ThesisProposed", "ThesisRevised"):
         out += thesis_violations(event_type, draft, skip)
     if event_type == "OrderRequestRecorded":

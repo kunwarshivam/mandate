@@ -44,44 +44,69 @@ pub struct InputDigests {
     pub cost_model: Digest,
 }
 
+/// The canonical objects a report's `inputs` digest (DEC-2244 item 6): the thesis records read,
+/// the close series, and the cost model, so a caller stores exactly what the record's references
+/// name (journal spec §6.3, §11 check 6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputObjects {
+    pub theses: Value,
+    pub closes: Value,
+    pub cost_model: Value,
+}
+
+/// The input objects of `request`, each the object whose digest [`crate::evaluate`]'s report
+/// holds in its `inputs`.
+///
+/// # Errors
+/// `Num` when a record's `seq` exceeds the canonical integer range, or a member name is not a
+/// canonical key.
+pub fn input_objects(request: &EvaluationRequest<'_>) -> Result<InputObjects, EvaluationError> {
+    let records = request
+        .records
+        .iter()
+        .map(|record| {
+            object(vec![
+                ("stream_id", text(&record.stream_id)),
+                ("seq", int(record.seq)?),
+                ("hash", reference(&record.hash)),
+                ("mandate_version", reference(&record.mandate_version)),
+                ("payload", record.payload.clone()),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let closes = request
+        .closes
+        .iter()
+        .map(|(id, closes)| {
+            let rows = closes
+                .iter()
+                .map(|close| {
+                    object(vec![
+                        ("at", decimal(close.at)),
+                        ("price", decimal(close.price)),
+                    ])
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            object(vec![
+                ("instrument", text(id.as_str())),
+                ("closes", Value::Array(rows)),
+            ])
+        })
+        .collect::<Result<Vec<_>, EvaluationError>>()?;
+    Ok(InputObjects {
+        theses: Value::Array(records),
+        closes: Value::Array(closes),
+        cost_model: cost_model(request.cost)?,
+    })
+}
+
 impl InputDigests {
     pub(crate) fn of(request: &EvaluationRequest<'_>) -> Result<Self, EvaluationError> {
-        let records = request
-            .records
-            .iter()
-            .map(|record| {
-                object(vec![
-                    ("stream_id", text(&record.stream_id)),
-                    ("seq", int(record.seq)?),
-                    ("hash", reference(&record.hash)),
-                    ("mandate_version", reference(&record.mandate_version)),
-                    ("payload", record.payload.clone()),
-                ])
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let closes = request
-            .closes
-            .iter()
-            .map(|(id, closes)| {
-                let rows = closes
-                    .iter()
-                    .map(|close| {
-                        object(vec![
-                            ("at", decimal(close.at)),
-                            ("price", decimal(close.price)),
-                        ])
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                object(vec![
-                    ("instrument", text(id.as_str())),
-                    ("closes", Value::Array(rows)),
-                ])
-            })
-            .collect::<Result<Vec<_>, EvaluationError>>()?;
+        let objects = input_objects(request)?;
         Ok(Self {
-            theses: digest(&Value::Array(records)),
-            closes: digest(&Value::Array(closes)),
-            cost_model: digest(&cost_model(request.cost)?),
+            theses: digest(&objects.theses),
+            closes: digest(&objects.closes),
+            cost_model: digest(&objects.cost_model),
         })
     }
 }
