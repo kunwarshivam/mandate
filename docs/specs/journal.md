@@ -1899,11 +1899,12 @@ DEC-291). The owner input it refused is its `causation_id`: rule 27.
     agent stream only (§9.11). The executor refuses acknowledgments, and the runtime
     refuses resumes and Stops (§2).
 28. `OwnerCommandRefused` with reason `not_independent`, `trigger_unknown`, `trigger_superseded`, or
-    `request_invalid` is on the account stream (`payload.reason`): only an acknowledgment is judged
-    for independence, and only under `independent_approval_required`
-    ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)), and only an
-    acknowledgment names a trigger and a request (§9.28). A resume or Stop is refused only for its
-    step-up.
+    `request_invalid` is on the account stream (`payload.reason`): only an acknowledgment names a
+    trigger and a request (§9.28). `trigger_unknown` and `trigger_superseded`, like the `step_up_*`
+    reasons, apply to every acknowledgment. `not_independent` and `request_invalid` apply only
+    under `independent_approval_required`
+    ([mandate spec §5.8, §6.7](mandate.md#67-tripwires-dec-187-dec-350-dec-351)). A resume or Stop is
+    refused only for its step-up.
 
 **Copy rule** (reason `schema`):
 
@@ -5286,7 +5287,18 @@ for the command, the same principal its step-up evidence names: the CLI's owner 
 it, and the API's session and step-up subject. Never from anything the caller supplies. An
 acknowledgment's `requested_by` is copied from the request it names. A request carries step-up
 evidence, so `step_up` is required on it (rule 239), and it is judged as §6.1 judges an owner
-command's.
+command's. That includes reuse: a request's assertion is spent like any other owner command's.
+The assertion of a request, an acknowledgment, an `ApprovalResponseSubmitted`, or an
+`OwnerCommandIssued` may appear on no later one of those four, whatever its outcome (mandate spec
+§6.1). So a request's assertion is never replayed on a second request, a resume, a Stop, or an
+acknowledgment, and a request reusing an earlier command's assertion is refused.
+
+**The residual: the users are the writer's word.** A `step_up` names its assertion,
+`authenticated_at`, and method, not its subject. The executor cannot check that `user` or
+`requested_by` is the user the step-up authenticated, so it trusts the writer for that binding,
+as it does for every owner command's `user`. A writer that set them from the caller's input could
+let one user both request and acknowledge. Until the step-up evidence names its subject (E9-4's
+signed assertions), the writer binding above is the control.
 
 **Stream rules** on the control stream, judged before anything takes effect, and failing closed:
 
