@@ -183,6 +183,21 @@ npm run test:e2e:api   # the e2e build with the API as its source, on port 4319
 The scenario switcher's cookie picks what the mock API serves. A production build answers 404 at
 `/v1` (`scripts/no-scenarios.mjs`).
 
+#### Signing in to a dev cell (DEC-2406)
+
+A dev or CI cell's API trusts E21-52's stub issuer, not Supabase. Under `next dev` only, two more
+server-side variables make the stub the sign-in client's stand-in: the dev server asks the stub for
+the subject's token on loopback at `POST /dev/stub-token`, and the browser trades it at
+`POST /v1/sessions` as it would Supabase's.
+
+| Variable | What it is |
+|---|---|
+| `OWLHEAD_STUB_ISSUER` | The stub's issuer exactly as it printed it: `http://127.0.0.1:<port>` or `http://[::1]:<port>` |
+| `OWLHEAD_STUB_SUBJECT` | The demo subject an operator linked for that issuer (`mandate identity link --issuer`) |
+
+A production build compiles no such route (`route.dev.ts`), its middleware answers 404 under `/dev/`,
+and `scripts/no-scenarios.mjs` checks the e2e and production builds both answer 404 there.
+
 ## The mock-data rule
 
 - Every figure comes from typed fixtures in `src/fixtures/`, which mirror

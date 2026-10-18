@@ -143,13 +143,7 @@ pub enum Drill {
     Archive,
 }
 
-pub const DRILLS: [Drill; 5] = [
-    Drill::Boot,
-    Drill::Journal,
-    Drill::Egress,
-    Drill::Compose,
-    Drill::KillSwitch,
-];
+pub const DRILLS: [Drill; 4] = [Drill::Boot, Drill::Journal, Drill::Egress, Drill::Compose];
 
 /// The journal's own drills (E21-41), which `cargo xtask ci cell-journal` runs in a job of their
 /// own so each cell job stays within its ten minutes (DEC-464).
@@ -158,6 +152,10 @@ pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
 /// The drill that kills the journal's primary, which with a synchronous standby is a failover and
 /// the old primary's rejoin; `cargo xtask ci cell-failover` runs it in a job of its own (DEC-464).
 pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
+
+/// The kill-switch drill (OPS-4, E21-34), which `cargo xtask ci cell-kill-switch` runs on a cell
+/// of its own so `ci cell` stays within its ten minutes (DEC-464, DEC-2602).
+pub const KILL_SWITCH_DRILLS: [Drill; 1] = [Drill::KillSwitch];
 
 impl Drill {
     pub fn name(self) -> &'static str {
@@ -178,6 +176,7 @@ impl Drill {
             .into_iter()
             .chain(JOURNAL_DRILLS)
             .chain(FAILOVER_DRILLS)
+            .chain(KILL_SWITCH_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
     }
@@ -266,8 +265,8 @@ pub fn ci() -> Result<()> {
     demo(false)
 }
 
-/// `cargo xtask ci cell-journal` and `ci cell-failover`: the cell, then `drills`, plain and seeded
-/// (E21-41). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+/// `cargo xtask ci cell-journal`, `ci cell-failover` and `ci cell-kill-switch`: the cell, then
+/// `drills`, plain and seeded (E21-41, DEC-2602). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
 pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {

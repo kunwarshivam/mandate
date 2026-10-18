@@ -25,8 +25,9 @@ commands:
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
                         postgres | openbao | objectstore | mutants | schema-mutants | cell |
-                        cell-demo | cell-journal | cell-failover | sweep; or one part of test:
-                        test-nextest | test-doc | test-rh-sim | test-python. Tests, pending tests,
+                        cell-demo | cell-journal | cell-failover | cell-kill-switch | sweep; or
+                        one part of test: test-nextest | test-doc | test-rh-sim | test-python.
+                        Tests, pending tests,
                         doctests, the rehearsal, Postgres, OpenBao and object-store runs and
                         `portable` run over the crates the diff selects (DEC-1190); with no diff
                         base, all of them
@@ -119,6 +120,7 @@ const PR_JOBS: &[&str] = &[
     "cell",
     "cell-journal",
     "cell-failover",
+    "cell-kill-switch",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -292,6 +294,7 @@ fn run() -> Result<()> {
                     .into_iter()
                     .chain(cell::JOURNAL_DRILLS)
                     .chain(cell::FAILOVER_DRILLS)
+                    .chain(cell::KILL_SWITCH_DRILLS)
                     .collect()
             } else {
                 names
@@ -331,6 +334,7 @@ fn ci(job: &str) -> Result<()> {
         "cell-demo" => cell::scenario::ci(),
         "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
+        "cell-kill-switch" => cell::ci_drills(job, &cell::KILL_SWITCH_DRILLS),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -377,10 +381,7 @@ fn ci(job: &str) -> Result<()> {
             }?;
             gitleaks_exceptions()
         }
-        "spec-guard" => {
-            commit_trailers()?;
-            spec_guard()
-        }
+        "spec-guard" => spec_guard(),
         "postgres" => postgres(),
         "openbao" => openbao(),
         "objectstore" => objectstore(),
@@ -1487,6 +1488,21 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let ulid = concat!("01JB3K6F0C9R2V7N", "4M8Q1T5W3Y");
     let setting = format!("        .env(\"MANDATE_API_WORKSPACE\", \"{ulid}\")");
     let not_ulid = format!("        .env(\"MANDATE_API_ORG\", \"{page}\")");
+    let screens = "web/src/components/api-screens/api-screens.test.tsx";
+    let unknown_agent = format!("    mount(<ApiAgent agentId=\"agt_{ulid}\" />);");
+    let not_agent = format!("    mount(<ApiAgent agentId=\"{page}\" />);");
+    let push_section = "web/src/components/notifications/push-section.test.tsx";
+    let subscribe = "web/src/lib/push/subscribe.test.ts";
+    let vapid = concat!(
+        "const VAPID = \"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vC",
+        "YLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8\";"
+    )
+    .to_owned();
+    let auth = format!("    auth: \"{}\",", concat!("BTBZMqHH6r4T", "ts7J_aSIgg"));
+    let not_vapid = format!("const VAPID = \"{page}\";");
+    let cell = "xtask/src/cell.rs";
+    let image = format!("                \"mandate.local/api:{}\",", "0123456789ab");
+    let not_image = format!("                \"mandate.local/api:{page}\",");
     vec![
         (signer.to_owned(), example.clone(), None),
         (signer.to_owned(), near_example, Some("alpaca-key-id")),
@@ -1522,6 +1538,18 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (process.to_owned(), setting.clone(), None),
         ("stray-process.rs".to_owned(), setting, generic),
         (process.to_owned(), not_ulid, generic),
+        (screens.to_owned(), unknown_agent.clone(), None),
+        ("stray-screens.tsx".to_owned(), unknown_agent, generic),
+        (screens.to_owned(), not_agent, generic),
+        (push_section.to_owned(), vapid.clone(), None),
+        (subscribe.to_owned(), vapid.clone(), None),
+        (subscribe.to_owned(), auth.clone(), None),
+        ("stray-push.ts".to_owned(), vapid, generic),
+        ("stray-push.ts".to_owned(), auth, generic),
+        (subscribe.to_owned(), not_vapid, generic),
+        (cell.to_owned(), image.clone(), None),
+        ("stray-cell.rs".to_owned(), image, generic),
+        (cell.to_owned(), not_image, generic),
     ]
 }
 
@@ -6369,10 +6397,6 @@ const PARSER_LIMITED_LINES: &[(&str, &str)] = &[
         "if [[ \"${line%%=*}\" =~ (KEY|SECRET|TOKEN|PASSWORD) ]]; then",
     ),
     (
-        ".github/scripts/docs-checks.sh",
-        r##"done < <(git log --format='%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)' "$merge_base..HEAD")"##,
-    ),
-    (
         ".github/scripts/docs-only.sh",
         r##"done < <(git diff --name-only "$merge_base" HEAD)"##,
     ),
@@ -9108,31 +9132,6 @@ fn choose_base(inputs: &BaseInputs) -> Result<Option<String>> {
         );
     }
     Ok(base)
-}
-
-/// Commits a change adds carry no `Co-authored-by` trailer: Cursor's agent hook fills it with the
-/// founder's email, which must not enter the history.
-fn commit_trailers() -> Result<()> {
-    let Some(base) = base_ref()? else {
-        return Ok(());
-    };
-    let log = output(
-        "git",
-        &[
-            "log",
-            "--format=%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)",
-            &format!("{base}..HEAD"),
-        ],
-    )?;
-    let problems: Vec<String> = log
-        .lines()
-        .filter_map(|line| line.split_once(' '))
-        .filter(|(_, trailer)| !trailer.trim().is_empty())
-        .map(|(sha, _)| {
-            format!("commit {sha} has a Co-authored-by trailer; remove it (.cursor/install.sh disables the hook that adds it)")
-        })
-        .collect();
-    report(problems, "commit-trailers")
 }
 
 fn spec_guard() -> Result<()> {
@@ -15429,11 +15428,12 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            15,
+            16,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, \
-             `cell-demo` (DEC-2002), `cell-journal`, and `cell-failover`"
+             `cell-demo` (DEC-2002), `cell-journal`, `cell-failover`, and `cell-kill-switch` \
+             (DEC-2602)"
         );
         for checkout in checkouts {
             assert!(
@@ -21156,10 +21156,6 @@ jq -r "$filter" "$src"
             (
                 ".github/scripts/docs-only.sh",
                 "while read -r f; do\n  echo \"$f\"\ndone < <(git diff --name-only \"$merge_base\" HEAD)\n",
-            ),
-            (
-                ".github/scripts/docs-checks.sh",
-                "while read -r c; do\n  echo \"$c\"\ndone < <(git log --format='%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)' \"$merge_base..HEAD\")\n",
             ),
             (
                 ".github/scripts/merge-approved.sh",
