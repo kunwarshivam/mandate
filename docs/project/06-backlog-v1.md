@@ -2828,9 +2828,11 @@ enables `live` (ES-23, OPS-5).
   over TLS 1.3, reached only by the processes whose egress names it, initialized and unsealed by
   `cargo xtask cell up`. *Slice 3a* ([DEC-2021](decisions/DEC-2021.md)): staging unseals itself
   with the static seal from a mounted, bootstrap-created key (DEC-2605 row 10); the cell and
-  production stay unsealed by hand. *Left:* provisioning the policies and roles in the cell, each process's
-  secret id as a mounted file, and the egress drill's vault probe; the audit device; the metrics
-  and journal parts of the canary scan once either carries a vault operation.
+  production stay unsealed by hand. *Left:* the chart's `previous_key` for one restart, which
+  staging's seal-key rotation needs (deploy/cell/README.md, "The vault"); provisioning the policies
+  and roles in the cell, each process's secret id as a mounted file, and the egress drill's vault
+  probe; the audit device; the metrics and journal parts of the canary scan once either carries a
+  vault operation.
 - **E21-33 (Proposed, M8; SC; lane D1; journal spec first if needed)** As an owner, I want a
   deployment manager that keeps each deployed agent's processes running and leaves a crash-looping
   agent paused, so that my agent is managed without anyone watching (design §3.4, §11 "Bad

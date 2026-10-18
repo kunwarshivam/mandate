@@ -318,6 +318,18 @@ anywhere but `environment: staging`. The chart keeps its TLS pair by Helm's `loo
 installed by Helm itself (or Flux's helm-controller), not rendered by `helm template` (DEC-2019,
 residuals).
 
+Rotating staging's seal key (DEC-2021 item 5) is a one-off with the founder at the terminal; the
+chart refuses a second key today, so it waits on a chart change that renders OpenBao's
+`previous_key` for one restart (backlog, E21-32 *Left*). Its steps then:
+
+1. Pick a new `keyId` (`staging-2`). Add the new key to `vault-seal-key` beside the old one, through
+   the founder's bootstrap, never in git, a value, or a log.
+2. Set `seal.keyId` to the new name and the old one as the previous key in
+   `deploy/cell/values/vault-staging.yaml`; Flux restarts `vault-0`, which unseals with the old key
+   and re-wraps its root key under the new one.
+3. Once `bao status` shows the vault unsealed under the new key id, remove the previous key from
+   the values, then the old key from the Secret.
+
 Not yet: provisioning policies and roles in the cell and handing each process its secret id as a
 mounted file, the egress drill's vault probe, and the vault's audit device.
 
