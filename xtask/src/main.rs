@@ -1253,10 +1253,11 @@ const INFRA_BINARY_ARGS: [&[&str]; 2] = [&["infra"], &["infra", "close"]];
 /// minted per run, never stored (DEC-2030 item 4). The Cloudflare token goes to OpenTofu as a
 /// variable under a `CF_` name, since `web/scripts/workers.mjs`
 /// keeps every `CLOUDFLARE_` name to `web-deploy.yml`'s deploy step (DEC-1005 item 2).
-const INFRA_SECRETS: [&str; 4] = [
+const INFRA_SECRETS: [&str; 5] = [
     "DIGITAL_OCEAN_API_KEY",
     "CF_INFRA_API_TOKEN",
     "ACCESS_ALLOWED_EMAILS",
+    "KUBE_API_ALLOWED_CIDRS",
     "TOFU_STATE_PASSPHRASE",
 ];
 /// The environment variables `infra.yml` hands `cargo xtask infra`: which environment and
@@ -1340,6 +1341,11 @@ fn infra() -> Result<()> {
     fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
     let plan_file = work.join(format!("{environment}.tfplan"));
     let commands = infra_commands(&environment, &action, &plan_file.to_string_lossy())?;
+    for name in [infra_preflight::KUBE_CIDRS_ENV, infra_preflight::EMAILS_ENV] {
+        for value in tofu_audit::list_items(&env::var(name).unwrap_or_default()) {
+            tofu_audit::mask(&value);
+        }
+    }
     let read = |name: &str| env::var(name).ok();
     let preflight = infra_preflight::preflight(&environment, &run, !commands.is_empty(), &read)?;
     eprint!("{}", preflight.checklist.render(&environment));
@@ -1692,6 +1698,10 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         INFRA_WORKFLOW,
         "TF_VAR_access_allowed_emails: ${{ secrets.ACCESS_ALLOWED_EMAILS }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "TF_VAR_kube_api_allowed_addresses: ${{ secrets.KUBE_API_ALLOWED_CIDRS }}",
     ),
 ];
 

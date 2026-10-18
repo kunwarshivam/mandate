@@ -10,10 +10,13 @@ use serde_json::Value;
 
 use crate::image::base64;
 
-/// The attribute names a credential is held under, in any resource or data source this tree uses.
-/// Each must be `sensitive` in its provider's schema, so a plan's diff prints it as `(sensitive
-/// value)`.
-const CREDENTIAL_NAMES: [&str; 8] = [
+/// The name parts a credential is held under, in any resource or data source this tree uses: an
+/// attribute whose name contains one (`tunnel_secret`, `client_secret`, `api_key`,
+/// `secret_access_key`), or is exactly `value`, and that holds a string, must be `sensitive` in
+/// its provider's schema, so a plan's diff prints it as `(sensitive value)`. An attribute of
+/// another type (an Access rule's `service_token` object, a boolean such as
+/// `allow_pkce_without_client_secret`) holds no credential and is not held to it.
+const CREDENTIAL_PARTS: [&str; 8] = [
     "token",
     "secret",
     "password",
@@ -21,10 +24,32 @@ const CREDENTIAL_NAMES: [&str; 8] = [
     "kube_config",
     "raw_config",
     "access_key",
-    "value",
+    "api_key",
 ];
 
-/// The reviewed attributes that carry a [`CREDENTIAL_NAMES`] name but hold no credential, each as
+/// Whether an attribute named `name`, of the schema type `kind`, could hold a credential: a
+/// string, or a list, set or map of strings, whose name carries a [`CREDENTIAL_PARTS`] part or is
+/// `value`.
+fn credential_named(name: &str, kind: Option<&Value>) -> bool {
+    let stringly = match kind {
+        Some(Value::String(kind)) => kind == "string",
+        Some(Value::Array(parts)) => parts.last().and_then(Value::as_str) == Some("string"),
+        _ => false,
+    };
+    let names_about_a_credential = NOT_CREDENTIAL_SUFFIXES
+        .iter()
+        .any(|suffix| name.ends_with(suffix));
+    stringly
+        && !names_about_a_credential
+        && (name == "value" || CREDENTIAL_PARTS.iter().any(|part| name.contains(part)))
+}
+
+/// The name endings that say an attribute is about a credential without holding one: an id
+/// (`token_id`), a URL (`token_url`), a lifetime (`access_token_lifetime`) or a header's name
+/// (`read_service_tokens_from_header`).
+const NOT_CREDENTIAL_SUFFIXES: [&str; 4] = ["_id", "_url", "_lifetime", "_header"];
+
+/// The reviewed attributes that carry a [`CREDENTIAL_PARTS`] name but hold no credential, each as
 /// `type` and dotted path: a DNS record's data value, and a node taint's value.
 const NOT_CREDENTIALS: [(&str, &str); 2] = [
     ("cloudflare_dns_record", "data.value"),
@@ -47,7 +72,7 @@ pub(crate) fn used_types(files: &[(String, String)]) -> BTreeSet<(String, String
         .collect()
 }
 
-/// Every attribute named in [`CREDENTIAL_NAMES`] that `schema` (`tofu providers schema -json`)
+/// Every attribute [`credential_named`] that `schema` (`tofu providers schema -json`)
 /// leaves unmarked in a type `used` names, outside [`NOT_CREDENTIALS`], as `kind type: path`. A
 /// type `used` names that no provider in `schema` describes is reported too, so a missing schema
 /// never passes.
@@ -122,7 +147,7 @@ fn walk_attributes(attributes: Option<&Value>, path: &mut Vec<String>, found: &m
     for (name, attribute) in attributes {
         path.push(name.clone());
         let sensitive = attribute.get("sensitive").and_then(Value::as_bool) == Some(true);
-        if CREDENTIAL_NAMES.contains(&name.as_str()) && !sensitive {
+        if credential_named(name, attribute.get("type")) && !sensitive {
             found.push(path.join("."));
         }
         walk_attributes(
@@ -221,6 +246,25 @@ pub(crate) fn mask_commands(value: &str) -> Vec<String> {
         .collect()
 }
 
+/// What to mask of a JSON list secret, `KUBE_API_ALLOWED_CIDRS` or `ACCESS_ALLOWED_EMAILS`:
+/// GitHub masks the secret only as the whole string it stored, so each item, and each CIDR's
+/// bare address, is masked on its own before any `tofu` call could print one (the review's B2).
+/// Text that is not a JSON list yields nothing, since GitHub already masks it whole.
+pub(crate) fn list_items(json: &str) -> Vec<String> {
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(json) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in items.iter().filter_map(Value::as_str) {
+        out.push(item.to_owned());
+        if let Some((host, _)) = item.split_once('/') {
+            out.push(host.to_owned());
+        }
+    }
+    out.retain(|item| !item.trim().is_empty());
+    out
+}
+
 /// Masks `value` when running in GitHub Actions, before anything else can print it.
 pub(crate) fn mask(value: &str) {
     if std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
@@ -283,6 +327,34 @@ mod tests {
         assert_eq!(problems.len(), 2, "{problems:?}");
         assert!(problems.iter().any(|p| p.contains("`token`")));
         assert!(problems.iter().any(|p| p.contains("`inner.secret`")));
+        assert!(credential_named(
+            "tunnel_secret",
+            Some(&serde_json::json!("string"))
+        ));
+        assert!(credential_named(
+            "client_secret",
+            Some(&serde_json::json!("string"))
+        ));
+        assert!(credential_named(
+            "secret_access_key",
+            Some(&serde_json::json!("string"))
+        ));
+        assert!(credential_named(
+            "api_key",
+            Some(&serde_json::json!(["list", "string"]))
+        ));
+        assert!(!credential_named(
+            "service_token",
+            Some(&serde_json::json!(["object", {}]))
+        ));
+        assert!(!credential_named(
+            "allow_pkce_without_client_secret",
+            Some(&serde_json::json!("bool"))
+        ));
+        assert!(!credential_named(
+            "name",
+            Some(&serde_json::json!("string"))
+        ));
         let missing = unmasked_attributes(&schema, &used(&[("resource", "cloudflare_other")]));
         assert_eq!(
             missing,
@@ -340,6 +412,25 @@ mod tests {
             plan_summary(&serde_json::json!({})),
             ["no resource changes"]
         );
+    }
+
+    /// The review's B2: each item of a list secret, and each CIDR's bare address, is masked on its
+    /// own.
+    #[test]
+    fn each_item_of_a_list_secret_is_masked() {
+        assert_eq!(
+            list_items("[\"203.0.113.7/32\", \"2001:db8::/48\"]"),
+            [
+                "203.0.113.7/32",
+                "203.0.113.7",
+                "2001:db8::/48",
+                "2001:db8::"
+            ]
+        );
+        assert_eq!(list_items("[\"you@example.com\"]"), ["you@example.com"]);
+        assert!(list_items("").is_empty());
+        assert!(list_items("not json").is_empty());
+        assert!(list_items("[\"\", 7]").is_empty());
     }
 
     /// The audit's item 3: every form a log could carry is masked.

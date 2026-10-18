@@ -108,7 +108,8 @@ needs:
   `["you@example.com"]`: who Access lets through to production's API host, as a JSON list of full
   addresses. It is a secret so the public log never shows it. Staging needs none: its Access
   admits the members of your Cloudflare account (DEC-2030 item 2).
-- **Environment variable, production only:** `KUBE_API_ALLOWED_CIDRS`, for example
+- **Environment secret, production only:** `KUBE_API_ALLOWED_CIDRS`, a secret so the public log
+  never shows your address, for example
   `["203.0.113.7/32"]`: the addresses production's cluster API admits besides a run's own window,
   as a JSON list, each no wider than /24. Staging needs none: each run opens the control plane to
   its own runner for the run (DEC-2028), and with no address the firewall admits nobody. Set it

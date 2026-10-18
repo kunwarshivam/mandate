@@ -71,7 +71,7 @@ jobs:
           DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
           TF_VAR_state_passphrase: ${{ secrets.TOFU_STATE_PASSPHRASE }}
           TF_VAR_cloudflare_api_token: ${{ secrets.CF_INFRA_API_TOKEN }}
-          TF_VAR_kube_api_allowed_addresses: ${{ vars.KUBE_API_ALLOWED_CIDRS }}
+          TF_VAR_kube_api_allowed_addresses: ${{ secrets.KUBE_API_ALLOWED_CIDRS }}
           TF_VAR_access_allowed_emails: ${{ secrets.ACCESS_ALLOWED_EMAILS }}
       # Runs however the step before ended, with only the DigitalOcean token, and deletes every
       # Spaces key minted for staging's or production's runs (DEC-2030 item 4).

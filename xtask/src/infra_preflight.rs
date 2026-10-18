@@ -216,7 +216,7 @@ pub(crate) fn environment_items(
     if environment == "production" {
         list.check(
             !no_cidrs(read(KUBE_CIDRS_ENV).as_deref()),
-            "variable KUBE_API_ALLOWED_CIDRS lists at least one CIDR (production only)",
+            "secret KUBE_API_ALLOWED_CIDRS lists at least one CIDR (production only)",
         );
         list.check(
             !no_cidrs(read(EMAILS_ENV).as_deref()),
@@ -732,7 +732,7 @@ mod tests {
             assert!(environment_items("staging", &full(cidrs)).complete());
             assert_eq!(
                 missing(&environment_items("production", &full(cidrs))),
-                ["variable KUBE_API_ALLOWED_CIDRS lists at least one CIDR (production only)"],
+                ["secret KUBE_API_ALLOWED_CIDRS lists at least one CIDR (production only)"],
                 "{cidrs:?}"
             );
         }
