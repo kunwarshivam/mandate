@@ -981,8 +981,9 @@ fn tofu_roots(tofu_dir: &Path) -> Result<Vec<PathBuf>> {
 
 /// The workflow that alone plans and applies the hosted environments (E21-56, DEC-2014).
 const INFRA_WORKFLOW: &str = ".github/workflows/infra.yml";
-/// The one command `infra.yml`'s secret-holding step runs.
-const INFRA_RUN: &str = "cargo xtask infra";
+/// The one command `infra.yml`'s secret-holding step runs: the xtask binary the job's earlier,
+/// secret-free step built, so no `cargo` runs beside a secret (leak-guard L9, DEC-2032).
+const INFRA_RUN: &str = "target/debug/xtask infra";
 /// The secrets that step reads, each from the environment `infra-<environment>` the founder
 /// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Cloudflare token
 /// and account go to OpenTofu as variables under `CF_` names, since `web/scripts/workers.mjs`
@@ -4265,12 +4266,14 @@ const PROGRAM_IN_AN_ARGUMENT: &str = "a shell or interpreter given its program i
 /// `nightly.yml`'s clock line writes the runner's time, in seconds, to the step's outputs for the
 /// sweep's rotation (DEC-1190 item 5). `r2-lockcheck.yml` runs the example its earlier step built
 /// with `cargo build`, which this check reads, so the step holding R2's key and the Cloudflare
-/// token compiles nothing.
+/// token compiles nothing; `infra.yml` likewise runs the xtask binary its earlier step built, so
+/// the step holding the cloud tokens runs no cargo (leak-guard L9, DEC-2032).
 const READ_LINES: &[(&str, &str)] = &[
     (
         ".github/workflows/r2-lockcheck.yml",
         "target/debug/examples/r2_finding",
     ),
+    (".github/workflows/infra.yml", "target/debug/xtask infra"),
     (
         ".github/workflows/nightly.yml",
         r##"echo "seconds=$(date -u +%s)" >> "$GITHUB_OUTPUT""##,
@@ -15521,7 +15524,7 @@ mod tests {
             assert!(text.contains(from), "the fixture still holds {from:?}");
             text.replacen(from, to, 1)
         };
-        let secret_step = "      - run: cargo xtask infra\n";
+        let secret_step = "      - run: target/debug/xtask infra\n";
         let cases = [
             (
                 "push",

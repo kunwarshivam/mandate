@@ -4,7 +4,8 @@
 # `infra-production`, whose required reviewer is the founder and which alone holds the cloud
 # tokens. No pull-request job can reach them (ES-12, DEC-1005's pattern); pull requests run the
 # credential-free checks in `ci.yml` instead. xtask is built in a step that holds no secret, and
-# only the last step, `cargo xtask infra`, receives them. `cargo xtask lint` checks this shape.
+# only the last step, `target/debug/xtask infra`, which runs that binary with no cargo, receives
+# them. `cargo xtask lint` checks this shape.
 name: infra
 
 on:
@@ -53,7 +54,7 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       # Built here, with no secret in the environment, so no build script ever sees one.
       - run: cargo build --locked --package xtask
-      - run: cargo xtask infra
+      - run: target/debug/xtask infra
         env:
           MANDATE_INFRA_ENVIRONMENT: ${{ inputs.environment }}
           MANDATE_INFRA_ACTION: ${{ inputs.action }}
