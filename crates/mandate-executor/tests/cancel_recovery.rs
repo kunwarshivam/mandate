@@ -262,7 +262,7 @@ fn a_refused_kill_switch_cancel_stays_pending_and_is_sent_again_at_the_next_star
 /// reported working, the order returns to its prior state, and no start sends that cancel again,
 /// which the sequence that asked it decides (§5.4).
 #[test]
-fn a_refused_cancel_that_is_not_a_kill_switchs_returns_to_the_prior_state() {
+fn a_refused_cancel_no_kill_switch_asked_returns_to_the_prior_state() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
