@@ -1308,6 +1308,42 @@ fn infra_workflow_in(root: &Path) -> Result<()> {
 /// is a reviewed change to this list.
 const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
+        ".github/workflows/r2-lockcheck.yml",
+        "- name: Build the R2 finding (no secrets)",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "# `release-signing` environment, then signs each arch's binaries and SHA256SUMS with the release key",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "# that environment's secrets hold (DEC-2024, as the founder decided in DEC-2605 rows 8 and 9).",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "# environment's required reviewer, approves the run. It checks out only `.github/scripts` and",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "# by SHA-256, and signs in a clean environment. The key is single-line base64, so GitHub masks",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "environment: release-signing",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "COSIGN_PASSWORD: ${{ secrets.RELEASE_SIGNING_PASSWORD }}",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "# droplets, against a two-node k3d cluster: the namespace and its secrets, the pull secret on the",
+    ),
+    (
         ".github/workflows/ci.yml",
         "# mandate-vault's conformance suite against OpenBao in dev mode, fake secrets only (DEC-977).",
     ),
@@ -1418,7 +1454,7 @@ const BACKSLASH_WORKFLOW_LINES: &[(&str, &str)] = &[
     ),
     (
         ".github/workflows/ci.yml",
-        r##"printf 'mutants=0\nshards=[]\ntotal=0\n' >> "$GITHUB_OUTPUT""##,
+        r##"printf 'mutants=0\nshards=[]\ntotal=0\nper_shard=1\n' >> "$GITHUB_OUTPUT""##,
     ),
     (
         ".github/workflows/codeql.yml",
