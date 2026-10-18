@@ -4711,6 +4711,7 @@ fn an_agent_kill_switch_cancels_only_that_agents_orders() {
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::RiskLimit,
             confirmation: None,
+            cause: None,
         }),
         &ports,
     );
@@ -4756,6 +4757,7 @@ fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::Owner,
             confirmation: Some(owner_confirmation()),
+            cause: None,
         }),
         &ports,
     );
@@ -4794,6 +4796,7 @@ fn an_account_kill_switch_uses_cancel_all_and_close_position() {
             scope: KillScope::Account(mandate_executor::AccountRef(common::ACCOUNT.to_owned())),
             initiator: Initiator::Owner,
             confirmation: Some(owner_confirmation()),
+            cause: None,
         }),
         &ports,
     );
@@ -4838,6 +4841,7 @@ fn an_account_cancel_all_covers_unknown_orders() {
             scope: KillScope::Account(mandate_executor::AccountRef(common::ACCOUNT.to_owned())),
             initiator: Initiator::Owner,
             confirmation: Some(owner_confirmation()),
+            cause: None,
         }),
         &ports,
     );
@@ -4872,6 +4876,7 @@ fn a_kill_switch_applies_the_mode_before_it_cancels() {
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::Owner,
             confirmation: Some(owner_confirmation()),
+            cause: None,
         }),
         &ports,
     );
@@ -4948,6 +4953,7 @@ fn an_automated_flatten_defers_equity_sells_to_the_session() {
                 scope: KillScope::Agent(agent(common::AGENT)),
                 initiator: Initiator::RiskLimit,
                 confirmation: None,
+                cause: None,
             }),
             &ports,
         );
@@ -5054,6 +5060,7 @@ fn an_automated_flatten_sells_crypto_at_once() {
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::RiskLimit,
             confirmation: None,
+            cause: None,
         }),
         &ports,
     );
@@ -5081,6 +5088,7 @@ fn an_owner_exit_outside_the_session_prices_from_the_confirmed_bid() {
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::Owner,
             confirmation: Some(owner_confirmation()),
+            cause: None,
         }),
         &ports,
     );
@@ -5135,6 +5143,7 @@ fn an_unconfirmed_owner_exit_waits_for_the_session() {
                 scope: KillScope::Agent(agent(common::AGENT)),
                 initiator: Initiator::Owner,
                 confirmation: None,
+                cause: None,
             }),
             &ports,
         );
@@ -5195,6 +5204,7 @@ fn a_paused_flattens_ladder_steps_and_its_step_cancel_does_not_end_the_sequence(
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::RiskLimit,
             confirmation: None,
+            cause: None,
         }),
         &ports,
     );
@@ -5313,6 +5323,7 @@ fn an_owner_flattens_rung_rests_at_the_confirmed_floor() {
                 floor: price("153"),
                 ..owner_confirmation()
             }),
+            cause: None,
         }),
         &ports,
     );
@@ -5558,6 +5569,7 @@ fn an_agent_kill_switch_cancels_a_watchdog_exit_of_no_agent_and_sells_only_its_o
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::RiskLimit,
             confirmation: None,
+            cause: None,
         }),
         &ports,
     );
@@ -6028,6 +6040,7 @@ fn a_kill_switch_jumps_a_full_queue() {
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::Owner,
             confirmation: Some(owner_confirmation()),
+            cause: None,
         }),
         &ports,
     );
@@ -6060,6 +6073,7 @@ fn the_journaled_order_is_the_handling_order() {
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::Owner,
             confirmation: Some(owner_confirmation()),
+            cause: None,
         }),
         &ports,
     );

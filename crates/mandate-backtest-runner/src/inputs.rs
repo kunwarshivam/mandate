@@ -18,14 +18,15 @@ use mandate_domain::{
 };
 use mandate_num::{
     Bps, Conviction, FeeCap, FeePerShare, FeeRate, Fraction, Price, Qty, Ratio, ShareIncrement,
-    TickRule, Unit, Usd,
+    SplitRatio, TickRule, Unit, Usd,
 };
 use mandate_risk::{DayTradeRegime, EtpClass, Exchange, GateConfig};
 use mandate_sim::{FirstBarVolumes, Instrument, Nanos, Session, SimBar, SimConfig, Slippage};
 use mandate_spec::document::ModelId;
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 use mandate_version_backtest::{
-    EtpClassification, InstrumentReference, RecordedOutput, RecordedThesis, VersionSettings,
+    EtpClassification, InstrumentReference, RecordedAction, RecordedOutput, RecordedThesis,
+    VersionSettings,
 };
 
 use crate::RunnerError;
@@ -55,7 +56,7 @@ pub struct Inputs {
     pub bars: Vec<SimBar>,
     pub coverage_start: UtcNanos,
     pub medians: Medians,
-    pub corporate_actions: Vec<Date>,
+    pub corporate_actions: Vec<RecordedAction>,
     pub outputs: Vec<RecordedOutput>,
     pub theses: Vec<RecordedThesis>,
     pub instrument: InstrumentReference,
@@ -104,7 +105,7 @@ pub fn decode(files: &InputFiles<'_>) -> Result<Inputs, RunnerError> {
     let corporate_actions = list(corporate_actions, &format!("{bars_file}/corporate_actions"))?
         .iter()
         .enumerate()
-        .map(|(i, d)| date(d, &format!("{bars_file}/corporate_actions/{i}")))
+        .map(|(i, a)| corporate_action(a, &format!("{bars_file}/corporate_actions/{i}")))
         .collect::<Result<_, _>>()?;
     let outputs = document(outputs_file, files.outputs)?;
     let [outputs] = fields(&outputs, outputs_file, ["outputs"])?;
@@ -227,6 +228,56 @@ fn words<T: Copy + Ord>(
         .enumerate()
         .map(|(i, v)| word(v, &format!("{path}/{i}"), table))
         .collect()
+}
+
+/// One corporate-action record (DEC-2245 item 1): `{kind: split, ex_date, ratio: {new, old},
+/// cash_in_lieu_price}` or `{kind: cash_dividend, ex_date, pay_date, per_share}`; any other kind
+/// refuses, naming its `kind`.
+fn corporate_action(value: &Value, path: &str) -> Result<RecordedAction, RunnerError> {
+    let at = |name: &str| format!("{path}/{name}");
+    let kind = value
+        .as_object()
+        .ok_or_else(|| invalid(path))?
+        .get("kind")
+        .ok_or_else(|| invalid(&at("kind")))?;
+    match text(kind, &at("kind"))? {
+        "split" => {
+            let [_, ex_date, ratio, price] = fields(
+                value,
+                path,
+                ["kind", "ex_date", "ratio", "cash_in_lieu_price"],
+            )?;
+            let ratio_path = at("ratio");
+            let [new, old] = fields(ratio, &ratio_path, ["new", "old"])?;
+            let new = count(new, &format!("{ratio_path}/new"))?;
+            let old = count(old, &format!("{ratio_path}/old"))?;
+            let cash_in_lieu_price = match price {
+                Value::Null => None,
+                price => Some(parsed(price, &at("cash_in_lieu_price"), Price::parse)?),
+            };
+            Ok(RecordedAction::Split {
+                ex_date: date(ex_date, &at("ex_date"))?,
+                ratio: SplitRatio::new(u64::from(new), u64::from(old))
+                    .map_err(|_| invalid(&ratio_path))?,
+                cash_in_lieu_price,
+            })
+        }
+        "cash_dividend" => {
+            let [_, ex_date, pay_date, per_share] =
+                fields(value, path, ["kind", "ex_date", "pay_date", "per_share"])?;
+            let ex_date = date(ex_date, &at("ex_date"))?;
+            let pay_date = date(pay_date, &at("pay_date"))?;
+            if pay_date < ex_date {
+                return Err(invalid(&at("pay_date")));
+            }
+            Ok(RecordedAction::CashDividend {
+                ex_date,
+                pay_date,
+                per_share: parsed(per_share, &at("per_share"), Price::parse)?,
+            })
+        }
+        _ => Err(invalid(&at("kind"))),
+    }
 }
 
 fn bar(value: &Value, path: &str) -> Result<(SimBar, Option<Qty>), RunnerError> {

@@ -6,10 +6,11 @@
 //! artifact before it appends the record (journal before acting, `AGENTS.md` rule 5).
 
 use mandate_canon::{Digest, Value};
+use mandate_num::NumError;
 use mandate_risk::{DayTradeRegime, EtpClass, Exchange, GateConfig};
 
 use super::report::{VersionDigests, VersionReport, reference};
-use super::{VersionInput, half_spread};
+use super::{RecordedAction, VersionInput, half_spread};
 use crate::VersionError;
 use crate::report::{int, object};
 use mandate_backtest::MetricsConfig;
@@ -52,7 +53,7 @@ pub fn backtest_run_recorded(record: &RunRecord<'_>) -> Result<Value, VersionErr
 /// Every setting the run reads besides the mandate, which the report names by its version hash,
 /// and the bars and records, which have digests of their own: the fill model, fees, the gate's
 /// settings, the connection's profile by content hash, the account, the instrument reference, the
-/// corporate-action dates, and the report's statistics.
+/// corporate actions, and the report's statistics.
 pub(super) fn configuration(input: &VersionInput<'_>) -> Result<Value, VersionError> {
     let settings = input.settings;
     let instrument = input.instrument;
@@ -119,8 +120,8 @@ pub(super) fn configuration(input: &VersionInput<'_>) -> Result<Value, VersionEr
                 input
                     .corporate_actions
                     .iter()
-                    .map(|date| decimal(*date))
-                    .collect(),
+                    .map(action)
+                    .collect::<Result<_, _>>()?,
             ),
         ),
     ])
@@ -204,4 +205,44 @@ fn etp(class: EtpClass) -> &'static str {
         EtpClass::Complex => "complex",
         EtpClass::Unclassified => "unclassified",
     }
+}
+
+/// One corporate action as the configuration digest spells it (DEC-2245 item 4).
+fn action(action: &RecordedAction) -> Result<Value, VersionError> {
+    match action {
+        RecordedAction::Split {
+            ex_date,
+            ratio,
+            cash_in_lieu_price,
+        } => object(vec![
+            ("kind", text("split")),
+            ("ex_date", decimal(*ex_date)),
+            (
+                "ratio",
+                object(vec![
+                    ("new", shares(ratio.new_shares())?),
+                    ("old", shares(ratio.old_shares())?),
+                ])?,
+            ),
+            (
+                "cash_in_lieu_price",
+                cash_in_lieu_price.map_or(Value::Null, decimal),
+            ),
+        ]),
+        RecordedAction::CashDividend {
+            ex_date,
+            pay_date,
+            per_share,
+        } => object(vec![
+            ("kind", text("cash_dividend")),
+            ("ex_date", decimal(*ex_date)),
+            ("pay_date", decimal(*pay_date)),
+            ("per_share", decimal(*per_share)),
+        ]),
+    }
+}
+
+/// A split ratio's share count, which the configuration holds as a canonical integer.
+fn shares(count: u64) -> Result<Value, VersionError> {
+    int(u32::try_from(count).map_err(|_| NumError::Overflow)?)
 }

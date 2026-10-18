@@ -6,8 +6,11 @@ use reqwest::StatusCode;
 use mandate_connections::record::ConnectionId;
 use serde_json::json;
 
-use crate::openbao::{refusal, role_settings, seal_verdict};
-use crate::policy::Identity;
+use crate::openbao::{
+    OpenBaoConfig, provision, provisioned_identities, refusal, role_settings, seal_verdict,
+};
+use crate::policy::{Identity, Mounts};
+use secrecy::SecretString;
 
 const UNSEALED_RAFT: &[u8] =
     br#"{"type":"shamir","initialized":true,"sealed":false,"t":3,"n":5,"storage_type":"raft"}"#;
@@ -116,4 +119,44 @@ fn each_role_lives_as_long_as_its_process_type_may() {
             "{identity:?}"
         );
     }
+}
+
+/// `provision` makes one role for each process type and, per connection, its executor's and its
+/// token exchange's: the list written out by hand.
+#[test]
+fn provisioning_covers_every_process_type_and_each_connections_two_roles() {
+    let c = |id: &str| ConnectionId::new(id).unwrap();
+    assert_eq!(
+        provisioned_identities(&[c("c1"), c("c2")]),
+        vec![
+            Identity::Api,
+            Identity::ConnectionManager,
+            Identity::Runtime,
+            Identity::SecretImport,
+            Identity::ModelGateway,
+            Identity::EmailSender,
+            Identity::Executor(c("c1")),
+            Identity::TokenExchange(c("c1")),
+            Identity::Executor(c("c2")),
+            Identity::TokenExchange(c("c2")),
+        ]
+    );
+    assert_eq!(provisioned_identities(&[]).len(), 6);
+}
+
+/// Provisioning a vault nobody answers for is an outage, never an empty success that would leave
+/// every process without credentials unnoticed.
+#[tokio::test(flavor = "current_thread")]
+async fn provisioning_an_unreachable_vault_is_an_outage() {
+    let config = OpenBaoConfig {
+        address: "https://127.0.0.1:9".to_owned(),
+        ca_pem: include_bytes!("fixtures/isrg-root-x1.pem").to_vec(),
+        mounts: Mounts::default(),
+    };
+    let token = SecretString::from("operator".to_owned());
+    let provisioned = provision(&config, &token, &[ConnectionId::new("c1").unwrap()]).await;
+    assert_eq!(
+        provisioned.map(|credentials| credentials.len()),
+        Err(SourceError::Unavailable)
+    );
 }

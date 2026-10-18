@@ -89,7 +89,10 @@ pub(crate) fn legal(from: OrderState, to: OrderState) -> bool {
                 | Canceled
                 | Expired
         ),
-        PendingCancel => matches!(to, Canceled | Filled | Accepted | PartiallyFilled),
+        PendingCancel => matches!(
+            to,
+            Canceled | Filled | Accepted | PartiallyFilled | Expired | Rejected
+        ),
         PendingReplace => matches!(
             to,
             Replaced | Filled | Canceled | Expired | Accepted | PartiallyFilled
@@ -257,6 +260,11 @@ pub(crate) fn described(
             batch.request_reconciliation();
         }
         Ok(StatusMapping::ReplacedPair) => replaced(batch, &id, order, status)?,
+        Ok(StatusMapping::Becomes(OrderState::Accepted | OrderState::PartiallyFilled))
+            if cancelling(batch, &id) =>
+        {
+            transition(batch, &id, OrderState::PendingCancel, status)?;
+        }
         Ok(StatusMapping::Becomes(to)) => {
             transition(
                 batch,
@@ -278,6 +286,24 @@ pub(crate) fn described(
         batch.request_reconciliation();
     }
     crate::reconcile::settle_doubted_placements(batch, &id, order)
+}
+
+/// Whether `id` is `PendingCancel` with a cancel outstanding that a working status does not end.
+/// A working status the broker reports (`new`, `accepted`, `partially_filled`, ...) says the
+/// broker has not cancelled the order yet, so it stays `PendingCancel` and the next start sends
+/// its cancel again (DEC-2302, §5.7). Only a refusal of the cancel ([`reject`], which marks the
+/// wait overdue) is §5.7's "cancel rejected" edge back to the prior state, and never for a kill
+/// switch's cancel, which must not lapse while the order works (§5.5, rule 13).
+fn cancelling(batch: &Batch<'_, '_>, id: &ClientOrderId) -> bool {
+    let refused = batch
+        .view
+        .details
+        .get(id)
+        .is_some_and(|detail| detail.cancel_overdue);
+    (!refused || batch.view.kill_switch_cancels(id))
+        && batch.view.orders.get(id).is_some_and(|order| {
+            order.state == OrderState::PendingCancel && order.cancel_unconfirmed
+        })
 }
 
 /// §5.7's last row: a status outside the table pauses the agent and alerts the owner. The order

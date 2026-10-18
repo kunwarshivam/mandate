@@ -18,7 +18,9 @@
   musl, every shipped package, with no feature flag; no shipped package may declare `live`; the
   `SHA256SUMS` format, its refusals, and a comparison that refuses one differing, missing or extra
   binary; every tool pinned to a GitHub release asset with a SHA-256 and a registry row at its
-  version.
+  version; and the build refuses, before anything runs, rustflags, compiler, wrapper and profile
+  variables and any cargo configuration it reads that sets a profile, `env`, an `include`,
+  rustflags or a compiler or wrapper, with no `--config` on its own command line (DEC-2027).
 - **Run:** `cargo nextest run -p mandate-release`; `cargo test -p xtask release`; for the build
   itself, `cargo xtask release build <dir>` twice from two checkouts, then `cargo xtask release
   compare <dir-a> <dir-b>` (about three minutes each on four cores).

@@ -21,6 +21,12 @@
 /.gitleaks.toml             @kunwarshivam
 /.cursor/                   @kunwarshivam
 /.cargo/                    @kunwarshivam
+/Cargo.lock                 @kunwarshivam
+/web/                       @kunwarshivam
+/scripts/                   @kunwarshivam
+/docs/runbooks/             @kunwarshivam
+/deploy/tofu/               @kunwarshivam
+/deploy/gitops/             @kunwarshivam
 
 # Safety-critical crates (ADR-0001 ES-02)
 /crates/mandate-accounting/ @kunwarshivam
@@ -50,6 +56,7 @@
 /crates/mandate-domain/     @kunwarshivam
 /crates/mandate-evaluation/ @kunwarshivam
 /crates/mandate-executor/   @kunwarshivam
+/crates/mandate-executord/  @kunwarshivam
 /crates/mandate-gateway-http/ @kunwarshivam
 /crates/mandate-gateway/    @kunwarshivam
 /crates/mandate-identity-seal/ @kunwarshivam
