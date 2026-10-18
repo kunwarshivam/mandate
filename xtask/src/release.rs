@@ -638,6 +638,9 @@ pub(crate) fn index_tag(revision: &str) -> String {
 struct Registry {
     secrets: PathBuf,
     basic: PathBuf,
+    /// The same credential as a registry config file in Docker's format, the one `helm push`
+    /// reads (`--registry-config`).
+    helm: PathBuf,
 }
 
 impl Registry {
@@ -648,12 +651,12 @@ impl Registry {
         fs::create_dir_all(&secrets).context("creating the auth directory")?;
         fs::set_permissions(&secrets, fs::Permissions::from_mode(0o700))?;
         let basic = secrets.join("basic");
+        let auth = image::base64(format!("{actor}:{token}").as_bytes());
+        write_secret(&basic, &format!("Authorization: Basic {auth}\n"))?;
+        let helm = secrets.join("helm-registry.json");
         write_secret(
-            &basic,
-            &format!(
-                "Authorization: Basic {}\n",
-                image::base64(format!("{actor}:{token}").as_bytes())
-            ),
+            &helm,
+            &format!("{{\"auths\":{{\"{REGISTRY_HOST}\":{{\"auth\":\"{auth}\"}}}}}}\n"),
         )?;
         let mut login = Command::new(tools.join("cosign"))
             .args([
@@ -672,7 +675,11 @@ impl Registry {
                 .context("handing cosign the token")?;
         }
         ensure!(login.wait()?.success(), "cosign login failed");
-        Ok(Self { secrets, basic })
+        Ok(Self {
+            secrets,
+            basic,
+            helm,
+        })
     }
 
     /// A header file carrying a push token for `repository`.
@@ -777,6 +784,101 @@ pub(crate) fn publish_index(root: &Path, out: &Path) -> Result<()> {
     registry.sign_out()?;
     fs::write(out.join("PUBLISHED"), &published).context("writing PUBLISHED")?;
     eprint!("    published the index of {revision}:\n{published}");
+    Ok(())
+}
+
+/// The charts a hosted cluster installs from `deploy/cell/charts/` (E21-58, DEC-2015 item 3).
+/// `archive-store` is the local cell's test stand-in and is never published (DEC-1050 item 5).
+pub(crate) const HOSTED_CHARTS: [&str; 4] =
+    ["backup-plugin-tls", "journal-db", "vault", "workspace"];
+
+/// A published chart's version: its `Chart.yaml` version with the commit's first twelve hex
+/// digits as build metadata, so a chart's tag names the commit it was packaged from.
+fn chart_version(chart_yaml: &str, revision: &str) -> Result<String> {
+    let base = chart_yaml
+        .lines()
+        .find_map(|line| line.strip_prefix("version: "))
+        .map(str::trim)
+        .filter(|version| !version.is_empty() && !version.contains('+'))
+        .context("Chart.yaml names no version, or one that already carries build metadata")?;
+    let short = revision
+        .get(..12)
+        .filter(|short| short.bytes().all(|b| b.is_ascii_hexdigit()))
+        .context("the commit is not a hex object name")?;
+    Ok(format!("{base}+g{short}"))
+}
+
+/// The manifest digest `helm push` reports on its `Digest:` line.
+fn pushed_digest(output: &str) -> Result<String> {
+    let digest = output
+        .lines()
+        .find_map(|line| line.strip_prefix("Digest: "))
+        .map(str::trim)
+        .context("helm push printed no digest")?;
+    let hex = digest
+        .strip_prefix("sha256:")
+        .context("helm push printed a digest that is not SHA-256")?;
+    ensure!(
+        hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+        "helm push printed a malformed digest: {digest}"
+    );
+    Ok(digest.to_owned())
+}
+
+/// `cargo xtask release publish-charts <out>` (E21-58, DEC-2015 item 3): only from a push to
+/// `main`, where `release.yml`'s `publish-index` job runs it (ES-12). Packages each of
+/// [`HOSTED_CHARTS`] with `helm package`, which reads through the charts' symlinks that Flux's git
+/// sources would drop, versioned by [`chart_version`]; pushes each to GHCR under
+/// `<repository>/charts`, signs its digest keyless with cosign (the run's GitHub OIDC identity,
+/// the same as the images'), and writes `<out>/CHARTS`, one `<reference>@<digest>  <chart>` line
+/// each, for the overlays' promotion (DEC-2016).
+pub(crate) fn publish_charts(root: &Path, out: &Path) -> Result<()> {
+    let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
+    let revision = git(root, &["rev-parse", "HEAD"])?;
+    let packages = out.join("charts");
+    fs::create_dir_all(&packages).context("creating the charts directory")?;
+    let registry = Registry::sign_in(&tools, out)?;
+    let mut charts = String::new();
+    for chart in HOSTED_CHARTS {
+        let dir = root.join("deploy/cell/charts").join(chart);
+        let manifest = fs::read_to_string(dir.join("Chart.yaml"))
+            .with_context(|| format!("reading {chart}'s Chart.yaml"))?;
+        let name = manifest
+            .lines()
+            .find_map(|line| line.strip_prefix("name: "))
+            .map(str::trim)
+            .with_context(|| format!("{chart}'s Chart.yaml names no chart"))?;
+        let version = chart_version(&manifest, &revision)?;
+        run(Command::new("helm")
+            .arg("package")
+            .arg(&dir)
+            .args(["--version", &version, "--destination"])
+            .arg(&packages))?;
+        let package = packages.join(format!("{name}-{version}.tgz"));
+        let pushed = Command::new("helm")
+            .arg("push")
+            .arg(&package)
+            .arg(format!("oci://{REGISTRY_HOST}/{REPOSITORY}/charts"))
+            .arg("--registry-config")
+            .arg(&registry.helm)
+            .output()
+            .context("starting `helm push`")?;
+        let printed = format!(
+            "{}{}",
+            String::from_utf8_lossy(&pushed.stdout),
+            String::from_utf8_lossy(&pushed.stderr)
+        );
+        eprint!("{printed}");
+        ensure!(pushed.status.success(), "helm push of {name} failed");
+        let digest = pushed_digest(&printed)?;
+        let reference = format!("{REGISTRY_HOST}/{REPOSITORY}/charts/{name}@{digest}");
+        run(Command::new(tools.join("cosign")).args(["sign", "--yes", &reference]))?;
+        charts.push_str(&format!("{reference}  {name}  {version}\n"));
+    }
+    registry.sign_out()?;
+    fs::write(out.join("CHARTS"), &charts).context("writing CHARTS")?;
+    eprint!("    published the charts of {revision}:\n{charts}");
     Ok(())
 }
 
@@ -1154,6 +1256,60 @@ mod tests {
             }
         }
         Ok(out)
+    }
+
+    #[test]
+    fn a_chart_version_carries_the_commit_as_build_metadata() -> Result<()> {
+        let manifest = "apiVersion: v2\nname: mandate-workspace\nversion: 0.1.0\n";
+        let revision = "545f4852774c1de0b2a4a1e3f0e9f6c2b8d7a0e1";
+        assert_eq!(chart_version(manifest, revision)?, "0.1.0+g545f4852774c");
+        assert!(chart_version("name: x\n", revision).is_err());
+        assert!(chart_version("version: 0.1.0+old\n", revision).is_err());
+        assert!(chart_version(manifest, "not-a-commit").is_err());
+        assert!(chart_version(manifest, "545f").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn only_a_sha256_digest_from_helm_push_is_taken() -> Result<()> {
+        let digest = format!("sha256:{}", hex('a'));
+        let printed = format!(
+            "Pushed: ghcr.io/kunwarshivam/mandate/charts/mandate-workspace:0.1.0_g545f4852774c\n\
+             Digest: {digest}\n"
+        );
+        assert_eq!(pushed_digest(&printed)?, digest);
+        assert!(pushed_digest("Pushed: x\n").is_err());
+        assert!(pushed_digest(&format!("Digest: sha512:{}\n", hex('a'))).is_err());
+        assert!(pushed_digest("Digest: sha256:abc\n").is_err());
+        assert!(pushed_digest(&format!("Digest: sha256:{}\n", hex('A'))).is_err());
+        Ok(())
+    }
+
+    /// The chart that is never published, beside [`HOSTED_CHARTS`].
+    const LOCAL_ONLY_CHARTS: [&str; 1] = ["archive-store"];
+
+    /// Every chart under `deploy/cell/charts/` is either published for the hosted clusters or
+    /// named as the local cell's alone, so a new chart cannot be left out of the hosted clusters
+    /// unnoticed.
+    #[test]
+    fn every_cell_chart_is_published_or_named_local_only() -> Result<()> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../deploy/cell/charts");
+        let mut found = Vec::new();
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
+            if entry.path().join("Chart.yaml").is_file() {
+                found.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+        found.sort();
+        let mut named: Vec<String> = HOSTED_CHARTS
+            .iter()
+            .chain(LOCAL_ONLY_CHARTS.iter())
+            .map(|chart| (*chart).to_owned())
+            .collect();
+        named.sort();
+        assert_eq!(found, named);
+        Ok(())
     }
 
     /// The jobs that publish, one a runner of each arch and the index over them.
