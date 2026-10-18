@@ -146,10 +146,15 @@ pub struct ExecutorState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Switch {
     pub(crate) agent: AgentId,
+    /// The record on another stream this switch copied, from its `copied_from` (DEC-2003 item 4).
+    pub(crate) copied_from: Option<EventId>,
     pub(crate) purpose: Purpose,
     pub(crate) floor: Option<Price>,
     pub(crate) instruments: Vec<InstrumentId>,
     pub(crate) pending: BTreeSet<InstrumentId>,
+    /// The orders the switch cancelled, which no refusal of that cancel returns to working while
+    /// the broker still reports them working (DEC-2302).
+    pub(crate) cancels: BTreeSet<ClientOrderId>,
 }
 
 /// What one `OrderRequestRecorded` carries (§9.5): the executor-only members of the order that
@@ -185,6 +190,11 @@ pub(crate) struct OrderDetail {
     /// broker's to refuse. A resubmission after a confirmed absence is a new attempt, with a new
     /// detail, which an exit waits on afresh (#174 ruling 5863046153, DEC-160 (18)).
     pub(crate) cancel_overdue: bool,
+    /// How many times the journal asked the order's cancel (`cancel_requested`), and when last:
+    /// a kill switch's in-run re-sends count against `unknown_absent_lookups` from these, so the
+    /// cap survives a replay (DEC-2302 item 7).
+    pub(crate) cancel_asks: u32,
+    pub(crate) cancel_asked_at: Option<RiskClock>,
     /// The broker's own cumulative filled quantity for the order, from the `filled_qty` its
     /// latest report carried: a bracket entry's filled quantity before its fills are ingested
     /// (§5.4's "the filled quantity", DEC-346 item 3).
@@ -378,6 +388,13 @@ impl ExecutorState {
         self.orders.get(client_order_id)
     }
 
+    /// Whether an agent-scoped kill switch cancelled `id` (§5.5, DEC-2302).
+    pub(crate) fn kill_switch_cancels(&self, id: &ClientOrderId) -> bool {
+        self.switches
+            .values()
+            .any(|switch| switch.cancels.contains(id))
+    }
+
     /// The orders whose `OrderSubmitted` committed with no acknowledgment. `Input::Started`
     /// queries each by `client_order_id` and never resubmits blindly (journal spec §5.2).
     pub fn unacknowledged(&self) -> Vec<&Order> {
@@ -562,6 +579,15 @@ impl ExecutorState {
     /// The writer epoch this state was folded under, once `Input::Started` has taken one.
     pub fn epoch(&self) -> Option<WriterEpoch> {
         self.epoch
+    }
+
+    /// Whether a switch this stream journaled copied `source`, another stream's record
+    /// (`copied_from`, DEC-2003 item 4): read from this stream's own `KillSwitchActivated`
+    /// records alone, so no mode another restriction set can make a switch count as applied.
+    pub fn applied_copy(&self, source: &EventId) -> bool {
+        self.switches
+            .values()
+            .any(|switch| switch.copied_from.as_ref() == Some(source))
     }
 
     pub fn started(&self) -> bool {

@@ -94,7 +94,19 @@ STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2, "meter
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
 REFUSED_COMMANDS = {"agent": ("resume", "stop", "lift_hold"), "acct": ("acknowledge",)}
-REFUSAL_REASONS = ("step_up_missing", "step_up_stale", "step_up_reused", "step_up_method", "not_independent")
+REFUSAL_REASONS = (
+    "step_up_missing",
+    "step_up_stale",
+    "step_up_reused",
+    "step_up_method",
+    "not_independent",
+    "trigger_unknown",
+    "trigger_superseded",
+    "request_invalid",
+)
+# Rule 28 (v0.57, §9.28, DEC-2509): only an acknowledgment, on the account stream, is refused for its
+# independence, its trigger, or its request; a resume, Stop, or lift is refused only for its step-up.
+ACCOUNT_ONLY_REASONS = ("not_independent", "trigger_unknown", "trigger_superseded", "request_invalid")
 MODEL_KIND = "model_version"
 MODEL_MEMBERS = ("model_id", "model_version", "admits_instruments")
 CASH_MEMBERS = ("cash_band", "cash_in_band")
@@ -166,6 +178,36 @@ REFUSAL = rec(
 SCHEMAS[("acct", "OwnerCommandRefused")] = REFUSAL
 SCHEMAS[("agent", "OwnerCommandRefused")] = REFUSAL
 
+# v0.57 §9.28 (DEC-2509): the owner's acknowledgment and its request, on the control stream, and
+# the executor's copies of them on the account stream, each the original's payload unchanged. The
+# step-up evidence is §9.7's, `authenticated_at` in whole seconds, and `risk_clock` §9.2's timestamp.
+# A request's `step_up` is required: a `null` is refused by rule 239 at `payload.step_up` with reason
+# `schema`, exactly as the type would refuse it, so the rule's clause can be shown to hold on its own.
+OWNER_STEP_UP = rec(("assertion_id", STR), ("authenticated_at", INT), ("method", STR))
+ACK_REQUESTED = rec(
+    ("agent", IDENT_T),
+    ("event", ULID),
+    ("requested_by", IDENT_T),
+    ("independent_required", BOOL),
+    ("submitted_at", INT),
+    ("risk_clock", RISK_CLOCK),
+    ("step_up", opt(OWNER_STEP_UP)),
+)
+ACKNOWLEDGED = rec(
+    ("agent", IDENT_T),
+    ("event", ULID),
+    ("user", IDENT_T),
+    ("requested_by", IDENT_T),
+    ("independent_required", BOOL),
+    ("request", opt(ULID)),
+    ("submitted_at", INT),
+    ("risk_clock", RISK_CLOCK),
+    ("step_up", opt(OWNER_STEP_UP)),
+)
+for _kind in ("ctl", "acct"):
+    SCHEMAS[(_kind, "OwnerAcknowledgmentRequested")] = ACK_REQUESTED
+    SCHEMAS[(_kind, "OwnerAcknowledged")] = ACKNOWLEDGED
+
 REQUIRED_REFS = {
     "ApprovalRequested": ("mandate_version",),
     "ApprovalResponded": ("mandate_version",),
@@ -181,6 +223,9 @@ REQUIRED_REFS = {
         "RiskLimitTriggered",
         "RiskLimitLifted",
         "HighWaterMarkReset",
+        "PositionReleased",
+        "InstrumentRestrictionChanged",
+        "GoalCompleted",
     )},
     "ThesisProposed": ("mandate_version", "model_version"),
     "ThesisRevised": ("mandate_version", "model_version"),
@@ -258,6 +303,7 @@ TRIGGER_REASONS = (
 LIFT_REASONS = ("owner_acknowledged", "version_loosened", "hard_breach_cleared")
 TRIPWIRE_METRICS = ("consecutive_losing_exits", "realized_loss_usd", "new_instruments")
 COUNTED_METRICS = ("consecutive_losing_exits", "new_instruments")
+ON_COMPLETE = ("hold_protected", "disarm_ladder", "release")
 SCHEMAS[("acct", "RiskDayStarted")] = rec(
     ("agent_id", IDENT_T),
     ("day", DATE),
@@ -290,6 +336,33 @@ SCHEMAS[("acct", "HighWaterMarkReset")] = rec(
     ("to", DEC),
     ("user_id", IDENT_T),
     ("step_up", STEP_UP),
+    ("risk_clock", RISK_CLOCK),
+)
+
+SCHEMAS[("acct", "PositionReleased")] = rec(
+    ("agent_id", IDENT_T),
+    ("instrument", ASSET_ID),
+    ("qty", DEC),
+    ("cause", one_of("owner_release", "goal_release")),
+    ("canceled_order_ids", list_of(IDENT_T)),
+    ("warning_ref", opt(REF)),
+    ("user_id", opt(IDENT_T)),
+    ("step_up", opt(STEP_UP)),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "InstrumentRestrictionChanged")] = rec(
+    ("agent_id", IDENT_T),
+    ("instrument", ASSET_ID),
+    ("restriction", one_of("stale_mark", "removed_instrument")),
+    ("reason", one_of("no_sane_mark", "sane_mark", *UNIVERSE_REASONS)),
+    ("active", BOOL),
+    ("risk_clock", RISK_CLOCK),
+)
+SCHEMAS[("acct", "GoalCompleted")] = rec(
+    ("agent_id", IDENT_T),
+    ("reason", opt(one_of("profit_stop_reached", "target_qty", "max_spend", "end_date"))),
+    ("then", opt(one_of(*ON_COMPLETE, "discretionary_exit_all_then_retire"))),
+    ("on_complete", opt(one_of(*ON_COMPLETE))),
     ("risk_clock", RISK_CLOCK),
 )
 
@@ -1437,6 +1510,9 @@ RISK_LIMIT_RECORDS = (
     "RiskLimitTriggered",
     "RiskLimitLifted",
     "HighWaterMarkReset",
+    "PositionReleased",
+    "InstrumentRestrictionChanged",
+    "GoalCompleted",
 )
 
 
@@ -1445,6 +1521,8 @@ RISK_LIMIT_RECORDS = (
 RISK_LIMIT_READS = {
     "RiskLimitTriggered": ("limit", "action", "inherited_loss"),
     "RiskLimitLifted": ("limit", "inherited_loss"),
+    "PositionReleased": ("qty", "cause"),
+    "InstrumentRestrictionChanged": ("restriction", "reason", "active"),
 }
 
 
@@ -1454,7 +1532,7 @@ def whole(text: str) -> bool:
 
 
 def risk_limit_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.27's rules 230 to 235 on a well-typed payload, each reported once, in the order the
+    """§9.27's rules 230 to 238 on a well-typed payload, each reported once, in the order the
     section states."""
     p = draft["payload"]
     out: list[Violation] = []
@@ -1515,6 +1593,28 @@ def risk_limit_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
     )
     if acknowledged:
         rule("235", draft["causation_id"] is not None, "causation_id")
+    if event_type == "PositionReleased":
+        owner = p["cause"] == "owner_release"
+        qty = Decimal(p["qty"])
+        if owner or "rule.236.goal_zero" in skip:
+            qty_ok = qty > 0
+        else:
+            qty_ok = qty >= 0
+        gesture = [(m, (p[m] is not None) == owner) for m in ("warning_ref", "user_id", "step_up")]
+        first_wrong("236", [("qty", qty_ok), *gesture])
+    if event_type == "InstrumentRestrictionChanged":
+        if p["restriction"] == "stale_mark":
+            reason_ok = p["reason"] in ("no_sane_mark", "sane_mark")
+            active_ok = p["active"] == (p["reason"] == "no_sane_mark")
+        else:
+            setting = REMOVING if "rule.237.removing" not in skip else UNIVERSE_REASONS
+            reason_ok = p["reason"] in (*setting, *ADMITTING)
+            active_ok = p["reason"] in (setting if p["active"] else ADMITTING)
+        first_wrong("237", [("reason", reason_ok), ("active", active_ok)])
+    if event_type == "GoalCompleted":
+        one_form = (p["then"] is None) != (p["on_complete"] is None)
+        reason_ok = p["reason"] is None or p["then"] is not None or "rule.238.reason" in skip
+        first_wrong("238", [("then", one_form), ("reason", reason_ok)])
     return out
 
 
@@ -1696,6 +1796,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("44.acknowledged", False, "schema", "payload.acknowledged")
     out += request_violations(event_type, draft, skip)
     out += answer_violations(event_type, draft, skip)
+    out += acknowledgment_violations(event_type, draft, skip)
     out += connection_violations(event_type, draft, skip)
     out += workspace_violations(event_type, draft, skip)
     out += membership_violations(event_type, draft, skip)
@@ -1833,6 +1934,37 @@ def answer_violations(event_type: str, draft: dict, skip: frozenset[str]) -> lis
             if failed:
                 rule(f"53.{failed}", False, f"payload.{failed}")
     return out
+
+
+def acknowledgment_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.28's rule 239 (reason `schema`), on a well-typed payload, reported once at the first
+    offending member: a request requires an independent user and carries step-up evidence; an
+    acknowledgment that requires independence names a request and a different user, and one that
+    does not names no request and its own user as requester."""
+    p = draft["payload"]
+
+    def rule(name: str, holds: bool, path: str) -> list[Violation]:
+        return [] if holds or f"rule.{name}" in skip else [Violation(f"rule.{name}", "schema", path)]
+
+    if event_type == "OwnerAcknowledgmentRequested":
+        return rule("239.requested", p["independent_required"] is True, "payload.independent_required") or rule(
+            "239.step_up", p["step_up"] is not None, "payload.step_up"
+        )
+    if event_type != "OwnerAcknowledged":
+        return []
+    independent = p["independent_required"]
+    mode = "independent" if independent else "plain"
+    clauses = [
+        ("239.request", (p["request"] is not None) == independent, "payload.request"),
+        ("239.requester", (p["requested_by"] != p["user"]) == independent, "payload.requested_by"),
+    ]
+    if "order.rule_239_requester_first" in skip:
+        clauses.reverse()
+    for name, holds, path in clauses:
+        out = rule(name, holds or f"rule.{name}.{mode}" in skip, path)
+        if out:
+            return out
+    return []
 
 
 def workspace_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
@@ -2776,9 +2908,11 @@ def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     refused = event_type == "OwnerCommandRefused" and p["command"] not in REFUSED_COMMANDS[kind]
     if refused and f"rule.26.{kind}" not in skip:
         out.append(Violation(f"rule.26.{kind}", "stream_mismatch", "payload.command"))
-    independent = event_type == "OwnerCommandRefused" and p["reason"] == "not_independent" and kind != "acct"
-    if independent and "rule.28" not in skip:
-        out.append(Violation("rule.28", "stream_mismatch", "payload.reason"))
+    refused_for = p["reason"] if event_type == "OwnerCommandRefused" else None
+    if refused_for in ACCOUNT_ONLY_REASONS and kind != "acct":
+        name = "rule.28" if refused_for == "not_independent" else "rule.28.acknowledgment_reasons"
+        if name not in skip:
+            out.append(Violation(name, "stream_mismatch", "payload.reason"))
     return out
 
 

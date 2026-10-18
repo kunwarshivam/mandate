@@ -123,7 +123,7 @@ fn member<'a>(value: &'a Value, name: &str) -> Option<&'a str> {
 }
 
 /// The workspace API's id: what `GET /backtests/{id}` can name.
-fn is_id(id: &str) -> bool {
+pub(crate) fn is_id(id: &str) -> bool {
     (1..=64).contains(&id.len())
         && id
             .bytes()
@@ -222,7 +222,7 @@ fn check_report(bytes: &[u8], payload: &Value) -> Result<(), ControlError> {
 }
 
 /// The latest registered rule set's content hash.
-fn rule_set(rows: &[Row]) -> Result<String, ControlError> {
+pub(crate) fn rule_set(rows: &[Row]) -> Result<String, ControlError> {
     rows.iter()
         .rev()
         .find(|r| {

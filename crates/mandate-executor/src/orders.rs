@@ -89,7 +89,10 @@ pub(crate) fn legal(from: OrderState, to: OrderState) -> bool {
                 | Canceled
                 | Expired
         ),
-        PendingCancel => matches!(to, Canceled | Filled | Accepted | PartiallyFilled),
+        PendingCancel => matches!(
+            to,
+            Canceled | Filled | Accepted | PartiallyFilled | Expired | Rejected
+        ),
         PendingReplace => matches!(
             to,
             Replaced | Filled | Canceled | Expired | Accepted | PartiallyFilled
@@ -257,6 +260,11 @@ pub(crate) fn described(
             batch.request_reconciliation();
         }
         Ok(StatusMapping::ReplacedPair) => replaced(batch, &id, order, status)?,
+        Ok(StatusMapping::Becomes(OrderState::Accepted | OrderState::PartiallyFilled))
+            if cancelling(batch, &id) =>
+        {
+            transition(batch, &id, OrderState::PendingCancel, status)?;
+        }
         Ok(StatusMapping::Becomes(to)) => {
             transition(
                 batch,
@@ -278,6 +286,24 @@ pub(crate) fn described(
         batch.request_reconciliation();
     }
     crate::reconcile::settle_doubted_placements(batch, &id, order)
+}
+
+/// Whether `id` is `PendingCancel` with a cancel outstanding that a working status does not end.
+/// A working status the broker reports (`new`, `accepted`, `partially_filled`, ...) says the
+/// broker has not cancelled the order yet, so it stays `PendingCancel` and the next start sends
+/// its cancel again (DEC-2302, §5.7). Only a refusal of the cancel ([`reject`], which marks the
+/// wait overdue) is §5.7's "cancel rejected" edge back to the prior state, and never for a kill
+/// switch's cancel, which must not lapse while the order works (§5.5, rule 13).
+fn cancelling(batch: &Batch<'_, '_>, id: &ClientOrderId) -> bool {
+    let refused = batch
+        .view
+        .details
+        .get(id)
+        .is_some_and(|detail| detail.cancel_overdue);
+    (!refused || batch.view.kill_switch_cancels(id))
+        && batch.view.orders.get(id).is_some_and(|order| {
+            order.state == OrderState::PendingCancel && order.cancel_unconfirmed
+        })
 }
 
 /// §5.7's last row: a status outside the table pauses the agent and alerts the owner. The order
@@ -427,6 +453,59 @@ pub(crate) fn lookups_due(batch: &mut Batch<'_, '_>) {
             batch.broker(BrokerRequest::GetOrderByClientId(target));
         }
     }
+}
+
+/// The alert the last of a kill switch's in-run cancel re-sends carries: an opaque key, never the
+/// order (`AGENTS.md` rule 6).
+const RETRIES_EXHAUSTED: &str = "kill_switch_cancel_retries_exhausted";
+
+/// DEC-2302 item 7, on a tick: a kill switch's cancel still unconfirmed on a `PendingCancel` order
+/// is asked again once `unknown_absent_window_s` has passed by the risk clock since the journal
+/// last asked it, at most `unknown_absent_lookups` times after the first: §5.7's "N lookups over
+/// T seconds" pair, which carries this meaning too. Each re-send is journaled before it is sent
+/// (rule 5), so the count is the fold's and survives a replay; the last carries the alert. After
+/// it the order stays `PendingCancel` and nothing more is sent within the run, and the next start
+/// sends the cancel again. No other cancel is retried here: protection keeps its own bound (§5.4).
+pub(crate) fn kill_cancels_due(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let config = batch.ports.config;
+    let now = batch.at().secs();
+    let view = &batch.view;
+    let due: Vec<(ClientOrderId, bool)> = view
+        .orders
+        .values()
+        .filter(|order| order.state == OrderState::PendingCancel && order.cancel_unconfirmed)
+        .filter(|order| view.kill_switch_cancels(&order.client_order_id))
+        .filter_map(|order| {
+            let detail = view.details.get(&order.client_order_id)?;
+            let asked = detail.cancel_asked_at?;
+            (detail.cancel_asks <= config.unknown_absent_lookups
+                && now.saturating_sub(asked.secs()) >= config.unknown_absent_window_s)
+                .then(|| {
+                    (
+                        order.client_order_id.clone(),
+                        detail.cancel_asks == config.unknown_absent_lookups,
+                    )
+                })
+        })
+        .collect();
+    for (id, last) in due {
+        let asked = record_state_change(
+            batch,
+            &id,
+            OrderState::PendingCancel,
+            StateEvidence {
+                cancel_requested: true,
+                ..StateEvidence::default()
+            },
+        )?;
+        batch.broker(BrokerRequest::Cancel {
+            client_order_id: id,
+        });
+        if last {
+            batch.notify(asked, RETRIES_EXHAUSTED);
+        }
+    }
+    Ok(())
 }
 
 /// `replaced`: the old order becomes `Replaced` and the new one, linked to it under an id derived

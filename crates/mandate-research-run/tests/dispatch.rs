@@ -124,7 +124,6 @@ impl BarReader for Leaky {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn bars_are_newest_first_up_to_count_and_never_after_the_cut_off() {
     let mut rows = bars("AAPL", 30);
     rows.push(bar("AAPL", CUT_OFF + 60, "999"));
@@ -161,7 +160,6 @@ fn bars_are_newest_first_up_to_count_and_never_after_the_cut_off() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_result_is_spotlighted_canonical_json() {
     let result = one(&with_bars(bars("AAPL", 3)), Tool::MarketBars, AAPL_BARS);
     let value = parsed(&result);
@@ -207,7 +205,6 @@ fn the_result_is_spotlighted_canonical_json() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_reader_that_leaks_shows_only_the_asked_symbol_at_or_before_the_cut_off() {
     let mut rows = bars("MSFT", 10);
     rows.extend(bars("AAPL", 3));
@@ -233,7 +230,6 @@ fn a_reader_that_leaks_shows_only_the_asked_symbol_at_or_before_the_cut_off() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn two_answers_for_one_instant_are_one_item_the_first_answered() {
     for (first, second) in [("100", "101"), ("101", "100")] {
         let rows = vec![
@@ -258,7 +254,6 @@ fn two_answers_for_one_instant_are_one_item_the_first_answered() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_widest_count_shows_the_newest_260_of_a_longer_answer() {
     let bounds = LoopBounds {
         max_result_bytes: 200_000,
@@ -282,7 +277,6 @@ fn the_widest_count_shows_the_newest_260_of_a_longer_answer() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn max_result_bytes_drops_the_oldest_bars_first() {
     let bounds = LoopBounds {
         max_result_bytes: 2_000,
@@ -312,7 +306,6 @@ fn max_result_bytes_drops_the_oldest_bars_first() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn each_read_is_cut_to_what_the_run_has_left_and_lowers_it() {
     let calls = [
         call(0, Tool::MarketBars, AAPL_BARS),
@@ -342,7 +335,6 @@ fn each_read_is_cut_to_what_the_run_has_left_and_lowers_it() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_failed_read_returns_only_its_error() {
     let fixture = Fixture {
         failing: true,
@@ -375,7 +367,6 @@ fn a_failed_read_returns_only_its_error() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn bars_arguments_outside_the_pinned_schema_read_nothing() {
     let fixture = with_bars(bars("AAPL", 5));
     for arguments in [
@@ -395,7 +386,6 @@ fn bars_arguments_outside_the_pinned_schema_read_nothing() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_read_outside_the_data_universe_is_refused_whole() {
     let fixture = with_bars(bars("TSLA", 5));
     let calls = [call(0, Tool::MarketBars, r#"{"count":5,"symbol":"TSLA"}"#)];
@@ -423,7 +413,6 @@ fn a_read_outside_the_data_universe_is_refused_whole() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn reads_not_served_yet_read_nothing_and_answer_unavailable() {
     let fixture = with_bars(bars("AAPL", 5));
     for (tool, arguments) in [
@@ -455,7 +444,6 @@ fn reads_not_served_yet_read_nothing_and_answer_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn thinks_run_with_an_empty_result_and_read_nothing() {
     let fixture = Fixture::default();
     let calls = [
@@ -474,7 +462,6 @@ fn thinks_run_with_an_empty_result_and_read_nothing() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn an_action_is_never_dispatched_and_nothing_of_its_reply_is_read() {
     for action in [Tool::ProposeThesis, Tool::Invalidate, Tool::ProposeExit] {
         let fixture = with_bars(bars("AAPL", 5));
@@ -565,7 +552,6 @@ fn unwrapped(got: &Dispatch) -> Dispatch {
 
 /// Random bar answers, counts, and byte budgets against [`breach`]'s oracle.
 #[test]
-#[ignore = "pending E19-13"]
 fn random_reads_hold_the_caps_and_the_cut_off() {
     let strategy = (
         proptest::collection::btree_set(-320_i64..5, 0..300),
