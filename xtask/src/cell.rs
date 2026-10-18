@@ -809,6 +809,17 @@ pub fn up() -> Result<()> {
     Ok(())
 }
 
+/// `cargo xtask cell hosted`: cell #1's own `cluster` step (`deploy/hosted/cell1.py`, E21-51,
+/// DEC-2001 item 11) against a two-node k3d cluster of its own, the proof before the droplets are
+/// bought: the same secrets, service-account patch, operator, journal-db and workspace chart with
+/// cell #1's values, the tunnel off.
+pub fn hosted() -> Result<()> {
+    sh(
+        "python3",
+        &["deploy/hosted/cell1.py", "--target", "k3d", "all"],
+    )
+}
+
 /// What the API's pod says when the workspace release does not become ready: its pods, its
 /// containers' last logs, current and from the run before a restart, and the namespace's recent
 /// events, so a server that refused to start
@@ -4482,13 +4493,17 @@ mod tests {
             format!("issuer: {LOCAL_ISSUER}"),
             format!("jwksUrl: {LOCAL_ISSUER}{STUB_KEY_SET}"),
             format!("appOrigin: {DEMO_APP_ORIGIN}"),
-            "tier: dev".to_string(),
         ] {
             assert!(
                 api.contains(&wanted.as_str()),
                 "k3d.yaml's api block lacks `{wanted}`"
             );
         }
+        assert!(
+            values.lines().any(|l| l == "deploymentTier: ci"),
+            "k3d.yaml must set `deploymentTier: ci`, the one tier the API server and the stub \
+             issuer beside it both take, and one the stub starts in (DEC-2100)"
+        );
         for ulid in [DEMO_ORG, DEMO_WORKSPACE] {
             assert!(
                 ulid.len() == 26

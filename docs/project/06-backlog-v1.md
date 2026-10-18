@@ -3076,6 +3076,23 @@ enables `live` (ES-23, OPS-5).
   then migrated by the command ends with each file applied once; no process applies a migration at
   start, shown by the existing xtask lint; and the chart's migration Job (E21-36), E21-41 and the
   CI cell (E21-37) all run it.
+- **E21-51 (Proposed, M8, for the 2026-10-26 demo; lane H; its steps touch SC paths: credentials, the
+  cell's ingress)** As the founder, I want cell #1 stood up on its two DigitalOcean droplets from a clean
+  account in one scripted run, so that the demo runs on the hosted cell, paper and demo data only
+  (DEC-995, DEC-990 item 2; [DEC-2001](decisions/DEC-2001.md)). *Accepted when:* `deploy/hosted/`
+  holds cloud-init for both nodes, k3s pinned by version and SHA-256, the cloud firewall as code,
+  and `cell1.py`, whose `--dry-run` prints every doctl, cloudflared, ssh, kubectl, helm and Cloudflare
+  API call and calls nothing; no droplet admits an inbound connection from the internet, SSH
+  included, and the founder reaches the nodes only through an ops tunnel behind Cloudflare Access;
+  the chart (E21-36) is installed with hosted values, its images pulled from private GHCR with a
+  `read:packages` token held as a Secret in the cluster, and `MANDATE_DEPLOYMENT_TIER` set from the
+  chart's own value; the API's public hostname answers only through Access; the journal's cold
+  store is bound to the R2 bucket `mandate-cell1-journal-cold`; no secret is on a command line, in
+  an environment variable, in a log, or in the runbook, shown by a recorded run; the same `cluster`
+  step passes against a two-node k3d cluster; and the founder's runbook gives the exact commands.
+  Agents create no cloud resource and spend nothing. Follow-ups: rotating the ops tunnel's first
+  token (DEC-2001 item 4); the `object-storage` egress CIDRs once E5-7's shipper or E21-41's backups
+  run.
 - **E21-52 (Proposed, M8; SC; lane SI)** As an operator of a `dev` or `ci` cell, I want a local stub
   token issuer, so that `cargo xtask cell demo` can open an API session without the managed issuer
   (DEC-2100; the E2E lane's gap 1). *Accepted when:* the tool crate `mandate-stub-issuer`, which no

@@ -14,7 +14,7 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 | `charts/backup-plugin-tls/` | The two certificates the Barman Cloud plugin and the operator authenticate each other with, made in the cluster in place of cert-manager (DEC-1050 item 3) |
 | `charts/archive-store/` | The local cell's stand-in for the S1 endpoint the journal archives to: the pinned test store, in its own namespace, reachable only by the journal's archive clients (DEC-1050 item 5). Never in cell #1 |
 | `compose/compose.json` | The same processes for one host (infrastructure §3.2, hybrid), generated: `cargo xtask cell generate --write` |
-| `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ |
+| `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ ; cell #1's own settings on top of `k3s.yaml`, and its bring-up, are in [`../hosted/`](../hosted/README.md) |
 | `images/mandate.Dockerfile` | The interim `mandate` image the cell builds from the change; lane R2 (E21-35) replaces it |
 | `images/deploy-manager.Dockerfile` | The deployment manager's image (`mandate-deployd`, DEC-1172), built beside it the same way |
 | `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
@@ -58,6 +58,9 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
   process's start (OPS-13);
 - `environment` is `paper` or `backtest` only, and every image is pinned by digest or is the
   cell's own `mandate.local/` build;
+- `MANDATE_DEPLOYMENT_TIER` on every process comes from the `deploymentTier` value alone:
+  `production` unless a values file says otherwise, `ci` in the local cell, `dev` on hosted cell #1
+  (DEC-971 item 2, [DEC-2001](../../docs/project/decisions/DEC-2001.md) item 6);
 - the cell's one ingress is a `cloudflared` pod dialing out to Cloudflare's tunnel edge, off in the
   local cell: no Service, NodePort, LoadBalancer or Ingress, and the tunnel token a mounted file;
 - no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and

@@ -76,6 +76,8 @@ commands:
                         the demo's six steps in order on the local cell: each gesture on main run
                         in the cell, each missing link named by its PR or story (E21-54)
   cell down             delete the local cell
+  cell hosted           cell #1's bring-up (deploy/hosted/) against a two-node k3d cluster of
+                        its own, the tunnel off
   cell generate [--write]
                         the Compose file and the journal's roles file from processes.json
                         (drift check unless --write)
@@ -282,6 +284,7 @@ fn run() -> Result<()> {
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
         ["cell", "up"] => cell::up(),
         ["cell", "down"] => cell::down(),
+        ["cell", "hosted"] => cell::hosted(),
         ["cell", "demo"] => cell::demo(true),
         ["cell", "demo", "--no-web"] => cell::demo(false),
         ["cell", "demo", "--scenario", name] => cell::scenario::run(name),
@@ -15654,12 +15657,12 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            16,
+            17,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, \
              `cell-demo` (DEC-2002), `cell-journal`, `cell-failover`, and `cell-kill-switch` \
-             (DEC-2602)"
+             (DEC-2602), and `hosted-k3d` (E21-51)"
         );
         for checkout in checkouts {
             assert!(
