@@ -289,3 +289,20 @@ async fn each_local_grant_has_its_own_random_accessor_and_secret_id() {
         }
     }
 }
+
+/// DEC-2020: the platform's own secrets, on the local vault.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn a_platform_secret_is_written_by_import_and_read_by_its_one_process() {
+    conformance::the_platform_secrets_have_their_holders();
+    conformance::a_platform_secret_is_written_by_import_and_read_by_its_one_process(&Local::new())
+        .await;
+}
+
+/// DEC-2020: no output shows a platform secret, on the local vault.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn no_debug_or_refusal_shows_a_platform_secret() {
+    conformance::the_platform_secrets_have_their_holders();
+    conformance::no_debug_or_refusal_shows_a_platform_secret(&Local::new()).await;
+}

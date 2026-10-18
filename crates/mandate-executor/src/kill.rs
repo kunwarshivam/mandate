@@ -27,12 +27,14 @@ const KILL_SWITCH: &str = "kill_switch";
 
 /// `Command::KillSwitch`. Only the agent scope is implemented: the account and workspace scopes,
 /// which alone may name `cancel-all` and `close-position`, answer the next slice's stub, so no
-/// path reaches the account-wide endpoints yet (DEC-485 item 1).
+/// path reaches the account-wide endpoints yet (DEC-485 item 1). A switch that copies another
+/// stream's record names it as `copied_from`, and `null` otherwise (DEC-2003 item 4).
 pub(crate) fn kill_switch(
     batch: &mut Batch<'_, '_>,
     scope: KillScope,
     initiator: Initiator,
     confirmation: Option<OwnerConfirmation>,
+    cause: Option<EventId>,
 ) -> Result<(), ExecutorError> {
     let KillScope::Agent(agent) = scope else {
         return Err(ExecutorError::Unimplemented { story: "E7-4" });
@@ -86,6 +88,10 @@ pub(crate) fn kill_switch(
             (
                 "bid_size",
                 price(confirmation.as_ref().map(|c| c.bid_size.to_string())),
+            ),
+            (
+                "copied_from",
+                cause.map_or(Value::Null, |copied| text(copied.0)),
             ),
         ],
     )?;
@@ -410,6 +416,7 @@ mod tests {
             scope: KillScope::Agent(AgentId("agent-a".to_owned())),
             initiator,
             confirmation,
+            cause: None,
         }))
     }
 
