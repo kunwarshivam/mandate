@@ -3158,6 +3158,26 @@ enables `live` (ES-23, OPS-5).
   environment other than the stream's each fail the whole lookup closed, never skipping the row;
   a revoked member is refused; and a property test folds random grant, revoke and role-change
   histories against an independent oracle that catches each seeded bug.
+- **E21-56 (Proposed, M8, staging for the 2026-10-26 demo; lane IAC; claim #1634; DEC-2011,
+  DEC-2012; ADR-0006)** As the founder, I want the hosted staging and production environments made
+  by OpenTofu from the repository, so that cell #1's infrastructure is reviewed code applied only
+  with my approval, never a script run by hand and never a token an agent holds (DEC-2011).
+  *Accepted when:* `deploy/tofu/` has one module per concern (network: a VPC and a firewall; DOKS:
+  one pool of two nodes, the Kubernetes version pinned and auto-upgrade off; Spaces: OpenTofu's
+  state bucket, versioned, and nothing else; Cloudflare: the tunnel, the API host's DNS record, its
+  Access application, and the R2 bucket for E21-41's WAL archive and base backups with a lock rule
+  over every key for at least the archive's 30-day retention (DEC-973 item 6); the budget: an
+  estimate the plan refuses past $65 per environment) and one root per environment (`staging`,
+  `production`), with state in Spaces, encrypted on the client, and the providers pinned by a
+  committed lock file; every pull request touching `deploy/tofu/` runs `tofu fmt -check`,
+  `tofu validate`, tflint and `tofu test` against mocked providers as the policy check (no public
+  firewall source, the state bucket private, the archive locked, no load balancer, the cap), with
+  no credential, selected by `cargo xtask ci select` (DEC-1190); `.github/workflows/infra.yml`
+  runs `plan` and `apply` only from `main` by manual dispatch, under the environments `infra-staging` and `infra-production`
+  with the founder as required reviewer (ES-12, DEC-1005); and the runbook names every token,
+  key, environment and secret the founder creates, each with the least permissions the plan
+  needs. It stops at a reachable, empty cluster with its buckets, DNS and Access: add-ons and
+  applications are lane GO's.
 
 ## Won't (v1)
 
