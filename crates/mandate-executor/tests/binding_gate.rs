@@ -695,6 +695,40 @@ fn missing_binding_input_does_not_block_risk_reduction() {
     );
 }
 
+/// A missing binding-gate input never denies an exit (`AGENTS.md` rule 13, trading spec §9.1,
+/// DEC-2034 item 2): a snapshot whose mandate reference differs from the resolved version, or that
+/// lacks a configuration reference, keeps the locally allowed risk exit routable, as a missing
+/// snapshot does.
+#[test]
+fn an_unbindable_snapshot_does_not_block_risk_reduction() {
+    let cases: [ConfigRefRemoval; 6] = [
+        ("fee_config", |refs| refs.fee_config = None),
+        ("trading_calendar", |refs| refs.trading_calendar = None),
+        ("instrument_snapshot", |refs| {
+            refs.instrument_snapshot = None
+        }),
+        ("rule_set", |refs| refs.rule_set = None),
+        ("mandate_version", |refs| refs.mandate_version = None),
+        ("another mandate_version", |refs| {
+            refs.mandate_version = Some(format!("sha256:{}", "9".repeat(64)))
+        }),
+    ];
+    for (name, unbind) in cases {
+        let (mut shell, ports) = ready_with_position();
+        let mut trusted = input_with_position();
+        unbind(&mut trusted.config_refs);
+        let gate = GateFixture {
+            input: Some(trusted),
+        };
+        let ran = shell.run_with_binding(
+            handoff(INTENT, AGENT, risk_exit(AAPL, "10", "149")),
+            &ports,
+            &gate,
+        );
+        assert!(submitted(&ran), "{name}: rule 13 keeps the risk exit routable");
+    }
+}
+
 #[test]
 fn replay_keeps_a_binding_denial_terminal() {
     let gate = GateFixture::denying();

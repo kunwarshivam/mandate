@@ -98,6 +98,22 @@ struct Rows {
 pub struct Journal(Rc<RefCell<Rows>>);
 
 impl Journal {
+    /// The `config_refs.mandate_version` of each account-stream record of `event_type`.
+    pub fn mandate_refs(&self, event_type: &str) -> Vec<Option<String>> {
+        self.rows_of(ACCOUNT_STREAM)
+            .iter()
+            .filter(|row| row.event_type == event_type)
+            .map(|row| {
+                parse(&row.body)
+                    .ok()?
+                    .get("config_refs")?
+                    .get("mandate_version")?
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .collect()
+    }
+
     pub fn rows_of(&self, stream: &str) -> Vec<StoredEvent> {
         self.0
             .borrow()
