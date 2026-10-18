@@ -295,7 +295,6 @@ fn nothing_journaled(f: &Fixture) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_approver_obtains_the_challenge_bound_to_the_approval_it_names() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -340,7 +339,6 @@ fn an_approver_obtains_the_challenge_bound_to_the_approval_it_names() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn each_kind_is_bound_into_the_record_the_authenticator_signs() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -364,7 +362,6 @@ fn each_kind_is_bound_into_the_record_the_authenticator_signs() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_principal_who_may_not_act_cannot_obtain_a_challenge() {
     let f = paper();
     let viewer = signed_in(&f, BOB);
@@ -387,7 +384,6 @@ fn a_principal_who_may_not_act_cannot_obtain_a_challenge() {
 /// one but the two `own` rows' issues a challenge to a principal holding its row, the record
 /// binding that kind.
 #[test]
-#[ignore = "pending E9-4"]
 fn every_kind_the_schema_names_issues_a_challenge_bound_to_it() {
     let schema: serde_json::Value = serde_json::from_str(ENVELOPE).expect("JSON");
     let listed: BTreeSet<String> = schema["$defs"]["StepUpAction"]["properties"]["kind"]["enum"]
@@ -496,7 +492,6 @@ fn the_wire_and_identity_kinds_are_the_same_variants() {
 
 /// A challenge is never kept by a cache between the server and the browser (DEC-2103 item 3).
 #[test]
-#[ignore = "pending E9-4"]
 fn a_challenge_is_answered_no_store() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -510,7 +505,6 @@ fn a_challenge_is_answered_no_store() {
 /// The two `own` rows are authorized at the principal's scope, which their own routes will use;
 /// until then the route answers them the one 404 and issues nothing (DEC-2103 item 1).
 #[test]
-#[ignore = "pending E9-4"]
 fn the_kinds_of_own_rows_wait_for_their_routes() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -522,7 +516,6 @@ fn the_kinds_of_own_rows_wait_for_their_routes() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_reduction_only_session_cannot_obtain_a_challenge() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -544,7 +537,6 @@ fn a_reduction_only_session_cannot_obtain_a_challenge() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_session_the_csrf_mark_and_the_key_come_before_the_body() {
     let f = paper();
     let nowhere = send(f.addr, "GET", "/nowhere", &[], b"");
@@ -611,7 +603,6 @@ fn schema_paths(reply: &Reply) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_body_the_schema_refuses_is_invalid_at_its_member() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -640,7 +631,6 @@ fn a_body_the_schema_refuses_is_invalid_at_its_member() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_retry_answers_the_same_challenge_and_another_action_under_the_key_conflicts() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -671,7 +661,6 @@ fn a_retry_answers_the_same_challenge_and_another_action_under_the_key_conflicts
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_expired_challenge_is_dropped_and_its_key_issues_a_new_one() {
     let f = paper();
     let cookie = signed_in(&f, ALICE);
@@ -689,7 +678,6 @@ fn an_expired_challenge_is_dropped_and_its_key_issues_a_new_one() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_live_workspace_is_refused_before_any_challenge_is_issued() {
     let f = fixture("live", Challenges::default());
     let cookie = signed_in(&f, ALICE);
@@ -712,7 +700,6 @@ fn keyed(n: usize) -> String {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn past_a_principals_bound_a_request_is_rate_limited_until_one_expires() {
     let f = fixture("paper", Challenges::bounded(3, 10));
     let alice = signed_in(&f, ALICE);
@@ -735,7 +722,6 @@ fn past_a_principals_bound_a_request_is_rate_limited_until_one_expires() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn past_the_stores_bound_a_request_is_rate_limited_for_everyone() {
     let f = fixture("paper", Challenges::bounded(3, 4));
     let alice = signed_in(&f, ALICE);
@@ -762,7 +748,6 @@ fn past_the_stores_bound_a_request_is_rate_limited_for_everyone() {
 /// binds the requester and the requested action and is the model's answer, and the store never
 /// holds more than its bounds, which the model counts from the answers it saw.
 #[test]
-#[ignore = "pending E9-4"]
 fn the_store_answers_as_an_independent_model_of_held_challenges_does() {
     for seed in [1_u64, 7, 2026, 0x5eed] {
         let f = fixture("paper", Challenges::bounded(4, 6));
