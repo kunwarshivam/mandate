@@ -8,13 +8,16 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 mod cell;
+mod gitops;
 mod image;
+mod mail;
+mod mutant_costs;
 mod release;
 
 const USAGE: &str = "\
@@ -59,6 +62,9 @@ commands:
                         ephemeral test key with --test-sign (E21-35)
   release drill <dist> <out>
                         run the signed, unsigned and wrongly signed images' start-up check
+  release check-signed <dist> <signatures>
+                        verify the release key's signatures over each binary and SHA256SUMS, then
+                        require the signed agentd to start at tier production (DEC-2024)
   release publish <dist> <out>
                         push this arch's images to GHCR, sign them keyless and attest their SBOMs
                         (main only, from CI)
@@ -68,6 +74,11 @@ commands:
   release publish-charts <out>
                         package the hosted clusters' charts, push them to GHCR and sign each
                         digest keyless (main only, from CI; E21-58)
+  gitops bootstrap <staging|production>
+                        install Flux, pinned, write the workload secrets and apply the cluster's
+                        sync.yaml (the founder's terminal only; deploy/gitops/BOOTSTRAP.md, E21-58)
+  gitops secrets <staging|production>
+                        write the workload secrets alone (the founder's terminal only)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
   cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
@@ -107,6 +118,7 @@ const FULL_JOB: &[&str] = &[
     "postgres",
     "openbao",
     "objectstore",
+    "tofu",
     "stub-release",
 ];
 const PR_JOBS: &[&str] = &[
@@ -150,6 +162,11 @@ const OPENBAO_REQUIRED: &str = "MANDATE_OPENBAO_REQUIRED";
 /// set both, with the store `.github/scripts/start-minio.sh` starts.
 const S3_URL: &str = "MANDATE_S3_URL";
 const S3_REQUIRED: &str = "MANDATE_S3_REQUIRED";
+/// Set by CI's `full-checks` so that `tofu` fails rather than skips when OpenTofu or tflint is
+/// missing (E21-56, DEC-2013).
+const TOFU_REQUIRED: &str = "MANDATE_TOFU_REQUIRED";
+/// The hosted environments' OpenTofu (E21-56): a change under it selects the `tofu` checks.
+const TOFU_DIR: &str = "deploy/tofu/";
 const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
 /// The `K/N` shard CI's `schema-mutants` matrix passes to `cargo xtask ci schema-mutants`, through
 /// the environment because the live-feature check refuses cargo words the shell expands (DEC-688).
@@ -234,10 +251,11 @@ fn run() -> Result<()> {
             Ok(())
         }
         ["ci", "mutants", "--plan"] => {
-            let plan = mutants_plan(Path::new("."), base_ref()?.as_deref())?;
+            let history = mutant_costs::plan_history();
+            let plan = mutants_plan_from(Path::new("."), base_ref()?.as_deref(), &history)?;
             eprintln!(
-                "    mutants: {} mutant(s) over {} shard(s)",
-                plan.mutants, plan.shards
+                "    mutants: {} mutant(s) over {} shard(s), up to {} a shard (DEC-2607)",
+                plan.mutants, plan.shards, plan.per_shard
             );
             print!("{}", plan.outputs());
             Ok(())
@@ -267,6 +285,7 @@ fn run() -> Result<()> {
         ["deps", "--used-by"] => deps_used_by(),
         ["decisions"] => decision_numbers(Path::new(".")),
         ["live-feature"] => live_feature_in(Path::new(".")),
+        ["mail-guard"] => mail::guard_in(Path::new(".")),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
         ["release", "tools"] => {
@@ -281,11 +300,20 @@ fn run() -> Result<()> {
             release::images(&root, Path::new(dist), Path::new(out), true)
         }
         ["release", "drill", dist, out] => release::drill(&root, Path::new(dist), Path::new(out)),
+        ["release", "check-signed", dist, signatures] => {
+            release::check_signed(&root, Path::new(dist), Path::new(signatures))
+        }
         ["release", "publish", dist, out] => {
             release::publish(&root, Path::new(dist), Path::new(out))
         }
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
         ["release", "publish-charts", out] => release::publish_charts(&root, Path::new(out)),
+        ["gitops", "bootstrap", environment] => {
+            gitops::bootstrap(&root, gitops::Environment::parse(environment)?)
+        }
+        ["gitops", "secrets", environment] => {
+            gitops::secrets(gitops::Environment::parse(environment)?)
+        }
         ["cell", "up"] => cell::up(),
         ["cell", "down"] => cell::down(),
         ["cell", "hosted"] => cell::hosted(),
@@ -395,8 +423,10 @@ fn ci(job: &str) -> Result<()> {
         "postgres" => postgres(),
         "openbao" => openbao(),
         "objectstore" => objectstore(),
+        "tofu" => tofu_checks(),
         "stub-release" => stub_release(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
+        "mutants-costs" => mutant_costs::ci(),
         "sweep" => sweep(Path::new(".")),
         "fast" => {
             for part in FAST_JOB {
@@ -822,6 +852,116 @@ fn objectstore() -> Result<()> {
     Ok(())
 }
 
+/// The credential-free checks of `deploy/tofu/` (E21-56, DEC-2012 item 8, DEC-2013): `tofu fmt
+/// -check`, tflint with its bundled ruleset, and in every module and environment root `tofu init
+/// -backend=false` against the committed lock file, `tofu validate` and `tofu test`, whose mocked
+/// providers are the policy check. Nothing here reads a credential or reaches a cloud API; the
+/// providers come from the OpenTofu registry, by the lock file's hashes. The working directories
+/// and the provider cache live under `target/tofu`, so the tree stays clean. It runs only when
+/// the diff changes `deploy/tofu/` or selects everything (DEC-1190), and skips without the tools
+/// unless [`TOFU_REQUIRED`] is set.
+fn tofu_checks() -> Result<()> {
+    if !selection()?.tofu {
+        eprintln!("    tofu: nothing under {TOFU_DIR} changed (DEC-1190)");
+        return Ok(());
+    }
+    let installed = |tool: &str| {
+        Command::new(tool)
+            .arg("--version")
+            .output()
+            .is_ok_and(|out| out.status.success())
+    };
+    if !installed("tofu") || !installed("tflint") {
+        if env::var_os(TOFU_REQUIRED).is_some() {
+            bail!("{TOFU_REQUIRED} is set but tofu or tflint is not installed");
+        }
+        eprintln!(
+            "    tofu: tofu or tflint is not installed; skipping (`bash .cursor/install.sh` installs both)"
+        );
+        return Ok(());
+    }
+    let root = repo_root()?;
+    let tofu_dir = root.join(TOFU_DIR);
+    let work = root.join("target").join("tofu");
+    let cache = work.join("plugins");
+    fs::create_dir_all(&cache).with_context(|| format!("creating {}", cache.display()))?;
+    sh("tofu", &["fmt", "-check", "-recursive", "-diff", TOFU_DIR])?;
+    let config = tofu_dir.join(".tflint.hcl");
+    sh(
+        "tflint",
+        &[
+            "--chdir",
+            TOFU_DIR,
+            "--recursive",
+            "--config",
+            &config.to_string_lossy(),
+        ],
+    )?;
+    for dir in tofu_roots(&tofu_dir)? {
+        let name = dir
+            .strip_prefix(&tofu_dir)
+            .with_context(|| format!("{} is outside {TOFU_DIR}", dir.display()))?
+            .to_string_lossy()
+            .replace('/', "-");
+        let data = work.join(&name);
+        let chdir = format!("-chdir={}", dir.display());
+        for args in [
+            vec![
+                chdir.as_str(),
+                "init",
+                "-backend=false",
+                "-input=false",
+                "-lockfile=readonly",
+            ],
+            vec![chdir.as_str(), "validate"],
+            vec![chdir.as_str(), "test"],
+        ] {
+            eprintln!("    $ tofu {}", args.join(" "));
+            let status = Command::new("tofu")
+                .args(&args)
+                .env("TF_DATA_DIR", &data)
+                .env("TF_PLUGIN_CACHE_DIR", &cache)
+                .env("TF_IN_AUTOMATION", "1")
+                .status()
+                .context("starting `tofu`")?;
+            if !status.success() {
+                bail!("`tofu {}` failed with {status}", args.join(" "));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Every OpenTofu root under `tofu_dir` that the checks run in: each directory directly under
+/// `modules/` and `environments/` holding a `.tf` file, in path order. A module with no root of
+/// its own, or a directory the checks would miss, fails here rather than passing unchecked.
+fn tofu_roots(tofu_dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut roots = Vec::new();
+    for group in ["modules", "environments"] {
+        let parent = tofu_dir.join(group);
+        for entry in
+            fs::read_dir(&parent).with_context(|| format!("reading {}", parent.display()))?
+        {
+            let dir = entry?.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let has_tf = fs::read_dir(&dir)?
+                .filter_map(Result::ok)
+                .any(|file| file.path().extension().is_some_and(|ext| ext == "tf"));
+            if !has_tf {
+                bail!("{} holds no .tf file", dir.display());
+            }
+            roots.push(dir);
+        }
+    }
+    roots.sort();
+    if roots.is_empty() {
+        bail!("{} holds no OpenTofu root", tofu_dir.display());
+    }
+    Ok(roots)
+}
+
 /// The packages whose tests need the S3 test store (E21-40): `cargo xtask ci objectstore` runs
 /// those of them the selection holds.
 const S3_TESTED: [&str; 1] = ["mandate-objectstore"];
@@ -1150,6 +1290,8 @@ struct Selection {
     full_checks: bool,
     /// Whether `schema-mutants` runs: a path the schema sweep reads changed ([`SCHEMA_SWEEP_INPUTS`]).
     schema_mutants: bool,
+    /// Whether `full-checks`' `tofu` part runs: a path under [`TOFU_DIR`] changed (E21-56).
+    tofu: bool,
     /// Whether the cell jobs run (DEC-2609): a path they read changed ([`CELL_INPUTS`]), or the
     /// selection holds a crate the cell's images hold ([`cell::IMAGE_PACKAGES`]), which it does
     /// whenever any crate those are built on changed.
@@ -1165,6 +1307,7 @@ impl Selection {
             python: true,
             full_checks: true,
             schema_mutants: true,
+            tofu: true,
             cell: true,
         }
     }
@@ -1201,13 +1344,14 @@ impl Selection {
             ),
         };
         format!(
-            "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {}; \
-             schema-mutants {}; cell {}; lint, the spec guard and mutants run as always \
+            "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {} \
+             (tofu {}); schema-mutants {}; cell {}; lint, the spec guard and mutants run as always \
              (DEC-1190)",
             yes(self.tests()),
             yes(self.python),
             yes(self.runner()),
             yes(self.full_checks),
+            yes(self.tofu),
             yes(self.schema_mutants),
             yes(self.cell),
         )
@@ -1255,6 +1399,7 @@ fn select(
     let mut python = false;
     let mut full_checks = false;
     let mut schema_mutants = false;
+    let mut tofu = false;
     let mut cell = false;
     for path in changed {
         if selects_everything(path) {
@@ -1287,6 +1432,7 @@ fn select(
         schema_mutants |= SCHEMA_SWEEP_INPUTS
             .iter()
             .any(|entry| path_under(path, entry));
+        tofu |= path_under(path, TOFU_DIR) && !docs;
         cell |= CELL_INPUTS.iter().any(|entry| path_under(path, entry));
     }
     let mut crates = dependents_closure(graph, &seeds);
@@ -1318,6 +1464,7 @@ fn select(
         python,
         full_checks,
         schema_mutants,
+        tofu,
         cell,
     }
 }
@@ -1423,6 +1570,7 @@ fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()
     shellcheck_scripts(&root.join("scripts"))?;
     actionlint_workflows(&root.join(".github/workflows"))?;
     live_feature_in(root)?;
+    mail::guard_in(root)?;
     workspace_checks()
 }
 
@@ -3777,8 +3925,14 @@ const PROGRAM_IN_AN_ARGUMENT: &str = "a shell or interpreter given its program i
 /// `xargs -r sudo rm -f` removes the Microsoft apt source files `grep` lists; `web.yml` and
 /// `web-deploy.yml` measure the Worker's dry run with `web/scripts/workers.mjs` (DEC-731 item 6).
 /// `nightly.yml`'s clock line writes the runner's time, in seconds, to the step's outputs for the
-/// sweep's rotation (DEC-1190 item 5).
+/// sweep's rotation (DEC-1190 item 5). `r2-lockcheck.yml` runs the example its earlier step built
+/// with `cargo build`, which this check reads, so the step holding R2's key and the Cloudflare
+/// token compiles nothing.
 const READ_LINES: &[(&str, &str)] = &[
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "target/debug/examples/r2_finding",
+    ),
     (
         ".github/workflows/nightly.yml",
         r##"echo "seconds=$(date -u +%s)" >> "$GITHUB_OUTPUT""##,
@@ -3804,7 +3958,7 @@ const READ_LINES: &[(&str, &str)] = &[
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
 /// while its whole text, comments included, holds no cargo word, no `.cargo` and no `CARGO_`
 /// (DEC-873 item 2). `ci.yml` runs the first four and the credential guard (DEC-964), `merge.yml`
-/// the fifth.
+/// the fifth, and `release.yml`'s `release-signing` job the release signer (DEC-2024).
 const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/docs-only.sh",
     ".github/scripts/docs-checks.sh",
@@ -3812,6 +3966,7 @@ const READ_SCRIPTS: &[&str] = &[
     ".github/scripts/start-openbao.sh",
     ".github/scripts/start-minio.sh",
     ".github/scripts/merge-approved.sh",
+    ".github/scripts/release-sign.sh",
     CREDENTIAL_GUARD,
 ];
 
@@ -3839,12 +3994,17 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// reports' `RUN_URL` and `VERDICTS` (DEC-1190), `merge.yml` the merge inputs, `web.yml` and
 /// `web-e2e.yml` the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and
 /// `web-deploy.yml` the build's public Supabase values and the deploy step's Cloudflare token and
-/// account (DEC-1005).
+/// account (DEC-1005), and `release.yml`'s `release-signing` job the release key, its password, the pinned
+/// cosign it signs with, and the digest it checks (DEC-2024).
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
     "CLOUDFLARE_ACCOUNT_ID",
     "CLOUDFLARE_API_TOKEN",
+    "COSIGN_PASSWORD",
+    "COSIGN_SHA256",
+    "COSIGN_URL",
+    "DIGEST",
     "DOCS_ONLY",
     "DO_NOT_TRACK",
     "EVENT",
@@ -3864,6 +4024,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "KUBECONFORM_VERSION",
     "LABELED_PR",
     "LINT_RESULT",
+    "MANDATE_MUTANTS_PER_SHARD",
     "MANDATE_MUTANTS_PLANNED",
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
@@ -3880,6 +4041,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_S3_REQUIRED",
     "MANDATE_S3_SECRET_ACCESS_KEY",
     "MANDATE_S3_URL",
+    "MANDATE_TOFU_REQUIRED",
     "MANDATE_SCHEMA_SHARD",
     "MANDATE_SWEEP_CLOCK",
     "MANDATE_TEST_PARTITION",
@@ -3900,6 +4062,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "PYTHON_RESULT",
     "PYTHON_SELECTED",
     "REASONS",
+    "RELEASE_SIGNING_KEY",
     "RH_SIM_LIVE_RESULT",
     "RH_SIM_LIVE_SELECTED",
     "RUN_PRS",
@@ -3914,6 +4077,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "R2_ACCESS_KEY_ID",
     "R2_ENDPOINT",
     "R2_SECRET_ACCESS_KEY",
+    "TFLINT_SHA256",
+    "TFLINT_VERSION",
+    "TOFU_SHA256",
+    "TOFU_VERSION",
 ];
 
 /// Whether `name` may be an `env:` key or a command-prefix assignment: exactly one of
@@ -3965,6 +4132,10 @@ const READ_ACTIONS: &[(&str, Option<&str>)] = &[
     (
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         None,
+    ),
+    (
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        Some(".github/workflows/release.yml"),
     ),
     ("actions/checkout@v7", Some(".github/workflows/codeql.yml")),
     (
@@ -4363,6 +4534,9 @@ fn closed_world(
             .filter(|arg| !arg.starts_with('-'))
             .all(|arg| writes_harmlessly(arg)),
         "curl" => curl_writes_harmlessly(&args),
+        "unzip" => {
+            args.len() >= 2 && flags_free(&args) && args.iter().all(|m| writes_harmlessly(m))
+        }
         "tar" => {
             args.len() >= 3
                 && flags_free(args.get(1..).unwrap_or_default())
@@ -4393,7 +4567,7 @@ fn closed_world(
                 READ_NPX.contains(&args.as_slice())
             } else {
                 match args.as_slice() {
-                    ["ci"] => true,
+                    ["ci"] | ["ci", "--ignore-scripts"] => true,
                     ["run", script] => scripts.contains(*script),
                     ["test"] | ["test", "--if-present"] => scripts.contains("test"),
                     _ => false,
@@ -6844,7 +7018,26 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         .map(|value| value.parse::<usize>())
         .transpose()
         .with_context(|| format!("parsing {MUTANTS_PLANNED_ENV}"))?;
-    mutants_scheduled(root, base, shard, planned)
+    let per_shard = match env::var(MUTANTS_PER_SHARD_ENV) {
+        Ok(value) => per_shard_value(&value)?,
+        Err(_) => 1,
+    };
+    mutants_scheduled(root, base, shard, planned, per_shard)
+}
+
+/// [`MUTANTS_PER_SHARD_ENV`]'s value: a whole number from 1 to
+/// [`mutant_costs::MAX_PER_SHARD`], as a plan writes it, and nothing else.
+fn per_shard_value(value: &str) -> Result<usize> {
+    let per_shard: usize = value
+        .parse()
+        .with_context(|| format!("{MUTANTS_PER_SHARD_ENV} is `{value}`, not a whole number"))?;
+    if !(1..=mutant_costs::MAX_PER_SHARD).contains(&per_shard) || value != per_shard.to_string() {
+        bail!(
+            "{MUTANTS_PER_SHARD_ENV} is `{value}`; a plan writes 1 to {} (DEC-2607)",
+            mutant_costs::MAX_PER_SHARD
+        );
+    }
+    Ok(per_shard)
 }
 
 /// [`mutants`] with its schedule passed in rather than read from the environment, which the tests
@@ -6854,12 +7047,13 @@ fn mutants_scheduled(
     base: Option<&str>,
     shard: Option<MutantShard>,
     planned: Option<usize>,
+    per_shard: usize,
 ) -> Result<()> {
     let Some(diff) = gate_diff(root, base)? else {
-        return check_schedule(0, shard, planned);
+        return check_schedule(0, shard, planned, per_shard);
     };
     let listed = gate_mutants(root, &diff)?;
-    check_schedule(listed.values().sum(), shard, planned)?;
+    check_schedule(listed.values().sum(), shard, planned, per_shard)?;
     if listed.is_empty() {
         eprintln!("    mutants: the diff generates no mutants");
         return Ok(());
@@ -6874,7 +7068,7 @@ fn mutants_scheduled(
         })
         .map(|krate| krate.package.clone())
         .collect();
-    gate_run(root, &diff, shard, &listed, &tested)
+    gate_run(root, &diff, shard, &listed, &tested, per_shard)
 }
 
 /// The gate's run over `diff`'s `listed` mutants, or `shard`'s slice of them, judged by the tests
@@ -6886,6 +7080,7 @@ fn gate_run(
     shard: Option<MutantShard>,
     listed: &BTreeMap<String, usize>,
     tested: &[String],
+    per_shard: usize,
 ) -> Result<()> {
     let meta = metadata_in(root)?;
     let harnesses = simulator_harnesses(&meta);
@@ -6895,7 +7090,8 @@ fn gate_run(
     simulator_oracles(&mut test_packages, &harnesses);
     let unoptimised = unoptimised_config(&unoptimised_packages(listed, &closure));
     live_tests_judge_every_mutant(root, listed, &test_packages, &unoptimised)?;
-    let first = TestOrder::write(&shard_packages(root, diff.path()?, shard, listed)?)?;
+    let in_shard = shard_packages(root, diff.path()?, shard, listed)?;
+    let first = TestOrder::write(&in_shard)?;
     let args = mutants_args(
         diff.path()?,
         shard,
@@ -6909,11 +7105,116 @@ fn gate_run(
         .and_then(|meta| meta.modified())
         .context("timing the diff this run reads")?;
     let unmutated = UnmutatedSource::read(root, &diff.touched)?;
-    let status = mutants_job_cargo(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
-        .status()
-        .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
+    let before = launched_after(root, started);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let stop = (per_shard > 1)
+        .then(|| Duration::from_millis(mutant_costs::STOP_AFTER_MS).saturating_sub(before));
+    let status = match stop {
+        Some(left) => mutants_job_within(root, &args, left),
+        None => mutants_job_cargo(root, &args),
+    }
+    .status()
+    .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
     unmutated.restored(root)?;
-    mutants_outcome(root, &diff.crates, status?.code(), started)
+    let code = status?.code();
+    let overran = stop.is_some() && matches!(code, Some(STOPPED_BY_TIMEOUT | KILLED_BY_TIMEOUT));
+    record_shard_cost(
+        root,
+        shard,
+        in_shard.clone(),
+        before,
+        code,
+        started,
+        overran,
+    );
+    if overran {
+        bail!(
+            "this shard of {per_shard} mutant(s) a shard ran out of time {} s after the gate \
+             started, inside the ten-minute job (DEC-464); the next plan for {} sizes its shards at \
+             one mutant (DEC-2607 item 5)",
+            mutant_costs::STOP_AFTER_MS / 1000,
+            in_shard.join(", ")
+        );
+    }
+    mutants_outcome(root, &diff.crates, code, started)
+}
+
+/// `timeout`'s exit status when it stopped its command.
+const STOPPED_BY_TIMEOUT: i32 = 124;
+/// `timeout`'s exit status when its command outlived the stop and it had to kill it.
+const KILLED_BY_TIMEOUT: i32 = 137;
+
+/// Seconds `timeout` waits after stopping cargo-mutants before it kills it.
+const KILL_AFTER_S: u64 = 15;
+
+/// The `cargo` child [`mutants_job_cargo`] makes, run under `timeout` so that it stops `left`
+/// from now (DEC-2607 item 5): with no clock to read here, `timeout` keeps the time.
+fn mutants_job_within(root: &Path, args: &[&str], left: Duration) -> Command {
+    let mut timeout = Command::new("timeout");
+    timeout
+        .current_dir(root)
+        .arg(format!("--kill-after={KILL_AFTER_S}s"))
+        .arg(format!("{}s", left.as_secs().max(1)))
+        .arg("cargo")
+        .args(args)
+        .env_remove(CARGO_TARGET_DIR)
+        .envs(MUTANT_BUILD_PROFILE);
+    timeout
+}
+
+/// The file whose modification time marks cargo-mutants' launch, read against the diff's own
+/// timestamp as [`gate_run`] reads its outcomes, because a clock read is disallowed here
+/// (ADR-0001 ES-05).
+const MUTANTS_LAUNCH_MARK: &str = "target/mutants-launch";
+
+/// How long after `started`, the diff's timestamp, cargo-mutants is about to launch: zero when the
+/// mark cannot be written or reads earlier, so a record never claims time it did not measure.
+fn launched_after(root: &Path, started: SystemTime) -> Duration {
+    let mark = root.join(MUTANTS_LAUNCH_MARK);
+    fs::write(&mark, b"")
+        .and_then(|()| fs::metadata(&mark))
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|launched| launched.duration_since(started).ok())
+        .unwrap_or_default()
+}
+
+/// Writes this shard's [`mutant_costs::ShardCost`] (DEC-2607 item 1). The record only informs
+/// later plans, so a record that cannot be written is said and the gate's verdict stands alone.
+fn record_shard_cost(
+    root: &Path,
+    shard: Option<MutantShard>,
+    packages: Vec<String>,
+    before: Duration,
+    code: Option<i32>,
+    started: SystemTime,
+    overran: bool,
+) {
+    let outcomes_path = root.join(MUTANTS_OUT).join("outcomes.json");
+    let outcomes = fs::metadata(&outcomes_path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .filter(|written| *written >= started)
+        .and_then(|_| fs::read_to_string(&outcomes_path).ok());
+    let written = u64::try_from(before.as_millis())
+        .context("the time before cargo-mutants overflows")
+        .and_then(|before_ms| {
+            mutant_costs::record(
+                mutant_costs::run_id(),
+                shard.map_or_else(|| "all".to_owned(), |s| s.argument()),
+                packages,
+                before_ms,
+                outcomes.as_deref(),
+                code,
+                overran,
+            )
+        })
+        .and_then(|cost| mutant_costs::write_record(root, &cost));
+    if let Err(err) = written {
+        eprintln!(
+            "    mutants: no cost record for this shard ({err:#}); DEC-2607's plan reads none"
+        );
+    }
 }
 
 /// The diff's source files as they were before an [`MUTANTS_IN_PLACE`] run mutated them, so that
@@ -7202,7 +7503,7 @@ fn sweep_scheduled(root: &Path, shard: Option<MutantShard>, planned: Option<usiz
         eprintln!("    sweep: this shard holds no mutant");
         return Ok(());
     }
-    gate_run(root, &diff, shard, &listed, &tested)
+    gate_run(root, &diff, shard, &listed, &tested, 1)
 }
 
 /// Every mutant the gate tests on `diff`, counted per package: `cargo mutants --list` with the
@@ -7224,57 +7525,97 @@ const MUTANTS_PLANNED_ENV: &str = "MANDATE_MUTANTS_PLANNED";
 /// The matrix width before DEC-538, and still its ceiling: DEC-498's 192 slice shards.
 const MUTANT_SHARDS: usize = 192;
 
-/// How CI's mutation matrix is sized for one diff (DEC-538): `mutants` is the count the gate tests
-/// and `shards` is `min(MUTANT_SHARDS, mutants)`.
+/// The variable CI sets on each mutation shard to the mutants a shard carries, as its plan sized
+/// them (DEC-2607 item 4).
+const MUTANTS_PER_SHARD_ENV: &str = "MANDATE_MUTANTS_PER_SHARD";
+
+/// How CI's mutation matrix is sized for one diff (DEC-538, DEC-2607): `mutants` is the count the
+/// gate tests, `per_shard` how many a shard may carry, and `shards` is
+/// `min(MUTANT_SHARDS, ceil(mutants / per_shard))`.
 ///
 /// cargo-mutants' `slice` sharding gives shard `k` of `N` the `k`-th run of `ceil(n / N)` listed
-/// mutants. For `n <= 192` that run is one mutant at either width, and for `n > 192` the width is
-/// 192 as before, so shard `k` of the plan tests exactly what shard `k` of 192 tested, and every
-/// shard the plan drops was one that tested nothing.
+/// mutants, which is at most `per_shard` below the ceiling. At one a shard, for `n <= 192` that run
+/// is one mutant at either width, and for `n > 192` the width is 192 as before, so shard `k` of
+/// the plan tests exactly what shard `k` of 192 tested, and every shard the plan drops was one
+/// that tested nothing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MutantPlan {
     mutants: usize,
+    per_shard: usize,
     shards: usize,
 }
 
 impl MutantPlan {
+    /// One mutant a shard (DEC-538), what a diff with no cost history gets.
     fn for_mutants(mutants: usize) -> Self {
+        Self::sized(mutants, 1)
+    }
+
+    /// `mutants` at up to `per_shard` a shard, which is taken as at least one (DEC-2607 item 4).
+    /// Past the ceiling a shard's slice is `ceil(mutants / 192)` wide, so the matrix is that many
+    /// fewer shards than 192 that slicing would leave empty.
+    fn sized(mutants: usize, per_shard: usize) -> Self {
+        let per_shard = per_shard.max(1);
+        let width = per_shard.max(mutants.div_ceil(MUTANT_SHARDS));
         Self {
             mutants,
-            shards: mutants.min(MUTANT_SHARDS),
+            per_shard,
+            shards: mutants.div_ceil(width),
         }
     }
 
     /// The plan as `GITHUB_OUTPUT` lines: the count, the matrix's shard indices as a JSON array
-    /// (`[]` for none), and the shard total each shard's `INDEX/TOTAL` names.
+    /// (`[]` for none), the shard total each shard's `INDEX/TOTAL` names, and the mutants a shard
+    /// carries.
     fn outputs(self) -> String {
         let indices: Vec<String> = (0..self.shards).map(|k| k.to_string()).collect();
         format!(
-            "mutants={}\nshards=[{}]\ntotal={}\n",
+            "mutants={}\nshards=[{}]\ntotal={}\nper_shard={}\n",
             self.mutants,
             indices.join(","),
-            self.shards
+            self.shards,
+            self.per_shard
         )
     }
 }
 
+/// [`mutants_plan_from`] with no cost history, so one mutant a shard (DEC-538).
+#[cfg(test)]
+fn mutants_plan(root: &Path, base: Option<&str>) -> Result<MutantPlan> {
+    mutants_plan_from(root, base, &mutant_costs::History::default())
+}
+
 /// `cargo xtask ci mutants --plan`: the mutant count the gate would test on this diff and the
 /// matrix it needs, without building anything (DEC-538). It goes through [`gate_diff`] and
-/// [`gate_mutants`], the gate's own selection.
-fn mutants_plan(root: &Path, base: Option<&str>) -> Result<MutantPlan> {
-    let mutants = match gate_diff(root, base)? {
-        Some(diff) => gate_mutants(root, &diff)?.values().sum(),
-        None => 0,
+/// [`gate_mutants`], the gate's own selection, and sizes each shard's load from the cost `history`
+/// of the packages the diff mutates (DEC-2607 item 3): one a shard for a package without a clean
+/// history.
+fn mutants_plan_from(
+    root: &Path,
+    base: Option<&str>,
+    history: &mutant_costs::History,
+) -> Result<MutantPlan> {
+    let Some(diff) = gate_diff(root, base)? else {
+        return Ok(MutantPlan::for_mutants(0));
     };
-    Ok(MutantPlan::for_mutants(mutants))
+    let listed = gate_mutants(root, &diff)?;
+    Ok(MutantPlan::sized(
+        listed.values().sum(),
+        mutant_costs::per_shard(history, listed.keys()),
+    ))
 }
 
 /// Refuses a shard whose schedule disagrees with the plan that launched it: a listing of another
 /// size, or a shard total other than the plan's. Either would mean the shards no longer cover the
 /// listing between them. Without a plan (a local run) any schedule is accepted.
-fn check_schedule(listed: usize, shard: Option<MutantShard>, planned: Option<usize>) -> Result<()> {
+fn check_schedule(
+    listed: usize,
+    shard: Option<MutantShard>,
+    planned: Option<usize>,
+    per_shard: usize,
+) -> Result<()> {
     check_schedule_for(listed, shard, planned, |mutants| {
-        MutantPlan::for_mutants(mutants).shards
+        MutantPlan::sized(mutants, per_shard).shards
     })
 }
 
@@ -9508,12 +9849,12 @@ mod tests {
         live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
         mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
-        plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems, registry_rows,
-        rehearsal_runs, release_stub_refused, repo_root, schema_mutants, shard_packages,
-        shellcheck_scripts, simulator_harnesses, simulator_oracles, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_order_config,
-        test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts, workspace_closure,
-        workspace_packages,
+        per_shard_value, plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems,
+        registry_rows, rehearsal_runs, release_stub_refused, repo_root, schema_mutants,
+        shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts,
+        workspace_closure, workspace_packages,
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
@@ -13306,21 +13647,23 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-538: the plan's matrix is `min(192, n)` shards, as `GITHUB_OUTPUT` lines CI reads with
-    /// `fromJSON`, and an empty list when the diff has no mutant, which is what skips the matrix.
+    /// DEC-538: at one a shard the plan's matrix is `n` shards up to 192, and past it the
+    /// `ceil(n / ceil(n / 192))` shards that 192-way slicing leaves holding a mutant (DEC-2607
+    /// item 4), as `GITHUB_OUTPUT` lines CI reads with `fromJSON`, and an empty list when the diff
+    /// has no mutant, which is what skips the matrix.
     #[test]
     fn the_plan_sizes_the_matrix_to_the_diff() -> Result<()> {
         assert_eq!(
             MutantPlan::for_mutants(0).outputs(),
-            "mutants=0\nshards=[]\ntotal=0\n",
+            "mutants=0\nshards=[]\ntotal=0\nper_shard=1\n",
             "no mutants, no shards"
         );
         assert_eq!(
             MutantPlan::for_mutants(10).outputs(),
-            "mutants=10\nshards=[0,1,2,3,4,5,6,7,8,9]\ntotal=10\n",
+            "mutants=10\nshards=[0,1,2,3,4,5,6,7,8,9]\ntotal=10\nper_shard=1\n",
             "ten mutants, one a shard"
         );
-        for (mutants, shards) in [(1, 1), (191, 191), (192, 192), (193, 192), (500, 192)] {
+        for (mutants, shards) in [(1, 1), (191, 191), (192, 192), (193, 97), (500, 167)] {
             let plan = MutantPlan::for_mutants(mutants);
             assert_eq!(plan.shards, shards, "{mutants} mutants");
             let outputs = plan.outputs();
@@ -13383,6 +13726,56 @@ mod tests {
                 assert!(planned.iter().all(|slice| slice.len() == 1), "{n} mutants");
             }
         }
+    }
+
+    /// DEC-2607 item 4: at `k` a shard, the plan's shards cover every listed mutant exactly once,
+    /// none is empty, none carries more than `k` below the 192-shard ceiling, and `k` of one is
+    /// DEC-538's plan.
+    #[test]
+    fn a_plan_of_k_a_shard_covers_every_mutant_once_at_most_k_a_shard() {
+        for k in 1..=crate::mutant_costs::MAX_PER_SHARD {
+            for n in 0..=1000 {
+                let plan = MutantPlan::sized(n, k);
+                let planned = slices(n, plan.shards.max(1));
+                let covered: Vec<usize> = planned.iter().flat_map(Clone::clone).collect();
+                assert_eq!(covered, (0..n).collect::<Vec<_>>(), "{n} mutants at {k}");
+                assert!(
+                    planned.iter().all(|slice| !slice.is_empty()) || n == 0,
+                    "no empty shard, {n} mutants at {k}"
+                );
+                assert!(plan.shards <= MUTANT_SHARDS, "{n} mutants at {k}");
+                if n <= MUTANT_SHARDS * k {
+                    assert!(
+                        planned.iter().all(|slice| slice.len() <= k),
+                        "at most {k} a shard for {n} mutants"
+                    );
+                }
+            }
+        }
+        for n in 0..=1000 {
+            assert_eq!(MutantPlan::sized(n, 1), MutantPlan::for_mutants(n));
+            assert_eq!(
+                MutantPlan::sized(n, 0),
+                MutantPlan::for_mutants(n),
+                "zero reads as one"
+            );
+        }
+        assert_eq!(MutantPlan::sized(102, 6).shards, 17);
+        assert_eq!(
+            MutantPlan::sized(102, 6).outputs().lines().last(),
+            Some("per_shard=6")
+        );
+    }
+
+    /// The shard reads the plan's load exactly as the plan wrote it, and nothing else.
+    #[test]
+    fn the_shard_reads_the_plans_load_and_nothing_else() -> Result<()> {
+        assert_eq!(per_shard_value("1")?, 1);
+        assert_eq!(per_shard_value("16")?, 16);
+        for bad in ["", "0", "17", "-1", "+4", "04", " 4", "4.0", "four"] {
+            assert!(per_shard_value(bad).is_err(), "{bad:?} is refused");
+        }
+        Ok(())
     }
 
     /// `cargo mutants --list --json` over the whole diff from `base`, for one shard or unsharded,
@@ -13496,7 +13889,7 @@ mod tests {
         );
         fs::remove_file(&diff).ok();
 
-        let wrong_count = mutants_scheduled(&fx.0, Some(base), None, Some(plan.mutants + 1))
+        let wrong_count = mutants_scheduled(&fx.0, Some(base), None, Some(plan.mutants + 1), 1)
             .expect_err("a shard whose listing differs from the plan is refused");
         assert!(wrong_count.to_string().contains("plan"), "{wrong_count}");
         let wrong_total = mutants_scheduled(
@@ -13504,6 +13897,7 @@ mod tests {
             Some(base),
             Some(MutantShard::parse(&format!("0/{MUTANT_SHARDS}"))?),
             Some(plan.mutants),
+            1,
         )
         .expect_err("a shard total other than the plan's is refused");
         assert!(wrong_total.to_string().contains("shard"), "{wrong_total}");
@@ -13522,7 +13916,7 @@ mod tests {
         let fx = Fixture::gated("mutants-plan-zero")?;
         let head = fx.git(&["rev-parse", "HEAD"])?;
         assert_eq!(mutants_plan(&fx.0, None)?, MutantPlan::for_mutants(0));
-        mutants_scheduled(&fx.0, None, None, Some(0))?;
+        mutants_scheduled(&fx.0, None, None, Some(0), 1)?;
 
         fx.write(
             "crates/covered/tests/more.rs",
@@ -13534,7 +13928,7 @@ mod tests {
             MutantPlan::for_mutants(0),
             "a tests-only change"
         );
-        mutants_scheduled(&fx.0, Some(&head), None, Some(0))?;
+        mutants_scheduled(&fx.0, Some(&head), None, Some(0), 1)?;
 
         fx.write(
             "crates/covered/src/lib.rs",
@@ -13550,7 +13944,7 @@ mod tests {
             MutantPlan::for_mutants(0),
             "changed source that generates no mutant"
         );
-        mutants_scheduled(&fx.0, Some(&head), None, Some(0))?;
+        mutants_scheduled(&fx.0, Some(&head), None, Some(0), 1)?;
         assert!(
             !fx.0.join(MUTANTS_OUT).exists(),
             "and the gate never started a run"
@@ -13570,20 +13964,33 @@ mod tests {
 
     #[test]
     fn a_shards_schedule_must_match_its_plan() -> Result<()> {
-        check_schedule(5, None, None)?;
-        check_schedule(5, Some(MutantShard::parse("3/192")?), None)?;
-        check_schedule(5, Some(MutantShard::parse("3/5")?), Some(5))?;
-        check_schedule(500, Some(MutantShard::parse("191/192")?), Some(500))?;
-        check_schedule(0, None, Some(0))?;
-        assert!(check_schedule(4, None, Some(5)).is_err(), "fewer listed");
-        assert!(check_schedule(6, None, Some(5)).is_err(), "more listed");
+        check_schedule(5, None, None, 1)?;
+        check_schedule(5, Some(MutantShard::parse("3/192")?), None, 1)?;
+        check_schedule(5, Some(MutantShard::parse("3/5")?), Some(5), 1)?;
+        check_schedule(500, Some(MutantShard::parse("166/167")?), Some(500), 1)?;
         assert!(
-            check_schedule(5, Some(MutantShard::parse("3/192")?), Some(5)).is_err(),
+            check_schedule(500, Some(MutantShard::parse("191/192")?), Some(500), 1).is_err(),
+            "192 shards for 500 mutants, 25 of them empty, is not the plan (DEC-2607 item 4)"
+        );
+        check_schedule(0, None, Some(0), 1)?;
+        assert!(check_schedule(4, None, Some(5), 1).is_err(), "fewer listed");
+        assert!(check_schedule(6, None, Some(5), 1).is_err(), "more listed");
+        assert!(
+            check_schedule(5, Some(MutantShard::parse("3/192")?), Some(5), 1).is_err(),
             "a 192-way shard under a plan of five"
         );
         assert!(
-            check_schedule(500, Some(MutantShard::parse("3/191")?), Some(500)).is_err(),
+            check_schedule(500, Some(MutantShard::parse("3/191")?), Some(500), 1).is_err(),
             "a total below the ceiling for a plan above it"
+        );
+        check_schedule(10, Some(MutantShard::parse("2/3")?), Some(10), 4)?;
+        assert!(
+            check_schedule(10, Some(MutantShard::parse("2/10")?), Some(10), 4).is_err(),
+            "one a shard under a plan of four a shard (DEC-2607 item 4)"
+        );
+        assert!(
+            check_schedule(10, Some(MutantShard::parse("2/3")?), Some(10), 1).is_err(),
+            "four a shard under a plan of one"
         );
         Ok(())
     }
@@ -13607,7 +14014,10 @@ mod tests {
             "mutants: ${{ steps.plan.outputs.mutants }}",
             "shards: ${{ steps.plan.outputs.shards }}",
             "total: ${{ steps.plan.outputs.total }}",
-            "printf 'mutants=0\\nshards=[]\\ntotal=0\\n' >> \"$GITHUB_OUTPUT\"",
+            "per_shard: ${{ steps.plan.outputs.per_shard }}",
+            "printf 'mutants=0\\nshards=[]\\ntotal=0\\nper_shard=1\\n' >> \"$GITHUB_OUTPUT\"",
+            "actions: read",
+            "GH_TOKEN: ${{ github.token }}",
         ] {
             assert!(
                 plan.iter().any(|l| l == line),
@@ -13621,6 +14031,7 @@ mod tests {
             "shard: ${{ fromJSON(needs.mutants-plan.outputs.shards) }}",
             "MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/${{ needs.mutants-plan.outputs.total }}",
             "MANDATE_MUTANTS_PLANNED: ${{ needs.mutants-plan.outputs.mutants }}",
+            "MANDATE_MUTANTS_PER_SHARD: ${{ needs.mutants-plan.outputs.per_shard }}",
         ] {
             assert!(matrix.iter().any(|l| l == line), "`mutants` has `{line}`");
         }
@@ -13908,6 +14319,7 @@ mod tests {
             "if: ${{ !github.event.pull_request.draft }}",
             "if: ${{ always() && !github.event.pull_request.draft }}",
             "needs: mutants-plan",
+            "needs: [mutants-plan, mutants]",
             "needs: select",
             report,
         ];
@@ -14682,6 +15094,50 @@ mod tests {
 
     fn crate_set(names: &[&str]) -> BTreeSet<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    /// E21-56 (DEC-2013): `full-checks`' `tofu` part runs for a change under `deploy/tofu/` that
+    /// is not documentation, and for a selection of everything; another `deploy/` path, a
+    /// Markdown file under `deploy/tofu/`, and documentation elsewhere leave it off.
+    #[test]
+    fn the_tofu_checks_follow_deploy_tofu() {
+        let graph = sample_graph();
+        let references = sample_references();
+        let tofu = |paths: Option<&[&str]>| {
+            let changed: Option<Vec<String>> =
+                paths.map(|paths| paths.iter().map(|p| (*p).to_owned()).collect());
+            select(changed.as_deref(), &graph, &references).tofu
+        };
+        for paths in [
+            &["deploy/tofu/modules/doks/main.tf"][..],
+            &["deploy/tofu/environments/staging/.terraform.lock.hcl"],
+            &[
+                "deploy/tofu/.tflint.hcl",
+                "docs/adr/0006-hosted-infrastructure-as-code.md",
+            ],
+            &[
+                "deploy/cell/values/k3d.yaml",
+                "deploy/tofu/modules/cell/tests/wiring.tftest.hcl",
+            ],
+        ] {
+            assert!(tofu(Some(paths)), "{paths:?} runs the tofu checks");
+        }
+        for paths in [
+            &["deploy/cell/values/k3d.yaml"][..],
+            &["deploy/tofu/README.md"],
+            &["docs/project/decisions/DEC-2013.md"],
+            &["crates/mandate-num/src/lib.rs"],
+        ] {
+            assert!(!tofu(Some(paths)), "{paths:?} leaves the tofu checks off");
+        }
+        assert!(
+            tofu(None),
+            "no diff base selects everything, the tofu checks included"
+        );
+        assert!(
+            tofu(Some(&["xtask/src/main.rs"])),
+            "xtask selects everything, the tofu checks included"
+        );
     }
 
     /// DEC-1190 items 2 and 3 over sample diffs: each diff's selected crates and scoped jobs,
@@ -15783,12 +16239,12 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            17,
+            18,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, the mutation plan, the mutants matrix, `schema-mutants`, `cell`, \
-             `cell-demo` (DEC-2002), `cell-journal`, `cell-failover`, and `cell-kill-switch` \
-             (DEC-2602), and `hosted-k3d` (E21-51)"
+             `full-checks`, the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
+             `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-journal`, `cell-failover`, \
+             `cell-kill-switch` (DEC-2602), and `hosted-k3d` (E21-51)"
         );
         for checkout in checkouts {
             assert!(
@@ -19378,6 +19834,11 @@ jq -r "$filter" "$src"
             ("tar-directory", "tar xzf t.tgz crates"),
             ("tar-no-members", "tar xzf t.tgz"),
             ("tar-flags", "tar xzf t.tgz -C crates tool"),
+            ("unzip-manifest", "unzip t.zip Cargo.toml"),
+            ("unzip-path", "unzip t.zip src/lib.rs"),
+            ("unzip-no-members", "unzip t.zip"),
+            ("unzip-flags", "unzip -d crates t.zip tool"),
+            ("hidden-unzip", "unzip t.zip .profile"),
             ("hidden-redirect", "echo x > .npmrc"),
             ("hidden-tee", "echo x | tee .profile"),
             ("hidden-curl", "curl -sSfL -o .bashrc https://example.com/x"),
@@ -19390,7 +19851,8 @@ jq -r "$filter" "$src"
         all.push((
             "writes",
             "echo x > notes.txt && curl -sSfL -o tool.tgz https://example.com/x && tar xzf \
-             tool.tgz tool && echo x | tee -a \"$GITHUB_OUTPUT\" && cargo test -p a-lib",
+             tool.tgz tool && unzip tool.zip tool && echo x | tee -a \"$GITHUB_OUTPUT\" && \
+             cargo test -p a-lib",
         ));
         let flows = [
             workflow(&all),
@@ -19492,7 +19954,7 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
-    /// In a `web` job, `npm` runs only as `npm ci`, `npm run <script>` of a script its
+    /// In a `web` job, `npm` runs only as `npm ci` (with `--ignore-scripts` or nothing), `npm run <script>` of a script its
     /// `package.json` holds, and `npm test`, and `npx` only in the forms the repository uses:
     /// `npx`, `npm exec`, `npm pkg set`, `npm config set`, `npm install`, a missing script, a
     /// script given arguments and a `package.json` naming cargo cannot be read. Working
@@ -19523,6 +19985,7 @@ jq -r "$filter" "$src"
                 "npm config set registry https://example.com",
             ),
             ("npm-install", "web", "npm install left-pad"),
+            ("npm-ci-other-flag", "web", "npm ci --foreground-scripts"),
             ("npm-run-missing", "web", "npm run nope"),
             ("npm-run-arguments", "web", "npm run build -- --debug"),
             ("package-naming-it", "web/app", "npm run build"),
@@ -19541,7 +20004,7 @@ jq -r "$filter" "$src"
         );
         text.push_str(
             "  web-ok:\n    defaults:\n      run:\n        working-directory: web\n    steps:\n      \
-             - run: npm ci\n      - run: npm run build\n      - run: npm run lint\n      - run: npm \
+             - run: npm ci\n      - run: npm ci --ignore-scripts\n      - run: npm run build\n      - run: npm run lint\n      - run: npm \
              test --if-present\n      - run: npx playwright install --with-deps --only-shell \
              chromium\n      - run: npx playwright install-deps chromium\n      - run: npx --yes \
              impeccable@4.1.0 detect src/\n      - working-directory: web\n        run: npm ci\n",
@@ -21657,6 +22120,46 @@ jq -r "$filter" "$src"
                 .as_deref()
                 .is_some_and(|err| err.contains("live-feature")),
             "a workflow that runs `live` fails the lint job naming the check, got {planted:?}"
+        );
+        assert!(
+            !reached.get(),
+            "the workspace checks run only after it passes"
+        );
+        Ok(())
+    }
+
+    /// The lint job runs the mail guard over its own repository (DEC-2511): a fixture workspace
+    /// passes, and one whose crate implements `MailTransport` for a type the guard does not
+    /// allow fails the job naming the check, before the workspace checks run.
+    #[test]
+    fn the_lint_job_runs_the_mail_guard_on_its_repository() -> Result<()> {
+        let root = env::temp_dir().join(format!("mandate-xtask-lint-mail-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fixture_workspace(&root)?;
+        for dir in [".github/workflows", ".github/scripts", "deploy", "scripts"] {
+            fs::create_dir_all(root.join(dir))?;
+        }
+        let clean = lint(&root, || Ok(())).map_err(|err| format!("{err:#}"));
+        fs::write(
+            root.join("a/src/lib.rs"),
+            "//! A fixture crate.\npub trait MailTransport {}\npub struct Leak;\nimpl MailTransport for Leak {}\n",
+        )?;
+        let reached = Cell::new(false);
+        let planted = lint(&root, || {
+            reached.set(true);
+            Ok(())
+        })
+        .map_err(|err| format!("{err:#}"))
+        .err();
+        fs::remove_dir_all(&root).ok();
+        assert_eq!(clean, Ok(()), "a clean fixture workspace passes");
+        assert!(
+            planted
+                .as_deref()
+                .is_some_and(|err| err.contains("mail-guard")),
+            "an unlisted transport fails the lint job naming the check, got {planted:?}"
         );
         assert!(
             !reached.get(),

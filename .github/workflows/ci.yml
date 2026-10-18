@@ -61,6 +61,12 @@ env:
   HELM_SHA256: "86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"
   KUBECONFORM_VERSION: "0.8.0"
   KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
+  # The hosted environments' OpenTofu and tflint (E21-56, DEC-2012 item 2), pinned with
+  # .cursor/install.sh and .github/workflows/infra.yml. tflint publishes only zip archives.
+  TOFU_VERSION: "1.13.1"
+  TOFU_SHA256: "378ada19d4bc70c43732004e8159be771b23b9a5afdf059e5f8a2b3fa2c70a69"
+  TFLINT_VERSION: "0.64.0"
+  TFLINT_SHA256: "cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537"
 
 jobs:
   # DEC-1190. The affected-set selection every scoped job follows: one boolean a job, and the
@@ -384,6 +390,7 @@ jobs:
       MANDATE_S3_ACCESS_KEY_ID: mandate-test
       MANDATE_S3_SECRET_ACCESS_KEY: mandate-test-only
       MANDATE_S3_REQUIRED: "1"
+      MANDATE_TOFU_REQUIRED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -410,6 +417,16 @@ jobs:
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
           tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
+      # `tofu`, the credential-free checks of deploy/tofu/ (E21-56, DEC-2013): fmt, tflint,
+      # validate, and `tofu test` against mocked providers. No step here holds a cloud credential.
+      - name: Install OpenTofu and tflint (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o tofu.tgz "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz"
+          echo "${TOFU_SHA256}  tofu.tgz" | sha256sum --check
+          tar xzf tofu.tgz tofu && sudo install tofu /usr/local/bin/ && rm tofu tofu.tgz
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o tflint.zip "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_amd64.zip"
+          echo "${TFLINT_SHA256}  tflint.zip" | sha256sum --check
+          unzip tflint.zip tflint && sudo install tflint /usr/local/bin/ && rm tflint tflint.zip
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -669,18 +686,24 @@ jobs:
 
   # DEC-538. Sizes the mutation matrix to the diff: `cargo xtask ci mutants --plan` lists, without
   # building, exactly the mutants the gate would test (its own diff and listing code), and reports
-  # the count and `min(192, count)` shard indices. A diff with no mutants, a documentation-only one
-  # included (DEC-112), launches no shard at all.
+  # the count, `min(192, ceil(count / k))` shard indices and `k`, the mutants a shard carries,
+  # sized per package from the `mutant-costs` history and one without a clean one (DEC-2607). A
+  # diff with no mutants, a documentation-only one included (DEC-112), launches no shard at all.
   mutants-plan:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # DEC-2607 item 3: the plan reads the `mutant-costs` history through the Actions API.
     permissions:
+      actions: read
       contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
     outputs:
       mutants: ${{ steps.plan.outputs.mutants }}
       shards: ${{ steps.plan.outputs.shards }}
       total: ${{ steps.plan.outputs.total }}
+      per_shard: ${{ steps.plan.outputs.per_shard }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -707,13 +730,15 @@ jobs:
         run: |
           if [ "$DOCS_ONLY" = true ]; then
             echo "docs-only change; no mutation shard has source to test (DEC-112)"
-            printf 'mutants=0\nshards=[]\ntotal=0\n' >> "$GITHUB_OUTPUT"
+            printf 'mutants=0\nshards=[]\ntotal=0\nper_shard=1\n' >> "$GITHUB_OUTPUT"
           else
             cargo xtask ci mutants --plan >> "$GITHUB_OUTPUT"
           fi
 
-  # One shard per planned mutant up to DEC-498's 192, so each shard's slice is what it was with 192
-  # (DEC-538). Skipped when the plan counted none; `full` accepts that skip only then.
+  # Up to `k` planned mutants a shard, 192 shards at most (DEC-538, DEC-2607); at `k` of one each
+  # shard's slice is what it was with 192. A shard of more than one stops 480 s after the gate
+  # starts and fails if it has not finished (DEC-2607 item 5). Skipped when the plan counted none;
+  # `full` accepts that skip only then.
   mutants:
     name: mutants (${{ matrix.shard }}/${{ needs.mutants-plan.outputs.total }})
     needs: mutants-plan
@@ -737,6 +762,7 @@ jobs:
     env:
       MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/${{ needs.mutants-plan.outputs.total }}
       MANDATE_MUTANTS_PLANNED: ${{ needs.mutants-plan.outputs.mutants }}
+      MANDATE_MUTANTS_PER_SHARD: ${{ needs.mutants-plan.outputs.per_shard }}
       MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
       MANDATE_PG_REQUIRED: "1"
       MANDATE_OPENBAO_REQUIRED: "1"
@@ -774,6 +800,43 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo xtask ci mutants
+      # DEC-2607 item 1: what this shard cost, kept whatever the gate concluded, for the history.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: mutant-cost-${{ matrix.shard }}
+          path: target/mutant-cost.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # DEC-2607 item 2. Folds this run's shard records into the rolling `mutant-costs` history,
+  # whatever the matrix concluded. It judges nothing, and neither `fast` nor `full` needs it.
+  mutants-costs:
+    needs: [mutants-plan, mutants]
+    if: ${{ always() && needs.mutants-plan.result == 'success' && needs.mutants-plan.outputs.mutants != '0' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: select
+      - run: cargo xtask ci mutants-costs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutant-costs
+          path: target/mutant-costs/mutant-costs.json
+          retention-days: 14
 
   # DEC-688. The workspace API schemas' mutation sweep (`schemas/workspace-api/mutate_schemas.py`)
   # takes about seven minutes unsharded, so it runs here beside `full-checks`, which stays under ten

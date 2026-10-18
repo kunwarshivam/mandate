@@ -10,8 +10,9 @@
   envelope is paper and asks every opening; the plan runs the six steps in order and types only the
   codes it was shown; step 6 kills the demo's agent at agent scope only, before the record is
   exported; every gesture is in the run's workspace and never live; each run takes a fresh ULID
-  workspace founded for the demo owner; step 1 checks the API's refusal with no session and the
-  owner's sign-in, and names the signed-in read; step 5 registers a rule set, runs the backtest
+  workspace founded for the demo owner; step 1 checks the API's refusal with no session, the
+  owner's sign-in and the signed-in read of the run's agents, and step 5 the signed-in read of its
+  backtest; a body check holds only for what it names; step 5 registers a rule set, runs the backtest
   runner on its committed demo inputs and records the payload it stores, which is pinned to the
   runner's golden store; every gap cites what of it is on `main` and waits on
   a named lane with its backlog story; each step reads ready, partial or skipped from its parts;

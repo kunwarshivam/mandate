@@ -48,6 +48,18 @@ pub trait NewsReader {
     /// # Errors
     /// [`ReadError`] when the store cannot answer.
     fn news(&self, query: &TextQuery) -> Result<Vec<NewsItem>, ReadError>;
+
+    /// `news.search`'s read: the query, narrowed by the model's search terms, each matched inside
+    /// the data service and never sent to a source (§6.10, data-plane spec §4.6, HI-28). A reader
+    /// that cannot match terms keeps this default and answers [`ReadError::Unavailable`], which
+    /// reads nothing (rule 3).
+    ///
+    /// # Errors
+    /// [`ReadError`] when the store cannot answer.
+    fn search(&self, query: &TextQuery, terms: &[String]) -> Result<Vec<NewsItem>, ReadError> {
+        let _ = (query, terms);
+        Err(ReadError::Unavailable)
+    }
 }
 
 /// Filings from allowlisted sources (lane I3, E17-7).
