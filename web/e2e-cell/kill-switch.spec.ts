@@ -6,10 +6,13 @@ import { expect, test } from "@playwright/test";
  * Stop and presses one agent's kill switch, and the API records it. It writes the workspace and the
  * kill switch's command id to `OWLHEAD_CELL_RESULT`, which the scenario checks against the
  * workspace's control stream; with no agent in the workspace it writes the reason and presses
- * nothing, never falling back to a workspace-wide switch the owner did not ask for.
+ * nothing, never falling back to a workspace-wide switch the owner did not ask for. A named agent
+ * that is already stopped is a reason too: D10 offers nothing to confirm for a stopped agent.
  */
 const RESULT = process.env.OWLHEAD_CELL_RESULT ?? "";
 const WORKSPACE = process.env.OWLHEAD_WORKSPACE_ID ?? "";
+/** The agent to kill, when the driver names one; otherwise the first the API lists that is not stopped. */
+const AGENT = process.env.OWLHEAD_CELL_AGENT ?? "";
 
 const write = (body: Record<string, string>) => writeFileSync(RESULT, JSON.stringify(body));
 
@@ -18,11 +21,11 @@ test("the kill switch from web/, recorded through the API", async ({ page }) => 
   const agents = page.waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents` && r.ok());
   await page.goto("/agents");
   const listed = (await (await agents).json()) as { agents?: Array<{ agent_id: string; mode: string }> };
-  const agent = listed.agents?.find((a) => a.mode !== "stopped");
-  if (!agent) {
-    write({ error: "no agent in the API's workspace to kill" });
-    return;
-  }
+  const named = AGENT ? listed.agents?.find((a) => a.agent_id === AGENT) : undefined;
+  if (AGENT && !named) return write({ error: `agent ${AGENT} is not in the API's workspace` });
+  if (named?.mode === "stopped") return write({ error: `agent ${AGENT} is already stopped; web/'s kill switch screen offers nothing to confirm for a stopped agent` });
+  const agent = named ?? listed.agents?.find((a) => a.mode !== "stopped");
+  if (!agent) return write({ error: "no agent in the API's workspace to kill" });
   const detail = page.waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents/${agent.agent_id}` && r.ok());
   await page.goto(`/agents/${agent.agent_id}`);
   await detail;

@@ -137,11 +137,13 @@ fn answers(program: &str, arg: &str) -> bool {
 }
 
 /// Step 6 from `web/`, in `workspace`, the one the cell's API hosts (the scenario passes its own run's,
-/// never a fixed id): starts `next dev` against the cell's API as the demo owner, signs in through
+/// never a fixed id), and to `agent` when it names one (else the first listed agent not stopped; a
+/// named agent already stopped is an `Err`, since D10 offers nothing to confirm for it): starts
+/// `next dev` against the cell's API as the demo owner, signs in through
 /// the stub, opens Stop and presses one listed agent's kill switch, and returns what the API
 /// recorded. An `Err` is the gap the scenario prints: a missing tool, no agent to kill, or a run
 /// that failed or ran past [`GESTURE_POLLS`] (its log is named).
-pub fn kill_switch_from_web(workspace: &str) -> Result<WebGesture> {
+pub fn kill_switch_from_web(workspace: &str, agent: Option<&str>) -> Result<WebGesture> {
     if let Some(why) = gesture_missing(
         answers("npm", "--version"),
         Path::new("web/node_modules").exists(),
@@ -193,6 +195,7 @@ pub fn kill_switch_from_web(workspace: &str) -> Result<WebGesture> {
         .env("OWLHEAD_CELL_TLS_KEY", &key)
         .env("OWLHEAD_CELL_TLS_CERT", &cert)
         .env("OWLHEAD_CELL_RESULT", &result)
+        .env("OWLHEAD_CELL_AGENT", agent.unwrap_or_default())
         .stdout(output.try_clone()?)
         .stderr(output)
         .spawn()
@@ -227,6 +230,16 @@ pub fn kill_switch_from_web(workspace: &str) -> Result<WebGesture> {
             log.display()
         ),
     }
+}
+
+/// Prints what the gesture recorded, for `cargo xtask cell web-kill-switch`.
+pub fn report(gesture: Result<WebGesture>) -> Result<()> {
+    let gesture = gesture?;
+    eprintln!(
+        "==> {}: agent {} in workspace {}, command {}",
+        gesture.shows, gesture.agent_id, gesture.workspace, gesture.command_id
+    );
+    Ok(())
 }
 
 #[cfg(test)]
