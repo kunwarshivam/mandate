@@ -123,8 +123,11 @@ pub enum Drill {
     /// The journal's Postgres primary is killed; once CloudNativePG brings it back, a stream
     /// written before the kill still exports and verifies by journal spec §11.
     Restart,
-    /// The kill switch with the exporter, the API and the deployment manager down (OPS-4, E21-34);
-    /// skipped, and named, until its processes and `mandate agent kill` are on `main`.
+    /// The kill switch with the API, the deployment manager, the exporter, the model gateway and
+    /// the control plane down (OPS-4, E21-34): `mandate agent kill` at each scope and `agent pause`
+    /// commit through one-off Jobs under the control role, and the control stream holding them
+    /// exports and verifies by journal spec §11. The stream owners' `KillSwitchActivated` is
+    /// named as skipped until the runtime and executor run in the cell (DEC-2000 item 6).
     KillSwitch,
     /// With the synchronous standby fenced, an append waits: nothing commits on the primary alone,
     /// and once the standby is back the cluster takes appends again and every stream it holds
@@ -191,7 +194,7 @@ impl Drill {
             Self::Restart => {
                 "the stream lost across the restart: a stream id the restart did not keep"
             }
-            Self::KillSwitch => "none until the drill runs",
+            Self::KillSwitch => "the connection-scope kill switch never committed",
             Self::StandbyDown => {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
             }
@@ -210,7 +213,7 @@ impl Drill {
             Self::Journal | Self::Compose => "rehash_mismatch",
             Self::Egress => "reached the live trading host",
             Self::Restart => "export_stream_empty",
-            Self::KillSwitch => "",
+            Self::KillSwitch => "no kill_switch of scope connection",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
         }
@@ -223,8 +226,6 @@ impl Drill {
 pub enum Verdict {
     Held,
     Broken(String),
-    /// The drill's processes are not on `main` yet; named, never counted as held.
-    Skipped(String),
 }
 
 /// Whether docker, k3d and helm are all on the path; when one is not, the reason.
@@ -1177,7 +1178,7 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Egress => egress(seeded),
             Drill::Compose => compose_drill(seeded),
             Drill::Restart => restart(seeded),
-            Drill::KillSwitch => kill_switch(),
+            Drill::KillSwitch => kill_switch(seeded),
             Drill::StandbyDown => standby_down(seeded),
             Drill::Archive => archive(seeded),
         };
@@ -1185,7 +1186,6 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             restore()?;
         }
         match (verdict?, seeded) {
-            (Verdict::Skipped(why), _) => eprintln!("    skipped: {why}"),
             (Verdict::Held, false) => eprintln!("    held"),
             (Verdict::Broken(why), true) if why.contains(d.seeded_symptom()) => {
                 eprintln!("    caught the seeded bug: {why}");
@@ -2334,24 +2334,266 @@ fn restart(seeded: bool) -> Result<Verdict> {
     }
 }
 
-/// The kill-switch drill (OPS-4) needs the runtime and executor processes and `mandate agent
-/// kill` in the binary; until both are on `main` it is named as skipped.
-fn kill_switch() -> Result<Verdict> {
-    let built = processes()?
+/// The processes the kill-switch drill takes down before it brakes (OPS-4, E21-34): none of them
+/// may be needed for a kill switch or a pause to commit. A name the chart does not render yet has
+/// nothing to take down.
+pub const KILL_SWITCH_DOWN: [&str; 5] = [
+    "api",
+    "deploy-manager",
+    "exporter",
+    "model-gateway",
+    "control-plane",
+];
+
+/// The agent and the connection the kill-switch drill brakes.
+const BRAKE_AGENT: &str = "agent-a";
+const BRAKE_CONNECTION: &str = "conn_alpaca_paper_01";
+
+/// The owner commands a brake run must leave on its control stream, as `(command, scope,
+/// subject)`: each scope's kill switch and an agent pause.
+pub fn brakes_expected(workspace: &str) -> Vec<(String, String, String)> {
+    [
+        ("kill_switch", "agent", BRAKE_AGENT),
+        ("kill_switch", "connection", BRAKE_CONNECTION),
+        ("kill_switch", "workspace", workspace),
+        ("pause", "agent", BRAKE_AGENT),
+    ]
+    .into_iter()
+    .map(|(c, k, s)| (c.to_owned(), k.to_owned(), s.to_owned()))
+    .collect()
+}
+
+/// The CLI arguments of each brake [`brakes_expected`] names, for `workspace` and `journal`.
+fn brake_args(workspace: &str, journal: &str) -> Vec<Vec<String>> {
+    let tail = [
+        "--workspace",
+        workspace,
+        "--user",
+        "drill-owner",
+        "--journal",
+        journal,
+        "--store",
+        "/work/store",
+    ];
+    [
+        vec!["agent", "kill", "--agent", BRAKE_AGENT],
+        vec!["agent", "kill", "--connection", BRAKE_CONNECTION],
+        vec!["agent", "kill", "--workspace-wide"],
+        vec!["agent", "pause", "--agent", BRAKE_AGENT],
+    ]
+    .into_iter()
+    .map(|head| head.into_iter().chain(tail).map(String::from).collect())
+    .collect()
+}
+
+/// Which brakes of `expected` the exported segment lines in `logs` do not hold, as one report, or
+/// `None` when every one is there. Each line of an export is `{"body":<event>,"hash":…}`, read from
+/// its first `{`, so the container prefix [`job_logs`] puts on each log line is skipped; any other
+/// line is ignored.
+pub fn brakes_missing(logs: &str, expected: &[(String, String, String)]) -> Option<String> {
+    let mut seen = Vec::new();
+    for line in logs.lines() {
+        let Some(start) = line.find('{') else {
+            continue;
+        };
+        let Ok(line) = serde_json::from_str::<Value>(line[start..].trim()) else {
+            continue;
+        };
+        let body = &line["body"];
+        if body["event_type"] != "OwnerCommandIssued" {
+            continue;
+        }
+        let field = |k: &str| body["payload"][k].as_str().unwrap_or_default().to_owned();
+        seen.push((field("command"), field("scope"), field("subject")));
+    }
+    let missing: Vec<String> = expected
         .iter()
-        .filter(|p| p["built"] == true)
-        .filter_map(|p| p["name"].as_str().map(String::from))
-        .collect::<Vec<_>>();
-    let agents = ["runtime", "executor"]
+        .filter(|e| !seen.contains(e))
+        .map(|(command, scope, subject)| format!("no {command} of scope {scope} ({subject})"))
+        .collect();
+    (!missing.is_empty()).then(|| missing.join("; "))
+}
+
+/// The kill-switch drill (OPS-4, E21-34): takes down every [`KILL_SWITCH_DOWN`] process the chart
+/// runs, opens a control stream, commits each scope's kill switch and an agent pause through
+/// one-off control Jobs, then exports the stream, verifies it by journal spec §11, and checks
+/// every brake is in it; the processes it took down are scaled back after. Seeded, it never
+/// commits the connection-scope kill switch, which the check must name.
+fn kill_switch(seeded: bool) -> Result<Verdict> {
+    let selector = format!("mandate.dev/process in ({})", KILL_SWITCH_DOWN.join(","));
+    let downed = kubectl(&[
+        "get",
+        "deployment",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        &selector,
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name} {.spec.replicas}{\"\\n\"}{end}",
+    ])?;
+    let downed: Vec<(String, String)> = downed
+        .lines()
+        .filter_map(|l| l.split_once(' '))
+        .map(|(n, r)| (n.to_owned(), r.to_owned()))
+        .collect();
+    let scaled_down = downed.iter().try_for_each(|(name, _)| {
+        kubectl(&[
+            "scale",
+            "deployment",
+            name,
+            "--namespace",
+            NAMESPACE,
+            "--replicas=0",
+        ])
+        .map(drop)
+    });
+    let verdict = scaled_down.and_then(|()| brake_in_cell(&selector, seeded));
+    let unrestored: Vec<String> = downed
         .iter()
-        .all(|n| built.iter().any(|b| b == n));
-    Ok(Verdict::Skipped(if agents {
-        "the runtime and executor are built, but the drill itself lands with O4 (E21-34)".into()
+        .filter_map(|(name, replicas)| {
+            let replicas = format!("--replicas={replicas}");
+            kubectl(&[
+                "scale",
+                "deployment",
+                name,
+                "--namespace",
+                NAMESPACE,
+                &replicas,
+            ])
+            .err()
+            .map(|e| format!("{name}: {e:#}"))
+        })
+        .collect();
+    if unrestored.is_empty() {
+        verdict
     } else {
-        "the runtime and executor images are not on main yet (P1, #1451), nor `mandate agent \
-         kill` (O4, E21-34)"
-            .into()
-    }))
+        bail!(
+            "the drill's verdict was {verdict:?}, but these processes were not scaled back: {}",
+            unrestored.join("; ")
+        )
+    }
+}
+
+fn brake_in_cell(selector: &str, seeded: bool) -> Result<Verdict> {
+    let mut gone = false;
+    for _ in 0..POLLS {
+        let pods = kubectl(&[
+            "get",
+            "pod",
+            "--namespace",
+            NAMESPACE,
+            "--selector",
+            selector,
+            "-o",
+            "name",
+        ])?;
+        if pods.trim().is_empty() {
+            gone = true;
+            break;
+        }
+        sleep(Duration::from_secs(2));
+    }
+    if !gone {
+        return Ok(Verdict::Broken(format!(
+            "a pod of {} was still in the cell",
+            KILL_SWITCH_DOWN.join(", ")
+        )));
+    }
+    let id = run_id()?;
+    let workspace = format!("kill{id}");
+    let journal = "$(MANDATE_JOURNAL_DSN)";
+    let open = json!([
+        "workspace",
+        "open",
+        "--workspace",
+        workspace,
+        "--journal",
+        journal,
+        "--store",
+        "/work/store"
+    ]);
+    let mut runs = vec![open];
+    for (n, args) in brake_args(&workspace, journal).into_iter().enumerate() {
+        if seeded && n == 1 {
+            continue;
+        }
+        runs.push(json!(args));
+    }
+    for (n, args) in runs.iter().enumerate() {
+        let job = render(
+            &[format!("run.id=\"{id}{n}\""), format!("run.args={args}")],
+            Some("templates/run.yaml"),
+        )?;
+        let (done, logs) = run_job(job)?;
+        if !done {
+            return Ok(Verdict::Broken(format!(
+                "`mandate {}` failed in the cell:\n{logs}",
+                args.as_array()
+                    .map(|a| a
+                        .iter()
+                        .take(3)
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(" "))
+                    .unwrap_or_default()
+            )));
+        }
+    }
+    let mut verify = render(
+        &[
+            format!("verify.id=\"{id}\""),
+            format!("verify.streams={}", json!([format!("ctl:{workspace}")])),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    show_segment(&mut verify)?;
+    let (verified, logs) = run_job(verify)?;
+    if !verified {
+        return Ok(Verdict::Broken(format!(
+            "the control stream holding the brakes did not verify:\n{logs}"
+        )));
+    }
+    if let Some(missing) = brakes_missing(&logs, &brakes_expected(&workspace)) {
+        return Ok(Verdict::Broken(missing));
+    }
+    let built = processes()?;
+    let is_built = |name: &str| {
+        built
+            .iter()
+            .any(|p| p["name"] == name && p["built"] == true)
+    };
+    let owners = if is_built("runtime") && is_built("executor") {
+        "the runtime and executor are built, but nothing in the drill starts them for an agent yet"
+    } else {
+        "the runtime and executor do not run in the cell yet"
+    };
+    eprintln!(
+        "    stream owners: skipped: {owners}, so each scope's KillSwitchActivated in every stream \
+         owner waits on them and on the executor's connection and workspace scopes (E7-4; \
+         DEC-2000 item 6)"
+    );
+    Ok(Verdict::Held)
+}
+
+/// Adds an init container after the exports that prints the first segment, so the Job's logs
+/// carry the exported events for [`brakes_missing`].
+fn show_segment(jobs: &mut [Value]) -> Result<()> {
+    let job = jobs.first_mut().context("the verify Job did not render")?;
+    let spec = &mut job["spec"]["template"]["spec"];
+    let image = spec["initContainers"][0]["image"].clone();
+    let show = json!({
+        "name": "show-segment",
+        "image": image,
+        "command": ["cat", "/work/segment-0.jsonl"],
+        "securityContext": spec["initContainers"][0]["securityContext"].clone(),
+        "resources": spec["initContainers"][0]["resources"].clone(),
+        "volumeMounts": [{"name": "work", "mountPath": "/work"}]
+    });
+    spec["initContainers"]
+        .as_array_mut()
+        .context("the verify Job has no init containers")?
+        .push(show);
+    Ok(())
 }
 
 /// The name of the journal's pod in `role` (`primary` or `replica`).
@@ -3116,6 +3358,18 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
             "`mandate workspace open` failed: {e:#}"
         )));
     }
+    for args in brake_args(&workspace, &control) {
+        let run = ["run", "--rm", "-v", &work, "control"]
+            .into_iter()
+            .chain(args.iter().map(String::as_str))
+            .collect::<Vec<_>>();
+        if let Err(e) = compose_cmd(&run) {
+            return Ok(Verdict::Broken(format!(
+                "`mandate {}` failed under Compose: {e:#}",
+                args.join(" ")
+            )));
+        }
+    }
     let verify_dsn = dsn("mandate_verify");
     compose_cmd(&[
         "run",
@@ -3146,7 +3400,11 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
         "verify",
         "/work/segment.jsonl",
     ]) {
-        Ok(_) => Ok(Verdict::Held),
+        Ok(_) => {
+            let segment = as_root_in(COMPOSE_SECRETS, "cat /s/work/segment.jsonl")?;
+            Ok(brakes_missing(&segment, &brakes_expected(&workspace))
+                .map_or(Verdict::Held, Verdict::Broken))
+        }
         Err(e) => Ok(Verdict::Broken(format!(
             "the exported control stream did not verify: {e:#}"
         ))),
@@ -3706,6 +3964,105 @@ mod tests {
 
     fn process(name: &str, built: bool) -> Value {
         json!({"name": name, "built": built})
+    }
+
+    fn command_line(command: &str, scope: &str, subject: &str) -> String {
+        json!({
+            "body": {
+                "event_type": "OwnerCommandIssued",
+                "payload": {"command": command, "scope": scope, "subject": subject}
+            },
+            "hash": "00"
+        })
+        .to_string()
+    }
+
+    /// The kill-switch drill's check: every brake must be on the exported stream, other lines and
+    /// events are ignored, and a missing connection-scope kill switch reads as the seeded symptom.
+    #[test]
+    fn the_brake_check_names_each_missing_brake() {
+        let expected = brakes_expected("kill1");
+        let all: Vec<String> = expected
+            .iter()
+            .map(|(c, k, s)| command_line(c, k, s))
+            .chain([
+                "init: exporting".to_owned(),
+                "{\"body\":{\"event_type\":\"StreamOpened\"}}".to_owned(),
+            ])
+            .collect();
+        assert_eq!(brakes_missing(&all.join("\n"), &expected), None);
+        let prefixed: Vec<String> = all
+            .iter()
+            .map(|l| format!("[pod/verify-1-abc/show-segment] {l}"))
+            .collect();
+        assert_eq!(
+            brakes_missing(&prefixed.join("\n"), &expected),
+            None,
+            "job_logs' container prefix is skipped"
+        );
+        let without_connection: Vec<&String> =
+            all.iter().filter(|l| !l.contains("connection")).collect();
+        let joined = without_connection
+            .iter()
+            .map(|l| l.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let missing = brakes_missing(&joined, &expected).unwrap();
+        assert!(
+            missing.contains(Drill::KillSwitch.seeded_symptom()),
+            "{missing}"
+        );
+        assert_eq!(
+            missing,
+            "no kill_switch of scope connection (conn_alpaca_paper_01)"
+        );
+        let wrong_workspace = brakes_missing(&all.join("\n"), &brakes_expected("kill2")).unwrap();
+        assert_eq!(wrong_workspace, "no kill_switch of scope workspace (kill2)");
+        let pause_as_kill = command_line("kill_switch", "agent", "agent-a");
+        let everything_but_pause: Vec<String> = expected
+            .iter()
+            .filter(|(c, _, _)| c != "pause")
+            .map(|(c, k, s)| command_line(c, k, s))
+            .chain([pause_as_kill])
+            .collect();
+        assert_eq!(
+            brakes_missing(&everything_but_pause.join("\n"), &expected).as_deref(),
+            Some("no pause of scope agent (agent-a)")
+        );
+    }
+
+    /// Every brake the drill commits names exactly one scope flag, and the processes it takes down
+    /// are the ones E21-34 names.
+    #[test]
+    fn the_brakes_reach_each_scope_once() {
+        let args = brake_args("kill1", "$(MANDATE_JOURNAL_DSN)");
+        assert_eq!(args.len(), brakes_expected("kill1").len());
+        for (run, (command, scope, _)) in args.iter().zip(brakes_expected("kill1")) {
+            let verb = if command == "pause" { "pause" } else { "kill" };
+            assert_eq!(&run[..2], ["agent", verb]);
+            let flag = match scope.as_str() {
+                "agent" => "--agent",
+                "connection" => "--connection",
+                _ => "--workspace-wide",
+            };
+            let flags = ["--agent", "--connection", "--workspace-wide"];
+            let named: Vec<&String> = run.iter().filter(|a| flags.contains(&a.as_str())).collect();
+            assert_eq!(named, [flag], "{run:?}");
+            assert!(
+                run.windows(2).any(|w| w == ["--workspace", "kill1"]),
+                "{run:?}"
+            );
+        }
+        assert_eq!(
+            KILL_SWITCH_DOWN,
+            [
+                "api",
+                "deploy-manager",
+                "exporter",
+                "model-gateway",
+                "control-plane"
+            ]
+        );
     }
 
     #[test]

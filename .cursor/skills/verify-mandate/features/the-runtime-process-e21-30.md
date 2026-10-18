@@ -2,8 +2,8 @@
 
 - **Spec:** [infrastructure design](../../../../docs/design/infrastructure.md) §3.1, §3.4, §3.6;
   [journal spec](../../../../docs/specs/journal.md) §5.1 (writer epochs), §9 rule 12; ADR-0001
-  ES-06, ES-20; DEC-17, DEC-914, DEC-968, DEC-994, DEC-1012, DEC-1013, DEC-1014, DEC-1015, DEC-1016, DEC-2208;
-  trading spec §11 (the startup hold).
+  ES-06, ES-20; DEC-17, DEC-914, DEC-968, DEC-994, DEC-1012, DEC-1013, DEC-1014, DEC-1015, DEC-1016,
+  DEC-2208; trading spec §11 (the startup hold).
 - **Code:** `mandate-daemon` (`crates/mandate-daemon`): `src/runtime.rs` (`RuntimeProcess`: one
   writer epoch on the agent stream, the control stream read before the account stream and the
   account stream before the clock stream, the account stream the connection's establishment names

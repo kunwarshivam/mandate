@@ -17,7 +17,7 @@ use mandate_cli::control::{ControlError, ControlJournal, Owner, Submitted};
 use mandate_cli::deploy::deploy;
 use mandate_cli::gestures::{AgentCommand, VersionCommand, confirmation, deployment};
 use mandate_cli::version::{admitted, confirm, create};
-use mandate_cli::{Cli, Command};
+use mandate_cli::{Cli, Command, brake};
 use mandate_journal::{AppendOutcome, ArtifactStore, Environment};
 use proptest::prelude::*;
 use proptest::test_runner::TestRunner;
@@ -598,7 +598,9 @@ fn the_gestures_take_an_environment_paper_by_default() {
             let args = match Cli::try_parse_from(&words).unwrap().command {
                 Command::Version(VersionCommand::Create(args)) => args.owner,
                 Command::Version(VersionCommand::Confirm(args)) => args.owner,
-                Command::Agent(AgentCommand::Deploy(args)) => args.owner,
+                Command::Agent(brake::AgentCommand::Gesture(AgentCommand::Deploy(args))) => {
+                    args.owner
+                }
                 other => panic!("{line}: {other:?}"),
             };
             let got = args.owner().map(|o| o.environment).map_err(|e| match e {

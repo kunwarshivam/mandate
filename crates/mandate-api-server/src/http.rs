@@ -123,6 +123,14 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             get(routes::one_approval).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/workspaces/{workspace}/backtests/{backtest}",
+            get(routes::one_backtest).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/evaluations/{evaluation}",
+            get(routes::one_evaluation).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/agents/{agent}/pause",
             post(writes::pause).fallback(otherwise.clone()),
         )

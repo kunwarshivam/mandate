@@ -16,10 +16,12 @@
 //! manifests (E5-8). `db migrate` applies the journal's roles, schema and migrations as the
 //! deploy step before any process starts (E21-50). `backtest record` journals a run
 //! `mandate-backtest-runner` stored, re-checking every artifact it names (E4-5, DEC-1144).
-//! `approvals` and `agent` are M7's owner control: the inbox, the owner's answers, and the owner's
-//! commands, each committed to the workspace control stream (E8-1 to E8-3). Their `clap` commands
-//! land once `mandate-journal` registers the control stream's schemas, without which a real journal
-//! refuses every event they commit (DEC-257 item 17, DEC-279 item 10). `vault import` stores the
+//! `agent pause` and `agent kill` reach an agent, a connection or the workspace with nothing but
+//! the journal (E21-34). `approvals` and `agent` are M7's owner control: the inbox, the owner's
+//! answers, and the owner's commands, each committed to the workspace control stream (E8-1 to
+//! E8-3). Their `clap` commands land once `mandate-journal` registers the control stream's schemas,
+//! without which a real journal refuses every event they commit (DEC-257 item 17, DEC-279 item
+//! 10). `vault import` stores the
 //! platform's OAuth client secret in the demo host's local vault, from stdin (E10-13 V1).
 
 use clap::{Parser, Subcommand};
@@ -28,6 +30,7 @@ pub mod agent;
 pub mod approvals;
 pub mod artifact;
 pub mod backtest;
+pub mod brake;
 pub mod config;
 pub mod connection;
 pub mod control;
@@ -92,9 +95,9 @@ pub enum Command {
     /// Create a mandate version, or show its confirmation code and confirm it, in paper.
     #[command(subcommand)]
     Version(gestures::VersionCommand),
-    /// Show an agent's deployment code, or deploy it with a confirmed version, in paper.
+    /// Deploy an agent, or pause it or commit a kill switch at agent, connection or workspace scope.
     #[command(subcommand)]
-    Agent(gestures::AgentCommand),
+    Agent(brake::AgentCommand),
     /// Import a platform secret into the demo host's local vault, from stdin only.
     #[command(subcommand)]
     Vault(vault::VaultCommand),
