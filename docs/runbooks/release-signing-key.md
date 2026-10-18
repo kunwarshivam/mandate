@@ -31,8 +31,10 @@ its password anywhere but GitHub's secret form.
 
 3. **Store the two secrets** under that environment's "Environment secrets", not as repository
    secrets:
-   - `RELEASE_SIGNING_KEY`: the whole contents of `cosign.key`, from
-     `-----BEGIN ENCRYPTED SIGSTORE PRIVATE KEY-----` to the end line.
+   - `RELEASE_SIGNING_KEY`: `cosign.key` as one line of base64, never the multi-line file
+     itself, because GitHub masks a multi-line secret in logs unreliably. Make the line with
+     `base64 -w0 cosign.key` on Linux or `base64 -i cosign.key | tr -d '\n'` on macOS, and paste
+     the output (one long line, no spaces) into the form. Don't save it in a file.
    - `RELEASE_SIGNING_PASSWORD`: the password from step 1.
 
 4. **Put the private half away.** Keep `cosign.key` only in your password manager, or delete it.
@@ -47,12 +49,14 @@ its password anywhere but GitHub's secret form.
 ## Each release: sign it
 
 1. Open Actions → `release` → "Run workflow", choose the branch `main`, and run it.
-2. The builds and `compare` run as on every `main` commit. Then each arch's `release-signing` job
-   waits for your approval. Choose "Review deployments", tick `release-signing`, and approve.
-3. Each job rebuilds the release, requires the digest its `build-a` printed, signs every binary
-   and `SHA256SUMS`, and then runs the signed `mandate-agentd` at tier `production`. The job
-   passes only if that binary starts, so a green job means the release is signed by the key the
-   binaries trust.
+2. The builds and `compare` run as on every `main` commit, then `release-signing-build` rebuilds
+   the release for each arch. Then each arch's `release-signing` job waits for your approval.
+   Choose "Review deployments", tick `release-signing`, and approve.
+3. `release-signing` checks the release against `build-a`'s digest and signs every binary and
+   `SHA256SUMS`. It runs no build. Then `release-signing-check` verifies each signature against
+   the committed public half and runs the signed `mandate-agentd` at tier `production`. It passes
+   only if that binary starts, so a green run means the release is signed by the key the binaries
+   trust.
 4. The signatures are kept for 90 days as the run's artifacts `release-signatures-<commit>-amd64`
    and `release-signatures-<commit>-arm64`, with `SHA256SUMS`. To check one by hand:
 
@@ -61,7 +65,7 @@ its password anywhere but GitHub's secret form.
      --insecure-ignore-tlog=true SHA256SUMS
    ```
 
-**If the job fails at "did not start at tier production",** the key in the environment is not
+**If `release-signing-check` fails at a signature or at "did not start at tier production",** the key in the environment is not
 the one in `RELEASE_KEYS`: the secrets hold a different pair from the committed public half.
 Nothing was published, and nothing changes until the two match.
 
@@ -69,5 +73,5 @@ Nothing was published, and nothing changes until the two match.
 
 Generate a new pair as above, replace both secrets, and add the new public half to `RELEASE_KEYS`
 in a PR, with the fingerprint its test pins. To revoke the old key, remove its public half in the
-same PR. Releases it signed then stop starting outside dev and CI once the new binaries roll out. If you think the secret leaked,
-delete it from the environment first, then rotate.
+same PR. Releases it signed then stop starting outside dev and CI once the new binaries roll out.
+If you think the secret leaked, delete it from the environment first, then rotate.
