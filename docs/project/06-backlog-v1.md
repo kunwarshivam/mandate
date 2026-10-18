@@ -2815,7 +2815,13 @@ enables `live` (ES-23, OPS-5).
   executor's exactly its own connection; a vault outage stops no running executor before its lease
   expires (E21-9); no secret is ever an environment variable; the OpenBao dev-server mode is
   refused outside tests; and a canary-secret scan of logs, metrics and the journal finds nothing
-  (OPS-1). Builds on E10-13's V1 (DEC-692) being complete.
+  (OPS-1). Builds on E10-13's V1 (DEC-692) being complete. *Slice 1* ([DEC-977](decisions/DEC-977.md),
+  #1458): the crate, both backends, one conformance suite, the policies, leases and grants.
+  *Slice 2* ([DEC-2019](decisions/DEC-2019.md)): the cell's OpenBao chart, in server mode on raft
+  over TLS 1.3, reached only by the processes whose egress names it, initialized and unsealed by
+  `cargo xtask cell up`. *Left:* provisioning the policies and roles in the cell, each process's
+  secret id as a mounted file, and the egress drill's vault probe; the audit device; the metrics
+  and journal parts of the canary scan once either carries a vault operation.
 - **E21-33 (Proposed, M8; SC; lane D1; journal spec first if needed)** As an owner, I want a
   deployment manager that keeps each deployed agent's processes running and leaves a crash-looping
   agent paused, so that my agent is managed without anyone watching (design §3.4, §11 "Bad
