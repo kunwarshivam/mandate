@@ -38,14 +38,14 @@ break-glass path, from your own machine, for when CI cannot run.
    Flux and the cluster read them anonymously.
 4. **The secrets, in your shell only**, never from a file in the repository:
    - `JOURNAL_ARCHIVE_ACCESS_KEY_ID` and `JOURNAL_ARCHIVE_SECRET_KEY`: Barman's bucket-scoped R2
-     token, which OpenTofu mints; its sensitive outputs give the access key id and the secret
-     (IAC's `deploy/tofu/README.md` names them).
+     token, which OpenTofu mints: its sensitive outputs `archive_access_key_id` and
+     `archive_secret_access_key`.
    - `CLOUDFLARED_TUNNEL_TOKEN`: the tunnel's token, the sensitive OpenTofu output `tunnel_token` of
      `deploy/tofu/environments/staging`.
 
    ```sh
-   export JOURNAL_ARCHIVE_ACCESS_KEY_ID="$(tofu -chdir=deploy/tofu/environments/staging output -raw <archive key id output>)"
-   export JOURNAL_ARCHIVE_SECRET_KEY="$(tofu -chdir=deploy/tofu/environments/staging output -raw <archive secret output>)"
+   export JOURNAL_ARCHIVE_ACCESS_KEY_ID="$(tofu -chdir=deploy/tofu/environments/staging output -raw archive_access_key_id)"
+   export JOURNAL_ARCHIVE_SECRET_KEY="$(tofu -chdir=deploy/tofu/environments/staging output -raw archive_secret_access_key)"
    export CLOUDFLARED_TUNNEL_TOKEN="$(tofu -chdir=deploy/tofu/environments/staging output -raw tunnel_token)"
    ```
 
