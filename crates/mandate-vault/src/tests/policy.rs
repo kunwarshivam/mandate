@@ -4,7 +4,8 @@
 use mandate_connections::record::ConnectionId;
 
 use crate::policy::{
-    Access, Identity, Mounts, SecretPath, allows, kv_path, openbao_policy, policy_name, role_name,
+    Access, Identity, Mounts, PlatformSecret, SecretPath, allows, kv_path, openbao_policy,
+    policy_name, role_name,
 };
 
 fn c(id: &str) -> ConnectionId {
@@ -154,6 +155,10 @@ fn blocks(hcl: &str) -> Vec<(String, String)> {
 #[test]
 fn each_policy_is_the_table_with_no_wildcard() {
     let connections = [c("c1"), c("c2")];
+    let platform_paths: Vec<String> = PlatformSecret::ALL
+        .iter()
+        .map(|s| format!("mandate/data/{}", kv_path(&SecretPath::Platform(*s))))
+        .collect();
     for identity in identities() {
         let hcl = openbao_policy(&identity, &connections, &Mounts::default());
         assert!(
@@ -163,7 +168,7 @@ fn each_policy_is_the_table_with_no_wildcard() {
         let got = blocks(&hcl);
         let data_blocks = got
             .iter()
-            .filter(|(p, _)| p.starts_with("mandate/"))
+            .filter(|(p, _)| p.starts_with("mandate/") && !platform_paths.contains(p))
             .count();
         let allowed = [Access::Read, Access::Write, Access::Delete]
             .iter()
@@ -175,13 +180,21 @@ fn each_policy_is_the_table_with_no_wildcard() {
             "no block beyond the table: {identity:?}: {hcl}"
         );
         let auth_blocks = got.iter().filter(|(p, _)| p.starts_with("auth/")).count();
+        let platform_blocks = got
+            .iter()
+            .filter(|(p, _)| platform_paths.contains(p))
+            .count();
         let want_auth = if identity == Identity::ConnectionManager {
             8
         } else {
             0
         };
         assert_eq!(auth_blocks, want_auth, "{identity:?}: {hcl}");
-        assert_eq!(got.len(), data_blocks + auth_blocks, "{identity:?}: {hcl}");
+        assert_eq!(
+            got.len(),
+            data_blocks + auth_blocks + platform_blocks,
+            "{identity:?}: {hcl}"
+        );
         for access in [Access::Read, Access::Write, Access::Delete] {
             for path in paths() {
                 let (prefix, caps) = match access {
