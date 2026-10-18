@@ -1,5 +1,6 @@
-//! What the executor reads from streams it does not write (DEC-2003 items 3 to 5): which agents
-//! trade on its account, from the control stream, and the kill switches each agent's stream holds.
+//! What the executor reads from streams it does not write (DEC-2003 items 3 to 5, DEC-2032): which
+//! agents trade on its account, from the control stream, and the kill switches and order proposals
+//! each agent's stream holds.
 //!
 //! Every reader here is a pure function of journaled rows. A row the executor must act on and
 //! cannot read is never skipped: it is [`Unreadable`], and the process stops rather than guess
@@ -7,9 +8,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::{Value, parse};
 use mandate_executor::{
-    AccountScope, AgentId, EventId, FoldedEvent, Initiator, OwnerConfirmation, Seq,
+    AccountScope, AgentId, EventId, FoldedEvent, Initiator, OwnerConfirmation, Purpose, Seq,
+    TimeInForce,
 };
 use mandate_journal::{Environment, StoredEvent};
 use mandate_num::{Price, Qty};
@@ -189,6 +192,90 @@ fn confirmation(payload: &Value) -> Result<Option<OwnerConfirmation>, Unreadable
     }))
 }
 
+/// One order the runtime proposed on an agent's stream: its `IntentProposed`, identified by its
+/// event id (journal spec §2, §9.1), which the executor hands to its core as the handoff the
+/// runtime would make in one process (DEC-2032 item 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Proposal {
+    pub intent: EventId,
+    pub instrument: InstrumentId,
+    pub side: Side,
+    pub qty: Qty,
+    pub limit: Price,
+    pub tif: TimeInForce,
+    pub purpose: Purpose,
+}
+
+/// The orders one agent's stream proposes, in stream order. An opening or an increase that a later
+/// `KillSwitchActivated`, or a later `AgentModeChanged` to any mode but `normal`, follows is left
+/// out: the agent stopped wanting it before the executor took it, and leaving it out adds no risk
+/// (`AGENTS.md` rule 3; DEC-2032 item 2). An owner's exit at the market is not a proposal this
+/// slice hands, since the core takes only limit orders from a handoff (DEC-2032 item 4).
+///
+/// # Errors
+/// [`Unreadable`] for an `IntentProposed` whose members do not read, or that is not a limit order.
+pub fn proposals(rows: &[FoldedEvent]) -> Result<Vec<Proposal>, Unreadable> {
+    let mut proposed: Vec<Proposal> = Vec::new();
+    for row in rows {
+        let text = |member: &str| row.payload.get(member).and_then(Value::as_str);
+        let stops = match row.event_type.as_str() {
+            "IntentProposed"
+                if text("purpose") == Some("owner_exit") && text("type") == Some("market") =>
+            {
+                false
+            }
+            "IntentProposed" => {
+                proposed.push(proposal(row)?);
+                false
+            }
+            "KillSwitchActivated" => true,
+            "AgentModeChanged" => text("to") != Some("normal"),
+            _ => false,
+        };
+        if stops {
+            proposed.retain(|order| !order.purpose.adds_risk());
+        }
+    }
+    Ok(proposed)
+}
+
+/// An `IntentProposed`'s limit order (journal spec §9.1).
+fn proposal(row: &FoldedEvent) -> Result<Proposal, Unreadable> {
+    let text = |member: &str| row.payload.get(member).and_then(Value::as_str);
+    if text("type") != Some("limit") {
+        return Err(Unreadable);
+    }
+    let side = match text("side") {
+        Some("buy") => Side::Buy,
+        Some("sell") => Side::Sell,
+        _ => return Err(Unreadable),
+    };
+    let tif = match text("tif") {
+        Some("day") => TimeInForce::Day,
+        Some("gtc") => TimeInForce::Gtc,
+        Some("ioc") => TimeInForce::Ioc,
+        _ => return Err(Unreadable),
+    };
+    let purpose = match text("purpose") {
+        Some("open") => Purpose::Open,
+        Some("increase") => Purpose::Increase,
+        Some("discretionary_exit") => Purpose::DiscretionaryExit,
+        Some("risk_exit") => Purpose::RiskExit,
+        Some("owner_exit") => Purpose::OwnerExit,
+        _ => return Err(Unreadable),
+    };
+    let member = |name: &str| text(name).ok_or(Unreadable);
+    Ok(Proposal {
+        intent: row.event_id.clone(),
+        instrument: InstrumentId::new(member("instrument_id")?).map_err(|_| Unreadable)?,
+        side,
+        qty: Qty::parse(member("qty")?).map_err(|_| Unreadable)?,
+        limit: Price::parse(member("limit_price")?).map_err(|_| Unreadable)?,
+        tif,
+        purpose,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use mandate_canon::{Key, Object};
@@ -333,5 +420,100 @@ mod tests {
             assert_eq!(confirmation(&others)?, None);
         }
         Ok(())
+    }
+
+    fn proposed(id: &str, purpose: &str, kind: &str, tif: &str) -> FoldedEvent {
+        row(
+            id,
+            "IntentProposed",
+            Some("decision"),
+            &[
+                ("instrument_id", s("AAPL")),
+                ("limit_price", s("150")),
+                ("purpose", s(purpose)),
+                ("qty", s("10")),
+                ("side", s("sell")),
+                ("tif", s(tif)),
+                ("type", s(kind)),
+            ],
+        )
+    }
+
+    fn mode(to: &str) -> FoldedEvent {
+        row(
+            "m1",
+            "AgentModeChanged",
+            None,
+            &[("from", s("normal")), ("to", s(to)), ("reason", s("owner"))],
+        )
+    }
+
+    fn ids(rows: &[FoldedEvent]) -> Result<Vec<String>, Unreadable> {
+        Ok(proposals(rows)?
+            .into_iter()
+            .map(|proposal| proposal.intent.0)
+            .collect())
+    }
+
+    #[test]
+    fn every_purpose_and_time_in_force_reads() -> Result<(), Unreadable> {
+        for (text, purpose) in [
+            ("open", Purpose::Open),
+            ("increase", Purpose::Increase),
+            ("discretionary_exit", Purpose::DiscretionaryExit),
+            ("risk_exit", Purpose::RiskExit),
+            ("owner_exit", Purpose::OwnerExit),
+        ] {
+            let read = proposals(&[proposed("i1", text, "limit", "day")])?;
+            assert_eq!(
+                read.iter().map(|p| p.purpose).collect::<Vec<_>>(),
+                [purpose]
+            );
+        }
+        for (text, tif) in [
+            ("day", TimeInForce::Day),
+            ("gtc", TimeInForce::Gtc),
+            ("ioc", TimeInForce::Ioc),
+        ] {
+            let read = proposals(&[proposed("i1", "risk_exit", "limit", text)])?;
+            assert_eq!(read.iter().map(|p| p.tif).collect::<Vec<_>>(), [tif]);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_later_switch_or_stopping_mode_drops_openings_and_increases_only() -> Result<(), Unreadable>
+    {
+        let waiting = [
+            proposed("open", "open", "limit", "day"),
+            proposed("increase", "increase", "limit", "day"),
+            proposed("exit", "discretionary_exit", "limit", "day"),
+        ];
+        for stop in [switch("k1", "owner", "c1"), mode("paused")] {
+            let mut rows = waiting.to_vec();
+            rows.push(stop);
+            rows.push(proposed("after", "open", "limit", "day"));
+            assert_eq!(ids(&rows)?, ["exit", "after"]);
+        }
+        let mut resumed = waiting.to_vec();
+        resumed.push(mode("normal"));
+        assert_eq!(ids(&resumed)?, ["open", "increase", "exit"]);
+        Ok(())
+    }
+
+    #[test]
+    fn only_an_owners_exit_at_the_market_is_passed_over() {
+        assert_eq!(
+            ids(&[proposed("i1", "owner_exit", "market", "day")]),
+            Ok(Vec::new())
+        );
+        assert_eq!(
+            ids(&[proposed("i1", "risk_exit", "market", "day")]),
+            Err(Unreadable)
+        );
+        assert_eq!(
+            ids(&[proposed("i1", "owner_exit", "stop", "day")]),
+            Err(Unreadable)
+        );
     }
 }

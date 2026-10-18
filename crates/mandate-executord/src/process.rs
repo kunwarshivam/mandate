@@ -1,4 +1,4 @@
-//! One broker account's executor as a long-running process (E21-30, DEC-2003).
+//! One broker account's executor as a long-running process (E21-30, DEC-2003, DEC-2032).
 
 use std::collections::{BTreeSet, VecDeque};
 use std::time::Duration;
@@ -8,16 +8,16 @@ use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
     BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
-    ExecutorState, IdGen, Input, InstrumentSnapshot, KillScope, MandateView, Ports,
-    ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
+    ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff, IntentId,
+    KillScope, MandateView, Ports, ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
-use mandate_process::{Input as Lifecycled, Kind, Lifecycle, State};
+use mandate_process::{Action, Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::UtcNanos;
 
-use crate::follow::{Switch, agents_of, folded, switches};
+use crate::follow::{Proposal, Switch, agents_of, folded, proposals, switches};
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -206,7 +206,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// One pass of the loop at the injected time `now`: an input in doubt first, then requests
     /// left unsent and a due reconciliation, then (once started) every kill switch the account's
-    /// agents' streams hold that the fold has not applied, then the latest tick. Before the start,
+    /// agents' streams hold that the fold has not applied, then the latest tick, then every exit
+    /// they propose that the fold has not taken (DEC-2032 item 1). Before the start,
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
     /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
@@ -236,7 +237,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
-        let Some((switches, unreadable)) = self.switches(now, &mut alerts) else {
+        let Some((switches, proposed, unreadable)) = self.switches(now, &mut alerts) else {
             return alerts;
         };
         for (agent, switch) in switches {
@@ -248,8 +249,18 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return alerts;
         }
-        if let Some(tick) = tick {
-            self.hand(now, now, Input::Tick(tick), &mut alerts, 0);
+        if let Some(tick) = tick
+            && !self.hand(now, now, Input::Tick(tick), &mut alerts, 0)
+        {
+            return alerts;
+        }
+        for (agent, proposal) in proposed {
+            if !proposal.purpose.adds_risk()
+                && self.lifecycle.permits(Action::RiskExit)
+                && !self.take(now, agent, proposal, &mut alerts)
+            {
+                return alerts;
+            }
         }
         alerts
     }
@@ -340,11 +351,15 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// that cannot be read. A control record that does not read stops the process at once, since
     /// the agents it names are unknown; a row on one agent's stream that does not read stops it only
     /// after the other agents' switches are applied (DEC-85, `AGENTS.md` rule 13).
+    #[allow(
+        clippy::type_complexity,
+        reason = "the switches, the proposals, and whether a row did not read"
+    )]
     fn switches(
         &mut self,
         now: UtcNanos,
         alerts: &mut Vec<Alert>,
-    ) -> Option<(Vec<(AgentId, Switch)>, bool)> {
+    ) -> Option<(Vec<(AgentId, Switch)>, Vec<(AgentId, Proposal)>, bool)> {
         let control = self.control.clone()?;
         let rows = self.follow(&control, alerts)?;
         let Ok(agents) = agents_of(&rows, self.state.scope(), self.environment) else {
@@ -353,6 +368,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         };
         let workspace = self.state.scope().workspace.0.clone();
         let mut pending = Vec::new();
+        let mut proposed = Vec::new();
         let mut unreadable = false;
         for agent in agents {
             let Some(stream) = StreamId::parse(&format!("agent:{workspace}:{}", agent.0)) else {
@@ -366,17 +382,28 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 .filter(|row| row.environment == self.environment.as_str())
                 .map(folded)
                 .collect();
-            let Ok(held) = read.and_then(|rows| switches(&rows)) else {
+            let Ok((held, asked)) = read.and_then(|rows| Ok((switches(&rows)?, proposals(&rows)?)))
+            else {
                 unreadable = true;
                 continue;
             };
+            proposed.extend(
+                asked
+                    .into_iter()
+                    .filter(|proposal| {
+                        self.state
+                            .intent(&IntentId(proposal.intent.clone()))
+                            .is_none()
+                    })
+                    .map(|proposal| (agent.clone(), proposal)),
+            );
             pending.extend(
                 held.into_iter()
                     .filter(|switch| !self.state.applied_copy(&switch.switch))
                     .map(|switch| (agent.clone(), switch)),
             );
         }
-        Some((pending, unreadable))
+        Some((pending, proposed, unreadable))
     }
 
     /// Applies one switch as the core's own kill switch of that agent alone, never an account-wide
@@ -395,6 +422,30 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             cause: Some(switch.switch),
         };
         self.hand(now, now, Input::Command(command), alerts, 0)
+    }
+
+    /// Hands one exit as the handoff the runtime would make in one process (DEC-2032 item 1).
+    fn take(
+        &mut self,
+        now: UtcNanos,
+        agent: AgentId,
+        proposal: Proposal,
+        alerts: &mut Vec<Alert>,
+    ) -> bool {
+        let handoff = IntentHandoff {
+            intent_id: IntentId(proposal.intent),
+            agent,
+            tif: Some(proposal.tif),
+            body: IntentBody::Order {
+                instrument: proposal.instrument,
+                side: proposal.side,
+                qty: proposal.qty,
+                limit: proposal.limit,
+                purpose: proposal.purpose,
+                protection: None,
+            },
+        };
+        self.hand(now, now, Input::Intent(handoff), alerts, 0)
     }
 
     /// Hands `input` to the core, journals its drafts as one batch, and only then sends what it
