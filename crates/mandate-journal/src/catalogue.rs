@@ -85,6 +85,8 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         "ModelInvocationRecorded" => entry(&[Agent, Control], &[MOD]),
         "ThesisProposed" | "ThesisRevised" => entry(AGENT, &[MAN, MOD]),
         "ThesisInvalidated" => entry(AGENT, &[MAN]),
+        "RunStarted" | "ToolCallRecorded" | "ToolResultRecorded" | "RunSummaryRecorded"
+        | "RunEnded" => entry(AGENT, &[MOD]),
         "ModelOutputRecorded"
         | "DecisionMade"
         | "IntentProposed"
