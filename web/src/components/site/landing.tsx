@@ -15,6 +15,7 @@ import { OpenApp } from "./open-app";
 import { ModeChart, Perch, TitleOwl } from "./owls";
 import { Blink, UnderConstruction, Window } from "./retro";
 import { SiteFooter } from "./site-footer";
+import { SIGN_IN_HREF } from "@/lib/hosts";
 
 export const HEADLINE = "Owlhead";
 export const SUBHEAD = "A trading agent for your own brokerage account. It does the reading and the watching, trades only inside rules you write, and writes down why it placed every order.";
@@ -232,7 +233,7 @@ export function Landing() {
               <TabLink tab="app" className={cn(PLAIN_BUTTON, "h-9")}>
                 Look inside the app
               </TabLink>
-              <Link href="/login" className={cn(PLAIN_BUTTON, "h-9")}>
+              <Link href={SIGN_IN_HREF} className={cn(PLAIN_BUTTON, "h-9")}>
                 Sign in
               </Link>
             </p>

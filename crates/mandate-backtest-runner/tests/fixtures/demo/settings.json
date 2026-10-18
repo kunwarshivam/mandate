@@ -1,0 +1,126 @@
+{
+ "sim": {
+  "decision_latency_ms": 0,
+  "approval_latency_ms": 0,
+  "slippage": {
+   "model": "fixed",
+   "half_spread_bps": "1",
+   "impact_bps": "2"
+  },
+  "volume_cap_fraction": "0.1"
+ },
+ "fees": {
+  "equities": {
+   "sec_rate": "0.00003",
+   "taf_per_share": "0.0002",
+   "taf_cap": "9.79",
+   "taf_cap_basis": "per_execution",
+   "cat_per_share": "0.00001",
+   "fee_rounding": "daily_total"
+  },
+  "crypto": {
+   "maker_bps": "15",
+   "taker_bps": "25"
+  },
+  "calendar": {
+   "valid_from": "2026-09-01",
+   "valid_to": "2026-12-31",
+   "trading_holidays": [
+    "2026-11-26",
+    "2026-12-25"
+   ],
+   "settlement_holidays": [
+    "2026-10-12",
+    "2026-11-11"
+   ]
+  }
+ },
+ "gate": {
+  "price_floor": "5",
+  "liquidity_floor_usd": "1000000",
+  "crypto_liquidity_floor_usd": "2000000",
+  "collar_liquid_threshold_usd": "50000000",
+  "collar_liquid_x": "0.01",
+  "collar_other_x": "0.02",
+  "collar_crypto_x": "0.02",
+  "collar_passive_band": "0.2",
+  "opposite_fill_interval_s": 60,
+  "min_resting_time_s": 2,
+  "order_to_fill_max": 10,
+  "order_to_fill_min_orders": 20,
+  "order_size_participation": "0.05",
+  "daily_participation": "0.05",
+  "close_window_minutes": 10,
+  "legacy_pdt_equity_threshold": "25000",
+  "etp_classification_max_age_s": 604800
+ },
+ "profile": {
+  "profile_version": 1,
+  "rows": [
+   {
+    "asset_class": "us_equity",
+    "session": "regular",
+    "cells": [
+     {
+      "order_type": "market",
+      "quantity_form": "whole",
+      "times_in_force": [
+       "day",
+       "gtc"
+      ],
+      "protection_forms": [
+       "bracket"
+      ]
+     },
+     {
+      "order_type": "limit",
+      "quantity_form": "whole",
+      "times_in_force": [
+       "day",
+       "gtc"
+      ],
+      "protection_forms": [
+       "bracket",
+       "oco"
+      ]
+     },
+     {
+      "order_type": "stop",
+      "quantity_form": "whole",
+      "times_in_force": [
+       "day",
+       "gtc"
+      ],
+      "protection_forms": []
+     },
+     {
+      "order_type": "stop_limit",
+      "quantity_form": "whole",
+      "times_in_force": [
+       "day",
+       "gtc"
+      ],
+      "protection_forms": []
+     }
+    ]
+   }
+  ],
+  "idempotency": {
+   "client_order_id": true,
+   "retry": "idempotent",
+   "query_by_client_order_id": true
+  }
+ },
+ "account_type": "margin",
+ "regime": {
+  "kind": "intraday_margin",
+  "maintenance_excess": "100000"
+ },
+ "metrics": {
+  "periods_per_year": 252,
+  "risk_free_per_period": "0"
+ },
+ "min_order_usd": "1",
+ "mark_max_age_s": 3600,
+ "benchmark_collar_bps": "25"
+}

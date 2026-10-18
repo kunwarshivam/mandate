@@ -26,10 +26,15 @@
 //!   screen, a new mandate's confirm, deploy, and go-live, judged and recorded as the CLI records
 //!   them (DEC-2101). [`stepup`] is the port every step-up goes through, which counts no evidence
 //!   until E9-4 binds it; [`objects`] is the content-addressed store those routes add records to.
+//! - [`writes`] also records resume, Stop, and an owner exit as the CLI records them, with step-up
+//!   forwarded only once the port verifies it, and [`status`] reports a command's phase from the
+//!   owning streams' direct causation (DEC-2102).
+//! - [`backtests`]: the backtest and evaluation reads' folds (DEC-1001, DEC-1002, DEC-1143).
 //!
 //! It never places, cancels, or sizes an order, and never calls a broker or a runtime (§1.4):
 //! `xtask/layers.toml` keeps it from every crate that could.
 
+pub mod backtests;
 pub mod clock;
 pub mod commands;
 pub mod config;
@@ -43,6 +48,7 @@ pub mod objects;
 pub mod reads;
 pub mod routes;
 pub mod session;
+pub mod status;
 pub mod stepup;
 pub mod subject;
 pub mod token;

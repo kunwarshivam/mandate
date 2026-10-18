@@ -1,0 +1,64 @@
+//! Where a runtime process learns its deployment (DEC-1015): from `run`'s flags, or from the
+//! variables the deployment manager sets on the pod it starts (E21-33), ids only and never a
+//! secret.
+//!
+//! The manager sets `MANDATE_PROCESS` (`runtime` here), `MANDATE_WORKSPACE`, `MANDATE_SUBJECT` (the
+//! agent) and `MANDATE_GENERATION`, which only the manager reads: the agent stream's writer epoch
+//! is what fences an earlier process (DEC-1012). A flag never overrides a variable the manager set,
+//! and one that disagrees with it is refused rather than guessed between (`AGENTS.md` rule 3). The
+//! connection and the owner may be left unnamed, to be read from the agent's deployment.
+
+/// The deployment a launch names; the connection and the owner are `None` when it leaves them to
+/// be resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Named {
+    pub workspace: String,
+    pub agent: String,
+    pub connection: Option<String>,
+    pub owner: Option<String>,
+}
+
+/// The deployment `flag` (the value after a `run` flag) and `var` (an environment variable, `Some`
+/// for any value it holds, unreadable ones included) name, or the refusal's code:
+/// `process_not_runtime` for a pod started for another process, `deployment_missing` for no
+/// workspace or agent, and `deployment_conflict` for a flag that disagrees with the manager's
+/// variable, or a manager variable set without `MANDATE_PROCESS`. A value that is empty or has
+/// whitespace around it names nothing.
+///
+/// # Errors
+/// The refusal codes above.
+pub fn named(
+    flag: &dyn Fn(&str) -> Option<String>,
+    var: &dyn Fn(&str) -> Option<String>,
+) -> Result<Named, &'static str> {
+    let given = |value: Option<String>| value.filter(|v| !v.is_empty() && v.trim() == v);
+    let (workspace, agent) = match given(var("MANDATE_PROCESS")) {
+        None if var("MANDATE_PROCESS").is_some() => return Err("process_not_runtime"),
+        None if var("MANDATE_WORKSPACE").is_some() || var("MANDATE_SUBJECT").is_some() => {
+            return Err("deployment_conflict");
+        }
+        None => (given(flag("--workspace")), given(flag("--agent"))),
+        Some(process) if process != "runtime" => return Err("process_not_runtime"),
+        Some(_) => (
+            agreed(var("MANDATE_WORKSPACE"), flag("--workspace"))?,
+            agreed(var("MANDATE_SUBJECT"), flag("--agent"))?,
+        ),
+    };
+    let (Some(workspace), Some(agent)) = (given(workspace), given(agent)) else {
+        return Err("deployment_missing");
+    };
+    Ok(Named {
+        workspace,
+        agent,
+        connection: given(flag("--connection")),
+        owner: given(flag("--owner")),
+    })
+}
+
+/// The manager's `set` value, unless a flag names a different one.
+fn agreed(set: Option<String>, flagged: Option<String>) -> Result<Option<String>, &'static str> {
+    match flagged {
+        Some(flagged) if set.as_ref() != Some(&flagged) => Err("deployment_conflict"),
+        _ => Ok(set),
+    }
+}

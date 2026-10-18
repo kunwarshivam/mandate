@@ -28,6 +28,22 @@ tests (deploy/tests/test_cell.py) and the drills (`cargo xtask cell drill`) read
 {{- $out | toJson -}}
 {{- end -}}
 
+{{/*
+"true" when process `p` is started by another process (its `started_by`) whose image is named: it
+then renders no Deployment of its own, only its pod in that process's templates (DEC-1170).
+*/}}
+{{- define "mandate.startedElsewhere" -}}
+{{- $root := .root -}}
+{{- with .p.started_by -}}
+{{- $by := . -}}
+{{- range (include "mandate.processes" $root | fromJsonArray) -}}
+{{- if and (eq .name $by) (index $root.Values.images .image) -}}
+true
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "mandate.labels" -}}
 app.kubernetes.io/name: mandate-workspace
 app.kubernetes.io/instance: {{ .root.Release.Name | quote }}
@@ -76,7 +92,75 @@ capabilities:
 {{ .root.Values.rolePrefix }}{{ .p.db_role | replace "_" "-" }}
 {{- end -}}
 
+{{/*
+The workspace's shared artifact store (mandate documents, backtest reports): one claim, at one
+fixed path. Who may write it is fixed here, by process type, not a value, so no value widens it:
+the control runs write ("rw"); the API server only reads, but its pod lays the store out before it
+starts ("seed": the pod's volume is writable, the server's own mount is not); the runtime and the
+deployment manager read ("ro"); every other process has no store at all.
+*/}}
+{{- define "mandate.artifactsRole" -}}
+{{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "deploy-manager" "ro" -}}
+{{- get $access .p.name -}}
+{{- end -}}
+
+{{/*
+Whether the claim renders: only with the long-running process whose pod lays it out (the API server). A
+claim on a class that binds on first use (local-path does) binds only when a pod uses it, and `helm
+--wait` waits for it to; and a reader alone would wait for a layout no writer makes. "true" or
+empty.
+*/}}
+{{- define "mandate.artifactsClaimed" -}}
+{{- $root := . -}}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) -}}
+{{- if eq (include "mandate.artifactsRole" (dict "root" $root "p" .)) "seed" -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Process `p`'s access to the store, "rw", "seed" or "ro", or empty when it has none or no claim renders, so
+no pod ever names a claim that is not there.
+*/}}
+{{- define "mandate.artifactsAccess" -}}
+{{- if include "mandate.artifactsClaimed" .root -}}
+{{- include "mandate.artifactsRole" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mandate.artifactsPath" -}}/var/lib/mandate/artifacts{{- end -}}
+
+{{/*
+The store's layout, before the process starts: the API server refuses a root without `sha256/`,
+and the readers need `sha256/` and `tmp/` to exist. A writer's or the API server's pod makes both; a reader's pod,
+mounted read-only, waits for a writer to have made them, and after two minutes fails rather than
+start without them (AGENTS.md rule 3).
+*/}}
+{{- define "mandate.artifactsLayout" -}}
+{{- $path := include "mandate.artifactsPath" . -}}
+- name: artifacts-layout
+  image: {{ .root.Values.images.postgres | quote }}
+  imagePullPolicy: IfNotPresent
+  command:
+    - bash
+    - -c
+    {{- if ne (include "mandate.artifactsAccess" .) "ro" }}
+    - {{ printf "mkdir -p %s/sha256 %s/tmp" $path $path | quote }}
+    {{- else }}
+    - {{ printf "for _ in $(seq 1 120); do [ -d %s/sha256 ] && [ -d %s/tmp ] && exit 0; sleep 1; done; echo 'the artifact store has no sha256/ and tmp/ after two minutes: refusing to start' >&2; exit 1" $path $path | quote }}
+    {{- end }}
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+  volumeMounts:
+    - name: artifacts
+      mountPath: {{ $path | quote }}
+      readOnly: {{ eq (include "mandate.artifactsAccess" .) "ro" }}
+{{- end -}}
+
 {{/* The journal DSN carries no password: libpq and sqlx read it from PGPASSFILE (DEC-822 item 4). */}}
+
 {{- define "mandate.env" -}}
 {{- $j := .root.Values.journal -}}
 {{- if .p.db_role }}
@@ -89,6 +173,10 @@ capabilities:
   value: /tmp
 - name: MANDATE_DEPLOYMENT_TIER
   value: {{ .root.Values.deploymentTier | quote }}
+{{- if include "mandate.artifactsAccess" . }}
+- name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
+  value: {{ include "mandate.artifactsPath" . | quote }}
+{{- end }}
 {{- end -}}
 
 {{- define "mandate.mounts" -}}
@@ -102,6 +190,11 @@ capabilities:
   mountPath: /run/secrets/journal-ca
   readOnly: true
 {{- end }}
+{{- with include "mandate.artifactsAccess" . }}
+- name: artifacts
+  mountPath: {{ include "mandate.artifactsPath" $ | quote }}
+  readOnly: {{ ne . "rw" }}
+{{- end }}
 {{- end -}}
 
 {{/*
@@ -111,6 +204,12 @@ nothing of the process runs until the pod's own egress is shown filtered: the Ku
 which no policy here allows, must stop answering. Still answering after a minute, the pod fails and
 never starts (AGENTS.md rule 3). Residual: an API server that is down at the same moment reads as
 filtered.
+The deployment manager's policy allows the API server (`kube-api`, DEC-1172), so its gate probes a
+destination that policy denies and that answers whenever nothing filters: the cluster resolver's
+metrics port, 9153, at the address in the pod's resolv.conf (CoreDNS's `kube-dns` Service serves it;
+every policy here allows the resolver on port 53 only). The vault has no pod in the local cell and
+the journal's Service exposes 5432 alone, so a probe of either would read as filtered at once.
+Residual: a resolver that serves no metrics port reads as filtered at once.
 */}}
 {{- define "mandate.egressGate" -}}
 - name: egress-gate
@@ -119,6 +218,21 @@ filtered.
   command:
     - bash
     - -c
+    {{- if has "kube-api" .p.egress }}
+    - |
+      dns=$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf)
+      [ -n "$dns" ] || { echo "no cluster resolver address: refusing to start" >&2; exit 1; }
+      for _ in $(seq 1 60); do
+        if timeout 2 bash -c "exec 3<>/dev/tcp/$dns/9153" 2>/dev/null; then
+          sleep 1
+        else
+          echo "egress filtered"
+          exit 0
+        fi
+      done
+      echo "egress still open after a minute: refusing to start" >&2
+      exit 1
+    {{- else }}
     - |
       [ -n "${KUBERNETES_SERVICE_HOST:-}" ] && [ -n "${KUBERNETES_SERVICE_PORT:-}" ] || { echo "no API server address: refusing to start" >&2; exit 1; }
       for _ in $(seq 1 60); do
@@ -131,6 +245,7 @@ filtered.
       done
       echo "egress still open after a minute: refusing to start" >&2
       exit 1
+    {{- end }}
   securityContext:
     {{- include "mandate.containerSecurity" . | nindent 4 }}
   resources:
@@ -139,7 +254,8 @@ filtered.
 {{- end -}}
 
 {{/*
-The pod around a process's containers. Secrets are files: the role's pgpass is mounted group-
+The pod around a process's containers. Only the deployment manager's passes `serviceAccount`, the
+one pod given an API token (DEC-1172); every other pod mounts none. Secrets are files: the role's pgpass is mounted group-
 readable for fsGroup, and libpq and sqlx refuse a pgpass any group can read, so an init container
 copies it to a memory-backed directory as 0600 under the process's own user.
 */}}
@@ -149,8 +265,17 @@ copies it to a memory-backed directory as 0600 under the process's own user.
 metadata:
   labels:
     {{- include "mandate.labels" . | nindent 4 }}
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
+  {{- with .serviceAccount }}
+  serviceAccountName: {{ . | quote }}
+  automountServiceAccountToken: true
+  {{- else }}
   automountServiceAccountToken: false
+  {{- end }}
   enableServiceLinks: false
   restartPolicy: {{ .restartPolicy }}
   securityContext:
@@ -189,6 +314,9 @@ spec:
           mountPath: /run/secrets/journal-role
           readOnly: true
     {{- end }}
+    {{- if include "mandate.artifactsAccess" . }}
+    {{- include "mandate.artifactsLayout" . | nindent 4 }}
+    {{- end }}
     {{- with .initContainers }}
     {{- . | nindent 4 }}
     {{- end }}
@@ -222,12 +350,39 @@ spec:
           - key: ca.crt
             path: ca.crt
     {{- end }}
+    {{- if include "mandate.artifactsAccess" . }}
+    - name: artifacts
+      persistentVolumeClaim:
+        claimName: artifacts
+        readOnly: {{ eq (include "mandate.artifactsAccess" .) "ro" }}
+    {{- end }}
     {{- with .volumes }}
     {{- . | nindent 4 }}
     {{- end }}
 {{- end -}}
 
-{{/* One container of process `p`: name, image, args, and optional extra mounts. */}}
+{{/*
+A service's launch from processes.json (DEC-1013): its `args`, and its `probe` asked `livez` and
+`readyz` (DEC-994 item 5), with `{workspace}` and the `runtime` values' `{agent}`, `{connection}` and
+`{owner}` filled in. A placeholder whose value is unset fails the render rather than starting a
+process for no deployment.
+*/}}
+{{- define "mandate.fill" -}}
+{{- $v := .root.Values -}}
+{{- $out := list -}}
+{{- range .words -}}
+{{- $w := . -}}
+{{- if contains "{workspace}" $w }}{{ $w = replace "{workspace}" $v.workspace $w }}{{ end -}}
+{{- if contains "{agent}" $w }}{{ $w = replace "{agent}" (required "runtime.agent is required once images.runtime is named" $v.runtime.agent) $w }}{{ end -}}
+{{- if contains "{connection}" $w }}{{ $w = replace "{connection}" (required "runtime.connection is required once images.runtime is named" $v.runtime.connection) $w }}{{ end -}}
+{{- if contains "{owner}" $w }}{{ $w = replace "{owner}" (required "runtime.owner is required once images.runtime is named" $v.runtime.owner) $w }}{{ end -}}
+{{- if contains "{probe}" $w }}{{ $w = replace "{probe}" $.probe $w }}{{ end -}}
+{{- $out = append $out $w -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/* One container of process `p`: name, image, command, args, probes, and optional extra mounts. */}}
 {{- define "mandate.container" -}}
 - name: {{ .name | quote }}
   image: {{ index .root.Values.images .p.image | quote }}
@@ -237,6 +392,18 @@ spec:
   {{- end }}
   {{- with .args }}
   args: {{ toJson . }}
+  {{- end }}
+  {{- with .probe }}
+  readinessProbe:
+    exec:
+      command: {{ toJson (index . "readyz") }}
+    periodSeconds: 5
+    failureThreshold: 3
+  livenessProbe:
+    exec:
+      command: {{ toJson (index . "livez") }}
+    periodSeconds: 10
+    failureThreshold: 3
   {{- end }}
   env:
     {{- include "mandate.env" . | nindent 4 }}
@@ -253,7 +420,9 @@ spec:
 
 {{/*
 The egress allowed to process `p`: DNS when it has any target, each in-cluster target by pod
-label and port, and each external target's CIDRs from values (an empty list allows nothing).
+label and port, and each external target's CIDRs from values (an empty list allows nothing). The
+API server (`kube-api`, the deployment manager's alone) is an external-style target: its CIDRs and
+its port from values, since a policy cannot select it by pod label.
 */}}
 {{- define "mandate.egressRules" -}}
 {{- $root := .root -}}
@@ -286,6 +455,16 @@ label and port, and each external target's CIDRs from values (an empty list allo
           mandate.dev/process: vault
   ports:
     - {protocol: TCP, port: 8200}
+{{- else if eq . "kube-api" }}
+{{- with (index $v.egress "kube-api") }}
+- to:
+    {{- range . }}
+    - ipBlock:
+        cidr: {{ . | quote }}
+    {{- end }}
+  ports:
+    - {protocol: TCP, port: {{ $v.egress.kubeApiPort }}}
+{{- end }}
 {{- else if eq . "model-gateway" }}
 - to:
     - podSelector:

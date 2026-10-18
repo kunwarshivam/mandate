@@ -11,11 +11,17 @@
 //! `mandate-daemon`: one agent deployment's runtime process (E21-30 slice 1, DEC-1012).
 //!
 //! `mandate-daemon run --workspace <id> --agent <id> --connection <id> --owner <user> --probe
-//! <socket> --fixture` runs it on the fixture wiring over an in-memory journal: it passes once a
-//! second, or sooner on a wake hint, drains on SIGTERM, and exits with its lifecycle's status.
-//! Without `--fixture` it refuses: a deployment's production ports are the post-R0 hook (DEC-968
-//! item 6). `mandate-daemon probe livez|readyz --probe <socket>` is its `exec` probe (DEC-994
-//! item 5). This is the one place the host clock is read (ES-05).
+//! <socket> [--fixture]` runs it over Postgres (`MANDATE_JOURNAL_DSN`) or, with `--fixture`, an
+//! in-memory journal: it passes once a second, or sooner on a wake hint, drains on SIGTERM, and
+//! exits with its lifecycle's status. Either way it runs on the deny-all fixture wiring, which can
+//! propose no order: a deployment's production ports are the post-R0 hook (DEC-968 item 6,
+//! DEC-1013). Without `--fixture` and without a journal it refuses. `mandate-daemon probe
+//! livez|readyz --probe <socket>` is its `exec` probe (DEC-994 item 5). This is the one place the
+//! host clock is read (ES-05).
+//!
+//! A pod the deployment manager starts runs `mandate-daemon run --probe <socket>` and names its
+//! workspace and agent by variables instead ([`launch`], DEC-1015). Until the connection and the
+//! owner are read from the agent's deployment, such a launch refuses `deployment_unresolved`.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -24,13 +30,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use mandate_artifacts_fs::FsArtifactStore;
 use mandate_daemon::wake::Sleep;
-use mandate_daemon::{Config, RuntimeProcess, Wake, fixture};
-use mandate_journal::Environment;
+use mandate_daemon::{Config, RuntimeProcess, Wake, deployment, fixture, launch};
+use mandate_journal::{Environment, StreamId};
 use mandate_process::State;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
-use mandate_store::{MemoryStore, Store};
+use mandate_store::{MemoryStore, PgStore, Store};
 use mandate_time::UtcNanos;
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -57,25 +64,35 @@ fn main() -> ExitCode {
             ExitCode::from(probe::query(&socket, asked).map_or(1, |a| a.exit_status()))
         }
         Some("run") => {
-            let named = ["--workspace", "--agent", "--connection", "--owner"].map(flag);
-            let [Some(workspace), Some(agent), Some(connection), Some(owner)] = named else {
-                eprintln!("deployment_missing");
-                return ExitCode::from(2);
+            let var = |name: &str| match std::env::var(name) {
+                Ok(value) => Some(value),
+                Err(std::env::VarError::NotUnicode(_)) => Some(String::new()),
+                Err(std::env::VarError::NotPresent) => None,
             };
-            if !args.iter().any(|a| a == "--fixture") {
-                eprintln!("deployment_ports_not_wired");
-                return ExitCode::from(2);
-            }
-            let config = Config {
-                deployment: Deployment {
-                    agent: AgentId(agent),
-                    connection: ConnectionId(connection),
-                    workspace: WorkspaceId(workspace),
+            let named = match launch::named(&flag, &var) {
+                Ok(named) => named,
+                Err(code) => {
+                    eprintln!("{code}");
+                    return ExitCode::from(2);
+                }
+            };
+            let fixture = args.iter().any(|a| a == "--fixture");
+            let given = match (named.connection, named.owner) {
+                (Some(connection), Some(owner)) => Given::Named { connection, owner },
+                (None, None) => match var("MANDATE_ARTIFACTS").filter(|r| !r.is_empty()) {
+                    Some(root) if !fixture => Given::Resolve { root },
+                    _ => {
+                        eprintln!("deployment_unresolved");
+                        return ExitCode::from(2);
+                    }
                 },
-                environment: Environment::Paper,
-                liveness: LIVENESS,
+                _ => {
+                    eprintln!("deployment_missing");
+                    return ExitCode::from(2);
+                }
             };
-            match run(&config, &owner, &socket) {
+            let deployment = (named.workspace, named.agent);
+            match run(deployment, given, &socket, fixture) {
                 Ok(status) => ExitCode::from(status),
                 Err(code) => {
                     eprintln!("runtime_start_failed: {code}");
@@ -102,15 +119,65 @@ fn host_now() -> UtcNanos {
     UtcNanos::from_parts(secs, since.subsec_nanos()).unwrap_or(UtcNanos::EPOCH)
 }
 
-fn run(config: &Config, owner: &str, socket: &Path) -> Result<u8, &'static str> {
+/// The rest of a deployment: named by flags, or read from the journal and the mandate documents
+/// in the artifact store at `root` (DEC-1016).
+enum Given {
+    Named { connection: String, owner: String },
+    Resolve { root: String },
+}
+
+fn run(
+    (workspace, agent): (String, String),
+    given: Given,
+    socket: &Path,
+    fixture: bool,
+) -> Result<u8, &'static str> {
     let terminate = Arc::new(AtomicBool::new(false));
     watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
-    let process = RuntimeProcess::start(
-        MemoryStore::default(),
-        fixture::wiring(owner),
-        config,
-        host_now(),
-    );
+    let config = |connection: String| Config {
+        deployment: Deployment {
+            agent: AgentId(agent.clone()),
+            connection: ConnectionId(connection),
+            workspace: WorkspaceId(workspace.clone()),
+        },
+        environment: Environment::Paper,
+        liveness: LIVENESS,
+    };
+    let artifacts = match &given {
+        Given::Resolve { root } => {
+            Some(FsArtifactStore::open_existing(root).map_err(|_| "artifact_store_unavailable")?)
+        }
+        Given::Named { .. } => None,
+    };
+    if fixture {
+        let Given::Named { connection, owner } = given else {
+            return Err("deployment_unresolved");
+        };
+        let process = RuntimeProcess::start(
+            MemoryStore::default(),
+            fixture::wiring(&owner),
+            &config(connection),
+            host_now(),
+        );
+        return serve(process, &mut Sleep, socket, &terminate);
+    }
+    let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
+    let store = PgStore::connect(&dsn)?;
+    let (connection, wiring) = match (given, artifacts) {
+        (Given::Named { connection, owner }, _) => (connection, fixture::wiring(&owner)),
+        (Given::Resolve { .. }, Some(artifacts)) => {
+            let control =
+                StreamId::parse(&format!("ctl:{workspace}")).ok_or("deployment_missing")?;
+            let rows = store.rows(&control).ok_or("journal_unavailable")?;
+            let found = deployment::resolved(&rows, &agent, Environment::Paper, &artifacts)?;
+            (
+                found.connection,
+                fixture::wiring_for(&found.approvers, &found.author),
+            )
+        }
+        (Given::Resolve { .. }, None) => return Err("artifact_store_unavailable"),
+    };
+    let process = RuntimeProcess::start(store, wiring, &config(connection), host_now());
     serve(process, &mut Sleep, socket, &terminate)
 }
 

@@ -23,10 +23,13 @@ use mandate_identity::{
     Authorized, Permission, Principal, Refusal, Scope, Session, WorkspaceId, authorize,
 };
 use mandate_identity_seal::Seal;
-use mandate_journal::StoredEvent;
+use mandate_journal::{ArtifactRef, StoredEvent};
 use mandate_time::UtcNanos;
 
-use crate::documents::{Envelope, envelope};
+use crate::backtests::{
+    Found, Outcome, backtest, backtest_report, evaluation, evaluation_report, paper,
+};
+use crate::documents::{Envelope, checked, envelope};
 use crate::http::{App, problem, problem_body, session_cookie, unauthenticated, with_type};
 use crate::members::ControlLookup;
 use crate::reads::{
@@ -475,4 +478,91 @@ pub(crate) async fn path_refused(app: &App, headers: &HeaderMap, request: Reques
     } else {
         unauthenticated()
     }
+}
+
+/// The bytes the deployment's store holds under `reference`, digest-checked; `None` without a store.
+fn stored(app: &App, reference: &ArtifactRef, name: &str) -> Option<Vec<u8>> {
+    let store = app.artifacts.as_ref()?;
+    checked(store.as_ref(), reference, name)
+}
+
+/// `GET /v1/workspaces/{ws}/backtests/{backtest_id}` (§4.2, DEC-1001 item 5): the workspace's own
+/// backtest, from its `BacktestRunRecorded`. A completed run's report is read from the store and
+/// checked against its digest; one the store lacks, or that fails its check, answers
+/// `journal_unavailable`, since `read-models/backtest` serves no completed run without its report
+/// (DEC-1143 item 4). `running` is never served: nothing journals a run in flight yet.
+pub async fn one_backtest(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((workspace, id))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let reader = match reader(&app, &headers, &workspace).await {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let view = match backtest(&reader.control, &id) {
+        Found::One(view) => view,
+        Found::Absent => return Refused::NotFound.response(),
+        Found::Unreadable => return Refused::JournalUnavailable.response(),
+    };
+    let (refusal, report_ref, report) = match &view.outcome {
+        Outcome::Completed { report_ref } => {
+            let Some(report) = stored(&app, report_ref, "backtest report")
+                .and_then(|bytes| backtest_report(&bytes, &view).ok())
+            else {
+                return Refused::JournalUnavailable.response();
+            };
+            (Value::Null, string(&report_ref.to_string()), report)
+        }
+        Outcome::Refused { refusal } => (string(refusal), Value::Null, Value::Null),
+    };
+    let members = vec![
+        ("backtest_id", string(&view.backtest_id)),
+        ("mandate_version", string(&view.mandate_version)),
+        ("state", string(view.state())),
+        ("refusal", refusal),
+        ("report_ref", report_ref),
+        ("report", report),
+    ];
+    served(&reader, &[], vec![("backtest", object(members))])
+}
+
+/// `GET /v1/workspaces/{ws}/evaluations/{evaluation_id}` (§4.7, DEC-1002 items 6 and 7): the
+/// founder's forward-paper evaluation, from its `EvaluationRunRecorded`, only where the deployment
+/// is marked an internal paper workspace and its control stream is paper throughout. Elsewhere
+/// every id answers the 404 an absent one does, even one the stream records (DEC-1143).
+pub async fn one_evaluation(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((workspace, id))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let reader = match reader(&app, &headers, &workspace).await {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    if !(app.hosted.internal_paper && paper(&reader.control)) {
+        return Refused::NotFound.response();
+    }
+    let view = match evaluation(&reader.control, &id) {
+        Found::One(view) => view,
+        Found::Absent => return Refused::NotFound.response(),
+        Found::Unreadable => return Refused::JournalUnavailable.response(),
+    };
+    let Some(report) = stored(&app, &view.report_ref, "evaluation report")
+        .and_then(|b| evaluation_report(&b).ok())
+    else {
+        return Refused::JournalUnavailable.response();
+    };
+    let members = vec![
+        ("evaluation_id", string(&view.evaluation_id)),
+        ("report_ref", string(&view.report_ref.to_string())),
+        ("report", report),
+    ];
+    served(&reader, &[], vec![("evaluation", object(members))])
 }

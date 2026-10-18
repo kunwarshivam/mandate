@@ -8,7 +8,51 @@ its memory until they move to Postgres (item 6).
   the pod, and a restart loses nothing a restart does not already lose: the sessions themselves.
 - The subject links are the operator's ConfigMap, mounted read-only at the one fixed path
   (DEC-1023); with none named the file is absent and every sign-in is refused.
+- In a dev or ci cell only, the local stub token issuer (DEC-2100, DEC-1025) runs as a sidecar on
+  the pod's loopback, started and answering before the server starts, since the server fetches
+  the stub's key set at its own start and only every five minutes after. Its image can only be a
+  local build, and the chart refuses it in any other tier.
 */ -}}
+{{- define "mandate.stubIssuer" -}}
+{{- $tier := .root.Values.deploymentTier -}}
+{{- if not (has $tier (list "dev" "ci")) -}}
+{{- fail (printf "images.stub-issuer runs only in a dev or ci cell, and deploymentTier is %q (DEC-2100)" $tier) -}}
+{{- end -}}
+- name: stub-issuer
+  image: {{ index .root.Values.images "stub-issuer" | quote }}
+  imagePullPolicy: IfNotPresent
+  restartPolicy: Always
+  args: ["--bind", "127.0.0.1:8090"]
+  env:
+    - {name: MANDATE_DEPLOYMENT_TIER, value: {{ $tier | quote }}}
+    - {name: HOME, value: /tmp}
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+- name: stub-issuer-ready
+  image: {{ .root.Values.images.postgres | quote }}
+  imagePullPolicy: IfNotPresent
+  command:
+    - bash
+    - -c
+    - |
+      for _ in $(seq 1 60); do
+        if timeout 2 bash -c "exec 3<>/dev/tcp/127.0.0.1/8090" 2>/dev/null; then
+          echo "stub issuer answering"
+          exit 0
+        fi
+        sleep 1
+      done
+      echo "the stub issuer did not answer on 127.0.0.1:8090 within a minute" >&2
+      exit 1
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+{{- end -}}
 {{- define "mandate.apiEnv" -}}
 {{- $a := .root.Values.api -}}
 {{- $j := .root.Values.journal -}}
@@ -61,6 +105,9 @@ spec:
     requests: {cpu: "50m", memory: "32Mi"}
   volumeMounts:
     - {name: credentials, mountPath: /run/credentials}` .root.Values.images.postgres (include "mandate.containerSecurity" . | indent 4) }}
+    {{- if index .root.Values.images "stub-issuer" }}
+    {{- $init = printf "%s\n%s" $init (include "mandate.stubIssuer" .) }}
+    {{- end }}
     {{- $volumes := "- {name: credentials, emptyDir: {medium: Memory, sizeLimit: 1Mi}}" }}
     {{- with .root.Values.api.subjectLinks }}
     {{- $volumes = printf "%s\n- {name: subject-links, configMap: {name: %q, defaultMode: 292, items: [{key: subject-links, path: subject-links}]}}" $volumes . }}

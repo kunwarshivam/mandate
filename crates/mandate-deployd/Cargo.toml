@@ -1,0 +1,24 @@
+[package]
+name = "mandate-deployd"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The deployment manager's process: mandate-deploy-manager over the Postgres journal and the Kubernetes API, with mandate-process's lifecycle and probes (E21-33 slice 2, DEC-1172)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-deploy-manager.workspace = true
+mandate-journal.workspace = true
+mandate-journal-pg.workspace = true
+mandate-process.workspace = true
+mandate-time.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal", "time"] }
+
+[dev-dependencies]
+proptest.workspace = true
+sqlx.workspace = true

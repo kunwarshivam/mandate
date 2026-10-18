@@ -4,6 +4,8 @@ import { AUTH_E2E_FLAG } from "./scripts/e2e-build.mjs";
 
 const PORT = Number(process.env.OWLHEAD_AUTH_E2E_PORT ?? 4318);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
+/** The public site's origin in this build (DEC-2405): `localhost` beside the app's `127.0.0.1`, so one server is both hosts. */
+export const SITE_ORIGIN = `http://localhost:${PORT}`;
 
 /**
  * Sign-in on, signed out (DEC-211): a production build with the Supabase variables set to a stub
@@ -25,12 +27,14 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: `npm run build && npx next start --hostname 127.0.0.1 --port ${PORT}`,
+    command: `npm run build && npx next start --hostname 0.0.0.0 --port ${PORT}`,
     env: {
       [AUTH_E2E_FLAG]: "1",
       NEXT_PUBLIC_SUPABASE_URL: STUB_SUPABASE,
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_e2e_stub",
       NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN: "1",
+      NEXT_PUBLIC_OWLHEAD_SITE_ORIGIN: SITE_ORIGIN,
+      NEXT_PUBLIC_OWLHEAD_APP_ORIGIN: ORIGIN,
     },
     url: ORIGIN,
     reuseExistingServer: false,

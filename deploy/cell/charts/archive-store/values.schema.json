@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mandate-archive-store values",
+  "description": "Settings only: the store's key is made in the cluster by the chart, never a value (DEC-822 item 4).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "image",
+    "bucket",
+    "initImage",
+    "clientNamespace",
+    "clientKeyName"
+  ],
+  "properties": {
+    "image": {
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$"
+    },
+    "bucket": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
+    },
+    "initImage": {
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$"
+    },
+    "clientNamespace": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+    },
+    "clientKeyName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+    }
+  }
+}

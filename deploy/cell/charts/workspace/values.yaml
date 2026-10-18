@@ -27,6 +27,9 @@ images:
   postgres: ghcr.io/cloudnative-pg/postgresql:18.6-202609281634-minimal-trixie@sha256:4467d4cf7e502fbc29800b75d755ede477a765b25a506a58a0842a57a4bf42c9
   mandate: ""
   api: ""
+  # The local stub token issuer (DEC-2100): a sidecar in the API pod, for a dev or ci cell's
+  # sign-in only. A local build alone can be named here, which only the local cell allows.
+  stub-issuer: ""
   runtime: ""
   executor: ""
   token-exchange: ""
@@ -34,6 +37,9 @@ images:
   model-gateway: ""
   exporter: ""
   data: ""
+  # The deployment manager (DEC-1172): the one pod with an API token, which starts the runtimes and
+  # executors. Once named, those two render as its pod templates, never as Deployments.
+  deploy-manager: ""
 
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once
 # images.api is named. None is a secret: the session signing key is made in the pod's memory at
@@ -51,6 +57,15 @@ api:
   appOrigin: ""
   # The ConfigMap holding the `subject-links` key; empty mounts none, so every sign-in is refused.
   subjectLinks: ""
+
+# The workspace's shared artifact store (mandate documents, backtest reports), mounted at
+# /var/lib/mandate/artifacts. Which process may write it is fixed by the chart, never a value.
+artifacts:
+  size: 1Gi
+  # Empty takes the cluster's default class (local-path in the local cell).
+  storageClass: ""
+  # ReadWriteOnce keeps every mounting pod on one node; ReadWriteMany needs a class that offers it.
+  accessMode: ReadWriteOnce
 
 # Where the workspace journal's Postgres is. The journal-db chart's defaults match these.
 journal:
@@ -81,6 +96,11 @@ egress:
   market-data: []
   artifact-store: []
   identity-provider: []
+  # The cluster's API server, for the deployment manager alone (DEC-1172): a policy cannot select
+  # it by pod label (k3s's is not a pod), so it is the addresses its `kubernetes` endpoints list,
+  # each a /32 or a narrow CIDR, and the port they listen on: 6443 on k3s, behind the 443 Service.
+  kube-api: []
+  kubeApiPort: 6443
   # The cluster DNS, which every process with an egress target needs to resolve its names.
   dns:
     namespace: kube-system
@@ -95,6 +115,14 @@ run:
 verify:
   id: ""
   streams: []
+
+# The agent deployment the runtime process runs (DEC-1013): its agent, the connection it trades
+# through, and the owner whose kill switch it acts on. Required once `images.runtime` is named;
+# ids only, never a secret.
+runtime:
+  agent: ""
+  connection: ""
+  owner: ""
 
 # The cell's one ingress: cloudflared dialing out to Cloudflare's tunnel edge, so the cluster
 # exposes no port (DEC-967 item 6). Off in the local cell, which has no tunnel.

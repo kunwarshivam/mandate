@@ -61,3 +61,16 @@ const SUMMARY: [(&str, &[&str]); 10] = [
     ("max_daily_loss", &["risk", "max_daily_loss"]),
     ("max_drawdown", &["risk", "max_drawdown"]),
 ];
+
+/// The bytes `store` holds under `reference`, checked against it; `None` when the store does not
+/// hold them or they do not hash to it. A digest mismatch is logged by `name`, with no content.
+pub fn checked(store: &dyn ArtifactSource, reference: &ArtifactRef, name: &str) -> Option<Vec<u8>> {
+    match get_artifact(store, reference) {
+        Ok(bytes) => Some(bytes),
+        Err(ArtifactError::Corrupt) => {
+            eprintln!("{name}: digest check failed");
+            None
+        }
+        Err(_) => None,
+    }
+}

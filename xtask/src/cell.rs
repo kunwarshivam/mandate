@@ -12,7 +12,7 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpStream, ToSocketAddrs};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+use sha2::Digest;
 
 use crate::{output, sh};
 
@@ -39,6 +40,20 @@ const CNPG_CHART_SHA256: &str = "b53d3991fe84bcf38767e7702cae78666265427a127a26f
 const CNPG_OPERATOR_TAG: &str =
     "1.30.1@sha256:923c267ec29636db3bee20f993d0ec4973fa22998e1adad37da79e4d32b5bc07";
 const CNPG_NAMESPACE: &str = "cnpg-system";
+/// CloudNativePG's Barman Cloud plugin, which archives the journal's WAL and takes its base backups
+/// (E21-41): its chart from the GitHub release, checked by SHA-256, and its two images pinned by
+/// digest (D-5). Its certificates come from [`PLUGIN_TLS_CHART`], not cert-manager (DEC-1050).
+const PLUGIN_CHART_URL: &str = "https://github.com/cloudnative-pg/charts/releases/download/plugin-barman-cloud-v0.8.1/plugin-barman-cloud-0.8.1.tgz";
+const PLUGIN_CHART_SHA256: &str =
+    "9ad0b9e56da2777a1a0269feaf7215e18297e9c8b5730e04acb27b5d462e9456";
+const PLUGIN_IMAGE_TAG: &str =
+    "v0.15.1@sha256:c75acad19a36e8176cfe2885761ff1b836c6ef977d7257e298c99a28b5c302ef";
+const PLUGIN_SIDECAR_TAG: &str =
+    "v0.15.1@sha256:2287a793a804db751edd0d07d44cd549e357677e98a800eb12e2cf7c0d53f9b0";
+pub const PLUGIN_TLS_CHART: &str = "deploy/cell/charts/backup-plugin-tls";
+/// The local cell's stand-in for the S1 endpoint, in its own namespace (DEC-1050 item 5).
+pub const ARCHIVE_STORE_CHART: &str = "deploy/cell/charts/archive-store";
+const ARCHIVE_STORE_NAMESPACE: &str = "archive-store";
 pub const WORKSPACE_CHART: &str = "deploy/cell/charts/workspace";
 pub const JOURNAL_CHART: &str = "deploy/cell/charts/journal-db";
 const WORKSPACE_VALUES: &str = "deploy/cell/values/k3d.yaml";
@@ -48,6 +63,24 @@ pub const COMPOSE_FILE: &str = "deploy/cell/compose/compose.json";
 const IMAGE_DOCKERFILE: &str = "deploy/cell/images/mandate.Dockerfile";
 /// The workspace API server's image, built beside `mandate` from the same static build.
 const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
+/// The deployment manager's image (DEC-1172), built beside `mandate` from the same static build.
+const DEPLOY_MANAGER_DOCKERFILE: &str = "deploy/cell/images/deploy-manager.Dockerfile";
+/// The deployment manager's process name, which is also its image's key in the chart's values.
+const DEPLOY_MANAGER_PROCESS: &str = "deploy-manager";
+/// The local stub token issuer's image (DEC-2100, DEC-1025), a sidecar in the API pod.
+const STUB_DOCKERFILE: &str = "deploy/cell/images/stub-issuer.Dockerfile";
+/// Lane SI's stub issuer crate (E21-52); the cell runs it only once it is in the workspace.
+const STUB_CRATE: &str = "crates/mandate-stub-issuer/Cargo.toml";
+/// The stub's entry point: its tests land before its code, with this file a `todo!()` stub
+/// (DEC-137), which the cell must not run, since the pod would never start.
+const STUB_MAIN: &str = "crates/mandate-stub-issuer/src/main.rs";
+/// What marks an entry point still pending (DEC-137).
+const PENDING_BODY: &str = "todo!(";
+/// The server's key-set tier check (E21-53); DEC-2100 item 9 runs the stub only once it is in.
+const KEY_SET_TIER_CHECK: (&str, &str) = (
+    "crates/mandate-api-server/src/config.rs",
+    "pub fn check_key_set_tier(",
+);
 /// Where a Linux host keeps its CA bundle, in the order `cell up` looks after `SSL_CERT_FILE`:
 /// Debian and Ubuntu, Fedora and RHEL, openSUSE, Alpine. The bundle is copied into the `api`
 /// image: on an empty base the server finds no roots, cannot build its key-set client, and refuses
@@ -58,6 +91,7 @@ const HOST_CA_BUNDLES: [&str; 4] = [
     "/etc/ssl/ca-bundle.pem",
     "/etc/ssl/cert.pem",
 ];
+const RUNTIME_DOCKERFILE: &str = "deploy/cell/images/runtime.Dockerfile";
 /// Where the cell keeps what it derives: the kubeconfig, the downloaded operator chart, and the
 /// image build context. Under `target/`, so nothing derived is ever committed.
 const STATE: &str = "target/cell";
@@ -93,19 +127,35 @@ pub enum Drill {
     /// The journal's Postgres primary is killed; once CloudNativePG brings it back, a stream
     /// written before the kill still exports and verifies by journal spec §11.
     Restart,
-    /// The kill switch with the exporter, the API and the deployment manager down (OPS-4, E21-34);
-    /// skipped, and named, until its processes and `mandate agent kill` are on `main`.
+    /// The kill switch with the API, the deployment manager, the exporter, the model gateway and
+    /// the control plane down (OPS-4, E21-34): `mandate agent kill` at each scope and `agent pause`
+    /// commit through one-off Jobs under the control role, and the control stream holding them
+    /// exports and verifies by journal spec §11. The stream owners' `KillSwitchActivated` is
+    /// named as skipped until the runtime and executor run in the cell (DEC-2000 item 6).
     KillSwitch,
+    /// With the synchronous standby fenced, an append waits: nothing commits on the primary alone,
+    /// and once the standby is back the cluster takes appends again and every stream it holds
+    /// verifies (OPS-2, E21-41).
+    StandbyDown,
+    /// A closed WAL segment and a base backup reach the archive: Postgres reports the segment
+    /// archived, and Barman's own tools, reading the store with the archive's key, list the backup
+    /// and fetch the segment back (E21-41).
+    Archive,
 }
 
-pub const DRILLS: [Drill; 6] = [
-    Drill::Boot,
-    Drill::Journal,
-    Drill::Egress,
-    Drill::Compose,
-    Drill::Restart,
-    Drill::KillSwitch,
-];
+pub const DRILLS: [Drill; 4] = [Drill::Boot, Drill::Journal, Drill::Egress, Drill::Compose];
+
+/// The journal's own drills (E21-41), which `cargo xtask ci cell-journal` runs in a job of their
+/// own so each cell job stays within its ten minutes (DEC-464).
+pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
+
+/// The drill that kills the journal's primary, which with a synchronous standby is a failover and
+/// the old primary's rejoin; `cargo xtask ci cell-failover` runs it in a job of its own (DEC-464).
+pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
+
+/// The kill-switch drill (OPS-4, E21-34), which `cargo xtask ci cell-kill-switch` runs on a cell
+/// of its own so `ci cell` stays within its ten minutes (DEC-464, DEC-2602).
+pub const KILL_SWITCH_DRILLS: [Drill; 1] = [Drill::KillSwitch];
 
 impl Drill {
     pub fn name(self) -> &'static str {
@@ -116,12 +166,17 @@ impl Drill {
             Self::Compose => "compose",
             Self::Restart => "restart",
             Self::KillSwitch => "kill-switch",
+            Self::StandbyDown => "standby-down",
+            Self::Archive => "archive",
         }
     }
 
     pub fn parse(name: &str) -> Result<Self> {
         DRILLS
             .into_iter()
+            .chain(JOURNAL_DRILLS)
+            .chain(FAILOVER_DRILLS)
+            .chain(KILL_SWITCH_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
     }
@@ -142,7 +197,11 @@ impl Drill {
             Self::Restart => {
                 "the stream lost across the restart: a stream id the restart did not keep"
             }
-            Self::KillSwitch => "none until the drill runs",
+            Self::KillSwitch => "the connection-scope kill switch never committed",
+            Self::StandbyDown => {
+                "the cluster's durability set to `preferred`, so the primary commits alone"
+            }
+            Self::Archive => "the archive pointed at another bucket of the same store",
         }
     }
 }
@@ -157,7 +216,9 @@ impl Drill {
             Self::Journal | Self::Compose => "rehash_mismatch",
             Self::Egress => "reached the live trading host",
             Self::Restart => "export_stream_empty",
-            Self::KillSwitch => "",
+            Self::KillSwitch => "no kill_switch of scope connection",
+            Self::StandbyDown => "committed with the standby fenced",
+            Self::Archive => "is not in the archive",
         }
     }
 }
@@ -168,8 +229,6 @@ impl Drill {
 pub enum Verdict {
     Held,
     Broken(String),
-    /// The drill's processes are not on `main` yet; named, never counted as held.
-    Skipped(String),
 }
 
 /// Whether docker, k3d and helm are all on the path; when one is not, the reason.
@@ -206,22 +265,60 @@ pub fn ci() -> Result<()> {
     demo(false)
 }
 
-/// helm lint and a strict schema check of every rendering of both charts, then the chart's
-/// invariant tests, which render it themselves (deploy/tests/test_cell.py).
+/// `cargo xtask ci cell-journal`, `ci cell-failover` and `ci cell-kill-switch`: the cell, then
+/// `drills`, plain and seeded (E21-41, DEC-2602). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
+    if let Some(reason) = tools_missing() {
+        if env::var_os(CELL_REQUIRED_ENV).is_some() {
+            bail!("{CELL_REQUIRED_ENV} is set but {reason}");
+        }
+        eprintln!("    {job}: {reason}; skipping (see deploy/cell/README.md)");
+        return Ok(());
+    }
+    up()?;
+    drill(drills, false)?;
+    drill(drills, true)
+}
+
+/// The Kubernetes API's address for a rendering with no cluster to read it from: k3s's
+/// `kubernetes` Service, the first address of its default service range.
+const KUBE_API_RENDERED: &str = r#"kubeApi={"cidrs":["10.43.0.1/32"],"ports":[443]}"#;
+
+/// helm lint and a strict schema check of every rendering of every chart, then the charts'
+/// invariant tests, which render them themselves (deploy/tests/).
 pub fn chart_checks() -> Result<()> {
-    for (chart, values) in [
-        (WORKSPACE_CHART, "deploy/cell/values/k3d.yaml"),
-        (WORKSPACE_CHART, "deploy/cell/values/k3s.yaml"),
-        (WORKSPACE_CHART, "deploy/cell/values/managed.yaml"),
-        (JOURNAL_CHART, "deploy/cell/values/k3d-journal-db.yaml"),
+    for (chart, values, namespace) in [
+        (WORKSPACE_CHART, "deploy/cell/values/k3d.yaml", NAMESPACE),
+        (WORKSPACE_CHART, "deploy/cell/values/k3s.yaml", NAMESPACE),
+        (
+            WORKSPACE_CHART,
+            "deploy/cell/values/managed.yaml",
+            NAMESPACE,
+        ),
+        (
+            JOURNAL_CHART,
+            "deploy/cell/values/k3d-journal-db.yaml",
+            NAMESPACE,
+        ),
+        (ARCHIVE_STORE_CHART, "", ARCHIVE_STORE_NAMESPACE),
+        (PLUGIN_TLS_CHART, "", CNPG_NAMESPACE),
     ] {
-        sh("helm", &["lint", "--strict", chart, "-f", values])?;
-        let rendered = output(
-            "helm",
-            &["template", "cell", chart, "-n", NAMESPACE, "-f", values],
-        )?;
+        let mut args = vec![chart];
+        if !values.is_empty() {
+            args.extend(["-f", values]);
+        }
+        if chart == JOURNAL_CHART {
+            args.extend(["--set-json", KUBE_API_RENDERED]);
+        }
+        let mut lint = vec!["lint", "--strict"];
+        lint.extend(&args);
+        sh("helm", &lint)?;
+        let mut template = vec!["template", "cell", "-n", namespace];
+        template.extend(&args);
+        let rendered = output("helm", &template)?;
         kubeconform(&rendered)?;
-        no_live_host_allowed(values, &parse_documents(&rendered)?, &live_addresses()?)?;
+        let named = if values.is_empty() { chart } else { values };
+        no_live_host_allowed(named, &parse_documents(&rendered)?, &live_addresses()?)?;
     }
     let status = Command::new("uv")
         .args([
@@ -231,7 +328,7 @@ pub fn chart_checks() -> Result<()> {
             "python",
             "pytest",
             "-q",
-            "../deploy/tests/test_cell.py",
+            "../deploy/tests",
         ])
         .env("MANDATE_CELL_HELM_REQUIRED", "1")
         .status()
@@ -242,8 +339,9 @@ pub fn chart_checks() -> Result<()> {
     Ok(())
 }
 
-/// Every rendered object against the Kubernetes 1.35 schemas; CloudNativePG's `Cluster` has no
-/// schema there and is skipped by kind, never by a missing-schema wildcard.
+/// Every rendered object against the Kubernetes 1.35 schemas; CloudNativePG's `Cluster` and
+/// `ScheduledBackup` and the Barman Cloud plugin's `ObjectStore` have no schema there and are
+/// skipped by kind, never by a missing-schema wildcard.
 fn kubeconform(rendered: &str) -> Result<()> {
     let mut child = Command::new("kubeconform")
         .args([
@@ -252,7 +350,7 @@ fn kubeconform(rendered: &str) -> Result<()> {
             "-kubernetes-version",
             "1.35.0",
             "-skip",
-            "Cluster",
+            "Cluster,ObjectStore,ScheduledBackup",
         ])
         .stdin(Stdio::piped())
         .spawn()
@@ -390,14 +488,18 @@ fn host_image_source() -> Result<ImageSource> {
     image_source(env::consts::OS, env::consts::ARCH, pinned.as_deref()).map_err(anyhow::Error::msg)
 }
 
-/// The cell's `mandate` image: the pulled one, or this checkout's build tagged by the binary's own
-/// SHA-256, so an uncommitted edit gets a new image rather than the last one imported.
+/// The cell's `mandate` image: the pulled one, or this checkout's build tagged by its binaries'
+/// SHA-256s, the CLI's and the backtest runner's beside it (DEC-1144), so an uncommitted edit to
+/// either gets a new image rather than the last one imported.
 fn image_tag() -> Result<String> {
     if let ImageSource::Pull(image) = host_image_source()? {
         return Ok(image);
     }
-    local_tag("mandate", "mandate")
+    local_tag("mandate", &["mandate", RUNNER])
 }
+
+/// The backtest runner (DEC-1144), built with the CLI and copied into its image.
+const RUNNER: &str = "mandate-backtest-runner";
 
 /// The cell's `api` image, this checkout's build of `mandate-api-server`: none when the cell pulls
 /// its `mandate` image, since no published API image exists yet, so the chart leaves the API out.
@@ -405,26 +507,164 @@ fn api_image_tag() -> Result<Option<String>> {
     if let ImageSource::Pull(_) = host_image_source()? {
         return Ok(None);
     }
-    local_tag("api", "mandate-api-server").map(Some)
+    local_tag("api", &["mandate-api-server"]).map(Some)
 }
 
-/// `mandate.local/<name>:<the first 12 hex digits of the binary's SHA-256>`.
-fn local_tag(name: &str, binary: &str) -> Result<String> {
-    let digest = sha256(&static_binary(binary))?;
+/// The cell's `deploy-manager` image, this checkout's build of `mandate-deployd`: none when the
+/// cell pulls its `mandate` image, as for the API server, so the chart leaves the manager out and
+/// renders the runtime and executor as Deployments of their own.
+fn deploy_manager_image_tag() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(DEPLOY_MANAGER_PROCESS, &["mandate-deployd"]).map(Some)
+}
+
+/// The workspace chart's settings, each a `--set-json` pair, that `cell up` installs it with and
+/// the drills render it with, beside [`image_sets`]: the API server's own endpoints as the
+/// deployment manager's one `kube-api` destination (DEC-1172). The endpoints are read from the
+/// cell, never written in k3d.yaml: docker picks the k3d network's subnet, so the server node's
+/// address is known only once it exists.
+fn egress_sets() -> Result<Vec<String>> {
+    let (addresses, port) = kube_api_endpoints()?;
+    Ok(vec![
+        format!("egress.kube-api={}", json!(addresses)),
+        format!("egress.kubeApiPort={port}"),
+    ])
+}
+
+/// The `kubernetes` Service's endpoint addresses, each as a /32, and their port, from its
+/// EndpointSlices: where a pod's connection to `kubernetes.default.svc` lands once the Service's
+/// address is translated, which is what a network policy filters (6443 on k3s).
+fn kube_api_endpoints() -> Result<(Vec<String>, u16)> {
+    let found = kubectl(&[
+        "get",
+        "endpointslices",
+        "--namespace",
+        "default",
+        "--selector",
+        "kubernetes.io/service-name=kubernetes",
+        "-o",
+        "jsonpath={range .items[*].endpoints[*].addresses[*]}{@} {end}|{.items[0].ports[0].port}",
+    ])?;
+    let (ips, port) = found
+        .trim()
+        .split_once('|')
+        .with_context(|| format!("the API server's endpoints read as `{found}`"))?;
+    let addresses = ips
+        .split_whitespace()
+        .map(|ip| {
+            ip.parse::<Ipv4Addr>()
+                .map(|ip| format!("{ip}/32"))
+                .with_context(|| format!("the API server's endpoint `{ip}` is not IPv4"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if addresses.is_empty() {
+        bail!("the API server lists no endpoint address");
+    }
+    let port = port
+        .trim()
+        .parse::<u16>()
+        .with_context(|| format!("the API server's endpoint port `{port}` is not a port"))?;
+    Ok((addresses, port))
+}
+
+/// Whether this checkout can run the stub issuer in the cell: lane SI's crate is in the workspace
+/// with its entry point implemented, not still the `todo!()` its tests land with, and the server
+/// refuses an `http` key set outside dev and CI (DEC-2100 item 9). Until all hold, the cell runs
+/// no stub, mounts no subject links, and every sign-in is refused.
+pub fn stub_ready(root: &Path) -> bool {
+    let (server, check) = KEY_SET_TIER_CHECK;
+    root.join(STUB_CRATE).is_file()
+        && fs::read_to_string(root.join(STUB_MAIN)).is_ok_and(|main| !main.contains(PENDING_BODY))
+        && fs::read_to_string(root.join(server)).is_ok_and(|code| code.contains(check))
+}
+
+/// The cell's stub issuer image: this checkout's dev-profile build, since the stub is compiled
+/// only with debug assertions (DEC-2100 item 2); none without an API image or a ready stub.
+fn stub_image_tag() -> Result<Option<String>> {
+    if api_image_tag()?.is_none() || !stub_ready(Path::new(".")) {
+        return Ok(None);
+    }
+    local_tag("stub-issuer", &["mandate-stub-issuer"]).map(Some)
+}
+
+/// The values the API's sign-in pieces take: the stub's image, and the subject-link ConfigMap the
+/// demo writes, both empty without a stub, so nothing is mounted and every sign-in is refused.
+fn signin_values(stub: Option<&str>) -> [String; 2] {
+    [
+        format!("images.stub-issuer={}", stub.unwrap_or_default()),
+        format!(
+            "api.subjectLinks={}",
+            if stub.is_some() { LINKS_CONFIGMAP } else { "" }
+        ),
+    ]
+}
+
+/// `mandate.local/<name>:<the first 12 hex digits of the binaries' digest>` ([`combined`]).
+fn local_tag(name: &str, binaries: &[&str]) -> Result<String> {
+    let digests = binaries
+        .iter()
+        .map(|binary| sha256(&static_binary(binary)))
+        .collect::<Result<Vec<_>>>()?;
+    let digest = combined(&digests);
     let short = digest
         .get(..12)
         .context("a SHA-256 shorter than 12 digits")?;
     Ok(format!("mandate.local/{name}:{short}"))
 }
 
+/// One binary's SHA-256 as it is, so a one-binary image keeps the tag it always had; several
+/// binaries' the SHA-256 of their digests, one a line, in order, so a change to any one of them
+/// changes the tag.
+fn combined(digests: &[String]) -> String {
+    match digests {
+        [one] => one.clone(),
+        many => {
+            let joined = many.join("\n");
+            sha2::Sha256::digest(joined.as_bytes())
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect()
+        }
+    }
+}
+
 fn static_binary(binary: &str) -> String {
     format!("{STATIC_TARGET}/{STATIC_TRIPLE}/debug/{binary}")
 }
 
-/// `cargo xtask cell up`: build the `mandate` and `api` images from this checkout (never with the
-/// `live` feature), bring up the k3d cluster if it is not up, install the CloudNativePG operator, the
-/// journal's Postgres and the workspace chart, and wait until every pod is ready and the
-/// migration Job has finished.
+/// The cell's `runtime` image (DEC-1013): this checkout's `mandate-daemon`. `None` where the
+/// `mandate` image is pulled: no signed runtime image is published yet, so the runtime is left out
+/// of that cell rather than built from something else.
+fn runtime_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag("runtime", &["mandate-daemon"]).map(Some)
+}
+
+/// The `images.*` settings for the images this cell runs, so `up` and every render agree.
+fn image_sets() -> Result<Vec<String>> {
+    let mut sets = vec![
+        format!("images.mandate={}", image_tag()?),
+        format!("images.api={}", api_image_tag()?.unwrap_or_default()),
+        format!(
+            "images.{DEPLOY_MANAGER_PROCESS}={}",
+            deploy_manager_image_tag()?.unwrap_or_default()
+        ),
+    ];
+    sets.extend(signin_values(stub_image_tag()?.as_deref()));
+    if let Some(runtime) = runtime_image()? {
+        sets.push(format!("images.runtime={runtime}"));
+    }
+    Ok(sets)
+}
+
+/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime` and `deploy-manager` images from
+/// this checkout (never with the `live` feature), bring up the k3d cluster if it is not up, install
+/// the CloudNativePG operator, the journal's Postgres and the workspace chart, and wait until every
+/// pod is ready and the migration Job has finished.
 pub fn up() -> Result<()> {
     let source = host_image_source()?;
     if source == ImageSource::Build {
@@ -432,8 +672,21 @@ pub fn up() -> Result<()> {
     }
     let image = image_tag()?;
     let api = api_image_tag()?;
+    let manager = deploy_manager_image_tag()?;
+    let runtime = runtime_image()?;
+    let stub = stub_image_tag()?;
     if source == ImageSource::Build {
-        build_image(&image, IMAGE_DOCKERFILE, "mandate", &[])?;
+        let runner = static_binary(RUNNER);
+        build_image(&image, IMAGE_DOCKERFILE, "mandate", &[(&runner, RUNNER)])?;
+    }
+    if let Some(runtime) = &runtime {
+        build_image(runtime, RUNTIME_DOCKERFILE, "mandate-daemon", &[])?;
+    }
+    if let Some(stub) = &stub {
+        build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
+    }
+    if let Some(manager) = &manager {
+        build_image(manager, DEPLOY_MANAGER_DOCKERFILE, "mandate-deployd", &[])?;
     }
     if let Some(api) = &api {
         build_image(
@@ -452,6 +705,15 @@ pub fn up() -> Result<()> {
     if let Some(api) = &api {
         sh("k3d", &["image", "import", "--cluster", CLUSTER, api])?;
     }
+    if let Some(runtime) = &runtime {
+        sh("k3d", &["image", "import", "--cluster", CLUSTER, runtime])?;
+    }
+    if let Some(stub) = &stub {
+        sh("k3d", &["image", "import", "--cluster", CLUSTER, stub])?;
+    }
+    if let Some(manager) = &manager {
+        sh("k3d", &["image", "import", "--cluster", CLUSTER, manager])?;
+    }
     let config = kubeconfig()?;
     sh(
         "k3d",
@@ -464,7 +726,7 @@ pub fn up() -> Result<()> {
             "--overwrite",
         ],
     )?;
-    let chart = operator_chart()?;
+    let chart = fetched_chart("cloudnative-pg.tgz", CNPG_CHART_URL, CNPG_CHART_SHA256)?;
     let operator_tag = format!("image.tag={CNPG_OPERATOR_TAG}");
     helm(&[
         "upgrade",
@@ -480,6 +742,8 @@ pub fn up() -> Result<()> {
         "--timeout",
         "5m",
     ])?;
+    backup_plugin()?;
+    archive_store()?;
     helm(&[
         "upgrade",
         "--install",
@@ -501,10 +765,22 @@ pub fn up() -> Result<()> {
         "--for=condition=Ready",
         "cluster.postgresql.cnpg.io/journal",
         "--timeout=300s",
+    ])
+    .with_context(|| format!("the journal cluster was not Ready: {}", cluster_state()))?;
+    let domain = kubectl(&[
+        "get",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.metadata.annotations.mandate\\.dev/failure-domain}",
     ])?;
-    let image_value = format!("images.mandate={image}");
-    let api_value = format!("images.api={}", api.clone().unwrap_or_default());
-    let installed = helm(&[
+    eprintln!("    journal: failure domains: {}", domain.trim());
+    if stub.is_some() {
+        demo_links(&image)?;
+    }
+    let sets = image_sets()?;
+    let mut install = vec![
         "upgrade",
         "--install",
         "workspace",
@@ -513,15 +789,16 @@ pub fn up() -> Result<()> {
         NAMESPACE,
         "-f",
         WORKSPACE_VALUES,
-        "--set",
-        &image_value,
-        "--set",
-        &api_value,
-        "--wait",
-        "--wait-for-jobs",
-        "--timeout",
-        "5m",
-    ]);
+    ];
+    for set in &sets {
+        install.extend(["--set", set.as_str()]);
+    }
+    let egress = egress_sets()?;
+    for set in &egress {
+        install.extend(["--set-json", set.as_str()]);
+    }
+    install.extend(["--wait", "--wait-for-jobs", "--timeout", "5m"]);
+    let installed = helm(&install);
     if installed.is_err() && api.is_some() {
         api_diagnosis();
     }
@@ -603,22 +880,30 @@ pub fn down() -> Result<()> {
 const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
-/// `mandate-cli` and `mandate-api-server` linked statically, so their images need no base
-/// (DEC-993 item 9), with no feature at all: never `live`. The dev profile, for the CI job's ten minutes (DEC-464): it keeps
-/// overflow checks, and the cell's journals are small.
+/// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
+/// (DEC-1013) and the deployment manager's `mandate-deployd` (DEC-1172) linked statically, so their images need no base (DEC-993 item 9), with no feature at
+/// all: never `live`; with them the stub issuer once [`stub_ready`], which the dev profile's debug
+/// assertions are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes
+/// (DEC-464): it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
-    let args = [
+    let mut args = vec![
         "build",
         "--locked",
         "--package",
         "mandate-cli",
         "--package",
+        RUNNER,
+        "--package",
         "mandate-api-server",
-        "--target",
-        STATIC_TRIPLE,
-        "--target-dir",
-        STATIC_TARGET,
+        "--package",
+        "mandate-daemon",
+        "--package",
+        "mandate-deployd",
     ];
+    if stub_ready(Path::new(".")) {
+        args.extend(["--package", "mandate-stub-issuer"]);
+    }
+    args.extend(["--target", STATIC_TRIPLE, "--target-dir", STATIC_TARGET]);
     eprintln!(
         "    $ RUSTFLAGS='-C target-feature=+crt-static' cargo {}",
         args.join(" ")
@@ -629,7 +914,7 @@ fn build_binary() -> Result<()> {
         .status()
         .context("starting cargo")?;
     if !status.success() {
-        bail!("the static build of mandate-cli and mandate-api-server failed with {status}");
+        bail!("the static build of the cell's binaries failed with {status}");
     }
     Ok(())
 }
@@ -737,12 +1022,12 @@ fn create_cluster() -> Result<()> {
     bail!("the cell's API server never became ready")
 }
 
-/// The operator chart from its GitHub release, kept under `target/cell` and checked by SHA-256
+/// A chart from its GitHub release, kept under `target/cell` as `name` and checked by SHA-256
 /// every time it is used.
-fn operator_chart() -> Result<String> {
-    let path = state()?.join("cloudnative-pg.tgz");
+fn fetched_chart(name: &str, url: &str, want: &str) -> Result<String> {
+    let path = state()?.join(name);
     let file = path.display().to_string();
-    if !path.exists() || sha256(&file)? != CNPG_CHART_SHA256 {
+    if !path.exists() || sha256(&file)? != want {
         sh(
             "curl",
             &[
@@ -752,15 +1037,129 @@ fn operator_chart() -> Result<String> {
                 "--retry-all-errors",
                 "-o",
                 &file,
-                CNPG_CHART_URL,
+                url,
             ],
         )?;
     }
     let found = sha256(&file)?;
-    if found != CNPG_CHART_SHA256 {
-        bail!("the CloudNativePG chart's SHA-256 is {found}, not {CNPG_CHART_SHA256}");
+    if found != want {
+        bail!("the chart {name}'s SHA-256 is {found}, not {want}");
     }
     Ok(file)
+}
+
+/// The Barman Cloud plugin beside the operator, with the certificates the TLS chart makes in place
+/// of cert-manager's; when an upgrade remade them, the plugin restarts, since it reads them only
+/// at start.
+fn backup_plugin() -> Result<()> {
+    let before = plugin_certificate_end()?;
+    helm(&[
+        "upgrade",
+        "--install",
+        "backup-plugin-tls",
+        PLUGIN_TLS_CHART,
+        "--namespace",
+        CNPG_NAMESPACE,
+    ])?;
+    let chart = fetched_chart(
+        "plugin-barman-cloud.tgz",
+        PLUGIN_CHART_URL,
+        PLUGIN_CHART_SHA256,
+    )?;
+    let image = format!("image.tag={PLUGIN_IMAGE_TAG}");
+    let sidecar = format!("sidecarImage.tag={PLUGIN_SIDECAR_TAG}");
+    helm(&[
+        "upgrade",
+        "--install",
+        "barman-cloud",
+        &chart,
+        "--namespace",
+        CNPG_NAMESPACE,
+        "--set",
+        &image,
+        "--set",
+        &sidecar,
+        "--set",
+        "certificate.createClientCertificate=false",
+        "--set",
+        "certificate.createServerCertificate=false",
+        "--set",
+        "certificate.createIssuer=false",
+        "--wait",
+        "--timeout",
+        "5m",
+    ])?;
+    if !before.is_empty() && before != plugin_certificate_end()? {
+        kubectl(&[
+            "rollout",
+            "restart",
+            "deployment/barman-cloud",
+            "--namespace",
+            CNPG_NAMESPACE,
+        ])?;
+        kubectl(&[
+            "rollout",
+            "status",
+            "deployment/barman-cloud",
+            "--namespace",
+            CNPG_NAMESPACE,
+            "--timeout=300s",
+        ])?;
+    }
+    Ok(())
+}
+
+/// When each of the plugin's two certificates ends, as the TLS chart records it; empty before the
+/// first install. Either changing means the plugin must restart.
+fn plugin_certificate_end() -> Result<String> {
+    let mut ends = String::new();
+    for secret in ["barman-cloud-server-tls", "barman-cloud-client-tls"] {
+        let end = kubectl(&[
+            "get",
+            "secret",
+            secret,
+            "--namespace",
+            CNPG_NAMESPACE,
+            "--ignore-not-found",
+            "-o",
+            "jsonpath={.metadata.annotations.mandate\\.dev/not-after}",
+        ])?;
+        ends.push_str(end.trim());
+        ends.push('/');
+    }
+    Ok(if ends == "//" { String::new() } else { ends })
+}
+
+/// The test store the journal archives to in the local cell, and the workspace's namespace, where
+/// it puts the archive's key.
+fn archive_store() -> Result<()> {
+    kubectl(&[
+        "create",
+        "namespace",
+        NAMESPACE,
+        "--dry-run=client",
+        "-o",
+        "json",
+    ])
+    .and_then(|ns| {
+        let ns: Value = serde_json::from_str(&ns).context("reading the namespace")?;
+        apply(&[ns])
+    })?;
+    let client = format!("clientNamespace={NAMESPACE}");
+    helm(&[
+        "upgrade",
+        "--install",
+        "archive-store",
+        ARCHIVE_STORE_CHART,
+        "--namespace",
+        ARCHIVE_STORE_NAMESPACE,
+        "--create-namespace",
+        "--set",
+        &client,
+        "--wait",
+        "--timeout",
+        "5m",
+    ])
 }
 
 fn sha256(file: &str) -> Result<String> {
@@ -816,8 +1215,8 @@ fn apply_as(objects: &[Value], extra: &[&str]) -> Result<()> {
 
 /// The chart rendered with the cell's values and `sets`, as the JSON documents it emits.
 pub fn render(sets: &[String], show_only: Option<&str>) -> Result<Vec<Value>> {
-    let image = format!("images.mandate={}", image_tag()?);
-    let api = format!("images.api={}", api_image_tag()?.unwrap_or_default());
+    let images = image_sets()?;
+    let egress = egress_sets()?;
     let mut args = vec![
         "template",
         "workspace",
@@ -826,12 +1225,11 @@ pub fn render(sets: &[String], show_only: Option<&str>) -> Result<Vec<Value>> {
         NAMESPACE,
         "-f",
         WORKSPACE_VALUES,
-        "--set",
-        image.as_str(),
-        "--set",
-        api.as_str(),
     ];
-    for set in sets {
+    for image in &images {
+        args.extend(["--set", image.as_str()]);
+    }
+    for set in egress.iter().chain(sets) {
         args.push("--set-json");
         args.push(set);
     }
@@ -871,13 +1269,14 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Egress => egress(seeded),
             Drill::Compose => compose_drill(seeded),
             Drill::Restart => restart(seeded),
-            Drill::KillSwitch => kill_switch(),
+            Drill::KillSwitch => kill_switch(seeded),
+            Drill::StandbyDown => standby_down(seeded),
+            Drill::Archive => archive(seeded),
         };
         if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
             restore()?;
         }
         match (verdict?, seeded) {
-            (Verdict::Skipped(why), _) => eprintln!("    skipped: {why}"),
             (Verdict::Held, false) => eprintln!("    held"),
             (Verdict::Broken(why), true) if why.contains(d.seeded_symptom()) => {
                 eprintln!("    caught the seeded bug: {why}");
@@ -1066,6 +1465,15 @@ fn tamper_segment(jobs: &mut [Value]) -> Result<()> {
 
 /// Applies a rendered Job and waits until it succeeds or fails; returns which, with its logs.
 fn run_job(objects: Vec<Value>) -> Result<(bool, String)> {
+    run_job_watching(objects, || Ok(()))
+}
+
+/// [`run_job`], calling `watch` at each poll while the Job runs, as a drill that must see what the
+/// database does during the Job.
+fn run_job_watching(
+    objects: Vec<Value>,
+    mut watch: impl FnMut() -> Result<()>,
+) -> Result<(bool, String)> {
     let job = objects
         .iter()
         .find(|o| o["kind"] == "Job")
@@ -1089,6 +1497,7 @@ fn run_job(objects: Vec<Value>) -> Result<(bool, String)> {
         if succeeded == "1" || failed == "1" {
             return Ok((succeeded == "1", job_logs(&name, job)));
         }
+        watch()?;
         sleep(Duration::from_secs(2));
     }
     bail!("Job {name} neither succeeded nor failed in time")
@@ -1169,8 +1578,9 @@ fn live_addresses() -> Result<BTreeMap<String, Vec<String>>> {
 /// One probe pod per process type, labelled as the chart labels that process, trying every live
 /// trading host and the journal. The pod is the chart's: non-root, read-only, no capability, and,
 /// outside seeded mode, behind the chart's own egress gate, so the probe starts when a process
-/// would. Seeded, the policies are gone and the gate would never open, so the probe goes without
-/// it to show it can see a leak.
+/// would; the deployment manager's probe waits behind the manager's own gate, since its policy
+/// allows the API server every other gate waits on (DEC-1172). Seeded, the policies are gone and
+/// the gate would never open, so the probe goes without it to show it can see a leak.
 fn probe_pod(process: &Value, id: &str, image: &str, script: &str) -> Result<Value> {
     let name = process["name"].as_str().context("a process has no name")?;
     let mut labels = serde_json::Map::new();
@@ -1273,12 +1683,15 @@ fn egress(seeded: bool) -> Result<Verdict> {
         .filter(|o| o["kind"] == "NetworkPolicy")
         .filter_map(|o| o["metadata"]["name"].as_str().map(String::from))
         .collect();
-    let gate = rendered
-        .iter()
-        .find(|o| o["kind"] == "Job" && o["metadata"]["name"] == "migrate")
-        .map(|j| j["spec"]["template"]["spec"]["initContainers"][0].clone())
-        .filter(|c| c["name"] == "egress-gate")
-        .context("the migration Job renders no egress gate")?;
+    let gate_of = |kind: &str, name: &str| {
+        rendered
+            .iter()
+            .find(|o| o["kind"] == kind && o["metadata"]["name"] == name)
+            .map(|w| w["spec"]["template"]["spec"]["initContainers"][0].clone())
+            .filter(|c| c["name"] == "egress-gate")
+    };
+    let gate = gate_of("Job", "migrate").context("the migration Job renders no egress gate")?;
+    let manager_gate = gate_of("Deployment", DEPLOY_MANAGER_PROCESS);
     let id = run_id()?;
     let all = processes()?;
     let pods = all
@@ -1286,7 +1699,10 @@ fn egress(seeded: bool) -> Result<Verdict> {
         .map(|p| {
             let mut pod = probe_pod(p, &id, &image, &script)?;
             if !seeded {
-                pod["spec"]["initContainers"] = json!([gate.clone()]);
+                let own = manager_gate
+                    .as_ref()
+                    .filter(|_| p["name"] == DEPLOY_MANAGER_PROCESS);
+                pod["spec"]["initContainers"] = json!([own.unwrap_or(&gate).clone()]);
             }
             Ok(pod)
         })
@@ -1585,7 +2001,7 @@ pub fn compose_document(root: &Path, all: &[Value]) -> Result<Value> {
         }),
     );
     let mut needs_egress = false;
-    for p in all.iter().filter(|p| p["built"] == true) {
+    for p in all.iter().filter(|p| in_compose(p)) {
         let name = p["name"].as_str().context("a process has no name")?;
         let kind = p["kind"].as_str().context("a process has no kind")?;
         let image_key = p["image"].as_str().context("a process has no image")?;
@@ -1666,6 +2082,14 @@ pub fn compose_document(root: &Path, all: &[Value]) -> Result<Value> {
                 service["depends_on"] =
                     json!({"migrate": {"condition": "service_completed_successfully"}});
                 service["restart"] = json!("unless-stopped");
+                if let Some(args) = p["args"].as_array() {
+                    service["command"] = json!(compose_words(args, "")?);
+                }
+                if let Some(probe) = p["probe"].as_array() {
+                    let mut test = vec![json!("CMD")];
+                    test.extend(compose_words(probe, "readyz")?.into_iter().map(Value::from));
+                    service["healthcheck"] = json!({"test": test, "interval": "5s", "retries": 6});
+                }
                 if name == API_PROCESS {
                     compose_api(&mut service)?;
                 }
@@ -1691,6 +2115,12 @@ pub fn compose_document(root: &Path, all: &[Value]) -> Result<Value> {
             "journal-roles": {"file": "../charts/journal-db/files/roles.sql"}
         }
     }))
+}
+
+/// Whether process `p` is in the Compose file: built, and not one whose `compose` is false, which
+/// has no Compose adapter (the deployment manager drives Kubernetes only, DEC-1172).
+fn in_compose(p: &Value) -> bool {
+    p["built"] == true && p["compose"] != false
 }
 
 /// The Compose file's secret holding the API server's session signing key, mounted owner-only as
@@ -1727,6 +2157,83 @@ fn compose_api(service: &mut Value) -> Result<()> {
         .context("the API's Compose service has no secrets")?
         .push(json!({"source": API_SESSION_KEY, "target": "session-signing-key"}));
     Ok(())
+}
+
+/// A service's `args` or `probe` from processes.json for Compose (DEC-1013): `{workspace}` and the
+/// `runtime` values' placeholders become the variables the operator sets, each required, and
+/// `{probe}` becomes `probe`.
+fn compose_words(words: &[Value], probe: &str) -> Result<Vec<String>> {
+    words
+        .iter()
+        .map(|w| {
+            let word = w.as_str().context("a launch word is not a string")?;
+            Ok(word
+                .replace("{workspace}", "${MANDATE_WORKSPACE:?set the workspace}")
+                .replace(
+                    "{agent}",
+                    "${MANDATE_RUNTIME_AGENT:?set the runtime's agent}",
+                )
+                .replace(
+                    "{connection}",
+                    "${MANDATE_RUNTIME_CONNECTION:?set the runtime's connection}",
+                )
+                .replace(
+                    "{owner}",
+                    "${MANDATE_RUNTIME_OWNER:?set the runtime's owner}",
+                )
+                .replace("{probe}", probe))
+        })
+        .collect()
+}
+
+/// The runtime image Compose is given when this cell built none (its `mandate` image is pulled):
+/// the drill never starts the runtime, but Compose resolves every service's variables first.
+const RUNTIME_NOT_BUILT: &str = "mandate.local/runtime:0000000";
+
+/// The variables the Compose file requires (DEC-1013): the workspace, the `mandate` image, the
+/// API server's settings ([`compose_api_settings`]), the runtime's image, and the runtime's
+/// deployment, read from the local cell's values so Compose and the k3d cell run one demo
+/// deployment.
+fn compose_env(
+    root: &Path,
+    image: &str,
+    api: &str,
+    runtime: Option<&str>,
+) -> Result<Vec<(String, String)>> {
+    let mut env = vec![
+        ("MANDATE_WORKSPACE".to_string(), WORKSPACE.to_string()),
+        ("MANDATE_IMAGE_MANDATE".to_string(), image.to_string()),
+        (
+            "MANDATE_IMAGE_RUNTIME".to_string(),
+            runtime.unwrap_or(RUNTIME_NOT_BUILT).to_string(),
+        ),
+    ];
+    env.extend(
+        compose_api_settings(api)
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value)),
+    );
+    for key in ["agent", "connection", "owner"] {
+        env.push((
+            format!("MANDATE_RUNTIME_{}", key.to_uppercase()),
+            runtime_value(root, key)?,
+        ));
+    }
+    Ok(env)
+}
+
+/// One of the local cell's `runtime:` values (`deploy/cell/values/k3d.yaml`).
+fn runtime_value(root: &Path, key: &str) -> Result<String> {
+    let text = fs::read_to_string(root.join(WORKSPACE_VALUES))
+        .with_context(|| format!("reading {WORKSPACE_VALUES}"))?;
+    let prefix = format!("  {key}: ");
+    text.lines()
+        .skip_while(|l| *l != "runtime:")
+        .take_while(|l| l.starts_with(' ') || *l == "runtime:")
+        .find_map(|l| l.strip_prefix(&prefix))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .with_context(|| format!("{WORKSPACE_VALUES} names no `runtime.{key}`"))
 }
 
 /// An image the workspace chart's values.yaml pins, read from its `images:` block, so the Compose
@@ -1786,6 +2293,52 @@ fn generate_in(root: &Path, write: bool) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// What the journal cluster says of itself, each instance's role and readiness, and the last lines
+/// of every container of an instance that is not Ready (the init Job's too), for a drill's report.
+/// Only the local cell's paper journal is ever read, so a statement in those lines leaves nothing.
+fn cluster_state() -> String {
+    let status = kubectl(&[
+        "get",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.status.phase} ({.status.phaseReason}); primary {.status.currentPrimary}, target {.status.targetPrimary}",
+    ])
+    .unwrap_or_default();
+    let pods = kubectl(&[
+        "get",
+        "pod",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        "cnpg.io/cluster=journal",
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}|{.metadata.labels.cnpg\\.io/instanceRole}|{.status.conditions[?(@.type==\"Ready\")].status}{\"\\n\"}{end}",
+    ])
+    .unwrap_or_default();
+    let mut report = format!("{}; instances:", status.trim());
+    for line in pods.lines().filter(|l| !l.is_empty()) {
+        report.push_str(&format!(" {line};"));
+        let mut fields = line.split('|');
+        let name = fields.next().unwrap_or_default();
+        if fields.nth(1) != Some("True") {
+            let tail = kubectl(&[
+                "logs",
+                name,
+                "--namespace",
+                NAMESPACE,
+                "--all-containers",
+                "--prefix",
+                "--tail=15",
+            ])
+            .unwrap_or_default();
+            report.push_str(&format!("\n[{name}]\n{tail}"));
+        }
+    }
+    report
 }
 
 /// Writes a control stream, kills the journal's primary, waits for CloudNativePG to bring the
@@ -1848,14 +2401,21 @@ fn restart(seeded: bool) -> Result<Verdict> {
             "the journal's primary pod was not Ready again within the drill's polls".into(),
         ));
     }
-    kubectl(&[
+    if kubectl(&[
         "wait",
         "--namespace",
         NAMESPACE,
         "--for=condition=Ready",
         "cluster.postgresql.cnpg.io/journal",
         "--timeout=300s",
-    ])?;
+    ])
+    .is_err()
+    {
+        return Ok(Verdict::Broken(format!(
+            "the journal cluster was not Ready within 300s of its primary's restart: {}",
+            cluster_state()
+        )));
+    }
     let stream = if seeded {
         format!("ctl:{workspace}lost")
     } else {
@@ -1878,24 +2438,872 @@ fn restart(seeded: bool) -> Result<Verdict> {
     }
 }
 
-/// The kill-switch drill (OPS-4) needs the runtime and executor processes and `mandate agent
-/// kill` in the binary; until both are on `main` it is named as skipped.
-fn kill_switch() -> Result<Verdict> {
-    let built = processes()?
+/// The processes the kill-switch drill takes down before it brakes (OPS-4, E21-34): none of them
+/// may be needed for a kill switch or a pause to commit. A name the chart does not render yet has
+/// nothing to take down.
+pub const KILL_SWITCH_DOWN: [&str; 5] = [
+    "api",
+    "deploy-manager",
+    "exporter",
+    "model-gateway",
+    "control-plane",
+];
+
+/// The agent and the connection the kill-switch drill brakes.
+const BRAKE_AGENT: &str = "agent-a";
+const BRAKE_CONNECTION: &str = "conn_alpaca_paper_01";
+
+/// The owner commands a brake run must leave on its control stream, as `(command, scope,
+/// subject)`: each scope's kill switch and an agent pause.
+pub fn brakes_expected(workspace: &str) -> Vec<(String, String, String)> {
+    [
+        ("kill_switch", "agent", BRAKE_AGENT),
+        ("kill_switch", "connection", BRAKE_CONNECTION),
+        ("kill_switch", "workspace", workspace),
+        ("pause", "agent", BRAKE_AGENT),
+    ]
+    .into_iter()
+    .map(|(c, k, s)| (c.to_owned(), k.to_owned(), s.to_owned()))
+    .collect()
+}
+
+/// The CLI arguments of each brake [`brakes_expected`] names, for `workspace` and `journal`.
+fn brake_args(workspace: &str, journal: &str) -> Vec<Vec<String>> {
+    let tail = [
+        "--workspace",
+        workspace,
+        "--user",
+        "drill-owner",
+        "--journal",
+        journal,
+        "--store",
+        "/work/store",
+    ];
+    [
+        vec!["agent", "kill", "--agent", BRAKE_AGENT],
+        vec!["agent", "kill", "--connection", BRAKE_CONNECTION],
+        vec!["agent", "kill", "--workspace-wide"],
+        vec!["agent", "pause", "--agent", BRAKE_AGENT],
+    ]
+    .into_iter()
+    .map(|head| head.into_iter().chain(tail).map(String::from).collect())
+    .collect()
+}
+
+/// Which brakes of `expected` the exported segment lines in `logs` do not hold, as one report, or
+/// `None` when every one is there. Each line of an export is `{"body":<event>,"hash":…}`, read from
+/// its first `{`, so the container prefix [`job_logs`] puts on each log line is skipped; any other
+/// line is ignored.
+pub fn brakes_missing(logs: &str, expected: &[(String, String, String)]) -> Option<String> {
+    let mut seen = Vec::new();
+    for line in logs.lines() {
+        let Some(start) = line.find('{') else {
+            continue;
+        };
+        let Ok(line) = serde_json::from_str::<Value>(line[start..].trim()) else {
+            continue;
+        };
+        let body = &line["body"];
+        if body["event_type"] != "OwnerCommandIssued" {
+            continue;
+        }
+        let field = |k: &str| body["payload"][k].as_str().unwrap_or_default().to_owned();
+        seen.push((field("command"), field("scope"), field("subject")));
+    }
+    let missing: Vec<String> = expected
         .iter()
-        .filter(|p| p["built"] == true)
-        .filter_map(|p| p["name"].as_str().map(String::from))
-        .collect::<Vec<_>>();
-    let agents = ["runtime", "executor"]
+        .filter(|e| !seen.contains(e))
+        .map(|(command, scope, subject)| format!("no {command} of scope {scope} ({subject})"))
+        .collect();
+    (!missing.is_empty()).then(|| missing.join("; "))
+}
+
+/// The kill-switch drill (OPS-4, E21-34): takes down every [`KILL_SWITCH_DOWN`] process the chart
+/// runs, opens a control stream, commits each scope's kill switch and an agent pause through
+/// one-off control Jobs, then exports the stream, verifies it by journal spec §11, and checks
+/// every brake is in it; the processes it took down are scaled back after. Seeded, it never
+/// commits the connection-scope kill switch, which the check must name.
+fn kill_switch(seeded: bool) -> Result<Verdict> {
+    let selector = format!("mandate.dev/process in ({})", KILL_SWITCH_DOWN.join(","));
+    let downed = kubectl(&[
+        "get",
+        "deployment",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        &selector,
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name} {.spec.replicas}{\"\\n\"}{end}",
+    ])?;
+    let downed: Vec<(String, String)> = downed
+        .lines()
+        .filter_map(|l| l.split_once(' '))
+        .map(|(n, r)| (n.to_owned(), r.to_owned()))
+        .collect();
+    let scaled_down = downed.iter().try_for_each(|(name, _)| {
+        kubectl(&[
+            "scale",
+            "deployment",
+            name,
+            "--namespace",
+            NAMESPACE,
+            "--replicas=0",
+        ])
+        .map(drop)
+    });
+    let verdict = scaled_down.and_then(|()| brake_in_cell(&selector, seeded));
+    let unrestored: Vec<String> = downed
         .iter()
-        .all(|n| built.iter().any(|b| b == n));
-    Ok(Verdict::Skipped(if agents {
-        "the runtime and executor are built, but the drill itself lands with O4 (E21-34)".into()
+        .filter_map(|(name, replicas)| {
+            let replicas = format!("--replicas={replicas}");
+            kubectl(&[
+                "scale",
+                "deployment",
+                name,
+                "--namespace",
+                NAMESPACE,
+                &replicas,
+            ])
+            .err()
+            .map(|e| format!("{name}: {e:#}"))
+        })
+        .collect();
+    if unrestored.is_empty() {
+        verdict
     } else {
-        "the runtime and executor images are not on main yet (P1, #1451), nor `mandate agent \
-         kill` (O4, E21-34)"
-            .into()
-    }))
+        bail!(
+            "the drill's verdict was {verdict:?}, but these processes were not scaled back: {}",
+            unrestored.join("; ")
+        )
+    }
+}
+
+fn brake_in_cell(selector: &str, seeded: bool) -> Result<Verdict> {
+    let mut gone = false;
+    for _ in 0..POLLS {
+        let pods = kubectl(&[
+            "get",
+            "pod",
+            "--namespace",
+            NAMESPACE,
+            "--selector",
+            selector,
+            "-o",
+            "name",
+        ])?;
+        if pods.trim().is_empty() {
+            gone = true;
+            break;
+        }
+        sleep(Duration::from_secs(2));
+    }
+    if !gone {
+        return Ok(Verdict::Broken(format!(
+            "a pod of {} was still in the cell",
+            KILL_SWITCH_DOWN.join(", ")
+        )));
+    }
+    let id = run_id()?;
+    let workspace = format!("kill{id}");
+    let journal = "$(MANDATE_JOURNAL_DSN)";
+    let open = json!([
+        "workspace",
+        "open",
+        "--workspace",
+        workspace,
+        "--journal",
+        journal,
+        "--store",
+        "/work/store"
+    ]);
+    let mut runs = vec![open];
+    for (n, args) in brake_args(&workspace, journal).into_iter().enumerate() {
+        if seeded && n == 1 {
+            continue;
+        }
+        runs.push(json!(args));
+    }
+    for (n, args) in runs.iter().enumerate() {
+        let job = render(
+            &[format!("run.id=\"{id}{n}\""), format!("run.args={args}")],
+            Some("templates/run.yaml"),
+        )?;
+        let (done, logs) = run_job(job)?;
+        if !done {
+            return Ok(Verdict::Broken(format!(
+                "`mandate {}` failed in the cell:\n{logs}",
+                args.as_array()
+                    .map(|a| a
+                        .iter()
+                        .take(3)
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(" "))
+                    .unwrap_or_default()
+            )));
+        }
+    }
+    let mut verify = render(
+        &[
+            format!("verify.id=\"{id}\""),
+            format!("verify.streams={}", json!([format!("ctl:{workspace}")])),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    show_segment(&mut verify)?;
+    let (verified, logs) = run_job(verify)?;
+    if !verified {
+        return Ok(Verdict::Broken(format!(
+            "the control stream holding the brakes did not verify:\n{logs}"
+        )));
+    }
+    if let Some(missing) = brakes_missing(&logs, &brakes_expected(&workspace)) {
+        return Ok(Verdict::Broken(missing));
+    }
+    let built = processes()?;
+    let is_built = |name: &str| {
+        built
+            .iter()
+            .any(|p| p["name"] == name && p["built"] == true)
+    };
+    let owners = if is_built("runtime") && is_built("executor") {
+        "the runtime and executor are built, but nothing in the drill starts them for an agent yet"
+    } else {
+        "the runtime and executor do not run in the cell yet"
+    };
+    eprintln!(
+        "    stream owners: skipped: {owners}, so each scope's KillSwitchActivated in every stream \
+         owner waits on them and on the executor's connection and workspace scopes (E7-4; \
+         DEC-2000 item 6)"
+    );
+    Ok(Verdict::Held)
+}
+
+/// Adds an init container after the exports that prints the first segment, so the Job's logs
+/// carry the exported events for [`brakes_missing`].
+fn show_segment(jobs: &mut [Value]) -> Result<()> {
+    let job = jobs.first_mut().context("the verify Job did not render")?;
+    let spec = &mut job["spec"]["template"]["spec"];
+    let image = spec["initContainers"][0]["image"].clone();
+    let show = json!({
+        "name": "show-segment",
+        "image": image,
+        "command": ["cat", "/work/segment-0.jsonl"],
+        "securityContext": spec["initContainers"][0]["securityContext"].clone(),
+        "resources": spec["initContainers"][0]["resources"].clone(),
+        "volumeMounts": [{"name": "work", "mountPath": "/work"}]
+    });
+    spec["initContainers"]
+        .as_array_mut()
+        .context("the verify Job has no init containers")?
+        .push(show);
+    Ok(())
+}
+
+/// The name of the journal's pod in `role` (`primary` or `replica`).
+fn journal_pod(role: &str) -> Result<String> {
+    let selector = format!("cnpg.io/cluster=journal,cnpg.io/instanceRole={role}");
+    let name = kubectl(&[
+        "get",
+        "pod",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        &selector,
+        "-o",
+        "jsonpath={.items[0].metadata.name}",
+    ])?;
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("the journal has no {role} pod");
+    }
+    Ok(name.to_string())
+}
+
+/// One query on the primary as its local superuser, through the pod's own socket: the drills
+/// read what Postgres itself holds, not what a process reports.
+fn on_primary(sql: &str) -> Result<String> {
+    let primary = journal_pod("primary")?;
+    Ok(kubectl(&[
+        "exec",
+        "--namespace",
+        NAMESPACE,
+        &primary,
+        "-c",
+        "postgres",
+        "--",
+        "psql",
+        "-X",
+        "-d",
+        "mandate",
+        "-tAc",
+        sql,
+    ])?
+    .trim()
+    .to_string())
+}
+
+/// Polls `check` until it is true or the drill's polls run out.
+fn until(mut check: impl FnMut() -> Result<bool>) -> Result<bool> {
+    for _ in 0..POLLS {
+        if check()? {
+            return Ok(true);
+        }
+        sleep(Duration::from_secs(2));
+    }
+    Ok(false)
+}
+
+/// How many standbys stream to the primary and count for its synchronous commits.
+fn synchronous_standbys() -> Result<String> {
+    on_primary(
+        "SELECT count(*) FROM pg_stat_replication WHERE sync_state IN ('sync', 'quorum') AND state = 'streaming'",
+    )
+}
+
+/// The journal's events stored for `stream`, as the primary sees them.
+fn stored_events(stream: &str) -> Result<String> {
+    on_primary(&format!(
+        "SELECT count(*) FROM journal.events WHERE stream_id = '{stream}'"
+    ))
+}
+
+/// The control CLI's `workspace open` for `workspace` as a run Job, ended after `deadline` seconds.
+fn open_job(id: &str, workspace: &str, deadline: u32) -> Result<Vec<Value>> {
+    let args = json!([
+        "workspace",
+        "open",
+        "--workspace",
+        workspace,
+        "--environment",
+        "paper",
+        "--journal",
+        "$(MANDATE_JOURNAL_DSN)",
+        "--store",
+        "/work/store"
+    ]);
+    let mut open = render(
+        &[format!("run.id=\"{id}\""), format!("run.args={args}")],
+        Some("templates/run.yaml"),
+    )?;
+    for job in open.iter_mut().filter(|o| o["kind"] == "Job") {
+        job["spec"]["activeDeadlineSeconds"] = json!(deadline);
+    }
+    Ok(open)
+}
+
+/// The verify Job over `streams`, and whether it passed, with its logs.
+fn verify_streams(id: &str, streams: &[String]) -> Result<(bool, String)> {
+    let verify = render(
+        &[
+            format!("verify.id=\"{id}\""),
+            format!("verify.streams={}", json!(streams)),
+        ],
+        Some("templates/run.yaml"),
+    )?;
+    run_job(verify)
+}
+
+/// How long the drill's append waits on the fenced standby before the drill ends it: long enough
+/// that a primary committing alone would have answered many times over.
+const FENCED_APPEND_SECS: u32 = 60;
+
+/// OPS-2 with the synchronous standby down: the standby is fenced (CloudNativePG stops its
+/// Postgres), an append is tried, and it must wait on the standby rather than commit: the primary
+/// shows a backend waiting for synchronous replication, the CLI never reports the commit, the
+/// primary shows none of its events, and the Job ends on its deadline. Whatever happened, the
+/// standby is then unfenced, the durability put back, and the cluster waited for until a
+/// synchronous standby streams again; then it must take a new append, and every stream written
+/// verifies. Seeded, the cluster's durability is `preferred` first, so the primary drops the
+/// standby and commits alone, which the drill must report.
+fn standby_down(seeded: bool) -> Result<Verdict> {
+    if !until(|| Ok(synchronous_standbys()? == "1"))? {
+        return Ok(Verdict::Broken(
+            "before the drill, no synchronous standby streams to the primary".into(),
+        ));
+    }
+    let fenced = if seeded {
+        set_durability("preferred").and_then(|()| fenced_append(seeded))
+    } else {
+        fenced_append(seeded)
+    };
+    let restored = restore_standby(seeded);
+    let (verdict, fenced) = fenced?;
+    let streaming = restored?;
+    if verdict != Verdict::Held {
+        return Ok(verdict);
+    }
+    if !streaming {
+        return Ok(Verdict::Broken(
+            "the standby never streamed synchronously again after it was unfenced".into(),
+        ));
+    }
+    let id = run_id()?;
+    let workspace = format!("standby{id}");
+    let (opened, logs) = run_job(open_job(&format!("{id}b"), &workspace, 120)?)?;
+    if !opened {
+        return Ok(Verdict::Broken(format!(
+            "with the standby back, `mandate workspace open` failed:\n{logs}"
+        )));
+    }
+    let mut streams = vec![format!("ctl:{workspace}")];
+    if stored_events(&fenced)? != "0" {
+        streams.push(fenced);
+    }
+    let (verified, logs) = verify_streams(&id, &streams)?;
+    if verified {
+        Ok(Verdict::Held)
+    } else {
+        Ok(Verdict::Broken(format!(
+            "with the standby back, the streams did not verify:\n{logs}"
+        )))
+    }
+}
+
+/// Unfences the standby, puts `required` back after a seeded run, and waits for the cluster to be
+/// Ready with a synchronous standby streaming, so the next drill starts from a whole cluster;
+/// whether one streams again. Every step runs even when an earlier one failed.
+fn restore_standby(seeded: bool) -> Result<bool> {
+    let unfenced = kubectl(&[
+        "annotate",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "cnpg.io/fencedInstances-",
+    ]);
+    let durable = if seeded {
+        set_durability("required")
+    } else {
+        Ok(())
+    };
+    let ready = kubectl(&[
+        "wait",
+        "--namespace",
+        NAMESPACE,
+        "--for=condition=Ready",
+        "cluster.postgresql.cnpg.io/journal",
+        "--timeout=300s",
+    ]);
+    let streaming = until(|| Ok(synchronous_standbys()? == "1"));
+    unfenced?;
+    durable?;
+    ready?;
+    streaming
+}
+
+/// Backends on the primary waiting for a standby to confirm their commit.
+fn waiting_on_standby() -> Result<String> {
+    on_primary("SELECT count(*) FROM pg_stat_activity WHERE wait_event = 'SyncRep'")
+}
+
+/// Fences the standby, waits until the primary has no synchronous standby, and tries one append,
+/// watching the primary for the commit that waits on the standby; the verdict, and the stream the
+/// append was for, which the drill checks once the standby is back.
+fn fenced_append(seeded: bool) -> Result<(Verdict, String)> {
+    let standby = journal_pod("replica")?;
+    let fence = format!("cnpg.io/fencedInstances=[\"{standby}\"]");
+    kubectl(&[
+        "annotate",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "--overwrite",
+        &fence,
+    ])?;
+    let id = run_id()?;
+    let stream = format!("ctl:fenced{id}");
+    if !until(|| Ok(synchronous_standbys()? == "0"))? {
+        let broken =
+            format!("{standby} was fenced, but the primary still streams to a synchronous standby");
+        return Ok((Verdict::Broken(broken), stream));
+    }
+    let workspace = format!("fenced{id}");
+    let deadline = if seeded { 120 } else { FENCED_APPEND_SECS };
+    let mut waited = false;
+    let (opened, logs) = run_job_watching(open_job(&id, &workspace, deadline)?, || {
+        if !waited {
+            waited = waiting_on_standby()? != "0";
+        }
+        Ok(())
+    })?;
+    let stored = stored_events(&stream)?;
+    let verdict = if opened {
+        Verdict::Broken(format!(
+            "an append committed with the standby fenced: `mandate workspace open` succeeded, and the primary holds {stored} of its events"
+        ))
+    } else if stored != "0" {
+        Verdict::Broken(format!(
+            "an append committed with the standby fenced: the primary holds {stored} events of {stream}, though the CLI never had its commit\n{logs}"
+        ))
+    } else {
+        let end = job_end(&format!("control-{id}"))?;
+        if end != "DeadlineExceeded" {
+            let reason = if end.is_empty() {
+                "no terminal condition"
+            } else {
+                end.as_str()
+            };
+            Verdict::Broken(format!(
+                "the append with the standby fenced failed (`{reason}`) rather than waited:\n{logs}"
+            ))
+        } else if !waited {
+            Verdict::Broken(format!(
+                "the append's Job ran out its deadline, but no commit ever waited on the standby, so the drill did not see what stopped it:\n{logs}"
+            ))
+        } else {
+            Verdict::Held
+        }
+    };
+    Ok((verdict, stream))
+}
+
+/// Why a Job that failed ended, as its `Failed` condition says, or its `FailureTarget` while the
+/// controller is still stopping its pod (`DeadlineExceeded` for one its deadline stopped); waited
+/// for, since a Job counts its failed pod before it sets either.
+fn job_end(name: &str) -> Result<String> {
+    let mut reason = String::new();
+    until(|| {
+        reason = kubectl(&[
+            "get",
+            "job",
+            name,
+            "--namespace",
+            NAMESPACE,
+            "-o",
+            "jsonpath={.status.conditions[?(@.type==\"FailureTarget\")].reason} {.status.conditions[?(@.type==\"Failed\")].reason}",
+        ])?
+        .split_whitespace()
+        .last()
+        .unwrap_or_default()
+        .to_string();
+        Ok(!reason.is_empty())
+    })?;
+    Ok(reason)
+}
+
+/// Sets the journal cluster's `dataDurability`, as only a seeded drill does.
+fn set_durability(durability: &str) -> Result<()> {
+    let patch = json!({"spec": {"postgresql": {"synchronous": {"dataDurability": durability}}}});
+    kubectl(&[
+        "patch",
+        "cluster.postgresql.cnpg.io/journal",
+        "--namespace",
+        NAMESPACE,
+        "--type",
+        "merge",
+        "-p",
+        &patch.to_string(),
+    ])
+    .map(|_| ())
+}
+
+/// The archive's destination and endpoint, as the installed ObjectStore holds them.
+fn archive_destination() -> Result<(String, String)> {
+    let both = kubectl(&[
+        "get",
+        "objectstore.barmancloud.cnpg.io/journal-archive",
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.spec.configuration.destinationPath} {.spec.configuration.endpointURL}",
+    ])?;
+    let (path, url) = both
+        .trim()
+        .split_once(' ')
+        .context("the archive's ObjectStore names no destination or endpoint")?;
+    Ok((path.to_string(), url.to_string()))
+}
+
+/// Points the archive at `path`, as only a seeded drill does, and back.
+fn set_destination(path: &str) -> Result<()> {
+    let patch = json!({"spec": {"configuration": {"destinationPath": path}}});
+    kubectl(&[
+        "patch",
+        "objectstore.barmancloud.cnpg.io/journal-archive",
+        "--namespace",
+        NAMESPACE,
+        "--type",
+        "merge",
+        "-p",
+        &patch.to_string(),
+    ])
+    .map(|_| ())
+}
+
+/// Writes a stream, closes the WAL segment that holds it, takes a base backup, and reads both back
+/// from the store with Barman's own tools. Seeded, the archive goes to another bucket of the same
+/// store first, which Postgres cannot tell, so only the read from the store can catch it; the
+/// destination is put back whatever happened. A seeded run leaves its segment and base backup under
+/// that other path, so the archive at the real one has a gap: a later restore takes its own base
+/// backup first.
+fn archive(seeded: bool) -> Result<Verdict> {
+    let (path, url) = archive_destination()?;
+    let verdict = if seeded {
+        set_destination(&format!("{path}-elsewhere")).and_then(|()| archived(&path, &url))
+    } else {
+        archived(&path, &url)
+    };
+    let restored = if seeded {
+        set_destination(&path)
+    } else {
+        Ok(())
+    };
+    let verdict = verdict?;
+    restored?;
+    Ok(verdict)
+}
+
+fn archived(path: &str, url: &str) -> Result<Verdict> {
+    let id = run_id()?;
+    let workspace = format!("archive{id}");
+    let (opened, logs) = run_job(open_job(&id, &workspace, 120)?)?;
+    if !opened {
+        return Ok(Verdict::Broken(format!(
+            "`mandate workspace open` failed before the archive check:\n{logs}"
+        )));
+    }
+    let segment = on_primary("SELECT pg_walfile_name(pg_current_wal_lsn())")?;
+    on_primary("SELECT pg_switch_wal()")?;
+    let reported = until(|| {
+        let last = on_primary("SELECT coalesce(last_archived_wal, '') FROM pg_stat_archiver")?;
+        Ok(last.len() == segment.len() && last >= segment)
+    })?;
+    if !reported {
+        return Ok(Verdict::Broken(format!(
+            "Postgres never reported {segment} archived: {}",
+            on_primary("SELECT failed_count, last_failed_wal FROM pg_stat_archiver")?
+        )));
+    }
+    let backup = format!("journal-drill-{id}");
+    let backup_id = base_backup(&backup);
+    let _ = kubectl(&[
+        "delete",
+        "backup",
+        &backup,
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "--wait=false",
+    ]);
+    let backup_id = match backup_id? {
+        Ok(backup_id) => backup_id,
+        Err(phase) => {
+            let sidecars = kubectl(&[
+                "get",
+                "pod",
+                "--namespace",
+                NAMESPACE,
+                "--selector",
+                "cnpg.io/cluster=journal",
+                "-o",
+                "jsonpath={range .items[*]}{.metadata.name}: {.status.containerStatuses[?(@.name==\"plugin-barman-cloud\")].lastState.terminated.reason} {.status.containerStatuses[?(@.name==\"plugin-barman-cloud\")].restartCount} restarts; {end}",
+            ])
+            .unwrap_or_default();
+            return Ok(Verdict::Broken(format!(
+                "the base backup {backup} did not complete (phase `{phase}`); the plugin's sidecars: {}",
+                sidecars.trim()
+            )));
+        }
+    };
+    let read = read_archive(&id, path, url, &segment);
+    let _ = kubectl(&[
+        "delete",
+        "pod",
+        &format!("archive-check-{id}"),
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "--wait=false",
+    ]);
+    let _ = kubectl(&[
+        "delete",
+        "networkpolicy",
+        "archive-check",
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+    ]);
+    let read = read?;
+    if !read.listed {
+        return Ok(Verdict::Broken(format!(
+            "Barman could not list the store at {path}, so the drill read nothing:\n{}",
+            read.logs
+        )));
+    }
+    if !read.fetched {
+        return Ok(Verdict::Broken(if read.logs.contains("does not exist") {
+            format!("{segment} is not in the archive at {path}:\n{}", read.logs)
+        } else {
+            format!(
+                "Barman failed to fetch {segment} from {path} for another reason than its absence:\n{}",
+                read.logs
+            )
+        }));
+    }
+    if !read.logs.contains(&backup_id) {
+        return Ok(Verdict::Broken(format!(
+            "the base backup {backup_id} is not in the archive at {path}:\n{}",
+            read.logs
+        )));
+    }
+    Ok(Verdict::Held)
+}
+
+/// Takes a base backup through the plugin: its Barman id once it completes, or the phase it ended
+/// in when it did not.
+fn base_backup(backup: &str) -> Result<std::result::Result<String, String>> {
+    apply(&[json!({
+        "apiVersion": "postgresql.cnpg.io/v1",
+        "kind": "Backup",
+        "metadata": {"name": backup},
+        "spec": {
+            "cluster": {"name": "journal"},
+            "method": "plugin",
+            "pluginConfiguration": {"name": "barman-cloud.cloudnative-pg.io"}
+        }
+    })])?;
+    let mut phase = String::new();
+    until(|| {
+        phase = kubectl(&[
+            "get",
+            "backup",
+            backup,
+            "--namespace",
+            NAMESPACE,
+            "-o",
+            "jsonpath={.status.phase}/{.status.backupId}/{.status.error}",
+        ])?
+        .trim()
+        .to_string();
+        Ok(phase.starts_with("completed/") || phase.starts_with("failed/"))
+    })?;
+    Ok(match phase.strip_prefix("completed/") {
+        Some(rest) if !rest.starts_with('/') => {
+            Ok(rest.split('/').next().unwrap_or_default().to_string())
+        }
+        _ => Err(phase),
+    })
+}
+
+/// What the check pod read from the store: whether Barman listed it, whether it fetched the
+/// segment, and both tools' logs.
+struct ArchiveRead {
+    listed: bool,
+    fetched: bool,
+    logs: String,
+}
+
+/// A pod with the plugin's own sidecar image and the archive's key that lists the base backups and
+/// fetches `segment` back from `path`, as a restore would, under a network policy of its own that
+/// reaches the store and nothing else. The caller removes the pod and the policy.
+fn read_archive(id: &str, path: &str, url: &str, segment: &str) -> Result<ArchiveRead> {
+    let image = format!("ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:{PLUGIN_SIDECAR_TAG}");
+    let name = format!("archive-check-{id}");
+    let key = |env: &str, key: &str| json!({"name": env, "valueFrom": {"secretKeyRef": {"name": "journal-archive-key", "key": key}}});
+    let tool = |name: &str, args: Vec<&str>| {
+        json!({
+            "name": name,
+            "image": image,
+            "command": args,
+            "env": [
+                key("AWS_ACCESS_KEY_ID", "ACCESS_KEY_ID"),
+                key("AWS_SECRET_ACCESS_KEY", "ACCESS_SECRET_KEY"),
+                {"name": "AWS_DEFAULT_REGION", "value": "us-east-1"},
+                {"name": "HOME", "value": "/tmp"}
+            ],
+            "securityContext": {
+                "allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true,
+                "capabilities": {"drop": ["ALL"]}
+            },
+            "resources": {
+                "limits": {"cpu": "200m", "memory": "256Mi"},
+                "requests": {"cpu": "200m", "memory": "256Mi"}
+            },
+            "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}]
+        })
+    };
+    let fetched = format!("/tmp/{segment}");
+    let policy = json!({
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {"name": "archive-check"},
+        "spec": {
+            "podSelector": {"matchLabels": {"mandate.dev/archive-check": "true"}},
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [],
+            "egress": [
+                {"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
+                         "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}}}],
+                 "ports": [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}]},
+                {"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": ARCHIVE_STORE_NAMESPACE}},
+                         "podSelector": {"matchLabels": {"app.kubernetes.io/name": "mandate-archive-store"}}}],
+                 "ports": [{"protocol": "TCP", "port": 9000}]}
+            ]
+        }
+    });
+    let pod = json!({
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": name,
+            "labels": {"mandate.dev/archive-check": "true", "mandate.dev/archive-client": "true"}
+        },
+        "spec": {
+            "restartPolicy": "Never",
+            "automountServiceAccountToken": false,
+            "securityContext": {
+                "runAsNonRoot": true, "runAsUser": 26, "runAsGroup": 26,
+                "seccompProfile": {"type": "RuntimeDefault"}
+            },
+            "initContainers": [tool(
+                "list",
+                vec!["barman-cloud-backup-list", "--endpoint-url", url, path, "journal"]
+            )],
+            "containers": [tool(
+                "fetch",
+                vec!["barman-cloud-wal-restore", "--endpoint-url", url, path, "journal", segment, &fetched]
+            )],
+            "volumes": [{"name": "tmp", "emptyDir": {}}]
+        }
+    });
+    apply(&[policy, pod])?;
+    let mut phase = String::new();
+    until(|| {
+        phase = kubectl(&[
+            "get",
+            "pod",
+            &name,
+            "--namespace",
+            NAMESPACE,
+            "-o",
+            "jsonpath={.status.phase}",
+        ])?
+        .trim()
+        .to_string();
+        Ok(phase == "Succeeded" || phase == "Failed")
+    })?;
+    let listed = kubectl(&[
+        "get",
+        "pod",
+        &name,
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.status.initContainerStatuses[0].state.terminated.exitCode}",
+    ])?;
+    let mut logs = String::new();
+    for container in ["list", "fetch"] {
+        if let Ok(out) = kubectl(&["logs", &name, "--namespace", NAMESPACE, "-c", container]) {
+            for line in out.lines() {
+                logs.push_str(&format!("[{container}] {line}\n"));
+            }
+        }
+    }
+    Ok(ArchiveRead {
+        listed: listed.trim() == "0",
+        fetched: phase == "Succeeded",
+        logs,
+    })
 }
 
 const COMPOSE_DIR: &str = "deploy/cell/compose";
@@ -1907,14 +3315,13 @@ const COMPOSE_SECRETS: &str = "deploy/cell/compose/secrets";
 fn compose_cmd(args: &[&str]) -> Result<String> {
     let image = image_tag()?;
     let api = api_image_tag()?.unwrap_or_else(|| image.clone());
+    let env = compose_env(Path::new("."), &image, &api, runtime_image()?.as_deref())?;
     let mut full = vec!["compose", "-f", "compose.json"];
     full.extend_from_slice(args);
     let out = Command::new("docker")
         .current_dir(COMPOSE_DIR)
         .args(&full)
-        .env("MANDATE_WORKSPACE", WORKSPACE)
-        .env("MANDATE_IMAGE_MANDATE", &image)
-        .envs(compose_api_settings(&api))
+        .envs(env)
         .output()
         .context("starting docker compose")?;
     let text = format!(
@@ -1938,11 +3345,11 @@ fn compose_api_settings(api_image: &str) -> [(&'static str, String); 8] {
         ("MANDATE_API_WORKSPACE", DEMO_WORKSPACE.to_string()),
         ("MANDATE_API_ISSUER", LOCAL_ISSUER.to_string()),
         ("MANDATE_API_AUDIENCE", "authenticated".to_string()),
-        ("MANDATE_API_JWKS_URL", format!("{LOCAL_ISSUER}/jwks")),
         (
-            "MANDATE_API_APP_ORIGIN",
-            "https://localhost:4317".to_string(),
+            "MANDATE_API_JWKS_URL",
+            format!("{LOCAL_ISSUER}{STUB_KEY_SET}"),
         ),
+        ("MANDATE_API_APP_ORIGIN", DEMO_APP_ORIGIN.to_string()),
         ("MANDATE_DEPLOYMENT_TIER", "dev".to_string()),
     ]
 }
@@ -2055,6 +3462,18 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
             "`mandate workspace open` failed: {e:#}"
         )));
     }
+    for args in brake_args(&workspace, &control) {
+        let run = ["run", "--rm", "-v", &work, "control"]
+            .into_iter()
+            .chain(args.iter().map(String::as_str))
+            .collect::<Vec<_>>();
+        if let Err(e) = compose_cmd(&run) {
+            return Ok(Verdict::Broken(format!(
+                "`mandate {}` failed under Compose: {e:#}",
+                args.join(" ")
+            )));
+        }
+    }
     let verify_dsn = dsn("mandate_verify");
     compose_cmd(&[
         "run",
@@ -2085,7 +3504,11 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
         "verify",
         "/work/segment.jsonl",
     ]) {
-        Ok(_) => Ok(Verdict::Held),
+        Ok(_) => {
+            let segment = as_root_in(COMPOSE_SECRETS, "cat /s/work/segment.jsonl")?;
+            Ok(brakes_missing(&segment, &brakes_expected(&workspace))
+                .map_or(Verdict::Held, Verdict::Broken))
+        }
         Err(e) => Ok(Verdict::Broken(format!(
             "the exported control stream did not verify: {e:#}"
         ))),
@@ -2097,8 +3520,22 @@ fn compose_steps(seeded: bool) -> Result<Verdict> {
 const DEMO_WORKSPACE: &str = "01KDEM0000000000000000000W";
 /// The demo workspace's organization (`api.org` in the local cell's values).
 const DEMO_ORG: &str = "01KDEM0000000000000000000R";
-/// The local stub issuer's address on the API pod's loopback (DEC-2100, lane SI).
+/// The local stub issuer's address on the API pod's loopback (DEC-2100, lane SI), exactly as its
+/// tokens carry it in `iss`: no trailing slash.
 const LOCAL_ISSUER: &str = "http://127.0.0.1:8090";
+/// The stub's port on the API pod's loopback, which the demo forwards to the same local port, so
+/// the `Host` the stub requires (`127.0.0.1:8090`, any other gets 421) is the one the demo sends.
+const STUB_PORT: u16 = 8090;
+/// The stub's key-set path under [`LOCAL_ISSUER`].
+const STUB_KEY_SET: &str = "/jwks.json";
+/// The ConfigMap holding the demo's subject links, which the chart mounts at the fixed path.
+const LINKS_CONFIGMAP: &str = "subject-links";
+/// The demo owner's subject at the stub issuer: a name for a demo principal, never a person's.
+const DEMO_SUBJECT: &str = "demo-owner";
+/// The user principal the demo owner signs in as.
+const DEMO_OWNER: &str = "01KDEM0000000000000000000P";
+/// The app origin the local cell's API takes (`api.appOrigin` in its values).
+const DEMO_APP_ORIGIN: &str = "https://localhost:4317";
 /// Where `web/` serves on the developer's machine (its `npm run dev`).
 const WEB_URL: &str = "http://127.0.0.1:4317";
 /// The process-list name lane A1 gives the workspace API server; `api_is_a_planned_name` checks
@@ -2121,11 +3558,16 @@ pub struct DemoPart {
 
 /// Which demo parts this checkout can bring up: a process is there once the process list marks
 /// it built (its lane's image exists), and the founding membership once the CLI has its gesture.
-pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
+pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<DemoPart> {
     let built = |name: &str| {
         processes
             .iter()
             .any(|p| p["name"] == name && p["built"] == true)
+    };
+    let started_by_built = |name: &str| {
+        processes
+            .iter()
+            .any(|p| p["name"] == name && p["started_by"].as_str().is_some_and(&built))
     };
     let lane = |ready: bool, why: &str| (!ready).then(|| why.to_string());
     vec![
@@ -2145,6 +3587,21 @@ pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
             ),
         },
         DemoPart {
+            name: "the agent runtime, on the deny-all wiring until the post-R0 hook (DEC-1013)",
+            skipped: if started_by_built("runtime") {
+                Some(
+                    "the deployment manager starts it, once it reads a deployment's account from \
+                     `AgentDeployed` version 2 (DEC-1171); until then it starts none"
+                        .to_string(),
+                )
+            } else {
+                lane(
+                    built("runtime"),
+                    "the runtime image is not on main yet (lane P3, E21-30)",
+                )
+            },
+        },
+        DemoPart {
             name: "a paper agent on rh-sim and recorded Alpaca fixtures, no credential",
             skipped: lane(
                 built("runtime") && built("executor"),
@@ -2154,8 +3611,9 @@ pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
         DemoPart {
             name: RESEARCH_GATEWAY,
             skipped: lane(
-                built("runtime"),
-                "the research loop runs in the runtime image, not on main yet (lane P1, #1451)",
+                built("runtime") && built("executor"),
+                "the research loop runs in the runtime once the post-R0 hook wires its ports; until \
+                 then the cell's runtime runs the deny-all wiring (DEC-1013)",
             ),
         },
         DemoPart {
@@ -2166,6 +3624,14 @@ pub fn demo_parts(processes: &[Value], cli_help: &str) -> Vec<DemoPart> {
                     .filter(|l| l.starts_with("  ") && !l.starts_with("   "))
                     .any(|l| l.split_whitespace().next() == Some("membership")),
                 "the founding membership gesture is not on main yet (lane ID1)",
+            ),
+        },
+        DemoPart {
+            name: SIGNIN_PART,
+            skipped: lane(
+                built(API_PROCESS) && stub_ready,
+                "the local stub issuer (lane SI, E21-52) and the server's key-set tier check \
+                 (E21-53) are not both on main (DEC-2100 item 9)",
             ),
         },
         DemoPart {
@@ -2194,15 +3660,15 @@ pub fn demo(web: bool) -> Result<()> {
         &["run", "--rm", "--network", "none", &image, "--help"],
     )
     .context("reading the CLI's commands from the image it built")?;
-    let mut parts = demo_parts(&processes()?, &help);
-    if api_image_tag()?.is_none() {
-        for part in parts.iter_mut().filter(|p| p.skipped.is_none()) {
-            if part.name.contains("API") {
-                part.skipped = Some(format!(
-                    "{IMAGE_ENV} names a pulled `mandate` image, and no API image is published yet"
-                ));
-            }
+    let mut listed = processes()?;
+    if runtime_image()?.is_none() {
+        for p in listed.iter_mut().filter(|p| p["name"] == "runtime") {
+            p["built"] = json!(false);
         }
+    }
+    let mut parts = demo_parts(&listed, &help, stub_ready(Path::new(".")));
+    if api_image_tag()?.is_none() {
+        skip_without_api_image(&mut parts);
     }
     let api_ready = parts
         .iter()
@@ -2218,8 +3684,15 @@ pub fn demo(web: bool) -> Result<()> {
         "    kubectl: docker exec {NODE} kubectl --namespace {NAMESPACE} get pods; \
          stop: cargo xtask cell down"
     );
+    let signin_ready = api_ready
+        && parts
+            .iter()
+            .any(|p| p.name == SIGNIN_PART && p.skipped.is_none());
     if api_ready {
-        api_port_forward()?;
+        api_port_forward(signin_ready)?;
+    }
+    if signin_ready {
+        demo_sign_in()?;
     }
     if !web {
         return Ok(());
@@ -2253,24 +3726,46 @@ pub fn demo(web: bool) -> Result<()> {
     }
 }
 
+/// Names every part that needs this checkout's API image as skipped, sign-in among them, for a
+/// cell that pulls its `mandate` image and so has no API image.
+pub fn skip_without_api_image(parts: &mut [DemoPart]) {
+    for part in parts.iter_mut().filter(|p| p.skipped.is_none()) {
+        if part.name.contains("API") || part.name == SIGNIN_PART {
+            part.skipped = Some(format!(
+                "{IMAGE_ENV} names a pulled `mandate` image, and no API image is published yet"
+            ));
+        }
+    }
+}
+
 /// The local port the demo forwards to the API server's listener on its pod's loopback.
 const API_LOCAL_PORT: u16 = 8787;
 
 /// The demo part that is the API server; `api_port_forward` runs only once it is ready.
 const API_PART: &str = "the workspace API server, through a port-forward";
 
+/// The demo part that is sign-in; `demo_sign_in` runs only once it is ready.
+const SIGNIN_PART: &str =
+    "sign-in as the demo owner, through the local stub issuer (dev cell only, DEC-2100)";
+
 /// Forwards [`API_LOCAL_PORT`] on this machine to the API server's listener, with the host's own
 /// `kubectl` (the cell's nodes publish no port), and checks that `/v1` answers: with no session,
 /// the one 401 (API-1). The forward keeps running after the demo returns, until its pod goes or it
 /// is stopped; a later demo whose port still answers that way reuses it rather than starting one.
-fn api_port_forward() -> Result<()> {
+fn api_port_forward(stub: bool) -> Result<()> {
     let config = kubeconfig()?;
-    let forward = port_forward_args(&config);
+    let forward = port_forward_args(&config, stub);
     let shown = forward.join(" ");
     let path = format!("/v1/workspaces/{DEMO_WORKSPACE}/agents");
     if http_status(API_LOCAL_PORT, &path).is_ok_and(|status| status == 401) {
-        eprintln!("    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (an earlier forward)");
-        return Ok(());
+        if !stub || stub_answers() {
+            eprintln!("    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (an earlier forward)");
+            return Ok(());
+        }
+        bail!(
+            "an earlier forward holds 127.0.0.1:{API_LOCAL_PORT} without the stub issuer's port \
+             {STUB_PORT}; stop it with `pkill -f 'port-forward deployment/api'` and run the demo again"
+        );
     }
     if output("kubectl", &["version", "--client"]).is_err() {
         eprintln!("    api: no kubectl on this machine; forward it with `kubectl {shown}`");
@@ -2291,17 +3786,21 @@ fn api_port_forward() -> Result<()> {
             bail!("`kubectl {shown}` exited with {status}:\n{}", said());
         }
         if let Ok(status) = http_status(API_LOCAL_PORT, &path) {
-            if status == 401 {
+            if status == 401 && (!stub || stub_answers()) {
                 eprintln!(
                     "    api: http://127.0.0.1:{API_LOCAL_PORT}/v1 answers (GET {path} is 401 \
                      with no session, API-1)"
                 );
                 return Ok(());
             }
-            bail!("the API server answered GET {path} with {status}, not the one 401");
+            if status != 401 {
+                let _ = child.kill();
+                bail!("the API server answered GET {path} with {status}, not the one 401");
+            }
         }
         sleep(Duration::from_secs(1));
     }
+    let _ = child.kill();
     bail!(
         "the API server did not answer on 127.0.0.1:{API_LOCAL_PORT} within 30 s through \
          `kubectl {shown}`, which said:\n{}",
@@ -2310,9 +3809,10 @@ fn api_port_forward() -> Result<()> {
 }
 
 /// `kubectl` arguments forwarding [`API_LOCAL_PORT`] on this machine's loopback to the API
-/// listener's port 8080: the address is its own flag, since a port spec is `LOCAL:REMOTE` only.
-pub fn port_forward_args(kubeconfig: &str) -> Vec<String> {
-    [
+/// listener's port 8080, and with `stub` [`STUB_PORT`] to the stub issuer's: the address is its
+/// own flag, since a port spec is `LOCAL:REMOTE` only.
+pub fn port_forward_args(kubeconfig: &str, stub: bool) -> Vec<String> {
+    let mut args: Vec<String> = [
         "--kubeconfig",
         kubeconfig,
         "--namespace",
@@ -2324,20 +3824,175 @@ pub fn port_forward_args(kubeconfig: &str) -> Vec<String> {
         &format!("{API_LOCAL_PORT}:8080"),
     ]
     .map(String::from)
-    .to_vec()
+    .to_vec();
+    if stub {
+        args.push(format!("{STUB_PORT}:{STUB_PORT}"));
+    }
+    args
+}
+
+/// Whether the stub issuer answers through the forward: its key set, with the `Host` it requires.
+fn stub_answers() -> bool {
+    http(STUB_PORT, "GET", STUB_KEY_SET, &[], "").is_ok_and(|(status, _)| status == 200)
+}
+
+/// Signs in as the demo owner the way `web/` does: a token for [`DEMO_SUBJECT`] from the stub
+/// issuer, then `POST /v1/sessions` from the app origin, which must answer 204 with the session
+/// cookie (workspace API spec §3.11 item 5).
+fn demo_sign_in() -> Result<()> {
+    let body = json!({"subject": DEMO_SUBJECT}).to_string();
+    let (status, reply) = http(
+        STUB_PORT,
+        "POST",
+        "/token",
+        &[("Content-Type", "application/json")],
+        &body,
+    )
+    .context("asking the stub issuer for a token")?;
+    if status != 200 {
+        bail!("the stub issuer answered POST /token with {status}");
+    }
+    let token: Value = serde_json::from_str(reply_body(&reply))
+        .context("the stub issuer's token reply is not JSON")?;
+    let token = token["access_token"]
+        .as_str()
+        .context("the stub issuer's reply carries no access_token")?;
+    let body = json!({"access_token": token}).to_string();
+    let (status, reply) = http(
+        API_LOCAL_PORT,
+        "POST",
+        "/v1/sessions",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", DEMO_APP_ORIGIN),
+            ("X-Mandate-Request", "1"),
+        ],
+        &body,
+    )
+    .context("opening a session")?;
+    if !signed_in(status, &reply) {
+        bail!("POST /v1/sessions answered {status}, not 204 with the session cookie");
+    }
+    eprintln!("    sign-in: the demo owner opened a session through the local stub issuer");
+    Ok(())
+}
+
+/// Whether an answer to `POST /v1/sessions` opened a session: 204 and the `__Host-` cookie.
+pub fn signed_in(status: u16, reply: &str) -> bool {
+    status == 204
+        && reply
+            .split("\r\n\r\n")
+            .next()
+            .unwrap_or_default()
+            .lines()
+            .any(|l| {
+                l.to_ascii_lowercase()
+                    .starts_with("set-cookie: __host-mandate_session=")
+            })
+}
+
+/// The body of an HTTP/1.1 reply: what follows its header block.
+fn reply_body(reply: &str) -> &str {
+    reply.split_once("\r\n\r\n").map_or("", |(_, body)| body)
+}
+
+/// One HTTP/1.1 request to 127.0.0.1:`port`, with `Host: 127.0.0.1:port` (the stub issuer takes
+/// no other), and its status code and whole reply.
+fn http(
+    port: u16,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> Result<(u16, String)> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let mut request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\
+         Content-Length: {}\r\n",
+        body.len()
+    );
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    request.push_str(body);
+    stream.write_all(request.as_bytes())?;
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply)?;
+    let status = status_of(&reply).context("the reply is not HTTP/1.1")?;
+    Ok((status, reply))
+}
+
+/// Writes the demo owner's subject link with the CLI's own `mandate identity link`, in the image
+/// this checkout built and with no network, then applies it as the [`LINKS_CONFIGMAP`] ConfigMap
+/// the chart mounts at the server's fixed path (DEC-1023). The subject reaches the CLI on standard
+/// input only, as it requires.
+fn demo_links(image: &str) -> Result<()> {
+    let dir = state()?.join("links");
+    if dir.exists() {
+        fs::remove_dir_all(&dir).context("clearing the demo's links directory")?;
+    }
+    fs::create_dir_all(&dir)?;
+    let owner = fs::metadata(&dir)?;
+    let user = format!("{}:{}", owner.uid(), owner.gid());
+    let mount = format!("{}:/out", fs::canonicalize(&dir)?.display());
+    let mut child = Command::new("docker")
+        .args([
+            "run",
+            "--rm",
+            "-i",
+            "--network",
+            "none",
+            "--user",
+            &user,
+            "-v",
+            &mount,
+            image,
+            "identity",
+            "link",
+            "--issuer",
+            LOCAL_ISSUER,
+            "--member",
+            DEMO_OWNER,
+            "--links",
+            "/out/subject-links",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .context("starting `mandate identity link` in the cell's image")?;
+    child
+        .stdin
+        .take()
+        .context("the CLI's standard input")?
+        .write_all(DEMO_SUBJECT.as_bytes())?;
+    let status = child.wait()?;
+    if !status.success() {
+        bail!(
+            "`mandate identity link` for the demo owner failed with {status}; it runs as this \
+             user ({user}) writing into {}, which rootless docker maps to another owner",
+            dir.display()
+        );
+    }
+    let links = fs::read_to_string(dir.join("subject-links"))
+        .context("reading the demo's subject-link file")?;
+    apply(&[links_configmap(&links)])
+}
+
+/// The ConfigMap holding the subject-link file `links` under the key the chart mounts.
+pub fn links_configmap(links: &str) -> Value {
+    json!({
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {"name": LINKS_CONFIGMAP, "labels": {"mandate.dev/workspace": WORKSPACE}},
+        "data": {"subject-links": links}
+    })
 }
 
 /// The status code of an HTTP/1.1 `GET path` to 127.0.0.1:`port`.
 fn http_status(port: u16, path: &str) -> Result<u16> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    write!(
-        stream,
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-    )?;
-    let mut reply = String::new();
-    stream.read_to_string(&mut reply)?;
-    status_of(&reply).context("the reply is not HTTP/1.1")
+    http(port, "GET", path, &[], "").map(|(status, _)| status)
 }
 
 /// The status code on an HTTP/1.1 reply's first line.
@@ -2410,8 +4065,121 @@ fn sh_in(dir: &str, program: &str, args: &[&str]) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// One binary's tag is its own digest, as before; two binaries' changes when either changes,
+    /// and with their order, so the runner alone changing gives the `mandate` image a new tag.
+    #[test]
+    fn an_image_of_two_binaries_is_tagged_by_both() {
+        let [a, b, c] = ["a", "b", "c"].map(|d| d.repeat(64));
+        assert_eq!(combined(std::slice::from_ref(&a)), a);
+        let both = combined(&[a.clone(), b.clone()]);
+        assert_eq!(both.len(), 64);
+        assert!(both.bytes().all(|x| x.is_ascii_hexdigit()));
+        assert_ne!(both, a);
+        assert_ne!(both, combined(&[a.clone(), c]));
+        assert_ne!(both, combined(&[b, a]));
+    }
+
     fn process(name: &str, built: bool) -> Value {
         json!({"name": name, "built": built})
+    }
+
+    fn command_line(command: &str, scope: &str, subject: &str) -> String {
+        json!({
+            "body": {
+                "event_type": "OwnerCommandIssued",
+                "payload": {"command": command, "scope": scope, "subject": subject}
+            },
+            "hash": "00"
+        })
+        .to_string()
+    }
+
+    /// The kill-switch drill's check: every brake must be on the exported stream, other lines and
+    /// events are ignored, and a missing connection-scope kill switch reads as the seeded symptom.
+    #[test]
+    fn the_brake_check_names_each_missing_brake() {
+        let expected = brakes_expected("kill1");
+        let all: Vec<String> = expected
+            .iter()
+            .map(|(c, k, s)| command_line(c, k, s))
+            .chain([
+                "init: exporting".to_owned(),
+                "{\"body\":{\"event_type\":\"StreamOpened\"}}".to_owned(),
+            ])
+            .collect();
+        assert_eq!(brakes_missing(&all.join("\n"), &expected), None);
+        let prefixed: Vec<String> = all
+            .iter()
+            .map(|l| format!("[pod/verify-1-abc/show-segment] {l}"))
+            .collect();
+        assert_eq!(
+            brakes_missing(&prefixed.join("\n"), &expected),
+            None,
+            "job_logs' container prefix is skipped"
+        );
+        let without_connection: Vec<&String> =
+            all.iter().filter(|l| !l.contains("connection")).collect();
+        let joined = without_connection
+            .iter()
+            .map(|l| l.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let missing = brakes_missing(&joined, &expected).unwrap();
+        assert!(
+            missing.contains(Drill::KillSwitch.seeded_symptom()),
+            "{missing}"
+        );
+        assert_eq!(
+            missing,
+            "no kill_switch of scope connection (conn_alpaca_paper_01)"
+        );
+        let wrong_workspace = brakes_missing(&all.join("\n"), &brakes_expected("kill2")).unwrap();
+        assert_eq!(wrong_workspace, "no kill_switch of scope workspace (kill2)");
+        let pause_as_kill = command_line("kill_switch", "agent", "agent-a");
+        let everything_but_pause: Vec<String> = expected
+            .iter()
+            .filter(|(c, _, _)| c != "pause")
+            .map(|(c, k, s)| command_line(c, k, s))
+            .chain([pause_as_kill])
+            .collect();
+        assert_eq!(
+            brakes_missing(&everything_but_pause.join("\n"), &expected).as_deref(),
+            Some("no pause of scope agent (agent-a)")
+        );
+    }
+
+    /// Every brake the drill commits names exactly one scope flag, and the processes it takes down
+    /// are the ones E21-34 names.
+    #[test]
+    fn the_brakes_reach_each_scope_once() {
+        let args = brake_args("kill1", "$(MANDATE_JOURNAL_DSN)");
+        assert_eq!(args.len(), brakes_expected("kill1").len());
+        for (run, (command, scope, _)) in args.iter().zip(brakes_expected("kill1")) {
+            let verb = if command == "pause" { "pause" } else { "kill" };
+            assert_eq!(&run[..2], ["agent", verb]);
+            let flag = match scope.as_str() {
+                "agent" => "--agent",
+                "connection" => "--connection",
+                _ => "--workspace-wide",
+            };
+            let flags = ["--agent", "--connection", "--workspace-wide"];
+            let named: Vec<&String> = run.iter().filter(|a| flags.contains(&a.as_str())).collect();
+            assert_eq!(named, [flag], "{run:?}");
+            assert!(
+                run.windows(2).any(|w| w == ["--workspace", "kill1"]),
+                "{run:?}"
+            );
+        }
+        assert_eq!(
+            KILL_SWITCH_DOWN,
+            [
+                "api",
+                "deploy-manager",
+                "exporter",
+                "model-gateway",
+                "control-plane"
+            ]
+        );
     }
 
     #[test]
@@ -2424,6 +4192,7 @@ mod tests {
         let parts = demo_parts(
             &today,
             "Commands:\n  workspace  Open the workspace control stream\n",
+            false,
         );
         let skipped: Vec<&str> = parts
             .iter()
@@ -2432,8 +4201,8 @@ mod tests {
             .collect();
         assert_eq!(
             skipped.len(),
-            5,
-            "API, agent, research, membership and web/ wait on their lanes: {skipped:?}"
+            7,
+            "API, runtime, agent, research, membership, sign-in and web/ wait on their lanes: {skipped:?}"
         );
         assert!(
             skipped.contains(&RESEARCH_GATEWAY),
@@ -2452,8 +4221,20 @@ mod tests {
         let parts = demo_parts(
             &later,
             "Commands:\n  membership  Grant the founding membership\n",
+            true,
         );
         assert!(parts.iter().all(|p| p.skipped.is_none()), "{parts:?}");
+        let no_stub = demo_parts(
+            &later,
+            "Commands:\n  membership  Grant the founding membership\n",
+            false,
+        );
+        let waiting: Vec<&str> = no_stub
+            .iter()
+            .filter(|p| p.skipped.is_some())
+            .map(|p| p.name)
+            .collect();
+        assert_eq!(waiting, [SIGNIN_PART], "only sign-in waits on the stub");
     }
 
     #[test]
@@ -2465,13 +4246,31 @@ mod tests {
             "the API server is a built service named `{API_PROCESS}`"
         );
         let help = "Commands:\n  workspace  Open\n      membership is named in a wrapped line\n";
-        let membership = demo_parts(&[], help)
+        let membership = demo_parts(&[], help, false)
             .into_iter()
             .find(|p| p.name == "the founding membership");
         assert!(
             membership.is_some_and(|m| m.skipped.is_some()),
             "a wrapped description line is not a command"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn the_deploy_manager_is_built_but_never_composed() -> Result<()> {
+        let all = processes_in(&crate::repo_root()?)?;
+        let manager = all.iter().find(|p| p["name"] == DEPLOY_MANAGER_PROCESS);
+        assert!(
+            manager.is_some_and(|p| p["built"] == true && !in_compose(p)),
+            "the deployment manager is built, and has no Compose adapter (DEC-1172)"
+        );
+        let compose = compose_document(&crate::repo_root()?, &all)?;
+        assert!(
+            compose["services"].get(DEPLOY_MANAGER_PROCESS).is_none(),
+            "the Compose file holds no deployment manager"
+        );
+        assert!(in_compose(&json!({"built": true})));
+        assert!(!in_compose(&json!({"built": false})));
         Ok(())
     }
 
@@ -2524,10 +4323,97 @@ mod tests {
     }
 
     #[test]
+    fn the_runtime_is_ready_once_built_and_the_agent_still_waits_on_its_executor() {
+        let list = [process("runtime", true), process("executor", false)];
+        let parts = demo_parts(&list, "", false);
+        let skipped = |prefix: &str| {
+            parts
+                .iter()
+                .find(|p| p.name.starts_with(prefix))
+                .map(|p| p.skipped.is_some())
+        };
+        assert_eq!(skipped("the agent runtime"), Some(false));
+        assert_eq!(skipped("a paper agent"), Some(true));
+        assert_eq!(
+            parts
+                .iter()
+                .find(|p| p.name == RESEARCH_GATEWAY)
+                .map(|p| p.skipped.is_some()),
+            Some(true),
+            "a deny-all runtime runs no research"
+        );
+        let unbuilt = demo_parts(&[process("runtime", false)], "", false);
+        assert!(
+            unbuilt
+                .iter()
+                .any(|p| p.name.starts_with("the agent runtime") && p.skipped.is_some())
+        );
+    }
+
+    /// A runtime the built deployment manager starts is not called ready: the manager starts none
+    /// until it reads a deployment's account (DEC-1171), so no runtime pod runs in the cell yet.
+    #[test]
+    fn a_runtime_the_built_manager_starts_is_not_called_ready() {
+        let runtime = json!({"name": "runtime", "built": true, "started_by": "deploy-manager"});
+        let ready = |manager_built: bool| {
+            let list = [runtime.clone(), process("deploy-manager", manager_built)];
+            demo_parts(&list, "", false)
+                .into_iter()
+                .find(|p| p.name.starts_with("the agent runtime"))
+                .map(|p| p.skipped.is_none())
+        };
+        assert_eq!(ready(true), Some(false));
+        assert_eq!(
+            ready(false),
+            Some(true),
+            "without the manager, the runtime is a Deployment"
+        );
+    }
+
+    /// Every variable the generated Compose file requires is one the drill sets, so a service it
+    /// never starts still cannot stop it (DEC-1013).
+    #[test]
+    fn the_compose_drill_sets_every_variable_the_compose_file_requires() -> Result<()> {
+        let root = crate::repo_root()?;
+        let compose = fs::read_to_string(root.join(COMPOSE_FILE))?;
+        let required: std::collections::BTreeSet<&str> = compose
+            .split("${")
+            .skip(1)
+            .filter_map(|rest| rest.split_once(":?").map(|(name, _)| name))
+            .collect();
+        assert!(required.contains("MANDATE_RUNTIME_AGENT"), "{required:?}");
+        for runtime in [Some("mandate.local/runtime:0123456789ab"), None] {
+            let env = compose_env(
+                &root,
+                "mandate.local/mandate:0123456789ab",
+                "mandate.local/api:0123456789ab",
+                runtime,
+            )?;
+            let set: std::collections::BTreeSet<&str> = env
+                .iter()
+                .filter(|(_, v)| !v.is_empty())
+                .map(|(k, _)| k.as_str())
+                .collect();
+            let missing: Vec<&&str> = required.iter().filter(|r| !set.contains(**r)).collect();
+            assert!(missing.is_empty(), "the drill leaves {missing:?} unset");
+        }
+        let agent = compose_env(&root, "i", "a", None)?
+            .into_iter()
+            .find(|(k, _)| k == "MANDATE_RUNTIME_AGENT")
+            .map(|(_, v)| v);
+        assert_eq!(
+            agent.as_deref(),
+            Some("demo-agent"),
+            "the k3d cell's deployment"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn an_agent_needs_both_its_runtime_and_its_executor() {
         for (runtime, executor) in [(true, false), (false, true)] {
             let list = [process("runtime", runtime), process("executor", executor)];
-            let agent = demo_parts(&list, "")
+            let agent = demo_parts(&list, "", false)
                 .into_iter()
                 .find(|p| p.name.starts_with("a paper agent"));
             assert!(agent.is_some_and(|a| a.skipped.is_some()));
@@ -2581,13 +4467,18 @@ mod tests {
             format!("org: {DEMO_ORG}"),
             format!("workspace: {DEMO_WORKSPACE}"),
             format!("issuer: {LOCAL_ISSUER}"),
-            format!("jwksUrl: {LOCAL_ISSUER}/jwks"),
+            format!("jwksUrl: {LOCAL_ISSUER}{STUB_KEY_SET}"),
         ] {
             assert!(
                 api.contains(&wanted.as_str()),
                 "k3d.yaml's api block lacks `{wanted}`"
             );
         }
+        assert!(
+            values.lines().any(|l| l == "deploymentTier: ci"),
+            "k3d.yaml must set `deploymentTier: ci`, the one tier the API server and the stub \
+             issuer beside it both take, and one the stub starts in (DEC-2100)"
+        );
         for ulid in [DEMO_ORG, DEMO_WORKSPACE] {
             assert!(
                 ulid.len() == 26
@@ -2606,11 +4497,8 @@ mod tests {
     fn every_compose_placeholder_is_one_the_drill_sets() -> Result<()> {
         let root = crate::repo_root()?;
         let text = serde_json::to_string(&compose_document(&root, &processes_in(&root)?)?)?;
-        let set: Vec<&str> = compose_api_settings("x")
-            .iter()
-            .map(|(name, _)| *name)
-            .chain(["MANDATE_WORKSPACE", "MANDATE_IMAGE_MANDATE"])
-            .collect();
+        let env = compose_env(&root, "x", "x", None)?;
+        let set: Vec<&str> = env.iter().map(|(name, _)| name.as_str()).collect();
         let named: Vec<&str> = text
             .split("${")
             .skip(1)
@@ -2675,7 +4563,14 @@ mod tests {
 
     #[test]
     fn the_api_forward_binds_loopback_and_names_local_then_remote_port() {
-        let args = port_forward_args("k");
+        let with_stub = port_forward_args("k", true);
+        assert_eq!(
+            with_stub.last().map(String::as_str),
+            Some("8090:8090"),
+            "the stub's port is forwarded to the same local port, so its Host matches"
+        );
+        assert_eq!(with_stub.len(), port_forward_args("k", false).len() + 1);
+        let args = port_forward_args("k", false);
         let at = |flag: &str| {
             args.iter()
                 .position(|a| a == flag)
@@ -2691,6 +4586,128 @@ mod tests {
             "{spec}"
         );
         assert!(ports.iter().all(|p| p.parse::<u16>().is_ok()));
+    }
+
+    #[test]
+    fn the_stub_runs_only_with_its_crate_and_the_servers_tier_check() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("xtask-stub-ready-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (server, check) = KEY_SET_TIER_CHECK;
+        let write = |path: &str, text: &str| -> Result<()> {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().context("a parent")?)?;
+            fs::write(path, text)?;
+            Ok(())
+        };
+        assert!(!stub_ready(&root), "neither");
+        write(STUB_CRATE, "[package]")?;
+        write(STUB_MAIN, "fn main() { serve() }")?;
+        assert!(!stub_ready(&root), "the crate without the server's check");
+        write(server, "fn other() {}")?;
+        assert!(!stub_ready(&root), "a server without the check");
+        write(server, &format!("{check}url: &str, tier: Tier)"))?;
+        assert!(stub_ready(&root), "both");
+        write(STUB_MAIN, "fn main() {\n    todo!()\n}")?;
+        assert!(
+            !stub_ready(&root),
+            "the crate's tests landed, its entry point still pending"
+        );
+        fs::remove_file(root.join(STUB_MAIN))?;
+        assert!(!stub_ready(&root), "a crate with no entry point");
+        write(STUB_MAIN, "fn main() { serve() }")?;
+        fs::remove_file(root.join(STUB_CRATE))?;
+        assert!(!stub_ready(&root), "the check without the crate");
+        let _ = fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    #[test]
+    fn without_a_stub_the_api_mounts_no_links_and_names_no_stub() {
+        assert_eq!(
+            signin_values(None),
+            ["images.stub-issuer=", "api.subjectLinks="]
+        );
+        assert_eq!(
+            signin_values(Some("mandate.local/stub-issuer:0123456789ab")),
+            [
+                "images.stub-issuer=mandate.local/stub-issuer:0123456789ab".to_string(),
+                format!("api.subjectLinks={LINKS_CONFIGMAP}")
+            ]
+        );
+    }
+
+    #[test]
+    fn the_demo_links_are_the_configmap_the_chart_mounts() {
+        let links = "sha256:ab 01KDEM0000000000000000000P\n";
+        let map = links_configmap(links);
+        assert_eq!(map["kind"], "ConfigMap");
+        assert_eq!(map["metadata"]["name"], LINKS_CONFIGMAP);
+        assert_eq!(map["data"]["subject-links"], links);
+        assert_eq!(
+            map.as_object().map(|o| o.contains_key("binaryData")),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn a_pulled_image_skips_sign_in_with_the_api() {
+        let later = [
+            process("api", true),
+            process("runtime", true),
+            process("executor", true),
+        ];
+        let mut parts = demo_parts(&later, "", true);
+        skip_without_api_image(&mut parts);
+        for name in [API_PART, SIGNIN_PART] {
+            assert!(
+                parts.iter().any(|p| p.name == name && p.skipped.is_some()),
+                "{name} is skipped without an API image"
+            );
+        }
+        assert!(
+            parts
+                .iter()
+                .any(|p| p.name.starts_with("a paper agent") && p.skipped.is_none()),
+            "parts that need no API image stay ready"
+        );
+    }
+
+    #[test]
+    fn a_session_opens_only_with_204_and_the_host_cookie() {
+        let reply = |status: &str, cookie: &str| {
+            format!("HTTP/1.1 {status}\r\n{cookie}content-length: 0\r\n\r\n")
+        };
+        let good = "set-cookie: __Host-mandate_session=v1.a.b; Path=/; Secure; HttpOnly\r\n";
+        assert!(signed_in(204, &reply("204 No Content", good)));
+        assert!(!signed_in(401, &reply("401 Unauthorized", good)));
+        assert!(!signed_in(204, &reply("204 No Content", "")));
+        assert!(!signed_in(
+            204,
+            &reply("204 No Content", "set-cookie: other=1\r\n")
+        ));
+        assert!(
+            !signed_in(
+                204,
+                "HTTP/1.1 204 No Content\r\n\r\nset-cookie: __Host-mandate_session=x\r\n"
+            ),
+            "a cookie in the body is not a header"
+        );
+        assert_eq!(
+            reply_body("HTTP/1.1 200 OK\r\na: b\r\n\r\n{\"x\":1}"),
+            "{\"x\":1}"
+        );
+    }
+
+    #[test]
+    fn the_demo_owner_is_a_ulid_and_the_stub_key_set_is_its_published_path() {
+        assert_eq!(STUB_KEY_SET, "/jwks.json");
+        assert!(!LOCAL_ISSUER.ends_with('/'));
+        assert!(
+            DEMO_OWNER.len() == 26
+                && DEMO_OWNER.bytes().all(
+                    |b| b.is_ascii_digit() || (b.is_ascii_uppercase() && !b"ILOU".contains(&b))
+                )
+        );
     }
 
     #[test]

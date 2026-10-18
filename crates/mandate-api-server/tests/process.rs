@@ -337,3 +337,27 @@ fn the_drain_bound_may_only_be_shortened() {
         assert_eq!(code, Some(2), "{bound}: {text}");
     }
 }
+
+#[test]
+fn the_internal_paper_setting_starts_only_on_a_journal_shown_paper() {
+    let setting = "MANDATE_API_INTERNAL_PAPER_WORKSPACE";
+    let (code, text) = refused(command(&LOCAL, &[(setting, "true")]));
+    assert_eq!(
+        code,
+        Some(2),
+        "an unreachable journal shows nothing: {text}"
+    );
+    assert!(
+        text.contains(&format!("refused: {setting} is on")),
+        "{text}"
+    );
+    let (code, text) = refused(command(&LOCAL, &[(setting, "yes")]));
+    assert_eq!(code, Some(2), "{text}");
+    assert!(text.contains(&format!("malformed: {setting}")), "{text}");
+    for off in ["false", ""] {
+        let (mut child, _, probes) = start(&[(setting, off)]);
+        assert_eq!(get(probes, "/livez").status, 200, "{off:?}");
+        terminate(&child.0);
+        assert_eq!(wait(&mut child.0, Duration::from_secs(10)), Some(0));
+    }
+}

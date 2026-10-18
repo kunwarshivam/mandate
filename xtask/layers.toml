@@ -127,6 +127,7 @@ workspace_services = [
     "mandate-cp-agent",
     "mandate-cp-site",
     "mandate-deploy-manager",
+    "mandate-deployd",
     "mandate-dispatcher",
 ]
 agent_process = [
@@ -276,12 +277,13 @@ forbidden_internal = [
 # process, and the workspace API (DEC-2500 item 2). Nothing may depend on it, so no trading crate
 # can wait on it (NT-9 at rung 1). `pure = false` since slice D10a: the operating system's random
 # source (through `ring`) and the Postgres journal (through `tokio`). Its other externals
-# (DEC-2500 item 2) are listed by the slice that first uses each.
+# (DEC-2500 item 2) are listed by the slice that first uses each: `secrecy` since slice D10b, for a
+# web-push address's vault entry and a VAPID key's document (DEC-2502 item 8, DEC-2503 item 3).
 [crates.mandate-dispatcher]
 layer = 9
 safety_critical = true
 pure = false
-allowed_external = ["ring", "thiserror", "tokio"]
+allowed_external = ["ring", "secrecy", "thiserror", "tokio"]
 forbidden_internal = ["mandate-runtime", "mandate-executor", "mandate-mcp", "mandate-shell", "mandate-cli", "mandate-paper", "mandate-alpaca", "mandate-robinhood", "mandate-agentd", "mandate-api"]
 allowed_dependents = []
 
@@ -585,6 +587,20 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The backtest runner (E4-4, E4-5, DEC-1144): runs mandate-version-backtest over JSON inputs and
+# stores the report, its input objects and the BacktestRunRecorded payload as artifacts, and never
+# touches the journal. In neither process group: it links the executor's protection pricing, and
+# DEC-1000 has a workspace service run a backtest "through the journal, never by linking it"
+# (DEC-986), so `mandate backtest record` journals what this stores. Nothing may depend on it, and
+# like the CLI it can never reach a connector, the shell, the paper binary, or a journal writer.
+[crates.mandate-backtest-runner]
+layer = 9
+safety_critical = true
+pure = false
+allowed_external = ["clap", "thiserror"]
+forbidden_internal = ["mandate-alpaca", "mandate-journal-pg", "mandate-paper", "mandate-shell"]
+allowed_dependents = []
+
 [crates.mandate-cli]
 layer = 9
 safety_critical = true
@@ -604,7 +620,17 @@ allowed_external = ["thiserror"]
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["secrecy", "thiserror"]
+allowed_external = ["ring", "secrecy", "thiserror"]
+
+# The workspace vault behind `SecretSource` (E21-32, DEC-977): the local vault and OpenBao. Above
+# mandate-vault-local, whose store it adapts. No runtime, scheduler, or connector may take it: an
+# executor gets its token through the process that leases it (V3, E21-9), and a runtime reads no
+# credential at all (CN-4).
+[crates.mandate-vault]
+layer = 8
+safety_critical = true
+pure = false
+allowed_external = ["base64", "reqwest", "ring", "rustls", "secrecy", "serde_json", "thiserror", "tokio"]
 
 [crates.mandate-alpaca]
 layer = 7
@@ -691,6 +717,15 @@ pure = false
 allowed_external = ["tokio"]
 forbidden_internal = ["mandate-cli", "mandate-paper"]
 
+# The stub token issuer for dev and CI cells only (E21-52, DEC-2100): no crate may depend on it, so
+# no product binary can hold it, and its issuer and router compile only with debug assertions.
+[crates.mandate-stub-issuer]
+layer = "tool"
+safety_critical = true
+pure = false
+allowed_external = ["axum", "base64", "ring", "serde_json", "tokio"]
+allowed_dependents = []
+
 # The journal port a long-running process writes and follows through (E21-29, E21-30, DEC-1012):
 # the in-memory journal and Postgres, with tokio driving the Postgres client. Below every process
 # crate that uses it, and above mandate-journal-pg.
@@ -733,6 +768,31 @@ forbidden_internal = [
     "mandate-runtime",
     "mandate-shell",
 ]
+# The deployment manager's process (E21-33 slice 2, DEC-1172): mandate-deploy-manager over the
+# Postgres journal and the Kubernetes API, with mandate-process's lifecycle and probes. tokio drives
+# the journal, the orchestrator's HTTPS and the SIGTERM listener. Like the manager it wires, it may
+# never reach a crate that writes an agent or account stream, holds a broker credential, or edits a
+# mandate.
+[crates.mandate-deployd]
+layer = 8
+safety_critical = true
+pure = false
+allowed_external = ["serde_json", "tokio"]
+forbidden_internal = [
+    "mandate-agentd",
+    "mandate-alpaca",
+    "mandate-builder",
+    "mandate-cli",
+    "mandate-executor",
+    "mandate-mcp",
+    "mandate-paper",
+    "mandate-risk",
+    "mandate-robinhood",
+    "mandate-runtime",
+    "mandate-shell",
+    "mandate-spec",
+]
+
 # The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over the
 # Postgres journal, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
 # and the SIGTERM listener. It may never reach the runner, the shell, the CLI, or any broker

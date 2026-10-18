@@ -1,0 +1,5 @@
+apiVersion: v2
+name: mandate-archive-store
+description: The local cell's S3-compatible test store, standing in for the S1 endpoint (E21-40) that the journal's WAL and base backups go to (E21-41); the local and CI cell only, never cell #1 or a managed cluster (DEC-1050)
+type: application
+version: 0.1.0

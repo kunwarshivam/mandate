@@ -116,3 +116,15 @@ condition = "AND"
 paths = ['''^crates/mandate-api-server/tests/process\.rs$''']
 regexTarget = "match"
 regexes = ['''^MANDATE_API_(?:WORKSPACE|ORG)", "[0-7][0-9A-HJKMNP-TV-Z]{25}"$''']
+
+# The cell test's stand-in for the label values the deployment manager's adapter adds to a pod
+# template (E21-33, DEC-1170): fixed hex placeholders for a workspace and a subject key, which are
+# label values, not credentials. Allowed only in that test file and only for those two labels with
+# those two values, so any other value there, and the same text anywhere else, is still reported.
+[[allowlists]]
+description = "Deployment manager label placeholders in the cell test"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^deploy/tests/test_cell\.py$''']
+regexTarget = "match"
+regexes = ['''(?:workspace-key": "0123456789abcdef|subject-key": "fedcba9876543210)"?$''']

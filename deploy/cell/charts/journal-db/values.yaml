@@ -1,9 +1,16 @@
 # The workspace journal's Postgres (infrastructure §4.1). Settings only: every password is made
 # in the cluster by this chart and kept across upgrades, never a value (DEC-822 item 4).
 
-# Instances of the CloudNativePG cluster. One on a developer machine and in CI; lane S2 (E21-41)
-# makes it two with one synchronous standby.
-instances: 1
+# Instances of the CloudNativePG cluster: a primary and a synchronous standby at least (E21-41).
+# Every commit waits for one standby, so with the standby down appends wait rather than commit
+# asynchronously (OPS-2); that rule is in the template, not a value (DEC-1050).
+instances: 2
+
+# Whether the instances must run on separate nodes. `separate` makes it a scheduling rule, so an
+# instance with no other node to go to stays pending; `shared` lets them share one node, as on a
+# one-node cell, and the Cluster says so in its `mandate.dev/failure-domain` annotation, which
+# `cargo xtask cell up` prints (E21-41: disclosed, not hidden).
+failureDomain: separate
 
 # CloudNativePG's PostgreSQL 18 image, pinned by digest (D-5).
 image: ghcr.io/cloudnative-pg/postgresql:18.6-202609281634-minimal-trixie@sha256:4467d4cf7e502fbc29800b75d755ede477a765b25a506a58a0842a57a4bf42c9
@@ -17,5 +24,48 @@ resources:
   cpu: 500m
   memory: 512Mi
 
-# The namespace the CloudNativePG operator runs in, which reaches the instances' status port.
+# Seconds a stopping instance waits for its clients to disconnect before it aborts their open
+# transactions (CloudNativePG's smart, then fast, shutdown). The runtime keeps a pooled connection
+# that never disconnects by itself, so a longer wait only delays every restart; a commit already
+# acknowledged is kept either way (`synchronous_commit`, `fsync`). DEC-1013 item 6.
+smartShutdownTimeout: 10
+
+# The namespace the CloudNativePG operator and its Barman Cloud plugin run in, which reaches the
+# instances' status port.
 operatorNamespace: cnpg-system
+
+# WAL and base backups through the Barman Cloud plugin to the S1 endpoint (E21-40, DEC-973 item
+# 6), with an access key of their own, never the database's (E21-41). Required: the chart renders
+# nothing without an endpoint.
+archive:
+  # HTTPS; plain HTTP only to a Service in this cluster, as the local cell's test store is.
+  endpointURL: ""
+  # `s3://<bucket>/<path>`; the cluster's objects go under `<path>/journal/`.
+  destinationPath: ""
+  # The Secret holding the archive's access key as `ACCESS_KEY_ID` and `ACCESS_SECRET_KEY`, made
+  # by the operator of the cell (or, in the local cell, by its test store's chart), never a value.
+  keyFrom: journal-archive-key
+  # Base backups and the WAL they need are kept this long (Barman's `<n>d|w|m`).
+  retention: 30d
+  # When the base backup runs (CloudNativePG's six-field cron, seconds first), UTC.
+  baseBackupSchedule: "0 15 3 * * *"
+  # Where the archive's endpoint is, for the instances' egress: CIDRs of /24 or narrower on
+  # `port`, or, for a store in this cluster, its namespace and pod labels. Exactly one.
+  egress:
+    cidrs: []
+    port: 443
+    namespace: ""
+    podSelector: {}
+
+# The Kubernetes API, which CloudNativePG's instance manager and the plugin's sidecar call. Empty
+# reads the `kubernetes` Service and its EndpointSlice at install; a rendering without a cluster
+# must name them.
+kubeApi:
+  cidrs: []
+  ports: []
+
+# The cluster DNS, as in the workspace chart's `egress.dns`.
+dns:
+  namespace: kube-system
+  podSelector:
+    k8s-app: kube-dns
