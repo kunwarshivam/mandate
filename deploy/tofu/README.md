@@ -86,7 +86,8 @@ wait until staging is up.
 3. **Barman's R2 token, after the first apply.** In **R2 → Manage R2 API Tokens → Create API
    token**, permission **Object Read & Write**, applied to the bucket `mandate-journal-archive-staging`
    only (later `-production`). It is not a GitHub secret, since `infra.yml` never needs it. It goes
-   into the cluster only at the Flux bootstrap (§4.4), never into git or a log.
+   into the cluster by lane GO's route: a Kubernetes Secret you create at the Flux bootstrap, or a
+   SOPS file encrypted to the cluster's age key, never plaintext in git or a log.
 4. **Before production only:** `api.owlhead.ai` already has DEC-822's hand-made record. The
    production apply refuses to create a second one, so delete that record (or tell lane IAC to
    adopt it) when production is to take the name. Staging uses `api-staging.owlhead.ai`, which
@@ -135,10 +136,8 @@ No repository-level secret or variable is used, so no other workflow can read th
    Nothing is destroyed.
    - If it fails with "DOKS does not offer 1.35.1-do.0; it offers: …", tell lane IAC the list.
      The pin changes in a one-line pull request.
-2. Dispatch again with action `apply` on the same commit, and approve it. The job plans again after
-   your approval, prints that plan, and applies exactly it, so the apply reflects the commit and
-   the cloud as they are when the job runs. Dispatch `apply` only at a commit you have read, and
-   read the apply job's printed plan afterwards. A first cluster takes about ten minutes.
+2. Dispatch again with action `apply` on the same commit, and approve it. The job applies the plan
+   it prints. A first cluster takes about ten minutes.
 3. **Reaching the cluster:** from an address in `KUBE_API_ALLOWED_CIDRS`, run
    `doctl kubernetes cluster kubeconfig save mandate-staging` on your own machine.
 4. **Handing over to lane GO (E21-58):** the outputs GO needs that are not secret are the cluster
@@ -146,11 +145,8 @@ No repository-level secret or variable is used, so no other workflow can read th
    `https://<account id>.r2.cloudflarestorage.com`, and the tunnel name `mandate-<env>`, all
    fixed by the code. The tunnel token is a sensitive output that `infra.yml` never prints.
    - Read it once on your own machine, for example in the Zero Trust dashboard under the tunnel.
-   - From an address in `KUBE_API_ALLOWED_CIDRS`, run lane GO's `cargo xtask gitops bootstrap
-     staging` (its runbook is `deploy/gitops/BOOTSTRAP.md`, #1651). It writes, through kubectl's
-     stdin, the Secrets `ws-ws1/cloudflared-tunnel` (key `token`, the tunnel token) and
-     `ws-ws1/journal-archive-key` (keys `ACCESS_KEY_ID` and `ACCESS_SECRET_KEY`, Barman's R2 token
-     from §2.3). Nothing goes into git or into `infra-staging`.
+   - Create it with Barman's R2 token (§2.3) as Kubernetes Secrets when you bootstrap Flux, or
+     have GO commit them SOPS-encrypted to the cluster's age key.
    - Flux pulls from then on, so neither CI nor `apply` needs the cluster's API again.
 
 ## What this does not guard, said plainly
