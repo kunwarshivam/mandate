@@ -6,10 +6,10 @@
 # `infra-production`, whose required reviewer is the founder and which alone holds the cloud
 # tokens. No pull-request job can reach them (ES-12, DEC-1005's pattern); pull requests run the
 # credential-free checks in `ci.yml` instead. xtask is built in a step that holds no secret, and
-# only the last step, which runs that built binary as `target/debug/xtask infra`, receives them, so
-# no build script ever runs beside a secret. The run refuses unless `sha` is the commit checked
-# out, so the founder's approval binds to the commit they reviewed. `cargo xtask lint` checks this
-# shape.
+# `target/debug/xtask infra`'s step, the built binary, receives them, so no build script ever runs
+# beside a secret; the last step, `if: always()`, gets the DigitalOcean token alone to delete the
+# run's Spaces key. The run refuses unless `sha` is the commit checked out, so the founder's
+# approval binds to the commit they reviewed. `cargo xtask lint` checks this shape.
 name: infra
 
 on:
@@ -72,3 +72,11 @@ jobs:
           TF_VAR_state_passphrase: ${{ secrets.TOFU_STATE_PASSPHRASE }}
           TF_VAR_cloudflare_api_token: ${{ secrets.CF_INFRA_API_TOKEN }}
           TF_VAR_kube_api_allowed_addresses: ${{ vars.KUBE_API_ALLOWED_CIDRS }}
+          TF_VAR_access_allowed_emails: ${{ secrets.ACCESS_ALLOWED_EMAILS }}
+      # Runs however the step before ended, with only the DigitalOcean token, and deletes every
+      # Spaces key minted for staging's or production's runs (DEC-2030 item 4).
+      - if: always()
+        run: target/debug/xtask infra close
+        env:
+          MANDATE_INFRA_ENVIRONMENT: ${{ inputs.environment }}
+          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_API_KEY }}

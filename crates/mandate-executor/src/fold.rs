@@ -841,6 +841,10 @@ fn order_state_changed(
     if flag(payload, "cancel_overdue") {
         detail.cancel_overdue = true;
     }
+    if flag(payload, "cancel_requested") {
+        detail.cancel_asks = detail.cancel_asks.saturating_add(1);
+        detail.cancel_asked_at = Some(at);
+    }
     if flag(payload, "ignored") {
         if flag(payload, "cancel_requested") {
             order.cancel_unconfirmed = true;

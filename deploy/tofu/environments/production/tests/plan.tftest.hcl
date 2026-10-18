@@ -41,6 +41,7 @@ variables {
   kube_api_allowed_addresses = ["203.0.113.7/32"]
   cloudflare_api_token       = "not-a-token"
   adopt_state_bucket         = false
+  access_allowed_emails      = ["founder@example.com"]
 }
 
 run "production_plans_under_its_cap" {
@@ -126,4 +127,14 @@ run "refuses_a_short_commit" {
   }
 
   expect_failures = [var.commit_sha]
+}
+
+run "production_names_its_access_emails" {
+  command = plan
+
+  variables {
+    access_allowed_emails = []
+  }
+
+  expect_failures = [var.access_allowed_emails]
 }

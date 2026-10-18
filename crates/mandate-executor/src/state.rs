@@ -190,6 +190,11 @@ pub(crate) struct OrderDetail {
     /// broker's to refuse. A resubmission after a confirmed absence is a new attempt, with a new
     /// detail, which an exit waits on afresh (#174 ruling 5863046153, DEC-160 (18)).
     pub(crate) cancel_overdue: bool,
+    /// How many times the journal asked the order's cancel (`cancel_requested`), and when last:
+    /// a kill switch's in-run re-sends count against `unknown_absent_lookups` from these, so the
+    /// cap survives a replay (DEC-2302 item 7).
+    pub(crate) cancel_asks: u32,
+    pub(crate) cancel_asked_at: Option<RiskClock>,
     /// The broker's own cumulative filled quantity for the order, from the `filled_qty` its
     /// latest report carried: a bracket entry's filled quantity before its fills are ingested
     /// (§5.4's "the filled quantity", DEC-346 item 3).

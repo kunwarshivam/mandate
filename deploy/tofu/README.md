@@ -104,6 +104,10 @@ needs:
   | `CF_INFRA_API_TOKEN` | §2.2 |
   | `TOFU_STATE_PASSPHRASE` | at least 32 random characters, for example `openssl rand -base64 48`. It is stretched with PBKDF2-SHA-512 at 600,000 iterations into an AES-GCM key. **Keep a copy in your password manager.** Without it the state cannot be read, and every later plan fails. Use a different one per environment |
 
+- **Environment secret, production only:** `ACCESS_ALLOWED_EMAILS`, for example
+  `["you@example.com"]`: who Access lets through to production's API host, as a JSON list of full
+  addresses. It is a secret so the public log never shows it. Staging needs none: its Access
+  admits the members of your Cloudflare account (DEC-2030 item 2).
 - **Environment variable, production only:** `KUBE_API_ALLOWED_CIDRS`, for example
   `["203.0.113.7/32"]`: the addresses production's cluster API admits besides a run's own window,
   as a JSON list, each no wider than /24. Staging needs none: each run opens the control plane to
@@ -158,9 +162,10 @@ have seen. The log never shows a value: only addresses and actions.
 - The state holds the tunnel token and Barman's R2 credentials, encrypted with
   `TOFU_STATE_PASSPHRASE`. Whoever holds that passphrase and a Spaces key can read it, and
   `DIGITAL_OCEAN_API_KEY` can mint a Spaces key.
-- A run killed before it ends leaves its Spaces key until the next run of that environment deletes
-  it (DEC-2030 item 4), and may leave its control-plane window open until the next run closes it
-  (DEC-2028 item 3).
+- A run's Spaces key is deleted when the run ends, and again by the workflow's last step, which
+  runs however the run ended. Only a runner that dies outright leaves it until the next run of
+  that environment deletes it (DEC-2030 item 4). Such a run may also leave its control-plane window
+  open until the next run closes it (DEC-2028 item 3).
 - The two nodes are in one region, one failure domain (DEC-995 item 6).
 - The workflow offers no `destroy`. The buckets have `prevent_destroy`. Tearing an environment
   down is a reviewed change, not a button.
