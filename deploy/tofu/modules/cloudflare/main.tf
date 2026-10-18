@@ -148,9 +148,10 @@ resource "cloudflare_zero_trust_access_application" "api" {
 }
 
 resource "cloudflare_r2_bucket" "journal_archive" {
-  account_id = var.account_id
-  name       = var.archive_bucket
-  location   = "enam"
+  account_id   = var.account_id
+  name         = var.archive_bucket
+  location     = "enam"
+  jurisdiction = "default"
 
   lifecycle {
     prevent_destroy = true
@@ -158,8 +159,9 @@ resource "cloudflare_r2_bucket" "journal_archive" {
 }
 
 resource "cloudflare_r2_bucket_lock" "journal_archive" {
-  account_id  = var.account_id
-  bucket_name = cloudflare_r2_bucket.journal_archive.name
+  account_id   = var.account_id
+  bucket_name  = cloudflare_r2_bucket.journal_archive.name
+  jurisdiction = cloudflare_r2_bucket.journal_archive.jurisdiction
 
   rules = [
     {
@@ -198,4 +200,8 @@ output "archive_bucket" {
 
 output "archive_endpoint" {
   value = "https://${var.account_id}.r2.cloudflarestorage.com"
+}
+
+output "archive_jurisdiction" {
+  value = cloudflare_r2_bucket.journal_archive.jurisdiction
 }

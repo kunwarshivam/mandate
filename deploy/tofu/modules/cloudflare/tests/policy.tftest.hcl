@@ -71,8 +71,8 @@ run "the_archive_is_locked_for_its_retention" {
   command = plan
 
   assert {
-    condition     = cloudflare_r2_bucket.journal_archive.name == "mandate-journal-archive-staging" && cloudflare_r2_bucket.journal_archive.location == "enam"
-    error_message = "The archive is the environment's R2 bucket in eastern North America."
+    condition     = cloudflare_r2_bucket.journal_archive.name == "mandate-journal-archive-staging" && cloudflare_r2_bucket.journal_archive.location == "enam" && cloudflare_r2_bucket.journal_archive.jurisdiction == "default"
+    error_message = "The archive is the environment's R2 bucket in eastern North America, in R2's default jurisdiction, whose endpoint the cell's egress is pinned to."
   }
 
   assert {
