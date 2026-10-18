@@ -9,6 +9,7 @@ use mandate_cli::brake::AgentCommand;
 use mandate_cli::connection::ConnectionCommand;
 use mandate_cli::control::Now;
 use mandate_cli::db::DbCommand;
+use mandate_cli::evaluation::EvaluationCommand;
 use mandate_cli::gestures::VersionCommand;
 use mandate_cli::identity::IdentityCommand;
 use mandate_cli::inbox::ApprovalsCommand;
@@ -19,8 +20,8 @@ use mandate_cli::sim_clock::from_env;
 use mandate_cli::vault::VaultCommand;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
-    Cli, Command, artifact, backtest, brake, connection, db, download, gestures, identity, inbox,
-    inspect, journal, register, vault, workspace,
+    Cli, Command, artifact, backtest, brake, connection, db, download, evaluation, gestures,
+    identity, inbox, inspect, journal, owner, register, vault, workspace,
 };
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
@@ -149,6 +150,18 @@ fn main() -> anyhow::Result<()> {
         Command::Agent(AgentCommand::Kill(args)) => {
             brake::run_kill(&args, now()?, &mut io::stdout().lock()).map(drop)
         }
+        Command::Agent(AgentCommand::Status(args)) => {
+            owner::run_status(&args, &mut io::stdout().lock())
+        }
+        Command::Agent(AgentCommand::Resume(args)) => {
+            owner::run_resume(&args, now()?, &mut io::stdout().lock())
+        }
+        Command::Agent(AgentCommand::Stop(args)) => {
+            owner::run_stop(&args, now()?, &mut io::stdout().lock())
+        }
+        Command::Agent(AgentCommand::Exit(args)) => {
+            owner::run_exit(&args, now()?, &mut io::stdout().lock())
+        }
         Command::Vault(VaultCommand::Import(args)) => {
             let environment: Vec<(String, String)> = std::env::vars_os()
                 .map(|(k, v)| {
@@ -172,6 +185,9 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Backtest(BacktestCommand::Record(args)) => {
             backtest::run_record(&args, now()?, &mut io::stdout().lock()).map(drop)
+        }
+        Command::Evaluation(EvaluationCommand::Run(args)) => {
+            evaluation::run_command(&args, now()?, &mut io::stdout().lock()).map(drop)
         }
     }
 }

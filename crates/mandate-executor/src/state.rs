@@ -146,10 +146,15 @@ pub struct ExecutorState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Switch {
     pub(crate) agent: AgentId,
+    /// The record on another stream this switch copied, from its `copied_from` (DEC-2003 item 4).
+    pub(crate) copied_from: Option<EventId>,
     pub(crate) purpose: Purpose,
     pub(crate) floor: Option<Price>,
     pub(crate) instruments: Vec<InstrumentId>,
     pub(crate) pending: BTreeSet<InstrumentId>,
+    /// The orders the switch cancelled, which no refusal of that cancel returns to working while
+    /// the broker still reports them working (DEC-2302).
+    pub(crate) cancels: BTreeSet<ClientOrderId>,
 }
 
 /// What one `OrderRequestRecorded` carries (§9.5): the executor-only members of the order that
@@ -378,6 +383,13 @@ impl ExecutorState {
         self.orders.get(client_order_id)
     }
 
+    /// Whether an agent-scoped kill switch cancelled `id` (§5.5, DEC-2302).
+    pub(crate) fn kill_switch_cancels(&self, id: &ClientOrderId) -> bool {
+        self.switches
+            .values()
+            .any(|switch| switch.cancels.contains(id))
+    }
+
     /// The orders whose `OrderSubmitted` committed with no acknowledgment. `Input::Started`
     /// queries each by `client_order_id` and never resubmits blindly (journal spec §5.2).
     pub fn unacknowledged(&self) -> Vec<&Order> {
@@ -562,6 +574,15 @@ impl ExecutorState {
     /// The writer epoch this state was folded under, once `Input::Started` has taken one.
     pub fn epoch(&self) -> Option<WriterEpoch> {
         self.epoch
+    }
+
+    /// Whether a switch this stream journaled copied `source`, another stream's record
+    /// (`copied_from`, DEC-2003 item 4): read from this stream's own `KillSwitchActivated`
+    /// records alone, so no mode another restriction set can make a switch count as applied.
+    pub fn applied_copy(&self, source: &EventId) -> bool {
+        self.switches
+            .values()
+            .any(|switch| switch.copied_from.as_ref() == Some(source))
     }
 
     pub fn started(&self) -> bool {

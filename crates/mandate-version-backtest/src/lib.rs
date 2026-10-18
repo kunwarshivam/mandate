@@ -54,8 +54,8 @@ use mandate_canon::Digest;
 use mandate_domain::{AgentMode, AssetId, AutonomyDecision, CapabilityProfile, MarketSession};
 use mandate_executor::{ProtectionPrices, equity_bracket_prices, protective_shape};
 use mandate_num::{
-    Adverse, Fraction, MarkPrice, NumError, Price, Qty, Rounding, Signed, SizeFraction, TickRule,
-    Unit, Usd,
+    Adverse, Fraction, MarkPrice, NumError, Price, Qty, Rounding, Signed, SizeFraction, SplitRatio,
+    TickRule, Unit, Usd,
 };
 use mandate_risk::{
     AccountFill, DayTrade, DayTradeInput, DayTradeRegime, Decision, EtpClass, Exchange,
@@ -104,6 +104,9 @@ pub enum VersionError {
     FlattenWithoutSell,
     #[error("the committed trading calendar could not be read")]
     CalendarUnavailable,
+    /// A step its story has not built yet (DEC-77): the stub's own report.
+    #[error("not implemented until {story}")]
+    Unimplemented { story: &'static str },
     #[error("a liquidity figure could not be computed: {0}")]
     Liquidity(&'static str),
     #[error(transparent)]
@@ -148,6 +151,7 @@ impl VersionError {
             Self::BarOutsideRegularSession(_) => "bar_outside_regular_session",
             Self::FlattenWithoutSell => "flatten_without_sell",
             Self::CalendarUnavailable => "calendar_unavailable",
+            Self::Unimplemented { .. } => "unimplemented",
             Self::Liquidity(code) | Self::Gate(code) => code,
             Self::Backtest(e) => e.code(),
             Self::Builder(e) => e.code(),
@@ -237,8 +241,37 @@ pub struct RecordedThesis {
     pub invalidated_at: Option<UtcNanos>,
 }
 
+/// One corporate action the data snapshot holds for the run's instrument (DEC-2245 item 1): the
+/// two kinds `mandate-accounting`'s fold applies (trading spec §8.5). Every other kind is refused
+/// before it reaches a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordedAction {
+    /// A forward or reverse split: `ratio` new shares for old, and the broker's price per new
+    /// share for a residual, when one is posted.
+    Split {
+        ex_date: Date,
+        ratio: SplitRatio,
+        cash_in_lieu_price: Option<Price>,
+    },
+    /// A cash dividend of `per_share` USD, paid on `pay_date`, never before the ex-date.
+    CashDividend {
+        ex_date: Date,
+        pay_date: Date,
+        per_share: Price,
+    },
+}
+
+impl RecordedAction {
+    /// The action's ex-date.
+    pub fn ex_date(&self) -> Date {
+        match self {
+            Self::Split { ex_date, .. } | Self::CashDividend { ex_date, .. } => *ex_date,
+        }
+    }
+}
+
 /// One version backtest's inputs. `bars` is one instrument's bars in strictly increasing order;
-/// `corporate_actions` are the ex-dates the data snapshot holds for it.
+/// `corporate_actions` are the actions the data snapshot holds for it.
 pub struct VersionInput<'a> {
     pub mandate: &'a ValidatedMandate,
     pub settings: &'a VersionSettings,
@@ -248,7 +281,7 @@ pub struct VersionInput<'a> {
     pub first_bar_volumes: &'a dyn FirstBarVolumes,
     pub outputs: &'a [RecordedOutput],
     pub theses: &'a [RecordedThesis],
-    pub corporate_actions: &'a [Date],
+    pub corporate_actions: &'a [RecordedAction],
 }
 
 /// One order the run submitted: its run-wide index, the instant it was decided at, the order, and
@@ -363,9 +396,10 @@ fn check_inputs(input: &VersionInput<'_>) -> Result<(), VersionError> {
     if let Some(date) = input
         .corporate_actions
         .iter()
-        .find(|date| first.trade_date <= **date && **date <= last.trade_date)
+        .map(RecordedAction::ex_date)
+        .find(|date| first.trade_date <= *date && *date <= last.trade_date)
     {
-        return Err(VersionError::CorporateActionInRange(*date));
+        return Err(VersionError::CorporateActionInRange(date));
     }
     let models = BuilderMandate::try_from(input.mandate)?.models;
     for (index, recorded) in input.outputs.iter().enumerate() {
