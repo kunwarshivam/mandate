@@ -5198,8 +5198,7 @@ record, read back only by the risk-state fold. **Vectors:** the test vectors' `r
 holds a base draft of each record shaped as the mandate reference cases' risk-state events, an
 invalid draft for every type and rule above, and valid drafts for the shapes the risk-state fold emits
 that a rule might be misread to refuse. The vectors stay version 3 (the section is additive, as in
-DEC-177 item 6). `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, and `HighWaterMarkReset`
-(rules 230 to 235) are in it now; the other three join with E6-15's slice A1b.
+DEC-177 item 6).
 
 ## 10. Anchoring
 
