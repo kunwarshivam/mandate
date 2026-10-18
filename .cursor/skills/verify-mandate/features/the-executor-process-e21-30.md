@@ -18,7 +18,8 @@
   the market at the floor its `OwnerExitRequested` confirmed, item 4), and each handed once as the
   runtime's handoff, an exit ready or not and an opening only once ready with its mandate's
   protection from the `Protections` port, an unreadable protection stopping the process, a handoff
-  the gate has no input for held with one `intent_held` alert, DEC-2033 items 1, 3, 5, and an
+  the gate has no input for held with one `opening_held` alert, or `exit_held` for an exit, the
+  alarm that must never sound, DEC-2033 items 1, 3, 5, and an
   owner's market exit without a floor raising one `owner_exit_unpriced` alert;
   `src/paper.rs` (`FixturePaper`, the fixture
   paper broker below `mandate-alpaca`'s client, DEC-2007 item 1) and `src/alpaca.rs`
@@ -45,7 +46,8 @@
   opening journaled before it is sent with its stop beside it, no opening before ready while the
   switch still goes, an opening a later switch or mode change follows never going while an exit
   does, an opening without gate facts held while the exit behind it goes, an unreadable protection
-  stopping the process, a switch going before another agent's earlier
+  stopping the process, an exit without a mandate version sounding `exit_held` and stopping
+  nothing, a switch going before another agent's earlier
   exit, a proposal taken once across passes and restarts, every exit in a pass, an unreadable
   proposal stopping the process, and an owner's market exit going as a limit at its confirmed
   floor, or without one alerting and stopping nothing. `tests/owner_exits.rs`: over random owner

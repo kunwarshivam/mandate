@@ -134,9 +134,9 @@ pub struct ExecutorProcess<S, B> {
     reconcile: bool,
     /// The followed streams that did not read on their last read, each alerted once.
     unreadable: BTreeSet<String>,
-    /// The handoffs the core refused for a missing binding-gate input, each alerted once; asked
-    /// again every pass, and never a stop, so the exits behind them still go (`AGENTS.md` rule 13).
-    /// Any other input refused for it stops the process, as every other refusal does.
+    /// The handoffs the core refused for a missing binding-gate input, each alerted once by
+    /// [`held`]; asked again every pass, and never a stop, so the exits behind them still go
+    /// (`AGENTS.md` rule 13).
     held: BTreeSet<String>,
     /// The owner's exits at the market with no confirmed floor to price them at, each alerted once
     /// and asked again every pass; never dropped, refused or held in silence (DEC-2033 item 4).
@@ -539,13 +539,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         ) {
             Ok(effects) => effects,
             Err(error) => {
-                if let (ExecutorError::BindingGateInputMissing, Input::Intent(handoff)) =
-                    (&error, &input)
-                {
-                    let intent = handoff.intent_id.0.0.clone();
+                if let Some((key, intent)) = held(&error, &input) {
                     if self.held.insert(intent.clone()) {
                         alerts.push(Alert {
-                            key: "intent_held",
+                            key,
                             subject: Some(intent),
                         });
                     }
@@ -790,4 +787,78 @@ fn tick_of(row: &StoredEvent) -> Option<UtcNanos> {
     let body = parse(&row.body).ok()?;
     let clock = body.get("payload")?.get("clock")?.as_str()?;
     UtcNanos::parse(clock).ok()
+}
+
+/// The alert and intent for a handoff the core refused for a missing binding-gate input, which the
+/// process holds rather than stop on (DEC-2033 item 5): `opening_held` for an opening or an
+/// increase, and `exit_held` for an exit, an alarm that must never sound once the mandate port reads
+/// each followed agent's deployed version, since an exit needs no other gate fact (rule 13); the
+/// binary's fixture port reads none yet. Any other
+/// refusal, and this one for any input but a handoff, is `None`: it stops the process.
+fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> {
+    let (ExecutorError::BindingGateInputMissing, Input::Intent(handoff)) = (error, input) else {
+        return None;
+    };
+    let opens = match &handoff.body {
+        IntentBody::Order { purpose, .. } => purpose.adds_risk(),
+        _ => false,
+    };
+    let key = if opens { "opening_held" } else { "exit_held" };
+    Some((key, handoff.intent_id.0.0.clone()))
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_accounting::Side;
+    use mandate_executor::{EventId, Purpose, TimeInForce};
+    use mandate_num::Qty;
+
+    use super::*;
+
+    type Error = Box<dyn std::error::Error>;
+
+    fn handoff(purpose: Purpose) -> Result<Input, Error> {
+        Ok(Input::Intent(IntentHandoff {
+            intent_id: IntentId(EventId("i1".to_owned())),
+            agent: AgentId("agenta".to_owned()),
+            tif: Some(TimeInForce::Day),
+            body: IntentBody::Order {
+                instrument: InstrumentId::new("AAPL")?,
+                side: Side::Sell,
+                qty: Qty::parse("10")?,
+                limit: Price::parse("150")?,
+                purpose,
+                protection: None,
+            },
+        }))
+    }
+
+    #[test]
+    fn only_a_handoff_refused_for_a_missing_gate_input_is_held() -> Result<(), Error> {
+        let missing = ExecutorError::BindingGateInputMissing;
+        let held_as = |purpose| -> Result<_, Error> {
+            Ok(held(&missing, &handoff(purpose)?).map(|(key, _)| key))
+        };
+        assert_eq!(held_as(Purpose::Open)?, Some("opening_held"));
+        assert_eq!(held_as(Purpose::Increase)?, Some("opening_held"));
+        for exit in [
+            Purpose::RiskExit,
+            Purpose::DiscretionaryExit,
+            Purpose::OwnerExit,
+        ] {
+            assert_eq!(held_as(exit)?, Some("exit_held"));
+        }
+        assert_eq!(
+            held(&missing, &handoff(Purpose::Open)?),
+            Some(("opening_held", "i1".to_owned()))
+        );
+        let tick = Input::Tick(RiskClock::from_secs(0));
+        assert_eq!(held(&missing, &tick), None);
+        assert_eq!(held(&missing, &Input::Started(WriterEpoch(1))), None);
+        assert_eq!(
+            held(&ExecutorError::NotStarted, &handoff(Purpose::Open)?),
+            None
+        );
+        Ok(())
+    }
 }
