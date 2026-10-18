@@ -4034,8 +4034,10 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
             name: "the agent runtime, on the deny-all wiring until the post-R0 hook (DEC-1013)",
             skipped: if started_by_built("runtime") {
                 Some(
-                    "the deployment manager starts it, once it reads a deployment's account from \
-                     `AgentDeployed` version 2 (DEC-1171); until then it starts none"
+                    "the deployment manager starts it from a version-2 `AgentDeployed` \
+                     (DEC-1171); the demo's paper deployment stays version 1 until \
+                     `connection record` can run, which waits on the executor's connect check \
+                     (E21-30, lane X)"
                         .to_string(),
                 )
             } else {
@@ -5006,8 +5008,9 @@ mod tests {
         );
     }
 
-    /// A runtime the built deployment manager starts is not called ready: the manager starts none
-    /// until it reads a deployment's account (DEC-1171), so no runtime pod runs in the cell yet.
+    /// A runtime the built deployment manager starts is not called ready: the manager starts it
+    /// only from a version-2 deployment (DEC-1171), and the demo's paper deployment is version 1
+    /// until its connection is recorded, so no runtime pod runs in the cell yet.
     #[test]
     fn a_runtime_the_built_manager_starts_is_not_called_ready() {
         let runtime = json!({"name": "runtime", "built": true, "started_by": "deploy-manager"});

@@ -38,11 +38,11 @@ use crate::routes::{
 use crate::stepup::{Action, journaled};
 use crate::versions::{
     CONFIRMED, CREATED, DEPLOYED, FIRST_VERSION, Pending, Refusal, active, check, confirm_digest,
-    deploy_digest, envelope_paths, instruments, last_confirmed, latest, object, reference, screen,
-    stored, text,
+    deploy_digest, envelope_paths, established_v2, instruments, last_confirmed, latest, object,
+    reference, screen, stopped, stored, text,
 };
 use crate::writes::{
-    Gate, appended, derived_for, id_text, one_key, principal_text, ref_text, strict, unknown,
+    Gate, appended_at, derived_for, id_text, one_key, principal_text, ref_text, strict, unknown,
 };
 
 /// The message every violation these routes report carries: the code and the pointer say what and
@@ -205,6 +205,7 @@ fn recorded(
     refs.sort();
     let event = Event {
         event_type,
+        schema_version: 1,
         payload: object(members)?,
         artifact_refs: refs.iter().map(|r| text(r)).collect(),
         config_refs,
@@ -212,12 +213,14 @@ fn recorded(
     Some((bytes, event))
 }
 
-/// A command ready to append: its derived id, its record's bytes, and its draft.
+/// A command ready to append: its derived id, its record's bytes, its draft, and the head it must
+/// be appended at, when what it decided from the rows must still hold at the append.
 struct Drafted {
     id: EventId,
     text: String,
     record: Vec<u8>,
     draft: Vec<u8>,
+    pinned: Option<u64>,
 }
 
 /// `event` under §3.4's id for `operation`, with its record's bytes.
@@ -241,6 +244,7 @@ fn drafted(
         text,
         record,
         draft,
+        pinned: None,
     })
 }
 
@@ -256,12 +260,12 @@ async fn commit(app: &App, admitted: &Admitted, drafted: Drafted) -> Result<Stor
         .objects
         .put(&drafted.record)
         .map_err(|_| Refused::JournalUnavailable)?;
-    let settled = appended(
+    let settled = appended_at(
         app,
         &admitted.reader,
-        &drafted.text,
-        &drafted.draft,
+        (&drafted.text, &drafted.draft),
         admitted.gate.now,
+        drafted.pinned,
     )
     .await;
     outcome(settled, &drafted.id)
@@ -778,18 +782,32 @@ async fn deployed(
         ("user", text(&admitted.principal)),
     ])
     .ok_or(Refused::JournalUnavailable)?;
-    let event = recorded(
+    let (document, mandate) = document(&admitted, version)?;
+    let connection = mandate.connection_id.as_str();
+    if document.get("connection_id").and_then(Value::as_str) != Some(connection) {
+        return Err(Answer::schema("/mandate_version", "version_invalid"));
+    }
+    let named = established_v2(&admitted.reader.control, connection);
+    let mut members = vec![
+        ("agent_id", text(agent)),
+        ("mandate_version", text(version)),
+    ];
+    if named {
+        members.push(("connection_id", text(connection)));
+    }
+    let (record, mut event) = recorded(
         &record,
         version,
         DEPLOYED,
-        vec![
-            ("agent_id", text(agent)),
-            ("mandate_version", text(version)),
-        ],
+        members,
         vec![("mandate_version", text(version))],
     )
     .ok_or(Refused::JournalUnavailable)?;
-    let drafted = drafted(&admitted, "deploy", event)?;
+    event.schema_version = if named { 2 } else { 1 };
+    let mut drafted = drafted(&admitted, "deploy", (record, event))?;
+    drafted.pinned = named
+        .then(|| admitted.reader.control.last().map(|row| row.seq))
+        .flatten();
     if let Some(repeated) = repeat(&admitted, &drafted) {
         return Ok(command_accepted(
             StatusCode::ACCEPTED,
@@ -797,7 +815,6 @@ async fn deployed(
             &repeated?,
         ));
     }
-    let (document, mandate) = document(&admitted, version)?;
     match document.get("environment").and_then(Value::as_str) {
         Some("live") => {
             return Err(Answer::Code(
@@ -821,6 +838,9 @@ async fn deployed(
             return Ok(command_accepted(StatusCode::OK, &admitted, row));
         }
         return Err(Answer::schema("/agent_id", "agent_active"));
+    }
+    if stopped(control, agent) {
+        return Err(Answer::schema("/agent_id", "agent_stopped"));
     }
     let objects = admitted.objects.as_ref();
     let date = admitted.gate.now.date();

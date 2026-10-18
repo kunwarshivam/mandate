@@ -2851,13 +2851,20 @@ enables `live` (ES-23, OPS-5).
   ServiceAccount and a Role over pods alone, bounded by a ValidatingAdmissionPolicy to pods shaped
   like its templates, its `kube-api` egress and an egress gate that probes a denied destination, the
   runtime's and executor's pod templates, which mount no service-account token, and the
-  `mandate.dev/subject-key` label. *Left:* reading the account from `AgentDeployed`
-  version 2 ([DEC-1171](decisions/DEC-1171.md)), until which the process starts nothing for a
-  deployment; the Compose adapter; the restart drill through `cargo xtask cell drill`; the owner's
-  resume lifting a crash-loop pause once the runtime copies the pause (E21-30); alerts through the
-  cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting exited pods; the
-  CLI and the workspace API writing version 2, and the writers' checks of rules 200 and 201 (a
-  writer writes version 2 exactly when rule 201 holds, and version 1 otherwise, as today). From
+  `mandate.dev/subject-key` label. *Slice 3* ([DEC-1171](decisions/DEC-1171.md),
+  [DEC-1173](decisions/DEC-1173.md)): `AgentDeployed` version 2 registered, rule 201 in §11's
+  `connection_lifecycle_mismatch` and rule 200 in §9.2's mapping; the manager reads a deployment's
+  account from version 2 and its connection's establishment, and the resolver is gone; a stop is
+  final, read or not, and a version-1 deployment raises `deployment_unread`; the CLI and the
+  workspace API write version 2 exactly when rule 201 holds, check rule 200, and never redeploy a
+  stopped agent's id. *Left:* the Compose adapter; the restart drill through `cargo xtask cell
+  drill`; the owner's resume lifting a crash-loop pause once the runtime copies the pause (E21-30);
+  alerts through the cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting
+  exited pods; the demo's runtime, which needs a version-2 deployment and so `connection record`
+  for the demo's paper connection, waiting on the executor's connect check (E21-30, lane X). From
+  #1737's review, minors left under the freeze rule: a version-2 deployment rule 201 refuses (its
+  connection revoked or never established) starts nothing silently, where a once-per-process opaque
+  alert like `deployment_unread` would show it; and RB-14 has no page under `docs/runbooks/`. From
   slice 2's review, minors left under the freeze rule:
   - The manager's egress gate reads any connection failure on port 9153 as filtered, so a dead or
     restarting resolver fails open; a positive control first (TCP 53 on the same address) would
@@ -2866,20 +2873,6 @@ enables `live` (ES-23, OPS-5).
   - The chart test of the gate seeds no 9153 allow in the manager's policy.
   - `PgControl`'s `rows_after` reads the whole control stream on every pass.
   - `pg.rs` has no competing-writer test for the writer epoch taken for each append.
-  Follow-ups from DEC-1171's review (minors, freeze rule), decided in
-  [DEC-1173](decisions/DEC-1173.md) and specified in journal spec v0.56:
-  - m1 (decided, writers to build): an agent id is deployed once, so a writer refuses an agent an
-    `AgentStopped` names; the CLI's `agent_stopped` and the workspace API's refusal land with the
-    writers.
-  - m2 (done in the vectors; the manager to build): a stop is final even for a deployment the
-    manager never read.
-  - m3 (decided; the manager to build): a version-1 deployment is retired before the manager runs
-    its workspace, and the manager raises `deployment_unread` for one it finds.
-  - m4 (done): the oracle's revocation-after-deployment case now fails two seeded bugs, and a
-    vector shows rule 201 refusing an account stream's copy.
-  - m5 (done): the §9 catalogue row names version 2.
-  - m6 (half done): `docs/specs/workspace-api.md` states the version its deployment writes;
-    `docs/design/infrastructure.md` changes with the manager's code.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
