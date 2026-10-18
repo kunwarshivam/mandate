@@ -153,6 +153,7 @@ pub(crate) struct Row {
     pub(crate) seq: u64,
     event_id: String,
     pub(crate) event_type: String,
+    pub(crate) schema_version: u64,
     payload: Value,
 }
 
@@ -186,6 +187,7 @@ fn row(stored: StoredEvent) -> Result<Row, ControlError> {
         seq: stored.seq,
         event_id: stored.event_id,
         event_type: stored.event_type,
+        schema_version: stored.schema_version,
         payload,
     })
 }
@@ -217,7 +219,19 @@ pub(crate) fn commit(
     journal: &mut dyn ControlJournal,
     store: &mut dyn ArtifactStore,
     owner: &Owner,
-    (event_type, mut key, stepped_up): Event,
+    event: Event,
+    bound: (&str, &Value, Vec<(&'static str, Value)>),
+    now: Now,
+) -> Result<Submitted, ControlError> {
+    commit_at(journal, store, owner, (event, 1), bound, now)
+}
+
+/// [`commit`] at `schema_version` of the event type.
+pub(crate) fn commit_at(
+    journal: &mut dyn ControlJournal,
+    store: &mut dyn ArtifactStore,
+    owner: &Owner,
+    ((event_type, mut key, stepped_up), schema_version): (Event, u64),
     (version, record, config_refs): (&str, &Value, Vec<(&'static str, Value)>),
     now: Now,
 ) -> Result<Submitted, ControlError> {
@@ -241,7 +255,7 @@ pub(crate) fn commit(
     let mut artifact_refs = vec![version.to_owned(), record_ref];
     artifact_refs.sort();
     let shape = Shape {
-        schema_version: 1,
+        schema_version,
         artifact_refs,
         config_refs,
     };
