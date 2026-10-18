@@ -13,6 +13,7 @@ use mandate_gateway::registry::{
     Endpoint, Identity, Locality, Registry, Reported, Route, Snapshot, Status,
 };
 use mandate_num::{Price, Qty};
+use mandate_research::{AllowlistVersion, SourceAllowlist, SourceId as AllowedSource};
 use mandate_research_run::{
     Bar, BarReader, Filing, FilingReader, InstrumentFact, InstrumentReader, ItemId, NewsItem,
     NewsReader, OutputBounds, ReadError, ResearchEntry, RetrievalPlan, SourceId, Symbol, TextQuery,
@@ -105,6 +106,10 @@ pub struct Bundle {
     pub deployment_cap: Usd6,
     pub reply: RecordedReply,
     pub plane: RecordedPlane,
+    /// The recorded instruments halted at the bundle's as-of time (DEC-2214 item 1).
+    pub halted: BTreeSet<AssetId>,
+    /// The source allowlist the bundle's items were recorded under (DEC-2214 item 1).
+    pub allowlist: SourceAllowlist,
 }
 
 const RESEARCH: &str = "research.json";
@@ -133,6 +138,30 @@ impl Bundle {
             Digest::of(endpoint.text("price_table")?.as_bytes()),
         )
         .map_err(|_| endpoint.malformed("cached_per_million"))?;
+        let plane = RecordedPlane {
+            bars: Doc::read(dir, BARS)?
+                .rows()?
+                .iter()
+                .map(bar)
+                .collect::<Result<_, _>>()?,
+            news: Doc::read(dir, NEWS)?
+                .rows()?
+                .iter()
+                .map(news)
+                .collect::<Result<_, _>>()?,
+            filings: Doc::read(dir, FILINGS)?
+                .rows()?
+                .iter()
+                .map(filing)
+                .collect::<Result<_, _>>()?,
+            instruments: Doc::read(dir, INSTRUMENTS)?
+                .rows()?
+                .iter()
+                .map(instrument)
+                .collect::<Result<_, _>>()?,
+        };
+        let halted = halts(&research, &plane.instruments)?;
+        let allowlist = allowlist(&research)?;
         Ok(Self {
             entry: ResearchEntry {
                 model_id: entry.text("model_id")?.to_owned(),
@@ -175,28 +204,9 @@ impl Bundle {
                     cached: reply.int("cached_tokens")?,
                 },
             },
-            plane: RecordedPlane {
-                bars: Doc::read(dir, BARS)?
-                    .rows()?
-                    .iter()
-                    .map(bar)
-                    .collect::<Result<_, _>>()?,
-                news: Doc::read(dir, NEWS)?
-                    .rows()?
-                    .iter()
-                    .map(news)
-                    .collect::<Result<_, _>>()?,
-                filings: Doc::read(dir, FILINGS)?
-                    .rows()?
-                    .iter()
-                    .map(filing)
-                    .collect::<Result<_, _>>()?,
-                instruments: Doc::read(dir, INSTRUMENTS)?
-                    .rows()?
-                    .iter()
-                    .map(instrument)
-                    .collect::<Result<_, _>>()?,
-            },
+            plane,
+            halted,
+            allowlist,
         })
     }
 
@@ -413,6 +423,62 @@ impl Read {
             })
             .collect())
     }
+}
+
+/// The assets of the instruments `research.json`'s `halted_instruments` names by symbol, each one an
+/// instrument the bundle records.
+fn halts(
+    research: &Read,
+    instruments: &[InstrumentFact],
+) -> Result<BTreeSet<AssetId>, BundleError> {
+    let malformed = BundleError::Malformed {
+        file: RESEARCH,
+        member: "halted_instruments",
+    };
+    research
+        .value
+        .get("halted_instruments")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed.clone())?
+        .iter()
+        .map(|symbol| {
+            symbol
+                .as_str()
+                .and_then(|text| instruments.iter().find(|fact| fact.symbol.as_str() == text))
+                .map(|fact| fact.asset_id.clone())
+                .ok_or_else(|| malformed.clone())
+        })
+        .collect()
+}
+
+/// `research.json`'s `allowlist`: its version and its sources.
+fn allowlist(research: &Read) -> Result<SourceAllowlist, BundleError> {
+    let malformed = || BundleError::Malformed {
+        file: RESEARCH,
+        member: "allowlist",
+    };
+    let allowlist = research.value.get("allowlist").ok_or_else(malformed)?;
+    let version = allowlist
+        .get("version")
+        .and_then(Value::as_int)
+        .and_then(|version| u32::try_from(version).ok())
+        .ok_or_else(malformed)?;
+    let sources = allowlist
+        .get("sources")
+        .and_then(Value::as_array)
+        .ok_or_else(malformed)?
+        .iter()
+        .map(|source| {
+            source
+                .as_str()
+                .and_then(|text| AllowedSource::new(text).ok())
+                .ok_or_else(malformed)
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(SourceAllowlist {
+        version: AllowlistVersion(version),
+        sources,
+    })
 }
 
 fn bar(row: &Doc<'_>) -> Result<RecordedBar, BundleError> {
