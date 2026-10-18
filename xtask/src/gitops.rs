@@ -1,11 +1,14 @@
 //! `cargo xtask gitops`: the founder's one bootstrap of a hosted cluster, and its workload secrets
 //! (E21-58, DEC-2015, DEC-2018).
 //!
-//! The cluster's control-plane firewall admits only the founder's addresses (lane IAC's
-//! `KUBE_API_ALLOWED_CIDRS`), so these commands run on the founder's machine, with the founder's
-//! kubeconfig, and nowhere else. They refuse to run in CI or without a terminal, and they apply
-//! nothing until the founder types the kubeconfig's current context, so an agent never applies
-//! anything to a real cluster (DEC-2015 item 5). The workload secrets come from the founder's
+//! The usual path is CI: lane IAC's `cargo xtask infra apply` calls [`bootstrap_from_infra`] in
+//! process, from `infra.yml` on `main`, with the runner's own address opened on the control-plane
+//! firewall for the run (DEC-2018 item 7). The commands below are the founder's break-glass path:
+//! the firewall otherwise admits only the founder's addresses (`KUBE_API_ALLOWED_CIDRS`), so they
+//! run on the founder's machine, with the founder's kubeconfig, and nowhere else. They refuse to
+//! run in CI or without a terminal, and they apply nothing until the founder types the
+//! kubeconfig's current context, so an agent never applies anything to a real cluster (DEC-2015
+//! item 5). The workload secrets come from the founder's
 //! shell: Barman's R2 token, which the founder makes by hand, and lane IAC's `tunnel_token` output
 //! (deploy/gitops/BOOTSTRAP.md). Each reaches only `kubectl`'s stdin and is never printed.
 //!
@@ -93,6 +96,170 @@ const WORKLOAD_SECRETS: [WorkloadSecret; 2] = [
         keys: &[("token", "CLOUDFLARED_TUNNEL_TOKEN")],
     },
 ];
+
+/// One secret value, held in memory only. In GitHub Actions, constructing it masks the value in the
+/// run's log at once, in every form a later line could print it ([`mask_forms`]): the repository
+/// is public, so its logs are, and GitHub masks only `secrets.*` values on its own. `Debug` hides
+/// it.
+pub(crate) struct Secret(String);
+
+impl Secret {
+    /// The value, masked first when this runs in GitHub Actions.
+    pub(crate) fn new(value: String) -> Self {
+        if env::var("GITHUB_ACTIONS").is_ok_and(|actions| actions == "true") {
+            let mut out = io::stdout().lock();
+            for form in mask_forms(&value) {
+                let _ = writeln!(out, "{}", mask_command(&form));
+            }
+            let _ = out.flush();
+        }
+        Self(value)
+    }
+
+    fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
+/// The workflow command that masks `form`. GitHub decodes `%25`, `%0D` and `%0A` in a command's
+/// data, so `%` is escaped first, then CR and LF; unescaped, a form holding a literal `%0A` would
+/// register a different mask and leave itself visible.
+fn mask_command(form: &str) -> String {
+    let data = form
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A");
+    format!("::add-mask::{data}")
+}
+
+/// Every form of `value` a log line could carry, each one line and non-empty: the value, its
+/// base64, base64url (unpadded), URL-encoded and JSON-escaped forms, and each of its lines.
+fn mask_forms(value: &str) -> Vec<String> {
+    let base64 = image::base64(value.as_bytes());
+    let base64url = base64
+        .replace('+', "-")
+        .replace('/', "_")
+        .trim_end_matches('=')
+        .to_owned();
+    let mut url = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            url.push(char::from(byte));
+        } else {
+            url.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    let json = serde_json::Value::String(value.to_owned()).to_string();
+    let json = json
+        .strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+        .unwrap_or(&json)
+        .to_owned();
+    let mut forms = vec![value.to_owned(), base64, base64url, url, json];
+    forms.extend(value.lines().map(str::to_owned));
+    let mut kept: Vec<String> = Vec::new();
+    for form in forms {
+        let form = form.trim().to_owned();
+        if !form.is_empty() && !form.contains(['\n', '\r']) && !kept.contains(&form) {
+            kept.push(form);
+        }
+    }
+    kept
+}
+
+/// The workload secrets' values, held in memory only and never printed.
+#[derive(Debug)]
+pub(crate) struct WorkloadSecrets {
+    /// The archive's R2 access key id: the bucket-scoped token's id.
+    pub(crate) archive_access_key_id: Secret,
+    /// The archive's R2 secret: the SHA-256 of that token's value.
+    pub(crate) archive_secret_access_key: Secret,
+    /// The tunnel's token.
+    pub(crate) tunnel_token: Secret,
+}
+
+impl WorkloadSecrets {
+    /// The founder's terminal: each value from the shell variable [`WORKLOAD_SECRETS`] names.
+    fn from_env() -> Result<Self> {
+        let read =
+            |var: &str| env::var(var).with_context(|| format!("{var} is not set (BOOTSTRAP.md)"));
+        Ok(Self {
+            archive_access_key_id: Secret::new(read("JOURNAL_ARCHIVE_ACCESS_KEY_ID")?),
+            archive_secret_access_key: Secret::new(read("JOURNAL_ARCHIVE_SECRET_KEY")?),
+            tunnel_token: Secret::new(read("CLOUDFLARED_TUNNEL_TOKEN")?),
+        })
+    }
+
+    /// Each Secret's manifest, in [`WORKLOAD_SECRETS`]' order.
+    fn manifests(&self) -> Result<Vec<(&'static str, String)>> {
+        let mut manifests = Vec::new();
+        for secret in WORKLOAD_SECRETS {
+            let mut values = Vec::new();
+            for (key, var) in secret.keys {
+                let value = match *var {
+                    "JOURNAL_ARCHIVE_ACCESS_KEY_ID" => &self.archive_access_key_id,
+                    "JOURNAL_ARCHIVE_SECRET_KEY" => &self.archive_secret_access_key,
+                    "CLOUDFLARED_TUNNEL_TOKEN" => &self.tunnel_token,
+                    other => bail!("no workload secret holds {other}"),
+                };
+                values.push((*key, value.expose().to_owned()));
+            }
+            manifests.push((secret.name, secret_manifest(secret.name, &values)?));
+        }
+        Ok(manifests)
+    }
+}
+
+/// The cluster a run applies to: a kubeconfig file, when not the default one, and the context in it.
+struct Cluster<'a> {
+    kubeconfig: Option<&'a Path>,
+    context: String,
+}
+
+/// The workflow that alone may bootstrap from CI: lane IAC's `infra.yml` on `main` (DEC-2018).
+const INFRA_WORKFLOW_SUFFIX: &str = "/.github/workflows/infra.yml@refs/heads/main";
+
+/// The repository the CI bootstrap belongs to.
+const REPOSITORY: &str = "kunwarshivam/mandate";
+
+/// What GitHub Actions says about the run, by name so no two can be swapped.
+struct Run<'a> {
+    /// `GITHUB_ACTIONS`.
+    actions: &'a str,
+    /// `GITHUB_REPOSITORY`.
+    repository: &'a str,
+    /// `GITHUB_EVENT_NAME`.
+    event: &'a str,
+    /// `GITHUB_REF`.
+    reference: &'a str,
+    /// `GITHUB_WORKFLOW_REF`.
+    workflow: &'a str,
+}
+
+/// Why a CI run must not bootstrap, if it must not: only a dispatched `infra.yml` on this
+/// repository's `main` in GitHub Actions may (DEC-2018 item 7). These are environment variables, a
+/// guard against running it by mistake, never the security boundary.
+fn infra_refusal(run: &Run<'_>) -> Option<&'static str> {
+    if run.actions != "true" {
+        Some("the CI bootstrap runs only in GitHub Actions")
+    } else if run.repository != REPOSITORY {
+        Some("the CI bootstrap runs only in this repository")
+    } else if run.event != "workflow_dispatch" {
+        Some("the CI bootstrap runs only from a dispatched run")
+    } else if run.reference != "refs/heads/main" {
+        Some("the CI bootstrap runs only on main")
+    } else if run.workflow != format!("{REPOSITORY}{INFRA_WORKFLOW_SUFFIX}") {
+        Some("the CI bootstrap runs only from infra.yml")
+    } else {
+        None
+    }
+}
 
 /// The `flux` the pins in [`FLUX_IMAGES`] belong to.
 const FLUX_VERSION: &str = "2.9.6";
@@ -233,10 +400,14 @@ fn confirm(
     Ok(context)
 }
 
-/// Runs `kubectl` against `context` with `stdin` as its input.
-fn kubectl(context: &str, args: &[&str], stdin: Option<&str>) -> Result<()> {
-    let mut child = Command::new("kubectl")
-        .args(["--context", context])
+/// Runs `kubectl` against `cluster` with `stdin` as its input.
+fn kubectl(cluster: &Cluster<'_>, args: &[&str], stdin: Option<&str>) -> Result<()> {
+    let mut command = Command::new("kubectl");
+    if let Some(kubeconfig) = cluster.kubeconfig {
+        command.arg("--kubeconfig").arg(kubeconfig);
+    }
+    let mut child = command
+        .args(["--v=0", "--context", &cluster.context])
         .args(args)
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -258,37 +429,22 @@ fn kubectl(context: &str, args: &[&str], stdin: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Reads every [`WORKLOAD_SECRETS`] value from the process environment, each required.
-fn secret_manifests() -> Result<Vec<(&'static str, String)>> {
-    let mut manifests = Vec::new();
-    for secret in WORKLOAD_SECRETS {
-        let mut values = Vec::new();
-        for (key, var) in secret.keys {
-            let value =
-                env::var(var).with_context(|| format!("{var} is not set (BOOTSTRAP.md)"))?;
-            values.push((*key, value));
-        }
-        manifests.push((secret.name, secret_manifest(secret.name, &values)?));
-    }
-    Ok(manifests)
-}
-
 /// Writes `manifests`, after the workspace namespace, which Flux would otherwise create only on
 /// its first reconcile.
-fn write_secrets(context: &str, manifests: &[(&str, String)]) -> Result<()> {
+fn write_secrets(cluster: &Cluster<'_>, manifests: &[(&str, String)]) -> Result<()> {
     let namespace = serde_json::json!({
         "apiVersion": "v1",
         "kind": "Namespace",
         "metadata": {"name": WORKSPACE_NAMESPACE},
     });
     kubectl(
-        context,
+        cluster,
         &["apply", "--server-side", "-f", "-"],
         Some(&namespace.to_string()),
     )?;
     for (name, manifest) in manifests {
         kubectl(
-            context,
+            cluster,
             &["apply", "--server-side", "-f", "-"],
             Some(manifest),
         )?;
@@ -299,15 +455,20 @@ fn write_secrets(context: &str, manifests: &[(&str, String)]) -> Result<()> {
 
 /// `cargo xtask gitops secrets <environment>`: the workload secrets alone.
 pub(crate) fn secrets(environment: Environment) -> Result<()> {
-    let manifests = secret_manifests()?;
+    let manifests = WorkloadSecrets::from_env()?.manifests()?;
     let context = founder_confirms(environment, "write the workload secrets of")?;
-    write_secrets(&context, &manifests)
+    write_secrets(
+        &Cluster {
+            kubeconfig: None,
+            context,
+        },
+        &manifests,
+    )
 }
 
-/// `cargo xtask gitops bootstrap <environment>`: Flux's controllers, pinned; the workload
-/// secrets; and the environment's `sync.yaml`, after which Flux reconciles the rest. Everything
-/// is read and checked before the founder confirms, so a refusal applies nothing.
-pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
+/// What a bootstrap applies, read and checked before anything touches a cluster: the pinned Flux
+/// controllers and the environment's `sync.yaml`.
+fn prepare(root: &Path, environment: Environment) -> Result<(String, String)> {
     let sync = root
         .join("deploy/gitops/clusters")
         .join(environment.name())
@@ -330,12 +491,22 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
     ensure!(exported.status.success(), "flux install --export failed");
     let manifest =
         pin_images(&String::from_utf8(exported.stdout).context("flux printed non-UTF-8")?)?;
-    let secrets = secret_manifests()?;
-    let context = founder_confirms(environment, "bootstrap Flux on")?;
+    Ok((manifest, sync))
+}
+
+/// Applies a bootstrap to `cluster`: the controllers, waiting for each; the workload secrets; then
+/// `sync.yaml`. Idempotent, so every run re-asserts all three.
+fn apply(
+    cluster: &Cluster<'_>,
+    environment: Environment,
+    manifest: &str,
+    secrets: &[(&str, String)],
+    sync: &str,
+) -> Result<()> {
     kubectl(
-        &context,
+        cluster,
         &["apply", "--server-side", "--force-conflicts", "-f", "-"],
-        Some(&manifest),
+        Some(manifest),
     )?;
     for controller in [
         "source-controller",
@@ -343,7 +514,7 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
         "helm-controller",
     ] {
         kubectl(
-            &context,
+            cluster,
             &[
                 "rollout",
                 "status",
@@ -355,12 +526,8 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
             None,
         )?;
     }
-    write_secrets(&context, &secrets)?;
-    kubectl(
-        &context,
-        &["apply", "--server-side", "-f", "-"],
-        Some(&sync),
-    )?;
+    write_secrets(cluster, secrets)?;
+    kubectl(cluster, &["apply", "--server-side", "-f", "-"], Some(sync))?;
     eprintln!(
         "    gitops: {} bootstrapped; Flux now reconciles deploy/gitops/clusters/{} from main",
         environment.name(),
@@ -369,8 +536,87 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
     Ok(())
 }
 
+/// `cargo xtask gitops bootstrap <environment>`, the founder's break-glass path: Flux's
+/// controllers, pinned; the workload secrets; and the environment's `sync.yaml`. Everything is read
+/// and checked before the founder confirms, so a refusal applies nothing.
+pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
+    let (manifest, sync) = prepare(root, environment)?;
+    let secrets = WorkloadSecrets::from_env()?.manifests()?;
+    let context = founder_confirms(environment, "bootstrap Flux on")?;
+    let cluster = Cluster {
+        kubeconfig: None,
+        context,
+    };
+    apply(&cluster, environment, &manifest, &secrets, &sync)
+}
+
+/// The bootstrap from CI (DEC-2018 item 7): lane IAC's `cargo xtask infra apply` calls this in
+/// process, between opening and closing the runner's window on the control-plane firewall, with
+/// the short-lived kubeconfig it fetched and the secrets from its sensitive outputs, all in memory.
+/// It refuses unless this is `infra.yml` on `main` in GitHub Actions, and unless the kubeconfig's
+/// current context is `expected_context`; then it applies exactly what the founder's path applies.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "lane IAC's `cargo xtask infra apply` calls it (E21-56 F2)"
+    )
+)]
+pub(crate) fn bootstrap_from_infra(
+    root: &Path,
+    environment: Environment,
+    kubeconfig: &Path,
+    expected_context: &str,
+    secrets: &WorkloadSecrets,
+) -> Result<()> {
+    let var = |name: &str| env::var(name).unwrap_or_default();
+    let (actions, repository, event, reference, workflow) = (
+        var("GITHUB_ACTIONS"),
+        var("GITHUB_REPOSITORY"),
+        var("GITHUB_EVENT_NAME"),
+        var("GITHUB_REF"),
+        var("GITHUB_WORKFLOW_REF"),
+    );
+    if let Some(reason) = infra_refusal(&Run {
+        actions: &actions,
+        repository: &repository,
+        event: &event,
+        reference: &reference,
+        workflow: &workflow,
+    }) {
+        bail!("{reason} (DEC-2018)");
+    }
+    let out = Command::new("kubectl")
+        .args(["--v=0", "--kubeconfig"])
+        .arg(kubeconfig)
+        .args(["config", "current-context"])
+        .output()
+        .context("starting kubectl")?;
+    ensure!(
+        out.status.success(),
+        "the kubeconfig has no current context"
+    );
+    let context = String::from_utf8(out.stdout)
+        .context("kubectl printed non-UTF-8")?
+        .trim()
+        .to_owned();
+    ensure!(
+        confirmed(&context, expected_context),
+        "the kubeconfig's context {context:?} is not {expected_context:?}; nothing was applied"
+    );
+    let (manifest, sync) = prepare(root, environment)?;
+    let manifests = secrets.manifests()?;
+    let cluster = Cluster {
+        kubeconfig: Some(kubeconfig),
+        context,
+    };
+    apply(&cluster, environment, &manifest, &manifests, &sync)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     /// An excerpt of `flux install --export` for v2.9.6, its image lines as the CLI prints them.
@@ -508,6 +754,180 @@ mod tests {
             || Ok(format!("{context}\n")),
         );
         assert!(right.is_ok_and(|c| c == context));
+    }
+
+    /// Only a dispatched `infra.yml` on this repository's `main` in GitHub Actions may bootstrap
+    /// from CI: the one good run passes, and each field made wrong in turn, or two fields swapped,
+    /// is refused.
+    #[test]
+    fn only_a_dispatched_infra_yml_on_main_may_bootstrap_from_ci() {
+        let workflow = "kunwarshivam/mandate/.github/workflows/infra.yml@refs/heads/main";
+        let good = || Run {
+            actions: "true",
+            repository: "kunwarshivam/mandate",
+            event: "workflow_dispatch",
+            reference: "refs/heads/main",
+            workflow,
+        };
+        assert!(infra_refusal(&good()).is_none());
+        let wrong: [fn(&mut Run<'static>); 9] = [
+            |r| r.actions = "",
+            |r| r.repository = "someone/mandate",
+            |r| r.event = "push",
+            |r| r.event = "pull_request",
+            |r| r.reference = "refs/heads/go",
+            |r| r.reference = "refs/pull/1/merge",
+            |r| r.workflow = "kunwarshivam/mandate/.github/workflows/ci.yml@refs/heads/main",
+            |r| r.workflow = "kunwarshivam/mandate/.github/workflows/infra.yml@refs/heads/go",
+            |r| r.workflow = "someone/mandate/.github/workflows/infra.yml@refs/heads/main",
+        ];
+        for (index, make_wrong) in wrong.iter().enumerate() {
+            let mut run = good();
+            make_wrong(&mut run);
+            assert!(infra_refusal(&run).is_some(), "case {index} passed");
+        }
+        let swapped = Run {
+            reference: workflow,
+            workflow: "refs/heads/main",
+            ..good()
+        };
+        assert!(infra_refusal(&swapped).is_some());
+        let swapped = Run {
+            repository: "workflow_dispatch",
+            event: "kunwarshivam/mandate",
+            ..good()
+        };
+        assert!(infra_refusal(&swapped).is_some());
+    }
+
+    /// The CI bootstrap refuses outside infra.yml before it reads the kubeconfig or the cluster.
+    #[test]
+    fn the_ci_bootstrap_refuses_before_it_reads_anything() {
+        let secrets = WorkloadSecrets {
+            archive_access_key_id: Secret::new("id".to_owned()),
+            archive_secret_access_key: Secret::new("secret".to_owned()),
+            tunnel_token: Secret::new("token".to_owned()),
+        };
+        let refused = bootstrap_from_infra(
+            Path::new("/nonexistent"),
+            Environment::Staging,
+            Path::new("/nonexistent/kubeconfig"),
+            "do-nyc3-mandate-staging",
+            &secrets,
+        );
+        assert!(refused.is_err_and(|e| e.to_string().contains("DEC-2018")));
+    }
+
+    /// The secrets' `Debug` never shows a value, and each value lands in its chart's key.
+    #[test]
+    fn the_secrets_are_redacted_and_land_in_their_keys() -> Result<()> {
+        let secrets = WorkloadSecrets {
+            archive_access_key_id: Secret::new("key-id-1".to_owned()),
+            archive_secret_access_key: Secret::new("secret-2".to_owned()),
+            tunnel_token: Secret::new("token-3".to_owned()),
+        };
+        let shown = format!("{secrets:?}");
+        for value in ["key-id-1", "secret-2", "token-3"] {
+            assert!(!shown.contains(value), "{shown}");
+        }
+        let manifests = secrets.manifests()?;
+        let data = |name: &str| -> Result<serde_json::Value> {
+            let (_, text) = manifests
+                .iter()
+                .find(|(n, _)| *n == name)
+                .context("missing")?;
+            Ok(serde_json::from_str::<serde_json::Value>(text)?["data"].clone())
+        };
+        let archive = data("journal-archive-key")?;
+        assert_eq!(archive["ACCESS_KEY_ID"], image::base64(b"key-id-1"));
+        assert_eq!(archive["ACCESS_SECRET_KEY"], image::base64(b"secret-2"));
+        assert_eq!(
+            data("cloudflared-tunnel")?["token"],
+            image::base64(b"token-3")
+        );
+        Ok(())
+    }
+
+    /// Each printed mask line, decoded as GitHub decodes command data in one pass, gives back the
+    /// exact form, even when the form holds `%`, a literal `%0A` or `%0D`, or a CR.
+    #[test]
+    fn each_mask_line_decodes_to_its_form() {
+        let decode = |line: &str| -> String {
+            let data = line.strip_prefix("::add-mask::").unwrap_or("<no prefix>");
+            let mut out = String::new();
+            let mut rest = data;
+            while let Some(c) = rest.chars().next() {
+                if let Some(tail) = rest.strip_prefix("%25") {
+                    out.push('%');
+                    rest = tail;
+                } else if let Some(tail) = rest.strip_prefix("%0D") {
+                    out.push('\r');
+                    rest = tail;
+                } else if let Some(tail) = rest.strip_prefix("%0A") {
+                    out.push('\n');
+                    rest = tail;
+                } else {
+                    out.push(c);
+                    rest = &rest[c.len_utf8()..];
+                }
+            }
+            out
+        };
+        assert_eq!(
+            mask_command("a\rb\nc%0Ad%"),
+            "::add-mask::a%0Db%0Ac%250Ad%25"
+        );
+        let value = "p%0Aq\rr%0Ds%\nline two";
+        let forms = mask_forms(value);
+        assert!(forms.contains(&"p%250Aq%0Dr%250Ds%25%0Aline%20two".to_owned()));
+        for form in &forms {
+            let line = mask_command(form);
+            assert!(!line.contains(['\n', '\r']), "{line:?} spans lines");
+            assert_eq!(&decode(&line), form, "{line:?} masks something else");
+        }
+        assert!(
+            forms
+                .iter()
+                .any(|form| mask_command(form).contains("%25250A")),
+            "the URL-encoded form's literal %0A is not escaped in {forms:?}"
+        );
+    }
+
+    /// Every printable form of a secret is masked, each on one line, none empty or repeated.
+    #[test]
+    fn every_printable_form_of_a_secret_is_masked() {
+        let value = "a+b/c=d\"e\nline two";
+        let forms = mask_forms(value);
+        let base64 = image::base64(value.as_bytes());
+        for expected in [
+            base64.clone(),
+            base64
+                .replace('+', "-")
+                .replace('/', "_")
+                .trim_end_matches('=')
+                .to_owned(),
+            "a%2Bb%2Fc%3Dd%22e%0Aline%20two".to_owned(),
+            "a+b/c=d\\\"e\\nline two".to_owned(),
+            "a+b/c=d\"e".to_owned(),
+            "line two".to_owned(),
+        ] {
+            assert!(forms.contains(&expected), "{expected} not in {forms:?}");
+        }
+        assert!(forms.iter().all(|f| !f.is_empty() && !f.contains('\n')));
+        let unique: BTreeSet<&String> = forms.iter().collect();
+        assert_eq!(unique.len(), forms.len(), "a form repeats in {forms:?}");
+        assert_eq!(
+            mask_forms("plain"),
+            vec![
+                "plain".to_owned(),
+                image::base64(b"plain"),
+                image::base64(b"plain").trim_end_matches('=').to_owned()
+            ]
+        );
+        assert_eq!(
+            format!("{:?}", Secret::new("hidden".to_owned())),
+            "<redacted>"
+        );
     }
 
     /// No workflow may run the bootstrap: the cluster's API admits only the founder's addresses.
