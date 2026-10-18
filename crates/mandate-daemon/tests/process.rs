@@ -8,7 +8,9 @@
     reason = "the tests bound their waits on a child process; no core code reads the clock"
 )]
 
+use std::ffi::OsStr;
 use std::io::Read;
+use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
@@ -45,6 +47,9 @@ impl Guard {
                 .arg("--probe")
                 .arg(socket)
                 .env_remove("MANDATE_JOURNAL_DSN")
+                .env_remove("MANDATE_PROCESS")
+                .env_remove("MANDATE_WORKSPACE")
+                .env_remove("MANDATE_SUBJECT")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -95,6 +100,63 @@ fn without_a_whole_deployment_or_a_journal_the_process_refuses() {
     let (status, stderr) = Guard::spawn(&run, &path).exited();
     assert_eq!(status.code(), Some(2));
     assert_eq!(stderr, "runtime_start_failed: journal_dsn_missing\n");
+    assert!(!path.exists(), "a refused process serves no probe");
+}
+
+/// A pod the deployment manager starts names its runtime by variables (DEC-1015). Until the
+/// connection and owner are read from the agent's mandate document, such a launch refuses before
+/// it is ready, and a pod for another process is refused outright.
+#[test]
+fn a_manager_launch_refuses_until_its_deployment_is_resolved() {
+    let path = socket("manager");
+    let launch = |process: &str| {
+        let mut child = Command::new(BIN)
+            .args(["run", "--probe"])
+            .arg(&path)
+            .env_remove("MANDATE_JOURNAL_DSN")
+            .env("MANDATE_WORKSPACE", "ws1")
+            .env("MANDATE_PROCESS", process)
+            .env("MANDATE_SUBJECT", "agent-a")
+            .env("MANDATE_GENERATION", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        let mut stderr = String::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
+        (child.wait().unwrap().code(), stderr)
+    };
+    assert_eq!(
+        launch("runtime"),
+        (Some(2), "deployment_unresolved\n".to_owned())
+    );
+    assert_eq!(
+        launch("executor"),
+        (Some(2), "process_not_runtime\n".to_owned())
+    );
+    let unreadable = Command::new(BIN)
+        .args(["run", "--probe"])
+        .arg(&path)
+        .args(DEPLOYMENT)
+        .env_remove("MANDATE_JOURNAL_DSN")
+        .env_remove("MANDATE_WORKSPACE")
+        .env_remove("MANDATE_SUBJECT")
+        .env("MANDATE_PROCESS", OsStr::from_bytes(b"run\xfftime"))
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(unreadable.status.code(), Some(2));
+    assert_eq!(
+        unreadable.stderr, b"process_not_runtime\n",
+        "an unreadable value is not taken as unset"
+    );
     assert!(!path.exists(), "a refused process serves no probe");
 }
 

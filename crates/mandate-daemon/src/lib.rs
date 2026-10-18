@@ -32,6 +32,7 @@
 //! post-R0 hook (DEC-968 item 6, DEC-1012 item 6); until then the binary runs only fixture wiring.
 
 pub mod fixture;
+pub mod launch;
 pub mod runtime;
 pub mod wake;
 
