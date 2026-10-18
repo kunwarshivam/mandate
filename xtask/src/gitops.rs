@@ -1,9 +1,11 @@
 //! `cargo xtask gitops`: the founder's one bootstrap of a hosted cluster, and its workload secrets
 //! (E21-58, DEC-2015, DEC-2018).
 //!
-//! The cluster's control-plane firewall admits only the founder's addresses (lane IAC's
-//! `KUBE_API_ALLOWED_CIDRS`), so these commands run on the founder's machine, with the founder's
-//! kubeconfig, and nowhere else. They refuse to run in CI or without a terminal, and they apply
+//! The usual path is CI: lane IAC's `cargo xtask infra apply` calls [`bootstrap_from_infra`] in
+//! process, from `infra.yml` on `main`, with the runner's own address opened on the control-plane
+//! firewall for the run (DEC-2018 item 7). The commands below are the founder's break-glass path:
+//! the firewall otherwise admits only the founder's addresses (`KUBE_API_ALLOWED_CIDRS`), so they
+//! run on the founder's machine, with the founder's kubeconfig, and nowhere else. They refuse to run in CI or without a terminal, and they apply
 //! nothing until the founder types the kubeconfig's current context, so an agent never applies
 //! anything to a real cluster (DEC-2015 item 5). The workload secrets come from the founder's
 //! shell: Barman's R2 token, which the founder makes by hand, and lane IAC's `tunnel_token` output
@@ -93,6 +95,78 @@ const WORKLOAD_SECRETS: [WorkloadSecret; 2] = [
         keys: &[("token", "CLOUDFLARED_TUNNEL_TOKEN")],
     },
 ];
+
+/// The workload secrets' values, held in memory only and never printed: `Debug` names the fields
+/// and hides every value.
+pub(crate) struct WorkloadSecrets {
+    /// The archive's R2 access key id: the bucket-scoped token's id.
+    pub(crate) archive_access_key_id: String,
+    /// The archive's R2 secret: the SHA-256 of that token's value.
+    pub(crate) archive_secret_access_key: String,
+    /// The tunnel's token.
+    pub(crate) tunnel_token: String,
+}
+
+impl std::fmt::Debug for WorkloadSecrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WorkloadSecrets { <redacted> }")
+    }
+}
+
+impl WorkloadSecrets {
+    /// The founder's terminal: each value from the shell variable [`WORKLOAD_SECRETS`] names.
+    fn from_env() -> Result<Self> {
+        let read =
+            |var: &str| env::var(var).with_context(|| format!("{var} is not set (BOOTSTRAP.md)"));
+        Ok(Self {
+            archive_access_key_id: read("JOURNAL_ARCHIVE_ACCESS_KEY_ID")?,
+            archive_secret_access_key: read("JOURNAL_ARCHIVE_SECRET_KEY")?,
+            tunnel_token: read("CLOUDFLARED_TUNNEL_TOKEN")?,
+        })
+    }
+
+    /// Each Secret's manifest, in [`WORKLOAD_SECRETS`]' order.
+    fn manifests(&self) -> Result<Vec<(&'static str, String)>> {
+        let mut manifests = Vec::new();
+        for secret in WORKLOAD_SECRETS {
+            let mut values = Vec::new();
+            for (key, var) in secret.keys {
+                let value = match *var {
+                    "JOURNAL_ARCHIVE_ACCESS_KEY_ID" => &self.archive_access_key_id,
+                    "JOURNAL_ARCHIVE_SECRET_KEY" => &self.archive_secret_access_key,
+                    "CLOUDFLARED_TUNNEL_TOKEN" => &self.tunnel_token,
+                    other => bail!("no workload secret holds {other}"),
+                };
+                values.push((*key, value.clone()));
+            }
+            manifests.push((secret.name, secret_manifest(secret.name, &values)?));
+        }
+        Ok(manifests)
+    }
+}
+
+/// The cluster a run applies to: a kubeconfig file, when not the default one, and the context in it.
+struct Cluster<'a> {
+    kubeconfig: Option<&'a Path>,
+    context: String,
+}
+
+/// The workflow that alone may bootstrap from CI: lane IAC's `infra.yml` on `main` (DEC-2018).
+const INFRA_WORKFLOW_SUFFIX: &str = "/.github/workflows/infra.yml@refs/heads/main";
+
+/// Why a CI run must not bootstrap, if it must not: only GitHub Actions, on `main`, in
+/// `infra.yml`, may (DEC-2018 item 7).
+fn infra_refusal(actions: &str, reference: &str, workflow: &str) -> Option<&'static str> {
+    if actions != "true" {
+        Some("the CI bootstrap runs only in GitHub Actions")
+    } else if reference != "refs/heads/main" {
+        Some("the CI bootstrap runs only on main")
+    } else if !workflow.ends_with(INFRA_WORKFLOW_SUFFIX) {
+        Some("the CI bootstrap runs only from infra.yml")
+    } else {
+        None
+    }
+}
 
 /// The `flux` the pins in [`FLUX_IMAGES`] belong to.
 const FLUX_VERSION: &str = "2.9.6";
@@ -233,10 +307,14 @@ fn confirm(
     Ok(context)
 }
 
-/// Runs `kubectl` against `context` with `stdin` as its input.
-fn kubectl(context: &str, args: &[&str], stdin: Option<&str>) -> Result<()> {
-    let mut child = Command::new("kubectl")
-        .args(["--context", context])
+/// Runs `kubectl` against `cluster` with `stdin` as its input.
+fn kubectl(cluster: &Cluster<'_>, args: &[&str], stdin: Option<&str>) -> Result<()> {
+    let mut command = Command::new("kubectl");
+    if let Some(kubeconfig) = cluster.kubeconfig {
+        command.arg("--kubeconfig").arg(kubeconfig);
+    }
+    let mut child = command
+        .args(["--context", &cluster.context])
         .args(args)
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -258,37 +336,22 @@ fn kubectl(context: &str, args: &[&str], stdin: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Reads every [`WORKLOAD_SECRETS`] value from the process environment, each required.
-fn secret_manifests() -> Result<Vec<(&'static str, String)>> {
-    let mut manifests = Vec::new();
-    for secret in WORKLOAD_SECRETS {
-        let mut values = Vec::new();
-        for (key, var) in secret.keys {
-            let value =
-                env::var(var).with_context(|| format!("{var} is not set (BOOTSTRAP.md)"))?;
-            values.push((*key, value));
-        }
-        manifests.push((secret.name, secret_manifest(secret.name, &values)?));
-    }
-    Ok(manifests)
-}
-
 /// Writes `manifests`, after the workspace namespace, which Flux would otherwise create only on
 /// its first reconcile.
-fn write_secrets(context: &str, manifests: &[(&str, String)]) -> Result<()> {
+fn write_secrets(cluster: &Cluster<'_>, manifests: &[(&str, String)]) -> Result<()> {
     let namespace = serde_json::json!({
         "apiVersion": "v1",
         "kind": "Namespace",
         "metadata": {"name": WORKSPACE_NAMESPACE},
     });
     kubectl(
-        context,
+        cluster,
         &["apply", "--server-side", "-f", "-"],
         Some(&namespace.to_string()),
     )?;
     for (name, manifest) in manifests {
         kubectl(
-            context,
+            cluster,
             &["apply", "--server-side", "-f", "-"],
             Some(manifest),
         )?;
@@ -299,15 +362,20 @@ fn write_secrets(context: &str, manifests: &[(&str, String)]) -> Result<()> {
 
 /// `cargo xtask gitops secrets <environment>`: the workload secrets alone.
 pub(crate) fn secrets(environment: Environment) -> Result<()> {
-    let manifests = secret_manifests()?;
+    let manifests = WorkloadSecrets::from_env()?.manifests()?;
     let context = founder_confirms(environment, "write the workload secrets of")?;
-    write_secrets(&context, &manifests)
+    write_secrets(
+        &Cluster {
+            kubeconfig: None,
+            context,
+        },
+        &manifests,
+    )
 }
 
-/// `cargo xtask gitops bootstrap <environment>`: Flux's controllers, pinned; the workload
-/// secrets; and the environment's `sync.yaml`, after which Flux reconciles the rest. Everything
-/// is read and checked before the founder confirms, so a refusal applies nothing.
-pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
+/// What a bootstrap applies, read and checked before anything touches a cluster: the pinned Flux
+/// controllers and the environment's `sync.yaml`.
+fn prepare(root: &Path, environment: Environment) -> Result<(String, String)> {
     let sync = root
         .join("deploy/gitops/clusters")
         .join(environment.name())
@@ -330,12 +398,22 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
     ensure!(exported.status.success(), "flux install --export failed");
     let manifest =
         pin_images(&String::from_utf8(exported.stdout).context("flux printed non-UTF-8")?)?;
-    let secrets = secret_manifests()?;
-    let context = founder_confirms(environment, "bootstrap Flux on")?;
+    Ok((manifest, sync))
+}
+
+/// Applies a bootstrap to `cluster`: the controllers, waiting for each; the workload secrets; then
+/// `sync.yaml`. Idempotent, so every run re-asserts all three.
+fn apply(
+    cluster: &Cluster<'_>,
+    environment: Environment,
+    manifest: &str,
+    secrets: &[(&str, String)],
+    sync: &str,
+) -> Result<()> {
     kubectl(
-        &context,
+        cluster,
         &["apply", "--server-side", "--force-conflicts", "-f", "-"],
-        Some(&manifest),
+        Some(manifest),
     )?;
     for controller in [
         "source-controller",
@@ -343,7 +421,7 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
         "helm-controller",
     ] {
         kubectl(
-            &context,
+            cluster,
             &[
                 "rollout",
                 "status",
@@ -355,18 +433,82 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
             None,
         )?;
     }
-    write_secrets(&context, &secrets)?;
-    kubectl(
-        &context,
-        &["apply", "--server-side", "-f", "-"],
-        Some(&sync),
-    )?;
+    write_secrets(cluster, secrets)?;
+    kubectl(cluster, &["apply", "--server-side", "-f", "-"], Some(sync))?;
     eprintln!(
         "    gitops: {} bootstrapped; Flux now reconciles deploy/gitops/clusters/{} from main",
         environment.name(),
         environment.name()
     );
     Ok(())
+}
+
+/// `cargo xtask gitops bootstrap <environment>`, the founder's break-glass path: Flux's
+/// controllers, pinned; the workload secrets; and the environment's `sync.yaml`. Everything is read
+/// and checked before the founder confirms, so a refusal applies nothing.
+pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
+    let (manifest, sync) = prepare(root, environment)?;
+    let secrets = WorkloadSecrets::from_env()?.manifests()?;
+    let context = founder_confirms(environment, "bootstrap Flux on")?;
+    let cluster = Cluster {
+        kubeconfig: None,
+        context,
+    };
+    apply(&cluster, environment, &manifest, &secrets, &sync)
+}
+
+/// The bootstrap from CI (DEC-2018 item 7): lane IAC's `cargo xtask infra apply` calls this in
+/// process, between opening and closing the runner's window on the control-plane firewall, with
+/// the short-lived kubeconfig it fetched and the secrets from its sensitive outputs, all in memory.
+/// It refuses unless this is `infra.yml` on `main` in GitHub Actions, and unless the kubeconfig's
+/// current context is `expected_context`; then it applies exactly what the founder's path applies.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "lane IAC's `cargo xtask infra apply` calls it (E21-56 F2)"
+    )
+)]
+pub(crate) fn bootstrap_from_infra(
+    root: &Path,
+    environment: Environment,
+    kubeconfig: &Path,
+    expected_context: &str,
+    secrets: &WorkloadSecrets,
+) -> Result<()> {
+    let var = |name: &str| env::var(name).unwrap_or_default();
+    if let Some(reason) = infra_refusal(
+        &var("GITHUB_ACTIONS"),
+        &var("GITHUB_REF"),
+        &var("GITHUB_WORKFLOW_REF"),
+    ) {
+        bail!("{reason} (DEC-2018)");
+    }
+    let out = Command::new("kubectl")
+        .arg("--kubeconfig")
+        .arg(kubeconfig)
+        .args(["config", "current-context"])
+        .output()
+        .context("starting kubectl")?;
+    ensure!(
+        out.status.success(),
+        "the kubeconfig has no current context"
+    );
+    let context = String::from_utf8(out.stdout)
+        .context("kubectl printed non-UTF-8")?
+        .trim()
+        .to_owned();
+    ensure!(
+        confirmed(&context, expected_context),
+        "the kubeconfig's context {context:?} is not {expected_context:?}; nothing was applied"
+    );
+    let (manifest, sync) = prepare(root, environment)?;
+    let manifests = secrets.manifests()?;
+    let cluster = Cluster {
+        kubeconfig: Some(kubeconfig),
+        context,
+    };
+    apply(&cluster, environment, &manifest, &manifests, &sync)
 }
 
 #[cfg(test)]
@@ -508,6 +650,68 @@ mod tests {
             || Ok(format!("{context}\n")),
         );
         assert!(right.is_ok_and(|c| c == context));
+    }
+
+    /// Only `infra.yml` on `main` in GitHub Actions may bootstrap from CI.
+    #[test]
+    fn only_infra_yml_on_main_may_bootstrap_from_ci() {
+        let infra = "kunwarshivam/mandate/.github/workflows/infra.yml@refs/heads/main";
+        assert!(infra_refusal("true", "refs/heads/main", infra).is_none());
+        assert!(infra_refusal("", "refs/heads/main", infra).is_some());
+        assert!(infra_refusal("true", "refs/heads/go", infra).is_some());
+        assert!(infra_refusal("true", "refs/pull/1/merge", infra).is_some());
+        let other = "kunwarshivam/mandate/.github/workflows/ci.yml@refs/heads/main";
+        assert!(infra_refusal("true", "refs/heads/main", other).is_some());
+        let branch = "kunwarshivam/mandate/.github/workflows/infra.yml@refs/heads/go";
+        assert!(infra_refusal("true", "refs/heads/main", branch).is_some());
+    }
+
+    /// The CI bootstrap refuses outside infra.yml before it reads the kubeconfig or the cluster.
+    #[test]
+    fn the_ci_bootstrap_refuses_before_it_reads_anything() {
+        let secrets = WorkloadSecrets {
+            archive_access_key_id: "id".to_owned(),
+            archive_secret_access_key: "secret".to_owned(),
+            tunnel_token: "token".to_owned(),
+        };
+        let refused = bootstrap_from_infra(
+            Path::new("/nonexistent"),
+            Environment::Staging,
+            Path::new("/nonexistent/kubeconfig"),
+            "do-nyc3-mandate-staging",
+            &secrets,
+        );
+        assert!(refused.is_err_and(|e| e.to_string().contains("DEC-2018")));
+    }
+
+    /// The secrets' `Debug` never shows a value, and each value lands in its chart's key.
+    #[test]
+    fn the_secrets_are_redacted_and_land_in_their_keys() -> Result<()> {
+        let secrets = WorkloadSecrets {
+            archive_access_key_id: "key-id-1".to_owned(),
+            archive_secret_access_key: "secret-2".to_owned(),
+            tunnel_token: "token-3".to_owned(),
+        };
+        let shown = format!("{secrets:?}");
+        for value in ["key-id-1", "secret-2", "token-3"] {
+            assert!(!shown.contains(value), "{shown}");
+        }
+        let manifests = secrets.manifests()?;
+        let data = |name: &str| -> Result<serde_json::Value> {
+            let (_, text) = manifests
+                .iter()
+                .find(|(n, _)| *n == name)
+                .context("missing")?;
+            Ok(serde_json::from_str::<serde_json::Value>(text)?["data"].clone())
+        };
+        let archive = data("journal-archive-key")?;
+        assert_eq!(archive["ACCESS_KEY_ID"], image::base64(b"key-id-1"));
+        assert_eq!(archive["ACCESS_SECRET_KEY"], image::base64(b"secret-2"));
+        assert_eq!(
+            data("cloudflared-tunnel")?["token"],
+            image::base64(b"token-3")
+        );
+        Ok(())
     }
 
     /// No workflow may run the bootstrap: the cluster's API admits only the founder's addresses.

@@ -5,6 +5,15 @@ first, production when you decide. After it, the cluster takes every change from
 Flux, and nobody applies anything to it by hand. Agents never run any step here (DEC-2015 item 5),
 and the command refuses to run in CI or without a terminal.
 
+## The usual path: CI
+
+Each run of lane IAC's `infra.yml` for an environment (dispatched from `main`, under its
+`infra-<environment>` environment, after your approval) bootstraps the cluster after its apply,
+with no step by hand: it opens its own address on the API firewall, fetches a short-lived
+kubeconfig, installs or re-asserts Flux, writes the workload secrets from OpenTofu's outputs, and
+applies `sync.yaml`, then closes the firewall again (DEC-2018 item 7). The rest of this page is the
+break-glass path, from your own machine, for when CI cannot run.
+
 ## Before you start
 
 1. **The cluster.** Lane IAC's OpenTofu (E21-56, `deploy/tofu/`) has made the DOKS cluster with two
@@ -22,20 +31,21 @@ and the command refuses to run in CI or without a terminal.
    package settings. This costs nothing, as DEC-971 item 5 notes for the images:
    - `mandate/charts/mandate-backup-plugin-tls`
    - `mandate/charts/mandate-journal-db`
+   - `mandate/charts/mandate-vault-server`
    - `mandate/charts/mandate-workspace`
    - the image packages
 
    Flux and the cluster read them anonymously.
 4. **The secrets, in your shell only**, never from a file in the repository:
    - `JOURNAL_ARCHIVE_ACCESS_KEY_ID` and `JOURNAL_ARCHIVE_SECRET_KEY`: Barman's bucket-scoped R2
-     API token, which you make by hand after the first apply, as `deploy/tofu/README.md` §2 item 3
-     says (#1652). It is not in OpenTofu's state. Paste its access key id and secret.
+     token, which OpenTofu mints; its sensitive outputs give the access key id and the secret
+     (IAC's `deploy/tofu/README.md` names them).
    - `CLOUDFLARED_TUNNEL_TOKEN`: the tunnel's token, the sensitive OpenTofu output `tunnel_token` of
      `deploy/tofu/environments/staging`.
 
    ```sh
-   read -rs JOURNAL_ARCHIVE_ACCESS_KEY_ID && export JOURNAL_ARCHIVE_ACCESS_KEY_ID
-   read -rs JOURNAL_ARCHIVE_SECRET_KEY && export JOURNAL_ARCHIVE_SECRET_KEY
+   export JOURNAL_ARCHIVE_ACCESS_KEY_ID="$(tofu -chdir=deploy/tofu/environments/staging output -raw <archive key id output>)"
+   export JOURNAL_ARCHIVE_SECRET_KEY="$(tofu -chdir=deploy/tofu/environments/staging output -raw <archive secret output>)"
    export CLOUDFLARED_TUNNEL_TOKEN="$(tofu -chdir=deploy/tofu/environments/staging output -raw tunnel_token)"
    ```
 
