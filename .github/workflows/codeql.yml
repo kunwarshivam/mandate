@@ -11,27 +11,24 @@
 #
 name: "CodeQL Advanced"
 
+# DEC-2606. A pull request's runs share one group, so a new push cancels the analysis of the head
+# it replaced; a push to `main` and the weekly schedule each have a group of their own and are
+# never cancelled.
+concurrency:
+  group: codeql-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: '42 2 * * 1'
-
-# DEC-2606. A draft analyses nothing, as `ci` runs nothing on one (DEC-610): the analysis runs when
-# the pull request is marked ready (`ready_for_review`) and on every later push. A pull request's
-# runs share one group, so a new push cancels the analysis of the head it replaced; a push to
-# `main` and the weekly schedule each have a group of their own and are never cancelled.
-concurrency:
-  group: codeql-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    if: ${{ !github.event.pull_request.draft }}
     # Runner size impacts CodeQL analysis time. To learn more, please see:
     #   - https://gh.io/recommended-hardware-resources-for-running-codeql
     #   - https://gh.io/supported-runners-and-hardware-resources
