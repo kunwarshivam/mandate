@@ -14,6 +14,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 mod cell;
+mod gitops;
 mod image;
 mod mutant_costs;
 mod release;
@@ -69,6 +70,11 @@ commands:
   release publish-charts <out>
                         package the hosted clusters' charts, push them to GHCR and sign each
                         digest keyless (main only, from CI; E21-58)
+  gitops bootstrap <staging|production>
+                        install Flux, pinned, write the workload secrets and apply the cluster's
+                        sync.yaml (the founder's terminal only; deploy/gitops/BOOTSTRAP.md, E21-58)
+  gitops secrets <staging|production>
+                        write the workload secrets alone (the founder's terminal only)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
   cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
@@ -288,6 +294,12 @@ fn run() -> Result<()> {
         }
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
         ["release", "publish-charts", out] => release::publish_charts(&root, Path::new(out)),
+        ["gitops", "bootstrap", environment] => {
+            gitops::bootstrap(&root, gitops::Environment::parse(environment)?)
+        }
+        ["gitops", "secrets", environment] => {
+            gitops::secrets(gitops::Environment::parse(environment)?)
+        }
         ["cell", "up"] => cell::up(),
         ["cell", "down"] => cell::down(),
         ["cell", "hosted"] => cell::hosted(),
