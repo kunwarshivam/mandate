@@ -1576,8 +1576,8 @@ fn verification_run_has_no_version_3() {
 /// §9.13's `VerificationRun`, the one record of these five with a version 2 (journal spec v0.36).
 const VERIFICATION: &str = "VerificationRun";
 
-/// Each of `event_types` is refused `schema` at an unlisted member on the control stream and
-/// `wrong_stream` on every other, and, but for `VerificationRun`, has no schema at version 2.
+/// §9.27's records are closed on the account stream at schema version 1: an unlisted member is
+/// refused `schema` there and `wrong_stream` on every other stream, and version 2 has no schema.
 #[test]
 #[ignore = "pending E6-15"]
 fn the_risk_limit_records_are_closed_on_the_account_stream() {
@@ -1604,6 +1604,8 @@ fn the_risk_limit_records_are_closed_on_the_account_stream() {
     }
 }
 
+/// Each of `event_types` is refused `schema` at an unlisted member on the control stream and
+/// `wrong_stream` on every other, and, but for `VerificationRun`, has no schema at version 2.
 fn closed_on_the_control_stream(event_types: &[&str]) {
     for event_type in event_types {
         for kind in [ACCT, AGENT, CTL, CLOCK] {
