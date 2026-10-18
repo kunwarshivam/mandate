@@ -17,8 +17,14 @@ variable "kube_api_allowed_addresses" {
   type        = list(string)
 }
 
+variable "cloudflare_api_token" {
+  description = "CF_INFRA_API_TOKEN: the Cloudflare token scoped to what this plan needs."
+  type        = string
+  sensitive   = true
+}
+
 variable "cloudflare_account_id" {
-  description = "CLOUDFLARE_ACCOUNT_ID."
+  description = "CF_ACCOUNT_ID."
   type        = string
 }
 

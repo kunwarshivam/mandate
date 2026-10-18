@@ -20,6 +20,7 @@ mod leak;
 mod mail;
 mod mutant_costs;
 mod release;
+mod tofu_audit;
 
 const USAGE: &str = "\
 usage: cargo xtask <command>
@@ -43,6 +44,9 @@ commands:
   ci mutants --plan     print the mutation matrix this diff needs, as GITHUB_OUTPUT lines
   ci schema-mutants K/N run shard K of N of the schema mutation sweep, after its baseline (CI
                         passes it as MANDATE_SCHEMA_SHARD)
+  infra                 plan, or plan and apply, one hosted environment's OpenTofu (E21-56):
+                        MANDATE_INFRA_ENVIRONMENT=staging|production and
+                        MANDATE_INFRA_ACTION=plan|apply; runs only in infra.yml's job on main
   layers                check crate layering and safety-critical policy (xtask/layers.toml)
   markers               check for debt markers and #[ignore] without a pending story
   feature-map [--index] check the verification skill's feature map against the workspace, or
@@ -91,6 +95,9 @@ commands:
   cell demo --scenario demo
                         the demo's six steps in order on the local cell: each gesture on main run
                         in the cell, each missing link named by its PR or story (E21-54)
+  cell web-kill-switch <workspace> [agent]
+                        step 6 from web/ against a running cell with sign-in ready: next dev, then
+                        Playwright presses one listed agent's kill switch (DEC-2406)
   cell down             delete the local cell
   cell hosted           cell #1's bring-up (deploy/hosted/) against a two-node k3d cluster of
                         its own, the tunnel off
@@ -310,6 +317,7 @@ fn run() -> Result<()> {
             release::publish(&root, Path::new(dist), Path::new(out))
         }
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
+        ["infra"] => infra(),
         ["release", "publish-charts", out] => release::publish_charts(&root, Path::new(out)),
         ["gitops", "bootstrap", environment] => {
             gitops::bootstrap(&root, gitops::Environment::parse(environment)?)
@@ -323,6 +331,12 @@ fn run() -> Result<()> {
         ["cell", "demo"] => cell::demo(true),
         ["cell", "demo", "--no-web"] => cell::demo(false),
         ["cell", "demo", "--scenario", name] => cell::scenario::run(name),
+        ["cell", "web-kill-switch", workspace] => {
+            cell::web::report(cell::web::kill_switch_from_web(workspace, None))
+        }
+        ["cell", "web-kill-switch", workspace, agent] => {
+            cell::web::report(cell::web::kill_switch_from_web(workspace, Some(agent)))
+        }
         ["cell", "generate"] => cell::generate(false),
         ["cell", "generate", "--write"] => cell::generate(true),
         ["cell", "drill", rest @ ..] => {
@@ -965,6 +979,325 @@ fn tofu_roots(tofu_dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(roots)
 }
 
+/// The workflow that alone plans and applies the hosted environments (E21-56, DEC-2014).
+const INFRA_WORKFLOW: &str = ".github/workflows/infra.yml";
+/// The one command `infra.yml`'s secret-holding step runs.
+const INFRA_RUN: &str = "cargo xtask infra";
+/// The secrets that step reads, each from the environment `infra-<environment>` the founder
+/// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Cloudflare token
+/// and account go to OpenTofu as variables under `CF_` names, since `web/scripts/workers.mjs`
+/// keeps every `CLOUDFLARE_` name to `web-deploy.yml`'s deploy step (DEC-1005 item 2).
+const INFRA_SECRETS: [&str; 5] = [
+    "DIGITAL_OCEAN_API_KEY",
+    "SPACES_ACCESS_KEY_ID",
+    "SPACES_SECRET_ACCESS_KEY",
+    "CF_INFRA_API_TOKEN",
+    "TOFU_STATE_PASSPHRASE",
+];
+/// The environment variables `infra.yml` hands `cargo xtask infra`: which environment and
+/// whether to apply, from the dispatch's choice inputs.
+const INFRA_ENVIRONMENT_ENV: &str = "MANDATE_INFRA_ENVIRONMENT";
+const INFRA_ACTION_ENV: &str = "MANDATE_INFRA_ACTION";
+
+/// The `tofu` commands, in order, that `action` runs for `environment` (E21-56, DEC-2014), each
+/// with its arguments, in the environment's root: init against the remote state and the committed
+/// lock file, a plan saved to `plan_file` (encrypted, DEC-2012 item 3), and for `apply` that
+/// same saved plan applied, so what is applied is exactly what the log showed.
+fn infra_commands(environment: &str, action: &str, plan_file: &str) -> Result<Vec<Vec<String>>> {
+    if !matches!(environment, "staging" | "production") {
+        bail!("{INFRA_ENVIRONMENT_ENV} must be staging or production, not `{environment}`");
+    }
+    if !matches!(action, "plan" | "apply") {
+        bail!("{INFRA_ACTION_ENV} must be plan or apply, not `{action}`");
+    }
+    let chdir = format!("-chdir={TOFU_DIR}environments/{environment}");
+    let mut commands = vec![
+        vec![
+            chdir.clone(),
+            "init".to_owned(),
+            "-input=false".to_owned(),
+            "-no-color".to_owned(),
+            "-lockfile=readonly".to_owned(),
+        ],
+        vec![
+            chdir.clone(),
+            "plan".to_owned(),
+            "-input=false".to_owned(),
+            "-no-color".to_owned(),
+            "-compact-warnings".to_owned(),
+            format!("-out={plan_file}"),
+        ],
+    ];
+    if action == "apply" {
+        commands.push(vec![
+            chdir,
+            "apply".to_owned(),
+            "-input=false".to_owned(),
+            "-no-color".to_owned(),
+            "-compact-warnings".to_owned(),
+            plan_file.to_owned(),
+        ]);
+    }
+    Ok(commands)
+}
+
+/// `cargo xtask infra` (E21-56, DEC-2014): plans, or plans and applies, one hosted environment.
+/// It refuses to run anywhere but a GitHub Actions run on `main`, so the only place it reaches a
+/// cloud account is `infra.yml`'s job, which the founder approves; agents never run it (AGENTS.md
+/// rule 8). The providers and the backend read their credentials from that job's environment.
+/// The public log gets no `tofu` output (DEC-2014 item 4): each command's output is captured,
+/// only a failure's diagnostics, which OpenTofu redacts for every sensitive value, are printed,
+/// and after `plan` the saved plan's addresses and actions alone.
+fn infra() -> Result<()> {
+    let actions = env::var("GITHUB_ACTIONS").unwrap_or_default();
+    let reference = env::var("GITHUB_REF").unwrap_or_default();
+    if actions != "true" || reference != "refs/heads/main" {
+        bail!(
+            "infra runs only in {INFRA_WORKFLOW}'s job on main (GITHUB_ACTIONS=true, \
+             GITHUB_REF=refs/heads/main), never by hand (E21-56, DEC-2014)"
+        );
+    }
+    let environment = env::var(INFRA_ENVIRONMENT_ENV).unwrap_or_default();
+    let action = env::var(INFRA_ACTION_ENV).unwrap_or_default();
+    let work = repo_root()?.join("target").join("tofu");
+    fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
+    let plan_file = work.join(format!("{environment}.tfplan"));
+    let tofu = |args: &[String]| {
+        let mut command = Command::new("tofu");
+        command.args(args).env("TF_IN_AUTOMATION", "1");
+        command
+    };
+    for args in infra_commands(&environment, &action, &plan_file.to_string_lossy())? {
+        eprintln!("    $ tofu {}", args.join(" "));
+        let out = tofu(&args).output().context("starting `tofu`")?;
+        if !out.status.success() {
+            eprintln!("{}", String::from_utf8_lossy(&out.stderr).trim());
+            bail!("`tofu {}` failed with {}", args.join(" "), out.status);
+        }
+        match args.get(1).map(String::as_str) {
+            Some("plan") => {
+                let shown = tofu(&[
+                    args.first().cloned().unwrap_or_default(),
+                    "show".to_owned(),
+                    "-json".to_owned(),
+                    plan_file.to_string_lossy().into_owned(),
+                ])
+                .output()
+                .context("starting `tofu`")?;
+                if !shown.status.success() {
+                    bail!("`tofu show -json` of the saved plan failed");
+                }
+                let plan: serde_json::Value = serde_json::from_slice(&shown.stdout)
+                    .context("the saved plan's JSON could not be read")?;
+                eprintln!("    the plan, by address (values stay out of the log):");
+                for line in tofu_audit::plan_summary(&plan) {
+                    eprintln!("      {line}");
+                }
+            }
+            Some("apply") => eprintln!("    applied exactly the plan above"),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// [`infra_workflow_problems`] over the repository at `root`'s workflows, failing on any.
+fn infra_workflow_in(root: &Path) -> Result<()> {
+    eprintln!("    infra-workflow: checking {INFRA_WORKFLOW}'s shape and who names its secrets");
+    let dir = root.join(".github/workflows");
+    let mut files = Vec::new();
+    if dir.is_dir() {
+        for path in files_by_extension(&dir, &["yml", "yaml"])? {
+            let text =
+                fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned();
+            files.push(CiFile {
+                path: relative,
+                text,
+            });
+        }
+    }
+    let problems = infra_workflow_problems(&files);
+    if !problems.is_empty() {
+        bail!("infra-workflow:\n  {}", problems.join("\n  "));
+    }
+    Ok(())
+}
+
+/// Every way the workflows break DEC-2014's shape for plan and apply: `infra.yml` must run on
+/// `workflow_dispatch` alone; grant nothing at the top; hold one job, `tofu`, which runs only on
+/// `refs/heads/main`, under `environment: infra-${{ inputs.environment }}`, reading contents only,
+/// with a checkout that keeps no credential; offer exactly `staging` and `production`; and read a
+/// secret only in the one step that runs [`INFRA_RUN`], and only [`INFRA_SECRETS`]. No other
+/// workflow may read any of [`INFRA_SECRETS`] or name `infra-staging` or `infra-production`.
+fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
+    let secret_names = |text: &str| {
+        text.match_indices("secrets.")
+            .map(|(at, _)| {
+                text.get(at.saturating_add("secrets.".len())..)
+                    .unwrap_or_default()
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut problems = Vec::new();
+    for file in files.iter().filter(|file| file.path != INFRA_WORKFLOW) {
+        for (number, line) in (1_usize..).zip(file.text.lines()) {
+            let code = uncommented(line);
+            if secret_names(code)
+                .iter()
+                .any(|name| INFRA_SECRETS.contains(&name.as_str()))
+                || code.contains("infra-staging")
+                || code.contains("infra-production")
+            {
+                problems.push(format!(
+                    "{}:{number}: reads an infrastructure secret or names its environment, \
+                     which only {INFRA_WORKFLOW} may (DEC-2014)",
+                    file.path
+                ));
+            }
+        }
+    }
+    let Some(infra) = files.iter().find(|file| file.path == INFRA_WORKFLOW) else {
+        return problems;
+    };
+    let lines: Vec<&str> = infra.text.lines().map(uncommented).collect();
+    let has = |wanted: &str| lines.iter().any(|line| line.trim_end() == wanted);
+    let mut fail = |why: &str| problems.push(format!("{INFRA_WORKFLOW}: {why} (DEC-2014)"));
+    let top: Vec<&str> = lines
+        .iter()
+        .filter(|line| line.starts_with(|c: char| c.is_ascii_alphabetic()))
+        .map(|line| line.split(':').next().unwrap_or_default().trim())
+        .collect();
+    if top != ["name", "on", "permissions", "concurrency", "jobs"] {
+        fail("its top-level keys must be exactly name, on, permissions, concurrency and jobs");
+    }
+    let on: Vec<&str> = lines
+        .iter()
+        .skip_while(|line| line.trim_end() != "on:")
+        .skip(1)
+        .take_while(|line| !line.starts_with(|c: char| c.is_ascii_alphabetic()))
+        .filter(|line| line.starts_with("  ") && !line.starts_with("   "))
+        .map(|line| line.trim().trim_end_matches(':'))
+        .collect();
+    if on != ["workflow_dispatch"] {
+        fail("it must run on workflow_dispatch alone, never on a push or a pull request");
+    }
+    if !has("permissions: {}") {
+        fail("it must grant nothing at the top (`permissions: {}`)");
+    }
+    for wanted in [
+        "        options: [staging, production]",
+        "        options: [plan, apply]",
+    ] {
+        if !has(wanted) {
+            fail(&format!(
+                "its dispatch inputs must offer exactly `{}`",
+                wanted.trim()
+            ));
+        }
+    }
+    let jobs: Vec<&str> = lines
+        .iter()
+        .skip_while(|line| line.trim_end() != "jobs:")
+        .skip(1)
+        .filter(|line| line.starts_with("  ") && !line.starts_with("   ") && line.ends_with(':'))
+        .copied()
+        .collect();
+    if jobs != ["  tofu:"] {
+        fail("it must hold one job, `tofu`");
+    }
+    for (wanted, why) in [
+        (
+            "    if: github.ref == 'refs/heads/main'",
+            "the job must run only on refs/heads/main",
+        ),
+        (
+            "    environment: infra-${{ inputs.environment }}",
+            "the job must run under the environment infra-<environment>, which the founder approves",
+        ),
+        ("    permissions:", "the job must read contents only"),
+        ("      contents: read", "the job must read contents only"),
+        (
+            "          persist-credentials: false",
+            "the checkout must keep no credential",
+        ),
+    ] {
+        if !has(wanted) {
+            fail(why);
+        }
+    }
+    let steps: Vec<Vec<usize>> = {
+        let mut steps: Vec<Vec<usize>> = Vec::new();
+        let mut in_steps = false;
+        for (index, line) in lines.iter().enumerate() {
+            if line.trim_end() == "    steps:" {
+                in_steps = true;
+            } else if in_steps && line.starts_with("      - ") {
+                steps.push(vec![index]);
+            } else if in_steps && !line.trim().is_empty() && !line.starts_with("       ") {
+                in_steps = false;
+            } else if let Some(step) = steps.last_mut().filter(|_| in_steps) {
+                step.push(index);
+            }
+        }
+        steps
+    };
+    let text_of = |step: &[usize]| {
+        step.iter()
+            .filter_map(|index| lines.get(*index).copied())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let run_of = |step: &[usize]| {
+        step.iter().find_map(|index| {
+            lines
+                .get(*index)?
+                .trim()
+                .trim_start_matches("- ")
+                .strip_prefix("run: ")
+                .map(str::trim)
+        })
+    };
+    let running: Vec<usize> = (0..steps.len())
+        .filter(|at| steps.get(*at).and_then(|step| run_of(step)) == Some(INFRA_RUN))
+        .collect();
+    if running.len() != 1 || running.first().copied() != steps.len().checked_sub(1) {
+        fail(&format!(
+            "its job must end with the one step that runs `{INFRA_RUN}`"
+        ));
+    }
+    let in_a_step: BTreeSet<usize> = steps.iter().flatten().copied().collect();
+    if lines
+        .iter()
+        .enumerate()
+        .any(|(index, line)| !in_a_step.contains(&index) && !secret_names(line).is_empty())
+    {
+        fail("only a step may read a secret, never the workflow or the job");
+    }
+    for (at, step) in steps.iter().enumerate() {
+        let allowed = running == [at];
+        if secret_names(&text_of(step))
+            .iter()
+            .any(|name| !allowed || !INFRA_SECRETS.contains(&name.as_str()))
+        {
+            fail(&format!(
+                "only the step that runs `{INFRA_RUN}` may read a secret, and only {}",
+                INFRA_SECRETS.join(", ")
+            ));
+        }
+    }
+    problems.sort();
+    problems.dedup();
+    problems
+}
+
 /// The packages whose tests need the S3 test store (E21-40): `cargo xtask ci objectstore` runs
 /// those of them the selection holds.
 const S3_TESTED: [&str; 1] = ["mandate-objectstore"];
@@ -1573,6 +1906,7 @@ fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()
     shellcheck_scripts(&root.join("scripts"))?;
     actionlint_workflows(&root.join(".github/workflows"))?;
     live_feature_in(root)?;
+    infra_workflow_in(root)?;
     mail::guard_in(root)?;
     leak::guard_in(root)?;
     workspace_checks()
@@ -4045,7 +4379,19 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_S3_REQUIRED",
     "MANDATE_S3_SECRET_ACCESS_KEY",
     "MANDATE_S3_URL",
+    "MANDATE_INFRA_ACTION",
+    "MANDATE_INFRA_ENVIRONMENT",
     "MANDATE_TOFU_REQUIRED",
+    "DIGITALOCEAN_TOKEN",
+    "SPACES_ACCESS_KEY_ID",
+    "SPACES_SECRET_ACCESS_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "TF_VAR_state_passphrase",
+    "TF_VAR_kube_api_allowed_addresses",
+    "TF_VAR_cloudflare_account_id",
+    "TF_VAR_cloudflare_api_token",
+    "TF_VAR_access_allowed_emails",
     "MANDATE_SCHEMA_SHARD",
     "MANDATE_SWEEP_CLOCK",
     "MANDATE_TEST_PARTITION",
@@ -9839,7 +10185,7 @@ mod tests {
 
     use super::{
         BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir, CARGO_TARGET_DIR, CiFile, CratePolicy,
-        Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, Layers, MUTANT_BUILD_PROFILE,
+        Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, INFRA_WORKFLOW, Layers, MUTANT_BUILD_PROFILE,
         MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT,
         Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS, Package, PendingTest,
         PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_LIVE_JOB, REHEARSAL_TESTED, SCHEMA_CHECKERS,
@@ -9862,9 +10208,9 @@ mod tests {
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
-        SWEEP_SHARD_MUTANTS, SweepPlan, Token, crate_graph, is_docs_path, literal_paths,
-        nextest_args, normalized_join, references_path, select, selection_in, source_references,
-        tokens,
+        SWEEP_SHARD_MUTANTS, SweepPlan, Token, crate_graph, infra_commands,
+        infra_workflow_problems, is_docs_path, literal_paths, nextest_args, normalized_join,
+        references_path, select, selection_in, source_references, tokens,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -15098,6 +15444,172 @@ mod tests {
 
     fn crate_set(names: &[&str]) -> BTreeSet<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    /// E21-56 (DEC-2014): `plan` inits and saves a plan; `apply` applies that same saved plan,
+    /// never a fresh one; any other environment or action is refused before a command runs.
+    #[test]
+    fn infra_applies_only_the_plan_it_showed() -> Result<()> {
+        let plan = infra_commands("staging", "plan", "/t/staging.tfplan")?;
+        assert_eq!(plan.len(), 2, "plan inits and plans: {plan:?}");
+        assert_eq!(
+            plan.first().map(|c| c.join(" ")),
+            Some(
+                "-chdir=deploy/tofu/environments/staging init -input=false -no-color \
+                 -lockfile=readonly"
+                    .to_owned()
+            )
+        );
+        assert!(
+            plan.get(1)
+                .is_some_and(|c| c.contains(&"-out=/t/staging.tfplan".to_owned())),
+            "the plan is saved: {plan:?}"
+        );
+        let apply = infra_commands("production", "apply", "/t/production.tfplan")?;
+        assert_eq!(
+            apply.last().map(|c| c.join(" ")),
+            Some(
+                "-chdir=deploy/tofu/environments/production apply -input=false -no-color \
+                 -compact-warnings /t/production.tfplan"
+                    .to_owned()
+            ),
+            "apply applies the saved plan: {apply:?}"
+        );
+        assert!(
+            !apply.iter().flatten().any(|word| word == "-auto-approve"),
+            "nothing applies a plan it did not save"
+        );
+        for (environment, action) in [
+            ("dev", "plan"),
+            ("staging", "destroy"),
+            ("", "plan"),
+            ("staging", ""),
+            ("../staging", "plan"),
+        ] {
+            assert!(
+                infra_commands(environment, action, "/t/p").is_err(),
+                "{environment:?} {action:?} is refused"
+            );
+        }
+        Ok(())
+    }
+
+    /// E21-56 (DEC-2014): the committed `infra.yml` passes its guard, and each way of loosening
+    /// it is named: another trigger, a job off `main`, another environment, a checkout that keeps
+    /// its credential, a second job, another input option, a secret in another step or at the job,
+    /// a secret not on the list, a step after the secret-holding one, and another workflow reading
+    /// an infrastructure secret or naming its environment.
+    #[test]
+    fn the_infra_workflow_keeps_its_shape() -> Result<()> {
+        let text = fs::read_to_string(repo_root()?.join(INFRA_WORKFLOW))?;
+        let web = ci_file(
+            ".github/workflows/web-deploy.yml",
+            "jobs:\n  deploy:\n    steps:\n      - run: npx wrangler deploy\n        env:\n          \
+             CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n",
+        );
+        let check = |infra: &str, others: &[CiFile]| {
+            let mut files = vec![ci_file(INFRA_WORKFLOW, infra)];
+            files.extend(others.iter().map(|f| ci_file(&f.path, &f.text)));
+            infra_workflow_problems(&files)
+        };
+        assert_eq!(
+            check(&text, std::slice::from_ref(&web)),
+            Vec::<String>::new(),
+            "the committed infra.yml, beside web-deploy's own Cloudflare token, passes"
+        );
+        let edited = |from: &str, to: &str| {
+            assert!(text.contains(from), "the fixture still holds {from:?}");
+            text.replacen(from, to, 1)
+        };
+        let secret_step = "      - run: cargo xtask infra\n";
+        let cases = [
+            (
+                "push",
+                edited(
+                    "on:\n  workflow_dispatch:\n",
+                    "on:\n  push:\n  workflow_dispatch:\n",
+                ),
+            ),
+            (
+                "off main",
+                edited("    if: github.ref == 'refs/heads/main'\n", ""),
+            ),
+            (
+                "other environment",
+                edited(
+                    "    environment: infra-${{ inputs.environment }}\n",
+                    "    environment: production\n",
+                ),
+            ),
+            (
+                "kept credential",
+                edited(
+                    "          persist-credentials: false\n",
+                    "          persist-credentials: true\n",
+                ),
+            ),
+            (
+                "second job",
+                format!("{text}  other:\n    runs-on: ubuntu-24.04\n"),
+            ),
+            (
+                "another option",
+                edited(
+                    "options: [staging, production]",
+                    "options: [staging, production, dev]",
+                ),
+            ),
+            (
+                "secret in the build step",
+                edited(
+                    "      - run: cargo build --locked --package xtask\n",
+                    "      - run: cargo build --locked --package xtask\n        env:\n          \
+                     T: ${{ secrets.DIGITAL_OCEAN_API_KEY }}\n",
+                ),
+            ),
+            (
+                "secret at the job",
+                edited(
+                    "    env:\n      TOFU_VERSION",
+                    "    env:\n      T: ${{ secrets.DIGITAL_OCEAN_API_KEY }}\n      TOFU_VERSION",
+                ),
+            ),
+            (
+                "unlisted secret",
+                edited(
+                    "          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_API_KEY }}\n",
+                    "          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_ADMIN_TOKEN }}\n",
+                ),
+            ),
+            (
+                "step after",
+                format!("{text}      - run: cargo xtask markers\n"),
+            ),
+            (
+                "secret step twice",
+                edited(
+                    "      - run: cargo build --locked --package xtask\n",
+                    secret_step,
+                ),
+            ),
+        ];
+        for (name, infra) in &cases {
+            let problems = check(infra, &[]);
+            assert!(!problems.is_empty(), "{name} is refused");
+            assert!(
+                problems.iter().all(|p| p.contains("(DEC-2014)")),
+                "{name}: {problems:?}"
+            );
+        }
+        for other in [
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ secrets.TOFU_STATE_PASSPHRASE }}\n",
+            "jobs:\n  x:\n    environment: infra-staging\n",
+        ] {
+            let problems = check(&text, &[ci_file(".github/workflows/ci.yml", other)]);
+            assert_eq!(problems.len(), 1, "{other}: {problems:?}");
+            assert!(problems[0].starts_with(".github/workflows/ci.yml:"));
+        }
+        Ok(())
     }
 
     /// E21-56 (DEC-2013): `full-checks`' `tofu` part runs for a change under `deploy/tofu/` that
