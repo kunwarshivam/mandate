@@ -7,16 +7,18 @@ mod support;
 
 use mandate_canon::Value;
 use mandate_executor::BrokerRequest;
+use mandate_executord::Alert;
 use mandate_process::State;
 use support::{
     ACCOUNT_STREAM, AGENT, Error, Journal, NOON, OTHER_AGENT, Paper, agent_stream, at, deploy,
-    deployed, kill, object, propose, start,
+    deployed, kill, object, owner_exit, propose, propose_owner_market_exit, start,
 };
 
 const OPEN: &str = "01JINTENT0000000000000000A";
 const OTHER_EXIT: &str = "01JINTENT0000000000000000B";
 const EXIT: &str = "01JINTENT0000000000000000C";
 const SWITCH: &str = "01JKILL00000000000000000AA";
+const OWNER: &str = "01JOWNER0000000000000000AA";
 
 fn exit(journal: &Journal, agent: &str, id: &str) -> Result<(), Error> {
     propose(journal, agent, id, "sell", "10", "150", "risk_exit")
@@ -190,31 +192,52 @@ fn an_unreadable_proposal_stops_the_process() -> Result<(), Error> {
     Ok(())
 }
 
-/// An owner's exit at the market is not handed by this slice, since the core takes only limit
-/// orders from a handoff (DEC-2033 item 4); it is neither received nor sent, and it stops nothing.
+/// An owner's exit at the market goes as a limit at the floor the owner confirmed in the
+/// `OwnerExitRequested` it follows from: the worst price they accepted (DEC-2033 item 4).
 #[test]
-fn an_owner_exit_at_the_market_is_not_handed() -> Result<(), Error> {
+fn an_owner_exit_at_the_market_goes_as_a_limit_at_its_confirmed_floor() -> Result<(), Error> {
     let journal = deployed()?;
-    journal.write(
-        &agent_stream(AGENT),
-        EXIT,
-        "IntentProposed",
-        1,
-        Some("decision"),
-        object(vec![
-            ("instrument_id", Value::Str("AAPL".to_owned())),
-            ("purpose", Value::Str("owner_exit".to_owned())),
-            ("qty", Value::Str("10".to_owned())),
-            ("side", Value::Str("sell".to_owned())),
-            ("tif", Value::Str("day".to_owned())),
-            ("type", Value::Str("market".to_owned())),
-        ])?,
-    )?;
+    owner_exit(&journal, AGENT, OWNER, Some("142.5"))?;
+    propose_owner_market_exit(&journal, AGENT, EXIT, OWNER)?;
     let broker = Paper::new(&journal);
     held(&broker)?;
     let mut process = start(&journal, &broker)?;
     process.step(at(NOON)?);
-    assert!(journal.received().is_empty());
+    assert_eq!(journal.received(), [EXIT]);
+    let limits: Vec<_> = journal
+        .payloads("IntentReceived")
+        .iter()
+        .filter_map(|payload| payload.get("limit_price").cloned())
+        .collect();
+    assert_eq!(limits, [Value::Str("142.5".to_owned())]);
+    Ok(())
+}
+
+/// An owner's exit at the market with no confirmed floor is neither refused nor handed: it raises
+/// one opaque alert naming the intent, stops nothing, and the exit behind it still goes (DEC-2033
+/// item 4, `AGENTS.md` rule 13).
+#[test]
+fn an_owner_exit_at_the_market_without_a_floor_alerts_and_stops_nothing() -> Result<(), Error> {
+    let journal = deployed()?;
+    owner_exit(&journal, AGENT, OWNER, None)?;
+    propose_owner_market_exit(&journal, AGENT, OTHER_EXIT, OWNER)?;
+    exit(&journal, AGENT, EXIT)?;
+    let broker = Paper::new(&journal);
+    held(&broker)?;
+    let mut process = start(&journal, &broker)?;
+    let first = process.step(at(NOON)?);
+    let second = process.step(at(NOON)?);
     assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
+    assert_eq!(journal.received(), [EXIT]);
+    assert!(journal.payloads("GateDecided").len() <= 1);
+    let unpriced = |alerts: &[Alert]| {
+        alerts
+            .iter()
+            .filter(|alert| {
+                alert.key == "owner_exit_unpriced" && alert.subject.as_deref() == Some(OTHER_EXIT)
+            })
+            .count()
+    };
+    assert_eq!((unpriced(&first), unpriced(&second)), (1, 0));
     Ok(())
 }

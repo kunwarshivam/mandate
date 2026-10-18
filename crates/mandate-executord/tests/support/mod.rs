@@ -816,3 +816,58 @@ pub fn propose(
         ])?,
     )
 }
+
+/// The runtime's copy of the owner's exit of the AAPL position (journal spec §9.1): with the bid,
+/// bid size and floor the owner confirmed, or none confirmed.
+pub fn owner_exit(
+    journal: &Journal,
+    agent: &str,
+    id: &str,
+    floor: Option<&str>,
+) -> Result<(), Error> {
+    let confirmed = |value: &str| floor.map_or(Value::Null, |_| text(value));
+    journal.write(
+        &agent_stream(agent),
+        id,
+        "OwnerExitRequested",
+        1,
+        Some("command"),
+        object(vec![
+            ("bid", confirmed("150")),
+            ("bid_size", confirmed("100")),
+            ("confirmed", Value::Bool(floor.is_some())),
+            ("floor", floor.map_or(Value::Null, text)),
+            ("scope", text("instrument")),
+            ("step_up", Value::Null),
+            ("step_up_status", text("absent")),
+            ("subject", text(AAPL)),
+            ("user", text("u1")),
+        ])?,
+    )
+}
+
+/// The runtime's `IntentProposed` of the owner's exit of 10 AAPL at the market, following from
+/// `cause`.
+pub fn propose_owner_market_exit(
+    journal: &Journal,
+    agent: &str,
+    id: &str,
+    cause: &str,
+) -> Result<(), Error> {
+    journal.write(
+        &agent_stream(agent),
+        id,
+        "IntentProposed",
+        1,
+        Some(cause),
+        object(vec![
+            ("instrument_id", text(AAPL)),
+            ("limit_price", Value::Null),
+            ("purpose", text("owner_exit")),
+            ("qty", text("10")),
+            ("side", text("sell")),
+            ("tif", text("day")),
+            ("type", text("market")),
+        ])?,
+    )
+}
