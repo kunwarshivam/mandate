@@ -4,14 +4,15 @@ import { stepUpLine } from "./commands";
 import { type AgentModeLine, RECORD_TITLE, type RecordList, type StopRecord } from "./record";
 
 /**
- * The kill switch's record screens (D10) over the workspace API (DEC-1096, DEC-2408): built from what the API
- * serves, the agents and their modes, never from the fixture-shaped workspace, which is empty there.
- * The API serves no open orders, and its positions are the account's, not one agent's, so those lists
- * say "not reported" and never "none": a list that read empty would claim the switch cancels and
- * sells nothing. The switch itself never waits on a read (rule 13), so a screen with lists not
- * reported can still be confirmed. "Close everything" sends the same account kill switch as "Stop all
- * agents" from here (DEC-1007), so its text says that, not the broker's close-all. Release (D11) needs the positions it hands over, so over the API
- * it has no record, and the Stop sheet does not offer it.
+ * The kill switch's record screens (D10) over the workspace API (DEC-1096, DEC-2408): built from
+ * what the API serves, the agents and their modes, never from the fixture-shaped workspace, which
+ * is empty there. The API serves no open orders, and its positions are the account's, not one
+ * agent's, so those lists say "not reported" and never "none": a list that read empty would claim
+ * the switch cancels and sells nothing. The switch itself never waits on a read (rule 13), so a
+ * screen with lists not reported can still be confirmed. "Close everything" sends the same account
+ * kill switch as "Stop all agents" from here (DEC-1007), so its text says that, not the broker's
+ * close-all. Release (D11) needs the positions it hands over, so over the API it has no record, and
+ * the Stop sheet does not offer it.
  */
 const ORDERS_NOT_REPORTED = "Not reported: the deployment does not serve open orders yet. The kill switch cancels them whatever this list shows.";
 const POSITIONS_NOT_REPORTED = "Not reported for one agent: the deployment serves the account's holdings, not each agent's. The kill switch sells only this agent's.";

@@ -103,6 +103,14 @@ describe("the Stop sheet and D10 over the API (rule 13)", () => {
     expect(posts.find((p) => p.path.endsWith("/kill-switch"))?.body).toMatchObject({ scope: { kind: "agent", id: "agt_01JB3K8Y4N7QW2M6R9T5V0XZAC" }, environment_shown: "paper" });
   });
 
+  it("says on the sheet what close-all sends over the API, never that it closes every position", async () => {
+    mount(<StopSheet open onOpenChange={() => {}} agentId={null} />);
+    const sheet = await screen.findByRole("dialog", { name: /^Stop/ });
+    const closeAll = await within(sheet).findByRole("link", { name: /^Close everything on this account/ });
+    expect(closeAll).toHaveTextContent("From here this sends the account's kill switch: each agent on the account is stopped by its own kill switch.");
+    expect(closeAll.textContent).not.toMatch(/cancel-all and close-all|closes every position/);
+  });
+
   it("says the agents are unavailable when they cannot be read, and keeps the account's kill switch", async () => {
     mount(<StopSheet open onOpenChange={() => {}} agentId={null} />, "unreachable");
     const sheet = await screen.findByRole("dialog", { name: /^Stop/ });

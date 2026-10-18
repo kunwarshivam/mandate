@@ -314,9 +314,19 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
                   </KillSwitchButton>
                   {ws.connection.connection_id ? (
                     <KillSwitchButton appearance="outline" title="Close everything on this account" href={recordHref("close_all", ws.connection.connection_id)} onClick={leave}>
-                      The broker&apos;s cancel-all and close-all: it cancels every open order, including ones Owlhead did not place, closes every position, including your own
-                      {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages, and ends every agent. Opens
-                      the full list to confirm with your passkey.
+                      {source === "api" ? (
+                        <>
+                          From here this sends the account&apos;s kill switch: each agent on the account is stopped by its own kill switch. Orders and holdings no agent
+                          placed are left as they are. Opens the full list to confirm with your passkey.
+                        </>
+                      ) : (
+                        <>
+                          The broker&apos;s cancel-all and close-all: it cancels every open order, including ones Owlhead did not place, closes every position, including your
+                          own
+                          {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages, and ends every
+                          agent. Opens the full list to confirm with your passkey.
+                        </>
+                      )}
                     </KillSwitchButton>
                   ) : null}
                 </>
