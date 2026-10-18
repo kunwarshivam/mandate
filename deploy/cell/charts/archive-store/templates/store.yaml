@@ -1,0 +1,159 @@
+{{- /*
+The test store's one key, made here and kept on upgrade by reading the Secret back. The store reads
+it from files; the journal's namespace gets the same key under the names the Barman Cloud plugin's
+ObjectStore reads. It is the archive's key alone: no database role knows it (E21-41).
+*/ -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace "archive-store-key" -}}
+{{- $id := printf "archive-%s" (randAlphaNum 12 | lower) -}}
+{{- $secret := randAlphaNum 40 -}}
+{{- if and $existing $existing.data -}}
+{{- $id = b64dec (get $existing.data "user") -}}
+{{- $secret = b64dec (get $existing.data "password") -}}
+{{- end -}}
+{{- define "store.key" -}}
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: archive-store-key
+  labels:
+    {{- include "store.labels" .root | nindent 4 }}
+stringData:
+  user: {{ .id | quote }}
+  password: {{ .secret | quote }}
+{{- end -}}
+{{- define "store.clientKey" -}}
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: {{ .root.Values.clientKeyName | quote }}
+  namespace: {{ .root.Values.clientNamespace | quote }}
+  labels:
+    {{- include "store.labels" .root | nindent 4 }}
+stringData:
+  ACCESS_KEY_ID: {{ .id | quote }}
+  ACCESS_SECRET_KEY: {{ .secret | quote }}
+{{- end -}}
+{{- define "store.deployment" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archive-store
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mandate-archive-store
+  template:
+    metadata:
+      labels:
+        {{- include "store.labels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: bucket
+          image: {{ .Values.initImage | quote }}
+          command: ["mkdir", "-p", {{ printf "/data/%s" .Values.bucket | quote }}]
+          securityContext: &hardened
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources: &small
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 50m, memory: 64Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      containers:
+        - name: store
+          image: {{ .Values.image | quote }}
+          args: ["server", "/data", "--address", ":9000"]
+          env:
+            - {name: MINIO_ROOT_USER_FILE, value: user}
+            - {name: MINIO_ROOT_PASSWORD_FILE, value: password}
+            - {name: MINIO_BROWSER, value: "off"}
+            - {name: HOME, value: /tmp}
+          ports:
+            - {name: s3, containerPort: 9000, protocol: TCP}
+          readinessProbe:
+            httpGet: {path: /minio/health/ready, port: 9000}
+            periodSeconds: 2
+          securityContext: *hardened
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: 250m, memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: key, mountPath: /run/secrets, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: key
+          secret:
+            secretName: archive-store-key
+{{- end -}}
+{{- define "store.service" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: archive-store
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: mandate-archive-store
+  ports:
+    - {name: s3, port: 9000, targetPort: 9000, protocol: TCP}
+{{- end -}}
+{{- /*
+Only the journal's archive clients reach the store, and the store reaches nothing.
+*/ -}}
+{{- define "store.policy" -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: archive-store
+  labels:
+    {{- include "store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mandate-archive-store
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.clientNamespace | quote }}
+          podSelector:
+            matchLabels:
+              mandate.dev/archive-client: "true"
+      ports:
+        - {protocol: TCP, port: 9000}
+  egress: []
+{{- end -}}
+---
+{{ include "store.emit" (include "store.key" (dict "root" . "id" $id "secret" $secret)) }}
+---
+{{ include "store.emit" (include "store.clientKey" (dict "root" . "id" $id "secret" $secret)) }}
+---
+{{ include "store.emit" (include "store.deployment" .) }}
+---
+{{ include "store.emit" (include "store.service" .) }}
+---
+{{ include "store.emit" (include "store.policy" .) }}

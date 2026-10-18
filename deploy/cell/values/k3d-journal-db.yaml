@@ -1,5 +1,20 @@
-# The journal's Postgres in the local and CI cell: one instance on k3s's default local-path class.
-instances: 1
+# The journal's Postgres in the local and CI cell: a primary and its synchronous standby on k3s's
+# default local-path class, on the cell's one node, which the Cluster discloses (E21-41).
+instances: 2
+failureDomain: shared
 storage:
   size: 1Gi
   storageClass: ""
+# The local cell's stand-in for the S1 endpoint: deploy/cell/charts/archive-store (DEC-1050 item 5).
+archive:
+  endpointURL: http://archive-store.archive-store.svc:9000
+  destinationPath: s3://journal-archive/ws1
+  keyFrom: journal-archive-key
+  retention: 7d
+  baseBackupSchedule: "0 15 3 * * *"
+  egress:
+    cidrs: []
+    port: 9000
+    namespace: archive-store
+    podSelector:
+      app.kubernetes.io/name: mandate-archive-store
