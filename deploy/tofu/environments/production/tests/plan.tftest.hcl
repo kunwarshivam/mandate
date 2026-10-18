@@ -37,12 +37,12 @@ run "production_plans_under_its_cap" {
   command = plan
 
   assert {
-    condition     = output.monthly_estimate_usd == 50
-    error_message = "Production should estimate 50 USD a month at list price."
+    condition     = output.monthly_estimate_usd == 55
+    error_message = "Production should estimate 55 USD a month at list price."
   }
 
   assert {
-    condition     = output.journal_archive_bucket == "mandate-journal-archive-production"
+    condition     = output.archive_bucket == "mandate-journal-archive-production"
     error_message = "The archive bucket is production's."
   }
 }

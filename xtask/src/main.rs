@@ -852,7 +852,7 @@ const INFRA_RUN: &str = "cargo xtask infra";
 /// and account go to OpenTofu as variables under `CF_` names, since `web/scripts/workers.mjs`
 /// keeps every `CLOUDFLARE_` name to `web-deploy.yml`'s deploy step (DEC-1005 item 2).
 const INFRA_SECRETS: [&str; 5] = [
-    "DIGITALOCEAN_TOKEN",
+    "DIGITAL_OCEAN_API_KEY",
     "SPACES_ACCESS_KEY_ID",
     "SPACES_SECRET_ACCESS_KEY",
     "CF_INFRA_API_TOKEN",
@@ -14978,20 +14978,20 @@ mod tests {
                 edited(
                     "      - run: cargo build --locked --package xtask\n",
                     "      - run: cargo build --locked --package xtask\n        env:\n          \
-                     T: ${{ secrets.DIGITALOCEAN_TOKEN }}\n",
+                     T: ${{ secrets.DIGITAL_OCEAN_API_KEY }}\n",
                 ),
             ),
             (
                 "secret at the job",
                 edited(
                     "    env:\n      TOFU_VERSION",
-                    "    env:\n      T: ${{ secrets.DIGITALOCEAN_TOKEN }}\n      TOFU_VERSION",
+                    "    env:\n      T: ${{ secrets.DIGITAL_OCEAN_API_KEY }}\n      TOFU_VERSION",
                 ),
             ),
             (
                 "unlisted secret",
                 edited(
-                    "          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}\n",
+                    "          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_API_KEY }}\n",
                     "          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_ADMIN_TOKEN }}\n",
                 ),
             ),

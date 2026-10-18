@@ -22,10 +22,11 @@ variables {
   api_hostname          = "api-staging.example.com"
   api_origin            = "http://127.0.0.1:8080"
   access_allowed_emails = ["founder@example.com"]
+  archive_bucket        = "mandate-journal-archive-staging"
 }
 
 run "api_host_is_tunnel_only_and_behind_access" {
-  command = apply
+  command = plan
 
   assert {
     condition     = cloudflare_dns_record.api.proxied && cloudflare_dns_record.api.type == "CNAME" && cloudflare_dns_record.api.content == "c0ffee00-0000-4000-8000-000000000000.cfargotunnel.com"
@@ -64,6 +65,41 @@ run "api_host_is_tunnel_only_and_behind_access" {
     )
     error_message = "The policy admits the named emails alone, never everyone."
   }
+}
+
+run "the_archive_is_locked_for_its_retention" {
+  command = plan
+
+  assert {
+    condition     = cloudflare_r2_bucket.journal_archive.name == "mandate-journal-archive-staging" && cloudflare_r2_bucket.journal_archive.location == "enam"
+    error_message = "The archive is the environment's R2 bucket in eastern North America."
+  }
+
+  assert {
+    condition = (
+      length(cloudflare_r2_bucket_lock.journal_archive.rules) == 1 &&
+      cloudflare_r2_bucket_lock.journal_archive.rules[0].enabled &&
+      cloudflare_r2_bucket_lock.journal_archive.rules[0].prefix == "" &&
+      cloudflare_r2_bucket_lock.journal_archive.rules[0].condition.type == "Age" &&
+      cloudflare_r2_bucket_lock.journal_archive.rules[0].condition.max_age_seconds >= 30 * 86400
+    )
+    error_message = "One enabled lock rule must cover every key for at least the 30-day retention."
+  }
+
+  assert {
+    condition     = cloudflare_r2_bucket_lock.journal_archive.bucket_name == cloudflare_r2_bucket.journal_archive.name
+    error_message = "The lock is on the archive bucket."
+  }
+}
+
+run "refuses_a_lock_shorter_than_the_retention" {
+  command = plan
+
+  variables {
+    archive_retention_days = 7
+  }
+
+  expect_failures = [var.archive_retention_days]
 }
 
 run "refuses_no_email" {

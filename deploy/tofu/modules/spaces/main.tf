@@ -1,6 +1,7 @@
-# The environment's buckets (DEC-2012 items 3 and 9): the OpenTofu state bucket, which the founder
-# creates once and the root adopts, and the journal archive for E21-41's Barman. Spaces has no
-# object lock, so the archive keeps every version, and Barman's key is granted that bucket alone.
+# OpenTofu's state bucket, and nothing else (DEC-2012 item 5): the founder creates it once, by
+# hand, and the root adopts it with an import block; it stays private and versioned and cannot be
+# destroyed by a plan. No journal spec §6.2 object and no backup is ever written here; the journal
+# archive is R2 (DEC-2012 item 9, the cloudflare module).
 
 terraform {
   required_version = "1.13.1"
@@ -39,52 +40,6 @@ resource "digitalocean_spaces_bucket" "state" {
   }
 }
 
-resource "digitalocean_spaces_bucket" "journal_archive" {
-  name   = "${var.prefix}-journal-archive-${var.environment}"
-  region = var.region
-  acl    = "private"
-
-  versioning {
-    enabled = true
-  }
-
-  lifecycle_rule {
-    id                                     = "abort-incomplete-uploads"
-    enabled                                = true
-    abort_incomplete_multipart_upload_days = 7
-  }
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-resource "digitalocean_spaces_key" "journal_archive" {
-  name = "${var.prefix}-${var.environment}-journal-archive"
-
-  grant {
-    bucket     = digitalocean_spaces_bucket.journal_archive.name
-    permission = "readwrite"
-  }
-}
-
 output "state_bucket" {
   value = digitalocean_spaces_bucket.state.name
-}
-
-output "journal_archive_bucket" {
-  value = digitalocean_spaces_bucket.journal_archive.name
-}
-
-output "journal_archive_endpoint" {
-  value = "https://${var.region}.digitaloceanspaces.com"
-}
-
-output "journal_archive_access_key_id" {
-  value = digitalocean_spaces_key.journal_archive.access_key
-}
-
-output "journal_archive_secret_access_key" {
-  value     = digitalocean_spaces_key.journal_archive.secret_key
-  sensitive = true
 }
