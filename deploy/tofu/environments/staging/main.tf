@@ -30,7 +30,7 @@ module "cell" {
   kube_api_allowed_addresses = var.kube_api_allowed_addresses
   spaces_monthly_usd         = 5
   block_storage_gb           = 40
-  cap_usd                    = 75
+  cap_usd                    = 65
 }
 
 module "cloudflare" {
@@ -41,6 +41,7 @@ module "cloudflare" {
   api_hostname          = "api-staging.owlhead.ai"
   api_origin            = "http://127.0.0.1:8080"
   access_allowed_emails = var.access_allowed_emails
+  archive_bucket        = "mandate-journal-archive-${local.environment}"
 }
 
 output "cluster_id" {
@@ -51,21 +52,12 @@ output "cluster_endpoint" {
   value = module.cell.cluster_endpoint
 }
 
-output "journal_archive_bucket" {
-  value = module.cell.journal_archive_bucket
+output "archive_bucket" {
+  value = module.cloudflare.archive_bucket
 }
 
-output "journal_archive_endpoint" {
-  value = module.cell.journal_archive_endpoint
-}
-
-output "journal_archive_access_key_id" {
-  value = module.cell.journal_archive_access_key_id
-}
-
-output "journal_archive_secret_access_key" {
-  value     = module.cell.journal_archive_secret_access_key
-  sensitive = true
+output "archive_endpoint" {
+  value = module.cloudflare.archive_endpoint
 }
 
 output "tunnel_id" {

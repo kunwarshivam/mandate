@@ -14,7 +14,7 @@ variables {
   node_count         = 2
   spaces_monthly_usd = 5
   block_storage_gb   = 40
-  cap_usd            = 75
+  cap_usd            = 65
 }
 
 run "plans_at_or_under_the_cap" {
