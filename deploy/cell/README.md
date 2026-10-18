@@ -204,19 +204,23 @@ there is one, and what the lane still has to land. A gap never fails the run and
 Each step's heading reads `ready`, `partial` or `skipped` with the lanes it waits on, and the
 report closes with every wait grouped by lane. The run ends, in the same pod, by exporting the
 workspace's control stream and verifying it by journal spec §11 against the artifact store its
-gestures wrote, so every artifact a record names is checked. Each run uses a fresh workspace,
-`demo<run id>`.
+gestures wrote, so every artifact a record names is checked. Each run uses a fresh workspace, a
+ULID made from the run id (`01KDEM<run id>000000000D`), founded for the demo owner, the member the
+stub issuer's `demo-owner` subject is linked to; before the gestures, the scenario points the API
+and the deployment manager at it (`helm upgrade --reuse-values --set api.workspace=…`) and waits
+for both to roll out, so every step, through the CLI, the API or `web/`, acts on one workspace
+(DEC-2006).
 
-The run's own report is the up-to-date list; on 2026-10-18, after slice 4, it read:
+The run's own report is the up-to-date list; on 2026-10-18, after slice 5, it read:
 
 | Step | Today | Runs | Waits on |
 |---|---|---|---|
-| 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found`; the cell's API refusing a read with no session (the one 401) | SI (E21-52, #1591): the stub issuer's entry point; E2E (E21-54): sign in and read the API's own workspace |
-| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy`, each code shown then typed | SI and W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
+| 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found` for the demo owner; the cell's API refusing a read of the run's workspace with no session (the one 401); the demo owner's sign-in through the stub issuer (204 and its cookie) | A1 (E21-31): the API reads memberships through `control_entry`, without which every signed-in read answers `membership_unavailable`; W2: the same in `web/` |
+| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy`, each code shown then typed | A1 and W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
 | 3. Research, through the gateway's recorded fake | skipped | Nothing yet | D1: the runtime started; I2 (E19-2): a deployment's research configured (DEC-2208); AH (E19-13): the agentic loop over its state (#1551, #1561, #1566, #1569 on `main`) |
-| 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4, #1592) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
-| 5. A backtest of the same version | skipped | Nothing yet | E2E: run the runner and `mandate backtest record` (#1581) in the gestures' pod; SI: the API read with a session |
-| 6. The kill switch | partial | `agent kill --agent demo-spy` (agent scope), recorded before the closing export and verify | SI and W2: from `web/`; D1 and X: the processes stop on it |
+| 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
+| 5. A backtest of the same version | skipped | Nothing yet | E2E: run the runner and `mandate backtest record` (#1581) in the gestures' pod; A1: the API read with a session |
+| 6. The kill switch | partial | `agent kill --agent demo-spy` (agent scope), recorded before the closing export and verify | A1 and W2: from `web/`; D1 and X: the processes stop on it |
 
 The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
 every opening asked, protection on. CI's `cell-demo` job, which no required check depends on, runs
