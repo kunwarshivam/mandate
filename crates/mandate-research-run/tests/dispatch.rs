@@ -518,6 +518,8 @@ fn breach(days: &BTreeSet<i64>, count: u32, cap: u32, left: u32, got: &Dispatch)
         Some(format!("{kept:?} is not the newest of {eligible:?}"))
     } else if observed(result) != kept {
         Some("observes other than it shows".to_owned())
+    } else if !wrapped(result) {
+        Some("an item is not exactly item_id, source, and its data under untrusted".to_owned())
     } else if result.truncated != (kept.len() < eligible.len()) {
         Some(format!(
             "truncated {} with {} of {}",
@@ -534,6 +536,31 @@ fn breach(days: &BTreeSet<i64>, count: u32, cap: u32, left: u32, got: &Dispatch)
     } else {
         None
     }
+}
+
+/// Whether every item the result shows is exactly `item_id`, `source`, and its fields under
+/// `untrusted` (§6.10, DEC-2209 item 4).
+fn wrapped(result: &Dispatched) -> bool {
+    let value = parsed(result);
+    let items = value
+        .get("items")
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    items.iter().all(|item| {
+        item.as_object().is_some()
+            && keys(item) == ["item_id", "source", "untrusted"]
+            && item.get("untrusted").and_then(Value::as_object).is_some()
+    })
+}
+
+/// The same result with every item's `untrusted` section renamed `data`.
+fn unwrapped(got: &Dispatch) -> Dispatch {
+    let mut got = got.clone();
+    for result in &mut got.results {
+        let text = String::from_utf8(result.content.clone()).unwrap_or_default();
+        result.content = text.replace("\"untrusted\"", "\"data\"").into_bytes();
+    }
+    got
 }
 
 /// Random bar answers, counts, and byte budgets against [`breach`]'s oracle.
@@ -665,6 +692,12 @@ fn the_oracle_catches_seeded_breaches() {
             64,
         ),
         ("two results", twice(&honest), 3, 30_000),
+        (
+            "its data not under untrusted",
+            unwrapped(&honest),
+            3,
+            30_000,
+        ),
     ] {
         assert!(
             breach(&days, count, cap, left, &got).is_some(),
