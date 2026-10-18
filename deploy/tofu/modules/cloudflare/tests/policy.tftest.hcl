@@ -134,3 +134,39 @@ run "refuses_a_lock_shorter_than_the_retention" {
 
   expect_failures = [var.archive_retention_days]
 }
+
+run "named_emails_replace_account_membership" {
+  command = plan
+
+  variables {
+    access_allowed_emails = ["founder@example.com"]
+  }
+
+  assert {
+    condition = (
+      length(cloudflare_zero_trust_access_policy.operators.include) == 1 &&
+      alltrue([for rule in cloudflare_zero_trust_access_policy.operators.include : rule.email.email == "founder@example.com" && rule.cloudflare_account_member == null && rule.everyone == null])
+    )
+    error_message = "With emails named, the policy admits those emails alone, not the account's members."
+  }
+}
+
+run "refuses_a_wildcard_email" {
+  command = plan
+
+  variables {
+    access_allowed_emails = ["*@example.com"]
+  }
+
+  expect_failures = [var.access_allowed_emails]
+}
+
+run "refuses_a_spaced_email" {
+  command = plan
+
+  variables {
+    access_allowed_emails = ["founder @example.com"]
+  }
+
+  expect_failures = [var.access_allowed_emails]
+}

@@ -48,13 +48,14 @@ module "cell" {
 }
 
 module "cloudflare" {
-  source         = "../../modules/cloudflare"
-  name           = "mandate-${local.environment}"
-  account_id     = local.account_id
-  zone_name      = "owlhead.ai"
-  api_hostname   = "api.owlhead.ai"
-  api_origin     = var.api_origin
-  archive_bucket = "mandate-journal-archive-${local.environment}"
+  source                = "../../modules/cloudflare"
+  name                  = "mandate-${local.environment}"
+  account_id            = local.account_id
+  zone_name             = "owlhead.ai"
+  api_hostname          = "api.owlhead.ai"
+  api_origin            = var.api_origin
+  access_allowed_emails = var.access_allowed_emails
+  archive_bucket        = "mandate-journal-archive-${local.environment}"
 }
 
 output "cluster_id" {

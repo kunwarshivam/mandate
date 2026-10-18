@@ -50,3 +50,14 @@ variable "bootstrap_runner_cidr" {
   type        = string
   default     = ""
 }
+
+variable "access_allowed_emails" {
+  description = "ACCESS_ALLOWED_EMAILS: who Access admits to production's API host, as a JSON list; production names them, as before DEC-2030, so a future member of the Cloudflare account is not admitted by default."
+  type        = list(string)
+  sensitive   = true
+
+  validation {
+    condition     = length(var.access_allowed_emails) > 0
+    error_message = "Production's Access needs at least one named email."
+  }
+}
