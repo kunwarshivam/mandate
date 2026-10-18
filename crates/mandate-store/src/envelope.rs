@@ -41,6 +41,18 @@ pub struct Fields<'a> {
 /// times its records by the scheduler's ticks (journal spec §5.4, mandate spec §5.2). `None` only for
 /// a schema version the canonical form cannot hold.
 pub fn draft_bytes(envelope: &Envelope<'_>, fields: &Fields<'_>) -> Option<Vec<u8>> {
+    draft_bytes_with_pii(envelope, fields, &[])
+}
+
+/// [`draft_bytes`] for a record that names personal data by reference: `pii_refs` holds the opaque
+/// vault references the payload carries, sorted and de-duplicated as journal spec §3 requires (the
+/// executor's `ConnectionChecked` names its account's, rule 62).
+pub fn draft_bytes_with_pii(
+    envelope: &Envelope<'_>,
+    fields: &Fields<'_>,
+    pii_refs: &[&str],
+) -> Option<Vec<u8>> {
+    let pii: BTreeSet<&str> = pii_refs.iter().copied().collect();
     let build = format!("sha256:{}", Digest::of(envelope.build.as_bytes()).to_hex());
     let actor = object(vec![
         ("build", Value::Str(build)),
@@ -72,7 +84,10 @@ pub fn draft_bytes(envelope: &Envelope<'_>, fields: &Fields<'_>) -> Option<Vec<u
         ("event_time", Value::Str(envelope.event_time.to_string())),
         ("event_type", text(fields.event_type)),
         ("payload", fields.payload.clone()),
-        ("pii_refs", Value::Array(Vec::new())),
+        (
+            "pii_refs",
+            Value::Array(pii.into_iter().map(text).collect()),
+        ),
         ("schema_version", int(fields.schema_version)?),
         ("stream_id", text(envelope.stream)),
     ])?;
