@@ -5,9 +5,9 @@
 //! `KUBE_API_ALLOWED_CIDRS`), so these commands run on the founder's machine, with the founder's
 //! kubeconfig, and nowhere else. They refuse to run in CI or without a terminal, and they apply
 //! nothing until the founder types the kubeconfig's current context, so an agent never applies
-//! anything to a real cluster (DEC-2015 item 5). The workload secrets come from lane IAC's
-//! OpenTofu outputs in the process environment. Each reaches only `kubectl`'s stdin and is never
-//! printed.
+//! anything to a real cluster (DEC-2015 item 5). The workload secrets come from the founder's
+//! shell: Barman's R2 token, which the founder makes by hand, and lane IAC's `tunnel_token` output
+//! (deploy/gitops/BOOTSTRAP.md). Each reaches only `kubectl`'s stdin and is never printed.
 //!
 //! `gitops bootstrap <environment>` installs Flux's three controllers at the pinned version, each
 //! image pinned by digest, writes the workload secrets, and applies the environment's `sync.yaml`.
@@ -178,29 +178,56 @@ fn confirmed(typed: &str, context: &str) -> bool {
 /// which this prints with the environment it will change. Returns that context.
 fn founder_confirms(environment: Environment, action: &str) -> Result<String> {
     let ci = env::var_os("CI").is_some() || env::var_os("GITHUB_ACTIONS").is_some();
-    if let Some(reason) = refusal(ci, io::stdin().is_terminal()) {
-        bail!("{reason} (DEC-2018)");
-    }
+    confirm(
+        ci,
+        io::stdin().is_terminal(),
+        environment,
+        action,
+        current_context,
+        || {
+            let mut typed = String::new();
+            io::stdin()
+                .lock()
+                .read_line(&mut typed)
+                .context("reading the answer")?;
+            Ok(typed)
+        },
+    )
+}
+
+/// The kubeconfig's current context.
+fn current_context() -> Result<String> {
     let out = Command::new("kubectl")
         .args(["config", "current-context"])
         .output()
         .context("starting kubectl (deploy/gitops/BOOTSTRAP.md)")?;
     ensure!(out.status.success(), "kubectl has no current context");
-    let context = String::from_utf8(out.stdout)
+    Ok(String::from_utf8(out.stdout)
         .context("kubectl printed non-UTF-8")?
         .trim()
-        .to_owned();
+        .to_owned())
+}
+
+/// [`founder_confirms`] over its inputs: a refusal reads neither the context nor an answer, and
+/// only the context typed exactly goes on.
+fn confirm(
+    ci: bool,
+    terminal: bool,
+    environment: Environment,
+    action: &str,
+    context: impl FnOnce() -> Result<String>,
+    answer: impl FnOnce() -> Result<String>,
+) -> Result<String> {
+    if let Some(reason) = refusal(ci, terminal) {
+        bail!("{reason} (DEC-2018)");
+    }
+    let context = context()?;
     eprint!(
         "    gitops: this will {action} the {} cluster through the context {context:?}.\n    Type the context's name to go on: ",
         environment.name()
     );
-    let mut typed = String::new();
-    io::stdin()
-        .lock()
-        .read_line(&mut typed)
-        .context("reading the answer")?;
     ensure!(
-        confirmed(&typed, &context),
+        confirmed(&answer()?, &context),
         "not confirmed; nothing was applied"
     );
     Ok(context)
@@ -444,6 +471,43 @@ mod tests {
             "do-nyc3-mandate-staging"
         ));
         assert!(!confirmed("\n", ""));
+    }
+
+    /// The confirmation refuses in CI and without a terminal before it reads anything, and goes on
+    /// only on the exact context.
+    #[test]
+    fn the_confirmation_refuses_before_reading_and_goes_on_only_on_the_context() {
+        let context = "do-nyc3-mandate-staging";
+        let never = || -> Result<String> { bail!("read after a refusal") };
+        for (ci, terminal) in [(true, true), (true, false), (false, false)] {
+            let refused = confirm(
+                ci,
+                terminal,
+                Environment::Staging,
+                "bootstrap",
+                never,
+                never,
+            );
+            assert!(refused.is_err_and(|e| e.to_string().contains("DEC-2018")));
+        }
+        let wrong = confirm(
+            false,
+            true,
+            Environment::Staging,
+            "bootstrap",
+            || Ok(context.to_owned()),
+            || Ok("yes\n".to_owned()),
+        );
+        assert!(wrong.is_err());
+        let right = confirm(
+            false,
+            true,
+            Environment::Staging,
+            "bootstrap",
+            || Ok(context.to_owned()),
+            || Ok(format!("{context}\n")),
+        );
+        assert!(right.is_ok_and(|c| c == context));
     }
 
     /// No workflow may run the bootstrap: the cluster's API admits only the founder's addresses.

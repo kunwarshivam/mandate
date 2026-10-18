@@ -7,14 +7,16 @@ and the command refuses to run in CI or without a terminal.
 
 ## Before you start
 
-1. **The cluster.** Lane IAC's OpenTofu has made the DOKS cluster with two nodes (the journal's two
+1. **The cluster.** Lane IAC's OpenTofu (E21-57, `deploy/tofu/`) has made the DOKS cluster with two nodes (the journal's two
    instances must sit on separate nodes), the R2 archive bucket with bucket lock (DEC-2605 row 4),
    DNS, and the Cloudflare Tunnel and Access application (DEC-2011).
 2. **Your machine.**
    - Its address must be in the control-plane firewall's `KUBE_API_ALLOWED_CIDRS`.
    - Its kubeconfig's current context must point at the cluster (`doctl kubernetes cluster
      kubeconfig save <cluster>`).
-   - It needs flux 2.9.6 (`bash .cursor/install.sh` installs it) and kubectl 1.35.
+   - It needs flux 2.9.6 and kubectl 1.35. On x86_64 Linux, `bash .cursor/install.sh` installs
+     flux, checked against its SHA-256. Elsewhere, install flux 2.9.6 yourself and check it against
+     the release's `flux_2.9.6_checksums.txt`; `bootstrap` refuses any other version.
 3. **The packages are public.** GHCR makes a new package private. After the first `main` run of
    `release.yml` that publishes the charts, set these packages public once in the repository's
    package settings. This costs nothing, as DEC-971 item 5 notes for the images:
@@ -24,13 +26,17 @@ and the command refuses to run in CI or without a terminal.
    - the image packages
 
    Flux and the cluster read them anonymously.
-4. **The secrets, in your shell only.** Set these from IAC's OpenTofu outputs, using the names its
-   README gives them, never from a file in the repository:
+4. **The secrets, in your shell only**, never from a file in the repository:
+   - `JOURNAL_ARCHIVE_ACCESS_KEY_ID` and `JOURNAL_ARCHIVE_SECRET_KEY`: Barman's bucket-scoped R2
+     API token, which you make by hand after the first apply, as `deploy/tofu/README.md` §2 item 3
+     says (#1652). It is not in OpenTofu's state. Paste its access key id and secret.
+   - `CLOUDFLARED_TUNNEL_TOKEN`: the tunnel's token, the sensitive OpenTofu output `tunnel_token` of
+     `deploy/tofu/environments/staging`.
 
    ```sh
-   export JOURNAL_ARCHIVE_ACCESS_KEY_ID="$(tofu output -raw <archive key id output>)"
-   export JOURNAL_ARCHIVE_SECRET_KEY="$(tofu output -raw <archive secret key output>)"
-   export CLOUDFLARED_TUNNEL_TOKEN="$(tofu output -raw <tunnel token output>)"
+   read -rs JOURNAL_ARCHIVE_ACCESS_KEY_ID && export JOURNAL_ARCHIVE_ACCESS_KEY_ID
+   read -rs JOURNAL_ARCHIVE_SECRET_KEY && export JOURNAL_ARCHIVE_SECRET_KEY
+   export CLOUDFLARED_TUNNEL_TOKEN="$(tofu -chdir=deploy/tofu/environments/staging output -raw tunnel_token)"
    ```
 
 ## Bootstrap
@@ -77,10 +83,9 @@ picks up the new archive key on its next archive attempt.
 
 In one pull request, change the pinned version and digests in:
 
-- `xtask/src/gitops.rs`
-- `docs/dependencies.md`
-- `.github/workflows/ci.yml`
-- `.cursor/install.sh`
+- `xtask/src/gitops.rs` (the version and each controller's digest)
+- `docs/dependencies.md` (the `flux` and Flux controller image rows)
+- `.cursor/install.sh` (the download and its SHA-256)
 
 Merge it, then run `bootstrap` again. Re-applying is idempotent.
 
