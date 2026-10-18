@@ -2029,6 +2029,7 @@ dependencies = [
  "mandate-accounting",
  "mandate-alpaca",
  "mandate-canon",
+ "mandate-connections",
  "mandate-domain",
  "mandate-executor",
  "mandate-journal",
