@@ -38,7 +38,8 @@ mod report;
 
 pub use record::{RunRecord, backtest_run_recorded};
 pub use report::{
-    DecisionOutcome, DecisionRow, Limitation, VERSION_REPORT_VERSION, VersionDigests, VersionReport,
+    DecisionOutcome, DecisionRow, Limitation, VERSION_REPORT_VERSION, VersionDigests,
+    VersionObjects, VersionReport,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

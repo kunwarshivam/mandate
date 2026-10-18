@@ -586,6 +586,20 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The backtest runner (E4-4, E4-5, DEC-1144): runs mandate-version-backtest over JSON inputs and
+# stores the report, its input objects and the BacktestRunRecorded payload as artifacts, and never
+# touches the journal. In neither process group: it links the executor's protection pricing, and
+# DEC-1000 has a workspace service run a backtest "through the journal, never by linking it"
+# (DEC-986), so `mandate backtest record` journals what this stores. Nothing may depend on it, and
+# like the CLI it can never reach a connector, the shell, the paper binary, or a journal writer.
+[crates.mandate-backtest-runner]
+layer = 9
+safety_critical = true
+pure = false
+allowed_external = ["clap", "thiserror"]
+forbidden_internal = ["mandate-alpaca", "mandate-journal-pg", "mandate-paper", "mandate-shell"]
+allowed_dependents = []
+
 [crates.mandate-cli]
 layer = 9
 safety_critical = true

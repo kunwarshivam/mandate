@@ -291,8 +291,11 @@ the spec invariants (DP-n) its tests cover.
   *Registration landed* (claim [#1463](https://github.com/kunwarshivam/mandate/issues/1463), lane
   I4): `mandate-journal` registers `BacktestRunRecorded` (`src/backtest_records.rs`) with rules 143
   and 144, `rule` and `man` required, written by a `user` or `system` actor only
-  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors. The
-  report, the run's append, and the route remain.
+  ([DEC-1141](decisions/DEC-1141.md)), against the generated `backtest_records` vectors. *The
+  run's append landed* ([DEC-1144](decisions/DEC-1144.md)): `mandate-backtest-runner run` runs a
+  version over JSON inputs and stores the report, its input objects and the payload as artifacts,
+  and `mandate backtest record` re-checks them and journals the record as the `backtest_runner`
+  system. `POST /backtests` and the local cell's Job remain.
 
 ### E5 Journal
 
