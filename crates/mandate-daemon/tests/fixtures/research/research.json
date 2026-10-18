@@ -21,6 +21,7 @@
   "seed": 7,
   "snapshot": "claude-sonnet-4-5-20250929"
  },
+ "halted_instruments": [],
  "reply": {
   "cached_tokens": 0,
   "input_tokens": 1800,

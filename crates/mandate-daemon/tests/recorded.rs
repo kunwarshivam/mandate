@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use mandate_canon::{Digest, Value, parse, to_canonical};
+use mandate_canon::{Digest, Key, Value, parse, to_canonical};
 use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_gateway::money::Usd6;
 use mandate_research_run::{
@@ -170,6 +170,60 @@ fn the_plane_gives_no_filings_and_only_the_instruments_asked_for() {
         .unwrap();
     let symbols: Vec<_> = facts.iter().map(|f| f.symbol.as_str().to_owned()).collect();
     assert_eq!(symbols, ["MSFT"]);
+}
+
+/// The bundle records which of its instruments are halted at its as-of time, and a bundle that
+/// does not say refuses the load: an absent halt list would admit more (DEC-2214 item 1).
+#[test]
+fn the_bundle_records_its_halts_and_refuses_without_them() {
+    assert!(Bundle::load(Path::new(FIXTURE)).unwrap().halted.is_empty());
+
+    let dir = copy("halted", "research.json", |value| {
+        let Value::Object(object) = value else {
+            panic!("research.json is an object");
+        };
+        object.insert(
+            Key::new("halted_instruments").unwrap(),
+            Value::Array(vec![Value::Str("MSFT".to_owned())]),
+        );
+    });
+    let halted = Bundle::load(&dir).unwrap().halted;
+    assert_eq!(
+        halted.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+        ["7b4a1c2e-2222-4a2b-9c3d-000000000002"],
+        "a halt names the recorded instrument's asset"
+    );
+
+    let dir = copy("halted-missing", "research.json", |value| {
+        remove(value, &["halted_instruments"]);
+    });
+    assert_eq!(
+        Bundle::load(&dir),
+        Err(BundleError::Malformed {
+            file: "research.json",
+            member: "halted_instruments"
+        })
+    );
+
+    for (name, halts) in [("halted-unrecorded", "TSLA"), ("halted-not-a-symbol", "")] {
+        let dir = copy(name, "research.json", |value| {
+            let Value::Object(object) = value else {
+                panic!("research.json is an object");
+            };
+            object.insert(
+                Key::new("halted_instruments").unwrap(),
+                Value::Array(vec![Value::Str(halts.to_owned())]),
+            );
+        });
+        assert_eq!(
+            Bundle::load(&dir),
+            Err(BundleError::Malformed {
+                file: "research.json",
+                member: "halted_instruments"
+            }),
+            "{halts:?}"
+        );
+    }
 }
 
 /// One recorded filing row, as `filings.json` holds it.
