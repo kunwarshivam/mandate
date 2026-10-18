@@ -101,10 +101,10 @@ Streams that touch different crates run in parallel; reviews and merges run one 
 - **Spike paper runs** (E17-0): the go-ahead.
 - **Dependabot:** six alerts on `main` (one high) to review.
 - **Cell #1 and model spend:** [DEC-995](decisions/DEC-995.md) (two DigitalOcean droplets, about
-  $104 a month, approve on #1456), [DEC-997](decisions/DEC-997.md) (OpenRouter, a $50 a month
-  cap), [DEC-2504](decisions/DEC-2504.md) (the managed cell's egress to the browsers' push
-  services), and DEC-2001 items 6 (the hosted tier is `dev` until release signing) and 7 (`doctl`),
-  on #1539's branch.
+  $104 a month; Proposed, from #1456), [DEC-997](decisions/DEC-997.md) (OpenRouter, a $50 a month
+  cap) and [DEC-2504](decisions/DEC-2504.md) (the managed cell's egress to the browsers' push
+  services); and, on #1539's branch only, DEC-2001 items 6 (the hosted tier is `dev` until release
+  signing) and 7 (`doctl`).
 - **#1539** (E21-51, cell #1's hosted bring-up): two of its commits carry `Co-authored-by`
   trailers that fast-lint refuses. Clearing them rewrites that branch's history and force-pushes
   it; agents wait for your yes.
