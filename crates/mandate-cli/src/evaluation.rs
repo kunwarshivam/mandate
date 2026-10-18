@@ -1,17 +1,20 @@
 //! `mandate evaluation run` ([DEC-2244](../../../docs/project/decisions/DEC-2244.md); backlog
 //! E17-8, E15-3): the forward-paper evaluation of an internal paper workspace's thesis records,
 //! read from the workspace's own journal and journaled as `EvaluationRunRecorded` (journal spec
-//! §9.18). This part reads: whether the workspace is an internal paper one (item 4), and the
-//! thesis records of its agents' streams (item 2).
+//! §9.18): whether the workspace is an internal paper one (item 4), the thesis records of its
+//! agents' streams (item 2), and the run that evaluates, stores and appends (items 1 and 5).
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 
 use mandate_canon::{Value, parse};
-use mandate_evaluation::ThesisRecord;
-use mandate_journal::{ArtifactRef, StoredEvent};
+use mandate_evaluation::{InputFiles, ThesisRecord};
+use mandate_journal::{ArtifactRef, ArtifactStore, StoredEvent};
+use mandate_time::UtcNanos;
 
-use crate::control::{ControlError, ControlJournal, Owner, agent_stream, control_stream};
+use crate::control::{
+    ControlError, ControlJournal, Now, Owner, Submitted, agent_stream, control_stream,
+};
 use crate::version::{refused, rows};
 
 /// The agent-stream records the evaluation reads (journal spec §9.4).
@@ -56,7 +59,8 @@ pub fn internal_paper(
 
 /// Every `ThesisProposed` and `ThesisRevised` of the workspace's agents (DEC-2244 item 2): the
 /// agents are the `agent_id`s of the control stream's `AgentDeployed` records, each read once, in
-/// id order, and each stream's records in stream order.
+/// id order, and each stream's records in stream order. It reads agent streams whatever the
+/// workspace is, so a caller runs [`internal_paper`] first, as [`run`] does.
 ///
 /// # Errors
 /// [`ControlError::Refused`] with `record_unbound` for a record with no
@@ -104,4 +108,46 @@ fn thesis_record(stored: StoredEvent) -> Result<ThesisRecord, ControlError> {
         mandate_version,
         payload: envelope.get("payload").cloned().unwrap_or(Value::Null),
     })
+}
+
+/// What `run` committed or found: the evaluation, its report, whether it passed, and the event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Evaluated {
+    pub evaluation_id: String,
+    pub report: String,
+    pub passed: bool,
+    pub submitted: Submitted,
+}
+
+/// One evaluation as `run` is asked for it: the four input files' bytes, the id the API will name
+/// it by, and the instant it reads up to.
+#[derive(Debug, Clone, Copy)]
+pub struct Request<'a> {
+    pub files: InputFiles<'a>,
+    pub evaluation_id: &'a str,
+    pub cut_off: UtcNanos,
+}
+
+/// Runs the forward-paper evaluation of the workspace's thesis records and journals it
+/// (DEC-2244 items 1, 2, 4 and 5): the internal paper gate, then the records, the inputs and the
+/// evaluation; then it stores the build text, the three input objects, the report and the payload,
+/// re-reads each by its digest, and appends `EvaluationRunRecorded` as the `system` `evaluator`.
+/// A re-run of the same evaluation finds the record it committed (DEC-290).
+///
+/// # Errors
+/// [`ControlError::Refused`], having appended nothing: `internal_paper` refusals,
+/// `evaluation_id_invalid`, `input_invalid`, [`thesis_records`]' refusals, the evaluator's own
+/// code when it refuses the evaluation (having stored nothing), `artifact_corrupt` for a stored
+/// object that does not re-hash, and `evaluation_id_taken` for an id another record holds.
+/// [`ControlError::Journal`] as `commit` reports.
+pub fn run(
+    journal: &mut dyn ControlJournal,
+    store: &mut dyn ArtifactStore,
+    owner: &Owner,
+    setting: bool,
+    request: &Request<'_>,
+    now: Now,
+) -> Result<Evaluated, ControlError> {
+    let _ = (journal, store, owner, setting, request, now);
+    Err(ControlError::Unimplemented { story: "E17-8" })
 }
