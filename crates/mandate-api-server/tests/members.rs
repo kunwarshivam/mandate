@@ -5,7 +5,7 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::hosted;
-use mandate_api_server::members::{ControlLookup, until_parser};
+use mandate_api_server::members::ControlLookup;
 use mandate_identity::{
     LookupFailed, Membership, MembershipEvent, MembershipLookup, MembershipQuery, MembershipRecord,
     MembershipState, OrgId, PrincipalId, Role, Scope, WorkspaceId,
@@ -43,11 +43,6 @@ fn scope() -> Scope {
         org: hosted().org,
         workspace: hosted().workspace,
     }
-}
-
-#[test]
-fn until_the_parser_lands_every_lookup_fails() {
-    assert_eq!(until_parser(&[]), Err(LookupFailed));
 }
 
 #[test]

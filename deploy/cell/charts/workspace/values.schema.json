@@ -16,6 +16,7 @@
     "runtime",
     "localImages",
     "ingress",
+    "deploymentTier",
     "api",
     "artifacts"
   ],
@@ -29,6 +30,15 @@
       "enum": [
         "paper",
         "backtest"
+      ]
+    },
+    "deploymentTier": {
+      "description": "MANDATE_DEPLOYMENT_TIER for every process (DEC-971 item 2): the start-up check refuses an unsigned build outside dev and ci, and any value it does not know is production",
+      "enum": [
+        "dev",
+        "ci",
+        "staging",
+        "production"
       ]
     },
     "images": {
@@ -381,7 +391,6 @@
         "audience",
         "jwksUrl",
         "appOrigin",
-        "tier",
         "subjectLinks"
       ],
       "properties": {
@@ -414,16 +423,6 @@
           "type": "string",
           "pattern": "^$|^https://[a-z0-9.-]+(:[0-9]+)?$",
           "description": "MANDATE_API_APP_ORIGIN"
-        },
-        "tier": {
-          "enum": [
-            "",
-            "dev",
-            "ci",
-            "staging",
-            "production"
-          ],
-          "description": "MANDATE_DEPLOYMENT_TIER"
         },
         "subjectLinks": {
           "type": "string",

@@ -6,7 +6,9 @@
 # credential. The build gets only the public `NEXT_PUBLIC_*` variables (DEC-823 item 5); the token
 # and the account ID reach the deploy step alone, after the bundle is built, so neither can be
 # inlined into it. `web/scripts/workers.mjs` checks this shape, and that nothing else deploys. The job
-# is off until the repository variable `WEB_DEPLOY_ENABLED` is `true` (DEC-1005 item 7).
+# is off until the repository variable `WEB_DEPLOY_ENABLED` is `true` (DEC-1005 item 7). The job
+# restores and saves no cache, which pull request runs could share, and installs with
+# `--ignore-scripts`, so no dependency's install script runs in the job that holds the token.
 name: web-deploy
 
 on:
@@ -49,9 +51,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: web/.nvmrc
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run cf:build
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}

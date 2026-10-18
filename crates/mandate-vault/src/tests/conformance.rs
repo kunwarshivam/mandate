@@ -14,7 +14,7 @@
 
 use crate::SourceError;
 use crate::lease::{LEASE_SECS, LeaseKeeper, RENEW_SECS};
-use crate::policy::{Access, Identity, SecretPath};
+use crate::policy::{Access, Holders, Identity, PlatformSecret, SecretPath, holders};
 use crate::source::{GRANT_SECS, Grant, SecretSource};
 use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
@@ -353,4 +353,132 @@ pub async fn after_revoke_the_session_takes_no_lease<H: Harness>(h: &H) {
             .is_err_and(|e| !e.is_outage()),
         "a renewal after revoke is a refusal, which drops the lease"
     );
+}
+
+/// The oracle for the platform's own secrets (DEC-2020 item 2), written out by hand: the model
+/// gateway reads the model provider's key, the email sender the email credential, and only the
+/// secret import writes either.
+pub fn platform_holders(secret: PlatformSecret) -> Holders {
+    let reads = match secret {
+        PlatformSecret::ModelProviderKey => Identity::ModelGateway,
+        PlatformSecret::EmailCredential => Identity::EmailSender,
+    };
+    Holders {
+        reads,
+        writes: Identity::SecretImport,
+    }
+}
+
+/// Each platform secret's holders are the oracle's. Each backend's run asserts it first, so a
+/// run with no OpenBao server still checks the table.
+pub fn the_platform_secrets_have_their_holders() {
+    for secret in PlatformSecret::ALL {
+        assert_eq!(holders(secret), Ok(platform_holders(secret)), "{secret:?}");
+    }
+}
+
+/// Every session the suite can open, the token exchange's included, for the platform cases.
+async fn every_session<H: Harness>(h: &H, now: UtcNanos) -> Vec<H::Source> {
+    let manager = h.source(Identity::ConnectionManager, now).await;
+    let grant = manager.issue_grant(&c("c1"), now).await.unwrap();
+    vec![
+        h.source(Identity::Api, now).await,
+        manager,
+        h.exchange(&grant, now).await.unwrap(),
+        h.source(Identity::Executor(c("c1")), now).await,
+        h.source(Identity::Runtime, now).await,
+        h.source(Identity::SecretImport, now).await,
+        h.source(Identity::ModelGateway, now).await,
+        h.source(Identity::EmailSender, now).await,
+    ]
+}
+
+/// A platform secret is write-only for the secret import, read by its one process and refused to
+/// every other identity, deleted by none, and a rotation is a write over it that its reader picks
+/// up at its next read. An outage is an outage, never a refusal (DEC-2020).
+pub async fn a_platform_secret_is_written_by_import_and_read_by_its_one_process<H: Harness>(h: &H) {
+    let now = at(1_000_000);
+    let import = h.source(Identity::SecretImport, now).await;
+    let value = |s: PlatformSecret, round: u8| format!("{s:?}-{round}");
+    for s in PlatformSecret::ALL {
+        import
+            .put(&SecretPath::Platform(s), &secret(&value(s, 1)))
+            .await
+            .unwrap();
+    }
+    for session in every_session(h, now).await {
+        let identity = session.identity().clone();
+        for s in PlatformSecret::ALL {
+            let path = SecretPath::Platform(s);
+            let read = session.read(&path).await;
+            if identity == platform_holders(s).reads {
+                assert_eq!(
+                    text(&read.unwrap().unwrap()),
+                    value(s, 1),
+                    "{identity:?} {s:?}"
+                );
+            } else {
+                assert_eq!(
+                    read.map(|v| v.is_some()),
+                    Err(SourceError::Denied),
+                    "{identity:?} {s:?}"
+                );
+            }
+            if identity != Identity::SecretImport {
+                let wrote = session.put(&path, &secret("forged")).await;
+                assert_eq!(wrote, Err(SourceError::Denied), "{identity:?} writes {s:?}");
+            }
+            let deleted = session.delete(&path).await;
+            assert_eq!(
+                deleted,
+                Err(SourceError::Denied),
+                "{identity:?} deletes {s:?}"
+            );
+        }
+    }
+    let gateway = h.source(Identity::ModelGateway, now).await;
+    let key = SecretPath::Platform(PlatformSecret::ModelProviderKey);
+    import
+        .put(&key, &secret(&value(PlatformSecret::ModelProviderKey, 2)))
+        .await
+        .unwrap();
+    assert_eq!(
+        text(&gateway.read(&key).await.unwrap().unwrap()),
+        value(PlatformSecret::ModelProviderKey, 2)
+    );
+    h.outage().await;
+    let cut = gateway.read(&key).await.map(|v| v.is_some());
+    h.restore().await;
+    assert!(cut.as_ref().is_err_and(SourceError::is_outage), "{cut:?}");
+}
+
+/// No `Debug` output, refusal, or error a platform secret's sessions produce shows it.
+pub async fn no_debug_or_refusal_shows_a_platform_secret<H: Harness>(h: &H) {
+    let now = at(1_000_000);
+    let import = h.source(Identity::SecretImport, now).await;
+    let mut outputs = vec![format!("{import:?}")];
+    for s in PlatformSecret::ALL {
+        let path = SecretPath::Platform(s);
+        import.put(&path, &secret(CANARY)).await.unwrap();
+        let reader = h.source(platform_holders(s).reads, now).await;
+        let held = reader.read(&path).await.unwrap().unwrap();
+        assert_eq!(text(&held), CANARY);
+        let refusals = [
+            import.read(&path).await.map(|v| v.is_some()).unwrap_err(),
+            reader.put(&path, &secret(CANARY)).await.unwrap_err(),
+            h.source(Identity::Runtime, now)
+                .await
+                .read(&path)
+                .await
+                .map(|v| v.is_some())
+                .unwrap_err(),
+        ];
+        outputs.push(format!("{reader:?}"));
+        outputs.push(format!("{held:?}"));
+        outputs.push(format!("{refusals:?}"));
+        outputs.extend(refusals.iter().map(ToString::to_string));
+    }
+    for output in outputs {
+        assert!(!output.contains(&CANARY[..16]), "{output}");
+    }
 }

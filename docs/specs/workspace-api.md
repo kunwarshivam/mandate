@@ -370,9 +370,11 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   and records it. **Validity is judged by the stream owner** at the moment mandate spec §6.1 names;
   the API's check is a convenience, except that it never forwards evidence bound to another action.
 - Until E9-4 ships, the CLI's only method is `cli_confirm`, paper only (mandate spec §6.1). The API
-  refuses every `live` step-up with `live_unavailable`. Whether the API itself may verify
-  `cli_confirm` for a call made in the web app is the founder's (DEC-2103 item 7, Proposed); until
-  decided, the API verifies `passkey` only, and `cli_confirm` stays the CLI's.
+  refuses every `live` step-up with `live_unavailable`. For a call made in the web app the API
+  verifies `passkey`, and `cli_confirm` only for a paper `approve` grant, confirmed in the CLI by
+  the same principal against a challenge this server issued for that action, within its 300 s and
+  once (DEC-2103 item 7, decided by the founder, DEC-2605 row 5); any other `cli_confirm` is
+  `step_up_method`.
 
 ### 3.7 Roles
 
@@ -683,13 +685,20 @@ per workspace deployment (item 6).
       never confirmed `invalid` at `/mandate_version`; one the control stream has confirmed a
       later version over `stale_base`, naming the latest; an agent already deployed with the same
       version answers `200` with its `AgentDeployed`, and with another version `invalid` at
-      `/agent_id`; every V-rule for the agent (V-002, V-006, and V-032 included) and the pinned
-      instruments, else `invalid` with the V-codes. V-002 reads the account's equity from the
-      latest `AccountSnapshotRecorded` on the account stream of the document's connection; with
+      `/agent_id`; an agent an `AgentStopped` names is `invalid` at `/agent_id` too, since an
+      agent id is deployed once ([DEC-1173](../project/decisions/DEC-1173.md) item 1); every
+      V-rule for the agent (V-002, V-006, and V-032 included) and the pinned instruments, else
+      `invalid` with the V-codes. V-002 reads the account's equity from the latest
+      `AccountSnapshotRecorded` on the account stream of the document's connection; with
       none, the equity is 0 and V-002 refuses (a tightening of the CLI, which leaves V-002 to the
       executor); then step-up, bound to the SHA-256 of the
-      canonical `{agent_id, mandate_version}`, kind `deploy`. It commits `AgentDeployed` version 1
-      with `config_refs.mandate_version`. A refusal commits nothing: `DeploymentRejected` is not
+      canonical `{agent_id, mandate_version}`, kind `deploy`. It commits `AgentDeployed` with
+      `config_refs.mandate_version`: version 2, naming the document's `connection_id`, exactly when
+      journal spec §9.24 rule 201 holds on the control stream (the connection established there at
+      version 2 and not since revoked), and version 1 otherwise; it refuses a version-2 draft whose
+      `connection_id` is not the document's (rule 200), appending nothing
+      ([DEC-1171](../project/decisions/DEC-1171.md)). Until the code change that follows DEC-1171
+      lands, it commits version 1. A refusal commits nothing: `DeploymentRejected` is not
       written until the deployment manager journals its own refusals. Its `202`, and the `200`
       of an agent already deployed with the version, are `commands/command-accepted`.
     - **Go live** answers `409` `live_unavailable` to every principal the deploy row authorizes,
