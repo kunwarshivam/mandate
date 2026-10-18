@@ -307,7 +307,6 @@ const SEEDED: [(&str, Parse); 4] = [
 ];
 
 #[test]
-#[ignore = "pending E21-55"]
 fn the_lookup_over_parsed_rows_matches_an_independent_fold() {
     if let Err(failure) = runner().run(&case(), |case| agrees(&case, real)) {
         panic!("{failure}");

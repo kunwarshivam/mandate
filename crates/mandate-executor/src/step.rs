@@ -17,8 +17,8 @@ use crate::protection::{
 use crate::reconcile::run;
 use crate::state::{EVERY_AGENT, ExecutorState, UnresolvedAppend};
 use crate::types::{
-    AgentId, BrokerOutcome, BrokerUpdate, Command, Effect, FoldedEvent, Input, OrderState,
-    ReconcileReason, WriterEpoch,
+    AgentId, BrokerOutcome, BrokerRequest, BrokerUpdate, Command, Effect, FoldedEvent, Input,
+    Order, OrderState, ReconcileReason, WriterEpoch,
 };
 
 /// One step of the executor (ADR-0001 ES-06).
@@ -127,8 +127,10 @@ fn superseded(unresolved: &Input, input: &Input) -> bool {
 }
 
 /// `Input::Started`: the process folded the stream and took an epoch. Every order whose outcome
-/// the journal does not know is queried, a received intent too old to submit is abandoned, and
-/// the startup reconciliation is requested. The intents waiting at the start resume after it has
+/// the journal does not know is queried, except a `PendingCancel` one whose cancel the broker
+/// never confirmed: its `Cancel` is sent again, whose answer decides it, since a crash between the
+/// batch that asked it and the request may have kept it from the broker (DEC-2302, rule 13). A
+/// received intent too old to submit is abandoned, and the startup reconciliation is requested. The intents waiting at the start resume after it has
 /// run, and the gate holds a new opening until it has run and an account has been journaled
 /// (`ExecutorState::reconciled_since_start`).
 fn started(
@@ -145,18 +147,32 @@ fn started(
     state.started_at = Some(state.account_head());
     let mut batch = Batch::new(state, ports)?;
     batch.bind(binding_gate);
-    let unresolved: Vec<_> =
-        batch
-            .view
-            .unacknowledged()
-            .into_iter()
-            .chain(batch.view.orders.values().filter(|order| {
-                matches!(order.state, OrderState::Unknown | OrderState::PendingCancel)
-            }))
-            .map(|order| order.client_order_id.clone())
-            .collect();
+    let cancelling =
+        |order: &&Order| order.state == OrderState::PendingCancel && order.cancel_unconfirmed;
+    let unresolved: Vec<_> = batch
+        .view
+        .unacknowledged()
+        .into_iter()
+        .chain(batch.view.orders.values().filter(|order| {
+            matches!(order.state, OrderState::Unknown | OrderState::PendingCancel)
+                && !cancelling(order)
+        }))
+        .map(|order| order.client_order_id.clone())
+        .collect();
+    let cancels: Vec<_> = batch
+        .view
+        .orders
+        .values()
+        .filter(cancelling)
+        .map(|order| order.client_order_id.clone())
+        .collect();
     for id in unresolved {
         query_unknown(&mut batch, id)?;
+    }
+    for id in cancels {
+        batch.broker(BrokerRequest::Cancel {
+            client_order_id: id,
+        });
     }
     resume(&mut batch, true)?;
     batch.request_reconciliation();

@@ -9,7 +9,7 @@ use mandate_canon::{Digest, Value};
 use mandate_risk::{DayTradeRegime, EtpClass, Exchange, GateConfig};
 
 use super::report::{VersionDigests, VersionReport, reference};
-use super::{VersionInput, half_spread};
+use super::{RecordedAction, VersionInput, half_spread};
 use crate::VersionError;
 use crate::report::{int, object};
 use mandate_backtest::MetricsConfig;
@@ -52,7 +52,7 @@ pub fn backtest_run_recorded(record: &RunRecord<'_>) -> Result<Value, VersionErr
 /// Every setting the run reads besides the mandate, which the report names by its version hash,
 /// and the bars and records, which have digests of their own: the fill model, fees, the gate's
 /// settings, the connection's profile by content hash, the account, the instrument reference, the
-/// corporate-action dates, and the report's statistics.
+/// corporate actions, and the report's statistics.
 pub(super) fn configuration(input: &VersionInput<'_>) -> Result<Value, VersionError> {
     let settings = input.settings;
     let instrument = input.instrument;
@@ -119,8 +119,8 @@ pub(super) fn configuration(input: &VersionInput<'_>) -> Result<Value, VersionEr
                 input
                     .corporate_actions
                     .iter()
-                    .map(|date| decimal(*date))
-                    .collect(),
+                    .map(action)
+                    .collect::<Result<_, _>>()?,
             ),
         ),
     ])
@@ -204,4 +204,10 @@ fn etp(class: EtpClass) -> &'static str {
         EtpClass::Complex => "complex",
         EtpClass::Unclassified => "unclassified",
     }
+}
+
+/// One corporate action as the configuration digest spells it (DEC-2245 item 4).
+fn action(action: &RecordedAction) -> Result<Value, VersionError> {
+    let _ = action;
+    Err(VersionError::Unimplemented { story: "E4-4" })
 }
