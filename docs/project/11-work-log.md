@@ -33,16 +33,17 @@ claim issue or the decision file, not here.
 - **2026-10-18, taking over the orphaned PRs.** The founder's other coordinating account ran out
   of tokens with 23 PRs open; this session took them over (merging `main` in, never rebasing).
   Merged on a Sonnet review each: #1566 `9942eec5`, #1572 `a34b2874`, #1583 `9befec7a`, #1547
-  `4d28c47b` (journal spec v0.53), #1570 `63352551`, #1522 `2373d8d5`, #1565 `9b1931b6` and #1580
-  `36a2d669` (renumbered to v0.54 at merge, vectors regenerated); #1448 closed, its content already
-  on `main` through #1458. Approved and waiting on CI: #1555 and #1560 (each re-approved after
-  `full-checks` found a doubled `serde_json` or `tokio` row the merge kept), #1581 (retargeted
-  to `main` once #1570 landed), #1558 (Cursor's gate decision ledger, marked ready), #1569
-  (retargeted after #1566) and #1578 (its first review). Sequenced behind them: #1537,
-  #1582 (gitleaks' two false positives allowed by path and value, as the other test allowlists
-  are), #1576 and #1577 after #1560, since all four rewrite `xtask/src/cell.rs`; #1575 after
-  #1569; #1545 after #1580, as v0.55. Waiting on the founder: #1539 and #1501 (above, in the
-  tracker).
+  `4d28c47b` (journal spec v0.53), #1570 `63352551`, #1522 `2373d8d5`, #1565 `9b1931b6`, #1580
+  `36a2d669` (renumbered to v0.54 at merge, vectors regenerated) and #1558 `6d3f8cb0` (Cursor's
+  gate decision ledger, marked ready); #1448 closed, its content already on `main` through #1458.
+  Approved and waiting on CI: #1555 and #1560 (each re-approved after `full-checks` found a
+  doubled `serde_json` or `tokio` row the merge kept), #1581 (retargeted to `main` once #1570
+  landed), #1569 (retargeted after #1566) and #1578 (its first review). Sequenced behind them:
+  #1537, #1582 (gitleaks' two false positives allowed by path and value, as the other test
+  allowlists are), #1576 and #1577 after #1560, since all four rewrite `xtask/src/cell.rs`; #1575
+  after #1569; #1545 after #1580, as v0.55. Waiting on the founder: #1539 and #1501 (above, in
+  the tracker).
+- **2026-10-17, the gate decision record.** The decision page was an agent header plus a short column of two-line checks, about 770px past a 1440×900 screen. It is now one ledger: the action once, the verdict on a line, every check full width with the result in a column. `web/` only.
 - **2026-10-13 and 10-14, the two coordinator sessions: nine merges, the live path's R0-gap rows
   closed.** The recorded docs sweep of the #1295/#1315 review notes landed split, the spec guard
   refusing spec and code in one PR (#1323 `29d0914c`, the agent-harness line alone in #1324
