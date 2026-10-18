@@ -8,14 +8,20 @@ spec = "docs/specs/notifications.md"
 placeholder = "[[EMAIL-FOOTER]]"
 founder_transport_crate = "mandate-mail-smtp"
 
+# The file that defines the trait: the only place `trait MailTransport` may appear.
+trait_file = "crates/mandate-dispatcher/src/email.rs"
+
 # The only implementors §4.4 allows: the recorded fixture and the founder-only SMTP transport.
+# Each is defined, once, in its file, and implements the trait there, by its bare name.
 [[transport]]
 crate = "mandate-dispatcher"
 type = "RecordedTransport"
+file = "crates/mandate-dispatcher/src/email.rs"
 
 [[transport]]
 crate = "mandate-mail-smtp"
 type = "FounderSmtpTransport"
+file = "crates/mandate-mail-smtp/src/lib.rs"
 
 # Mail-sending crates: SMTP clients, message builders that submit, and mail-provider SDKs.
 [denied]
