@@ -105,12 +105,8 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   cap) and [DEC-2504](decisions/DEC-2504.md) (the managed cell's egress to the browsers' push
   services); and, on #1539's branch only, DEC-2001 items 6 (the hosted tier is `dev` until release
   signing) and 7 (`doctl`).
-- **#1539** (E21-51, cell #1's hosted bring-up): two of its commits carry `Co-authored-by`
-  trailers that fast-lint refuses. Clearing them rewrites that branch's history and force-pushes
-  it; agents wait for your yes.
-- **#1501** (Dependabot): besides sharp and undici it moves `wrangler`, which deploys `web/` from
-  `main`, from 4.139.0 to 4.151.1 without the registry row that pins 4.139.0
-  (`docs/dependencies.md`). Left open: redo the bump with its row, or close it.
+- **Decided 2026-10-18:** the `Co-authored-by` check is gone ([DEC-2601](decisions/DEC-2601.md)), so
+  #1539 lands without a history rewrite; #1501 carries its `wrangler` 4.151.1 registry row.
 - **#1582** (the deployment manager in the cell, merged) took option 1: the manager starts the
   runtime, and starts none until DEC-1171's account read lands, so the cell runs no runtime until
   then. Option 2 keeps #1560's static runtime meanwhile, one line in `processes.json`.
