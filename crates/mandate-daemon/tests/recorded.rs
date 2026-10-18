@@ -67,7 +67,6 @@ fn remove(value: &mut Value, path: &[&str]) {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn the_bundle_loads_every_file_it_names() {
     let bundle = Bundle::load(Path::new(FIXTURE)).unwrap();
     assert_eq!(bundle.entry.model_id, "llm.research_agent");
@@ -88,7 +87,6 @@ fn the_bundle_loads_every_file_it_names() {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn the_registry_offers_the_entry_on_its_one_endpoint() {
     let bundle = Bundle::load(Path::new(FIXTURE)).unwrap();
     let registry = bundle.registry().unwrap();
@@ -101,7 +99,6 @@ fn the_registry_offers_the_entry_on_its_one_endpoint() {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn a_missing_file_refuses_the_load() {
     for file in FILES {
         let dir = copy(&format!("missing-{file}"), "", |_| {});
@@ -115,7 +112,6 @@ fn a_missing_file_refuses_the_load() {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn a_missing_member_refuses_the_load_and_nothing_is_defaulted() {
     let cases: [(&str, &[&str], &str); 8] = [
         ("research.json", &["entry", "seed"], "seed"),
@@ -144,7 +140,6 @@ fn a_missing_member_refuses_the_load_and_nothing_is_defaulted() {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn text_that_is_not_strict_json_refuses_the_load() {
     let dir = copy("not-json", "", |_| {});
     fs::write(dir.join("news.json"), b"[{\"age_s\": 1.5}]").unwrap();
@@ -158,7 +153,6 @@ fn text_that_is_not_strict_json_refuses_the_load() {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn the_plane_gives_no_filings_and_only_the_instruments_asked_for() {
     let plane = Bundle::load(Path::new(FIXTURE)).unwrap().plane;
     let query = TextQuery {
@@ -202,7 +196,6 @@ proptest! {
     /// the same items stay in the plan's windows on any day (DEC-2210 item 2). The oracle reads
     /// the ages from the fixture's own JSON, not from the loaded bundle.
     #[test]
-    #[ignore = "pending E21-54"]
     fn recorded_items_are_stamped_at_their_age_before_each_cut_off(
         cut_off in 1_700_000_000_i64..2_100_000_000,
     ) {
