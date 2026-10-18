@@ -508,7 +508,7 @@ risk_case("MC-R28", "A 1:3 reverse split removes the residual's basis, and its c
                "12) = 100.01 is removed from B; cash in lieu = round(1/3 x 300.03, 2) = 100.01, so realized moves by 0 and E "
                "by cash in lieu - f x mark' = 100.01 - 100.01 = 0. The mark is replaced by 300.03. CashInLieuPosted moves "
                "the receivable to cash and leaves E unchanged.")
-risk_case("MC-R29", "A cash dividend joins E with the ex-date's first mark; its application and its payment move no USD measure",
+risk_case("MC-R29", "A cash dividend joins E with the first counted sane mark after application; its application and its payment move no USD measure",
           "two_stock_swing", WIDE + FAST + ISO, "100", "100", "us_equity", at(14, 0),
           [mk(at(14, 1), "100"),
            {"event": "corporate_action_dividend", "at": at(0, 0, day=22), "session": "after_hours", "per_share": "0.255"},
