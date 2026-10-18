@@ -213,14 +213,36 @@ struct Cluster<'a> {
 /// The workflow that alone may bootstrap from CI: lane IAC's `infra.yml` on `main` (DEC-2018).
 const INFRA_WORKFLOW_SUFFIX: &str = "/.github/workflows/infra.yml@refs/heads/main";
 
-/// Why a CI run must not bootstrap, if it must not: only GitHub Actions, on `main`, in
-/// `infra.yml`, may (DEC-2018 item 7).
-fn infra_refusal(actions: &str, reference: &str, workflow: &str) -> Option<&'static str> {
-    if actions != "true" {
+/// The repository the CI bootstrap belongs to.
+const REPOSITORY: &str = "kunwarshivam/mandate";
+
+/// What GitHub Actions says about the run, by name so no two can be swapped.
+struct Run<'a> {
+    /// `GITHUB_ACTIONS`.
+    actions: &'a str,
+    /// `GITHUB_REPOSITORY`.
+    repository: &'a str,
+    /// `GITHUB_EVENT_NAME`.
+    event: &'a str,
+    /// `GITHUB_REF`.
+    reference: &'a str,
+    /// `GITHUB_WORKFLOW_REF`.
+    workflow: &'a str,
+}
+
+/// Why a CI run must not bootstrap, if it must not: only a dispatched `infra.yml` on this
+/// repository's `main` in GitHub Actions may (DEC-2018 item 7). These are environment variables, a
+/// guard against running it by mistake, never the security boundary.
+fn infra_refusal(run: &Run<'_>) -> Option<&'static str> {
+    if run.actions != "true" {
         Some("the CI bootstrap runs only in GitHub Actions")
-    } else if reference != "refs/heads/main" {
+    } else if run.repository != REPOSITORY {
+        Some("the CI bootstrap runs only in this repository")
+    } else if run.event != "workflow_dispatch" {
+        Some("the CI bootstrap runs only from a dispatched run")
+    } else if run.reference != "refs/heads/main" {
         Some("the CI bootstrap runs only on main")
-    } else if !workflow.ends_with(INFRA_WORKFLOW_SUFFIX) {
+    } else if run.workflow != format!("{REPOSITORY}{INFRA_WORKFLOW_SUFFIX}") {
         Some("the CI bootstrap runs only from infra.yml")
     } else {
         None
@@ -536,11 +558,20 @@ pub(crate) fn bootstrap_from_infra(
     secrets: &WorkloadSecrets,
 ) -> Result<()> {
     let var = |name: &str| env::var(name).unwrap_or_default();
-    if let Some(reason) = infra_refusal(
-        &var("GITHUB_ACTIONS"),
-        &var("GITHUB_REF"),
-        &var("GITHUB_WORKFLOW_REF"),
-    ) {
+    let (actions, repository, event, reference, workflow) = (
+        var("GITHUB_ACTIONS"),
+        var("GITHUB_REPOSITORY"),
+        var("GITHUB_EVENT_NAME"),
+        var("GITHUB_REF"),
+        var("GITHUB_WORKFLOW_REF"),
+    );
+    if let Some(reason) = infra_refusal(&Run {
+        actions: &actions,
+        repository: &repository,
+        event: &event,
+        reference: &reference,
+        workflow: &workflow,
+    }) {
         bail!("{reason} (DEC-2018)");
     }
     let out = Command::new("kubectl")
@@ -711,18 +742,48 @@ mod tests {
         assert!(right.is_ok_and(|c| c == context));
     }
 
-    /// Only `infra.yml` on `main` in GitHub Actions may bootstrap from CI.
+    /// Only a dispatched `infra.yml` on this repository's `main` in GitHub Actions may bootstrap
+    /// from CI: the one good run passes, and each field made wrong in turn, or two fields swapped,
+    /// is refused.
     #[test]
-    fn only_infra_yml_on_main_may_bootstrap_from_ci() {
-        let infra = "kunwarshivam/mandate/.github/workflows/infra.yml@refs/heads/main";
-        assert!(infra_refusal("true", "refs/heads/main", infra).is_none());
-        assert!(infra_refusal("", "refs/heads/main", infra).is_some());
-        assert!(infra_refusal("true", "refs/heads/go", infra).is_some());
-        assert!(infra_refusal("true", "refs/pull/1/merge", infra).is_some());
-        let other = "kunwarshivam/mandate/.github/workflows/ci.yml@refs/heads/main";
-        assert!(infra_refusal("true", "refs/heads/main", other).is_some());
-        let branch = "kunwarshivam/mandate/.github/workflows/infra.yml@refs/heads/go";
-        assert!(infra_refusal("true", "refs/heads/main", branch).is_some());
+    fn only_a_dispatched_infra_yml_on_main_may_bootstrap_from_ci() {
+        let workflow = "kunwarshivam/mandate/.github/workflows/infra.yml@refs/heads/main";
+        let good = || Run {
+            actions: "true",
+            repository: "kunwarshivam/mandate",
+            event: "workflow_dispatch",
+            reference: "refs/heads/main",
+            workflow,
+        };
+        assert!(infra_refusal(&good()).is_none());
+        let wrong: [fn(&mut Run<'static>); 9] = [
+            |r| r.actions = "",
+            |r| r.repository = "someone/mandate",
+            |r| r.event = "push",
+            |r| r.event = "pull_request",
+            |r| r.reference = "refs/heads/go",
+            |r| r.reference = "refs/pull/1/merge",
+            |r| r.workflow = "kunwarshivam/mandate/.github/workflows/ci.yml@refs/heads/main",
+            |r| r.workflow = "kunwarshivam/mandate/.github/workflows/infra.yml@refs/heads/go",
+            |r| r.workflow = "someone/mandate/.github/workflows/infra.yml@refs/heads/main",
+        ];
+        for (index, make_wrong) in wrong.iter().enumerate() {
+            let mut run = good();
+            make_wrong(&mut run);
+            assert!(infra_refusal(&run).is_some(), "case {index} passed");
+        }
+        let swapped = Run {
+            reference: workflow,
+            workflow: "refs/heads/main",
+            ..good()
+        };
+        assert!(infra_refusal(&swapped).is_some());
+        let swapped = Run {
+            repository: "workflow_dispatch",
+            event: "kunwarshivam/mandate",
+            ..good()
+        };
+        assert!(infra_refusal(&swapped).is_some());
     }
 
     /// The CI bootstrap refuses outside infra.yml before it reads the kubeconfig or the cluster.
