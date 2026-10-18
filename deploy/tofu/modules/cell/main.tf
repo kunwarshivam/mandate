@@ -51,7 +51,13 @@ variable "kube_api_allowed_addresses" {
 }
 
 variable "spaces_monthly_usd" {
-  type = number
+  description = "Spaces' subscription, counted in every environment though it is per account (DEC-2012 item 12)."
+  type        = number
+
+  validation {
+    condition     = var.spaces_monthly_usd >= 5
+    error_message = "Spaces costs at least 5 USD a month; counting less would undercount the estimate."
+  }
 }
 
 variable "block_storage_gb" {
@@ -59,7 +65,13 @@ variable "block_storage_gb" {
 }
 
 variable "cap_usd" {
-  type = number
+  description = "This environment's refusal threshold; two environments at 65 USD leave headroom under DEC-2011's 150 USD."
+  type        = number
+
+  validation {
+    condition     = var.cap_usd > 0 && var.cap_usd <= 65
+    error_message = "An environment's cap is at most 65 USD a month (DEC-2012 item 12)."
+  }
 }
 
 locals {
@@ -110,23 +122,6 @@ output "cluster_endpoint" {
 
 output "state_bucket" {
   value = module.spaces.state_bucket
-}
-
-output "journal_archive_bucket" {
-  value = module.spaces.journal_archive_bucket
-}
-
-output "journal_archive_endpoint" {
-  value = module.spaces.journal_archive_endpoint
-}
-
-output "journal_archive_access_key_id" {
-  value = module.spaces.journal_archive_access_key_id
-}
-
-output "journal_archive_secret_access_key" {
-  value     = module.spaces.journal_archive_secret_access_key
-  sensitive = true
 }
 
 output "monthly_estimate_usd" {

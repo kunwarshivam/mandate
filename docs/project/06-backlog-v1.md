@@ -3106,16 +3106,17 @@ enables `live` (ES-23, OPS-5).
   by OpenTofu from the repository, so that cell #1's infrastructure is reviewed code applied only
   with my approval, never a script run by hand and never a token an agent holds (DEC-2011).
   *Accepted when:* `deploy/tofu/` has one module per concern (network: a VPC and a firewall; DOKS:
-  one pool of two nodes, the Kubernetes version pinned and auto-upgrade off; Spaces: the state
-  bucket, versioned, and the journal-archive bucket for E21-41's Barman, versioned since Spaces has
-  no object lock; Cloudflare: the tunnel, the API host's DNS record and its Access application;
-  the budget: an estimate the plan refuses past the cap) and one root per environment (`staging`,
+  one pool of two nodes, the Kubernetes version pinned and auto-upgrade off; Spaces: OpenTofu's
+  state bucket, versioned, and nothing else; Cloudflare: the tunnel, the API host's DNS record, its
+  Access application, and the R2 bucket for E21-41's WAL archive and base backups with a lock rule
+  over every key for at least the archive's 30-day retention (DEC-973 item 6); the budget: an
+  estimate the plan refuses past $65 per environment) and one root per environment (`staging`,
   `production`), with state in Spaces, encrypted on the client, and the providers pinned by a
   committed lock file; every pull request touching `deploy/tofu/` runs `tofu fmt -check`,
   `tofu validate`, tflint and `tofu test` against mocked providers as the policy check (no public
-  firewall source, buckets private, no load balancer, the cap), with no credential, selected by
-  `cargo xtask ci select` (DEC-1190); `.github/workflows/infra.yml` runs `plan` and `apply` only
-  from `main` by manual dispatch, under the environments `infra-staging` and `infra-production`
+  firewall source, the state bucket private, the archive locked, no load balancer, the cap), with
+  no credential, selected by `cargo xtask ci select` (DEC-1190); `.github/workflows/infra.yml`
+  runs `plan` and `apply` only from `main` by manual dispatch, under the environments `infra-staging` and `infra-production`
   with the founder as required reviewer (ES-12, DEC-1005); and the runbook names every token,
   key, environment and secret the founder creates, each with the least permissions the plan
   needs. It stops at a reachable, empty cluster with its buckets, DNS and Access: add-ons and
