@@ -1,0 +1,11 @@
+file = "crates/mandate-journal/tests/acknowledgment_records.rs"
+test = "the_three_new_refusal_reasons_are_the_account_streams_alone"
+reason = """
+DEC-2509 (journal spec v0.61 §9.28, rules 239 and 28): `OwnerAcknowledgmentRequested` and
+`OwnerAcknowledged` are closed on the control stream and as the account stream's copies, and
+`OwnerCommandRefused` gains three reasons. The journal does not register them yet, so it refuses
+this test's drafts as `unknown_event_type`, `unknown_schema` at `payload`, or `non_canonical` at
+`payload.reason`, answers of the journal's own rather than a stub's report. No stub or new API is
+needed: the change is the schema registration. E8-3's registration (M7 S2) deletes this file with
+the test's `#[ignore]` line.
+"""
