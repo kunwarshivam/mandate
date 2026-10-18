@@ -1,6 +1,6 @@
 # Bootstrapping a hosted cluster (the founder's runbook)
 
-E21-56, [DEC-2018](../../docs/project/decisions/DEC-2018.md). This is done once per cluster:
+E21-58, [DEC-2018](../../docs/project/decisions/DEC-2018.md). This is done once per cluster:
 staging first, production when the founder decides. After it, the cluster takes every change
 from `main` through Flux, and nobody applies anything to it by hand. Agents never run any step
 here (DEC-2015 item 5).

@@ -66,7 +66,7 @@ commands:
                         push and sign the multi-arch index over every arch's published images
                         (main only, from CI, after each arch's publish)
   gitops bootstrap      install Flux, pinned, write the workload secrets and apply the sync.yaml of
-                        $GITOPS_ENVIRONMENT (gitops-bootstrap.yml on main only; E21-56)
+                        $GITOPS_ENVIRONMENT (gitops-bootstrap.yml on main only; E21-58)
   gitops secrets        write the workload secrets alone (gitops-bootstrap.yml on main only)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
@@ -3711,7 +3711,7 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// `MANDATE_*`, `*_RESULT` and `*_SELECTED` names, the selection's `REASONS`, and the failure
 /// reports' `RUN_URL` and `VERDICTS` (DEC-1190), `merge.yml` the merge inputs, `web.yml` and
 /// `web-e2e.yml` the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`,
-/// `gitops-bootstrap.yml` its tool pins, the cluster's kubeconfig and the workload secrets (E21-56,
+/// `gitops-bootstrap.yml` its tool pins, the cluster's kubeconfig and the workload secrets (E21-58,
 /// DEC-2018), and
 /// `web-deploy.yml` the build's public Supabase values and the deploy step's Cloudflare token and
 /// account (DEC-1005).

@@ -1,5 +1,5 @@
 //! `cargo xtask gitops`: the founder's one bootstrap of a hosted cluster, and its workload secrets
-//! (E21-56, DEC-2015, DEC-2018).
+//! (E21-58, DEC-2015, DEC-2018).
 //!
 //! Both commands run only from `.github/workflows/gitops-bootstrap.yml`, dispatched from `main`
 //! under the environment's GitHub environment, whose required reviewer is the founder. They refuse
