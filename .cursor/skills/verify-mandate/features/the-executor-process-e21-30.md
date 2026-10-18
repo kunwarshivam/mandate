@@ -3,7 +3,7 @@
 - **Spec:** [infrastructure design](../../../../docs/design/infrastructure.md) §3.1, §3.4, §3.6;
   [journal spec](../../../../docs/specs/journal.md) §2 (the copy rules), §5.1 (writer epochs),
   §9.1 (`KillSwitchActivated`, `OwnerExitRequested`, `IntentProposed`); trading spec §5.5 (the agent-scoped kill
-  switch), §11 (reconciliation); connections spec §8.1 (the connect check); ADR-0001 ES-06, ES-20; DEC-17, DEC-1171, DEC-2003, DEC-2007, DEC-2032.
+  switch), §11 (reconciliation); connections spec §8.1 (the connect check); ADR-0001 ES-06, ES-20; DEC-17, DEC-1171, DEC-2003, DEC-2007, DEC-2033.
 - **Code:** `mandate-executord` (`crates/mandate-executord`): `src/process.rs` (`ExecutorProcess`:
   one writer epoch on the account stream, `StreamOpened` on an empty one, `Input::Started` on the
   first pass that reads a tick, every draft journaled before the broker sees what it names, an
@@ -14,8 +14,8 @@
   `src/follow.rs` (`agents_of`: the account's agents from version-2 `ConnectionEstablished` and
   `AgentDeployed`; `switches`: an agent stream's `KillSwitchActivated` records with the bid the
   same command's `OwnerExitRequested` confirmed; `proposals`: its `IntentProposed` limit orders,
-  less an opening a later switch or mode change follows, DEC-2032 item 2), and each exit handed
-  once as the runtime's handoff, ready or not (DEC-2032 item 1); `src/paper.rs` (`FixturePaper`, the fixture
+  less an opening a later switch or mode change follows, DEC-2033 item 2), and each exit handed
+  once as the runtime's handoff, ready or not (DEC-2033 item 1); `src/paper.rs` (`FixturePaper`, the fixture
   paper broker below `mandate-alpaca`'s client, DEC-2007 item 1) and `src/alpaca.rs`
   (`AlpacaBroker`, the client as the process's `Broker`, DEC-2007 item 2), `src/connect.rs`
   (`connect_check`: `StreamOpened` and `ConnectionChecked` for a paper Alpaca connection, DEC-2007

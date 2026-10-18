@@ -1,4 +1,4 @@
-//! What the executor reads from streams it does not write (DEC-2003 items 3 to 5, DEC-2032): which
+//! What the executor reads from streams it does not write (DEC-2003 items 3 to 5, DEC-2033): which
 //! agents trade on its account, from the control stream, and the kill switches and order proposals
 //! each agent's stream holds.
 //!
@@ -194,7 +194,7 @@ fn confirmation(payload: &Value) -> Result<Option<OwnerConfirmation>, Unreadable
 
 /// One order the runtime proposed on an agent's stream: its `IntentProposed`, identified by its
 /// event id (journal spec §2, §9.1), which the executor hands to its core as the handoff the
-/// runtime would make in one process (DEC-2032 item 1).
+/// runtime would make in one process (DEC-2033 item 1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Proposal {
     pub intent: EventId,
@@ -209,8 +209,8 @@ pub struct Proposal {
 /// The orders one agent's stream proposes, in stream order. An opening or an increase that a later
 /// `KillSwitchActivated`, or a later `AgentModeChanged` to any mode but `normal`, follows is left
 /// out: the agent stopped wanting it before the executor took it, and leaving it out adds no risk
-/// (`AGENTS.md` rule 3; DEC-2032 item 2). An owner's exit at the market is not a proposal this
-/// slice hands, since the core takes only limit orders from a handoff (DEC-2032 item 4).
+/// (`AGENTS.md` rule 3; DEC-2033 item 2). An owner's exit at the market is not a proposal this
+/// slice hands, since the core takes only limit orders from a handoff (DEC-2033 item 4).
 ///
 /// # Errors
 /// [`Unreadable`] for an `IntentProposed` whose members do not read, or that is not a limit order.

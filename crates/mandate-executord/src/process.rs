@@ -1,4 +1,4 @@
-//! One broker account's executor as a long-running process (E21-30, DEC-2003, DEC-2032).
+//! One broker account's executor as a long-running process (E21-30, DEC-2003, DEC-2033).
 
 use std::collections::{BTreeSet, VecDeque};
 use std::time::Duration;
@@ -207,7 +207,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// One pass of the loop at the injected time `now`: an input in doubt first, then requests
     /// left unsent and a due reconciliation, then (once started) every kill switch the account's
     /// agents' streams hold that the fold has not applied, then the latest tick, then every exit
-    /// they propose that the fold has not taken (DEC-2032 item 1). Before the start,
+    /// they propose that the fold has not taken (DEC-2033 item 1). Before the start,
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
     /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
@@ -424,7 +424,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         self.hand(now, now, Input::Command(command), alerts, 0)
     }
 
-    /// Hands one exit as the handoff the runtime would make in one process (DEC-2032 item 1).
+    /// Hands one exit as the handoff the runtime would make in one process (DEC-2033 item 1).
     fn take(
         &mut self,
         now: UtcNanos,

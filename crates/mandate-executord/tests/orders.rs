@@ -1,4 +1,4 @@
-//! The orders the account's agents propose (E21-30, DEC-2032): each exit's `IntentProposed`
+//! The orders the account's agents propose (E21-30, DEC-2033): each exit's `IntentProposed`
 //! handed to the core as the runtime's handoff would be, once, whether or not the process is
 //! ready, kill switches always first, and nothing sent before it is journaled. An opening waits for
 //! the next slice, which hands it with its protection.
@@ -86,7 +86,7 @@ fn an_opening_waits_for_its_protection() -> Result<(), Error> {
     Ok(())
 }
 
-/// An exit before a change of the agent's mode is still handed (DEC-2032 item 2).
+/// An exit before a change of the agent's mode is still handed (DEC-2033 item 2).
 #[test]
 fn a_mode_change_keeps_a_waiting_exit() -> Result<(), Error> {
     let journal = deployed()?;
@@ -191,7 +191,7 @@ fn an_unreadable_proposal_stops_the_process() -> Result<(), Error> {
 }
 
 /// An owner's exit at the market is not handed by this slice, since the core takes only limit
-/// orders from a handoff (DEC-2032 item 4); it is neither received nor sent, and it stops nothing.
+/// orders from a handoff (DEC-2033 item 4); it is neither received nor sent, and it stops nothing.
 #[test]
 fn an_owner_exit_at_the_market_is_not_handed() -> Result<(), Error> {
     let journal = deployed()?;
