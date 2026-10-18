@@ -3101,22 +3101,23 @@ enables `live` (ES-23, OPS-5).
   API's image (A1), its version and deploy routes (A2), the runtime's image (P), the executor (X),
   the research driver (I2), step-up (SU), the backtest's API read and `web/` screen (I4, W2), the
   kill switch's CLI (O4) and the deployment manager (D1).
-- **E21-56 (Proposed, M8, staging by 2026-10-26; lane GO; claim #1635; DEC-2015 to DEC-2018; after
-  DEC-2011's empty DOKS cluster from lane IAC)** As the founder, I want staging and production on
-  DOKS reconciled by GitOps from `main`, so that what runs is exactly what `main` says and
+- **E21-58 (Proposed, M8, staging by 2026-10-26; lane GO; claim #1635; DEC-2015 to DEC-2018; after
+  E21-57's empty DOKS cluster from lane IAC, DEC-2011)** As the founder, I want staging and production
+  on DOKS reconciled by GitOps from `main`, so that what runs is exactly what `main` says and
   production moves only by a reviewed pull request. *Accepted when:* `deploy/gitops/` holds one
   overlay per environment (`staging`, `production`), reconciled by Flux read-only from `main`
   (DEC-2015), that installs, from `deploy/cell/charts/` and `deploy/hosted/values/` unforked, the
   CloudNativePG operator and its Barman Cloud plugin, the journal's two instances on separate nodes
-  archiving to lane IAC's Spaces bucket, the workspace chart, and cloudflared for the tunnel; staging
+  archiving to the journal archive bucket (Cloudflare R2 with bucket lock, DEC-2605 row 4) through
+  an egress rule that fails closed, the workspace chart, and cloudflared for the tunnel; staging
   tracks the signed image digests `release.yml` publishes from `main` through a bot pull request,
-  and production changes only by a pull request that copies staging's digests; every image's
-  signature is verified at admission (E21-35); CI renders every overlay with no credential,
-  checks it with kubeconform, and refuses an overlay that sets the stub tier (`dev` or `ci`,
-  DEC-2005) or `live`, or names an image not pinned by digest, selected by `cargo xtask ci select`
-  (DEC-1190); workload secrets come from the environment's GitHub environment by an approved
-  workflow until E21-32's vault, never committed; and the founder's one bootstrap runs from an
-  approved workflow on `main` behind the environment's required reviewers, never by an agent.
+  and production changes only by a pull request that copies staging's digests; every image of the
+  repository's is signature-checked at admission (E21-35); CI renders every overlay with no
+  credential, checks it with kubeconform, and refuses an overlay that sets the stub tier (`dev` or
+  `ci`, DEC-2005) or `live`, or names an image not pinned by digest, selected by `cargo xtask ci
+  select` (DEC-1190); and the founder's one bootstrap, from an address the cluster's API firewall
+  admits, installs Flux and creates the workload secrets (the tunnel token and the archive key)
+  from lane IAC's outputs, never committed and never by an agent, until E21-32's vault holds them.
 
 ## Won't (v1)
 
