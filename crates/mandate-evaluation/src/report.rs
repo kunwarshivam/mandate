@@ -44,6 +44,25 @@ pub struct InputDigests {
     pub cost_model: Digest,
 }
 
+/// The canonical objects a report's `inputs` digest (DEC-2244 item 6): the thesis records read,
+/// the close series, and the cost model, so a caller stores exactly what the record's references
+/// name (journal spec §6.3, §11 check 6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputObjects {
+    pub theses: Value,
+    pub closes: Value,
+    pub cost_model: Value,
+}
+
+/// The input objects of `request`, each the object whose digest [`crate::evaluate`]'s report
+/// holds in its `inputs`.
+///
+/// # Errors
+/// `unimplemented` until E17-8's run append builds it.
+pub fn input_objects(_request: &EvaluationRequest<'_>) -> Result<InputObjects, EvaluationError> {
+    Err(EvaluationError::Unimplemented { story: "E17-8" })
+}
+
 impl InputDigests {
     pub(crate) fn of(request: &EvaluationRequest<'_>) -> Result<Self, EvaluationError> {
         let records = request

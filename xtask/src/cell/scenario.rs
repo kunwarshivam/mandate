@@ -17,9 +17,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use super::{
-    API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_WORKSPACE, NAMESPACE, NODE, api_image_tag,
-    api_port_forward, http_status, kubectl, processes, render, run_id, run_job, stub_image_tag,
-    tools_missing, up,
+    API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS, NAMESPACE,
+    NODE, WORKSPACE_CHART, api_image_tag, api_port_forward, helm, http, kubectl, open_session,
+    processes, render, run_id, run_job, signed_in, stub_image_tag, stub_token, tools_missing, up,
 };
 use crate::output;
 
@@ -35,15 +35,24 @@ const INPUTS: &str = "/in";
 const JOURNAL: &str = "$(MANDATE_JOURNAL_DSN)";
 const STORE: &str = "/work/store";
 const SEGMENT: &str = "/work/segment.jsonl";
-/// The founding member: an opaque ULID (identity spec §3.1), never a name. The CLI's owner
-/// gestures take the lower-case form, which is all `--user` accepts (DEC-527 item 3).
-pub const FOUNDER: &str = "01K7DEM00000000000000F0VND";
+/// The founding member: the demo owner, the member the stub issuer's `demo-owner` subject is
+/// linked to, so the owner who signs in is the one the run's workspace was founded for (DEC-2010).
+/// An opaque ULID (identity spec §3.1), never a name; the CLI's owner gestures take the lower-case
+/// form, which is all `--user` accepts (DEC-527 item 3).
+pub const FOUNDER: &str = DEMO_OWNER;
 /// The demo's agent.
 pub const AGENT: &str = "demo-spy";
 /// How long the gestures' Job may run: the egress gate, the credentials copy and every gesture,
 /// one after another. Under the 300 s `run_job` polls for, so the Job ends, and the report is
 /// written, before the polling gives up.
 const DEADLINE_S: u64 = 240;
+
+/// The run's workspace (DEC-2010): a ULID, since the API hosts only a ULID, fresh for each run id
+/// because a confirmed version refuses a second confirmation: `01KDEM`, the run id's ten digits,
+/// then a fixed tail that no other demo id uses.
+pub fn workspace_of(id: &str) -> String {
+    format!("01KDEM{id:0>10.10}000000000D")
+}
 
 /// One of the demo's six steps and what it is made of.
 #[derive(Debug)]
@@ -157,13 +166,15 @@ pub fn by_lane(steps: &[Step]) -> BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>>
     lanes
 }
 
-/// The waits several gaps share: a session from the stub issuer, the agent's runtime started by
-/// the deployment manager, web/ driven against the cell, and the executor in the cell.
-const SI_SESSION: Wait = Wait {
-    lane: "SI",
-    story: "E21-52",
-    pr: Some(1591),
-    lands: "the stub issuer's entry point, so the API opens a session (DEC-2100 item 9)",
+/// The waits several gaps share: the API's membership read, the agent's runtime started by the
+/// deployment manager, web/ driven against the cell, and the executor in the cell.
+const MB_MEMBERS: Wait = Wait {
+    lane: "MB",
+    story: "E21-31",
+    pr: None,
+    lands: "the membership parser: the API reads memberships through `control_entry`; until \
+            then its `until_parser` fails every signed-in read and command closed with \
+            `membership_unavailable` (DEC-978 item 8)",
 };
 const D1_RUNTIME: Wait = Wait {
     lane: "D1",
@@ -203,6 +214,15 @@ pub struct ApiCheck {
     pub shows: &'static str,
     pub path: String,
     pub status: u16,
+    pub ask: Ask,
+}
+
+/// How an [`ApiCheck`] asks: a `GET` of its path with no session, or the demo owner's sign-in,
+/// a token from the stub issuer traded at `POST /v1/sessions`, which also needs the session cookie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ask {
+    NoSession,
+    SignIn,
 }
 
 /// One CLI command in the cell, the text its success prints, and what it shows the demo. A gesture
@@ -308,25 +328,29 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 ),
                 Part::Api(ApiCheck {
                     shows: "the cell's API, through the demo's port-forward, refusing a read \
-                            of the demo workspace with no session (401)",
-                    path: format!("/v1/workspaces/{DEMO_WORKSPACE}/agents"),
+                            of the run's workspace with no session (401)",
+                    path: format!("/v1/workspaces/{workspace}/agents"),
                     status: 401,
+                    ask: Ask::NoSession,
+                }),
+                Part::Api(ApiCheck {
+                    shows: "the demo owner signing in through the stub issuer: POST \
+                            /v1/sessions opens a session (204 and its cookie)",
+                    path: "/v1/sessions".into(),
+                    status: 204,
+                    ask: Ask::SignIn,
                 }),
                 Part::Gap(Gap {
-                    what: "the demo owner signs in and reads the workspace through the API",
-                    on_main: "the API in the cell (#1554) with the stub issuer's sidecar wired \
-                              (#1572), `mandate identity link` (#1529), `cell demo`'s own sign-in, \
-                              and web/'s sign-in to a dev cell (#1588)",
-                    waits: vec![
-                        SI_SESSION,
-                        wait(
-                            "E2E",
-                            "E21-54",
-                            None,
-                            "this scenario signs in and reads the API's own workspace with the \
-                             session, a partial step while the gestures use a fresh one",
-                        ),
-                    ],
+                    what: "the owner reads the run's workspace through the API with that session",
+                    on_main: "sign-in through the stub issuer (#1591), the API hosting the run's \
+                              workspace founded for the demo owner, and \
+                              `mandate_identity::control_entry`",
+                    waits: vec![MB_MEMBERS],
+                }),
+                Part::Gap(Gap {
+                    what: "the same sign-in and read in web/",
+                    on_main: "web/'s sign-in to a dev cell (#1588) and the stub issuer (#1591)",
+                    waits: vec![MB_MEMBERS, W2_WEB],
                 }),
             ],
         },
@@ -378,9 +402,9 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 Part::Gap(Gap {
                     what: "the same gestures from web/",
                     on_main: "the API's version, confirm and deploy routes (#1552) in the cell \
-                              (#1554), web/'s set-up (#1557) and its sign-in to a dev cell \
-                              (#1588)",
-                    waits: vec![SI_SESSION, W2_WEB],
+                              (#1554), web/'s set-up (#1557), its sign-in to a dev cell \
+                              (#1588) and the stub issuer (#1591)",
+                    waits: vec![MB_MEMBERS, W2_WEB],
                 }),
                 Part::Gap(Gap {
                     what: "the agent's runtime started from AgentDeployed",
@@ -449,13 +473,14 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 Part::Gap(Gap {
                     what: "the owner approves the ask in web/",
                     on_main: "the approval answer in web/ and the API's responses route in the \
-                              cell (#1554); `mandate approvals approve` is the CLI's path, with \
+                              cell (#1554), the step-up challenge route's spec and schemas \
+                              (#1592); `mandate approvals approve` is the CLI's path, with \
                               nothing to approve until the runtime asks",
                     waits: vec![
                         wait(
                             "L1",
                             "E9-4",
-                            Some(1592),
+                            None,
                             "step-up the API verifies before a grant (DEC-1007 item 3, DEC-2103), \
                              and passkey enrolment, without which every grant answers \
                              `step_up_missing`",
@@ -483,16 +508,17 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 what: "the backtest of this version, its report read through the API and \
                        shown in web/",
                 on_main: "the runner in the cell's image and `mandate backtest record` (#1581, \
-                          DEC-1144), the API's backtest read (#1555), and web/'s report screen \
-                          (#1549)",
+                          DEC-1144), the API's backtest read (#1555), web/'s report screen \
+                          (#1549), and the owner's session through the stub issuer (#1591)",
                 waits: vec![
                     wait(
                         "E2E",
                         "E21-54",
                         None,
-                        "this scenario runs the runner and records it in the gestures' pod",
+                        "this scenario runs the runner, records it in the gestures' pod and \
+                         reads it through the API with the owner's session",
                     ),
-                    SI_SESSION,
+                    MB_MEMBERS,
                 ],
             })],
         },
@@ -503,21 +529,15 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 Part::Gap(Gap {
                     what: "the kill switch from web/, recorded through the API",
                     on_main: "POST /v1/workspaces/{ws}/kill-switch in the cell (#1457, #1554), \
-                              web/'s kill switch sent through the API, and its sign-in to a dev \
-                              cell (#1588)",
-                    waits: vec![SI_SESSION, W2_WEB],
+                              web/'s kill switch sent through the API, its sign-in to a dev cell \
+                              (#1588) and the stub issuer (#1591)",
+                    waits: vec![MB_MEMBERS, W2_WEB],
                 }),
-                Part::Gap(Gap {
-                    what: "the kill switch through the CLI, at agent scope",
-                    on_main: "`mandate agent kill` at agent, connection and workspace scope \
-                              (#1537, DEC-2000)",
-                    waits: vec![wait(
-                        "E2E",
-                        "E21-54",
-                        None,
-                        "this scenario runs it as a gesture and the closing verify covers it",
-                    )],
-                }),
+                gesture(
+                    "the owner's kill switch for the agent, through the CLI (agent scope)",
+                    owner(&["agent", "kill", "--agent", AGENT]),
+                    format!("kill_switch agent {AGENT} committed as event"),
+                ),
                 Part::Gap(Gap {
                     what: "the agent's processes stop on it",
                     on_main: "the runtime reads the kill switch first (#1521, image #1560)",
@@ -668,7 +688,10 @@ pub fn run(name: &str) -> Result<()> {
     }
     up()?;
     let id = run_id()?;
-    let workspace = format!("demo{id}");
+    let workspace = workspace_of(&id);
+    if api_unaskable()?.is_none() {
+        point_api(&workspace)?;
+    }
     let mandate = fs::read(MANDATE_FILE).with_context(|| format!("reading {MANDATE_FILE}"))?;
     let instrument = fs::read_to_string(INSTRUMENT_FILE)
         .with_context(|| format!("reading {INSTRUMENT_FILE}"))?;
@@ -751,9 +774,9 @@ pub fn run(name: &str) -> Result<()> {
                     }
                 }
                 Part::Api(check) => {
-                    let answer = api_status(&check.path)?;
+                    let answer = api_answer(check)?;
                     let required = env::var_os(CELL_REQUIRED_ENV).is_some();
-                    let (word, said, fails) = api_verdict(&answer, check.status, required);
+                    let (word, said, fails) = api_verdict(&answer, check, required);
                     eprintln!("    {word:<8} {}: {said}", check.shows);
                     if fails {
                         failed.get_or_insert_with(|| format!("GET {}: {said}", check.path));
@@ -797,57 +820,127 @@ pub fn run(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// The status the cell's API answers `GET path` with through the demo's port-forward, or why it
-/// cannot be asked: no API in the process list, a cell that pulled its images and has no API image,
-/// or no `kubectl` on this machine to forward with.
-fn api_status(path: &str) -> Result<Result<u16, String>> {
+/// Why the cell's API cannot be asked, or `None` when it can: no API in the process list, a cell
+/// that pulled its images and has no API image, or no `kubectl` on this machine to forward with.
+fn api_unaskable() -> Result<Option<String>> {
     let listed = processes()?
         .iter()
         .any(|p| p["name"] == API_PROCESS && p["built"] == true);
     if !listed {
-        return Ok(Err("the API is not in the cell's process list".into()));
+        return Ok(Some("the API is not in the cell's process list".into()));
     }
     if api_image_tag()?.is_none() {
-        return Ok(Err(
+        return Ok(Some(
             "the cell pulled its images and no API image is published yet".into(),
         ));
     }
     if output("kubectl", &["version", "--client"]).is_err() {
-        return Ok(Err(
+        return Ok(Some(
             "no kubectl on this machine to forward the API's port with".into(),
         ));
     }
+    Ok(None)
+}
+
+/// Points the cell's API and deployment manager at the run's `workspace` (DEC-2010): a `helm
+/// upgrade` of the workspace release that keeps every other value, then a wait until both
+/// Deployments have rolled out, so no pod of an earlier run still serves another workspace; and
+/// any earlier `kubectl port-forward` to the API is stopped, so the checks never reach an old pod
+/// through it (`api_port_forward` would reuse a forward that still answers its 401).
+fn point_api(workspace: &str) -> Result<()> {
+    let hosted = format!("api.workspace={workspace}");
+    helm(&[
+        "upgrade",
+        "workspace",
+        WORKSPACE_CHART,
+        "--namespace",
+        NAMESPACE,
+        "--reuse-values",
+        "--set",
+        &hosted,
+        "--wait",
+        "--wait-for-jobs",
+        "--timeout",
+        "5m",
+    ])?;
+    for process in [API_PROCESS, DEPLOY_MANAGER_PROCESS] {
+        let deployment = format!("deployment/{process}");
+        let present = kubectl(&[
+            "get",
+            &deployment,
+            "--namespace",
+            NAMESPACE,
+            "--ignore-not-found",
+            "-o",
+            "name",
+        ])?;
+        if present.trim().is_empty() {
+            continue;
+        }
+        kubectl(&[
+            "rollout",
+            "status",
+            &deployment,
+            "--namespace",
+            NAMESPACE,
+            "--timeout=120s",
+        ])?;
+    }
+    let _ = output("pkill", &["-f", "port-forward.*deployment/api"]);
+    eprintln!("    api: hosting {workspace}, rolled out; an earlier forward to it is stopped");
+    Ok(())
+}
+
+/// What the cell's API answers `check` with through the demo's port-forward, its status and
+/// whole reply, or why it cannot be asked. A sign-in first asks the stub issuer for a token; a
+/// stub that gives none reads as an API that could not be asked.
+fn api_answer(check: &ApiCheck) -> Result<Result<(u16, String), String>> {
+    if let Some(why) = api_unaskable()? {
+        return Ok(Err(why));
+    }
     let forwarded = api_port_forward(stub_image_tag()?.is_some());
-    Ok(answer_of(forwarded, || http_status(API_LOCAL_PORT, path)))
+    Ok(answer_of(forwarded, || match check.ask {
+        Ask::NoSession => http(API_LOCAL_PORT, "GET", &check.path, &[], ""),
+        Ask::SignIn => open_session(&stub_token()?),
+    }))
 }
 
 /// What the API answered, given the port-forward's result and a probe of the forwarded port. The
 /// forward bails on a reachable API that answers anything but 401, so its error alone cannot tell
-/// an unreachable API from a wrong one: the probe decides. A status it reads is the API's answer,
-/// which the verdict fails unless it is the expected one; only a probe that reads none means the
-/// API could not be asked.
-pub fn answer_of(
-    forwarded: Result<()>,
-    probe: impl FnOnce() -> Result<u16>,
-) -> Result<u16, String> {
+/// an unreachable API from a wrong one: the probe decides. An answer it reads is the API's, which
+/// the verdict fails unless it is the expected one; only a probe that reads none means the API
+/// could not be asked.
+pub fn answer_of<T>(forwarded: Result<()>, probe: impl FnOnce() -> Result<T>) -> Result<T, String> {
     match (forwarded, probe()) {
-        (_, Ok(status)) => Ok(status),
+        (_, Ok(answer)) => Ok(answer),
         (Err(e), Err(_)) => Err(format!("the port-forward to the API failed: {e:#}")),
         (Ok(()), Err(e)) => Err(format!("the API did not answer: {e:#}")),
     }
 }
 
-/// How an API check reads: `ran` only for the status it expects; `failed` for any other status,
-/// and for an API that cannot be asked where CI requires the cell; otherwise `not run`. Returns the
-/// word, what to print after it, and whether the run fails.
+/// How an API check reads: `ran` only for the status it expects, and for a sign-in only with the
+/// session cookie; `failed` for any other answer, and for an API that cannot be asked where CI
+/// requires the cell; otherwise `not run`. Returns the word, what to print after it, and whether
+/// the run fails.
 pub fn api_verdict(
-    answer: &Result<u16, String>,
-    expected: u16,
+    answer: &Result<(u16, String), String>,
+    check: &ApiCheck,
     required: bool,
 ) -> (&'static str, String, bool) {
+    let expected = check.status;
     match answer {
-        Ok(status) if *status == expected => ("ran", format!("answered {status}"), false),
-        Ok(status) => ("failed", format!("answered {status}, not {expected}"), true),
+        Ok((status, reply)) if *status == expected => {
+            if check.ask == Ask::SignIn && !signed_in(*status, reply) {
+                (
+                    "failed",
+                    format!("answered {status} without the session cookie"),
+                    true,
+                )
+            } else {
+                ("ran", format!("answered {status}"), false)
+            }
+        }
+        Ok((status, _)) => ("failed", format!("answered {status}, not {expected}"), true),
         Err(why) if required => ("failed", why.clone(), true),
         Err(why) => ("not run", why.clone(), false),
     }
@@ -1002,43 +1095,164 @@ mod tests {
         assert_eq!(all[all.len() - 1].args[2], SEGMENT);
     }
 
-    /// The API is checked only for what it serves without a session: step 1 asks for the demo
-    /// workspace's agents and must be refused with the one 401, and no check expects a success the
-    /// cell cannot give until a session exists.
+    /// Step 6 commits the owner's kill switch for the demo's agent, at agent scope only (an
+    /// agent-scoped switch never reaches the connection or the workspace, rule 13), after the
+    /// agent is deployed and before the record is exported, so the closing verify covers it.
     #[test]
-    fn the_api_is_checked_only_for_its_refusal_without_a_session() {
+    fn step_six_kills_the_demo_agent_at_agent_scope_before_the_record() {
         let steps = plan("demo1", &mandate());
-        let checks: Vec<(u8, &ApiCheck)> = steps
-            .iter()
-            .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
-            .filter_map(|(n, p)| match p {
-                Part::Api(c) => Some((n, c)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(checks.len(), 1, "one API check");
-        let (step, check) = checks[0];
-        assert_eq!(step, 1);
-        assert_eq!(check.status, 401);
+        let all = gestures(&steps);
+        let at = |head: &[&str]| all.iter().position(|g| g.args[..head.len()] == *head);
+        let kill = at(&["agent", "kill"]).expect("step 6 runs `agent kill`");
+        let g = all[kill];
+        assert_eq!(g.args[2..4], ["--agent", AGENT]);
+        assert!(
+            !g.args
+                .iter()
+                .any(|a| a == "--connection" || a == "--workspace-wide"),
+            "{:?}",
+            g.args
+        );
         assert_eq!(
-            check.path,
-            format!("/v1/workspaces/{DEMO_WORKSPACE}/agents")
+            g.expect,
+            format!("kill_switch agent {AGENT} committed as event")
+        );
+        let deployed = all
+            .iter()
+            .rposition(|g| g.args[..2] == ["agent", "deploy"])
+            .unwrap();
+        assert!(deployed < kill, "the agent is deployed before it is killed");
+        assert!(
+            kill < at(&["journal", "export"]).unwrap(),
+            "exported after it"
+        );
+        let step6 = &steps[5].parts;
+        assert!(
+            step6
+                .iter()
+                .any(|p| matches!(p, Part::Gesture(x) if x.container == g.container)),
+            "the kill switch is step 6's"
         );
     }
 
-    /// Only the expected status reads as run; another status always fails the run, and an API
-    /// that cannot be asked fails it only where CI requires the cell.
+    /// Step 1 checks the API twice, as main can serve it: a read of the run's own workspace with
+    /// no session must be refused with the one 401, and the demo owner's sign-in must open a
+    /// session (204); the read with that session stays a gap until the API reads memberships
+    /// (lane MB).
     #[test]
-    fn an_api_check_runs_only_on_its_status_and_fails_where_the_cell_is_required() {
-        let unreachable: Result<u16, String> = Err("no kubectl".into());
+    fn step_one_checks_the_refusal_and_the_sign_in_and_names_the_signed_in_read() {
+        let ws = workspace_of("0123456789");
+        let steps = plan(&ws, &mandate());
+        let checks: Vec<(u8, &str, u16, Ask)> = steps
+            .iter()
+            .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
+            .filter_map(|(n, p)| match p {
+                Part::Api(c) => Some((n, c.path.as_str(), c.status, c.ask)),
+                _ => None,
+            })
+            .collect();
+        let read = format!("/v1/workspaces/{ws}/agents");
+        assert_eq!(
+            checks,
+            [
+                (1, read.as_str(), 401, Ask::NoSession),
+                (1, "/v1/sessions", 204, Ask::SignIn)
+            ]
+        );
+        let waits_on_members = steps[0].parts.iter().any(|p| {
+            matches!(p, Part::Gap(g) if g.what.contains("with that session")
+                && g.waits.iter().any(|w| w.lane == "MB"))
+        });
+        assert!(
+            waits_on_members,
+            "the signed-in read is named, waiting on MB"
+        );
+    }
+
+    /// A run's workspace is a ULID (26 Crockford base-32 characters, the first at most 7), fresh
+    /// for each run id, and never the fixed workspace the chart's values name.
+    #[test]
+    fn each_run_takes_a_fresh_ulid_workspace() {
+        let crockford =
+            |c: char| c.is_ascii_digit() || (c.is_ascii_uppercase() && !"ILOU".contains(c));
+        let a = workspace_of("0123456789");
+        let b = workspace_of("9876543210");
+        for ws in [&a, &b, &workspace_of("7")] {
+            assert_eq!(ws.len(), 26, "{ws}");
+            assert!(ws.chars().all(crockford), "{ws}");
+            assert!(ws.as_bytes()[0] <= b'7', "{ws}");
+            assert_ne!(ws.as_str(), super::super::DEMO_WORKSPACE);
+        }
+        assert_ne!(a, b);
+        assert_eq!(a, "01KDEM0123456789000000000D");
+        let steps = plan(&a, &mandate());
+        let all = gestures(&steps);
+        let owner = super::super::DEMO_OWNER;
+        let found = all
+            .iter()
+            .find(|g| g.args[..2] == ["workspace", "found"])
+            .unwrap();
+        assert!(
+            found.args.windows(2).any(|w| w == ["--member", owner]),
+            "the workspace is founded for the owner who signs in: {:?}",
+            found.args
+        );
+        let kill = all
+            .iter()
+            .find(|g| g.args[..2] == ["agent", "kill"])
+            .unwrap();
+        let user = owner.to_ascii_lowercase();
+        assert!(
+            kill.args
+                .windows(2)
+                .any(|w| w[0] == "--user" && w[1] == user),
+            "the owner's gestures act as that member: {:?}",
+            kill.args
+        );
+    }
+
+    fn check(status: u16, ask: Ask) -> ApiCheck {
+        ApiCheck {
+            shows: "s",
+            path: "/".into(),
+            status,
+            ask,
+        }
+    }
+
+    /// Only the expected status reads as run, and a sign-in only with the session cookie; any
+    /// other answer always fails the run, and an API that cannot be asked fails it only where CI
+    /// requires the cell.
+    #[test]
+    fn an_api_check_runs_only_on_its_answer_and_fails_where_the_cell_is_required() {
+        let refusal = check(401, Ask::NoSession);
+        let sign_in = check(204, Ask::SignIn);
+        let opened = "HTTP/1.1 204 No Content\r\nset-cookie: __Host-mandate_session=v1.a; \
+                      Path=/\r\n\r\n"
+            .to_owned();
+        let bare = "HTTP/1.1 204 No Content\r\n\r\n".to_owned();
+        let unreachable: Result<(u16, String), String> = Err("no kubectl".into());
         for required in [false, true] {
-            assert_eq!(api_verdict(&Ok(401), 401, required).0, "ran");
-            assert!(
-                !api_verdict(&Ok(401), 401, required).2,
-                "a 401 never fails the run"
+            assert_eq!(
+                api_verdict(&Ok((401, String::new())), &refusal, required),
+                ("ran", "answered 401".into(), false),
+                "a 401 never fails the refusal check"
             );
+            assert_eq!(
+                api_verdict(&Ok((204, opened.clone())), &sign_in, required).0,
+                "ran"
+            );
+            for (status, reply) in [
+                (204, bare.clone()),
+                (401, opened.clone()),
+                (403, bare.clone()),
+            ] {
+                let (word, _, fails) = api_verdict(&Ok((status, reply)), &sign_in, required);
+                assert_eq!((word, fails), ("failed", true), "{status}");
+            }
             for status in [200, 403, 404, 500] {
-                let (word, _, fails) = api_verdict(&Ok(status), 401, required);
+                let (word, _, fails) =
+                    api_verdict(&Ok((status, String::new())), &refusal, required);
                 assert_eq!(
                     (word, fails),
                     ("failed", true),
@@ -1047,11 +1261,11 @@ mod tests {
             }
         }
         assert_eq!(
-            api_verdict(&unreachable, 401, false),
+            api_verdict(&unreachable, &sign_in, false),
             ("not run", "no kubectl".into(), false)
         );
         assert_eq!(
-            api_verdict(&unreachable, 401, true),
+            api_verdict(&unreachable, &sign_in, true),
             ("failed", "no kubectl".into(), true)
         );
     }
@@ -1060,18 +1274,19 @@ mod tests {
     /// so the verdict fails it; only a probe that reads nothing makes the API unreachable.
     #[test]
     fn a_reachable_api_that_answers_wrongly_is_an_answer_not_unreachable() {
+        let refusal = check(401, Ask::NoSession);
         let bailed = || Err(anyhow::anyhow!("answered 404, not the one 401"));
-        assert_eq!(answer_of(bailed(), || Ok(404)), Ok(404));
+        let wrong = || Ok((404, String::new()));
+        assert_eq!(answer_of(bailed(), wrong), Ok((404, String::new())));
         assert_eq!(
-            api_verdict(&answer_of(bailed(), || Ok(404)), 401, false).0,
+            api_verdict(&answer_of(bailed(), wrong), &refusal, false).0,
             "failed"
         );
-        assert_eq!(answer_of(Ok(()), || Ok(401)), Ok(401));
-        let refused = || Err(anyhow::anyhow!("connection refused"));
+        let refused = || Err::<(u16, String), _>(anyhow::anyhow!("connection refused"));
         assert!(answer_of(bailed(), refused).is_err(), "nothing answered");
         assert!(answer_of(Ok(()), refused).is_err(), "nothing answered");
         assert_eq!(
-            api_verdict(&answer_of(Ok(()), refused), 401, false).0,
+            api_verdict(&answer_of(Ok(()), refused), &refusal, false).0,
             "not run"
         );
     }
@@ -1152,15 +1367,15 @@ mod tests {
         );
     }
 
-    /// Which steps run today: the gestures on `main` make steps 1, 2 and 4 partial, steps 3, 5
-    /// and 6 wait wholly on other lanes, and the record runs whole.
+    /// Which steps run today: the gestures on `main` make steps 1, 2, 4 and 6 partial, steps 3
+    /// and 5 wait wholly on other lanes, and the record runs whole.
     #[test]
     fn each_step_reads_ready_partial_or_skipped_from_its_parts() {
         let steps = plan("demo1", &mandate());
         let read: Vec<Readiness> = steps.iter().map(readiness).collect();
         assert_eq!(
             read,
-            [Partial, Partial, Skipped, Partial, Skipped, Skipped, Ready]
+            [Partial, Partial, Skipped, Partial, Skipped, Partial, Ready]
         );
         let step = |parts: Vec<Part>| Step {
             number: 9,
@@ -1174,13 +1389,7 @@ mod tests {
                 waits: lanes.iter().map(|l| wait(l, "E1-1", None, "x")).collect(),
             })
         };
-        let check = || {
-            Part::Api(ApiCheck {
-                shows: "s",
-                path: "/".into(),
-                status: 401,
-            })
-        };
+        let check = || Part::Api(check(401, Ask::NoSession));
         assert_eq!(readiness(&step(vec![check()])), Ready);
         assert_eq!(readiness(&step(vec![check(), gap(&["A"])])), Partial);
         assert_eq!(readiness(&step(vec![gap(&["A"]), gap(&["B"])])), Skipped);
