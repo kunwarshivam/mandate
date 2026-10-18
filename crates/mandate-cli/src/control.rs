@@ -244,6 +244,10 @@ enum Writer {
     /// runner stored, which `mandate backtest record` re-checks (journal spec §9.18; DEC-1141,
     /// DEC-1144).
     Runner,
+    /// The `evaluator` system, for `EvaluationRunRecorded` alone: the record of a forward-paper
+    /// evaluation `mandate evaluation run` ran and stored (journal spec §9.18; DEC-1141,
+    /// DEC-2244 item 5).
+    Evaluator,
 }
 
 /// DEC-952: paper and live never share a stream. An owner's event is appended only to a control
@@ -277,6 +281,10 @@ const OPENER_ID: &str = "control_services";
 /// The backtest runner's system id and its one event type (DEC-1144 item 7).
 const RUNNER_ID: &str = "backtest_runner";
 pub(crate) const BACKTEST_TYPE: &str = "BacktestRunRecorded";
+
+/// The forward-paper evaluator's system id and its one event type (DEC-2244 item 5).
+const EVALUATOR_ID: &str = "evaluator";
+pub(crate) const EVALUATION_TYPE: &str = "EvaluationRunRecorded";
 
 /// The founding grant's event type (journal spec §9.12).
 const FOUNDING_TYPE: &str = "MemberActivated";
@@ -417,6 +425,7 @@ fn draft_caused(
         Writer::Opener if event_type == "StreamOpened" => ("system", OPENER_ID),
         Writer::Founder if event_type == FOUNDING_TYPE => ("system", OPENER_ID),
         Writer::Runner if event_type == BACKTEST_TYPE => ("system", RUNNER_ID),
+        Writer::Evaluator if event_type == EVALUATION_TYPE => ("system", EVALUATOR_ID),
         Writer::Opener | Writer::Founder => {
             return Err(ControlError::Journal(format!(
                 "only the stream's opening and its founding grant are written as {OPENER_ID}, \
@@ -426,6 +435,11 @@ fn draft_caused(
         Writer::Runner => {
             return Err(ControlError::Journal(format!(
                 "only {BACKTEST_TYPE} is written as {RUNNER_ID}, not {event_type}"
+            )));
+        }
+        Writer::Evaluator => {
+            return Err(ControlError::Journal(format!(
+                "only {EVALUATION_TYPE} is written as {EVALUATOR_ID}, not {event_type}"
             )));
         }
     };
@@ -891,6 +905,21 @@ pub(crate) fn commit_backtest(
     commit_as(Writer::Runner, journal, owner, decided, shape, now)
 }
 
+/// Commits one decided `EvaluationRunRecorded` with `shape`, as the `evaluator` system (DEC-1141,
+/// DEC-2244 item 5).
+///
+/// # Errors
+/// As [`commit`]; [`ControlError::Journal`] for any other event type.
+pub(crate) fn commit_evaluation(
+    journal: &mut dyn ControlJournal,
+    owner: &Owner,
+    decided: Decided,
+    shape: Shape,
+    now: Now,
+) -> Result<Submitted, ControlError> {
+    commit_as(Writer::Evaluator, journal, owner, decided, shape, now)
+}
+
 fn commit_as(
     writer: Writer,
     journal: &mut dyn ControlJournal,
@@ -1036,7 +1065,14 @@ mod tests {
             actor(Writer::Owner, "BacktestRunRecorded")?,
             pair("user", "u1")
         );
+        assert_eq!(
+            actor(Writer::Evaluator, "EvaluationRunRecorded")?,
+            pair("system", "evaluator")
+        );
         for (writer, other) in [
+            (Writer::Evaluator, "BacktestRunRecorded"),
+            (Writer::Evaluator, "StreamOpened"),
+            (Writer::Evaluator, "MemberActivated"),
             (Writer::Founder, "StreamOpened"),
             (Writer::Founder, "MemberRoleChanged"),
             (Writer::Opener, "MemberActivated"),

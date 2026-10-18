@@ -1,0 +1,6 @@
+# OpenTofu working directories, state and plans never enter the repository (DEC-2012 item 3).
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log

@@ -32,9 +32,11 @@
 //! cannot be computed from one (DEC-99). Like the scorer it is pure: no clock, no I/O, ordered
 //! collections only, and the same records give the same report bytes.
 
+mod inputs;
 mod record;
 mod report;
 
+pub use inputs::{EvaluationInputs, INPUT_FILE_NAMES, InputFiles, decode};
 pub use record::{EvaluationRecord, evaluation_run_recorded};
 pub use report::{
     EVALUATION_REPORT_VERSION, EvaluationReport, Group, InputObjects, SignalModelKey, input_objects,
@@ -77,6 +79,10 @@ pub enum EvaluationError {
     Research(&'static str),
     #[error(transparent)]
     Num(#[from] NumError),
+    /// An input file that is not its DEC-2244 item 3 shape: the path of the first file and member
+    /// missing, unknown, or malformed.
+    #[error("the input `{0}` is missing, unknown, or malformed")]
+    Input(String),
     /// A step its story has not built yet (DEC-77): the stub's own report.
     #[error("not implemented until {story}")]
     Unimplemented { story: &'static str },
@@ -99,6 +105,7 @@ impl EvaluationError {
             Self::BaselineWithoutCloses => "baseline_without_closes",
             Self::Research(code) => code,
             Self::Num(e) => e.code(),
+            Self::Input(_) => "input_invalid",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }

@@ -20,7 +20,8 @@ use mandate_api::problem::ProblemCode;
 use mandate_authn::Request;
 use mandate_canon::{Int, Key, Object, Value, to_canonical};
 use mandate_identity::{
-    Authorized, Permission, Principal, Refusal, Scope, Session, WorkspaceId, authorize,
+    Authorized, Permission, Principal, Refusal, Scope, Session, TenantContext, WorkspaceId,
+    authorize,
 };
 use mandate_identity_seal::Seal;
 use mandate_journal::{ArtifactRef, StoredEvent};
@@ -48,6 +49,8 @@ pub const BUILD: &str = match option_env!("MANDATE_BUILD_DIGEST") {
 /// The workspace a request may read, once authorized, and the control stream's rows.
 pub(crate) struct Reader {
     pub(crate) workspace: String,
+    /// The context `authorize` returned for the request (identity spec ID-8).
+    pub(crate) tenant: TenantContext,
     pub(crate) control: Vec<StoredEvent>,
     pub(crate) now: UtcNanos,
 }
@@ -172,6 +175,7 @@ pub(crate) async fn authorized(
     match authorized {
         Ok(Authorized::Workspace { tenant, .. }) => Ok(Reader {
             workspace: workspace_text(tenant.workspace())?,
+            tenant,
             control,
             now,
         }),

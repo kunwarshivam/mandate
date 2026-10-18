@@ -1,7 +1,9 @@
 //! A connection's stream rules (journal spec v0.32 §9.8 rules 66 to 68 and 131) and §11's two
 //! connection checks, `connection_lifecycle_mismatch` and `connection_cause_mismatch` (E7-17, DEC-800 item 9).
 //! A range's lifecycle run starts from its connection anchor, or fails closed without one (journal
-//! spec v0.35, DEC-885).
+//! spec v0.35, DEC-885). Journal spec v0.54 §9.24 (DEC-1171) adds stream rule 201, which the same
+//! check judges from the same fold: a version-2 `AgentDeployed` names a connection established on
+//! its control stream at version 2 and not since revoked. A version-1 `AgentDeployed` is not read.
 //! `append` folds no stream, so these rules are not `append`'s: the connection manager and the
 //! executor check them against their own fold before appending, and verification runs them here
 //! over the stored rows.
@@ -32,9 +34,11 @@ const ROTATED: &str = "ConnectionCredentialRotated";
 const REFUSED: &str = "ConnectionRefused";
 const CHECKED: &str = "ConnectionChecked";
 const REQUESTED: &str = "ConnectionRequested";
+const DEPLOYED: &str = "AgentDeployed";
 
-/// The connection records on the control stream, which the connection manager folds.
-const CONTROL_RECORDS: [&str; 5] = [ESTABLISHED, REVOKED, ROTATED, REFUSED, REQUESTED];
+/// The connection records on the control stream, which the connection manager folds, and the
+/// deployment rule 201 judges against them, read at version 2 only.
+const CONTROL_RECORDS: [&str; 6] = [ESTABLISHED, REVOKED, ROTATED, REFUSED, REQUESTED, DEPLOYED];
 
 /// What a connect's establishment repeats of the request it closes (rule 131).
 const ESTABLISHMENT_REPEATS: [&str; 5] =
@@ -70,8 +74,9 @@ const UNBOUND_OCCASIONS: [&str; 3] = ["connect", "reconnect", "reauthorize"];
 /// The brokers that connect through MCP (journal spec §9.8), whose checks always list `contract`.
 const MCP_BROKERS: [&str; 1] = ["robinhood"];
 
-/// A §9.8 stream rule: 66 (establishment), 67 (rotation and refusal), 68 (the account stream), and
-/// 131 (the pending connection, journal spec v0.32, DEC-699).
+/// A connection stream rule: §9.8's 66 (establishment), 67 (rotation and refusal), 68 (the account
+/// stream), and 131 (the pending connection, journal spec v0.32, DEC-699), and §9.24's 201 (the
+/// deployment's connection, journal spec v0.54, DEC-1171).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ConnectionStreamRule {
     /// A connection is established again only after its revocation, for the same broker,
@@ -85,16 +90,20 @@ pub enum ConnectionStreamRule {
     /// From a control stream's first `ConnectionRequested` on, every connect closes its own open
     /// request once, repeating its members, and a request names a new connection and `account_ref`.
     Requested,
+    /// A version-2 `AgentDeployed` names a connection established earlier on its control stream at
+    /// version 2, whose latest establishment or revocation is an establishment.
+    Deployed,
 }
 
 impl ConnectionStreamRule {
-    /// The rule's number in journal spec §9.8.
+    /// The rule's number in journal spec §9.8 or §9.24.
     pub fn number(self) -> u8 {
         match self {
             Self::Established => 66,
             Self::Rotated => 67,
             Self::AccountStream => 68,
             Self::Requested => 131,
+            Self::Deployed => 201,
         }
     }
 }
@@ -426,10 +435,12 @@ impl<'r> Row<'r> {
     }
 
     /// Whether a range rule judges the record: every connection record on an account stream, and
-    /// a request, establishment, rotation, or refusal on a control stream (DEC-885 item 4, DEC-888).
+    /// a request, establishment, rotation, or refusal on a control stream (DEC-885 item 4, DEC-888),
+    /// and there a version-2 `AgentDeployed`, the only version [`connection_rows`] keeps (DEC-1171).
     fn judged(&self) -> bool {
         self.stream != StreamType::Control
             || JUDGED_ON_CONTROL.contains(&self.stored.event_type.as_str())
+            || self.stored.event_type == DEPLOYED
     }
 
     fn payload(&self) -> &Value {
@@ -441,7 +452,9 @@ impl<'r> Row<'r> {
     }
 }
 
-/// The rows §9.8's rules read: the connection records of the control and account streams.
+/// The rows the connection rules read: the connection records of the control and account streams,
+/// and the control stream's version-2 `AgentDeployed`s; a version-1 deployment names no connection,
+/// so rule 201 never judges it.
 fn connection_rows(rows: &[StoredEvent]) -> Vec<Row<'_>> {
     rows.iter()
         .enumerate()
@@ -452,9 +465,8 @@ fn connection_rows(rows: &[StoredEvent]) -> Vec<Row<'_>> {
                 StreamType::Account => &ACCOUNT_RECORDS,
                 _ => &[],
             };
-            records
-                .contains(&stored.event_type.as_str())
-                .then_some(())?;
+            let deployment_v1 = stored.event_type == DEPLOYED && stored.schema_version != 2;
+            (records.contains(&stored.event_type.as_str()) && !deployment_v1).then_some(())?;
             let body = parse(&stored.body).ok()?;
             Some(Row {
                 index,
@@ -487,11 +499,13 @@ fn listed(p: &Value, check: &str) -> bool {
     results(p).iter().any(|r| text(r, "check") == check)
 }
 
-/// The connection manager's fold of one control stream (rules 66, 67, and 131).
+/// The connection manager's fold of one control stream (rules 66, 67, 131, and 201).
 #[derive(Debug, Clone, Default)]
 struct ControlFold {
     /// Each connection's first establishment.
     first: BTreeMap<String, Value>,
+    /// The connections established at version 2, with an `account_ref` (rule 201).
+    established_v2: BTreeSet<String>,
     /// Each connection's latest `ConnectionEstablished` or `ConnectionRevoked`.
     latest: BTreeMap<String, &'static str>,
     /// Each connection's latest scopes, its establishment's or the latest rotation's.
@@ -554,6 +568,9 @@ impl ControlFold {
                         .or_insert_with(|| id.to_owned());
                 }
                 self.first.entry(id.to_owned()).or_insert_with(|| p.clone());
+                if row.stored.schema_version == 2 {
+                    self.established_v2.insert(id.to_owned());
+                }
                 self.latest.insert(id.to_owned(), ESTABLISHED);
                 self.scopes.insert(id.to_owned(), owned(&scopes));
             }
@@ -575,6 +592,11 @@ impl ControlFold {
                     return Err(ConnectionStreamRule::Rotated);
                 }
                 self.scopes.insert(id.to_owned(), owned(&scopes));
+            }
+            DEPLOYED => {
+                if !self.established_v2.contains(id) || latest != Some(ESTABLISHED) {
+                    return Err(ConnectionStreamRule::Deployed);
+                }
             }
             REQUESTED => {
                 let account_ref = text(p, "account_ref");

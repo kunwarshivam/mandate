@@ -1,0 +1,15 @@
+# `cell1.py --target k3d` only: the journal's archive in the local cell's test store,
+# deploy/cell/charts/archive-store, exactly as deploy/cell/values/k3d-journal-db.yaml sets it
+# (DEC-1050 item 5, DEC-2006). deploy/tests/test_hosted.py holds the two equal.
+archive:
+  endpointURL: http://archive-store.archive-store.svc:9000
+  destinationPath: s3://journal-archive/ws1
+  keyFrom: journal-archive-key
+  retention: 7d
+  baseBackupSchedule: "0 15 3 * * *"
+  egress:
+    cidrs: []
+    port: 9000
+    namespace: archive-store
+    podSelector:
+      app.kubernetes.io/name: mandate-archive-store
