@@ -1767,6 +1767,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-backtest-runner"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "mandate-accounting",
+ "mandate-artifacts-fs",
+ "mandate-backtest",
+ "mandate-builder",
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-journal",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-sim",
+ "mandate-spec",
+ "mandate-time",
+ "mandate-version-backtest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-builder"
 version = "0.0.0"
 dependencies = [
@@ -1869,9 +1890,14 @@ name = "mandate-daemon"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-gateway",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-num",
  "mandate-process",
+ "mandate-research",
+ "mandate-research-driver",
+ "mandate-research-run",
  "mandate-runtime",
  "mandate-store",
  "mandate-time",
