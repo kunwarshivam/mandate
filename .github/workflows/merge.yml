@@ -11,7 +11,7 @@
 # and `schedule` run this file and the script as they are on the default branch. A merge made
 # here pushes to `main` with this workflow's own token, which starts no workflow, so after any
 # merge it dispatches `ci` on `main` once, the post-merge run every other merge gets from its push
-# (DEC-2610; `actions: write` is for that dispatch alone).
+# (DEC-2610). The dispatch is its own job, `ci-on-main`, the only one holding `actions: write`.
 name: merge
 
 on:
@@ -41,9 +41,10 @@ jobs:
       group: merge-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
       cancel-in-progress: false
     permissions:
-      actions: write
       contents: write
       pull-requests: write
+    outputs:
+      merged: ${{ steps.merge.outputs.merged }}
     env:
       GH_TOKEN: ${{ github.token }}
       MERGE_APPROVERS: ${{ vars.MERGE_APPROVERS || format('{0} kunwar-vp cursor', github.repository_owner) }}
@@ -53,6 +54,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch || 'main' }}
           persist-credentials: false
       - name: Merge each approved pull request whose checks are green
+        id: merge
         env:
           EVENT: ${{ github.event_name }}
           LABELED_PR: ${{ github.event.pull_request.number }}
@@ -80,6 +82,21 @@ jobs:
             fi
           done
           if [ "$merged" = 1 ]; then
-            gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" -f ref=main
+            echo "merged=true" >> "$GITHUB_OUTPUT"
           fi
           exit "$failed"
+
+  # DEC-2610: after a run that merged at least one pull request, even when another failed to,
+  # dispatch `ci` on `main` once. It holds `actions: write` and nothing else, and runs no code.
+  ci-on-main:
+    needs: merge
+    if: ${{ always() && needs.merge.outputs.merged == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Dispatch ci on main after this run's merges (DEC-2610)
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" -f ref=main

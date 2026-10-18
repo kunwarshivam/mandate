@@ -14622,9 +14622,11 @@ mod tests {
         );
         assert!(
             workflow.contains(
-                "concurrency:\n  group: ci-${{ github.ref }}\n  cancel-in-progress: true\n"
+                "concurrency:\n  group: ci-${{ github.event_name == 'workflow_dispatch' && \
+                 github.run_id || github.ref }}\n  cancel-in-progress: true\n"
             ),
-            "a newer run of the same ref cancels the older one"
+            "a newer run of the same ref cancels the older one, and a dispatched run, the \
+             nightly's included, has a group of its own, so it is never cancelled (DEC-2610)"
         );
         assert!(
             workflow.contains("  push:\n    branches: [main]\n"),
@@ -16988,15 +16990,62 @@ jq -r "$filter" "$src"
     #[test]
     fn the_merge_workflow_runs_ci_on_main_after_a_merge_it_made() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/merge.yml"))?;
-        let dispatch = "gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/\
-                        dispatches\" -f ref=main";
-        assert_eq!(workflow.matches(dispatch).count(), 1, "one dispatch");
-        let guarded = workflow
-            .split_once("if [ \"$merged\" = 1 ]; then")
-            .map(|(_, after)| after.trim_start().starts_with(dispatch));
-        assert_eq!(guarded, Some(true), "the dispatch runs only after a merge");
-        assert!(workflow.contains("if printf '%s\\n' \"$out\" | grep -q '^merged as '; then"));
-        assert!(workflow.contains("      actions: write\n"));
+        let job = |name: &str| -> Result<Vec<String>> {
+            Ok(workflow_job(&workflow, name)
+                .with_context(|| format!("merge.yml has a `{name}` job"))?
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- ").to_owned())
+                .collect())
+        };
+        let merge = job("merge")?;
+        assert!(
+            merge
+                .iter()
+                .any(|l| l == "echo \"merged=true\" >> \"$GITHUB_OUTPUT\"")
+        );
+        assert!(
+            merge
+                .iter()
+                .any(|l| l == "if printf '%s\\n' \"$out\" | grep -q '^merged as '; then"),
+            "only a run that merged says so"
+        );
+        assert!(
+            !merge
+                .iter()
+                .filter(|l| !l.starts_with('#'))
+                .any(|l| l.contains("actions:") || l.contains("dispatches")),
+            "the merging job holds no `actions` right and dispatches nothing"
+        );
+        let dispatch = job("ci-on-main")?;
+        for line in [
+            "needs: merge",
+            "if: ${{ always() && needs.merge.outputs.merged == 'true' }}",
+            "actions: write",
+            "run: gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches\" \
+             -f ref=main",
+        ] {
+            assert!(
+                dispatch.iter().any(|l| l == line),
+                "`ci-on-main` has `{line}`"
+            );
+        }
+        let rights: Vec<&String> = dispatch
+            .iter()
+            .skip_while(|l| *l != "permissions:")
+            .skip(1)
+            .take_while(|l| l.ends_with(": write") || l.ends_with(": read"))
+            .collect();
+        assert_eq!(
+            rights,
+            ["actions: write"],
+            "`actions: write` and nothing else"
+        );
+        assert!(
+            !dispatch
+                .iter()
+                .any(|l| l.contains("checkout") || l.contains("secrets.")),
+            "the dispatch job runs no code and reads no secret"
+        );
         Ok(())
     }
 
