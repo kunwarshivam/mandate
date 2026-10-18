@@ -1,0 +1,61 @@
+{{- /*
+The server's TLS (DEC-2019 item 3): a CA made for this vault alone and a server certificate it
+signs for the Service's names and the pod's loopback. The CA's key is never stored, so nothing can
+sign another certificate this vault's clients would trust. The key pair is read back on upgrade,
+so an upgrade keeps it, until it is within 30 days of its end (the Secret's
+`mandate.dev/not-after`, in seconds since the epoch) or its Secret is gone or lacks a part; then
+both are remade, and every client restarts to read the new CA. Clients mount only the ConfigMap
+`vault-ca`, the CA certificate, which is not a secret.
+*/ -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace "vault-tls" -}}
+{{- $crt := "" -}}
+{{- $key := "" -}}
+{{- $ca := "" -}}
+{{- $notAfter := 0 -}}
+{{- $now := now | unixEpoch | int64 -}}
+{{- if and $existing $existing.data $existing.metadata.annotations (get $existing.data "tls.crt") (get $existing.data "tls.key") (get $existing.data "ca.crt") -}}
+{{- $notAfter = get $existing.metadata.annotations "mandate.dev/not-after" | int64 -}}
+{{- end -}}
+{{- if gt (sub $notAfter $now) (mul 30 86400) -}}
+{{- $crt = b64dec (get $existing.data "tls.crt") -}}
+{{- $key = b64dec (get $existing.data "tls.key") -}}
+{{- $ca = b64dec (get $existing.data "ca.crt") -}}
+{{- else -}}
+{{- $authority := genCA (printf "mandate-vault-%s" .Values.workspace) (int .Values.days) -}}
+{{- $made := genSignedCert "vault" (list "127.0.0.1") (include "vault.dnsNames" . | fromJsonArray) (int .Values.days) $authority -}}
+{{- $crt = $made.Cert -}}
+{{- $key = $made.Key -}}
+{{- $ca = $authority.Cert -}}
+{{- $notAfter = add $now (mul (int .Values.days) 86400) -}}
+{{- end -}}
+{{- define "vault.tlsSecret" -}}
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/tls
+metadata:
+  name: vault-tls
+  annotations:
+    mandate.dev/not-after: {{ .notAfter | quote }}
+  labels:
+    {{- include "vault.labels" .root | nindent 4 }}
+stringData:
+  tls.crt: {{ .crt | quote }}
+  tls.key: {{ .key | quote }}
+  ca.crt: {{ .ca | quote }}
+{{- end -}}
+{{- define "vault.caConfigMap" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-ca
+  annotations:
+    mandate.dev/not-after: {{ .notAfter | quote }}
+  labels:
+    {{- include "vault.labels" .root | nindent 4 }}
+data:
+  ca.crt: {{ .ca | quote }}
+{{- end -}}
+---
+{{ include "vault.emit" (include "vault.tlsSecret" (dict "root" . "crt" $crt "key" $key "ca" $ca "notAfter" $notAfter)) }}
+---
+{{ include "vault.emit" (include "vault.caConfigMap" (dict "root" . "ca" $ca "notAfter" $notAfter)) }}
