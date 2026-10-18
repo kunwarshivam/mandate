@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+use sha2::Digest;
 
 use crate::{output, sh};
 
@@ -390,14 +391,18 @@ fn host_image_source() -> Result<ImageSource> {
     image_source(env::consts::OS, env::consts::ARCH, pinned.as_deref()).map_err(anyhow::Error::msg)
 }
 
-/// The cell's `mandate` image: the pulled one, or this checkout's build tagged by the binary's own
-/// SHA-256, so an uncommitted edit gets a new image rather than the last one imported.
+/// The cell's `mandate` image: the pulled one, or this checkout's build tagged by its binaries'
+/// SHA-256s, the CLI's and the backtest runner's beside it (DEC-1144), so an uncommitted edit to
+/// either gets a new image rather than the last one imported.
 fn image_tag() -> Result<String> {
     if let ImageSource::Pull(image) = host_image_source()? {
         return Ok(image);
     }
-    local_tag("mandate", "mandate")
+    local_tag("mandate", &["mandate", RUNNER])
 }
+
+/// The backtest runner (DEC-1144), built with the CLI and copied into its image.
+const RUNNER: &str = "mandate-backtest-runner";
 
 /// The cell's `api` image, this checkout's build of `mandate-api-server`: none when the cell pulls
 /// its `mandate` image, since no published API image exists yet, so the chart leaves the API out.
@@ -405,16 +410,36 @@ fn api_image_tag() -> Result<Option<String>> {
     if let ImageSource::Pull(_) = host_image_source()? {
         return Ok(None);
     }
-    local_tag("api", "mandate-api-server").map(Some)
+    local_tag("api", &["mandate-api-server"]).map(Some)
 }
 
-/// `mandate.local/<name>:<the first 12 hex digits of the binary's SHA-256>`.
-fn local_tag(name: &str, binary: &str) -> Result<String> {
-    let digest = sha256(&static_binary(binary))?;
+/// `mandate.local/<name>:<the first 12 hex digits of the binaries' digest>` ([`combined`]).
+fn local_tag(name: &str, binaries: &[&str]) -> Result<String> {
+    let digests = binaries
+        .iter()
+        .map(|binary| sha256(&static_binary(binary)))
+        .collect::<Result<Vec<_>>>()?;
+    let digest = combined(&digests);
     let short = digest
         .get(..12)
         .context("a SHA-256 shorter than 12 digits")?;
     Ok(format!("mandate.local/{name}:{short}"))
+}
+
+/// One binary's SHA-256 as it is, so a one-binary image keeps the tag it always had; several
+/// binaries' the SHA-256 of their digests, one a line, in order, so a change to any one of them
+/// changes the tag.
+fn combined(digests: &[String]) -> String {
+    match digests {
+        [one] => one.clone(),
+        many => {
+            let joined = many.join("\n");
+            sha2::Sha256::digest(joined.as_bytes())
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect()
+        }
+    }
 }
 
 fn static_binary(binary: &str) -> String {
@@ -433,7 +458,8 @@ pub fn up() -> Result<()> {
     let image = image_tag()?;
     let api = api_image_tag()?;
     if source == ImageSource::Build {
-        build_image(&image, IMAGE_DOCKERFILE, "mandate", &[])?;
+        let runner = static_binary(RUNNER);
+        build_image(&image, IMAGE_DOCKERFILE, "mandate", &[(&runner, RUNNER)])?;
     }
     if let Some(api) = &api {
         build_image(
@@ -592,7 +618,8 @@ pub fn down() -> Result<()> {
 const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
-/// `mandate-cli` and `mandate-api-server` linked statically, so their images need no base
+/// `mandate-cli`, the backtest runner and `mandate-api-server` linked statically, so their images
+/// need no base
 /// (DEC-993 item 9), with no feature at all: never `live`. The dev profile, for the CI job's ten minutes (DEC-464): it keeps
 /// overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
@@ -601,6 +628,8 @@ fn build_binary() -> Result<()> {
         "--locked",
         "--package",
         "mandate-cli",
+        "--package",
+        RUNNER,
         "--package",
         "mandate-api-server",
         "--target",
@@ -618,7 +647,7 @@ fn build_binary() -> Result<()> {
         .status()
         .context("starting cargo")?;
     if !status.success() {
-        bail!("the static build of mandate-cli and mandate-api-server failed with {status}");
+        bail!("the static build of the cell's binaries failed with {status}");
     }
     Ok(())
 }
@@ -2398,6 +2427,20 @@ fn sh_in(dir: &str, program: &str, args: &[&str]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One binary's tag is its own digest, as before; two binaries' changes when either changes,
+    /// and with their order, so the runner alone changing gives the `mandate` image a new tag.
+    #[test]
+    fn an_image_of_two_binaries_is_tagged_by_both() {
+        let [a, b, c] = ["a", "b", "c"].map(|d| d.repeat(64));
+        assert_eq!(combined(std::slice::from_ref(&a)), a);
+        let both = combined(&[a.clone(), b.clone()]);
+        assert_eq!(both.len(), 64);
+        assert!(both.bytes().all(|x| x.is_ascii_hexdigit()));
+        assert_ne!(both, a);
+        assert_ne!(both, combined(&[a.clone(), c]));
+        assert_ne!(both, combined(&[b, a]));
+    }
 
     fn process(name: &str, built: bool) -> Value {
         json!({"name": name, "built": built})
