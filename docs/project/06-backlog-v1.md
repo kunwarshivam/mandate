@@ -3186,6 +3186,23 @@ enables `live` (ES-23, OPS-5).
   key, environment and secret the founder creates, each with the least permissions the plan
   needs. It stops at a reachable, empty cluster with its buckets, DNS and Access: add-ons and
   applications are lane GO's.
+- **E21-58 (Proposed, M8, staging by 2026-10-26; lane GO; claim #1635; DEC-2015 to DEC-2018; after
+  E21-56's empty DOKS cluster from lane IAC, DEC-2011)** As the founder, I want staging and production
+  on DOKS reconciled by GitOps from `main`, so that what runs is exactly what `main` says and
+  production moves only by a reviewed pull request. *Accepted when:* `deploy/gitops/` holds one
+  overlay per environment (`staging`, `production`), reconciled by Flux read-only from `main`
+  (DEC-2015), that installs, from `deploy/cell/charts/` and `deploy/hosted/values/` unforked, the
+  CloudNativePG operator and its Barman Cloud plugin, the journal's two instances on separate nodes
+  archiving to the journal archive bucket (Cloudflare R2 with bucket lock, DEC-2605 row 4) through
+  an egress rule that fails closed, the workspace chart, and cloudflared for the tunnel; staging
+  tracks the signed image digests `release.yml` publishes from `main` through a bot pull request,
+  and production changes only by a pull request that copies staging's digests; every image of the
+  repository's is signature-checked at admission (E21-35); CI renders every overlay with no
+  credential, checks it with kubeconform, and refuses an overlay that sets the stub tier (`dev` or
+  `ci`, DEC-2005) or `live`, or names an image not pinned by digest, selected by `cargo xtask ci
+  select` (DEC-1190); and the founder's one bootstrap, from an address the cluster's API firewall
+  admits, installs Flux and creates the workload secrets (the tunnel token and the archive key)
+  from lane IAC's outputs, never committed and never by an agent, until E21-32's vault holds them.
 
 ## Won't (v1)
 
