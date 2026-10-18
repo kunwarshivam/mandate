@@ -22,12 +22,14 @@ use mandate_time::UtcNanos;
 
 mod agent;
 mod artifact;
+mod backtest_records;
 mod catalogue;
 mod connection_fold;
 mod connections;
 mod control;
 mod control_plane;
 mod control_verify;
+mod deployment;
 mod draft;
 mod gateway;
 mod invalidation;
