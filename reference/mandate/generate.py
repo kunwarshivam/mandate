@@ -508,16 +508,45 @@ risk_case("MC-R28", "A 1:3 reverse split removes the residual's basis, and its c
                "12) = 100.01 is removed from B; cash in lieu = round(1/3 x 300.03, 2) = 100.01, so realized moves by 0 and E "
                "by cash in lieu - f x mark' = 100.01 - 100.01 = 0. The mark is replaced by 300.03. CashInLieuPosted moves "
                "the receivable to cash and leaves E unchanged.")
-risk_case("MC-R29", "A cash dividend is income on the ex-date; its payment moves no USD measure",
+risk_case("MC-R29", "A cash dividend joins E with the ex-date's first mark; its application and its payment move no USD measure",
           "two_stock_swing", WIDE + FAST + ISO, "100", "100", "us_equity", at(14, 0),
           [mk(at(14, 1), "100"),
            {"event": "corporate_action_dividend", "at": at(0, 0, day=22), "session": "after_hours", "per_share": "0.255"},
            mk(at(13, 35, day=22), "99.745"),
            {"event": "dividend_paid", "at": at(13, 36, day=22), "session": "regular"}],
-          note="The receivable is round(100 x 0.255, 2) = 25.5, income on the ex-date (trading spec 8.5), so E rises to "
-               "10025.5 and H with it. The ex-date's mark, lower by the dividend, returns E to 10000, leaving a drawdown of "
-               "the dividend's share of H: the receivable is counted before the mark falls, which only tightens. "
-               "DividendPaid only moves the receivable to cash.")
+          note="The receivable is round(100 x 0.255, 2) = 25.5, Q being the position at application. Applied at 20:00 "
+               "before the ex-date, while the last mark is still the cum-dividend close, it changes nothing (MI-33). It "
+               "joins E with the first counted sane mark after it, the ex-date's, in the same step: 100 x 99.745 + 25.5 "
+               "- 10000 + 10000 = 10000, so E, H and the drawdown never see the dividend twice. DividendPaid only moves "
+               "the receivable to cash.")
+risk_case("MC-R30", "A dividend applied before the ex-date's mark lifts no rung",
+          "two_stock_swing", WIDE + FAST + ISO, "100", "100", "us_equity", at(14, 0),
+          [mk(at(14, 1), "96.9"),
+           {"event": "corporate_action_dividend", "at": at(0, 0, day=22), "session": "after_hours", "per_share": "1.2"},
+           mk(at(13, 35, day=22), "95.7")],
+          note="96.9 is a 3.1% drawdown, past the 0.03 scale_sizes rung. A dividend of 120 counted at application, against "
+               "the cum-dividend mark, would make E 9810, a 1.9% drawdown below the rung's 0.02 lift level, and lift it "
+               "for the night; the ex-date's mark of 95.7 would trigger it again. Held until that mark, the dividend "
+               "arrives with it: E = 9570 + 120 = 9690, still 3.1%, and the rung never moves (MI-33).")
+risk_case("MC-R31", "A 3:2 split at a rung's exact boundary does not clear the breach its confirmation is counting",
+          "two_stock_swing", WIDE + [rep("/risk/scale_lift_after_s", 0), rep("/risk/daily_breach_min_s", 0)] + ISO,
+          "100", "100", "us_equity", at(14, 0),
+          [mk(at(14, 1), "94"),
+           {"event": "corporate_action_split", "at": at(14, 1, 30), "session": "regular", "new": 3, "old": 2,
+            "fractionable": False, "cash_in_lieu_price": None},
+           clk(at(14, 2, 5))],
+          note="94 is a drawdown of exactly 6%, the exits_only rung, whose confirmation needs 60 s. 94 x 2 / 3 rounded "
+               "half to even would be 62.666666666667 and lift E to 9400.00000000005, clearing the breach and restarting "
+               "the wait. Rounded toward zero it is 62.666666666666: E = 150 x 62.666666666666 = 9399.9999999999, so the "
+               "breach holds and the tick 65 s after the mark confirms the rung, as a tick in place of the split would "
+               "(MI-33).")
+risk_case("MC-R32", "A reverse split that leaves no whole share and posts no price removes the position at 0; a later posting adds nothing",
+          "two_stock_swing", WIDE + FAST + ISO, "2", "100", "us_equity", at(14, 0),
+          [mk(at(14, 1), "100"), split(at(0, 0, day=22), 1, 3),
+           {"event": "cash_in_lieu_posted", "at": at(13, 35, day=22), "session": "regular"}],
+          note="Q_raw = 2 / 3, so Q' = 0 and the whole basis, 200, is removed. No price is posted, so cash in lieu is 0 and "
+               "E falls by 2 x 100 to 9800. The broker's later CashInLieuPosted changes no figure, whatever it pays: "
+               "cash the risk state never booked stays out of E, and the difference is the reconciliation's (MI-33).")
 
 # =========================================================== E. risk day boundaries
 for cid, title, instant in [
