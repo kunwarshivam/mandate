@@ -28,10 +28,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   - **Rule 201, a stream rule.** The connection was established on this control stream with an
     `account_ref` (version 2), and not since revoked, before the deployment. Held as rules 66 to 68
     are: the writer checks it before appending, and §11's `connection_lifecycle_mismatch` checks it
-    from the connection anchor, which already holds what it reads. A tightening under DEC-176:
-    live deployments meet it already (the CLI's `admitted()`, DEC-529 item 3), but the CLI's paper
-    `agent deploy` admits a connection the stream never recorded, and must now refuse it until
-    `connection record` establishes it.
+    from the connection anchor, which already holds what it reads. A writer writes version 2
+    exactly when rule 201 holds, and version 1 otherwise, as it does today: a live deployment meets
+    it already (the CLI's `admitted()`, DEC-529 item 3), and the CLI's paper `agent deploy` on a
+    connection the stream never recorded stays version 1, which the manager does not start. No
+    deployment that is accepted today is refused.
   - **Version 1 names no account.** The manager starts nothing for a version-1 deployment: it fails
     closed rather than read the document. Every other reader treats the two versions alike.
   - **Vectors.** A new generated `agent_deployed` section; no other section changes, so the
@@ -4843,10 +4844,10 @@ closed without one:
      its connection. A version-1 `AgentDeployed` is not judged, so every stream written before
      v0.52 still verifies.
 
-**Rule 201 is a tightening (DEC-176), and it changes one writer's behaviour.** It refuses only
-deployments, which add risk, so it never holds a risk reduction (`AGENTS.md` rule 13), and what it
-refuses fails closed: the deployment is not recorded, and nothing starts. Not every deployment
-written today meets it:
+**A writer writes version 2 exactly when rule 201 holds, and version 1 otherwise.** Rule 201
+judges only version 2, which adds risk, so it never holds a risk reduction (`AGENTS.md` rule 13),
+and a version-2 draft it would refuse is never written: the writer writes version 1, which the
+manager does not start (fail closed). Not every deployment written today meets it:
 
 - **Live.** The CLI's `admitted()` already requires, for a live mandate, that the connection's
   latest `ConnectionEstablished` or `ConnectionRevoked` be a version-2 establishment, with an
@@ -4858,10 +4859,11 @@ written today meets it:
   no `ConnectionEstablished` (`mandate-spec`'s `unrecorded_stop_limit_asset_classes`). So the CLI's
   `agent deploy` deploys a paper agent today on a connection the stream records nothing about. The
   workspace API's deployment clears the environment the same way, though it refuses V-002 for a
-  deployment. Under rule 201 a paper deployment, like a live one, needs the connection's version-2
-  `ConnectionEstablished` (from `connection record`) earlier on the control stream. The CLI is
-  the writer whose behaviour changes, in the code change that follows: it refuses such a paper
-  deployment before appending, and the owner records the connection first.
+  deployment. Such a paper deployment is written as version 1, as today, and is never refused for
+  rule 201; the manager starts nothing for it until the owner records the connection (with
+  `connection record`, which needs the connect sequence's `ConnectionChecked`) and deploys again.
+  The CLI changes in the code change that follows only in writing version 2 when rule 201
+  holds.
 - **Revoked.** A connection whose latest record is a revocation is known to the fold, so V-001
   refuses a paper deployment on it (no environment, read as `live`), and `admitted()` a live one.
 

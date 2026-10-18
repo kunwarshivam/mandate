@@ -2747,8 +2747,8 @@ enables `live` (ES-23, OPS-5).
   templates, RBAC and Deployment, the Compose adapter, the restart drill through `cargo xtask cell
   drill`; the owner's resume lifting a crash-loop pause once the runtime copies the pause (E21-30);
   an alert for an instance stuck `Pending` or `Unknown`; deleting exited pods; a check that the
-  pod templates mount no service-account token; the writers' checks of rules 200 and 201 (the CLI's
-  paper `agent deploy` then needs `connection record` first). Follow-ups from DEC-1171's review
+  pod templates mount no service-account token; the writers' checks of rules 200 and 201 (a writer writes version 2
+  exactly when rule 201 holds, and version 1 otherwise, as today). Follow-ups from DEC-1171's review
   (minors, freeze rule):
   - m1: the CLI lets a stopped agent's id be deployed again, while §9.21 reads `AgentStopped` as
     final; decide whether agent ids are reused.
