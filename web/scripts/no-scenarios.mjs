@@ -1,7 +1,9 @@
 // Fails the build if the dev-only scenario switcher reached it, or if a production build (flag unset)
-// accepts a scenario. Run after `next build`: it scans the output for the switcher, then starts the
-// build and asks for the stale scenario by query parameter and by cookie, and for the mock workspace API
-// at `/v1` (DEC-975), which only the e2e build serves, and for the stub sign-in's token route, which no build serves (DEC-2406). The e2e build
+// accepts a scenario. Run after `next build`: it scans the output for the switcher and for any compiled
+// route under `/dev/` (DEC-2406: the stub sign-in's token route is `next dev` only, so no build, the
+// e2e one included, may hold it). Then it starts the build and asks for the stale scenario by query
+// parameter and by cookie, for the mock workspace API at `/v1` (DEC-975), which only the e2e build
+// serves, and for the stub sign-in's token route, which no build serves. The e2e build
 // (`OWLHEAD_E2E_SCENARIOS=1`, scripts/e2e-build.mjs) must accept both, so the flag is checked both ways.
 import { spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
@@ -24,6 +26,20 @@ export function findSwitcher(nextDir) {
   if (!scanned.some((f) => f.endsWith(".js"))) throw new Error(`no JavaScript under ${nextDir}/static or /server; build first`);
   const hits = scanned.filter((f) => readFileSync(f, "utf8").includes(SWITCHER_MARKER)).map((f) => relative(nextDir, f));
   return { scanned: scanned.length, hits };
+}
+
+/**
+ * Every route under `/dev/` the build compiled, from its app-paths manifest and its server output's file
+ * paths. Paths, not text: the client bundle names `/dev/stub-token` as the address it asks.
+ */
+export function findDevRoutes(nextDir) {
+  const manifest = JSON.parse(readFileSync(join(nextDir, "server", "app-paths-manifest.json"), "utf8"));
+  const listed = Object.keys(manifest).filter((route) => /^\/dev(\/|$)/.test(route));
+  const files = readdirSync(join(nextDir, "server", "app"), { withFileTypes: true, recursive: true })
+    .filter((e) => e.isFile())
+    .map((e) => relative(join(nextDir, "server", "app"), join(e.parentPath, e.name)))
+    .filter((path) => /^dev(\/|$)/.test(path));
+  return [...listed, ...files.map((f) => `server/app/${f}`)];
 }
 
 /** What the running build does with `?scenario=stale` and with the scenario cookie. */
@@ -86,6 +102,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const failures = [];
   const { scanned, hits } = findSwitcher(join(process.cwd(), dir));
   if (hits.length) failures.push(`the dev-only scenario switcher is in the build:\n    ${hits.join("\n    ")}`);
+  const devRoutes = findDevRoutes(join(process.cwd(), dir));
+  if (devRoutes.length) failures.push(`a dev-only route under /dev/ is compiled into the build:\n    ${devRoutes.join("\n    ")}`);
   const seen = await withBuild(probe);
   const accepts = seen.paramStatus === 307 && seen.paramSetsCookie && seen.cookieRendersStale && seen.mockApiStatus === 200 && seen.stubTokenStatus === 404;
   const refuses = seen.paramStatus === 200 && !seen.paramSetsCookie && !seen.cookieRendersStale && seen.mockApiStatus === 404 && seen.stubTokenStatus === 404;

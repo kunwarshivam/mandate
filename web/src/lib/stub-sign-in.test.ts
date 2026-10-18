@@ -1,7 +1,9 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { findDevRoutes } from "../../scripts/no-scenarios.mjs";
 import { POST } from "@/app/dev/stub-token/route.dev";
 import { DEV_ROUTE_EXTENSION, pageExtensions } from "./dev-routes";
 import { STUB_ISSUER_ENV, STUB_SUBJECT_ENV, STUB_TOKEN_PATH, mintStubToken, readStubSignIn, sameOriginAsk, tokenFromStub } from "./stub-sign-in";
@@ -94,13 +96,34 @@ describe("the app's route for it", () => {
     expect(sameOriginAsk(new Headers({ host: "127.0.0.1:4317", origin: "http://127.0.0.1:4317", "x-mandate-request": "1" }))).toBe(true);
     expect(sameOriginAsk(new Headers({ host: "127.0.0.1:4317", origin: "http://127.0.0.1:4318", "x-mandate-request": "1" }))).toBe(false);
     expect(sameOriginAsk(new Headers({ host: "127.0.0.1:4317", origin: "null", "x-mandate-request": "1" }))).toBe(false);
+    expect(sameOriginAsk(new Headers({ host: "[::1]:4317", origin: "http://[::1]:4317", "x-mandate-request": "1" }))).toBe(true);
   });
 
-  it("is a dev route a production build does not compile, and that its middleware refuses outside next dev", () => {
+  it("refuses a rebound name whose Origin matches its Host, since only a loopback host is asked", () => {
+    for (const host of ["rebind.example:4317", "localhost.example:4317", "127.0.0.2:4317"])
+      expect(sameOriginAsk(new Headers({ host, origin: `http://${host}`, "x-mandate-request": "1" })), host).toBe(false);
+  });
+
+  it("finds a route under /dev/ in a build's manifest or server output, and none in a build without one", () => {
+    const build = (manifest: Record<string, string>, files: string[]) => {
+      const dir = mkdtempSync(join(tmpdir(), "no-scenarios-"));
+      mkdirSync(join(dir, "server", "app"), { recursive: true });
+      writeFileSync(join(dir, "server", "app-paths-manifest.json"), JSON.stringify(manifest));
+      for (const f of files) {
+        mkdirSync(dirname(join(dir, "server", "app", f)), { recursive: true });
+        writeFileSync(join(dir, "server", "app", f), "");
+      }
+      return dir;
+    };
+    expect(findDevRoutes(build({ "/v1/[...path]/route": "app/v1/route.js", "/devices/page": "app/devices/page.js" }, ["v1/route.js", "devices/page.js"]))).toEqual([]);
+    expect(findDevRoutes(build({ "/dev/stub-token/route": "app/dev/stub-token/route.js" }, []))).toEqual(["/dev/stub-token/route"]);
+    expect(findDevRoutes(build({}, ["dev/stub-token/route.js"]))).toEqual(["server/app/dev/stub-token/route.js"]);
+  });
+
+  it("is a dev route a production build does not compile", () => {
     expect(pageExtensions("production")).not.toContain(DEV_ROUTE_EXTENSION);
     expect(pageExtensions("development")).toContain(DEV_ROUTE_EXTENSION);
     expect(readdirSync(join(WEB, "src/app/dev/stub-token"))).toEqual(["route.dev.ts"]);
-    expect(readFileSync(join(WEB, "src/middleware.ts"), "utf8")).toContain('if (process.env.NODE_ENV !== "development" && DEV_ONLY.test(request.nextUrl.pathname)) return new NextResponse(null, { status: 404 });');
   });
 });
 

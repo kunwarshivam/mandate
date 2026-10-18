@@ -66,14 +66,21 @@ export async function mintStubToken(config: StubSignIn, fetch: typeof globalThis
   }
 }
 
-/** Whether the browser asked from this app's own origin, with the CSRF mark: `Origin`'s host is the `Host` it sent. */
+/** The hosts `next dev` may be asked on: a rebound name never is, so DNS rebinding cannot make `Origin` match `Host`. */
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * Whether the browser asked from this app's own origin, with the CSRF mark: `Origin`'s host is the
+ * `Host` it sent, and that host is a loopback name.
+ */
 export function sameOriginAsk(headers: Headers): boolean {
   if (headers.get(STUB_TOKEN_HEADER) !== "1") return false;
   const origin = headers.get("origin");
   const host = headers.get("host");
   if (!origin || !host) return false;
   try {
-    return new URL(origin).host === host;
+    const asked = new URL(origin);
+    return asked.host === host && LOOPBACK_HOSTS.has(asked.hostname);
   } catch {
     return false;
   }
