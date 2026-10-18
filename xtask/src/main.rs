@@ -235,10 +235,11 @@ fn run() -> Result<()> {
             Ok(())
         }
         ["ci", "mutants", "--plan"] => {
-            let plan = mutants_plan(Path::new("."), base_ref()?.as_deref())?;
+            let history = mutant_costs::plan_history();
+            let plan = mutants_plan_from(Path::new("."), base_ref()?.as_deref(), &history)?;
             eprintln!(
-                "    mutants: {} mutant(s) over {} shard(s)",
-                plan.mutants, plan.shards
+                "    mutants: {} mutant(s) over {} shard(s), up to {} a shard (DEC-2607)",
+                plan.mutants, plan.shards, plan.per_shard
             );
             print!("{}", plan.outputs());
             Ok(())
@@ -3866,6 +3867,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "KUBECONFORM_VERSION",
     "LABELED_PR",
     "LINT_RESULT",
+    "MANDATE_MUTANTS_PER_SHARD",
     "MANDATE_MUTANTS_PLANNED",
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
@@ -6846,7 +6848,26 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         .map(|value| value.parse::<usize>())
         .transpose()
         .with_context(|| format!("parsing {MUTANTS_PLANNED_ENV}"))?;
-    mutants_scheduled(root, base, shard, planned)
+    let per_shard = match env::var(MUTANTS_PER_SHARD_ENV) {
+        Ok(value) => per_shard_value(&value)?,
+        Err(_) => 1,
+    };
+    mutants_scheduled(root, base, shard, planned, per_shard)
+}
+
+/// [`MUTANTS_PER_SHARD_ENV`]'s value: a whole number from 1 to
+/// [`mutant_costs::MAX_PER_SHARD`], as a plan writes it, and nothing else.
+fn per_shard_value(value: &str) -> Result<usize> {
+    let per_shard: usize = value
+        .parse()
+        .with_context(|| format!("{MUTANTS_PER_SHARD_ENV} is `{value}`, not a whole number"))?;
+    if !(1..=mutant_costs::MAX_PER_SHARD).contains(&per_shard) || value != per_shard.to_string() {
+        bail!(
+            "{MUTANTS_PER_SHARD_ENV} is `{value}`; a plan writes 1 to {} (DEC-2607)",
+            mutant_costs::MAX_PER_SHARD
+        );
+    }
+    Ok(per_shard)
 }
 
 /// [`mutants`] with its schedule passed in rather than read from the environment, which the tests
@@ -6856,12 +6877,13 @@ fn mutants_scheduled(
     base: Option<&str>,
     shard: Option<MutantShard>,
     planned: Option<usize>,
+    per_shard: usize,
 ) -> Result<()> {
     let Some(diff) = gate_diff(root, base)? else {
-        return check_schedule(0, shard, planned);
+        return check_schedule(0, shard, planned, per_shard);
     };
     let listed = gate_mutants(root, &diff)?;
-    check_schedule(listed.values().sum(), shard, planned)?;
+    check_schedule(listed.values().sum(), shard, planned, per_shard)?;
     if listed.is_empty() {
         eprintln!("    mutants: the diff generates no mutants");
         return Ok(());
@@ -6876,7 +6898,7 @@ fn mutants_scheduled(
         })
         .map(|krate| krate.package.clone())
         .collect();
-    gate_run(root, &diff, shard, &listed, &tested)
+    gate_run(root, &diff, shard, &listed, &tested, per_shard)
 }
 
 /// The gate's run over `diff`'s `listed` mutants, or `shard`'s slice of them, judged by the tests
@@ -6888,6 +6910,7 @@ fn gate_run(
     shard: Option<MutantShard>,
     listed: &BTreeMap<String, usize>,
     tested: &[String],
+    per_shard: usize,
 ) -> Result<()> {
     let meta = metadata_in(root)?;
     let harnesses = simulator_harnesses(&meta);
@@ -6913,13 +6936,60 @@ fn gate_run(
         .context("timing the diff this run reads")?;
     let unmutated = UnmutatedSource::read(root, &diff.touched)?;
     let before = launched_after(root, started);
-    let status = mutants_job_cargo(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
-        .status()
-        .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let stop = (per_shard > 1)
+        .then(|| Duration::from_millis(mutant_costs::STOP_AFTER_MS).saturating_sub(before));
+    let status = match stop {
+        Some(left) => mutants_job_within(root, &args, left),
+        None => mutants_job_cargo(root, &args),
+    }
+    .status()
+    .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
     unmutated.restored(root)?;
     let code = status?.code();
-    record_shard_cost(root, shard, in_shard, before, code, started);
+    let overran = stop.is_some() && matches!(code, Some(STOPPED_BY_TIMEOUT | KILLED_BY_TIMEOUT));
+    record_shard_cost(
+        root,
+        shard,
+        in_shard.clone(),
+        before,
+        code,
+        started,
+        overran,
+    );
+    if overran {
+        bail!(
+            "this shard of {per_shard} mutant(s) a shard ran out of time {} s after the gate \
+             started, inside the ten-minute job (DEC-464); the next plan for {} sizes its shards at \
+             one mutant (DEC-2607 item 5)",
+            mutant_costs::STOP_AFTER_MS / 1000,
+            in_shard.join(", ")
+        );
+    }
     mutants_outcome(root, &diff.crates, code, started)
+}
+
+/// `timeout`'s exit status when it stopped its command.
+const STOPPED_BY_TIMEOUT: i32 = 124;
+/// `timeout`'s exit status when its command outlived the stop and it had to kill it.
+const KILLED_BY_TIMEOUT: i32 = 137;
+
+/// Seconds `timeout` waits after stopping cargo-mutants before it kills it.
+const KILL_AFTER_S: u64 = 15;
+
+/// The `cargo` child [`mutants_job_cargo`] makes, run under `timeout` so that it stops `left`
+/// from now (DEC-2607 item 5): with no clock to read here, `timeout` keeps the time.
+fn mutants_job_within(root: &Path, args: &[&str], left: Duration) -> Command {
+    let mut timeout = Command::new("timeout");
+    timeout
+        .current_dir(root)
+        .arg(format!("--kill-after={KILL_AFTER_S}s"))
+        .arg(format!("{}s", left.as_secs().max(1)))
+        .arg("cargo")
+        .args(args)
+        .env_remove(CARGO_TARGET_DIR)
+        .envs(MUTANT_BUILD_PROFILE);
+    timeout
 }
 
 /// The file whose modification time marks cargo-mutants' launch, read against the diff's own
@@ -6948,6 +7018,7 @@ fn record_shard_cost(
     before: Duration,
     code: Option<i32>,
     started: SystemTime,
+    overran: bool,
 ) {
     let outcomes_path = root.join(MUTANTS_OUT).join("outcomes.json");
     let outcomes = fs::metadata(&outcomes_path)
@@ -6965,7 +7036,7 @@ fn record_shard_cost(
                 before_ms,
                 outcomes.as_deref(),
                 code,
-                false,
+                overran,
             )
         })
         .and_then(|cost| mutant_costs::write_record(root, &cost));
@@ -7262,7 +7333,7 @@ fn sweep_scheduled(root: &Path, shard: Option<MutantShard>, planned: Option<usiz
         eprintln!("    sweep: this shard holds no mutant");
         return Ok(());
     }
-    gate_run(root, &diff, shard, &listed, &tested)
+    gate_run(root, &diff, shard, &listed, &tested, 1)
 }
 
 /// Every mutant the gate tests on `diff`, counted per package: `cargo mutants --list` with the
@@ -7284,57 +7355,97 @@ const MUTANTS_PLANNED_ENV: &str = "MANDATE_MUTANTS_PLANNED";
 /// The matrix width before DEC-538, and still its ceiling: DEC-498's 192 slice shards.
 const MUTANT_SHARDS: usize = 192;
 
-/// How CI's mutation matrix is sized for one diff (DEC-538): `mutants` is the count the gate tests
-/// and `shards` is `min(MUTANT_SHARDS, mutants)`.
+/// The variable CI sets on each mutation shard to the mutants a shard carries, as its plan sized
+/// them (DEC-2607 item 4).
+const MUTANTS_PER_SHARD_ENV: &str = "MANDATE_MUTANTS_PER_SHARD";
+
+/// How CI's mutation matrix is sized for one diff (DEC-538, DEC-2607): `mutants` is the count the
+/// gate tests, `per_shard` how many a shard may carry, and `shards` is
+/// `min(MUTANT_SHARDS, ceil(mutants / per_shard))`.
 ///
 /// cargo-mutants' `slice` sharding gives shard `k` of `N` the `k`-th run of `ceil(n / N)` listed
-/// mutants. For `n <= 192` that run is one mutant at either width, and for `n > 192` the width is
-/// 192 as before, so shard `k` of the plan tests exactly what shard `k` of 192 tested, and every
-/// shard the plan drops was one that tested nothing.
+/// mutants, which is at most `per_shard` below the ceiling. At one a shard, for `n <= 192` that run
+/// is one mutant at either width, and for `n > 192` the width is 192 as before, so shard `k` of
+/// the plan tests exactly what shard `k` of 192 tested, and every shard the plan drops was one
+/// that tested nothing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MutantPlan {
     mutants: usize,
+    per_shard: usize,
     shards: usize,
 }
 
 impl MutantPlan {
+    /// One mutant a shard (DEC-538), what a diff with no cost history gets.
     fn for_mutants(mutants: usize) -> Self {
+        Self::sized(mutants, 1)
+    }
+
+    /// `mutants` at up to `per_shard` a shard, which is taken as at least one (DEC-2607 item 4).
+    /// Past the ceiling a shard's slice is `ceil(mutants / 192)` wide, so the matrix is that many
+    /// fewer shards than 192 that slicing would leave empty.
+    fn sized(mutants: usize, per_shard: usize) -> Self {
+        let per_shard = per_shard.max(1);
+        let width = per_shard.max(mutants.div_ceil(MUTANT_SHARDS));
         Self {
             mutants,
-            shards: mutants.min(MUTANT_SHARDS),
+            per_shard,
+            shards: mutants.div_ceil(width),
         }
     }
 
     /// The plan as `GITHUB_OUTPUT` lines: the count, the matrix's shard indices as a JSON array
-    /// (`[]` for none), and the shard total each shard's `INDEX/TOTAL` names.
+    /// (`[]` for none), the shard total each shard's `INDEX/TOTAL` names, and the mutants a shard
+    /// carries.
     fn outputs(self) -> String {
         let indices: Vec<String> = (0..self.shards).map(|k| k.to_string()).collect();
         format!(
-            "mutants={}\nshards=[{}]\ntotal={}\n",
+            "mutants={}\nshards=[{}]\ntotal={}\nper_shard={}\n",
             self.mutants,
             indices.join(","),
-            self.shards
+            self.shards,
+            self.per_shard
         )
     }
 }
 
+/// [`mutants_plan_from`] with no cost history, so one mutant a shard (DEC-538).
+#[cfg(test)]
+fn mutants_plan(root: &Path, base: Option<&str>) -> Result<MutantPlan> {
+    mutants_plan_from(root, base, &mutant_costs::History::default())
+}
+
 /// `cargo xtask ci mutants --plan`: the mutant count the gate would test on this diff and the
 /// matrix it needs, without building anything (DEC-538). It goes through [`gate_diff`] and
-/// [`gate_mutants`], the gate's own selection.
-fn mutants_plan(root: &Path, base: Option<&str>) -> Result<MutantPlan> {
-    let mutants = match gate_diff(root, base)? {
-        Some(diff) => gate_mutants(root, &diff)?.values().sum(),
-        None => 0,
+/// [`gate_mutants`], the gate's own selection, and sizes each shard's load from the cost `history`
+/// of the packages the diff mutates (DEC-2607 item 3): one a shard for a package without a clean
+/// history.
+fn mutants_plan_from(
+    root: &Path,
+    base: Option<&str>,
+    history: &mutant_costs::History,
+) -> Result<MutantPlan> {
+    let Some(diff) = gate_diff(root, base)? else {
+        return Ok(MutantPlan::for_mutants(0));
     };
-    Ok(MutantPlan::for_mutants(mutants))
+    let listed = gate_mutants(root, &diff)?;
+    Ok(MutantPlan::sized(
+        listed.values().sum(),
+        mutant_costs::per_shard(history, listed.keys()),
+    ))
 }
 
 /// Refuses a shard whose schedule disagrees with the plan that launched it: a listing of another
 /// size, or a shard total other than the plan's. Either would mean the shards no longer cover the
 /// listing between them. Without a plan (a local run) any schedule is accepted.
-fn check_schedule(listed: usize, shard: Option<MutantShard>, planned: Option<usize>) -> Result<()> {
+fn check_schedule(
+    listed: usize,
+    shard: Option<MutantShard>,
+    planned: Option<usize>,
+    per_shard: usize,
+) -> Result<()> {
     check_schedule_for(listed, shard, planned, |mutants| {
-        MutantPlan::for_mutants(mutants).shards
+        MutantPlan::sized(mutants, per_shard).shards
     })
 }
 
@@ -9568,12 +9679,12 @@ mod tests {
         live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
         mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
-        plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems, registry_rows,
-        rehearsal_runs, release_stub_refused, repo_root, schema_mutants, shard_packages,
-        shellcheck_scripts, simulator_harnesses, simulator_oracles, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_order_config,
-        test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts, workspace_closure,
-        workspace_packages,
+        per_shard_value, plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems,
+        registry_rows, rehearsal_runs, release_stub_refused, repo_root, schema_mutants,
+        shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts,
+        workspace_closure, workspace_packages,
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
@@ -13366,21 +13477,23 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-538: the plan's matrix is `min(192, n)` shards, as `GITHUB_OUTPUT` lines CI reads with
-    /// `fromJSON`, and an empty list when the diff has no mutant, which is what skips the matrix.
+    /// DEC-538: at one a shard the plan's matrix is `n` shards up to 192, and past it the
+    /// `ceil(n / ceil(n / 192))` shards that 192-way slicing leaves holding a mutant (DEC-2607
+    /// item 4), as `GITHUB_OUTPUT` lines CI reads with `fromJSON`, and an empty list when the diff
+    /// has no mutant, which is what skips the matrix.
     #[test]
     fn the_plan_sizes_the_matrix_to_the_diff() -> Result<()> {
         assert_eq!(
             MutantPlan::for_mutants(0).outputs(),
-            "mutants=0\nshards=[]\ntotal=0\n",
+            "mutants=0\nshards=[]\ntotal=0\nper_shard=1\n",
             "no mutants, no shards"
         );
         assert_eq!(
             MutantPlan::for_mutants(10).outputs(),
-            "mutants=10\nshards=[0,1,2,3,4,5,6,7,8,9]\ntotal=10\n",
+            "mutants=10\nshards=[0,1,2,3,4,5,6,7,8,9]\ntotal=10\nper_shard=1\n",
             "ten mutants, one a shard"
         );
-        for (mutants, shards) in [(1, 1), (191, 191), (192, 192), (193, 192), (500, 192)] {
+        for (mutants, shards) in [(1, 1), (191, 191), (192, 192), (193, 97), (500, 167)] {
             let plan = MutantPlan::for_mutants(mutants);
             assert_eq!(plan.shards, shards, "{mutants} mutants");
             let outputs = plan.outputs();
@@ -13443,6 +13556,56 @@ mod tests {
                 assert!(planned.iter().all(|slice| slice.len() == 1), "{n} mutants");
             }
         }
+    }
+
+    /// DEC-2607 item 4: at `k` a shard, the plan's shards cover every listed mutant exactly once,
+    /// none is empty, none carries more than `k` below the 192-shard ceiling, and `k` of one is
+    /// DEC-538's plan.
+    #[test]
+    fn a_plan_of_k_a_shard_covers_every_mutant_once_at_most_k_a_shard() {
+        for k in 1..=crate::mutant_costs::MAX_PER_SHARD {
+            for n in 0..=1000 {
+                let plan = MutantPlan::sized(n, k);
+                let planned = slices(n, plan.shards.max(1));
+                let covered: Vec<usize> = planned.iter().flat_map(Clone::clone).collect();
+                assert_eq!(covered, (0..n).collect::<Vec<_>>(), "{n} mutants at {k}");
+                assert!(
+                    planned.iter().all(|slice| !slice.is_empty()) || n == 0,
+                    "no empty shard, {n} mutants at {k}"
+                );
+                assert!(plan.shards <= MUTANT_SHARDS, "{n} mutants at {k}");
+                if n <= MUTANT_SHARDS * k {
+                    assert!(
+                        planned.iter().all(|slice| slice.len() <= k),
+                        "at most {k} a shard for {n} mutants"
+                    );
+                }
+            }
+        }
+        for n in 0..=1000 {
+            assert_eq!(MutantPlan::sized(n, 1), MutantPlan::for_mutants(n));
+            assert_eq!(
+                MutantPlan::sized(n, 0),
+                MutantPlan::for_mutants(n),
+                "zero reads as one"
+            );
+        }
+        assert_eq!(MutantPlan::sized(102, 6).shards, 17);
+        assert_eq!(
+            MutantPlan::sized(102, 6).outputs().lines().last(),
+            Some("per_shard=6")
+        );
+    }
+
+    /// The shard reads the plan's load exactly as the plan wrote it, and nothing else.
+    #[test]
+    fn the_shard_reads_the_plans_load_and_nothing_else() -> Result<()> {
+        assert_eq!(per_shard_value("1")?, 1);
+        assert_eq!(per_shard_value("16")?, 16);
+        for bad in ["", "0", "17", "-1", "+4", "04", " 4", "4.0", "four"] {
+            assert!(per_shard_value(bad).is_err(), "{bad:?} is refused");
+        }
+        Ok(())
     }
 
     /// `cargo mutants --list --json` over the whole diff from `base`, for one shard or unsharded,
@@ -13556,7 +13719,7 @@ mod tests {
         );
         fs::remove_file(&diff).ok();
 
-        let wrong_count = mutants_scheduled(&fx.0, Some(base), None, Some(plan.mutants + 1))
+        let wrong_count = mutants_scheduled(&fx.0, Some(base), None, Some(plan.mutants + 1), 1)
             .expect_err("a shard whose listing differs from the plan is refused");
         assert!(wrong_count.to_string().contains("plan"), "{wrong_count}");
         let wrong_total = mutants_scheduled(
@@ -13564,6 +13727,7 @@ mod tests {
             Some(base),
             Some(MutantShard::parse(&format!("0/{MUTANT_SHARDS}"))?),
             Some(plan.mutants),
+            1,
         )
         .expect_err("a shard total other than the plan's is refused");
         assert!(wrong_total.to_string().contains("shard"), "{wrong_total}");
@@ -13582,7 +13746,7 @@ mod tests {
         let fx = Fixture::gated("mutants-plan-zero")?;
         let head = fx.git(&["rev-parse", "HEAD"])?;
         assert_eq!(mutants_plan(&fx.0, None)?, MutantPlan::for_mutants(0));
-        mutants_scheduled(&fx.0, None, None, Some(0))?;
+        mutants_scheduled(&fx.0, None, None, Some(0), 1)?;
 
         fx.write(
             "crates/covered/tests/more.rs",
@@ -13594,7 +13758,7 @@ mod tests {
             MutantPlan::for_mutants(0),
             "a tests-only change"
         );
-        mutants_scheduled(&fx.0, Some(&head), None, Some(0))?;
+        mutants_scheduled(&fx.0, Some(&head), None, Some(0), 1)?;
 
         fx.write(
             "crates/covered/src/lib.rs",
@@ -13610,7 +13774,7 @@ mod tests {
             MutantPlan::for_mutants(0),
             "changed source that generates no mutant"
         );
-        mutants_scheduled(&fx.0, Some(&head), None, Some(0))?;
+        mutants_scheduled(&fx.0, Some(&head), None, Some(0), 1)?;
         assert!(
             !fx.0.join(MUTANTS_OUT).exists(),
             "and the gate never started a run"
@@ -13630,20 +13794,33 @@ mod tests {
 
     #[test]
     fn a_shards_schedule_must_match_its_plan() -> Result<()> {
-        check_schedule(5, None, None)?;
-        check_schedule(5, Some(MutantShard::parse("3/192")?), None)?;
-        check_schedule(5, Some(MutantShard::parse("3/5")?), Some(5))?;
-        check_schedule(500, Some(MutantShard::parse("191/192")?), Some(500))?;
-        check_schedule(0, None, Some(0))?;
-        assert!(check_schedule(4, None, Some(5)).is_err(), "fewer listed");
-        assert!(check_schedule(6, None, Some(5)).is_err(), "more listed");
+        check_schedule(5, None, None, 1)?;
+        check_schedule(5, Some(MutantShard::parse("3/192")?), None, 1)?;
+        check_schedule(5, Some(MutantShard::parse("3/5")?), Some(5), 1)?;
+        check_schedule(500, Some(MutantShard::parse("166/167")?), Some(500), 1)?;
         assert!(
-            check_schedule(5, Some(MutantShard::parse("3/192")?), Some(5)).is_err(),
+            check_schedule(500, Some(MutantShard::parse("191/192")?), Some(500), 1).is_err(),
+            "192 shards for 500 mutants, 25 of them empty, is not the plan (DEC-2607 item 4)"
+        );
+        check_schedule(0, None, Some(0), 1)?;
+        assert!(check_schedule(4, None, Some(5), 1).is_err(), "fewer listed");
+        assert!(check_schedule(6, None, Some(5), 1).is_err(), "more listed");
+        assert!(
+            check_schedule(5, Some(MutantShard::parse("3/192")?), Some(5), 1).is_err(),
             "a 192-way shard under a plan of five"
         );
         assert!(
-            check_schedule(500, Some(MutantShard::parse("3/191")?), Some(500)).is_err(),
+            check_schedule(500, Some(MutantShard::parse("3/191")?), Some(500), 1).is_err(),
             "a total below the ceiling for a plan above it"
+        );
+        check_schedule(10, Some(MutantShard::parse("2/3")?), Some(10), 4)?;
+        assert!(
+            check_schedule(10, Some(MutantShard::parse("2/10")?), Some(10), 4).is_err(),
+            "one a shard under a plan of four a shard (DEC-2607 item 4)"
+        );
+        assert!(
+            check_schedule(10, Some(MutantShard::parse("2/3")?), Some(10), 1).is_err(),
+            "four a shard under a plan of one"
         );
         Ok(())
     }
@@ -13667,7 +13844,10 @@ mod tests {
             "mutants: ${{ steps.plan.outputs.mutants }}",
             "shards: ${{ steps.plan.outputs.shards }}",
             "total: ${{ steps.plan.outputs.total }}",
-            "printf 'mutants=0\\nshards=[]\\ntotal=0\\n' >> \"$GITHUB_OUTPUT\"",
+            "per_shard: ${{ steps.plan.outputs.per_shard }}",
+            "printf 'mutants=0\\nshards=[]\\ntotal=0\\nper_shard=1\\n' >> \"$GITHUB_OUTPUT\"",
+            "actions: read",
+            "GH_TOKEN: ${{ github.token }}",
         ] {
             assert!(
                 plan.iter().any(|l| l == line),
@@ -13681,6 +13861,7 @@ mod tests {
             "shard: ${{ fromJSON(needs.mutants-plan.outputs.shards) }}",
             "MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/${{ needs.mutants-plan.outputs.total }}",
             "MANDATE_MUTANTS_PLANNED: ${{ needs.mutants-plan.outputs.mutants }}",
+            "MANDATE_MUTANTS_PER_SHARD: ${{ needs.mutants-plan.outputs.per_shard }}",
         ] {
             assert!(matrix.iter().any(|l| l == line), "`mutants` has `{line}`");
         }

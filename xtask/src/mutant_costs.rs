@@ -34,6 +34,19 @@ pub const COST_ARTIFACT_PREFIX: &str = "mutant-cost-";
 /// How many records the history keeps for each mutated package, the most recent by run.
 pub const KEPT_PER_PACKAGE: usize = 20;
 
+/// The milliseconds after the gate's start by which a shard of more than one mutant must be done
+/// (DEC-2607 item 5): with the job's setup before xtask, inside DEC-464's ten minutes.
+pub const STOP_AFTER_MS: u64 = 480_000;
+
+/// The most mutants a shard carries (DEC-2607 item 3).
+pub const MAX_PER_SHARD: usize = 16;
+
+/// The fewest clean records a package needs before its shards carry more than one mutant.
+pub const MIN_RECORDS: usize = 3;
+
+/// The factor on a package's longest mutant when sizing its shards.
+const MUTANT_MARGIN: u64 = 2;
+
 /// One shard's cost (DEC-2607 item 1).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShardCost {
@@ -170,6 +183,70 @@ pub fn fold(mut history: History, records: &[ShardCost]) -> History {
         kept.drain(..excess);
     }
     history
+}
+
+/// How many mutants a shard of one package may carry, from its kept records (DEC-2607 item 3):
+/// `floor((STOP_AFTER_MS - F) / (MUTANT_MARGIN * M))` between 1 and [`MAX_PER_SHARD`], `F` its
+/// largest fixed part and `M` its longest mutant. One while it has fewer than [`MIN_RECORDS`]
+/// records, or any record that ran out of time or ended other than `caught` or `missed`.
+fn package_per_shard(records: &[ShardCost]) -> usize {
+    let clean = |record: &ShardCost| {
+        !record.overran && matches!(record.outcome.as_str(), "caught" | "missed")
+    };
+    if records.len() < MIN_RECORDS || !records.iter().all(clean) {
+        return 1;
+    }
+    let fixed = records
+        .iter()
+        .map(|r| r.fixed_ms)
+        .max()
+        .unwrap_or(STOP_AFTER_MS);
+    let longest = records
+        .iter()
+        .map(|r| r.longest_mutant_ms)
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    let fits = STOP_AFTER_MS.saturating_sub(fixed) / longest.saturating_mul(MUTANT_MARGIN);
+    usize::try_from(fits)
+        .unwrap_or(MAX_PER_SHARD)
+        .clamp(1, MAX_PER_SHARD)
+}
+
+/// How many mutants a shard of a diff mutating `packages` may carry: the smallest of theirs, and
+/// one for a diff with none.
+pub fn per_shard<'p>(history: &History, packages: impl IntoIterator<Item = &'p String>) -> usize {
+    packages
+        .into_iter()
+        .map(|package| {
+            package_per_shard(
+                history
+                    .by_package
+                    .get(package)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+            )
+        })
+        .min()
+        .unwrap_or(1)
+}
+
+/// The history the plan reads in CI, or an empty one, which sizes every shard at one mutant: outside
+/// CI, or when the history cannot be read, as said in the log.
+pub fn plan_history() -> History {
+    let Ok(repo) = env::var("GITHUB_REPOSITORY") else {
+        return History::default();
+    };
+    let scratch = Path::new("target/mutant-costs-download");
+    let read = fs::create_dir_all(scratch)
+        .context("creating the download directory")
+        .and_then(|()| latest_history(&repo, scratch));
+    read.unwrap_or_else(|err| {
+        eprintln!(
+            "    mutants: no cost history ({err:#}); every shard carries one mutant (DEC-2607)"
+        );
+        History::default()
+    })
 }
 
 /// The workflow run's id, 0 outside CI.
@@ -405,6 +482,102 @@ mod tests {
             .map(|c| (c.run, c.shard.as_str()))
             .collect();
         assert_eq!(order, [(3, "0/2"), (9, "0/2"), (9, "1/2")]);
+    }
+
+    fn sized(fixed_ms: u64, longest_mutant_ms: u64) -> ShardCost {
+        ShardCost {
+            fixed_ms,
+            longest_mutant_ms,
+            ..cost(1, "0/1", &["a"])
+        }
+    }
+
+    #[test]
+    fn a_package_is_sized_from_its_largest_fixed_part_and_longest_mutant() {
+        let records = [
+            sized(100_000, 5_000),
+            sized(140_000, 2_000),
+            sized(90_000, 11_000),
+        ];
+        assert_eq!(
+            package_per_shard(&records),
+            15,
+            "(480 - 140) s over twice 11 s is 15.45"
+        );
+        let executor = [
+            sized(140_000, 26_000),
+            sized(120_000, 20_000),
+            sized(130_000, 1_000),
+        ];
+        assert_eq!(package_per_shard(&executor), 6, "(480 - 140) / 52 is 6.5");
+        let quick = [sized(60_000, 100), sized(60_000, 100), sized(60_000, 100)];
+        assert_eq!(
+            package_per_shard(&quick),
+            MAX_PER_SHARD,
+            "never more than sixteen"
+        );
+        let full = [sized(470_000, 9_000), sized(10_000, 1), sized(10_000, 1)];
+        assert_eq!(package_per_shard(&full), 1, "never fewer than one");
+        let over = [sized(480_001, 1), sized(1, 1), sized(1, 1)];
+        assert_eq!(
+            package_per_shard(&over),
+            1,
+            "a fixed part past the stop leaves one"
+        );
+    }
+
+    #[test]
+    fn a_package_without_a_clean_history_gets_one_mutant_a_shard() {
+        assert_eq!(package_per_shard(&[]), 1, "no history");
+        assert_eq!(
+            package_per_shard(&[sized(1_000, 1_000), sized(1_000, 1_000)]),
+            1,
+            "fewer than three records"
+        );
+        for spoil in ["timeout", "baseline-failed", "failed"] {
+            let mut records = vec![sized(1_000, 1_000); 5];
+            records[2].outcome = spoil.to_owned();
+            assert_eq!(
+                package_per_shard(&records),
+                1,
+                "a record that ended {spoil}"
+            );
+        }
+        let mut records = vec![sized(1_000, 1_000); 5];
+        records[4].overran = true;
+        assert_eq!(
+            package_per_shard(&records),
+            1,
+            "a record that ran out of time"
+        );
+        let mut missed = vec![sized(1_000, 1_000); 5];
+        missed[0].outcome = "missed".to_owned();
+        assert_eq!(
+            package_per_shard(&missed),
+            MAX_PER_SHARD,
+            "a missed mutant is a cost like any other; the gate judges it, not the plan"
+        );
+    }
+
+    #[test]
+    fn a_diff_takes_the_smallest_of_its_packages() {
+        let mut history = History::default();
+        history
+            .by_package
+            .insert("quick".to_owned(), vec![sized(60_000, 100); 3]);
+        history
+            .by_package
+            .insert("slow".to_owned(), vec![sized(140_000, 26_000); 3]);
+        let names =
+            |list: &[&str]| -> Vec<String> { list.iter().map(|p| (*p).to_owned()).collect() };
+        assert_eq!(per_shard(&history, &names(&["quick"])), MAX_PER_SHARD);
+        assert_eq!(per_shard(&history, &names(&["quick", "slow"])), 6);
+        assert_eq!(
+            per_shard(&history, &names(&["quick", "new"])),
+            1,
+            "a package with no records"
+        );
+        assert_eq!(per_shard(&history, &names(&[])), 1);
     }
 
     #[test]
