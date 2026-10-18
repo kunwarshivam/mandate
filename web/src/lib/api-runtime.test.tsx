@@ -239,7 +239,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     expect(current().view).toBeNull();
   });
 
-  it("sends no version creation and no deployment, which have no request schema yet, and says not sent, never recorded", async () => {
+  it("creates the version from its document, and takes the server's version and the served classification; no deployment is sent", async () => {
     const { posts } = mount();
     await ready();
     const agent = buildWorkspace("approvals").agents[0];
@@ -248,15 +248,17 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
       id = current().createVersion({ mandate: agent.mandate, provenance: agent.provenance }).id;
     });
     expect(current().setUps.at(-1)).toMatchObject({ id, agentId: "", created: { phase: "sent", validated: false, classification: null } });
-    await waitFor(() => expect(current().setUps.at(-1)?.created).toMatchObject({ phase: "undelivered", reason: "not_sent", validated: false, classification: null }));
+    await waitFor(() => expect(current().setUps.at(-1)?.created).toMatchObject({ phase: "recorded", validated: true, classification: "risk_increasing" }));
+    expect(posts().map((p) => new URL(p.url).pathname)).toEqual([`/v1/workspaces/${WS}/mandate-versions`]);
+    expect(JSON.parse(posts()[0].body ?? "{}")).toEqual(agent.mandate);
     act(() => current().deployVersion(id, DEPLOY_RECORD));
     await waitFor(() => expect(current().setUps.at(-1)?.deployed).toMatchObject({ phase: "undelivered", reason: "not_sent" }));
     expect(current().setUps.at(-1)?.confirmed).toBeNull();
-    expect(posts()).toHaveLength(0);
+    expect(posts()).toHaveLength(1);
     expect(current().backtestFor(agent.mandate_version)).toBeNull();
   });
 
-  it("sends no confirm until the served confirmation can be read: a version not created is refused first, and no step-up is recorded", async () => {
+  it("confirms bound to the served screen, with no step-up until E9-4, and shows the server's step_up_required with nothing recorded", async () => {
     const { posts } = mount();
     await ready();
     const agent = buildWorkspace("approvals").agents[0];
@@ -265,13 +267,32 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
       id = current().createVersion({ mandate: agent.mandate, provenance: agent.provenance }).id;
     });
     const setUp = () => current().setUps.find((s) => s.id === id)!;
-    await waitFor(() => expect(setUp().created.phase).toBe("undelivered"));
+    await waitFor(() => expect(setUp().created.phase).toBe("recorded"));
     act(() => current().confirmVersion(id, CONFIRM_RECORD, confirmStepUpDigest(setUp().version, null, null)));
     expect(setUp().confirmed).toMatchObject({ phase: "sent", record: CONFIRM_RECORD, stepUp: null });
+    await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "undelivered", reason: "step_up_required", stepUp: null }));
+    const confirm = posts().at(-1);
+    expect(new URL(confirm?.url ?? "").pathname).toBe(`/v1/workspaces/${WS}/mandate-versions/${encodeURIComponent(setUp().version)}/confirm`);
+    expect(JSON.parse(confirm?.body ?? "{}")).toMatchObject({ classification_shown: "risk_increasing", step_up: null, agent_id: null, base_version: null });
+    expect(JSON.parse(confirm?.body ?? "{}").screen_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it("refuses a confirm before its version is recorded, and a set-up it never made, sending nothing", async () => {
+    const { posts } = mount("unreachable");
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("unreachable"));
+    const agent = buildWorkspace("approvals").agents[0];
+    let id = "";
+    act(() => {
+      id = current().createVersion({ mandate: agent.mandate, provenance: agent.provenance }).id;
+    });
+    const setUp = () => current().setUps.find((s) => s.id === id)!;
+    await waitFor(() => expect(setUp().created.phase).not.toBe("sent"), { timeout: 20_000 });
+    expect(setUp().created.phase).not.toBe("recorded");
+    act(() => current().confirmVersion(id, CONFIRM_RECORD, null));
     await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "undelivered", reason: "not_created", stepUp: null }));
     act(() => current().confirmVersion("set-unknown", CONFIRM_RECORD, null));
     expect(current().setUps.some((s) => s.id === "set-unknown")).toBe(false);
-    expect(posts()).toHaveLength(0);
+    expect(posts().filter((p) => p.url.includes("/confirm"))).toHaveLength(0);
   });
 
   it("writes nothing to browser storage", async () => {

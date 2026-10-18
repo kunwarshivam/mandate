@@ -3,11 +3,13 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
-import { prepareApprovalResponse, prepareOwnerCommand } from "@/api/commands";
+import { prepareApprovalResponse, prepareConfirm, prepareOwnerCommand } from "@/api/commands";
+import { confirmAccepted } from "@/api/confirm";
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, PreparedCommand } from "@/api/types";
+import { prepareCreateVersion, readConfirmation, versionCreated } from "@/api/versions";
 import type { Iso, Workspace } from "@/fixtures/types";
 import type { ApiSource } from "./data-source";
 import { mandateVersion } from "./fixture-journey";
@@ -29,7 +31,7 @@ const SENDS = 4;
 const STATUS_READS = 30;
 const SETTLED: ReadonlySet<CommandPhase> = new Set(["applied", "refused", "ended"]);
 
-type Delivery = { phase: "recorded"; eventId: string } | { phase: "undelivered"; reason: string } | { phase: "unknown"; eventId: string | null };
+type Delivery = { phase: "recorded"; eventId: string; body?: unknown } | { phase: "undelivered"; reason: string } | { phase: "unknown"; eventId: string | null };
 
 const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 const later = (ms: number, iso: Iso): Iso => new Date(Date.parse(iso) + ms).toISOString();
@@ -167,7 +169,7 @@ export function ApiRuntimeProvider({
       let eventId: string | null = null;
       for (let attempt = 0; attempt < SENDS; attempt += 1) {
         const outcome = await client.send(command);
-        if (outcome.ok) return { phase: "recorded", eventId: outcome.accepted.event_id };
+        if (outcome.ok) return { phase: "recorded", eventId: outcome.accepted.event_id, body: outcome.body };
         const { error } = outcome;
         if (error.effect === "none") return { phase: "undelivered", reason: error.code };
         eventId = error.event_id ?? eventId;
@@ -269,44 +271,77 @@ export function ApiRuntimeProvider({
   }, []);
 
   /**
-   * Step 1 (`POST /mandate-drafts/{id}/versions`) has no request schema yet, so nothing is sent and
-   * nothing is invented: the step answers `not_sent`, and no version exists (DEC-2401 item 4).
+   * Step 1, `POST /mandate-versions` (§3.11 item 11, DEC-2101 item 3): the mandate document itself.
+   * The version is the one the server hashed, never one computed here; it is recorded only once the
+   * server says so, and the served confirmation's classification is the one shown.
    */
-  const createVersion = useCallback<Runtime["createVersion"]>((request) => {
-    counter.current += 1;
-    const setUp: SetUp = {
-      id: `set-${counter.current}`,
-      agentId: "",
-      version: mandateVersion(request.mandate),
-      created: { phase: "sent", sentAt: nowRef.current, base: null, classification: null, validated: false },
-      confirmed: null,
-      deployed: null,
-    };
-    setUpsRef.current = [...setUpsRef.current, setUp];
-    setSetUps(setUpsRef.current);
-    window.setTimeout(() => patchSetUp(setUp.id, (s) => ({ ...s, created: { ...s.created, phase: "undelivered", reason: "not_sent" } })), 0);
-    return setUp;
-  }, [patchSetUp]);
+  const createVersion = useCallback<Runtime["createVersion"]>(
+    (request) => {
+      counter.current += 1;
+      const setUp: SetUp = {
+        id: `set-${counter.current}`,
+        agentId: "",
+        version: mandateVersion(request.mandate),
+        created: { phase: "sent", sentAt: nowRef.current, base: null, classification: null, validated: false },
+        confirmed: null,
+        deployed: null,
+      };
+      setUpsRef.current = [...setUpsRef.current, setUp];
+      setSetUps(setUpsRef.current);
+      const created = (patch: Partial<SetUp["created"]>, version?: SetUp["version"]) =>
+        patchSetUp(setUp.id, (s) => ({ ...s, ...(version ? { version } : {}), created: { ...s.created, ...patch } }));
+      void (async () => {
+        const delivered = await deliver(prepareCreateVersion(client, request.mandate));
+        if (!mounted.current) return;
+        if (delivered.phase === "undelivered") return created({ phase: "undelivered", reason: delivered.reason });
+        if (delivered.phase === "unknown") return created({ phase: "unknown" });
+        const answer = versionCreated(delivered.body);
+        if (!answer.ok) return created({ phase: "unknown" });
+        const version = answer.value.mandate_version;
+        const screen = await readConfirmation(client, version);
+        if (!mounted.current) return;
+        created({ phase: "recorded", recordedAt: nowRef.current, validated: true, classification: screen.ok ? screen.value.classification : null }, version);
+      })();
+      return setUp;
+    },
+    [client, deliver, patchSetUp],
+  );
 
   /**
-   * Step 2, `POST /mandate-versions/{hash}/confirm` (§5.1), is not sent either: its `screen_digest` and
-   * `classification_shown` are the served `GET .../confirmation`'s, which this client does not read yet,
-   * and a digest computed here would claim a screen the server never served. A version not created is
-   * refused first; otherwise the step answers `not_sent`. No step-up is recorded, since none was sent
-   * (DEC-2401 item 4).
+   * Step 2, `POST /mandate-versions/{hash}/confirm` (§5.1, DEC-2101 item 5), bound to the
+   * confirmation the server serves now: it is read again first, since its digest can move. Step-up
+   * is `null` until E9-4 gives the browser its ceremony, so the server answers a first version's
+   * confirm `step_up_required` and records nothing (DEC-2101 item 2); the screen says so.
    */
   const confirmVersion = useCallback<Runtime["confirmVersion"]>(
     (setUpId, record) => {
       const setUp = setUpsRef.current.find((s) => s.id === setUpId);
       if (!setUp) return;
-      const reason = setUp.created.phase === "recorded" ? "not_sent" : "not_created";
+      const confirmed = (patch: Partial<NonNullable<SetUp["confirmed"]>>) =>
+        patchSetUp(setUpId, (s) => ({ ...s, confirmed: s.confirmed ? { ...s.confirmed, ...patch } : null }));
       patchSetUp(setUpId, (s) => ({ ...s, confirmed: { phase: "sent", sentAt: nowRef.current, record, stepUp: null } }));
-      window.setTimeout(() => patchSetUp(setUpId, (s) => ({ ...s, confirmed: s.confirmed ? { ...s.confirmed, phase: "undelivered", reason } : null })), 0);
+      void (async () => {
+        if (setUp.created.phase !== "recorded") return confirmed({ phase: "undelivered", reason: "not_created" });
+        const screen = await readConfirmation(client, setUp.version);
+        if (!mounted.current) return;
+        if (!screen.ok) return confirmed({ phase: "undelivered", reason: screen.error.code });
+        const served = { screen_digest: screen.value.screen_digest, classification: screen.value.classification };
+        const delivered = await deliver(prepareConfirm(client, { version: setUp.version, agentId: null, base: null, record, served }));
+        if (!mounted.current) return;
+        if (delivered.phase === "undelivered") return confirmed({ phase: "undelivered", reason: delivered.reason });
+        if (delivered.phase === "unknown") return confirmed({ phase: "unknown" });
+        const accepted = confirmAccepted(delivered.body, "");
+        confirmed(accepted.ok ? { phase: "recorded", recordedAt: nowRef.current, classification: accepted.value.classification, applies: accepted.value.applies } : { phase: "unknown" });
+      })();
     },
-    [patchSetUp],
+    [client, deliver, patchSetUp],
   );
 
-  /** Step 3 (`POST /agents`) has no request schema yet either: not sent, and no agent exists. */
+  /**
+   * Step 3 (`POST /agents`) is not sent: its `agent_id` must already name an agent stream, which no
+   * API route creates yet, and the server refuses every deployment without step-up until E9-4
+   * (DEC-2101 items 2 and 6). Not sent, and no agent exists.
+   */
   const deployVersion = useCallback<Runtime["deployVersion"]>(
     (setUpId, record) => {
       if (!setUpsRef.current.some((s) => s.id === setUpId)) return;
