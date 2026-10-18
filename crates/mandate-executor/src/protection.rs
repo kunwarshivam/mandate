@@ -6831,10 +6831,9 @@ mod sequence_tests {
     }
 
     /// #286 round 1, B1, the reviewer's second path: the broker reports the opening whose cancel
-    /// is outstanding canceled, or filled, with no `CancelAccepted`; the exit goes in that step.
-    /// An expiry reported then is no edge out of `PendingCancel` in §5.7's table and is journaled
-    /// and ignored, so the bound ends that wait: the exit goes with the query, and the answer
-    /// re-sends nothing (DEC-160 (18)).
+    /// is outstanding canceled, filled, or expired, with no `CancelAccepted`; the exit goes in
+    /// that step, and a later answer re-sends nothing. An expiry is an edge out of `PendingCancel`
+    /// by the prior state's own (DEC-2302 item 5), so it no longer waits for the bound.
     #[test]
     fn an_opening_reported_gone_without_a_confirmation_releases_the_exit()
     -> Result<(), ExecutorError> {
@@ -6847,16 +6846,9 @@ mod sequence_tests {
                 Input::BrokerUpdate(BrokerUpdate::Order(opening_order(BUY, status, filled)?)),
                 &ports,
             )?;
-            if status == "expired" {
-                assert_eq!(submitted(&pushed), 0, "{:?}", drafted(&pushed));
-                let due = executor.run(Input::Tick(RiskClock::from_secs(15)), &ports)?;
-                assert_eq!(queried(&due), vec![BUY]);
-                assert_eq!(submitted(&due), 1, "{status}");
-                let answered = executor.run(buy_reported(status, filled)?, &ports)?;
-                assert_eq!(submitted(&answered), 0, "{status}");
-            } else {
-                assert_eq!(submitted(&pushed), 1, "{status}: {:?}", drafted(&pushed));
-            }
+            assert_eq!(submitted(&pushed), 1, "{status}: {:?}", drafted(&pushed));
+            let answered = executor.run(buy_reported(status, filled)?, &ports)?;
+            assert_eq!(submitted(&answered), 0, "{status}");
         }
         Ok(())
     }

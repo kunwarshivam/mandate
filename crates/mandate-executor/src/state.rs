@@ -150,6 +150,9 @@ pub(crate) struct Switch {
     pub(crate) floor: Option<Price>,
     pub(crate) instruments: Vec<InstrumentId>,
     pub(crate) pending: BTreeSet<InstrumentId>,
+    /// The orders the switch cancelled, which no refusal of that cancel returns to working while
+    /// the broker still reports them working (DEC-2302).
+    pub(crate) cancels: BTreeSet<ClientOrderId>,
 }
 
 /// What one `OrderRequestRecorded` carries (§9.5): the executor-only members of the order that
@@ -376,6 +379,13 @@ impl ExecutorState {
     /// One order, or `None` for an id this executor never derived.
     pub fn order(&self, client_order_id: &ClientOrderId) -> Option<&Order> {
         self.orders.get(client_order_id)
+    }
+
+    /// Whether an agent-scoped kill switch cancelled `id` (§5.5, DEC-2302).
+    pub(crate) fn kill_switch_cancels(&self, id: &ClientOrderId) -> bool {
+        self.switches
+            .values()
+            .any(|switch| switch.cancels.contains(id))
     }
 
     /// The orders whose `OrderSubmitted` committed with no acknowledgment. `Input::Started`
