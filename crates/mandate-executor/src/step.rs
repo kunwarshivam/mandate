@@ -207,7 +207,8 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             scope,
             initiator,
             confirmation,
-        }) => kill_switch(batch, scope, initiator, confirmation),
+            cause,
+        }) => kill_switch(batch, scope, initiator, confirmation, cause),
         Input::Command(Command::CancelOpenings { agent, instrument }) => {
             cancel_openings(batch, Some(&agent), Some(&instrument))
         }

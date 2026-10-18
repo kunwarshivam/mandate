@@ -425,6 +425,7 @@ fn kill_switch_activated(
     instruments.extend(named("deferred")?);
     let switch = Switch {
         agent: AgentId(required_text(payload, "subject")?.to_owned()),
+        copied_from: optional_text(payload, "copied_from").map(|id| EventId(id.to_owned())),
         purpose: purpose_of(required_text(payload, "purpose")?)?,
         floor: optional_price(payload, "floor")?,
         pending: instruments.iter().cloned().collect(),

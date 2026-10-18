@@ -2021,6 +2021,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-executord"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-alpaca",
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-executor",
+ "mandate-journal",
+ "mandate-num",
+ "mandate-process",
+ "mandate-store",
+ "mandate-time",
+ "proptest",
+]
+
+[[package]]
 name = "mandate-gateway"
 version = "0.0.0"
 dependencies = [

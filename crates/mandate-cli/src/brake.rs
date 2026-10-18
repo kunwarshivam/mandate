@@ -23,6 +23,7 @@ use crate::control::{ControlError, ControlJournal, Ids, Now, Owner, Submitted, a
 use crate::deploy::active;
 use crate::gestures;
 use crate::inbox::InstantIds;
+use crate::owner;
 use crate::postgres::JournalArgs;
 use crate::register::{OwnerArgs, open};
 use crate::version::{Row, refused, rows, stored};
@@ -38,6 +39,16 @@ pub enum AgentCommand {
     /// Commit a kill switch for one agent, a connection, or the whole workspace. Never refused;
     /// needs no code.
     Kill(BrakeArgs),
+    /// Show one agent's mode, startup hold, pending approvals and restrictions. Commits nothing.
+    Status(owner::StatusArgs),
+    /// Show the code that resumes one agent from the owner's own pause, or resume it with it.
+    Resume(owner::ResumeArgs),
+    /// Show the code that stops one agent, or stop it with it; `--release` hands its positions to
+    /// the owner, unprotected.
+    Stop(owner::StopArgs),
+    /// Exit one instrument of one agent at once; never refused. Without the right code it carries
+    /// no step-up evidence.
+    Exit(owner::ExitArgs),
 }
 
 /// What a brake reaches: exactly one of `--agent`, `--connection` or `--workspace-wide`.
