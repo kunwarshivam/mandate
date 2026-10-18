@@ -18,6 +18,9 @@ claim issue or the decision file, not here.
 - A merge of `main` that keeps both sides of a registry row leaves two rows, which `cargo xtask
   deps` refuses only in `full-checks`; after every merge run `deps` and gitleaks, not only the
   crate's tests (#1555, #1560).
+- Worktrees of one workspace that share a `CARGO_TARGET_DIR` overwrite each other's artifacts for
+  workspace crates: a build can mix two trees and report errors no tree has. Give each worktree its
+  own target, or touch the crates' sources before building.
 - One checkout, one work stream: parallel builders each take their own worktree; background gates
   own the tree until they finish; reviewers read branches by ref.
 - A three-dot diff against a stale merge-base fails the spec guard; rebuild on `main`'s tip.
@@ -34,15 +37,16 @@ claim issue or the decision file, not here.
   of tokens with 23 PRs open; this session took them over (merging `main` in, never rebasing).
   Merged on a Sonnet review each: #1566 `9942eec5`, #1572 `a34b2874`, #1583 `9befec7a`, #1547
   `4d28c47b` (journal spec v0.53), #1570 `63352551`, #1522 `2373d8d5`, #1565 `9b1931b6`, #1580
-  `36a2d669` (renumbered to v0.54 at merge, vectors regenerated) and #1558 `6d3f8cb0` (Cursor's
-  gate decision ledger, marked ready); #1448 closed, its content already on `main` through #1458.
-  Approved and waiting on CI: #1555 and #1560 (each re-approved after `full-checks` found a
-  doubled `serde_json` or `tokio` row the merge kept), #1581 (retargeted to `main` once #1570
-  landed), #1569 (retargeted after #1566) and #1578 (its first review). Sequenced behind them:
-  #1537, #1582 (gitleaks' two false positives allowed by path and value, as the other test
-  allowlists are), #1576 and #1577 after #1560, since all four rewrite `xtask/src/cell.rs`; #1575
-  after #1569; #1545 after #1580, as v0.55. Waiting on the founder: #1539 and #1501 (above, in
-  the tracker).
+  `36a2d669` (v0.54), #1558 `6d3f8cb0`, #1578 `fcf8f0c8`, #1569 `5716653c`, #1560 `a6cdd644`,
+  #1545 `fa0220dc` (v0.55, §9.25, since #1580 had taken §9.24), #1575 `c7ef3fc2` and #1581
+  `7bbbc3bc`; #1448 closed, its content already on `main` through #1458. Merges of `main` that
+  CI then refused: a doubled `serde_json` and `tokio` row (#1555, #1560), a struct literal in
+  #1565's test missing #1555's new field, a chart test rendering without the values #1522 made
+  required (#1560), and a k3d image import that failed and still exited 0 (#1581's
+  `cell-journal`; the fix belongs in `cell up`). #1537's review found three surviving mutants on
+  the pause exit, killed by tests that need no Postgres. Sequenced: #1555, #1537 and #1576
+  re-approved after their latest merges, #1577 after #1576; #1582 waits on the founder (how the
+  runtime starts in the cell, beside #1560). Waiting on the founder: #1539 and #1501 (above).
 - **2026-10-17, the gate decision record.** The decision page was an agent header plus a short column of two-line checks, about 770px past a 1440×900 screen. It is now one ledger: the action once, the verdict on a line, every check full width with the result in a column. `web/` only.
 - **2026-10-13 and 10-14, the two coordinator sessions: nine merges, the live path's R0-gap rows
   closed.** The recorded docs sweep of the #1295/#1315 review notes landed split, the spec guard

@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-18, a coordinator session took over the orphaned PRs of the founder's other coordinating account: nine merged, six approved and waiting on CI, the rest sequenced behind them (work log). 2026-10-17: the gate decision record is a ledger on the first screen (`web/`, #1558). The Where-we-are rows are as of 2026-10-14 |
+| **Last updated** | 2026-10-18, a coordinator session took over the orphaned PRs of the founder's other coordinating account: seventeen merged, the rest re-approved or sequenced behind them (work log). 2026-10-17: the gate decision record is a ledger on the first screen (`web/`, #1558). The Where-we-are rows are as of 2026-10-14 |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
