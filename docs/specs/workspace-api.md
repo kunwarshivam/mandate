@@ -350,12 +350,29 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   here. `digest` is the SHA-256 of the action's canonical object: the approval's
   content hash, the mandate version hash, or the command's canonical members (DEC-279 item 1's
   object for commands).
+- The challenge route ([DEC-2103](../project/decisions/DEC-2103.md)), operation name
+  `step_up_challenge`: the session (the one 401, or `reduction_only` for a reduction-only session,
+  identity spec §7.2 step 1 and §7.3), the CSRF mark, `Idempotency-Key`, the body
+  (`commands/step-up-challenge-request`, strict), then the §3.7 row the kind needs; a principal
+  that may not perform the action gets that row's refusal and no challenge, and the two kinds of
+  `own` rows answer the one 404 until their own routes land. The challenge id is
+  §3.4's derived id for the key, so a retry with the same action answers the same challenge and
+  the same key with another action is `idempotency_conflict`. Only after the row is granted is a
+  `live` workspace refused `live_unavailable`, so a principal without the row gets that row's
+  refusal in either environment. It answers `201` with `commands/step-up-challenge`, with
+  `Cache-Control: no-store`, and the server never logs its body: `challenge_id`,
+  `webauthn_challenge` (the unpadded base64url of the 32 bytes the authenticator signs),
+  `action`, `issued_at`, and `expires_at`. Challenges are held in the server's memory, at most 32
+  unexpired per principal and 4,096 in all (`rate_limited` past either), and never journaled
+  when issued; a challenge the server no longer holds counts as missing.
 - The evidence the call then carries is `{assertion_id, authenticated_at, method}`, the shape the
   journal records (journal spec §9.2). The API checks it is bound to the call's digest and unused,
   and records it. **Validity is judged by the stream owner** at the moment mandate spec §6.1 names;
   the API's check is a convenience, except that it never forwards evidence bound to another action.
-- Until E9-4 ships, the only method is `cli_confirm`, paper only (mandate spec §6.1). The API
-  refuses every `live` step-up with `live_unavailable`.
+- Until E9-4 ships, the CLI's only method is `cli_confirm`, paper only (mandate spec §6.1). The API
+  refuses every `live` step-up with `live_unavailable`. Whether the API itself may verify
+  `cli_confirm` for a call made in the web app is the founder's (DEC-2103 item 7, Proposed); until
+  decided, the API verifies `passkey` only, and `cli_confirm` stays the CLI's.
 
 ### 3.7 Roles
 

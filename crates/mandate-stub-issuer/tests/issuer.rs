@@ -38,7 +38,6 @@ fn part(token: &str, index: usize) -> serde_json::Value {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn the_issuer_is_the_bind_exactly() {
     assert_eq!(issuer().issuer, "http://127.0.0.1:8899");
     assert_eq!(
@@ -48,7 +47,6 @@ fn the_issuer_is_the_bind_exactly() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn the_key_set_is_one_es256_p256_key() {
     let issuer = issuer();
     let set: serde_json::Value = serde_json::from_str(&issuer.jwks).expect("JSON");
@@ -89,7 +87,6 @@ fn the_key_set_is_one_es256_p256_key() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_token_verifies_as_the_servers_access_token_with_exactly_its_claims() {
     let issuer = issuer();
     let now = now_s();
@@ -116,7 +113,6 @@ fn a_token_verifies_as_the_servers_access_token_with_exactly_its_claims() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_token_lapses_after_its_ttl_and_the_skew() {
     let issuer = issuer();
     let now = now_s();
@@ -136,7 +132,6 @@ fn a_token_lapses_after_its_ttl_and_the_skew() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn the_audience_is_the_one_given() {
     let issuer = issuer_at("127.0.0.1:8899", "mandate-demo");
     let token = issuer.token("alice", now_s()).expect("a token");
@@ -144,7 +139,6 @@ fn the_audience_is_the_one_given() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn each_start_makes_a_new_key_and_no_other_key_verifies_its_tokens() {
     let (first, second) = (issuer(), issuer());
     assert_ne!(first.kid, second.kid);
@@ -155,7 +149,6 @@ fn each_start_makes_a_new_key_and_no_other_key_verifies_its_tokens() {
 }
 
 #[test]
-#[ignore = "pending E21-52"]
 fn a_subject_that_is_empty_has_a_control_character_or_is_too_long_is_refused() {
     let issuer = issuer();
     let now = now_s();

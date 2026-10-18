@@ -23,8 +23,10 @@ use serde_json::{Value, json};
 use sha2::Digest;
 
 use crate::{output, sh};
+use web::web_run;
 
 pub mod scenario;
+pub mod web;
 
 pub const CLUSTER: &str = "mandate-cell";
 const NODE: &str = "k3d-mandate-cell-server-0";
@@ -143,13 +145,7 @@ pub enum Drill {
     Archive,
 }
 
-pub const DRILLS: [Drill; 5] = [
-    Drill::Boot,
-    Drill::Journal,
-    Drill::Egress,
-    Drill::Compose,
-    Drill::KillSwitch,
-];
+pub const DRILLS: [Drill; 4] = [Drill::Boot, Drill::Journal, Drill::Egress, Drill::Compose];
 
 /// The journal's own drills (E21-41), which `cargo xtask ci cell-journal` runs in a job of their
 /// own so each cell job stays within its ten minutes (DEC-464).
@@ -158,6 +154,10 @@ pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
 /// The drill that kills the journal's primary, which with a synchronous standby is a failover and
 /// the old primary's rejoin; `cargo xtask ci cell-failover` runs it in a job of its own (DEC-464).
 pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
+
+/// The kill-switch drill (OPS-4, E21-34), which `cargo xtask ci cell-kill-switch` runs on a cell
+/// of its own so `ci cell` stays within its ten minutes (DEC-464, DEC-2602).
+pub const KILL_SWITCH_DRILLS: [Drill; 1] = [Drill::KillSwitch];
 
 impl Drill {
     pub fn name(self) -> &'static str {
@@ -178,6 +178,7 @@ impl Drill {
             .into_iter()
             .chain(JOURNAL_DRILLS)
             .chain(FAILOVER_DRILLS)
+            .chain(KILL_SWITCH_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
     }
@@ -266,8 +267,8 @@ pub fn ci() -> Result<()> {
     demo(false)
 }
 
-/// `cargo xtask ci cell-journal` and `ci cell-failover`: the cell, then `drills`, plain and seeded
-/// (E21-41). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+/// `cargo xtask ci cell-journal`, `ci cell-failover` and `ci cell-kill-switch`: the cell, then
+/// `drills`, plain and seeded (E21-41, DEC-2602). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
 pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
@@ -3637,7 +3638,8 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
 /// `cargo xtask cell demo [--no-web]`: the full local cell on a developer machine, with paper and
 /// demo data only. It brings up the cell, opens the demo workspace and verifies its journal,
 /// prints what is ready and what is skipped and why, then runs `web/` in the foreground at
-/// [`WEB_URL`] unless `--no-web`.
+/// [`WEB_URL`], or against the cell's API at [`DEMO_APP_ORIGIN`] once sign-in is ready
+/// ([`web_run`]), unless `--no-web`.
 pub fn demo(web: bool) -> Result<()> {
     if let Some(reason) = tools_missing() {
         bail!("the demo needs docker, k3d and helm: {reason} (deploy/cell/README.md)");
@@ -3703,16 +3705,27 @@ pub fn demo(web: bool) -> Result<()> {
             wanted.trim()
         );
     }
-    eprintln!("==> web/ at {WEB_URL} (Ctrl-C stops it; the cell keeps running)");
+    let run = web_run(signin_ready);
+    eprintln!(
+        "==> web/ at {} (Ctrl-C stops it; the cell keeps running)",
+        run.url
+    );
+    if signin_ready {
+        eprintln!(
+            "    web/: the demo owner's workspace through the API, signed in by the stub issuer \
+             (next dev only, DEC-2406)"
+        );
+    }
     let status = Command::new("npm")
         .current_dir("web")
-        .args(["run", "dev"])
+        .args(["run", run.script])
+        .envs(run.env.iter().map(|(name, value)| (*name, value.as_str())))
         .status()
-        .context("starting `npm run dev`")?;
+        .with_context(|| format!("starting `npm run {}`", run.script))?;
     if status.success() || status.code().is_none() {
         Ok(())
     } else {
-        bail!("`npm run dev` in web/ failed with {status}")
+        bail!("`npm run {}` in web/ failed with {status}", run.script)
     }
 }
 
@@ -4458,6 +4471,7 @@ mod tests {
             format!("workspace: {DEMO_WORKSPACE}"),
             format!("issuer: {LOCAL_ISSUER}"),
             format!("jwksUrl: {LOCAL_ISSUER}{STUB_KEY_SET}"),
+            format!("appOrigin: {DEMO_APP_ORIGIN}"),
             "tier: dev".to_string(),
         ] {
             assert!(

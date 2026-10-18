@@ -1892,6 +1892,7 @@ version = "0.0.0"
 dependencies = [
  "mandate-artifacts-fs",
  "mandate-canon",
+ "mandate-domain",
  "mandate-gateway",
  "mandate-journal",
  "mandate-journal-pg",
@@ -2562,6 +2563,7 @@ dependencies = [
  "mandate-authn",
  "mandate-identity",
  "mandate-journal",
+ "mandate-release",
  "mandate-time",
  "ring",
  "serde_json",

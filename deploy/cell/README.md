@@ -106,9 +106,10 @@ cargo xtask cell up               # build the image, start k3d, install the oper
 cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch, standby-down, archive
 cargo xtask cell drill --seeded   # each drill with its bug planted; fails if one still holds
 cargo xtask cell down
-cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills
+cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills, demo --no-web
 cargo xtask ci cell-journal       # and beside it: up, then standby-down and archive, plain and seeded
 cargo xtask ci cell-failover      # and beside it: up, then restart (a failover with the standby), plain and seeded
+cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch, plain and seeded (DEC-2602)
 ```
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
@@ -176,6 +177,12 @@ Sign-in runs through lane SI's stub issuer (DEC-2100, DEC-1025).
   a session with it through `POST /v1/sessions`, which must answer 204 with the session cookie.
 - Until both pieces are in, no stub runs, no links are mounted, every sign-in is refused, and the
   demo names the sign-in step as skipped.
+- Once that session opens, `cell demo` runs `web/` with `npm run dev:cell` at
+  https://localhost:4317, the API's app origin, reading the demo workspace through
+  http://localhost:8787 as the demo owner (DEC-2406). Under `next dev` only, `web/`'s server asks
+  the stub for `demo-owner`'s token, and the browser opens its own session with it. Next's
+  `--experimental-https` makes a local certificate with mkcert the first time, which may ask to
+  trust its CA. Without sign-in, `web/` runs on its own fixtures at http://127.0.0.1:4317, as before.
 
 The session signing key is made in the pod's memory at each
 start. The interim `api` image carries a CA bundle found on the building host (`SSL_CERT_FILE`, else
@@ -191,20 +198,25 @@ release in `web/.nvmrc` and npm; the first run does `npm ci`.
 `cargo xtask cell demo --scenario demo` (E21-54, DEC-2002) runs the demo's story on the cell, its
 six steps in order, with paper and demo data only and no credential. Each gesture whose pieces are
 on `main` runs in the cell, in one Job of the `control` process, and passes only when it printed
-what its success prints. Each missing link prints as `gap` with the PR or story that closes it; a
-gap never fails the run and is never faked. The run ends, in the same pod, by exporting the
+what its success prints. Each missing link prints as `gap` (DEC-2004): what of it is already on
+`main`, citing its PRs, and every lane it still waits on, with that lane's story, its open PR when
+there is one, and what the lane still has to land. A gap never fails the run and is never faked.
+Each step's heading reads `ready`, `partial` or `skipped` with the lanes it waits on, and the
+report closes with every wait grouped by lane. The run ends, in the same pod, by exporting the
 workspace's control stream and verifying it by journal spec §11 against the artifact store its
 gestures wrote, so every artifact a record names is checked. Each run uses a fresh workspace,
 `demo<run id>`.
 
-| Step | Runs today | Gaps, and what closes each |
-|---|---|---|
-| 1. Sign in, see the workspace | `workspace open` (paper), `workspace found`; the cell's API, through `cell demo`'s port-forward, refusing a read of the demo workspace with no session (the one 401) | Sign-in and the workspace read with a session: the API runs in the cell (#1554) and `mandate identity link` is on `main` (#1529); still needed is E21-52's stub token issuer beside the API (lanes SI and A1) |
-| 2. Deploy under a confirmed envelope | `config register`, `model register`, `version create`, `version confirm` shown then typed, `agent deploy` shown then typed | The same through the API and `web/`: the routes (#1552) and `web/`'s set-up (#1557) are on `main`; still needed is a session (E21-52); the agent's processes started from `AgentDeployed`: E21-33 (lane D1) |
-| 3. Research, through the gateway's recorded fake | Nothing yet | The runtime (#1521), the research driver (DEC-996 item 2), E15-8's records and the gateway's transport (#1519) are on `main`; still needed are the runtime's cell image (#1560, lane P), the driver run inside the runtime process (lane I2), and E19-5 (spec #1543) |
-| 4. Sized, gated, asked, approved, filled, protected | `approvals list` (empty until the runtime asks) | The runtime's cell image (#1560, lane P); approval from `web/`: E9-4 (lane SU); the fill and the stop on a fixture broker: E21-30's executor slice (lane X) |
-| 5. A backtest of the same version | Nothing yet | The backtest (#1482) and `web/`'s report screen (#1549) are on `main`; still needed are a way to run it in the cell and its API read (E4-4, lane I4) |
-| 6. The kill switch from `web/` | Nothing yet | The route runs in the cell (#1457, #1554); still needed are a session (E21-52) and, for the processes stopping on it, the runtime's cell image (#1560), E21-30's executor slice and E21-34 (lane O4, #1537) |
+The run's own report is the up-to-date list; on 2026-10-18 it read:
+
+| Step | Today | Runs | Waits on |
+|---|---|---|---|
+| 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found`; the cell's API refusing a read with no session (the one 401) | SI (E21-52, #1591): the stub issuer's entry point; E2E (E21-54): sign in and read the API's own workspace |
+| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy`, each code shown then typed | SI and W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
+| 3. Research, through the gateway's recorded fake | skipped | Nothing yet | D1: the runtime started; I2 (E19-2): a deployment's research configured (DEC-2208); AH (E19-13): the agentic loop over its state (#1551, #1561, #1566, #1569 on `main`) |
+| 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4, #1592) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
+| 5. A backtest of the same version | skipped | Nothing yet | E2E: run the runner and `mandate backtest record` (#1581) in the gestures' pod; SI: the API read with a session |
+| 6. The kill switch | skipped | Nothing yet | SI and W2: from `web/`; E2E: `mandate agent kill` (#1537) as a gesture; D1 and X: the processes stop on it |
 
 The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
 every opening asked, protection on. CI's `cell-demo` job, which no required check depends on, runs

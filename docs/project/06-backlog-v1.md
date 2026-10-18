@@ -549,6 +549,28 @@ the spec invariants (DP-n) its tests cover.
   validator rule `7.review_ceiling_label` and its mutant in `reference/journal/generate.py`, the regenerated
   `journal.yaml` and `fixtures/refcases/journal.json`, and the agent-stream harness's count
   (`crates/mandate-refcases/src/journal/agent_stream.rs`, 106 to 108), as DEC-177 items 6 and 14 did (ES-22).
+- **E6-15 (Must, safety-critical)** As an owner, I want the limits, rungs, and tripwires my mandate
+  sets to bind on the paper and live path, not only in the reference cases, so that a fired tripwire
+  or a latched rung actually holds new openings
+  ([DEC-2301](decisions/DEC-2301.md); claim [#1599](https://github.com/kunwarshivam/mandate/issues/1599)).
+  Today only the reference-case harness and `mandate-version-backtest` drive `RiskState` and
+  `mandate_executor::tripwire::fold`. The executor refuses the risk-state records, and the shell's
+  gate has nothing latched. In the DEC-77 sequence:
+  - **A0:** journal spec §9.27 closes the seven risk-limit records (v0.58).
+  - **A1:** the `risk_limits` vectors.
+  - **A2 and A3:** `mandate-journal`'s registration, tests first.
+  - **B1 to B4:** `mandate_executor::risk_state`, off R0's path. It is a pure fold of the account
+    stream's records into the records to append and a gate view, either readable or unreadable.
+    An unreadable view holds openings and never exits (DEC-2301 item 3). Its property tests use a
+    latch oracle that derives the latched set from the appended records alone.
+  - **C:** the wiring in `mandate-shell`'s `adapters.rs`, `paper/gate.rs`, and `paper/context.rs`,
+    which are R0 files. It waits for R0 to close, or for the founder's call.
+
+  *Accepted when:* every MC-R, MC-T, MC-L, and MC-W case, driven through journaled records, gives the
+  harness's snapshot and events. A restart rebuilds the same view. Every fail-closed cause holds
+  openings and leaves exits, protective orders, risk exits, and kill switches untouched. The paper
+  path's gate reads the folded view. Delegations end once E8-8 gives them a runtime lift
+  (`delegations_suspended`).
 
 ### E7 Alpaca connector and recovery
 
