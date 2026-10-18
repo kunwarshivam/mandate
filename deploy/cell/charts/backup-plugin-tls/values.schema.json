@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mandate-backup-plugin-tls values",
+  "description": "Nothing secret is a value: the certificates are made in the cluster (DEC-822 item 4).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "days"
+  ],
+  "properties": {
+    "days": {
+      "type": "integer",
+      "minimum": 31,
+      "maximum": 825
+    }
+  }
+}

@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BrandOwl } from "@/components/brand/brand-owl";
 import { OwlheadWordmark } from "@/components/brand/Logo";
-import { LOGIN_PATH } from "@/lib/auth-routes";
 import { cn } from "@/lib/utils";
 import { PAGE_FORM_ID, SIGN_UP_ID } from "./parts";
 import styles from "./scroll.module.css";
+import { SIGN_IN_HREF } from "@/lib/hosts";
 
 const ACCOUNT = "inline-flex h-9 items-center rounded-full px-4 text-[0.9375rem] font-semibold whitespace-nowrap outline-none focus-visible:ring-3 focus-visible:ring-ring";
 
@@ -50,7 +50,7 @@ export function ScrollBar() {
           <OwlheadWordmark title="" className="h-5 w-auto max-[380px]:hidden" />
         </a>
         <div className="ms-auto flex items-center gap-1.5" data-slot="account-buttons">
-          <Link href={LOGIN_PATH} className={cn(ACCOUNT, "text-foreground hover:bg-muted")}>
+          <Link href={SIGN_IN_HREF} className={cn(ACCOUNT, "text-foreground hover:bg-muted")}>
             Sign in
           </Link>
           <button type="button" onClick={toSignUp} className={cn(ACCOUNT, "bg-highlight text-highlight-foreground ring-1 ring-foreground")}>

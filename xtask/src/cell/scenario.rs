@@ -9,6 +9,7 @@
 //! Each run takes a fresh workspace, `demo<run id>`, because a confirmed version is refused a
 //! second confirmation (`version_invalid`), so a run never depends on what an earlier one left.
 use std::collections::BTreeMap;
+use std::env;
 use std::fs;
 
 use anyhow::{Context, Result, bail};
@@ -16,8 +17,11 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use super::{
-    CELL_REQUIRED_ENV, NAMESPACE, NODE, kubectl, render, run_id, run_job, tools_missing, up,
+    API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_WORKSPACE, NAMESPACE, NODE, api_image_tag,
+    api_port_forward, http_status, kubectl, processes, render, run_id, run_job, stub_image_tag,
+    tools_missing, up,
 };
+use crate::output;
 
 /// The scenarios `--scenario` takes.
 pub const SCENARIOS: &[&str] = &["demo"];
@@ -53,10 +57,20 @@ pub struct Step {
 #[derive(Debug)]
 pub enum Part {
     Gesture(Gesture),
+    Api(ApiCheck),
     Gap {
         what: &'static str,
         closes: &'static str,
     },
+}
+
+/// One request to the cell's workspace API through `cell demo`'s port-forward, and the status it
+/// must answer: a check of what the API serves today, never a stand-in for a step it cannot do.
+#[derive(Debug)]
+pub struct ApiCheck {
+    pub shows: &'static str,
+    pub path: String,
+    pub status: u16,
 }
 
 /// One CLI command in the cell, the text its success prints, and what it shows the demo. A gesture
@@ -160,12 +174,17 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     ),
                     format!("founded ctl:{workspace} for member {FOUNDER}"),
                 ),
+                Part::Api(ApiCheck {
+                    shows: "the cell's API, through the demo's port-forward, refusing a read \
+                            of the demo workspace with no session (401)",
+                    path: format!("/v1/workspaces/{DEMO_WORKSPACE}/agents"),
+                    status: 401,
+                }),
                 Part::Gap {
-                    what: "sign-in to web/ and the workspace read through the API",
-                    closes: "the API server (#1457) and `mandate identity link` (#1529) are on \
-                             main; still needed: its cell image (an `api` entry to add to \
-                             processes.json, lane A1) and E21-52's stub token issuer for POST \
-                             /v1/sessions (spec #1535, crate not built; lane SI)",
+                    what: "sign-in to web/ and the workspace read through the API with a session",
+                    closes: "the API runs in the cell (#1554) and `mandate identity link` is on \
+                             main (#1529); still needed: E21-52's stub token issuer beside the \
+                             API for POST /v1/sessions (lanes SI and A1)",
                 },
             ],
         },
@@ -216,8 +235,9 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 ),
                 Part::Gap {
                     what: "the same gestures from web/",
-                    closes: "E10-11 and E10-12, the API's version and deploy routes \
-                             (claims #751, #752; lane A2)",
+                    closes: "the API's version, confirm and deploy routes (#1552) and web/'s \
+                             set-up (#1557) are on main and the API runs in the cell (#1554); \
+                             still needed: a session, E21-52's stub issuer (lanes SI and A1)",
                 },
                 Part::Gap {
                     what: "the agent's processes started from AgentDeployed",
@@ -231,10 +251,10 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             parts: vec![Part::Gap {
                 what: "a research run in the agent's runtime, through mandate-gateway's \
                        recorded fake",
-                closes: "the runtime process is on main (#1521); still needed: its cell \
-                         image (processes.json `runtime`, lane P), the shell's research driver \
-                         (DEC-996 item 2, lane I2), E15-8's closed records and E19-5's \
-                         invalidation (its spec is on main, #1543), without which no run starts",
+                closes: "the runtime (#1521), the research driver (DEC-996 item 2), E15-8's \
+                         records and the gateway's transport (#1519) are on main; still needed: \
+                         the runtime's cell image (#1560, lane P), the driver run inside the \
+                         runtime process (lane I2), and E19-5's invalidation (spec #1543)",
             }],
         },
         Step {
@@ -244,8 +264,8 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             parts: vec![
                 Part::Gap {
                     what: "the runtime sizes the opening and the gate and autonomy rules ask",
-                    closes: "the runtime process (#1521) is on main; its cell image \
-                             (processes.json `runtime`, lane P)",
+                    closes: "the runtime process (#1521) is on main; its cell image (#1560, \
+                             lane P)",
                 },
                 gesture(
                     "the owner's inbox, read (empty until the runtime asks)",
@@ -282,12 +302,13 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             parts: vec![
                 Part::Gap {
                     what: "the kill switch from web/, recorded through the API",
-                    closes: "the API's cell image (lane A1); its POST \
-                             /v1/workspaces/{ws}/kill-switch is on main (#1457)",
+                    closes: "POST /v1/workspaces/{ws}/kill-switch runs in the cell (#1457, \
+                             #1554); still needed: a session, E21-52's stub issuer (lanes SI and \
+                             A1)",
                 },
                 Part::Gap {
                     what: "the agent's processes stop on it",
-                    closes: "the runtime reads it first (#1521, on main; its cell image, \
+                    closes: "the runtime reads it first (#1521, on main; its cell image #1560, \
                              lane P), E21-30's executor slice (lane X), E21-34 (`mandate agent \
                              kill`, lane O4, #1537)",
                 },
@@ -324,7 +345,7 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
         .flat_map(|s| &s.parts)
         .filter_map(|p| match p {
             Part::Gesture(g) => Some(g),
-            Part::Gap { .. } => None,
+            Part::Api(_) | Part::Gap { .. } => None,
         })
         .collect()
 }
@@ -507,6 +528,15 @@ pub fn run(name: &str) -> Result<()> {
                         failed = Some(g.container.clone());
                     }
                 }
+                Part::Api(check) => {
+                    let answer = api_status(&check.path)?;
+                    let required = env::var_os(CELL_REQUIRED_ENV).is_some();
+                    let (word, said, fails) = api_verdict(&answer, check.status, required);
+                    eprintln!("    {word:<8} {}: {said}", check.shows);
+                    if fails {
+                        failed.get_or_insert_with(|| format!("GET {}: {said}", check.path));
+                    }
+                }
                 Part::Gap { what, closes } => {
                     gaps += 1;
                     eprintln!("    gap      {what}: {closes}");
@@ -527,6 +557,62 @@ pub fn run(name: &str) -> Result<()> {
         NODE
     );
     Ok(())
+}
+
+/// The status the cell's API answers `GET path` with through the demo's port-forward, or why it
+/// cannot be asked: no API in the process list, a cell that pulled its images and has no API image,
+/// or no `kubectl` on this machine to forward with.
+fn api_status(path: &str) -> Result<Result<u16, String>> {
+    let listed = processes()?
+        .iter()
+        .any(|p| p["name"] == API_PROCESS && p["built"] == true);
+    if !listed {
+        return Ok(Err("the API is not in the cell's process list".into()));
+    }
+    if api_image_tag()?.is_none() {
+        return Ok(Err(
+            "the cell pulled its images and no API image is published yet".into(),
+        ));
+    }
+    if output("kubectl", &["version", "--client"]).is_err() {
+        return Ok(Err(
+            "no kubectl on this machine to forward the API's port with".into(),
+        ));
+    }
+    let forwarded = api_port_forward(stub_image_tag()?.is_some());
+    Ok(answer_of(forwarded, || http_status(API_LOCAL_PORT, path)))
+}
+
+/// What the API answered, given the port-forward's result and a probe of the forwarded port. The
+/// forward bails on a reachable API that answers anything but 401, so its error alone cannot tell
+/// an unreachable API from a wrong one: the probe decides. A status it reads is the API's answer,
+/// which the verdict fails unless it is the expected one; only a probe that reads none means the
+/// API could not be asked.
+pub fn answer_of(
+    forwarded: Result<()>,
+    probe: impl FnOnce() -> Result<u16>,
+) -> Result<u16, String> {
+    match (forwarded, probe()) {
+        (_, Ok(status)) => Ok(status),
+        (Err(e), Err(_)) => Err(format!("the port-forward to the API failed: {e:#}")),
+        (Ok(()), Err(e)) => Err(format!("the API did not answer: {e:#}")),
+    }
+}
+
+/// How an API check reads: `ran` only for the status it expects; `failed` for any other status,
+/// and for an API that cannot be asked where CI requires the cell; otherwise `not run`. Returns the
+/// word, what to print after it, and whether the run fails.
+pub fn api_verdict(
+    answer: &Result<u16, String>,
+    expected: u16,
+    required: bool,
+) -> (&'static str, String, bool) {
+    match answer {
+        Ok(status) if *status == expected => ("ran", format!("answered {status}"), false),
+        Ok(status) => ("failed", format!("answered {status}, not {expected}"), true),
+        Err(why) if required => ("failed", why.clone(), true),
+        Err(why) => ("not run", why.clone(), false),
+    }
 }
 
 /// `cargo xtask ci cell-demo`: the scenario on the CI runner's cell. Skipped without docker, k3d
@@ -675,6 +761,80 @@ mod tests {
         assert_eq!(tail, [["journal", "export"], ["journal", "verify"]]);
         assert_eq!(all[all.len() - 2].args[3], SEGMENT);
         assert_eq!(all[all.len() - 1].args[2], SEGMENT);
+    }
+
+    /// The API is checked only for what it serves without a session: step 1 asks for the demo
+    /// workspace's agents and must be refused with the one 401, and no check expects a success the
+    /// cell cannot give until a session exists.
+    #[test]
+    fn the_api_is_checked_only_for_its_refusal_without_a_session() {
+        let steps = plan("demo1", &mandate());
+        let checks: Vec<(u8, &ApiCheck)> = steps
+            .iter()
+            .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
+            .filter_map(|(n, p)| match p {
+                Part::Api(c) => Some((n, c)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(checks.len(), 1, "one API check");
+        let (step, check) = checks[0];
+        assert_eq!(step, 1);
+        assert_eq!(check.status, 401);
+        assert_eq!(
+            check.path,
+            format!("/v1/workspaces/{DEMO_WORKSPACE}/agents")
+        );
+    }
+
+    /// Only the expected status reads as run; another status always fails the run, and an API
+    /// that cannot be asked fails it only where CI requires the cell.
+    #[test]
+    fn an_api_check_runs_only_on_its_status_and_fails_where_the_cell_is_required() {
+        let unreachable: Result<u16, String> = Err("no kubectl".into());
+        for required in [false, true] {
+            assert_eq!(api_verdict(&Ok(401), 401, required).0, "ran");
+            assert!(
+                !api_verdict(&Ok(401), 401, required).2,
+                "a 401 never fails the run"
+            );
+            for status in [200, 403, 404, 500] {
+                let (word, _, fails) = api_verdict(&Ok(status), 401, required);
+                assert_eq!(
+                    (word, fails),
+                    ("failed", true),
+                    "{status}, required {required}"
+                );
+            }
+        }
+        assert_eq!(
+            api_verdict(&unreachable, 401, false),
+            ("not run", "no kubectl".into(), false)
+        );
+        assert_eq!(
+            api_verdict(&unreachable, 401, true),
+            ("failed", "no kubectl".into(), true)
+        );
+    }
+
+    /// A wrong status from a reachable API is an answer, even when the port-forward bailed on it,
+    /// so the verdict fails it; only a probe that reads nothing makes the API unreachable.
+    #[test]
+    fn a_reachable_api_that_answers_wrongly_is_an_answer_not_unreachable() {
+        let bailed = || Err(anyhow::anyhow!("answered 404, not the one 401"));
+        assert_eq!(answer_of(bailed(), || Ok(404)), Ok(404));
+        assert_eq!(
+            api_verdict(&answer_of(bailed(), || Ok(404)), 401, false).0,
+            "failed"
+        );
+        assert_eq!(answer_of(Ok(()), || Ok(401)), Ok(401));
+        let refused = || Err(anyhow::anyhow!("connection refused"));
+        assert!(answer_of(bailed(), refused).is_err(), "nothing answered");
+        assert!(answer_of(Ok(()), refused).is_err(), "nothing answered");
+        assert_eq!(
+            api_verdict(&answer_of(Ok(()), refused), 401, false).0,
+            "not run"
+        );
     }
 
     /// A gap is named, never faked: each names a PR (`#n`) or a story (`E<epic>-<n>`) that closes

@@ -86,6 +86,7 @@ To run without sign-in, set neither variable (or leave `.env.local` out). To run
 | `NEXT_PUBLIC_SUPABASE_URL` | The project's URL, from the dashboard's Connect dialog |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | The publishable key (`sb_publishable_…`, Project Settings > API Keys); never the secret key |
 | `NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN` | `1` shows the email link on `/login`; leave it unset until the project has SMTP. The deployed Worker's build reads it from the GitHub variable of that name (repository or `production` environment), like the two Supabase values (DEC-1005 item 6) |
+| `NEXT_PUBLIC_OWLHEAD_SITE_ORIGIN`, `NEXT_PUBLIC_OWLHEAD_APP_ORIGIN` | The public site's and the app's origins (DEC-2405). With both set, the site serves only its public pages and sends sign-in and every app screen to the app with a 308, so the session lives on the app alone. Leave both unset locally; the Worker's build sets them in `web-deploy.yml` |
 
 Next reads `.env.local` for `npm run dev`, `npm run build` and `npm start`; the variables are
 inlined into the build, so rebuild after changing them. For the deployed Worker they are variables of
