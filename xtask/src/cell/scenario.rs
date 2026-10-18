@@ -20,7 +20,8 @@ use sha2::{Digest, Sha256};
 use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS, NAMESPACE,
     NODE, WORKSPACE_CHART, api_image_tag, api_port_forward, helm, http, kubectl, open_session,
-    processes, render, run_id, run_job, signed_in, stub_image_tag, stub_token, tools_missing, up,
+    processes, render, reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag,
+    stub_token, tools_missing, up,
 };
 use crate::output;
 
@@ -167,16 +168,8 @@ pub fn by_lane(steps: &[Step]) -> BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>>
     lanes
 }
 
-/// The waits several gaps share: the API's membership read, the agent's runtime started by the
-/// deployment manager, web/ driven against the cell, and the executor in the cell.
-const MB_MEMBERS: Wait = Wait {
-    lane: "MB",
-    story: "E21-31",
-    pr: None,
-    lands: "the membership parser: the API reads memberships through `control_entry`; until \
-            then its `until_parser` fails every signed-in read and command closed with \
-            `membership_unavailable` (DEC-978 item 8)",
-};
+/// The waits several gaps share: the agent's runtime started by the deployment manager, web/
+/// driven against the cell, and the executor in the cell.
 const D1_RUNTIME: Wait = Wait {
     lane: "D1",
     story: "E21-33",
@@ -216,14 +209,52 @@ pub struct ApiCheck {
     pub path: String,
     pub status: u16,
     pub ask: Ask,
+    pub body: Body,
 }
 
-/// How an [`ApiCheck`] asks: a `GET` of its path with no session, or the demo owner's sign-in,
-/// a token from the stub issuer traded at `POST /v1/sessions`, which also needs the session cookie.
+/// How an [`ApiCheck`] asks: a `GET` of its path with no session; the demo owner's sign-in, a
+/// token from the stub issuer traded at `POST /v1/sessions`, which also needs the session cookie;
+/// or a `GET` of its path with the session that sign-in opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ask {
     NoSession,
     SignIn,
+    Session,
+}
+
+/// What the answer's JSON body must hold besides its status: nothing, an `agents` list naming an
+/// agent, or string members at JSON pointers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Body {
+    Any,
+    Lists(&'static str),
+    Members(Vec<(&'static str, String)>),
+}
+
+impl Body {
+    /// Why `body` does not hold what this asks, or `None` when it does.
+    pub fn missing(&self, body: &str) -> Option<String> {
+        let value: Value = match self {
+            Self::Any => return None,
+            Self::Lists(_) | Self::Members(_) => match serde_json::from_str(body) {
+                Ok(value) => value,
+                Err(_) => return Some("the body is not JSON".into()),
+            },
+        };
+        match self {
+            Self::Any => None,
+            Self::Lists(agent) => {
+                let listed = value["agents"]
+                    .as_array()
+                    .is_some_and(|a| a.iter().any(|x| x["agent_id"] == *agent));
+                (!listed).then(|| format!("its agents do not list {agent}"))
+            }
+            Self::Members(members) => members.iter().find_map(|(pointer, want)| {
+                let got = value.pointer(pointer).and_then(Value::as_str);
+                (got != Some(want.as_str())).then(|| format!("{pointer} is {got:?}, not {want}"))
+            }),
+        }
+    }
 }
 
 /// One command in the cell, the text its success prints, and what it shows the demo. A gesture
@@ -365,6 +396,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     path: format!("/v1/workspaces/{workspace}/agents"),
                     status: 401,
                     ask: Ask::NoSession,
+                    body: Body::Any,
                 }),
                 Part::Api(ApiCheck {
                     shows: "the demo owner signing in through the stub issuer: POST \
@@ -372,18 +404,20 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     path: "/v1/sessions".into(),
                     status: 204,
                     ask: Ask::SignIn,
+                    body: Body::Any,
                 }),
-                Part::Gap(Gap {
-                    what: "the owner reads the run's workspace through the API with that session",
-                    on_main: "sign-in through the stub issuer (#1591), the API hosting the run's \
-                              workspace founded for the demo owner, and \
-                              `mandate_identity::control_entry`",
-                    waits: vec![MB_MEMBERS],
+                Part::Api(ApiCheck {
+                    shows: "the demo owner, signed in, reading the run's workspace through the \
+                            API: its agents list the demo's agent (200)",
+                    path: format!("/v1/workspaces/{workspace}/agents"),
+                    status: 200,
+                    ask: Ask::Session,
+                    body: Body::Lists(AGENT),
                 }),
                 Part::Gap(Gap {
                     what: "the same sign-in and read in web/",
                     on_main: "web/'s sign-in to a dev cell (#1588) and the stub issuer (#1591)",
-                    waits: vec![MB_MEMBERS, W2_WEB],
+                    waits: vec![W2_WEB],
                 }),
             ],
         },
@@ -437,7 +471,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     on_main: "the API's version, confirm and deploy routes (#1552) in the cell \
                               (#1554), web/'s set-up (#1557), its sign-in to a dev cell \
                               (#1588) and the stub issuer (#1591)",
-                    waits: vec![MB_MEMBERS, W2_WEB],
+                    waits: vec![W2_WEB],
                 }),
                 Part::Gap(Gap {
                     what: "the agent's runtime started from AgentDeployed",
@@ -583,12 +617,23 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     ),
                     format!("report={DEMO_REPORT}"),
                 ),
+                Part::Api(ApiCheck {
+                    shows: "the demo owner, signed in, reading the backtest through the API: \
+                            completed, with the report the run stored (200)",
+                    path: format!("/v1/workspaces/{workspace}/backtests/{BACKTEST_ID}"),
+                    status: 200,
+                    ask: Ask::Session,
+                    body: Body::Members(vec![
+                        ("/backtest/state", "completed".into()),
+                        ("/backtest/report_ref", DEMO_REPORT.into()),
+                        ("/backtest/mandate_version", version.clone()),
+                    ]),
+                }),
                 Part::Gap(Gap {
-                    what: "the owner reads the backtest through the API, completed, and web/ \
-                           shows its report",
+                    what: "web/ shows the backtest's report",
                     on_main: "the API's backtest read (#1555), web/'s report screen (#1549), \
                               and the owner's session through the stub issuer (#1591)",
-                    waits: vec![MB_MEMBERS, W2_WEB],
+                    waits: vec![W2_WEB],
                 }),
             ],
         },
@@ -601,7 +646,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     on_main: "POST /v1/workspaces/{ws}/kill-switch in the cell (#1457, #1554), \
                               web/'s kill switch sent through the API, its sign-in to a dev cell \
                               (#1588) and the stub issuer (#1591)",
-                    waits: vec![MB_MEMBERS, W2_WEB],
+                    waits: vec![W2_WEB],
                 }),
                 gesture(
                     "the owner's kill switch for the agent, through the CLI (agent scope)",
@@ -1013,6 +1058,19 @@ fn api_answer(check: &ApiCheck) -> Result<Result<(u16, String), String>> {
     Ok(answer_of(forwarded, || match check.ask {
         Ask::NoSession => http(API_LOCAL_PORT, "GET", &check.path, &[], ""),
         Ask::SignIn => open_session(&stub_token()?),
+        Ask::Session => {
+            let (status, reply) = open_session(&stub_token()?)?;
+            let cookie = session_cookie(&reply).with_context(|| {
+                format!("POST /v1/sessions answered {status} without the session cookie")
+            })?;
+            http(
+                API_LOCAL_PORT,
+                "GET",
+                &check.path,
+                &[("Cookie", &cookie)],
+                "",
+            )
+        }
     }))
 }
 
@@ -1047,6 +1105,8 @@ pub fn api_verdict(
                     format!("answered {status} without the session cookie"),
                     true,
                 )
+            } else if let Some(why) = check.body.missing(reply_body(reply)) {
+                ("failed", format!("answered {status}, but {why}"), true)
             } else {
                 ("ran", format!("answered {status}"), false)
             }
@@ -1263,7 +1323,7 @@ mod tests {
             })
             .flatten()
             .collect();
-        assert_eq!(lanes, ["MB", "W2"]);
+        assert_eq!(lanes, ["W2"], "only web/'s report screen is left");
     }
 
     /// The runner's five inputs are read from its committed fixtures into their own directory of
@@ -1373,37 +1433,110 @@ mod tests {
         );
     }
 
-    /// Step 1 checks the API twice, as main can serve it: a read of the run's own workspace with
-    /// no session must be refused with the one 401, and the demo owner's sign-in must open a
-    /// session (204); the read with that session stays a gap until the API reads memberships
-    /// (lane MB).
+    /// The API checks, in order: step 1's read of the run's own workspace with no session (the one
+    /// 401), the demo owner's sign-in (204), and the read with that session, which must list the
+    /// demo's agent; then step 5's signed-in read of the backtest, completed, with the stored
+    /// report of the confirmed version.
     #[test]
-    fn step_one_checks_the_refusal_and_the_sign_in_and_names_the_signed_in_read() {
+    fn the_api_checks_refuse_sign_in_and_read_the_run_as_its_owner() {
         let ws = workspace_of("0123456789");
         let steps = plan(&ws, &mandate());
-        let checks: Vec<(u8, &str, u16, Ask)> = steps
+        let checks: Vec<(u8, &str, u16, Ask, &Body)> = steps
             .iter()
             .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
             .filter_map(|(n, p)| match p {
-                Part::Api(c) => Some((n, c.path.as_str(), c.status, c.ask)),
+                Part::Api(c) => Some((n, c.path.as_str(), c.status, c.ask, &c.body)),
                 _ => None,
             })
             .collect();
         let read = format!("/v1/workspaces/{ws}/agents");
+        let backtest = format!("/v1/workspaces/{ws}/backtests/{BACKTEST_ID}");
+        let completed = Body::Members(vec![
+            ("/backtest/state", "completed".into()),
+            ("/backtest/report_ref", DEMO_REPORT.into()),
+            ("/backtest/mandate_version", reference(&mandate())),
+        ]);
         assert_eq!(
             checks,
             [
-                (1, read.as_str(), 401, Ask::NoSession),
-                (1, "/v1/sessions", 204, Ask::SignIn)
+                (1, read.as_str(), 401, Ask::NoSession, &Body::Any),
+                (1, "/v1/sessions", 204, Ask::SignIn, &Body::Any),
+                (1, read.as_str(), 200, Ask::Session, &Body::Lists(AGENT)),
+                (5, backtest.as_str(), 200, Ask::Session, &completed),
             ]
         );
-        let waits_on_members = steps[0].parts.iter().any(|p| {
-            matches!(p, Part::Gap(g) if g.what.contains("with that session")
-                && g.waits.iter().any(|w| w.lane == "MB"))
-        });
         assert!(
-            waits_on_members,
-            "the signed-in read is named, waiting on MB"
+            !by_lane(&steps).iter().any(|(lane, _)| *lane == "MB"),
+            "nothing waits on the membership parser now on main"
+        );
+    }
+
+    /// A body check holds only for what it names: the agent among `agents`, and each member at
+    /// its pointer as that exact string.
+    #[test]
+    fn a_body_check_holds_only_for_what_it_names() {
+        let lists = Body::Lists("demo-spy");
+        assert_eq!(
+            lists.missing(r#"{"agents":[{"agent_id":"x"},{"agent_id":"demo-spy"}]}"#),
+            None
+        );
+        for body in [
+            r#"{"agents":[{"agent_id":"demo-web"}]}"#,
+            r#"{"agents":[]}"#,
+            "{}",
+            "<html>",
+        ] {
+            assert!(lists.missing(body).is_some(), "{body}");
+        }
+        let members = Body::Members(vec![("/b/state", "completed".into()), ("/b/r", "x".into())]);
+        assert_eq!(
+            members.missing(r#"{"b":{"state":"completed","r":"x"}}"#),
+            None
+        );
+        for body in [
+            r#"{"b":{"state":"running","r":"x"}}"#,
+            r#"{"b":{"state":"completed","r":"y"}}"#,
+            r#"{"b":{"state":"completed"}}"#,
+            r#"{"b":{"state":"completed","r":1}}"#,
+        ] {
+            assert!(members.missing(body).is_some(), "{body}");
+        }
+        assert_eq!(Body::Any.missing("<html>"), None);
+        let session = check(200, Ask::Session);
+        let wanting = ApiCheck {
+            body: lists,
+            ..session
+        };
+        let reply = |body: &str| Ok((200, format!("HTTP/1.1 200 OK\r\n\r\n{body}")));
+        assert_eq!(
+            api_verdict(
+                &reply(r#"{"agents":[{"agent_id":"demo-spy"}]}"#),
+                &wanting,
+                false
+            )
+            .0,
+            "ran"
+        );
+        let (word, said, fails) = api_verdict(&reply(r#"{"agents":[]}"#), &wanting, false);
+        assert_eq!((word, fails), ("failed", true), "{said}");
+    }
+
+    /// The session cookie's pair is read from the reply's headers only, by its own name.
+    #[test]
+    fn the_session_cookie_is_read_from_the_headers() {
+        let reply = "HTTP/1.1 204 No Content\r\nSet-Cookie: other=1\r\nset-cookie: \
+                     __Host-mandate_session=v1.abc; Path=/; Secure\r\n\r\n";
+        assert_eq!(
+            session_cookie(reply).as_deref(),
+            Some("__Host-mandate_session=v1.abc")
+        );
+        assert_eq!(
+            session_cookie("HTTP/1.1 204 No Content\r\n\r\nSet-Cookie: __Host-mandate_session=x"),
+            None
+        );
+        assert_eq!(
+            session_cookie("HTTP/1.1 204 No Content\r\nSet-Cookie: other=1\r\n\r\n"),
+            None
         );
     }
 
@@ -1455,6 +1588,7 @@ mod tests {
             path: "/".into(),
             status,
             ask,
+            body: Body::Any,
         }
     }
 
