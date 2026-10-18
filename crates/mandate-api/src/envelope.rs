@@ -70,6 +70,39 @@ pub enum StepUpStatus {
     Unbound,
 }
 
+/// The one action a step-up challenge binds (§3.6, API-17): its kind and the SHA-256 of the
+/// action's canonical object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self", deny_unknown_fields)]
+pub struct StepUpAction {
+    pub kind: StepUpActionKind,
+    pub digest: Ref,
+}
+
+/// §3.6's step-up action kinds, one per action identity spec ID-4 lists that this API serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepUpActionKind {
+    ConfirmVersion,
+    Deploy,
+    Approve,
+    Connection,
+    Resume,
+    Stop,
+    Acknowledge,
+    OwnerExit,
+    KillSwitchPrivilege,
+    Disclosure,
+    PolicyLoosen,
+    MemberInvite,
+    RoleGrant,
+    ClientConnect,
+    CredentialEnrol,
+    NotificationAddress,
+    BreakGlassApprove,
+    LiftHold,
+}
+
 impl Rules for Watermark {
     fn rules(&self, at: &str, check: &mut Check) {
         let stream = is_stream_id(&self.stream_id, &["ctl", "clock", "ntf"]);
@@ -80,6 +113,6 @@ impl Rules for Watermark {
 }
 
 crate::wire::rules!(checked: Watermark);
-crate::wire::rules!(none: ApiVersion, Actor, Record, StepUpEvidence, StepUpStatus);
+crate::wire::rules!(none: ApiVersion, Actor, Record, StepUpEvidence, StepUpStatus, StepUpAction);
 
-crate::wire::object_only!(Watermark, Actor, Record, StepUpEvidence);
+crate::wire::object_only!(Watermark, Actor, Record, StepUpEvidence, StepUpAction);
