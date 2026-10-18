@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-17, the gate decision record is a ledger on the first screen (`web/`). 2026-10-14 remains the last coordinator close of the live path's R0-gap rows |
+| **Last updated** | 2026-10-18, a coordinator session took over the orphaned PRs of the founder's other coordinating account: twenty merged (work log). 2026-10-17: the gate decision record is a ledger on the first screen (`web/`, #1558). The Where-we-are rows are as of 2026-10-14 |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
@@ -100,6 +100,20 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   history rewrite.
 - **Spike paper runs** (E17-0): the go-ahead.
 - **Dependabot:** six alerts on `main` (one high) to review.
+- **Cell #1 and model spend:** [DEC-995](decisions/DEC-995.md) (two DigitalOcean droplets, about
+  $104 a month; Proposed, from #1456), [DEC-997](decisions/DEC-997.md) (OpenRouter, a $50 a month
+  cap) and [DEC-2504](decisions/DEC-2504.md) (the managed cell's egress to the browsers' push
+  services); and, on #1539's branch only, DEC-2001 items 6 (the hosted tier is `dev` until release
+  signing) and 7 (`doctl`).
+- **#1539** (E21-51, cell #1's hosted bring-up): two of its commits carry `Co-authored-by`
+  trailers that fast-lint refuses. Clearing them rewrites that branch's history and force-pushes
+  it; agents wait for your yes.
+- **#1501** (Dependabot): besides sharp and undici it moves `wrangler`, which deploys `web/` from
+  `main`, from 4.139.0 to 4.151.1 without the registry row that pins 4.139.0
+  (`docs/dependencies.md`). Left open: redo the bump with its row, or close it.
+- **#1582** (the deployment manager in the cell, merged) took option 1: the manager starts the
+  runtime, and starts none until DEC-1171's account read lands, so the cell runs no runtime until
+  then. Option 2 keeps #1560's static runtime meanwhile, one line in `processes.json`.
 
 Nothing else is blocked on you.
 
