@@ -1503,6 +1503,15 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let cell = "xtask/src/cell.rs";
     let image = format!("                \"mandate.local/api:{}\",", "0123456789ab");
     let not_image = format!("                \"mandate.local/api:{page}\",");
+    let challenges = "schemas/workspace-api/examples/commands.step-up-challenge.json";
+    let challenge = format!(
+        "  \"webauthn_challenge\": \"{}\",",
+        concat!("q83vEjRWeJCrze8SNFZ4kKvN7xI0", "VniQq83vEjRWeJA")
+    );
+    let not_challenge = format!(
+        "  \"webauthn_challenge\": \"{}\",",
+        concat!("zz3vEjRWeJCrze8SNFZ4kKvN7xI0", "VniQq83vEjRWeJA")
+    );
     vec![
         (signer.to_owned(), example.clone(), None),
         (signer.to_owned(), near_example, Some("alpaca-key-id")),
@@ -1550,6 +1559,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (cell.to_owned(), image.clone(), None),
         ("stray-cell.rs".to_owned(), image, generic),
         (cell.to_owned(), not_image, generic),
+        (challenges.to_owned(), challenge.clone(), None),
+        ("stray-challenge.json".to_owned(), challenge, generic),
+        (challenges.to_owned(), not_challenge, generic),
     ]
 }
 
