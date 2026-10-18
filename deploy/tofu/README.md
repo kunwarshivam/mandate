@@ -82,8 +82,9 @@ wait until staging is up.
    address changes. This is not `web-deploy.yml`'s `CLOUDFLARE_API_TOKEN`, which stays as it is.
    R2 Storage Edit can also lift the archive's lock rule: R2's lock is governance-equivalent
    (DEC-973 item 5). Account API Tokens Edit makes the token admin-level: it can mint any token,
-   which you accepted for the automation (DEC-2029). Keep it in the environment alone. Each run
-   checks the token's permissions first and names any that are missing.
+   which you accepted for the automation (DEC-2029). Keep it in the environment alone. Once the
+   preflight lands (DEC-2029 item 4), each run checks the token's permissions first and names
+   any that are missing.
 2. **The account id, `CF_ACCOUNT_ID`.** From the account's overview page (32 hex characters). It is
    not a secret, so it is a variable.
 3. **Barman's R2 token is not yours to make.** OpenTofu mints it, scoped to the archive bucket with

@@ -63,11 +63,11 @@ variable "bootstrap_runner_cidr" {
 
   validation {
     condition = var.bootstrap_runner_cidr == "" || (
-      can(regex("^[0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3}/32$", var.bootstrap_runner_cidr)) &&
+      can(regex("^((0|[1-9][0-9]{0,2})[.]){3}(0|[1-9][0-9]{0,2})/32$", var.bootstrap_runner_cidr)) &&
       can(cidrhost(var.bootstrap_runner_cidr, 0)) &&
       !can(regex("^(0|10|127|169[.]254|172[.](1[6-9]|2[0-9]|3[01])|192[.]168|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])|22[4-9]|2[3-5][0-9])[.]", var.bootstrap_runner_cidr))
     )
-    error_message = "The runner window is empty or exactly one public IPv4 /32."
+    error_message = "The runner window is empty or exactly one public IPv4 /32, written without leading zeros."
   }
 }
 

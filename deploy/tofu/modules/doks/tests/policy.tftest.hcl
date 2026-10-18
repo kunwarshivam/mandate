@@ -176,3 +176,73 @@ run "refuses_an_ipv6_runner" {
 
   expect_failures = [var.bootstrap_runner_cidr]
 }
+
+run "refuses_a_loopback_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "127.0.0.1/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_cgnat_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "100.64.1.2/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_link_local_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "169.254.1.1/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_unspecified_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "0.0.0.0/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_slash_31_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "198.51.100.22/31"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_leading_zero_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "198.051.100.23/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
+
+run "refuses_a_multicast_runner" {
+  command = plan
+
+  variables {
+    bootstrap_runner_cidr = "224.0.0.1/32"
+  }
+
+  expect_failures = [var.bootstrap_runner_cidr]
+}
