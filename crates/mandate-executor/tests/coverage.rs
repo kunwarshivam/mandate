@@ -588,6 +588,7 @@ fn a_paused_agents_exit_is_held_not_denied() {
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::RiskLimit,
             confirmation: None,
+            cause: None,
         }),
         &ports,
     );
@@ -927,6 +928,7 @@ fn a_kill_switch_cancel_is_unconfirmed_until_the_broker_confirms_it() {
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::RiskLimit,
             confirmation: None,
+            cause: None,
         }),
         &ports,
     );
@@ -976,6 +978,7 @@ fn a_kill_switch_leaves_another_agents_working_order_alone() {
             scope: KillScope::Agent(agent(common::AGENT)),
             initiator: Initiator::RiskLimit,
             confirmation: None,
+            cause: None,
         }),
         &ports,
     );
