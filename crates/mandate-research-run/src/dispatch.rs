@@ -184,6 +184,9 @@ fn read(call: &ToolCall, scope: &Scope, readers: Readers<'_>) -> Result<Answer, 
     if call.tool == Tool::FilingsSearch {
         return filings_search(call, scope, readers);
     }
+    if call.tool == Tool::FilingsGet {
+        return filings_get(call, scope, readers);
+    }
     let Ok(arguments) = mandate_canon::parse(call.arguments.as_bytes()) else {
         return Ok(Answer::Failed);
     };
@@ -416,6 +419,16 @@ fn filings_search(
         untrusted: true,
         stored: None,
     }))
+}
+
+/// `filings.get` (§6.10, DEC-2250 items 6 to 9, DEC-2252 items 2 to 4).
+fn filings_get(
+    call: &ToolCall,
+    scope: &Scope,
+    readers: Readers<'_>,
+) -> Result<Answer, ResearchRunError> {
+    let _ = (call, scope, readers);
+    Err(ResearchRunError::Unimplemented { story: "E19-13" })
 }
 
 /// The forms `filings.search` may name, in their order (DEC-2250 item 1).

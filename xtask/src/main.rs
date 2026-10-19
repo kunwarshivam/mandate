@@ -10,7 +10,7 @@ use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
 mod admission_drill;
@@ -18,6 +18,7 @@ mod cell;
 mod gitops;
 mod image;
 mod infra_preflight;
+mod infra_verify;
 mod infra_window;
 mod leak;
 mod mail;
@@ -1642,7 +1643,8 @@ fn opens_window(environment: &str, action: &str) -> bool {
     environment == "staging" && action == "apply"
 }
 
-/// Lane GO's bootstrap after staging's apply (DEC-2018 item 7, DEC-2028): the workload secrets
+/// Lane GO's bootstrap after staging's apply (DEC-2018 item 7, DEC-2028), then its verify
+/// (DEC-2050), which reads staging until it is up and fails the run if it never is: the workload secrets
 /// from OpenTofu's outputs, each wrapped in a [`gitops::Secret`], which masks it, the moment it is
 /// read; a kubeconfig that expires in 900 seconds, at mode 0600 in `$RUNNER_TEMP` and deleted
 /// however the bootstrap ends; and the bootstrap itself, which confirms the context first.
@@ -1688,7 +1690,40 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         kubeconfig.path(),
         &context,
         &secrets,
-    )
+    )?;
+    let account = output("cloudflare_account_id")?;
+    mask::add_mask(account.trim());
+    let (tunnel_id, api_hostname) = (output("tunnel_id")?, output("api_hostname")?);
+    mask::add_mask(tunnel_id.trim());
+    let get = |args: &[&str]| -> Result<String> {
+        let out = gitops::tool("kubectl")
+            .args(["--v=0", "--kubeconfig"])
+            .arg(kubeconfig.path())
+            .args(["--context", &context, "get"])
+            .args(args)
+            .output()
+            .context("starting kubectl")?;
+        ensure!(out.status.success(), "kubectl get failed");
+        String::from_utf8(out.stdout).context("kubectl printed non-UTF-8")
+    };
+    let cloudflare_token = env::var("TF_VAR_cloudflare_api_token").unwrap_or_default();
+    let checklist = infra_verify::verify(
+        &get,
+        &infra_window::Curl,
+        &infra_verify::Edge {
+            cloudflare_token: &cloudflare_token,
+            account: account.trim(),
+            tunnel_id: tunnel_id.trim(),
+            api_hostname: api_hostname.trim(),
+        },
+    )?;
+    eprint!("{}", checklist.render_titled("infra verify (staging)"));
+    ensure!(
+        checklist.complete(),
+        "staging is not up after {} seconds: each MISSING line above names what is not (DEC-2050)",
+        infra_verify::SECONDS
+    );
+    Ok(())
 }
 
 /// Runs each `tofu` command in turn, with the run's Spaces key in the child's environment alone,
@@ -16827,6 +16862,15 @@ mod tests {
         assert!(
             last_secret < kubeconfig && kubeconfig < at(&staging, "gitops::bootstrap_from_infra("),
             "the kubeconfig is fetched after the secrets are wrapped and before the bootstrap"
+        );
+        let account = at(&staging, "mask::add_mask(account.trim());");
+        let verify = at(&staging, "infra_verify::verify(");
+        assert!(
+            at(&staging, "gitops::bootstrap_from_infra(") < account
+                && account < verify
+                && verify < at(&staging, "ensure!(\n        checklist.complete()"),
+            "staging is verified after its bootstrap, with the account masked first, and an \
+             incomplete verify fails the run (DEC-2050)"
         );
         let close_step = body("\nfn infra_close() -> Result<()> {");
         let masks = at(&close_step, "mask::add_mask(&value);");

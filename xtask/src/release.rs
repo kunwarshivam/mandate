@@ -1969,6 +1969,7 @@ mod tests {
             ),
         )?;
         let password = "the-password-is-not-an-argument";
+        let key = image::base64(b"stand-in key");
         let output = Command::new(&script)
             .current_dir(&dir)
             .env_clear()
@@ -1976,7 +1977,7 @@ mod tests {
             .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
             .env("COSIGN_URL", format!("file://{}", stand_in.display()))
             .env("COSIGN_SHA256", sha256(&stand_in)?)
-            .env("RELEASE_SIGNING_KEY", "c3RhbmQtaW4ga2V5")
+            .env("RELEASE_SIGNING_KEY", &key)
             .env("COSIGN_PASSWORD", password)
             .env("RUNNER_TEMP", dir.join("runner"))
             .env("LD_PRELOAD", "planted.so")
@@ -1996,7 +1997,7 @@ mod tests {
             "COSIGN_PASSWORD\nHOME\nPATH\n"
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
-        for secret in [password, "c3RhbmQtaW4ga2V5", "stand-in key"] {
+        for secret in [password, key.as_str(), "stand-in key"] {
             assert!(
                 !stderr.contains(secret),
                 "stderr shows {secret:?}: {stderr}"
@@ -2016,8 +2017,10 @@ mod tests {
     /// a special builtin such as `set`, and it refuses any other exported function before it reads
     /// anything, so a planted `BASH_FUNC_echo%%` or `BASH_FUNC_set%%` can neither silence its
     /// `set +x +v` nor stand in for a check, and a planted `compgen` that lists nothing cannot hide
-    /// another, even beside a planted `unset` that would keep it (DEC-2024 item 4). No run reaches
-    /// the key.
+    /// another, even beside a planted `unset` that would keep it (DEC-2024 item 4). Every run is
+    /// handed what a signing needs, a stand-in cosign, a key and a password, and the control, with
+    /// nothing planted, signs all three files; each planted run stops with its own refusal on
+    /// stderr, never runs cosign and never reaches `RUNNER_TEMP` (DEC-2049 item 1).
     #[test]
     fn the_signer_refuses_exported_functions() -> Result<()> {
         let script =
@@ -2026,36 +2029,71 @@ mod tests {
             "mandate-xtask-signer-functions-{}",
             std::process::id()
         ));
+        let refused = "the environment defines shell functions; nothing is signed";
         let echo = ("BASH_FUNC_echo%%", "() { builtin echo planted; }");
         let compgen = ("BASH_FUNC_compgen%%", "() { :; }");
-        let cases: [&[(&str, &str)]; 4] = [
-            &[echo],
-            &[("BASH_FUNC_set%%", "() { builtin echo planted; }")],
-            &[compgen, echo],
-            &[("BASH_FUNC_unset%%", "() { :; }"), compgen, echo],
+        let cases: [(&[(&str, &str)], &str); 5] = [
+            (&[], ""),
+            (&[echo], refused),
+            (
+                &[("BASH_FUNC_set%%", "() { builtin echo planted; }")],
+                "`set': is a special builtin",
+            ),
+            (&[compgen, echo], refused),
+            (
+                &[("BASH_FUNC_unset%%", "() { :; }"), compgen, echo],
+                "`unset': is a special builtin",
+            ),
         ];
-        for planted in cases {
+        for (planted, refusal) in cases {
             let name = planted
                 .iter()
                 .map(|(n, _)| n.replace('%', ""))
                 .collect::<Vec<_>>()
                 .join("+");
+            let name = if name.is_empty() {
+                "control".to_owned()
+            } else {
+                name
+            };
             let dir = root.join(&name);
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(dir.join("dist/bin"))?;
             fs::write(dir.join("dist/bin/a"), "a")?;
             fs::write(dir.join("dist/bin/b"), "b")?;
             write_sums(&dir, SIGNER_SUMS)?;
+            let stand_in = dir.join("stand-in-cosign");
+            fs::write(&stand_in, "#!/bin/sh\necho signed >> cosign-runs\n")?;
             let output = Command::new(&script)
                 .current_dir(&dir)
                 .env_clear()
                 .env("PATH", "/usr/bin:/bin")
                 .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
+                .env("COSIGN_URL", format!("file://{}", stand_in.display()))
+                .env("COSIGN_SHA256", sha256(&stand_in)?)
+                .env("RELEASE_SIGNING_KEY", image::base64(b"stand-in key"))
+                .env("COSIGN_PASSWORD", "stand-in password")
                 .env("RUNNER_TEMP", dir.join("runner"))
                 .envs(planted.iter().copied())
                 .output()?;
             let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let runs = fs::read_to_string(dir.join("cosign-runs")).unwrap_or_default();
+            if planted.is_empty() {
+                assert!(
+                    output.status.success(),
+                    "control: the signer stopped: {stderr}"
+                );
+                assert_eq!(runs, "signed\n".repeat(3), "control: cosign runs");
+                continue;
+            }
             assert!(!output.status.success(), "{name}: the signer went on");
+            assert!(stderr.contains(refusal), "{name}: stderr is {stderr:?}");
+            assert!(
+                !stdout.contains("planted") && !stderr.contains("planted"),
+                "{name}: a planted function ran"
+            );
+            assert!(runs.is_empty(), "{name}: cosign ran");
             assert!(
                 !stdout.contains("OK"),
                 "{name}: the signer checked the copies"
