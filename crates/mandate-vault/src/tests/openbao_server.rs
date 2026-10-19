@@ -356,7 +356,6 @@ async fn operator_get(address: &str, ca_pem: &[u8], operator: &SecretString, pat
 /// own accessor; a login to a role not yet made is `RoleMissing`, which a process may wait out.
 /// The pure requests are checked first, so a run with no server still fails until they hold.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn provisioning_sets_both_kubernetes_mounts_up_with_their_templated_policies() {
     let auth = |ca_pem: &[u8]| KubernetesAuth {
         host: "https://127.0.0.1:6443".to_owned(),

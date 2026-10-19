@@ -257,14 +257,50 @@ pub fn kubernetes_mount_requests(
     mounts: &Mounts,
     auth: &KubernetesAuth,
 ) -> Result<Vec<(String, Value)>, SourceError> {
-    let _ = (mounts, auth);
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let plain = is_segment(&mounts.kubernetes_executor) && is_segment(&mounts.kubernetes_exchange);
+    let https = auth
+        .host
+        .strip_prefix("https://")
+        .is_some_and(|rest| !rest.is_empty());
+    let ca = auth.ca_pem.as_deref().is_none_or(is_certificate);
+    if !(plain && https && ca) {
+        return Err(SourceError::Config);
+    }
+    let mut config = serde_json::Map::new();
+    config.insert("kubernetes_host".to_owned(), json!(auth.host));
+    if let Some(pem) = &auth.ca_pem {
+        config.insert("kubernetes_ca_cert".to_owned(), json!(pem));
+    }
+    Ok([&mounts.kubernetes_executor, &mounts.kubernetes_exchange]
+        .into_iter()
+        .flat_map(|mount| {
+            [
+                (format!("sys/auth/{mount}"), json!({"type": "kubernetes"})),
+                (
+                    format!("auth/{mount}/config"),
+                    Value::Object(config.clone()),
+                ),
+            ]
+        })
+        .collect())
+}
+
+/// Whether `pem` is one PEM certificate block, begun and ended.
+fn is_certificate(pem: &str) -> bool {
+    let pem = pem.trim();
+    pem.starts_with("-----BEGIN CERTIFICATE-----") && pem.ends_with("-----END CERTIFICATE-----")
 }
 
 /// The accessor of `mount` in the vault's `sys/auth` answer, the name the templated policies
 /// key the login's alias by. One missing, or one that is not a plain path segment, so that it
 /// could end the template, is [`SourceError::Malformed`].
 pub fn mount_accessor(sys_auth: Option<&Value>, mount: &str) -> Result<String, SourceError> {
-    let _ = (sys_auth, mount);
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    sys_auth
+        .and_then(|listed| listed.get("data"))
+        .and_then(|data| data.get(format!("{mount}/")))
+        .and_then(|entry| entry.get("accessor"))
+        .and_then(Value::as_str)
+        .filter(|accessor| is_segment(accessor))
+        .map(str::to_owned)
+        .ok_or(SourceError::Malformed)
 }

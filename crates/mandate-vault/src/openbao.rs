@@ -29,7 +29,10 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use serde_json::{Value, json};
 
 use crate::SourceError;
-use crate::kubernetes::{KubernetesAuth, service_account_name};
+use crate::kubernetes::{
+    KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
+    mount_accessor, service_account_name,
+};
 use crate::lease::{LEASE_SECS, Lease, lease_times};
 use crate::policy::{
     Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, role_name,
@@ -122,21 +125,55 @@ impl Http {
         let response = request.send().await.map_err(|_| SourceError::Unavailable)?;
         let status = response.status();
         refusal(status)?;
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| SourceError::Unavailable)?
+            .to_vec();
+        parsed(bytes)
+    }
+
+    /// A Kubernetes login to `/v1/<path>` for `role`: as [`Http::call`], except that a refusal's
+    /// body is read, for [`kubernetes_login_refusal`], and then wiped like any other.
+    async fn login(
+        &self,
+        path: &str,
+        body: &Value,
+        role: &str,
+    ) -> Result<Option<Value>, SourceError> {
+        let response = self
+            .client
+            .post(format!("{}/v1/{path}", self.address))
+            .header("Content-Type", "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|_| SourceError::Unavailable)?;
+        let status = response.status();
         let mut bytes = response
             .bytes()
             .await
             .map_err(|_| SourceError::Unavailable)?
             .to_vec();
-        let parsed = if bytes.is_empty() {
-            Ok(None)
-        } else {
-            serde_json::from_slice(&bytes)
-                .map(Some)
-                .map_err(|_| SourceError::Malformed)
-        };
-        bytes.zeroize();
-        parsed
+        if let Err(refused) = kubernetes_login_refusal(status.as_u16(), &bytes, role) {
+            bytes.zeroize();
+            return Err(refused);
+        }
+        parsed(bytes)
     }
+}
+
+/// The JSON in `bytes`, or `None` when there are none; the bytes are wiped either way.
+fn parsed(mut bytes: Vec<u8>) -> Result<Option<Value>, SourceError> {
+    let parsed = if bytes.is_empty() {
+        Ok(None)
+    } else {
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|_| SourceError::Malformed)
+    };
+    bytes.zeroize();
+    parsed
 }
 
 /// The refusal a status means, if any. Only a refusal the vault itself states is one: 400, 401
@@ -160,8 +197,15 @@ pub(crate) fn refusal(status: StatusCode) -> Result<(), SourceError> {
 /// every other refusal stops it (DEC-2060, agreed with lane D1). No part of the body reaches the
 /// error.
 pub fn kubernetes_login_refusal(status: u16, body: &[u8], role: &str) -> Result<(), SourceError> {
-    let _ = (status, body, role);
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let missing = json!([format!("invalid role name \"{role}\"")]);
+    let says_missing = status == 400
+        && serde_json::from_slice::<Value>(body)
+            .ok()
+            .is_some_and(|answer| answer.get("errors") == Some(&missing));
+    if says_missing {
+        return Err(SourceError::RoleMissing);
+    }
+    refusal(StatusCode::from_u16(status).map_err(|_| SourceError::Unavailable)?)
 }
 
 /// The string at `pointer` in `value`.
@@ -314,7 +358,7 @@ impl OpenBaoSource {
             .ok_or(SourceError::Malformed)?;
         seal_verdict(status.to_string().as_bytes(), ALLOW_DEV_SERVER)?;
         let body = json!({ "role": role, "jwt": jwt.expose_secret() });
-        let answer = http.call(Method::POST, &path, None, Some(&body)).await?;
+        let answer = http.login(&path, &body, &role).await?;
         let auth = answer.as_ref().and_then(|answer| answer.get("auth"));
         let token = SecretString::from(text(answer.as_ref(), "/auth/client_token")?.to_owned());
         let ttl = seconds(answer.as_ref(), "/auth/lease_duration")?;
@@ -616,8 +660,33 @@ async fn provision_kubernetes(
     mounts: &Mounts,
     auth: &KubernetesAuth,
 ) -> Result<(), SourceError> {
-    let _ = (http, token, mounts, auth);
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let listed = http.call(Method::GET, "sys/auth", token, None).await?;
+    for (path, body) in kubernetes_mount_requests(mounts, auth)? {
+        let enabled = path
+            .strip_prefix("sys/auth/")
+            .is_some_and(|mount| mount_accessor(listed.as_ref(), mount).is_ok());
+        if !enabled {
+            http.call(Method::POST, &path, token, Some(&body)).await?;
+        }
+    }
+    let listed = http.call(Method::GET, "sys/auth", token, None).await?;
+    let any = ConnectionId::new("0").map_err(|_| SourceError::Config)?;
+    for (identity, mount) in [
+        (Identity::Executor(any.clone()), &mounts.kubernetes_executor),
+        (Identity::TokenExchange(any), &mounts.kubernetes_exchange),
+    ] {
+        let accessor = mount_accessor(listed.as_ref(), mount)?;
+        let hcl = kubernetes_policy(&identity, mounts, &accessor)?;
+        let name = kubernetes_policy_name(&identity, mounts)?;
+        http.call(
+            Method::PUT,
+            &format!("sys/policies/acl/{name}"),
+            token,
+            Some(&json!({ "policy": hcl })),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the AppRole

@@ -334,7 +334,6 @@ fn a_kubernetes_login_is_accepted_only_for_its_own_role_and_account() {
 /// does not exist is `RoleMissing`, which a process may wait out; a missing role named otherwise,
 /// another 400, or a body that is not the vault's error list is still `Denied`.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_missing_role_is_its_own_refusal_and_every_other_answer_keeps_its_meaning() {
     let missing = br#"{"errors":["invalid role name \"6331\""]}"#;
     assert_eq!(

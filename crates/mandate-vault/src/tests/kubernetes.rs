@@ -521,7 +521,6 @@ const PEM: &str = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\
 /// Both mounts are enabled as `kubernetes` and configured with the API server's address, the CA
 /// only where one is given, executor's first.
 #[test]
-#[ignore = "pending E21-32"]
 fn both_kubernetes_mounts_are_enabled_and_pointed_at_the_api_server() {
     let in_cluster = KubernetesAuth {
         host: "https://10.43.0.1:443".to_owned(),
@@ -567,7 +566,6 @@ fn both_kubernetes_mounts_are_enabled_and_pointed_at_the_api_server() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_plain_address_a_bad_ca_or_a_bad_mount_sets_nothing_up() {
     let fine = KubernetesAuth {
         host: "https://10.43.0.1:443".to_owned(),
@@ -622,7 +620,6 @@ fn a_plain_address_a_bad_ca_or_a_bad_mount_sets_nothing_up() {
 /// The accessor is read from `sys/auth`'s `data`, where each mount is keyed with its trailing
 /// slash; one missing or able to end a template is refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_mounts_accessor_is_read_from_the_vaults_list_and_must_be_plain() {
     let listed = json!({
         "data": {
