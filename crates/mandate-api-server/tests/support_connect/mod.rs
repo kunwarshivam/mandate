@@ -326,12 +326,11 @@ pub fn code(reply: &Reply) -> (u16, ProblemCode) {
     (reply.status, problem.code)
 }
 
-/// The text a start derives from [`DRAWS`]: the `state`, the verifier, and its challenge.
-pub fn drawn_texts() -> [String; 3] {
-    let state = b64(&DRAWS[0]);
-    let verifier = b64(&DRAWS[1]);
-    let challenge = challenge(&verifier);
-    [state, verifier, challenge]
+/// The text a start could derive from [`DRAWS`], in either order: each draw's text and its
+/// challenge.
+pub fn drawn_texts() -> [String; 4] {
+    let [first, second] = DRAWS.map(|draw| b64(&draw));
+    [challenge(&first), challenge(&second), first, second]
 }
 
 /// A refused start leaves nothing redeemable: no `state` is held, and neither `body` nor any
