@@ -278,13 +278,25 @@ pub fn command(
 const ACKNOWLEDGED: &str = "OwnerAcknowledged";
 const REQUESTED: &str = "OwnerAcknowledgmentRequested";
 
-/// The control stream's records, parsed from their bytes.
+/// The control stream's records, parsed from their bytes. A row that does not parse fails the
+/// whole read, so a rule never passes on a stream it could not read in full: a dropped
+/// acknowledgment would leave its request looking unspent (rule 241).
+///
+/// # Errors
+/// [`ControlError::Journal`] when the journal cannot be read or a row does not parse.
 fn records(journal: &dyn ControlJournal, owner: &Owner) -> Result<Vec<Value>, ControlError> {
-    Ok(journal
+    journal
         .rows(&control_stream(owner)?)?
         .iter()
-        .filter_map(|row| mandate_canon::parse(&row.body).ok())
-        .collect())
+        .map(|row| {
+            mandate_canon::parse(&row.body).map_err(|_| {
+                ControlError::Journal(format!(
+                    "the control stream's row {} does not parse",
+                    row.seq
+                ))
+            })
+        })
+        .collect()
 }
 
 /// The text at the dotted `path` of `record`, if any.

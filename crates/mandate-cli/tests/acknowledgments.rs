@@ -432,6 +432,64 @@ fn an_earlier_acknowledgment_does_not_spend_another_request() {
     );
 }
 
+/// The #1822 review: a control-stream row the CLI cannot parse fails the acknowledgment closed,
+/// committing nothing, rather than being skipped, so an acknowledgment the CLI could not read never
+/// leaves its request looking unspent (rule 241).
+#[test]
+fn an_unreadable_control_row_refuses_an_acknowledgment_of_a_request() {
+    let mut fx = Fixture::new();
+    let asked = answer(
+        "request",
+        run(&mut fx, &user(CHECKER), AGENT, &request(42), ASKED_AT),
+    );
+    fx.journal.push_raw(
+        CONTROL,
+        "OwnerAcknowledged",
+        b"{\"payload\": {\"request\": ",
+    );
+    let before = rows(&fx).len();
+    let ack = acknowledge(42, Some(&asked.event_id));
+    let got = run(&mut fx, &owner(), AGENT, &ack, ASKED_AT + 5);
+    assert!(matches!(got, Err(ControlError::Journal(_))), "{got:?}");
+    assert_eq!(rows(&fx).len(), before, "nothing committed");
+}
+
+/// The #1822 review, nit 2: rule 239 is judged before rule 240, as §9.28 check 4 orders
+/// `not_independent` before `request_invalid` (the vectors' `independence_before_the_request`). The
+/// owner's own request of another agent or another event is refused `not_independent`.
+#[test]
+fn your_own_request_is_not_independent_before_it_is_another_agents_or_events() {
+    let mut fx = Fixture::new();
+    let other_agent = answer(
+        "request",
+        run(&mut fx, &owner(), OTHER_AGENT, &request(42), ASKED_AT),
+    );
+    let other_event = answer(
+        "request",
+        run(&mut fx, &owner(), AGENT, &request(43), ASKED_AT + 1),
+    );
+    let before = rows(&fx).len();
+    for (what, named) in [
+        ("another agent's", other_agent),
+        ("another event's", other_event),
+    ] {
+        assert_eq!(
+            run(
+                &mut fx,
+                &owner(),
+                AGENT,
+                &acknowledge(42, Some(&named.event_id)),
+                ASKED_AT + 5
+            ),
+            Err(ControlError::Refused {
+                reason: "not_independent"
+            }),
+            "{what}"
+        );
+        assert_eq!(rows(&fx).len(), before, "{what}: nothing committed");
+    }
+}
+
 /// DEC-2512 items 1 and 2: the code binds what the owner confirms. A request's code differs from an
 /// acknowledgment's of the same event, and an acknowledgment's code differs with the request it
 /// names, or none.
