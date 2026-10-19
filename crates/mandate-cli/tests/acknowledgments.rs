@@ -9,18 +9,19 @@
 //! is not an earlier request of the same agent and event, or that an earlier acknowledgment already
 //! named, is `request_invalid`; one of the owner's own request is `not_independent`. The users are
 //! the authenticated owners, never a value the caller types. The tests of what is not implemented
-//! yet are pending E8-3 and fail on the command's `ControlError::Unimplemented`, but for the plain
-//! acknowledgment's members, which fail on the members DEC-279 item 7 wrote (DEC-77).
+//! yet are pending E8-3 and fail on the command's `ControlError::Unimplemented`, but for the two
+//! plain acknowledgment tests, which fail on the members DEC-279 item 7 wrote (DEC-77).
 
 mod common;
 
 use std::collections::BTreeSet;
+use std::path::Path;
 
 use common::{
     AGENT, ASKED_AT, CONTROL, FixedIds, Fixture, OTHER_AGENT, OWNER, WORKSPACE, at, body, member,
     member_text, object, owner, text,
 };
-use mandate_canon::Value;
+use mandate_canon::{Value, parse};
 use mandate_cli::agent::{Command, code, command};
 use mandate_cli::control::{ControlError, Owner, Submitted};
 use mandate_journal::{Draft, Environment, StoredEvent};
@@ -165,6 +166,73 @@ fn a_plain_acknowledgment_has_section_9_28s_members_and_a_journal_accepts_it() {
     assert_eq!(member(&event, "payload.request"), Some(&Value::Null));
 }
 
+/// The members a plain acknowledgment's independence rides on, which §9.28's vectors judge.
+const INDEPENDENCE: [&str; 3] = ["independent_required", "request", "requested_by"];
+
+/// The vectors' executor case `name` in §9.28's section.
+fn executor_case(name: &str) -> Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/journal.json");
+    let fixture = parse(&std::fs::read(path).unwrap()).unwrap();
+    let cases = member(&fixture, "acknowledgments.executor")
+        .and_then(Value::as_array)
+        .map(<[Value]>::to_vec)
+        .unwrap_or_default();
+    cases
+        .into_iter()
+        .find(|c| member_text(c, "name") == Some(name))
+        .unwrap_or_else(|| panic!("§9.28's vectors have no executor case {name}"))
+}
+
+/// DEC-2512 item 3, the coordinator's ruling (a): a plain acknowledgment writes
+/// `independent_required: false` whatever the policy, which adds no risk because the executor
+/// judges under the stricter of the copy's requirement and the overlay's. The CLI's payload, with
+/// its own agent, event and user written as the vectors', is exactly the control-stream
+/// acknowledgment of `reference/journal`'s `plain_under_overlay` case, whose oracle refuses its
+/// copy `not_independent` under a requiring overlay and lifts nothing.
+#[test]
+#[ignore = "pending E8-3"]
+fn a_plain_acknowledgment_under_a_requiring_policy_is_the_one_the_executor_refuses() {
+    let case = executor_case("plain_under_overlay");
+    assert_eq!(
+        member(&case, "overlay_independent"),
+        Some(&Value::Bool(true))
+    );
+    let outcomes: Vec<&str> = member(&case, "expect")
+        .and_then(Value::as_array)
+        .map(|e| e.iter().filter_map(|x| member_text(x, "outcome")).collect())
+        .unwrap_or_default();
+    assert_eq!(outcomes, ["not_independent"], "the executor refuses it");
+    let vector = member(&case, "control")
+        .and_then(Value::as_array)
+        .and_then(|records| records.first())
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        member_text(&vector, "event_type"),
+        Some("OwnerAcknowledged")
+    );
+    let named = |path: &str| member_text(&vector, path).unwrap_or_default().to_owned();
+    let (agent, event, by) = (
+        named("payload.agent"),
+        named("payload.event"),
+        named("payload.user"),
+    );
+    let mut fx = Fixture::new();
+    let ack = Command::Acknowledge {
+        event: event.clone(),
+        request: None,
+    };
+    answer(
+        "acknowledge",
+        run(&mut fx, &user(&by), &agent, &ack, ASKED_AT),
+    );
+    let committed = committed(&fx, 0, &by, &ACKNOWLEDGED, ASKED_AT);
+    for name in INDEPENDENCE {
+        let path = format!("payload.{name}");
+        assert_eq!(member(&committed, &path), member(&vector, &path), "{name}");
+    }
+}
+
 /// DEC-2512 item 1, rule 239: a request needs the code, and without it is refused `step_up_missing`
 /// with nothing committed; with it, it commits one `OwnerAcknowledgmentRequested` that names the
 /// owner as the requester, requires an independent user, and carries step-up evidence.
@@ -240,7 +308,7 @@ fn an_acknowledgment_of_another_users_request_names_it_and_copies_its_requester(
     );
 }
 
-/// Rule 239, DEC-2512 item 2: a user never acknowledges their own request. The CLI refuses it
+/// Rule 239, DEC-2512 items 2 and 4: a user never acknowledges their own request. The CLI refuses it
 /// `not_independent` and commits nothing.
 #[test]
 #[ignore = "pending E8-3"]
@@ -260,7 +328,7 @@ fn acknowledging_your_own_request_is_refused_not_independent() {
     assert_eq!(rows(&fx).len(), 1, "nothing committed");
 }
 
-/// Rules 240 and 241, DEC-2512 item 2: an acknowledgment naming an unknown id, an event that is no
+/// Rules 240 and 241, DEC-2512 items 2 and 4: an acknowledgment naming an unknown id, an event that is no
 /// request, a request of another agent or another event, or a request an earlier acknowledgment
 /// already answered, is refused `request_invalid` and commits nothing.
 #[test]
