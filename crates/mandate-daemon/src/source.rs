@@ -28,6 +28,25 @@ use crate::meter::CellMeter;
 use crate::recorded::Bundle;
 use crate::runtime::{ResearchParts, ResearchSource};
 
+/// The `event_time` of `agent`'s latest research `MeterReserved` on the workspace's meter stream
+/// `meter` (DEC-2259 item 3), as the risk clock's second; `None` before the first. Other agents' and
+/// other purposes' reservations, and the stream's other records, are passed over.
+///
+/// # Errors
+/// [`FoldError::Unreadable`] naming the member when a `MeterReserved` gives no readable
+/// `agent_id`, `purpose` or `event_time`.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn last_research_reservation(
+    meter: &[StoredEvent],
+    agent: &str,
+) -> Result<Option<RiskClock>, FoldError> {
+    let _ = (meter, agent);
+    todo!()
+}
+
 /// Where the source reads a stream's records: the process's store, or a read connection of its own.
 pub trait Rows {
     /// The stream's records, or `None` when they cannot be read.

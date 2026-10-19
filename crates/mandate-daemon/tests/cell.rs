@@ -12,14 +12,18 @@ use std::rc::Rc;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
 use mandate_daemon::cell::{
-    CellDeployment, CellError, OptIn, opt_in, research, research_daily_cap,
+    CellDeployment, CellError, OptIn, meter_opened_ids, opt_in, research, research_daily_cap,
+    research_metered,
 };
 use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_daemon::source::Rows;
 use mandate_gateway::money::Usd6;
+use mandate_gateway::provider::{IdSource, SequentialIds};
 use mandate_journal::{ArtifactStore, Environment, StoredEvent, StreamId};
 use mandate_runtime::{EventDraft, EventId};
 use mandate_spec::document::Mandate;
+use mandate_store::MemoryStore;
+use mandate_store::meter::JournalMeter;
 use mandate_time::UtcNanos;
 use serde_json::{Value as Json, json};
 
@@ -283,4 +287,55 @@ fn the_daily_research_cap_is_the_mandate_s_own_and_fails_closed() {
     ] {
         assert_eq!(cap(&*edit), unavailable, "{case}");
     }
+}
+
+/// DEC-2259 item 1: research over a meter the process gives, its journaled meter stream, is the
+/// same research the in-memory meter wires: the same configuration and the same references.
+#[test]
+#[ignore = "pending E21-61"]
+fn research_over_a_given_meter_is_the_same_research() {
+    let (root, control, version, _) = deployed("metered");
+    let meter = JournalMeter::open(
+        MemoryStore::default(),
+        "ws1",
+        Environment::Paper,
+        Rc::new(|| UtcNanos::from_parts(1_792_180_800, 0).unwrap()),
+        Box::new(SequentialIds::starting_at(1 << 70)),
+    );
+    let metered = research_metered(
+        opted(),
+        Box::new(control.clone()),
+        Box::new(meter),
+        &root,
+        now(),
+    )
+    .unwrap_or_else(|error| panic!("{error:?}"));
+    let (plain_root, plain_control, _, _) = deployed("plain");
+    let plain = research(opted(), Box::new(plain_control), &plain_root, now()).unwrap();
+    assert_eq!(metered.wiring.config, plain.wiring.config);
+    let draft = EventDraft {
+        event_id: EventId("01J8Z3MC000000000000000001".to_owned()),
+        event_type: "RunStarted".to_owned(),
+        causation_id: None,
+        payload: Value::Null,
+    };
+    let (_, refs) = metered.refs.refs(&draft).unwrap();
+    assert_eq!(
+        refs.get("mandate_version").and_then(Value::as_str),
+        Some(version.as_str())
+    );
+}
+
+/// DEC-2258 item 2: a workspace's meter stream opens with an id drawn from its own name, the same
+/// at every start, and no two workspaces' streams open with one id.
+#[test]
+#[ignore = "pending E21-61"]
+fn each_workspace_s_meter_stream_opens_with_an_id_of_its_own() {
+    let first = |workspace: &str| meter_opened_ids(workspace).next_id();
+    assert_eq!(first("ws1"), first("ws1"));
+    assert_ne!(first("ws1"), first("ws2"));
+    assert_ne!(first("ws2"), first("ws3"));
+    let mut ids = meter_opened_ids("ws1");
+    let (one, two) = (ids.next_id(), ids.next_id());
+    assert_ne!(one, two);
 }

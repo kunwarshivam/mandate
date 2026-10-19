@@ -48,6 +48,23 @@ impl CellMeter {
         }
     }
 
+    /// As [`CellMeter::new`], over any meter store: in a process given a journal, the workspace's
+    /// journaled `meter:{workspace_id}` stream (DEC-2259 item 1), so a restart folds every
+    /// reservation the gateway made before it and the hold, a cross-check now, holds nothing.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn over(
+        store: Box<dyn MeterStore>,
+        rows: Rc<dyn Rows>,
+        who: SourceFor,
+        clock: Rc<dyn Fn() -> UtcNanos>,
+    ) -> Self {
+        let _ = (store, rows, who, clock);
+        todo!()
+    }
+
     /// Whether the store is held at `at`: the agent stream records a reserved call on `at`'s risk
     /// day that the store does not hold, or a call record whose reservation or time it cannot read,
     /// or the stream cannot be read.

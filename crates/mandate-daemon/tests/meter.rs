@@ -15,9 +15,12 @@ use mandate_gateway::meter::{
     MeterRecord, MeterStore, Reservation, Settlement, SharedMeter, StoreError,
 };
 use mandate_gateway::money::{Usage, Usd6};
+use mandate_gateway::provider::SequentialIds;
 use mandate_gateway::registry::ModelRef;
 use mandate_journal::{Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
+use mandate_store::MemoryStore;
+use mandate_store::meter::JournalMeter;
 use mandate_time::{Date, UtcNanos};
 
 const AGENT: &str = "agent-a";
@@ -319,4 +322,61 @@ fn every_spend_the_gateway_can_hold_converts_exactly() {
             .unwrap();
         assert_eq!(meter.research_spend(at(NOW)), Some(usd(spent)), "{max}");
     }
+}
+
+/// A research reservation of the agent today at `max` dollars, its ids ULIDs from `n`, as the
+/// journal takes them.
+fn journaled_reservation(n: u128, max: &str) -> MeterRecord {
+    let MeterRecord::Reserved(mut reservation) = reserved("", AGENT, max, day(TODAY)) else {
+        unreachable!("reserved gives a reservation")
+    };
+    reservation.event_id = mandate_canon::encode_ulid(n);
+    reservation.call_id = mandate_canon::encode_ulid(n + 1);
+    MeterRecord::Reserved(reservation)
+}
+
+/// DEC-2259 items 1 and 2: over the journaled meter stream, a cell meter restarted after a
+/// reserved call counts that reservation at its maximum, and the agent stream's record of the call
+/// holds nothing. A call record whose reservation the journal lacks still holds the store.
+#[test]
+#[ignore = "pending E21-61"]
+fn a_journaled_meter_restarted_counts_its_reservation_and_holds_nothing() {
+    let (journal, stream, clock) = (MemoryStore::default(), Stream::default(), Clock::at(NOW));
+    let journaled = |from: u128| {
+        CellMeter::over(
+            Box::new(JournalMeter::open(
+                journal.clone(),
+                "ws1",
+                Environment::Paper,
+                clock.reading(),
+                Box::new(SequentialIds::starting_at(from)),
+            )),
+            Rc::new(stream.clone()),
+            who(),
+            clock.reading(),
+        )
+    };
+    let mut before = journaled(1 << 70);
+    let reservation = journaled_reservation(10, "0.25");
+    before.append(reservation.clone()).unwrap();
+    stream.call(
+        &format!(r#""{}""#, reservation.event_id()),
+        "2026-10-16T14:00:00.000000000Z",
+    );
+    drop(before);
+
+    let after = journaled(1 << 71);
+    assert!(!after.held(at(NOW)), "the journal holds the reservation");
+    assert_eq!(after.read(), Ok(vec![reservation]));
+    assert_eq!(after.research_spend(at(NOW)), Some(usd("0.25")));
+
+    stream.call(
+        r#""01J8Z3MR000000000000000777""#,
+        "2026-10-16T14:30:00.000000000Z",
+    );
+    assert!(
+        after.held(at(NOW)),
+        "a reservation the journal lacks still holds"
+    );
+    assert_eq!(after.research_spend(at(NOW)), None);
 }

@@ -10,8 +10,9 @@ use std::rc::Rc;
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Key, Object, Value};
-use mandate_gateway::meter::SharedMeter;
+use mandate_gateway::meter::{MeterStore, SharedMeter};
 use mandate_gateway::money::Usd6;
+use mandate_gateway::provider::SequentialIds;
 use mandate_journal::{Environment, StreamId};
 use mandate_num::Usd;
 use mandate_research::PolicyOverlay;
@@ -152,6 +153,38 @@ pub fn research_daily_cap(document: &Value) -> Result<Usd6, CellError> {
         .ok_or_else(unavailable)?;
     let cap = PolicyOverlay::internal_research_profile().effective_cost_cap(cap);
     Usd6::parse(&cap.to_string()).map_err(|_| unavailable())
+}
+
+/// The ids a workspace's meter writer opens its stream with, its `StreamOpened` the one record it
+/// gives an id of its own (DEC-2258 item 2): drawn from the stream's own name, so no two
+/// workspaces' streams open with one id, as the journal's event ids must not repeat across streams.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn meter_opened_ids(workspace: &str) -> SequentialIds {
+    let _ = workspace;
+    todo!()
+}
+
+/// As [`research`], with the worker's gateway and the research source sharing `meter`, the
+/// workspace's journaled meter stream in a process given a journal (DEC-2259 item 1).
+///
+/// # Errors
+/// As [`research`].
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn research_metered(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    meter: Box<dyn MeterStore>,
+    artifacts: &Path,
+    now: Box<dyn FnMut() -> UtcNanos>,
+) -> Result<CellResearch, CellError> {
+    let _ = (opted, rows, meter, artifacts, now);
+    todo!()
 }
 
 /// The research `opted` asks for, reading the streams through `rows` and the mandate documents and
