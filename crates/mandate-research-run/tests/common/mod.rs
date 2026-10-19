@@ -25,7 +25,7 @@ use mandate_num::{Price, Qty};
 use mandate_research_run::{
     Allowlist, Bar, BarReader, Filing, FilingEntry, FilingReader, FilingText, GatewayParts,
     InstrumentFact, InstrumentReader, ItemId, ModelPin, NewsItem, NewsReader, NewsText,
-    NoHostedTransport, OutputBounds, ReadError, Readers, ResearchEntry, ResearchTransport,
+    NoHostedTransport, OutputBounds, Quote, ReadError, Readers, ResearchEntry, ResearchTransport,
     RetrievalPlan, Scope, Selection, SourceId, Symbol, TextQuery, recorded_reply, research_gateway,
 };
 use mandate_time::UtcNanos;
@@ -164,6 +164,9 @@ pub struct Fixture {
     /// What `filing_text` answers; `None` reads as [`ReadError::Unavailable`].
     pub filing_text: Option<Result<FilingText, ReadError>>,
     pub range_asks: std::cell::RefCell<Vec<RangeAsk>>,
+    /// What `last_quote` answers for each symbol asked, by name; a name absent answers none.
+    pub quotes: std::collections::BTreeMap<String, Quote>,
+    pub quote_asks: std::cell::RefCell<Vec<(Symbol, UtcNanos)>>,
 }
 
 impl Fixture {
@@ -199,6 +202,17 @@ impl BarReader for Fixture {
             .cloned()
             .collect();
         self.answer(&rows)
+    }
+
+    fn last_quote(&self, name: &Symbol, cut_off: UtcNanos) -> Result<Option<Quote>, ReadError> {
+        self.quote_asks.borrow_mut().push((name.clone(), cut_off));
+        let rows: Vec<Quote> = self
+            .quotes
+            .get(name.as_str())
+            .cloned()
+            .into_iter()
+            .collect();
+        Ok(self.answer(&rows)?.into_iter().next())
     }
 }
 
