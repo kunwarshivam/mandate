@@ -3,6 +3,10 @@
 //! unreadable view holds new openings and no exit, protective order, risk exit, or kill switch
 //! (`AGENTS.md` rules 3 and 13). Until B2 fills in `fold`, every test that folds a row fails at its
 //! `Unimplemented` stub.
+//!
+//! E6-15 slice B2b-1 (DEC-2305, journal spec §9.30): a version-2 `MarkUpdated` steps the risk state
+//! with its verdict, a version-1 mark stays no verdict, and the reference cases' marks and ticks,
+//! driven as account-stream rows, give the harness's snapshots and records (DEC-2304 item 6).
 
 use mandate_canon::{Key, Value, parse, to_canonical};
 use mandate_domain::{AgentMode, AssetClass, Environment, MarketSession};
@@ -17,7 +21,8 @@ use mandate_spec::context::stop_limit_asset_classes;
 use mandate_spec::document::ProvenanceMap;
 use mandate_spec::risk::{Opening, RiskState, SessionClock};
 use mandate_spec::{Mandate, SpecError, ValidatedMandate, ValidationContext};
-use mandate_time::{Date, UtcNanos};
+use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
+use serde_json::Value as Json;
 use std::collections::{BTreeMap, BTreeSet};
 
 const ACCOUNT: &str = "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1";
@@ -49,14 +54,25 @@ fn at(text: &str) -> UtcNanos {
     UtcNanos::parse(text).unwrap()
 }
 
+fn fixture() -> Json {
+    serde_json::from_str(include_str!("../../../fixtures/refcases/mandate.json")).unwrap()
+}
+
 /// `research_equity_pinned`, the reference bases' one pinned US equity, validated.
 fn mandate() -> ValidatedMandate {
-    let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../../../fixtures/refcases/mandate.json")).unwrap();
-    let document = fixture
-        .pointer("/bases/research_equity_pinned/mandate")
-        .unwrap();
-    let canonical = parse(&serde_json::to_vec(document).unwrap()).unwrap();
+    validated("research_equity_pinned", &[])
+}
+
+/// A reference base with a case's `replace` patch, validated.
+fn validated(base: &str, patch: &[Json]) -> ValidatedMandate {
+    let mut document = fixture()["bases"][base]["mandate"].clone();
+    for change in patch {
+        assert_eq!(change["op"], "replace", "the cases here only replace");
+        *document
+            .pointer_mut(change["path"].as_str().unwrap())
+            .unwrap() = change["value"].clone();
+    }
+    let canonical = parse(&serde_json::to_vec(&document).unwrap()).unwrap();
     let context = ValidationContext {
         account_equity_usd: Usd::parse("25000").unwrap(),
         other_allocations_usd: Usd::ZERO,
@@ -264,7 +280,6 @@ fn only_paused_or_stopped_holds_an_exit_and_nothing_holds_a_kill_switch() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn a_row_the_fold_does_not_read_advances_its_head() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -285,7 +300,6 @@ fn a_row_the_fold_does_not_read_advances_its_head() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn a_seq_gap_makes_the_view_unreadable() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -298,7 +312,6 @@ fn a_seq_gap_makes_the_view_unreadable() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn an_unknown_schema_version_makes_the_view_unreadable() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -316,7 +329,6 @@ fn an_unknown_schema_version_makes_the_view_unreadable() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn an_event_type_outside_the_catalogue_makes_the_view_unreadable() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -328,7 +340,6 @@ fn an_event_type_outside_the_catalogue_makes_the_view_unreadable() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn an_undecodable_row_makes_the_view_unreadable() {
     let mandate = mandate();
     for body in [b"not json".to_vec(), br#"{"payload":{}}"#.to_vec()] {
@@ -342,7 +353,6 @@ fn an_undecodable_row_makes_the_view_unreadable() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn a_refusal_to_decide_makes_the_view_unreadable() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -363,7 +373,6 @@ fn a_refusal_to_decide_makes_the_view_unreadable() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn an_unreadable_view_stays_unreadable_and_appends_nothing() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -381,7 +390,6 @@ fn an_unreadable_view_stays_unreadable_and_appends_nothing() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn a_tick_across_new_york_midnight_appends_the_risk_day_the_journal_accepts() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -422,4 +430,343 @@ fn a_tick_across_new_york_midnight_appends_the_risk_day_the_journal_accepts() {
     draft.insert(Key::new("payload").unwrap(), append.payload.clone());
     let parsed = Draft::parse(&to_canonical(&Value::Object(draft)));
     assert!(parsed.is_ok(), "§9.27 accepts it: {:?}", parsed.err());
+}
+
+/// Every second counts and every tick is crypto's, as the harness's crypto cases step (§5.2).
+struct Crypto;
+
+impl SessionClock for Crypto {
+    fn seconds_between(&self, from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
+        Wall.seconds_between(from, to)
+    }
+}
+
+impl RiskCalendar for Crypto {
+    fn session(&self, _at: UtcNanos) -> Result<MarketSession, SpecError> {
+        Ok(MarketSession::Crypto)
+    }
+}
+
+/// An equity's clock: the regular-session seconds of `mandate-time`'s NYSE calendar, which the
+/// harness counts staleness on (DEC-2305 item 8). Every tick these walks fold is in the regular
+/// session; a mark's session is its record's (DEC-2305 item 1).
+struct Nyse(ExchangeCalendar);
+
+impl SessionClock for Nyse {
+    fn seconds_between(&self, from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
+        let mut total = 0;
+        let mut date = from.date();
+        while date <= to.date() {
+            for span in self.0.sessions(date)? {
+                let (start, end) = (span.start().max(from), span.end().min(to));
+                if span.session() == Session::Regular && start < end {
+                    total += Wall.seconds_between(start, end)?;
+                }
+            }
+            date = date.next()?;
+        }
+        Ok(total)
+    }
+}
+
+impl RiskCalendar for Nyse {
+    fn session(&self, _at: UtcNanos) -> Result<MarketSession, SpecError> {
+        Ok(MarketSession::Regular)
+    }
+}
+
+fn nyse() -> Nyse {
+    Nyse(ExchangeCalendar::us_equities().unwrap())
+}
+
+fn case(id: &str) -> Json {
+    let fixture = fixture();
+    let cases = fixture["cases"].as_array().unwrap();
+    cases.iter().find(|case| case["id"] == id).unwrap().clone()
+}
+
+/// A case's patched mandate.
+fn case_mandate(case: &Json) -> ValidatedMandate {
+    validated(
+        case["base"].as_str().unwrap(),
+        case["patch"].as_array().unwrap(),
+    )
+}
+
+/// The fold opened at a case's `initial`, with `harness_defaults`' staleness limit.
+fn open_case<'c>(
+    case: &Json,
+    mandate: &ValidatedMandate,
+    calendar: &'c dyn RiskCalendar,
+) -> AccountRiskFold<'c> {
+    let initial = |key: &str| case["initial"][key].as_str().unwrap().to_owned();
+    let max_age = fixture()["harness_defaults"]["mark_max_age_s"].as_u64();
+    let opening = Opening {
+        position_qty: Qty::parse(&initial("position_qty")).unwrap(),
+        avg_cost: Price::parse(&initial("avg_cost")).unwrap(),
+        asset_class: AssetClass::parse(&initial("asset_class")).unwrap(),
+        at: at(&initial("at")),
+        inherited_loss_usd: Usd::parse(&initial("inherited_loss_usd")).unwrap(),
+        mark_max_age_s: u32::try_from(max_age.unwrap()).unwrap(),
+    };
+    let tripwires = TripwireState::default();
+    AccountRiskFold::open(ACCOUNT, 1, AGENT, mandate, &opening, calendar, tripwires).unwrap()
+}
+
+/// A version-2 `MarkUpdated` for `instrument` in §9.30's member order, its `price` the bid.
+fn mark(
+    seq: u64,
+    instrument: &str,
+    clock: &str,
+    bid: &str,
+    sane: bool,
+    session: &str,
+) -> StoredEvent {
+    row(
+        seq,
+        "MarkUpdated",
+        2,
+        &format!(
+            r#"{{"instrument_id":"{instrument}","price":"{bid}","source":"quote","feed":"iex",
+            "bid":"{bid}","sane":{sane},"session":"{session}","risk_clock":"{clock}"}}"#
+        ),
+    )
+}
+
+/// The instrument a case's marks quote: the reference cases name none, so BTC/USD for crypto and
+/// AAPL for an equity.
+fn instrument(case: &Json) -> &'static str {
+    match case["initial"]["asset_class"].as_str().unwrap() {
+        "crypto" => "BTC/USD",
+        _ => "AAPL",
+    }
+}
+
+/// The §9.27 records, whose members a step's journal states.
+const CLOSED_RECORDS: [&str; 7] = [
+    "RiskDayStarted",
+    "RiskLimitTriggered",
+    "RiskLimitLifted",
+    "HighWaterMarkReset",
+    "PositionReleased",
+    "InstrumentRestrictionChanged",
+    "GoalCompleted",
+];
+
+fn mode_name(mode: AgentMode) -> &'static str {
+    match mode {
+        AgentMode::Normal => "normal",
+        AgentMode::ExitsOnly => "exits_only",
+        AgentMode::Paused => "paused",
+        AgentMode::Stopped => "stopped",
+    }
+}
+
+/// The view's snapshot against a step's `expect`: the reported figures, the mode, and both name
+/// sets, as the harness compares them.
+fn check_snapshot(view: &RiskView, seq: u64, expect: &Json) {
+    let RiskView::Readable { snapshot, head } = view else {
+        panic!("seq {seq} leaves the view readable: {view:?}");
+    };
+    assert_eq!(*head, seq);
+    for (member, actual) in [
+        ("agent_equity", snapshot.agent_equity.to_string()),
+        ("high_water_mark", snapshot.high_water_mark.to_string()),
+        ("drawdown", snapshot.drawdown.to_string()),
+        ("day_start_equity", snapshot.day_start_equity.to_string()),
+        ("daily_pnl", snapshot.daily_pnl.to_string()),
+        (
+            "daily_pnl_fraction",
+            snapshot.daily_pnl_fraction.to_string(),
+        ),
+        ("capital_base", snapshot.capital_base.to_string()),
+        ("size_factor", snapshot.size_factor.to_string()),
+        ("net_contributed", snapshot.net_contributed.to_string()),
+        ("agent_mode", mode_name(snapshot.agent_mode).to_owned()),
+    ] {
+        assert_eq!(actual, expect[member], "seq {seq}: {member}");
+    }
+    let names = |key: &str| -> BTreeSet<String> {
+        let listed = expect[key].as_array().unwrap().iter();
+        listed
+            .map(|name| name.as_str().unwrap().to_owned())
+            .collect()
+    };
+    let held = snapshot.restrictions.iter().map(|r| r.as_str().to_owned());
+    assert_eq!(held.collect::<BTreeSet<_>>(), names("restrictions"));
+    let instrument = snapshot.instrument_restrictions.iter();
+    let instrument = instrument
+        .map(|r| r.as_str().to_owned())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(instrument, names("instrument_restrictions"));
+}
+
+/// The appended records against a step's `journal`: every type in §5.2's order, and every member
+/// the step states of a §9.27 record.
+fn check_records(appends: &[RiskAppend], seq: u64, journal: &Json) {
+    let journal = journal.as_array().unwrap();
+    let types: Vec<&str> = appends.iter().map(|append| append.event_type).collect();
+    let wanted: Vec<&str> = journal
+        .iter()
+        .map(|e| e["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(types, wanted, "seq {seq}: the records, in order");
+    for (append, entry) in appends.iter().zip(journal) {
+        if !CLOSED_RECORDS.contains(&append.event_type) {
+            continue;
+        }
+        for (member, value) in entry.as_object().unwrap() {
+            let actual = append.payload.get(member);
+            let same = match value {
+                Json::String(text) if member == "type" => text == append.event_type,
+                Json::String(text) => actual.and_then(Value::as_str) == Some(text.as_str()),
+                Json::Bool(flag) => actual == Some(&Value::Bool(*flag)),
+                other => panic!("seq {seq}: a member the walk does not compare: {other}"),
+            };
+            assert!(same, "seq {seq}: {member} is {value}, not {actual:?}");
+        }
+    }
+}
+
+/// Folds a case's steps as account-stream rows from seq 2, a `mark` as a version-2 `MarkUpdated`
+/// and a `clock` or `risk_day_started` as a tick, and checks each against its `expect`.
+fn walk(fold: &mut AccountRiskFold<'_>, instrument: &str, steps: &[Json]) {
+    for (seq, step) in (2..).zip(steps) {
+        let text = |key: &str| step[key].as_str().unwrap();
+        let row = match text("event") {
+            "mark" => mark(
+                seq,
+                instrument,
+                text("at"),
+                text("bid"),
+                step["sane"].as_bool().unwrap(),
+                text("session"),
+            ),
+            "clock" | "risk_day_started" => tick(seq, text("at")),
+            other => panic!("not a mark or a tick: {other}"),
+        };
+        let appends = fold.fold(&row).unwrap();
+        check_records(&appends, seq, &step["expect"]["journal"]);
+        check_snapshot(fold.view(), seq, &step["expect"]);
+    }
+}
+
+fn readable_in(mode: AgentMode) -> RiskView {
+    let mandate = mandate();
+    let state = RiskState::open(&mandate, &opening(), &Wall).unwrap();
+    let mut snapshot = state.snapshot().clone();
+    snapshot.agent_mode = mode;
+    RiskView::Readable {
+        snapshot: Box::new(snapshot),
+        head: 1,
+    }
+}
+
+const EXITS: [OrderPath; 4] = [
+    OrderPath::OwnerExit,
+    OrderPath::DiscretionaryExit,
+    OrderPath::RiskExit,
+    OrderPath::ProtectiveOrder,
+];
+
+#[test]
+fn a_readable_exits_only_view_holds_openings_only() {
+    let view = readable_in(AgentMode::ExitsOnly);
+    assert!(view.holds(OrderPath::Opening));
+    for path in EXITS.into_iter().chain([OrderPath::KillSwitch]) {
+        assert!(!view.holds(path), "exits_only holds no {path:?} (rule 13)");
+    }
+}
+
+#[test]
+fn a_readable_paused_or_stopped_view_holds_every_exit_but_never_the_kill_switch() {
+    for mode in [AgentMode::Paused, AgentMode::Stopped] {
+        let view = readable_in(mode);
+        for path in EXITS.into_iter().chain([OrderPath::Opening]) {
+            assert!(view.holds(path), "{mode:?} holds {path:?}");
+        }
+        assert!(!view.holds(OrderPath::KillSwitch), "{mode:?}");
+    }
+}
+
+#[test]
+fn an_unreadable_view_from_a_readable_normal_is_exits_only() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    assert_eq!(fold.view().mode(), AgentMode::Normal);
+    assert_eq!(fold.fold(&row(2, "LimitWaived", 1, "{}")).unwrap(), vec![]);
+    assert_eq!(fold.view().mode(), AgentMode::ExitsOnly);
+}
+
+/// MC-R20's opening holds 0.1 BTC at 60000 on an allocation of 10000, so a mark at 1 read as a
+/// sane price would take E to 4000.1.
+#[test]
+fn a_version_1_mark_is_no_verdict_and_moves_nothing() {
+    let case = case("MC-R20");
+    let mandate = case_mandate(&case);
+    let mut fold = open_case(&case, &mandate, &Crypto);
+    let v1 = row(
+        2,
+        "MarkUpdated",
+        1,
+        r#"{"instrument_id":"BTC/USD","price":"1","source":"quote","feed":"iex",
+        "risk_clock":"2026-09-21T04:00:30.000000000Z"}"#,
+    );
+    assert_eq!(fold.fold(&v1).unwrap(), vec![]);
+    let RiskView::Readable { snapshot, head } = fold.view() else {
+        panic!("a version-1 mark is readable: {:?}", fold.view());
+    };
+    assert_eq!(
+        (snapshot.agent_equity.to_string(), *head),
+        ("10000".into(), 2)
+    );
+    assert!(snapshot.instrument_restrictions.is_empty(), "30 s is fresh");
+}
+
+#[test]
+fn a_mark_after_version_2_is_an_unknown_schema_version() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    let mut later = mark(
+        2,
+        "AAPL",
+        "2026-09-22T14:30:01.000000000Z",
+        "1",
+        true,
+        "regular",
+    );
+    later.schema_version = 3;
+    assert_eq!(fold.fold(&later).unwrap(), vec![]);
+    assert_eq!(
+        unreadable(fold.view()),
+        (UnreadableCause::UnknownSchemaVersion, 1)
+    );
+}
+
+/// MC-R20: sane crypto marks move E at any hour, and the tick at New York midnight starts the risk
+/// day from E (§5.4). Its first step, the risk day at the opening instant, is the opened state.
+#[test]
+#[ignore = "pending E6-15"]
+fn mc_r20_crypto_marks_and_ticks_fold_as_the_reference_case() {
+    let case = case("MC-R20");
+    let mandate = case_mandate(&case);
+    let mut fold = open_case(&case, &mandate, &Crypto);
+    let steps = case["steps"].as_array().unwrap();
+    check_snapshot(fold.view(), 1, &steps[0]["expect"]);
+    walk(&mut fold, instrument(&case), &steps[1..]);
+}
+
+/// MC-R13's first three steps: two sane regular-session marks at 100, then a sane pre-market mark
+/// at 80 the next morning, which leaves the equity's E at 10000 since only a regular-session mark
+/// updates it (§5.2). Its later steps, the not-sane mark and the staleness tick, journal
+/// `InstrumentRestrictionChanged`, which B2b-2 writes. The case has no after-hours or overnight
+/// mark, a gap the E6-15 backlog entry records.
+#[test]
+#[ignore = "pending E6-15"]
+fn mc_r13_session_marks_leave_an_equitys_equity_as_the_reference_case() {
+    let case = case("MC-R13");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let mut fold = open_case(&case, &mandate, &calendar);
+    let steps = case["steps"].as_array().unwrap();
+    walk(&mut fold, instrument(&case), &steps[..3]);
 }

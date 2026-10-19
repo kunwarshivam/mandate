@@ -1,4 +1,4 @@
-"""Journal spec v0.69 rule 255's reference vectors (DEC-2621, E7-27): §9.8's `ConnectionRequested`
+"""Journal spec v0.68 rule 255's reference vectors (DEC-2621, E7-27): §9.8's `ConnectionRequested`
 version 2 names how the credential is obtained and, for an Alpaca OAuth connect, the token's possible
 breadth and the disclosure the owner confirmed.
 
@@ -33,7 +33,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.69 §9.8 rule 255 (DEC-2621)"
+SPEC = "docs/specs/journal.md v0.68 §9.8 rule 255 (DEC-2621)"
 AT = "2026-10-19T15:30:00.000000000Z"
 OAUTH = "oauth_v2"
 API_KEY = "api_key_v2"
@@ -92,7 +92,7 @@ def invalid_drafts() -> list[dict]:
     def bad(name, clause, base, changes, reason, path):
         out.append(control_invalid(name, clause, base, changes, reason, path))
 
-    types = "§9.8 v0.69 types"
+    types = "§9.8 v0.68 types"
     bad("credential_unknown", f"{types}: `credential` is `oauth` or `api_key`", OAUTH, [change("payload.credential", "key_pair")], "non_canonical", "payload.credential")
     bad("credential_null", f"{types}: `credential` is not nullable", OAUTH, [change("payload.credential", None)], "schema", "payload.credential")
     bad("breadth_not_object", f"{types}: `breadth` is an object or null", OAUTH, [change("payload.breadth", "may_reach")], "schema", "payload.breadth")
@@ -277,7 +277,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         (
             "a rule-255 draft is relabelled as a type case",
             "invalid_drafts.oracle",
-            mutated(lambda s: case(s, "invalid_drafts", "oauth_robinhood").update(clause="§9.8 v0.69 types")),
+            mutated(lambda s: case(s, "invalid_drafts", "oauth_robinhood").update(clause="§9.8 v0.68 types")),
         ),
         (
             "a valid draft is an OAuth request without its breadth",

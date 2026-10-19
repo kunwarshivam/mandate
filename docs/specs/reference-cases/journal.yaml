@@ -20450,7 +20450,7 @@ connection_requests:
       reason: schema
       path: payload.note
   - name: requested_version_3
-    clause: '§9.8 v0.69: versions 1 and 2 only'
+    clause: '§9.8 v0.68: versions 1 and 2 only'
     base_draft: requested
     changes:
     - path: schema_version
@@ -71805,7 +71805,7 @@ owner_confirmations:
       reason: schema
       path: payload.floor
 connection_requested:
-  spec: docs/specs/journal.md v0.69 §9.8 rule 255 (DEC-2621)
+  spec: docs/specs/journal.md v0.68 §9.8 rule 255 (DEC-2621)
   drafts:
     oauth_v2:
       envelope_version: 1
@@ -71904,7 +71904,7 @@ connection_requested:
       pii_refs: []
   invalid_drafts:
   - name: credential_unknown
-    clause: '§9.8 v0.69 types: `credential` is `oauth` or `api_key`'
+    clause: '§9.8 v0.68 types: `credential` is `oauth` or `api_key`'
     base_draft: oauth_v2
     changes:
     - path: payload.credential
@@ -71914,7 +71914,7 @@ connection_requested:
       reason: non_canonical
       path: payload.credential
   - name: credential_null
-    clause: '§9.8 v0.69 types: `credential` is not nullable'
+    clause: '§9.8 v0.68 types: `credential` is not nullable'
     base_draft: oauth_v2
     changes:
     - path: payload.credential
@@ -71924,7 +71924,7 @@ connection_requested:
       reason: schema
       path: payload.credential
   - name: breadth_not_object
-    clause: '§9.8 v0.69 types: `breadth` is an object or null'
+    clause: '§9.8 v0.68 types: `breadth` is an object or null'
     base_draft: oauth_v2
     changes:
     - path: payload.breadth
@@ -71934,7 +71934,7 @@ connection_requested:
       reason: schema
       path: payload.breadth
   - name: reach_unknown
-    clause: '§9.8 v0.69 types: `other_environment` is `may_reach` while U-A4 is open'
+    clause: '§9.8 v0.68 types: `other_environment` is `may_reach` while U-A4 is open'
     base_draft: oauth_v2
     changes:
     - path: payload.breadth.other_environment
@@ -71944,7 +71944,7 @@ connection_requested:
       reason: non_canonical
       path: payload.breadth.other_environment
   - name: disclosure_null
-    clause: '§9.8 v0.69 types: `disclosure` is not nullable'
+    clause: '§9.8 v0.68 types: `disclosure` is not nullable'
     base_draft: oauth_v2
     changes:
     - path: payload.breadth.disclosure
@@ -71954,7 +71954,7 @@ connection_requested:
       reason: schema
       path: payload.breadth.disclosure
   - name: document_not_id
-    clause: '§9.8 v0.69 types: `document` is an id'
+    clause: '§9.8 v0.68 types: `document` is an id'
     base_draft: oauth_v2
     changes:
     - path: payload.breadth.disclosure.document
@@ -71964,7 +71964,7 @@ connection_requested:
       reason: non_canonical
       path: payload.breadth.disclosure.document
   - name: version_not_text
-    clause: '§9.8 v0.69 types: `version` is text'
+    clause: '§9.8 v0.68 types: `version` is text'
     base_draft: oauth_v2
     changes:
     - path: payload.breadth.disclosure.version

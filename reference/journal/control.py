@@ -556,7 +556,7 @@ SCHEMAS[("ctl", "ConnectionRefused")] = rec(
     ("user", STR),
     ("step_up", STEP_UP),
 )
-# §9.8 v0.69 (DEC-2621): how a version-2 request's credential is obtained, what an OAuth token may
+# §9.8 v0.68 (DEC-2621): how a version-2 request's credential is obtained, what an OAuth token may
 # also reach (U-A4 open, so only `may_reach`), and the one disclosure document rule 255 names.
 REQUEST_CREDENTIALS = ("oauth", "api_key")
 OTHER_ENVIRONMENT_REACH = ("may_reach",)
@@ -1284,7 +1284,7 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("ctl", "VerificationRun", 2): VERIFICATION_RUN_V2,
     # v0.51 §9.24 (DEC-1171): version 1's members, then the stored document's connection.
     ("ctl", "AgentDeployed", 2): rec(*SCHEMAS[("ctl", "AgentDeployed")].fields, ("connection_id", IDENT_T)),
-    # v0.69 §9.8 (DEC-2621): version 1's members, then how the credential is obtained and, for an
+    # v0.68 §9.8 (DEC-2621): version 1's members, then how the credential is obtained and, for an
     # OAuth connect, the token's possible breadth and the disclosure the owner confirmed.
     ("ctl", "ConnectionRequested", 2): rec(
         *SCHEMAS[("ctl", "ConnectionRequested")].fields,
