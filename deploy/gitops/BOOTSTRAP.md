@@ -130,7 +130,12 @@ cluster:
    reaches the cluster, a log, or a file left behind. The founder's ULID is `founding.member` in
    `clusters/staging/workspace.yaml`. Rotating it, or removing the secret, is a rerun. If the
    secret is ever unset by mistake, the next apply unlinks you (its log says `nobody is linked`)
-   and, once the API restarts, staging refuses every sign-in: set the secret again and rerun.
+   and, once the API restarts, staging refuses every sign-in: set the secret again and rerun. The
+   restart is `kubectl rollout restart`, an annotation on the API's pod template that Flux leaves
+   alone, since no HelmRelease here sets `driftDetection`; the next Helm upgrade drops it with one
+   extra rollout. If drift detection is ever turned on for the workspace release, it must ignore
+   `/spec/template/metadata/annotations/kubectl.kubernetes.io~1restartedAt` on `deployment/api`, or
+   Flux reverts the restart.
 2. **The mount.** Once an apply has written the ConfigMap, staging's values set
    `api.subjectLinks: subject-links`, so the API server reads it.
 3. **The grant.** Once the `mandate` image staging runs has `workspace found --open`, staging's
