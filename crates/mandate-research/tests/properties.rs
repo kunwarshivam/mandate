@@ -1232,7 +1232,6 @@ proptest! {
     /// revision and retirement the fold reported for that step. The independent counter (oracle 1)
     /// agrees with every replayed step, so replay is not checked against the fold alone.
     #[test]
-    #[ignore = "pending E21-59"]
     fn replaying_the_recorded_decisions_rebuilds_the_fold_s_lineages(
         revisions in prop::collection::vec(0_u32..5, 1..8),
         cap in 0_u32..4,

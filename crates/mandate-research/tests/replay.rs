@@ -35,7 +35,6 @@ fn lineage(revisions: u32, admitted: u32, retired: bool) -> Lineage {
 /// fourth refused `lineage_retired`. Each step returns the lineage after it, and only the retiring
 /// step reports that it retired the lineage.
 #[test]
-#[ignore = "pending E21-59"]
 fn mc_n17_replayed_raises_the_revision_counts_admissions_and_retires_once() {
     let mut state = LineageState::default();
     let (l, x) = (lineage_id("th-20"), asset(INSTRUMENT_5));
@@ -72,7 +71,6 @@ fn mc_n17_replayed_raises_the_revision_counts_admissions_and_retires_once() {
 /// MC-N19: a refusal other than `lineage_retired` leaves the lineage as it was, though known, and
 /// gives it no holder.
 #[test]
-#[ignore = "pending E21-59"]
 fn another_refusal_makes_the_lineage_known_and_changes_nothing() {
     let mut state = LineageState::default();
     let (l, x) = (lineage_id("th-30"), asset(INSTRUMENT_5));
@@ -85,7 +83,6 @@ fn another_refusal_makes_the_lineage_known_and_changes_nothing() {
 /// An admission moves the instrument's holder to the admitting lineage: the lineage that held it
 /// before loses its holder entry, and a lineage on another instrument keeps its own.
 #[test]
-#[ignore = "pending E21-59"]
 fn an_admission_moves_the_instrument_s_holder_to_its_lineage() {
     let mut state = LineageState::default();
     let (a, b, c) = (lineage_id("th-a"), lineage_id("th-b"), lineage_id("th-c"));
@@ -115,7 +112,6 @@ fn an_admission_moves_the_instrument_s_holder_to_its_lineage() {
 /// A second `lineage_retired` refusal on a retired lineage changes nothing and does not report a
 /// retirement again, and a refusal never moves a holder.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_lineage_retires_only_once_and_a_refusal_moves_no_holder() {
     let mut state = LineageState::default();
     let (a, b, x) = (lineage_id("th-a"), lineage_id("th-b"), asset(INSTRUMENT_5));
