@@ -31,6 +31,11 @@ pub const SCENARIOS: &[&str] = &["demo"];
 /// Both are stored as canonical JSON (journal spec §4), so a version is the SHA-256 of the file.
 pub const MANDATE_FILE: &str = "deploy/cell/demo/mandate.json";
 pub const INSTRUMENT_FILE: &str = "deploy/cell/demo/instrument.json";
+/// [`WEB_AGENT`]'s own envelope and its instrument's snapshot, as canonical JSON: the demo's
+/// envelope on QQQ, since V-006 refuses a second agent on the account an instrument the demo agent
+/// already pins (DEC-2036).
+pub const WEB_MANDATE_FILE: &str = "deploy/cell/demo/web-mandate.json";
+pub const WEB_INSTRUMENT_FILE: &str = "deploy/cell/demo/web-instrument.json";
 const INPUTS: &str = "/in";
 /// The journal and the artifact store every gesture names: the `control` process's DSN, expanded
 /// by Kubernetes from its environment, and the pod's own `/work`, which all its containers share.
@@ -44,9 +49,9 @@ const SEGMENT: &str = "/work/segment.jsonl";
 pub const FOUNDER: &str = DEMO_OWNER;
 /// The demo's agent.
 pub const AGENT: &str = "demo-spy";
-/// A second agent under the same confirmed version, deployed for `web/`'s kill switch: the CLI
-/// stops [`AGENT`] inside the Job, and `web/` offers nothing to stop on a stopped agent, so the
-/// browser presses this one's (lane W2's D10).
+/// A second agent, on its own envelope ([`WEB_MANDATE_FILE`]), deployed for `web/`'s kill switch:
+/// the CLI stops [`AGENT`] inside the Job, and `web/` offers nothing to stop on a stopped agent, so
+/// the browser presses this one's (lane W2's D10).
 pub const WEB_AGENT: &str = "demo-web";
 /// How long the gestures' Job may run: the egress gate, the credentials copy and every gesture,
 /// one after another. Under the 300 s `run_job` polls for, so the Job ends, and the report is
@@ -184,12 +189,13 @@ pub fn by_lane(steps: &[Step]) -> BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>>
 
 /// The waits several gaps share: the agent's runtime started by the deployment manager, web/
 /// driven against the cell, and the executor in the cell.
-const D1_RUNTIME: Wait = Wait {
-    lane: "D1",
-    story: "E21-33",
+const X_CONNECT: Wait = Wait {
+    lane: "X",
+    story: "E21-30",
     pr: None,
-    lands: "the deployment manager reads a deployment's account from AgentDeployed version 2 and \
-            starts its runtime (DEC-1171, claim #1491); until then it starts none",
+    lands: "the executor's connect check, so `connection record` can record the demo's paper \
+            connection and its deployment is written at version 2, which the manager starts; \
+            until then the deployment is version 1 and starts nothing (DEC-1171)",
 };
 const W2_WEB: Wait = Wait {
     lane: "W2",
@@ -362,9 +368,11 @@ pub(super) fn deploy_code(agent: &str, version: &str) -> String {
     ))
 }
 
-/// The demo's six steps for `workspace`, given the bytes of the demo's mandate.
-pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
+/// The demo's six steps for `workspace`, given the bytes of the demo's mandate and of
+/// [`WEB_AGENT`]'s.
+pub fn plan(workspace: &str, (mandate, web_mandate): (&[u8], &[u8])) -> Vec<Step> {
     let version = reference(mandate);
+    let web_version = reference(web_mandate);
     let user = FOUNDER.to_ascii_lowercase();
     let with = |args: &[&str], extra: &[&str]| -> Vec<String> {
         args.iter().chain(extra).map(|a| a.to_string()).collect()
@@ -399,7 +407,10 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
     let mandate_in = format!("{INPUTS}/mandate.json");
     let instrument_in = format!("{INPUTS}/instrument.json");
     let (confirm, deploy) = (confirm_code(&version), deploy_code(AGENT, &version));
-    let web_deploy = deploy_code(WEB_AGENT, &version);
+    let (web_confirm, web_deploy) = (
+        confirm_code(&web_version),
+        deploy_code(WEB_AGENT, &web_version),
+    );
     let steps = vec![
         Step {
             number: 1,
@@ -511,23 +522,6 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     owner(&["agent", "deploy", AGENT, &version, "--code", &deploy]),
                     "deployed as event".into(),
                 ),
-                gesture(
-                    "a second agent's code, shown, for web/'s kill switch in step 6",
-                    owner(&["agent", "deploy", WEB_AGENT, &version]),
-                    format!("code {web_deploy}"),
-                ),
-                gesture(
-                    "the second agent, deployed with the code shown",
-                    owner(&[
-                        "agent",
-                        "deploy",
-                        WEB_AGENT,
-                        &version,
-                        "--code",
-                        &web_deploy,
-                    ]),
-                    "deployed as event".into(),
-                ),
                 Part::Gap(Gap {
                     what: "the same gestures from web/",
                     on_main: "the API's version, confirm and deploy routes (#1552) in the cell \
@@ -537,10 +531,11 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 }),
                 Part::Gap(Gap {
                     what: "the agent's runtime started from AgentDeployed",
-                    on_main: "the deployment manager in the cell (#1582), the runtime's image \
+                    on_main: "the deployment manager in the cell (#1582), starting a runtime \
+                              from a version-2 deployment (DEC-1171, E21-33), the runtime's image \
                               (#1560), and the runtime reading its deployment and mandate from \
                               the manager (#1576, #1577)",
-                    waits: vec![D1_RUNTIME],
+                    waits: vec![X_CONNECT],
                 }),
             ],
         },
@@ -557,7 +552,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                           records (#1561), the loop's pure state (#1566) and the runtime's side \
                           (#1569)",
                 waits: vec![
-                    D1_RUNTIME,
+                    X_CONNECT,
                     wait(
                         "I2",
                         "E19-2",
@@ -585,7 +580,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     on_main: "the runtime and its image (#1521, #1560), on the deny-all wiring \
                               that proposes nothing (DEC-1013 item 2)",
                     waits: vec![
-                        D1_RUNTIME,
+                        X_CONNECT,
                         wait(
                             "P5",
                             "E21-2",
@@ -703,6 +698,49 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             number: 6,
             title: "the kill switch from the web app stops the agent",
             parts: vec![
+                gesture(
+                    "QQQ's instrument snapshot, registered, for a second agent's envelope",
+                    owner(&[
+                        "config",
+                        "register",
+                        "--kind",
+                        "instrument_snapshot",
+                        &format!("{INPUTS}/web-instrument.json"),
+                    ]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "the second agent's envelope, created: the demo's on QQQ",
+                    owner(&["version", "create", &format!("{INPUTS}/web-mandate.json")]),
+                    format!("created {web_version}"),
+                ),
+                gesture(
+                    "its confirmation code, shown (nothing committed)",
+                    owner(&["version", "confirm", &web_version]),
+                    format!("code {web_confirm}"),
+                ),
+                gesture(
+                    "the second envelope, confirmed with the code shown",
+                    owner(&["version", "confirm", &web_version, "--code", &web_confirm]),
+                    "confirmed as event".into(),
+                ),
+                gesture(
+                    "the second agent's code, shown, for web/'s kill switch",
+                    owner(&["agent", "deploy", WEB_AGENT, &web_version]),
+                    format!("code {web_deploy}"),
+                ),
+                gesture(
+                    "the second agent, deployed with the code shown",
+                    owner(&[
+                        "agent",
+                        "deploy",
+                        WEB_AGENT,
+                        &web_version,
+                        "--code",
+                        &web_deploy,
+                    ]),
+                    "deployed as event".into(),
+                ),
                 Part::Web(WebCheck {
                     shows: "the owner's kill switch for the second agent, pressed in web/ and \
                             recorded through the API on the run's control stream",
@@ -716,7 +754,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 Part::Gap(Gap {
                     what: "the agent's processes stop on it",
                     on_main: "the runtime reads the kill switch first (#1521, image #1560)",
-                    waits: vec![D1_RUNTIME, X_EXECUTOR],
+                    waits: vec![X_CONNECT, X_EXECUTOR],
                 }),
             ],
         },
@@ -906,7 +944,11 @@ pub fn run(name: &str) -> Result<()> {
     let mandate = fs::read(MANDATE_FILE).with_context(|| format!("reading {MANDATE_FILE}"))?;
     let instrument = fs::read_to_string(INSTRUMENT_FILE)
         .with_context(|| format!("reading {INSTRUMENT_FILE}"))?;
-    let steps = plan(&workspace, &mandate);
+    let web_mandate =
+        fs::read(WEB_MANDATE_FILE).with_context(|| format!("reading {WEB_MANDATE_FILE}"))?;
+    let web_instrument = fs::read_to_string(WEB_INSTRUMENT_FILE)
+        .with_context(|| format!("reading {WEB_INSTRUMENT_FILE}"))?;
+    let steps = plan(&workspace, (&mandate, &web_mandate));
     let all = gestures(&steps);
     let first = all.first().context("the scenario has no gesture")?;
     let rendered = render(
@@ -922,6 +964,11 @@ pub fn run(name: &str) -> Result<()> {
             String::from_utf8(mandate).context("the mandate is not UTF-8")?,
         ),
         ("instrument.json".into(), instrument),
+        (
+            "web-mandate.json".into(),
+            String::from_utf8(web_mandate).context("the second mandate is not UTF-8")?,
+        ),
+        ("web-instrument.json".into(), web_instrument),
     ]
     .into_iter()
     .chain(backtest_inputs(Path::new("."))?)
@@ -1321,6 +1368,15 @@ mod tests {
         fs::read(format!("../{MANDATE_FILE}")).unwrap()
     }
 
+    fn web_mandate() -> Vec<u8> {
+        fs::read(format!("../{WEB_MANDATE_FILE}")).unwrap()
+    }
+
+    /// The plan for `workspace` on the demo's two envelopes.
+    fn planned(workspace: &str) -> Vec<Step> {
+        plan(workspace, (&mandate(), &web_mandate()))
+    }
+
     fn parsed(path: &str) -> Value {
         serde_json::from_slice(&fs::read(format!("../{path}")).unwrap()).unwrap()
     }
@@ -1330,7 +1386,12 @@ mod tests {
     /// integers and no string but ASCII, where its compact form is RFC 8785's.
     #[test]
     fn the_demo_files_are_canonical_json() {
-        for path in [MANDATE_FILE, INSTRUMENT_FILE] {
+        for path in [
+            MANDATE_FILE,
+            INSTRUMENT_FILE,
+            WEB_MANDATE_FILE,
+            WEB_INSTRUMENT_FILE,
+        ] {
             let bytes = fs::read(format!("../{path}")).unwrap();
             let again = serde_json::to_vec(&parsed(path)).unwrap();
             assert_eq!(bytes, again, "{path} is not canonical JSON");
@@ -1361,6 +1422,39 @@ mod tests {
         assert_eq!(pinned[0]["symbol"], instrument["symbol"]);
     }
 
+    /// The second agent's envelope is the demo's but for its name, its description and its one
+    /// pinned instrument, which its own snapshot names and which is not the demo agent's, so V-006
+    /// finds it unclaimed on the shared connection (DEC-2036).
+    #[test]
+    fn the_web_envelope_is_the_demo_s_on_another_instrument() {
+        let (mut demo, mut web) = (parsed(MANDATE_FILE), parsed(WEB_MANDATE_FILE));
+        let instrument = parsed(WEB_INSTRUMENT_FILE);
+        let pinned = web["universe"]["pinned_instruments"].clone();
+        assert_eq!(pinned.as_array().map(Vec::len), Some(1));
+        assert_eq!(pinned[0]["asset_id"], instrument["instrument_id"]);
+        assert_eq!(pinned[0]["symbol"], instrument["symbol"]);
+        assert_ne!(
+            pinned[0]["asset_id"],
+            parsed(INSTRUMENT_FILE)["instrument_id"]
+        );
+        assert_eq!(web["name"], WEB_AGENT);
+        assert_eq!(web["connection_id"], demo["connection_id"]);
+        for m in [&mut demo, &mut web] {
+            m["name"] = Value::Null;
+            m["behavior"]["description"] = Value::Null;
+            m["universe"]["pinned_instruments"] = Value::Null;
+        }
+        assert_eq!(web, demo, "every other member is the demo's");
+        let mut snapshot = instrument.clone();
+        let mut spy = parsed(INSTRUMENT_FILE);
+        for s in [&mut snapshot, &mut spy] {
+            for key in ["instrument_id", "symbol", "exchange"] {
+                s[key] = Value::Null;
+            }
+        }
+        assert_eq!(snapshot, spy, "a plain, whole-share listed fund, as SPY is");
+    }
+
     /// DEC-530 item 4's codes for the demo's mandate, as the CLI binary showed them when the
     /// scenario's gestures were run against a local Postgres (and the CLI accepted them typed).
     #[test]
@@ -1375,7 +1469,7 @@ mod tests {
     /// typed code is the one shown; every gesture's container name is unique and a Kubernetes name.
     #[test]
     fn the_plan_runs_the_six_steps_and_types_the_codes_it_shows() {
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         let numbers: Vec<u8> = steps.iter().map(|s| s.number).collect();
         assert_eq!(
             numbers,
@@ -1443,21 +1537,24 @@ mod tests {
     /// API read and web/'s report wait on the membership parser and web/.
     #[test]
     fn step_five_registers_a_rule_set_runs_the_backtest_and_records_it() {
-        let steps = plan("demo5", &mandate());
+        let steps = planned("demo5");
         let all = gestures(&steps);
         let at = |name: &str| {
             all.iter()
                 .rposition(|g| g.container.ends_with(name))
                 .unwrap()
         };
+        let version = reference(&mandate());
         let (rule_set, runner, record) = (
-            at("config-register"),
+            all.iter()
+                .position(|g| g.args.iter().any(|a| a == "rule_set"))
+                .unwrap(),
             at("runner-run"),
             at("backtest-record"),
         );
         let (confirm, kill) = (
             all.iter()
-                .rposition(|g| g.args[..2] == ["version", "confirm"])
+                .rposition(|g| g.args[..3] == ["version", "confirm", version.as_str()])
                 .unwrap(),
             at("agent-kill"),
         );
@@ -1538,7 +1635,7 @@ mod tests {
     /// store, so a record's missing artifact fails the run.
     #[test]
     fn every_gesture_is_in_the_demo_workspace_and_never_live() {
-        let steps = plan("demo7", &mandate());
+        let steps = planned("demo7");
         let all = gestures(&steps);
         fn value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
             let at = args.iter().position(|a| a == flag);
@@ -1580,7 +1677,7 @@ mod tests {
     /// agent is deployed and before the record is exported, so the closing verify covers it.
     #[test]
     fn step_six_kills_the_demo_agent_at_agent_scope_before_the_record() {
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         let all = gestures(&steps);
         let at = |head: &[&str]| all.iter().position(|g| g.args[..head.len()] == *head);
         let kill = at(&["agent", "kill"]).expect("step 6 runs `agent kill`");
@@ -1622,7 +1719,7 @@ mod tests {
     #[test]
     fn the_api_checks_refuse_sign_in_and_read_the_run_as_its_owner() {
         let ws = workspace_of("0123456789");
-        let steps = plan(&ws, &mandate());
+        let steps = planned(&ws);
         let checks: Vec<(u8, &str, u16, Ask, &Body)> = steps
             .iter()
             .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
@@ -1715,29 +1812,66 @@ mod tests {
         }
     }
 
-    /// Step 2 deploys a second agent under the same version, with its own shown and typed code,
-    /// and step 6 has web/ press that agent's kill switch, never the one the CLI stops.
+    /// The second agent has an envelope of its own, deployed only after step 5's backtest is
+    /// recorded: `agent deploy` and `backtest record` each take only the workspace's latest
+    /// confirmed version, so its confirmation comes after the record and its deployment after its
+    /// confirmation. Its snapshot is registered before its version is created, and web/ presses
+    /// that agent's kill switch, never the one the CLI stops (DEC-2036).
     #[test]
     fn web_kills_a_second_agent_the_cli_does_not() {
-        let version = reference(&mandate());
-        let steps = plan("demo6", &mandate());
+        let (version, web) = (reference(&mandate()), reference(&web_mandate()));
+        assert_ne!(version, web, "two envelopes, two versions");
+        let steps = planned("demo6");
         let all = gestures(&steps);
         let deployed: Vec<[&str; 2]> = all
             .iter()
             .filter(|g| g.args[..2] == ["agent", "deploy"])
             .map(|g| [g.args[2].as_str(), g.args[3].as_str()])
             .collect();
-        let v = version.as_str();
+        let (v, w) = (version.as_str(), web.as_str());
         assert_eq!(
             deployed,
-            [[AGENT, v], [AGENT, v], [WEB_AGENT, v], [WEB_AGENT, v]]
+            [[AGENT, v], [AGENT, v], [WEB_AGENT, w], [WEB_AGENT, w]]
         );
-        let code = deploy_code(WEB_AGENT, &version);
+        let code = deploy_code(WEB_AGENT, &web);
         assert_ne!(code, deploy_code(AGENT, &version));
         assert!(
             all.iter().any(|g| g.args[2] == WEB_AGENT
                 && g.args.windows(2).any(|w| w == ["--code", code.as_str()]))
         );
+        let at = |args: &[&str]| {
+            all.iter()
+                .position(|g| g.args.len() >= args.len() && g.args[..args.len()] == *args)
+                .unwrap_or_else(|| panic!("no gesture {args:?}"))
+        };
+        let snapshot = format!("{INPUTS}/web-instrument.json");
+        let register = at(&[
+            "config",
+            "register",
+            "--kind",
+            "instrument_snapshot",
+            &snapshot,
+        ]);
+        let created = at(&["version", "create", &format!("{INPUTS}/web-mandate.json")]);
+        let confirmed = at(&["version", "confirm", w, "--code"]);
+        let deploy = at(&["agent", "deploy", WEB_AGENT, w, "--code"]);
+        let record = at(&["backtest", "record"]);
+        assert!(at(&["agent", "deploy", AGENT, v, "--code"]) < record);
+        assert!(record < register && register < created && created < confirmed);
+        assert!(confirmed < deploy);
+        assert_eq!(all[created].expect, format!("created {web}"));
+        let step_of = |container: &str| {
+            steps
+                .iter()
+                .find(|s| {
+                    s.parts
+                        .iter()
+                        .any(|p| matches!(p, Part::Gesture(g) if g.container == container))
+                })
+                .map(|s| s.number)
+        };
+        assert_eq!(step_of(&all[register].container), Some(6));
+        assert_eq!(step_of(&all[deploy].container), Some(6));
         let kill = all
             .iter()
             .find(|g| g.args[..2] == ["agent", "kill"])
@@ -1879,7 +2013,7 @@ mod tests {
         }
         assert_ne!(a, b);
         assert_eq!(a, "01KDEM0123456789000000000D");
-        let steps = plan(&a, &mandate());
+        let steps = planned(&a);
         let all = gestures(&steps);
         let owner = super::super::DEMO_OWNER;
         let found = all
@@ -2021,7 +2155,7 @@ mod tests {
     #[test]
     fn every_gap_waits_on_a_named_lane_and_its_backlog_story() {
         let backlog = fs::read_to_string("../docs/project/06-backlog-v1.md").unwrap();
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         for step in &steps {
             for part in &step.parts {
                 let Part::Gap(gap) = part else { continue };
@@ -2066,7 +2200,7 @@ mod tests {
     /// waits wholly on other lanes, and the record runs whole.
     #[test]
     fn each_step_reads_ready_partial_or_skipped_from_its_parts() {
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         let read: Vec<Readiness> = steps.iter().map(readiness).collect();
         assert_eq!(
             read,
@@ -2100,7 +2234,7 @@ mod tests {
     /// holds back.
     #[test]
     fn the_summary_lists_every_wait_once_under_its_lane() {
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         let grouped = by_lane(&steps);
         let mut counted = BTreeMap::<&str, usize>::new();
         for step in &steps {
@@ -2147,7 +2281,7 @@ mod tests {
     /// gate first, so no gesture runs before the pod's egress is filtered.
     #[test]
     fn the_job_runs_every_gesture_in_order_after_the_egress_gate() {
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         let all = gestures(&steps);
         let files = [
             ("mandate.json", "{}".to_string()),

@@ -107,6 +107,7 @@ fn a_token_file_open_to_others_or_missing_is_refused_before_any_vault_is_reached
     for mode in [0o640, 0o604, 0o644] {
         let out = fresh("out");
         let token = token_file(CANARY, mode);
+        let _removed = Removed(vec![token.clone(), out.clone()]);
         let output = provision(NOWHERE, &ca(), &token, &["c1"], &out);
         refused(
             &output,
@@ -124,6 +125,7 @@ fn a_token_file_open_to_others_or_missing_is_refused_before_any_vault_is_reached
 fn an_unreachable_vault_is_an_outage_and_writes_nothing() {
     let out = fresh("out");
     let token = token_file(CANARY, 0o600);
+    let _removed = Removed(vec![token.clone(), out.clone()]);
     let output = provision(NOWHERE, &ca(), &token, &["c1"], &out);
     refused(&output, "unavailable", &out, "an unreachable vault");
 }
@@ -132,6 +134,7 @@ fn an_unreachable_vault_is_an_outage_and_writes_nothing() {
 fn a_plain_http_address_a_bad_ca_or_a_bad_connection_is_refused() {
     let token = token_file(CANARY, 0o600);
     let out = fresh("out");
+    let _removed = Removed(vec![token.clone(), out.clone()]);
     let output = provision("http://127.0.0.1:9", &ca(), &token, &["c1"], &out);
     refused(&output, "config", &out, "a plain-HTTP address");
     let bad_ca = token_file("not a certificate", 0o600);
@@ -139,6 +142,69 @@ fn a_plain_http_address_a_bad_ca_or_a_bad_connection_is_refused() {
     refused(&output, "config", &out, "a CA that is not PEM");
     let output = provision(NOWHERE, &ca(), &token, &["not a connection id!"], &out);
     refused(&output, "(connection)", &out, "a malformed connection id");
+}
+
+/// An `--out` the write would refuse is refused before the vault is reached: the address is one no
+/// vault listens on, so the refusal is `credential_file`, never `unavailable`, and nothing is
+/// written into `--out` (DEC-2022 item 2).
+#[test]
+fn an_out_the_write_would_refuse_is_refused_before_any_vault_is_reached() {
+    let token = token_file(CANARY, 0o600);
+    let open = fresh("out-open");
+    let planted = fresh("out-planted");
+    let parent = fresh("out-parent");
+    let _removed = Removed(vec![
+        token.clone(),
+        open.clone(),
+        planted.clone(),
+        parent.clone(),
+    ]);
+    fs::create_dir(&open).unwrap();
+    fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::create_dir(&planted).unwrap();
+    fs::set_permissions(&planted, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::create_dir(planted.join("executor-c1.secret-id")).unwrap();
+    fs::create_dir(&parent).unwrap();
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o777)).unwrap();
+    let listing = |dir: &Path| -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    };
+    for (out, case) in [
+        (open.clone(), "a 0755 --out"),
+        (planted.clone(), "a directory at an output name"),
+        (parent.join("out"), "an --out whose parent others may write"),
+    ] {
+        let before = if out.exists() {
+            listing(&out)
+        } else {
+            Vec::new()
+        };
+        let output = provision(NOWHERE, &ca(), &token, &["c1"], &out);
+        let err = stderr(&output);
+        assert!(!output.status.success(), "{case} succeeded: {err}");
+        assert!(
+            err.contains("(credential_file)"),
+            "{case} reached the vault: {err}"
+        );
+        assert!(
+            !err.contains(&CANARY[..16]),
+            "{case} printed the token: {err}"
+        );
+        assert!(output.stdout.is_empty(), "{case} printed");
+        let after = if out.exists() {
+            listing(&out)
+        } else {
+            Vec::new()
+        };
+        assert_eq!(before, after, "{case} wrote into --out");
+    }
+    assert!(!parent.join("out").exists());
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
 }
 
 /// The token is never an argument: the command has no flag that takes one.

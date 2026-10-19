@@ -12,7 +12,7 @@ provider "cloudflare" {
 locals {
   environment = "staging"
   region      = "nyc3"
-  account_id  = data.cloudflare_accounts.visible.result[0].id
+  account_id  = sensitive(data.cloudflare_accounts.visible.result[0].id)
 }
 
 data "cloudflare_accounts" "visible" {
@@ -54,6 +54,14 @@ module "cloudflare" {
   archive_bucket = "mandate-journal-archive-${local.environment}"
 }
 
+resource "terraform_data" "applied_commit" {
+  input = var.commit_sha
+}
+
+output "applied_commit" {
+  value = terraform_data.applied_commit.output
+}
+
 output "cluster_id" {
   value = module.cell.cluster_id
 }
@@ -67,7 +75,8 @@ output "archive_bucket" {
 }
 
 output "archive_endpoint" {
-  value = module.cloudflare.archive_endpoint
+  value     = module.cloudflare.archive_endpoint
+  sensitive = true
 }
 
 output "archive_destination_path" {
@@ -89,7 +98,8 @@ output "archive_jurisdiction" {
 }
 
 output "cloudflare_account_id" {
-  value = local.account_id
+  value     = local.account_id
+  sensitive = true
 }
 
 output "tunnel_id" {

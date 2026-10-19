@@ -1,23 +1,26 @@
-//! One broker account's executor as a long-running process (E21-30, DEC-2003).
+//! One broker account's executor as a long-running process (E21-30, DEC-2003, DEC-2033).
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Duration;
 
+use mandate_accounting::InstrumentId;
 use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
     BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
-    ExecutorState, IdGen, Input, InstrumentSnapshot, KillScope, MandateView, Ports,
+    ExecutorError, ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff,
+    IntentId, KillScope, MandateVersion, MandateView, Ports, ProtectionPrices, Purpose,
     ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
-use mandate_process::{Input as Lifecycled, Kind, Lifecycle, State};
+use mandate_num::{Fraction, Price};
+use mandate_process::{Action, Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::UtcNanos;
 
-use crate::follow::{Switch, agents_of, folded, switches};
+use crate::follow::{Proposal, Switch, agents_of, folded, proposals, switches};
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -30,7 +33,27 @@ pub trait Broker {
     fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError>;
 }
 
-/// The executor core's ports for one account.
+/// The protections port could not answer. The process stops rather than hand an opening without
+/// the protection its mandate asks for (TI-4); the restart asks again (DEC-2033 item 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Unplanned;
+
+/// The protective prices an opening is handed with: the mandate's protection for an entry at its
+/// limit, as the order builder derives it in one process, or none when the mandate turns
+/// protection off. `IntentProposed` does not journal them, so the handoff takes them from the
+/// mandate the agent is deployed under (DEC-2033 item 3).
+pub trait Protections {
+    /// # Errors
+    /// [`Unplanned`] when the mandate's protection cannot be read.
+    fn protection(
+        &self,
+        agent: &AgentId,
+        instrument: &InstrumentId,
+        entry: Price,
+    ) -> Result<Option<ProtectionPrices>, Unplanned>;
+}
+
+/// The executor core's ports for one account, with the protections an opening is handed with.
 pub struct Wiring {
     pub ids: Box<dyn IdGen>,
     pub mandates: Box<dyn MandateView>,
@@ -38,17 +61,42 @@ pub struct Wiring {
     pub config: ExecutorConfig,
     pub fees: mandate_accounting::Config,
     pub gate: Box<dyn BindingGateSource>,
+    pub protections: Box<dyn Protections>,
 }
 
 impl Wiring {
-    fn ports(&self) -> Ports<'_> {
+    fn ports<'a>(&'a self, mandates: &'a Deployed<'a>) -> Ports<'a> {
         Ports {
             ids: self.ids.as_ref(),
-            mandates: self.mandates.as_ref(),
+            mandates,
             instruments: self.instruments.as_ref(),
             config: &self.config,
             fees: &self.fees,
         }
+    }
+}
+
+/// The core's mandate port: a followed agent's version is the one its `AgentDeployed` names, so no
+/// exit of a followed agent waits on the wiring's port; the rest is the wiring's (DEC-2034 item 1).
+struct Deployed<'a> {
+    versions: &'a BTreeMap<AgentId, MandateVersion>,
+    wiring: &'a dyn MandateView,
+}
+
+impl MandateView for Deployed<'_> {
+    fn version(&self, agent: &AgentId) -> Option<MandateVersion> {
+        self.versions
+            .get(agent)
+            .cloned()
+            .or_else(|| self.wiring.version(agent))
+    }
+
+    fn crypto_stop_limit_offset(&self, agent: &AgentId) -> Option<Fraction> {
+        self.wiring.crypto_stop_limit_offset(agent)
+    }
+
+    fn covers(&self, agent: &AgentId, instrument: &InstrumentId) -> bool {
+        self.wiring.covers(agent, instrument)
     }
 }
 
@@ -110,6 +158,16 @@ pub struct ExecutorProcess<S, B> {
     reconcile: bool,
     /// The followed streams that did not read on their last read, each alerted once.
     unreadable: BTreeSet<String>,
+    /// The handoffs the core refused for a missing binding-gate input, each alerted once by
+    /// [`held`]; asked again every pass, and never a stop, so the exits behind them still go
+    /// (`AGENTS.md` rule 13).
+    held: BTreeSet<String>,
+    /// Each followed agent's deployed mandate version, from its `AgentDeployed`, which the core's
+    /// mandate port answers with (DEC-2034 item 1).
+    deployed: BTreeMap<AgentId, MandateVersion>,
+    /// The owner's exits at the market with no confirmed floor to price them at, each alerted once
+    /// and asked again every pass; never dropped, refused or held in silence (DEC-2033 item 4).
+    unpriced: BTreeSet<String>,
     max_chain: usize,
     written_at: UtcNanos,
 }
@@ -138,6 +196,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             outbox: VecDeque::new(),
             reconcile: false,
             unreadable: BTreeSet::new(),
+            held: BTreeSet::new(),
+            deployed: BTreeMap::new(),
+            unpriced: BTreeSet::new(),
             max_chain: config.max_chain,
             written_at: now,
         };
@@ -206,7 +267,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// One pass of the loop at the injected time `now`: an input in doubt first, then requests
     /// left unsent and a due reconciliation, then (once started) every kill switch the account's
-    /// agents' streams hold that the fold has not applied, then the latest tick. Before the start,
+    /// agents' streams hold that the fold has not applied, then the latest tick, then every order
+    /// they propose that the fold has not taken, an opening or an increase only while ready
+    /// (DEC-2033 item 1). Before the start,
     /// the pass hands the first tick it reads and `Input::Started`. Returns the alerts whose drafts
     /// committed.
     pub fn step(&mut self, now: UtcNanos) -> Vec<Alert> {
@@ -236,7 +299,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
-        let Some((switches, unreadable)) = self.switches(now, &mut alerts) else {
+        let Some((switches, proposed, unreadable)) = self.switches(now, &mut alerts) else {
             return alerts;
         };
         for (agent, switch) in switches {
@@ -248,8 +311,20 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return alerts;
         }
-        if let Some(tick) = tick {
-            self.hand(now, now, Input::Tick(tick), &mut alerts, 0);
+        if let Some(tick) = tick
+            && !self.hand(now, now, Input::Tick(tick), &mut alerts, 0)
+        {
+            return alerts;
+        }
+        for (agent, proposal) in proposed {
+            let action = if proposal.purpose.adds_risk() {
+                Action::Open
+            } else {
+                Action::RiskExit
+            };
+            if self.lifecycle.permits(action) && !self.take(now, agent, proposal, &mut alerts) {
+                return alerts;
+            }
         }
         alerts
     }
@@ -340,21 +415,27 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// that cannot be read. A control record that does not read stops the process at once, since
     /// the agents it names are unknown; a row on one agent's stream that does not read stops it only
     /// after the other agents' switches are applied (DEC-85, `AGENTS.md` rule 13).
+    #[allow(
+        clippy::type_complexity,
+        reason = "the switches, the proposals, and whether a row did not read"
+    )]
     fn switches(
         &mut self,
         now: UtcNanos,
         alerts: &mut Vec<Alert>,
-    ) -> Option<(Vec<(AgentId, Switch)>, bool)> {
+    ) -> Option<(Vec<(AgentId, Switch)>, Vec<(AgentId, Proposal)>, bool)> {
         let control = self.control.clone()?;
         let rows = self.follow(&control, alerts)?;
         let Ok(agents) = agents_of(&rows, self.state.scope(), self.environment) else {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return None;
         };
+        self.deployed.clone_from(&agents);
         let workspace = self.state.scope().workspace.0.clone();
         let mut pending = Vec::new();
+        let mut proposed = Vec::new();
         let mut unreadable = false;
-        for agent in agents {
+        for agent in agents.into_keys() {
             let Some(stream) = StreamId::parse(&format!("agent:{workspace}:{}", agent.0)) else {
                 continue;
             };
@@ -366,17 +447,28 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 .filter(|row| row.environment == self.environment.as_str())
                 .map(folded)
                 .collect();
-            let Ok(held) = read.and_then(|rows| switches(&rows)) else {
+            let Ok((held, asked)) = read.and_then(|rows| Ok((switches(&rows)?, proposals(&rows)?)))
+            else {
                 unreadable = true;
                 continue;
             };
+            proposed.extend(
+                asked
+                    .into_iter()
+                    .filter(|proposal| {
+                        self.state
+                            .intent(&IntentId(proposal.intent.clone()))
+                            .is_none()
+                    })
+                    .map(|proposal| (agent.clone(), proposal)),
+            );
             pending.extend(
                 held.into_iter()
                     .filter(|switch| !self.state.applied_copy(&switch.switch))
                     .map(|switch| (agent.clone(), switch)),
             );
         }
-        Some((pending, unreadable))
+        Some((pending, proposed, unreadable))
     }
 
     /// Applies one switch as the core's own kill switch of that agent alone, never an account-wide
@@ -395,6 +487,64 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             cause: Some(switch.switch),
         };
         self.hand(now, now, Input::Command(command), alerts, 0)
+    }
+
+    /// Hands one proposal as the handoff the runtime would make in one process, an opening or an
+    /// increase with its mandate's protection. A protections port that cannot answer stops the
+    /// process rather than hand an opening unprotected (DEC-2033 item 3). An exit at the market
+    /// with no limit raises one opaque alert naming the intent and stops nothing, since the core
+    /// takes only limit orders from a handoff (DEC-2033 item 4): `owner_exit_unpriced` for an
+    /// owner's exit with no confirmed floor, `exit_unpriced` for any other exit.
+    fn take(
+        &mut self,
+        now: UtcNanos,
+        agent: AgentId,
+        proposal: Proposal,
+        alerts: &mut Vec<Alert>,
+    ) -> bool {
+        let Some(limit) = proposal.limit else {
+            let intent = proposal.intent.0;
+            if self.unpriced.insert(intent.clone()) {
+                let key = match proposal.purpose {
+                    Purpose::OwnerExit => "owner_exit_unpriced",
+                    _ => "exit_unpriced",
+                };
+                alerts.push(Alert {
+                    key,
+                    subject: Some(intent),
+                });
+            }
+            return true;
+        };
+        let protection = if proposal.purpose.adds_risk() {
+            match self
+                .wiring
+                .protections
+                .protection(&agent, &proposal.instrument, limit)
+            {
+                Ok(protection) => protection,
+                Err(Unplanned) => {
+                    self.lifecycle.observe(now, Lifecycled::Failed);
+                    return false;
+                }
+            }
+        } else {
+            None
+        };
+        let handoff = IntentHandoff {
+            intent_id: IntentId(proposal.intent),
+            agent,
+            tif: Some(proposal.tif),
+            body: IntentBody::Order {
+                instrument: proposal.instrument,
+                side: proposal.side,
+                qty: proposal.qty,
+                limit,
+                purpose: proposal.purpose,
+                protection,
+            },
+        };
+        self.hand(now, now, Input::Intent(handoff), alerts, 0)
     }
 
     /// Hands `input` to the core, journals its drafts as one batch, and only then sends what it
@@ -417,11 +567,23 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let effects = match handle(
             &mut self.state,
             input.clone(),
-            &self.wiring.ports(),
+            &self.wiring.ports(&Deployed {
+                versions: &self.deployed,
+                wiring: self.wiring.mandates.as_ref(),
+            }),
             self.wiring.gate.as_ref(),
         ) {
             Ok(effects) => effects,
-            Err(_) => {
+            Err(error) => {
+                if let Some((key, intent)) = held(&error, &input) {
+                    if self.held.insert(intent.clone()) {
+                        alerts.push(Alert {
+                            key,
+                            subject: Some(intent),
+                        });
+                    }
+                    return true;
+                }
                 self.lifecycle.observe(now, Lifecycled::Failed);
                 return false;
             }
@@ -661,4 +823,120 @@ fn tick_of(row: &StoredEvent) -> Option<UtcNanos> {
     let body = parse(&row.body).ok()?;
     let clock = body.get("payload")?.get("clock")?.as_str()?;
     UtcNanos::parse(clock).ok()
+}
+
+/// The alert and intent for a handoff the core refused for a missing binding-gate input, which the
+/// process holds rather than stop on (DEC-2033 item 5): `opening_held` for an opening or an
+/// increase, and `exit_held` for an exit, an alarm that must never sound once the mandate port reads
+/// each followed agent's deployed version, since an exit needs no other gate fact (rule 13); the
+/// binary's fixture port reads none yet. Any other
+/// refusal, and this one for any input but a handoff, is `None`: it stops the process.
+fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> {
+    let (ExecutorError::BindingGateInputMissing, Input::Intent(handoff)) = (error, input) else {
+        return None;
+    };
+    let opens = match &handoff.body {
+        IntentBody::Order { purpose, .. } => purpose.adds_risk(),
+        _ => false,
+    };
+    let key = if opens { "opening_held" } else { "exit_held" };
+    Some((key, handoff.intent_id.0.0.clone()))
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_accounting::Side;
+    use mandate_executor::{EventId, Purpose, TimeInForce};
+    use mandate_num::Qty;
+
+    use super::*;
+
+    type Error = Box<dyn std::error::Error>;
+
+    fn handoff(purpose: Purpose) -> Result<Input, Error> {
+        Ok(Input::Intent(IntentHandoff {
+            intent_id: IntentId(EventId("i1".to_owned())),
+            agent: AgentId("agenta".to_owned()),
+            tif: Some(TimeInForce::Day),
+            body: IntentBody::Order {
+                instrument: InstrumentId::new("AAPL")?,
+                side: Side::Sell,
+                qty: Qty::parse("10")?,
+                limit: Price::parse("150")?,
+                purpose,
+                protection: None,
+            },
+        }))
+    }
+
+    #[test]
+    fn only_a_handoff_refused_for_a_missing_gate_input_is_held() -> Result<(), Error> {
+        let missing = ExecutorError::BindingGateInputMissing;
+        let held_as = |purpose| -> Result<_, Error> {
+            Ok(held(&missing, &handoff(purpose)?).map(|(key, _)| key))
+        };
+        assert_eq!(held_as(Purpose::Open)?, Some("opening_held"));
+        assert_eq!(held_as(Purpose::Increase)?, Some("opening_held"));
+        for exit in [
+            Purpose::RiskExit,
+            Purpose::DiscretionaryExit,
+            Purpose::OwnerExit,
+        ] {
+            assert_eq!(held_as(exit)?, Some("exit_held"));
+        }
+        assert_eq!(
+            held(&missing, &handoff(Purpose::Open)?),
+            Some(("opening_held", "i1".to_owned()))
+        );
+        let tick = Input::Tick(RiskClock::from_secs(0));
+        assert_eq!(held(&missing, &tick), None);
+        assert_eq!(held(&missing, &Input::Started(WriterEpoch(1))), None);
+        assert_eq!(
+            held(&ExecutorError::NotStarted, &handoff(Purpose::Open)?),
+            None
+        );
+        Ok(())
+    }
+
+    /// A wiring port that knows `agentb` and covers only MSFT, with a 1 % crypto offset.
+    struct Wired;
+
+    impl MandateView for Wired {
+        fn version(&self, agent: &AgentId) -> Option<MandateVersion> {
+            (agent.0 == "agentb").then(|| MandateVersion("sha256:wired".to_owned()))
+        }
+
+        fn crypto_stop_limit_offset(&self, _agent: &AgentId) -> Option<Fraction> {
+            Fraction::parse("0.01").ok()
+        }
+
+        fn covers(&self, _agent: &AgentId, instrument: &InstrumentId) -> bool {
+            instrument.as_str() == "MSFT"
+        }
+    }
+
+    #[test]
+    fn a_followed_agents_deployed_version_answers_first_and_the_rest_is_the_wirings()
+    -> Result<(), Error> {
+        let agent = |id: &str| AgentId(id.to_owned());
+        let versions = BTreeMap::from([(
+            agent("agenta"),
+            MandateVersion("sha256:deployed".to_owned()),
+        )]);
+        let port = Deployed {
+            versions: &versions,
+            wiring: &Wired,
+        };
+        let version = |id: &str| port.version(&agent(id)).map(|version| version.0);
+        assert_eq!(version("agenta").as_deref(), Some("sha256:deployed"));
+        assert_eq!(version("agentb").as_deref(), Some("sha256:wired"));
+        assert_eq!(version("agentc"), None);
+        assert_eq!(
+            port.crypto_stop_limit_offset(&agent("agenta")),
+            Some(Fraction::parse("0.01")?)
+        );
+        assert!(port.covers(&agent("agenta"), &InstrumentId::new("MSFT")?));
+        assert!(!port.covers(&agent("agenta"), &InstrumentId::new("AAPL")?));
+        Ok(())
+    }
 }
