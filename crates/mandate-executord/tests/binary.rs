@@ -141,6 +141,44 @@ fn a_launch_without_an_account_or_a_journal_is_refused() {
     assert!(!path.exists(), "a refused process serves no probe");
 }
 
+/// A pod the manager started never runs on the in-memory journal: `run` and `connect-check` with
+/// `--fixture` and `MANDATE_PROCESS` set exit at once, refused, and serve no probe.
+#[test]
+fn a_managers_pod_is_refused_the_fixture_journal() {
+    let path = socket("fixture-pod");
+    let path_text = path.to_str().unwrap();
+    for args in [
+        vec!["run", "--probe", path_text, "--fixture"],
+        vec![
+            "connect-check",
+            "--workspace",
+            "ws1",
+            "--account",
+            "acct1",
+            "--connection",
+            "c1",
+            "--pii-ref",
+            "pii_01J8Z2ACCT0000000000000001",
+            "--fixture",
+        ],
+    ] {
+        let mut pod = Guard(
+            command(&args)
+                .env("MANDATE_PROCESS", "executor")
+                .env("MANDATE_WORKSPACE", "ws1")
+                .env("MANDATE_SUBJECT", "acct1")
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let (status, stderr) = pod.exited();
+        assert_eq!(status.code(), Some(2), "{args:?}");
+        assert_eq!(stderr, "fixture_under_manager\n", "{args:?}");
+    }
+    assert!(!path.exists(), "a refused pod serves no probe");
+}
+
 /// The connect check prints the id of the passing record it journaled; without its arguments, or
 /// without a journal, it refuses.
 #[test]

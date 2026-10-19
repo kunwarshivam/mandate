@@ -69,6 +69,40 @@ pub trait SubjectLinks: Send + Sync {
     fn principal(&self, issuer: &str, subject: &str) -> Result<PrincipalId, LinkRefusal>;
 }
 
+/// Whether the subject links still name a principal, read at a `cli_confirm` step-up
+/// ([DEC-2104](../../../docs/project/decisions/DEC-2104.md) item 4): the one mapping a CLI
+/// confirmation's principal is checked against, never the members read.
+pub trait NamesPrincipal: Send + Sync {
+    /// Whether some line of the links names `principal`, read now.
+    ///
+    /// # Errors
+    /// [`LinkRefusal`] but [`LinkRefusal::NotLinked`], in the order its variants are listed.
+    fn names(&self, principal: PrincipalId) -> Result<bool, LinkRefusal>;
+}
+
+impl NamesPrincipal for Fixed {
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    fn names(&self, _principal: PrincipalId) -> Result<bool, LinkRefusal> {
+        todo!()
+    }
+}
+
+/// Whether the file at `path` names `principal` on some line, read with [`principal_at`]'s
+/// checks: a file that is refused whole names nobody.
+///
+/// # Errors
+/// [`LinkRefusal`] but [`LinkRefusal::NotLinked`], in the order its variants are listed.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn names_at(_path: &Path, _principal: PrincipalId) -> Result<bool, LinkRefusal> {
+    todo!()
+}
+
 /// The deployment's subject links: the file at [`SUBJECT_LINKS`] and no other, so no setting,
 /// argument, or request can point the server at another file (DEC-1023).
 #[derive(Debug, Clone, Copy, Default)]

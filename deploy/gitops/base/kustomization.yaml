@@ -1,0 +1,20 @@
+# What every hosted cluster runs (E21-58, DEC-2015), the same set `cargo xtask cell up` installs
+# in the local cell, minus its test archive store. Each cluster's overlay, clusters/<environment>,
+# adds only that environment's values. deploy/tests/test_gitops.py builds and checks each one
+# (DEC-2017).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces.yaml
+  - sources.yaml
+  - operator.yaml
+  - backup-plugin.yaml
+  - journal.yaml
+  - workspace.yaml
+configMapGenerator:
+  - name: workspace-managed-values
+    namespace: flux-system
+    files:
+      - values.yaml=../../cell/values/managed.yaml
+generatorOptions:
+  disableNameSuffixHash: true
