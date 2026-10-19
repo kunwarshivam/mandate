@@ -101,6 +101,11 @@ run "staging_may_rely_on_the_window_alone" {
   variables {
     kube_api_allowed_addresses = []
   }
+
+  assert {
+    condition     = length(var.kube_api_allowed_addresses) == 0 && output.monthly_estimate_usd == 57 && output.archive_bucket == "mandate-journal-archive-staging"
+    error_message = "Staging plans whole with no founder CIDR: the root refuses nothing, and the cluster's own test shows its firewall then admits nobody."
+  }
 }
 
 run "records_the_commit_it_applies" {

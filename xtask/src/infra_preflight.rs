@@ -183,11 +183,7 @@ fn present(read: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String> 
 /// Whether `value`, a JSON list as `infra.yml` hands it on (`KUBE_API_ALLOWED_CIDRS`,
 /// `ACCESS_ALLOWED_EMAILS`), names nothing: unset, blank, or an empty JSON list.
 pub(crate) fn no_cidrs(value: Option<&str>) -> bool {
-    value.is_none_or(|value| {
-        value
-            .chars()
-            .all(|c| c.is_whitespace() || c == '[' || c == ']')
-    })
+    crate::names_nothing(value)
 }
 
 /// The checks that read only the step's environment: each secret by name, and production's
