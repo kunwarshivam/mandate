@@ -17,7 +17,7 @@ use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::{Clock, Delivery, ManualClock, SequentialIds};
 use mandate_gateway::registry::Locality;
 use mandate_gateway::{CallRecord, Gateway, RateCaps, RequestError, Settings};
-use mandate_journal::{ArtifactRef, ArtifactStore, Environment};
+use mandate_journal::{ArtifactRef, ArtifactStore, Environment, get_artifact};
 use mandate_research::{AssetClass as EnvelopeClass, WorkingUniverse};
 use mandate_research_run::agentic::LoopBounds;
 use mandate_research_run::{
@@ -27,7 +27,7 @@ use mandate_research_run::{
 };
 use mandate_runtime::{
     DispatchRequest, DispatchedResult, ResearchInput, ResearchRequest, RetrievedObservation,
-    RiskClock,
+    RiskClock, TurnRequest,
 };
 use mandate_store::MemoryStore;
 use mandate_time::UtcNanos;
@@ -63,6 +63,23 @@ pub enum DispatchError {
     /// An item's record could not be captured (item 6).
     Uncaptured,
     /// A content was longer than `u32` bytes, or the sink refused a store (items 5 and 6).
+    Unstored,
+}
+
+/// Why a turn was answered with nothing (DEC-2264); the core's run bound then ends the run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnError {
+    /// The turn path is not implemented yet (E19-13, DEC-2264).
+    Unimplemented,
+    /// The worker's bundle names no agentic loop (DEC-2263 item 5).
+    NoLoop,
+    /// The worker did not start the run, or it was cancelled.
+    NotStarted,
+    /// An artifact of the transcript the sink cannot give back (item 1).
+    Missing,
+    /// The turn could not be built, so nothing was sent (DEC-2256 item 4).
+    Unbuilt(ResearchRunError),
+    /// The sink refused the record's prompt or response.
     Unstored,
 }
 
@@ -361,6 +378,17 @@ impl RecordedWorker {
         }
     }
 
+    /// Sends the core's turn (DEC-2264): the transcript's artifacts loaded through the sink, the
+    /// turn built over the run's kept seed and context and sent through the gateway over the recorded
+    /// reply, and the record's prompt and response stored before `Called`, or the gateway's refusal
+    /// answered `Refused`.
+    ///
+    /// # Errors
+    /// [`TurnError`] when nothing is answered, and why.
+    pub fn turn(&mut self, _request: &TurnRequest) -> Result<(), TurnError> {
+        Err(TurnError::Unimplemented)
+    }
+
     fn start(&mut self, run_id: &str, cut_off: RiskClock, parts: &ResearchParts) {
         let Some(scope) = self.scope(cut_off, parts) else {
             return;
@@ -510,7 +538,9 @@ impl ResearchWorker for RecordedWorker {
             ResearchRequest::Dispatch(request) => {
                 let _unanswered = self.dispatch(request, parts);
             }
-            ResearchRequest::Turn(_) => {}
+            ResearchRequest::Turn(request) => {
+                let _unanswered = self.turn(request);
+            }
         }
     }
 
@@ -543,5 +573,10 @@ impl<A: ArtifactStore> ArtifactSink for StoreSink<A> {
         self.0
             .put_artifact(bytes)
             .is_ok_and(|reference| reference == ArtifactRef::of(bytes))
+    }
+
+    /// The store's checked read: bytes that do not hash to `digest` are none.
+    fn get(&self, digest: &Digest) -> Option<Vec<u8>> {
+        get_artifact(&self.0, &ArtifactRef::from_digest(*digest)).ok()
     }
 }
