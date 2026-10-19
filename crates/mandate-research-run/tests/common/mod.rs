@@ -24,9 +24,9 @@ use mandate_gateway::{Gateway, RateCaps, Settings};
 use mandate_num::{Price, Qty};
 use mandate_research_run::{
     Allowlist, Bar, BarReader, Filing, FilingReader, GatewayParts, InstrumentFact,
-    InstrumentReader, ItemId, ModelPin, NewsItem, NewsReader, NoHostedTransport, OutputBounds,
-    ReadError, Readers, ResearchEntry, ResearchTransport, RetrievalPlan, Scope, Selection,
-    SourceId, Symbol, TextQuery, recorded_reply, research_gateway,
+    InstrumentReader, ItemId, ModelPin, NewsItem, NewsReader, NewsText, NoHostedTransport,
+    OutputBounds, ReadError, Readers, ResearchEntry, ResearchTransport, RetrievalPlan, Scope,
+    Selection, SourceId, Symbol, TextQuery, recorded_reply, research_gateway,
 };
 use mandate_time::UtcNanos;
 
@@ -154,6 +154,8 @@ pub struct Fixture {
     pub calls: Cell<u32>,
     pub queries: std::cell::RefCell<Vec<TextQuery>>,
     pub terms: std::cell::RefCell<Vec<Vec<String>>>,
+    pub texts: Vec<NewsText>,
+    pub text_asks: std::cell::RefCell<Vec<(ItemId, UtcNanos, u32)>>,
 }
 
 impl Fixture {
@@ -201,6 +203,19 @@ impl NewsReader for Fixture {
     fn search(&self, query: &TextQuery, terms: &[String]) -> Result<Vec<NewsItem>, ReadError> {
         self.terms.borrow_mut().push(terms.to_vec());
         self.news(query)
+    }
+
+    fn news_text(
+        &self,
+        item: &ItemId,
+        cut_off: UtcNanos,
+        allowlist_version: u32,
+    ) -> Result<NewsText, ReadError> {
+        self.text_asks
+            .borrow_mut()
+            .push((item.clone(), cut_off, allowlist_version));
+        let answered = self.answer(&self.texts)?;
+        answered.into_iter().next().ok_or(ReadError::Unavailable)
     }
 }
 
