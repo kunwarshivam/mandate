@@ -34,8 +34,8 @@ use crate::documents::{Envelope, checked, envelope};
 use crate::http::{App, problem, problem_body, session_cookie, unauthenticated, with_type};
 use crate::members::ControlLookup;
 use crate::reads::{
-    AgentView, ApprovalView, Deployment, Filter, account_positions, account_ref, agent, approvals,
-    deployed, inbox,
+    AgentView, ApprovalView, Deployment, Filter, account_positions, account_ref, agent,
+    agent_orders, approvals, deployed, inbox,
 };
 use crate::session::Authenticated;
 
@@ -370,18 +370,9 @@ pub async fn one_agent(
         return Refused::NotFound.response();
     };
     let found = document(&app, deployment);
-    let account = match &found {
-        Some(found) => match account_ref(&reader.control, &found.connection_id) {
-            Some(reference) => {
-                let stream = format!("acct:{}:{reference}", reader.workspace);
-                match app.journal.rows(&stream).await {
-                    Ok(rows) => Some(rows),
-                    Err(_) => return Refused::JournalUnavailable.response(),
-                }
-            }
-            None => None,
-        },
-        None => None,
+    let account = match account_of(&app, &reader, found.as_ref()).await {
+        Ok(account) => account.map(|(_, rows)| rows),
+        Err(refusal) => return refusal.response(),
     };
     let mut members = agent_members(&agent(deployment, rows), found.as_ref());
     members.push((
@@ -407,6 +398,60 @@ async fn all_approvals(
         .flat_map(|(deployment, rows)| approvals(&deployment.0, rows))
         .collect();
     Ok((views, read.into_iter().map(|(_, rows)| rows).collect()))
+}
+
+/// The `account_ref` the control stream binds to the connection `document` names, and that
+/// account stream's rows (DEC-1020 item 3); `None` with no document or no bound reference.
+async fn account_of(
+    app: &App,
+    reader: &Reader,
+    document: Option<&Envelope>,
+) -> Result<Option<(String, Vec<StoredEvent>)>, Refused> {
+    let Some(reference) = document.and_then(|d| account_ref(&reader.control, &d.connection_id))
+    else {
+        return Ok(None);
+    };
+    let stream = format!("acct:{}:{reference}", reader.workspace);
+    match app.journal.rows(&stream).await {
+        Ok(rows) => Ok(Some((reference, rows))),
+        Err(_) => Err(Refused::JournalUnavailable),
+    }
+}
+
+/// `GET /v1/workspaces/{ws}/agents/{agent_id}/orders` (§4.7 D3, DEC-2111): `read-models/orders`,
+/// from the account stream of the connection the agent's deployed document names.
+pub async fn agent_orders_read(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((workspace, id))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let reader = match reader(&app, &headers, &workspace).await {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let Some(deployment) = deployed(&reader.control)
+        .into_iter()
+        .find(|deployment| deployment.0 == id)
+    else {
+        return Refused::NotFound.response();
+    };
+    let account = match account_of(&app, &reader, document(&app, &deployment).as_ref()).await {
+        Ok(account) => account,
+        Err(refusal) => return refusal.response(),
+    };
+    let (reference, rows) = account.map_or((Value::Null, Vec::new()), |(reference, rows)| {
+        (string(&reference), rows)
+    });
+    let orders = Value::Array(agent_orders(&rows, &deployment.0));
+    let members = vec![
+        ("agent_id", string(&deployment.0)),
+        ("account_ref", reference),
+        ("orders", orders),
+    ];
+    served(&reader, &[rows.as_slice()], members)
 }
 
 /// `GET /v1/workspaces/{ws}/approvals?state=pending|resolved`.
