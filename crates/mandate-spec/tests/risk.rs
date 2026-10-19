@@ -1,9 +1,9 @@
-//! The risk-state fold (`kind: risk_state`, MC-R01 to MC-R24; [§5]).
+//! The risk-state fold (`kind: risk_state`, MC-R01 to MC-R32; [§5]).
 //!
-//! §5 is one transition function with ten kinds of input, and almost every rule in it is about *time*:
+//! §5 is one transition function with fourteen kinds of input, and almost every rule in it is about *time*:
 //! breach time that accumulates over intervals credited by the condition at their start, a hard breach
 //! that waits for a second quote, a breach that keeps confirming against the day it began in, scale rungs
-//! that lift one at a time, a floor that lifts only after a full risk day. The 24 reference cases pin
+//! that lift one at a time, a floor that lifts only after a full risk day. The 32 reference cases pin
 //! points on those timelines. What they cannot pin is the shape of the timeline between the points, which
 //! is where an implementation goes wrong: a confirmation that resets on the first quiet interval, a hard
 //! level that latches on one print, a rollover measured against the wrong day's E₀.
@@ -4104,4 +4104,180 @@ fn corporate_actions_move_the_risk_state_only_by_their_cash_against_an_independe
     }) {
         panic!("MI-33: {failure}");
     }
+}
+
+/// A dividend joins E only with a counted sane mark (§5.2, DEC-2303 item 2): neither a mark that
+/// fails its checks nor an equity's extended-hours mark brings it in, so E stays at 10000 until the
+/// regular session's sane mark, which adds the 25.5 due at application.
+#[test]
+fn only_a_counted_sane_mark_brings_in_the_dividend_due() -> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "100"),
+            dividend(ACTION_AT, MarketSession::AfterHours, "0.255"),
+            quote(
+                "2026-09-22T12:00:00.000000000Z",
+                "100",
+                MarketSession::PreMarket,
+                true,
+            ),
+            quote(
+                "2026-09-22T13:35:00.000000000Z",
+                "100",
+                MarketSession::Regular,
+                false,
+            ),
+            mark("2026-09-22T13:36:00.000000000Z", "100"),
+        ],
+    )?;
+    for (number, what) in [
+        (3, "an extended-hours mark"),
+        (4, "a mark that fails its checks"),
+    ] {
+        assert_eq!(
+            step_of(&outcomes, number)?.snapshot.agent_equity,
+            usd("10000"),
+            "{what} does not carry the dividend"
+        );
+    }
+    assert_eq!(step_of(&outcomes, 5)?.snapshot.agent_equity, usd("10025.5"));
+    Ok(())
+}
+
+/// A dividend is not a quote (DEC-2303 item 4): applied 10 s after the first quote at the hard
+/// level, it leaves the hard breach pending, and only the next quote latches.
+#[test]
+fn a_dividend_is_not_a_quote_so_it_never_completes_a_hard_breach() -> Result<(), String> {
+    let mandate = swing(&[
+        ("/risk/max_daily_loss", Some(s("0.5"))),
+        ("/risk/scale_lift_after_s", Some(common::i(0))),
+    ])?;
+    let outcomes = walk(
+        &mandate,
+        &opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "105"),
+            mark("2026-09-21T14:02:00.000000000Z", "94.4"),
+            dividend(
+                "2026-09-21T14:02:10.000000000Z",
+                MarketSession::Regular,
+                "0.01",
+            ),
+            mark("2026-09-21T14:02:11.000000000Z", "94.2"),
+        ],
+    )?;
+    let at_the_dividend = step_of(&outcomes, 3)?;
+    assert!(trace(&at_the_dividend.journal).is_empty());
+    assert_eq!(
+        restrictions(&at_the_dividend.snapshot),
+        vec![Restriction::HardBreach]
+    );
+    assert!(latched(&at_the_dividend.snapshot).is_empty());
+    assert_eq!(
+        latched(&step_of(&outcomes, 4)?.snapshot),
+        vec![LimitKey::DrawdownRung(1), LimitKey::DrawdownRung(2)]
+    );
+    Ok(())
+}
+
+/// The receivable is round(Q × d, 2) with Q the position at application (DEC-2303 item 2): a sale
+/// of half the shares before the ex-date's mark leaves it at 25.5, not 12.75. E is
+/// 10000 − 5000 + 25.5 + 50 × 99.745 = 10012.75.
+#[test]
+fn a_later_fill_does_not_change_the_dividend_due() -> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "100"),
+            dividend(ACTION_AT, MarketSession::AfterHours, "0.255"),
+            sale(
+                "2026-09-22T12:00:00.000000000Z",
+                "50",
+                "100",
+                MarketSession::PreMarket,
+            ),
+            mark("2026-09-22T13:35:00.000000000Z", "99.745"),
+        ],
+    )?;
+    assert_eq!(
+        step_of(&outcomes, 4)?.snapshot.agent_equity,
+        usd("10012.75")
+    );
+    Ok(())
+}
+
+/// A split with no residual at the exact boundary of the daily loss and of the lifetime floor keeps
+/// the breach whose confirmation is counting, as MC-R31 does for a rung (MI-33): a 7:1 split of 100
+/// shares rounds 94 ÷ 7 and 90 ÷ 7 toward zero, so E falls by under 700 × 10⁻¹² and never rises, and
+/// every step journals what the same walk with a tick in the split's place journals.
+#[test]
+fn a_split_at_the_daily_loss_or_floor_boundary_keeps_the_breach_it_is_confirming()
+-> Result<(), String> {
+    let cases: [(&str, &str, LimitKey); 2] = [
+        ("0.06", "94", LimitKey::MaxDailyLoss),
+        ("0.5", "90", LimitKey::LifetimeFloor),
+    ];
+    for (daily, bid, limit) in cases {
+        let mandate = swing(&[
+            ("/risk/max_daily_loss", Some(s(daily))),
+            ("/risk/scale_lift_after_s", Some(common::i(0))),
+            ("/risk/daily_breach_min_s", Some(common::i(0))),
+        ])?;
+        let clock = RegularSessionClock::new();
+        let open = patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0");
+        let first = mark("2026-09-21T14:01:00.000000000Z", bid);
+        let confirm = tick("2026-09-21T14:02:05.000000000Z", MarketSession::Regular);
+        let split_walk = walk(
+            &mandate,
+            &open,
+            &clock,
+            &[
+                first.clone(),
+                split(
+                    "2026-09-21T14:01:30.000000000Z",
+                    MarketSession::Regular,
+                    (7, 1),
+                    ShareIncrement::Whole,
+                    None,
+                ),
+                confirm.clone(),
+            ],
+        )?;
+        let tick_walk = walk(
+            &mandate,
+            &open,
+            &clock,
+            &[
+                first,
+                tick("2026-09-21T14:01:30.000000000Z", MarketSession::Regular),
+                confirm,
+            ],
+        )?;
+        let before = &step_of(&split_walk, 1)?.snapshot.agent_equity;
+        let after = &step_of(&split_walk, 2)?.snapshot.agent_equity;
+        assert!(
+            after < before,
+            "{limit:?}: the split lowers E by its rounding"
+        );
+        for number in [2, 3] {
+            assert_eq!(
+                trace(&step_of(&split_walk, number)?.journal),
+                trace(&step_of(&tick_walk, number)?.journal),
+                "{limit:?}: step {number} journals what the tick's walk journals"
+            );
+        }
+        assert!(
+            latched(&step_of(&split_walk, 3)?.snapshot).contains(&limit),
+            "{limit:?}: the tick 65 s after the boundary mark confirms the limit, so the comparison is not vacuous"
+        );
+    }
+    Ok(())
 }

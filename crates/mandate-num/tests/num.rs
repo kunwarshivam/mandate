@@ -384,6 +384,19 @@ fn hand_calculated_values_from_the_reference_cases() {
         "-0.5"
     );
     assert_eq!(
+        u("0.5").round(0, Rounding::TowardZero).unwrap().to_string(),
+        "0",
+        "an exact half rounds toward zero, not away from it"
+    );
+    assert_eq!(
+        u("-0.5")
+            .round(0, Rounding::TowardZero)
+            .unwrap()
+            .to_string(),
+        "0",
+        "and so does a negative one"
+    );
+    assert_eq!(
         u("-0.005").round(2, Rounding::HalfUp).unwrap().to_string(),
         "-0.01"
     );
