@@ -1,8 +1,8 @@
-# Staging (DEC-2011 item 1): one DOKS cluster of two nodes in nyc1, its buckets, and the API host
-# behind the tunnel and Access. The cluster and its VPC moved from nyc3, which had no capacity for
-# its nodes, to nyc1, also New York, at the same price; the state bucket stays in nyc3, since Spaces
-# does not run in nyc1 (DEC-2044 item 2). DigitalOcean's provider reads its credentials from the environment
-# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
+# Staging (DEC-2011 item 1): one DOKS cluster of two nodes in tor1, its buckets, and the API host
+# behind the tunnel and Access. The cluster and its VPC run in tor1, Toronto, which DEC-995 item 2
+# allows, because DigitalOcean offers s-2vcpu-4gb in neither nyc3 nor nyc1; the price is the same,
+# and the state bucket stays in nyc3 (DEC-2047, DEC-2044 item 2). DigitalOcean's provider reads its
+# credentials from the environment (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
 # token as a variable; only infra.yml's job under infra-staging receives either.
 
 provider "digitalocean" {}
@@ -13,7 +13,7 @@ provider "cloudflare" {
 
 locals {
   environment  = "staging"
-  region       = "nyc1"
+  region       = "tor1"
   state_region = "nyc3"
   account_id = sensitive(one(distinct([
     for account in data.cloudflare_accounts.visible.result : account.id
