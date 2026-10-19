@@ -111442,7 +111442,7 @@
   ]
  },
  "owner_confirmations": {
-  "spec": "docs/specs/journal.md v0.66 §9.5 rules 246 and 247 (DEC-2039)",
+  "spec": "docs/specs/journal.md v0.67 §9.5 rules 247 and 248 (DEC-2040)",
   "drafts": {
    "intent": {
     "envelope_version": 1,
@@ -111514,7 +111514,7 @@
   "invalid_drafts": [
    {
     "name": "zero_bid",
-    "clause": "rule 246: `bid` is positive",
+    "clause": "rule 247: `bid` is positive",
     "base_draft": "confirmation",
     "changes": [
      {
@@ -111530,7 +111530,7 @@
    },
    {
     "name": "zero_bid_size",
-    "clause": "rule 246: `bid_size` is positive",
+    "clause": "rule 247: `bid_size` is positive",
     "base_draft": "confirmation",
     "changes": [
      {
@@ -111546,7 +111546,7 @@
    },
    {
     "name": "zero_floor",
-    "clause": "rule 246: `floor` is positive",
+    "clause": "rule 247: `floor` is positive",
     "base_draft": "confirmation",
     "changes": [
      {
@@ -111562,7 +111562,7 @@
    },
    {
     "name": "negative_bid",
-    "clause": "rule 246: `bid` is positive",
+    "clause": "rule 247: `bid` is positive",
     "base_draft": "confirmation",
     "changes": [
      {
@@ -111578,7 +111578,7 @@
    },
    {
     "name": "negative_bid_size",
-    "clause": "rule 246: `bid_size` is positive",
+    "clause": "rule 247: `bid_size` is positive",
     "base_draft": "confirmation",
     "changes": [
      {
@@ -111594,7 +111594,7 @@
    },
    {
     "name": "negative_floor",
-    "clause": "rule 246: `floor` is positive",
+    "clause": "rule 247: `floor` is positive",
     "base_draft": "confirmation",
     "changes": [
      {
@@ -111610,7 +111610,7 @@
    },
    {
     "name": "zero_bid_and_floor",
-    "clause": "rule 246: reported at the first that fails, `bid` before `floor`",
+    "clause": "rule 247: reported at the first that fails, `bid` before `floor`",
     "base_draft": "confirmation",
     "changes": [
      {
@@ -111680,7 +111680,7 @@
   "valid_drafts": [
    {
     "name": "floor_above_bid",
-    "clause": "rule 246: the floor is the owner's, not bound to the bid",
+    "clause": "rule 247: the floor is the owner's, not bound to the bid",
     "base_draft": "confirmation",
     "changes": [
      {
@@ -111694,7 +111694,7 @@
    },
    {
     "name": "tiny_prices",
-    "clause": "rule 246: positive, however small",
+    "clause": "rule 247: positive, however small",
     "base_draft": "confirmation",
     "changes": [
      {
@@ -111727,7 +111727,7 @@
   "batches": [
    {
     "name": "the_intent_then_its_confirmation",
-    "clause": "rule 247: one batch, the intent first",
+    "clause": "rule 248: one batch, the intent first",
     "drafts": [
      {
       "envelope_version": 1,
@@ -111802,7 +111802,7 @@
    },
    {
     "name": "a_limit_at_the_floor",
-    "clause": "rule 247: a limit not below the floor",
+    "clause": "rule 248: a limit not below the floor",
     "drafts": [
      {
       "envelope_version": 1,
@@ -111877,7 +111877,7 @@
    },
    {
     "name": "a_limit_above_the_floor",
-    "clause": "rule 247: a limit above the floor",
+    "clause": "rule 248: a limit above the floor",
     "drafts": [
      {
       "envelope_version": 1,
@@ -111952,7 +111952,7 @@
    },
    {
     "name": "an_unconfirmed_owner_exit",
-    "clause": "rule 247: an owner exit needs no confirmation",
+    "clause": "rule 248: an owner exit needs no confirmation",
     "drafts": [
      {
       "envelope_version": 1,
@@ -111996,7 +111996,7 @@
    },
    {
     "name": "then_another_intent",
-    "clause": "rule 247: a later intent needs none",
+    "clause": "rule 248: a later intent needs none",
     "drafts": [
      {
       "envelope_version": 1,
@@ -112106,7 +112106,7 @@
    },
    {
     "name": "alone",
-    "clause": "rule 247: the intent is in the batch",
+    "clause": "rule 248: the intent is in the batch",
     "drafts": [
      {
       "envelope_version": 1,
@@ -112149,7 +112149,7 @@
    },
    {
     "name": "before_its_intent",
-    "clause": "rule 247: the intent is immediately before it",
+    "clause": "rule 248: the intent is immediately before it",
     "drafts": [
      {
       "envelope_version": 1,
@@ -112227,7 +112227,7 @@
    },
    {
     "name": "twice",
-    "clause": "rule 247: one confirmation per intent",
+    "clause": "rule 248: one confirmation per intent",
     "drafts": [
      {
       "envelope_version": 1,
@@ -112336,7 +112336,7 @@
    },
    {
     "name": "after_another_intent",
-    "clause": "rule 247: immediately after its own intent",
+    "clause": "rule 248: immediately after its own intent",
     "drafts": [
      {
       "envelope_version": 1,
@@ -112449,7 +112449,7 @@
    },
    {
     "name": "of_another_intent",
-    "clause": "rule 247: the same intent",
+    "clause": "rule 248: the same intent",
     "drafts": [
      {
       "envelope_version": 1,
@@ -112527,7 +112527,7 @@
    },
    {
     "name": "of_a_risk_exit",
-    "clause": "rule 247: only an owner's exit is confirmed",
+    "clause": "rule 248: only an owner's exit is confirmed",
     "drafts": [
      {
       "envelope_version": 1,
@@ -112605,7 +112605,7 @@
    },
    {
     "name": "a_limit_below_the_floor",
-    "clause": "rule 247: never a limit below the floor",
+    "clause": "rule 248: never a limit below the floor",
     "drafts": [
      {
       "envelope_version": 1,
