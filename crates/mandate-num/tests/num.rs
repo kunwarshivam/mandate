@@ -51,6 +51,7 @@ fn div_round(n: i128, d: i128, mode: Rounding) -> i128 {
         Rounding::HalfEven => 2 * r > d || (2 * r == d && q % 2 != 0),
         Rounding::HalfUp => 2 * r > d || (2 * r == d && n >= 0),
         Rounding::Ceiling => r > 0,
+        Rounding::TowardZero => n < 0 && r > 0,
     };
     if up { q + 1 } else { q }
 }
@@ -59,7 +60,8 @@ fn modes() -> impl Strategy<Value = Rounding> {
     prop_oneof![
         Just(Rounding::HalfEven),
         Just(Rounding::HalfUp),
-        Just(Rounding::Ceiling)
+        Just(Rounding::Ceiling),
+        Just(Rounding::TowardZero)
     ]
 }
 
@@ -366,6 +368,33 @@ fn hand_calculated_values_from_the_reference_cases() {
     assert_eq!(
         u("-0.005").round(2, Rounding::Ceiling).unwrap().to_string(),
         "0"
+    );
+    assert_eq!(
+        u("0.509")
+            .round(2, Rounding::TowardZero)
+            .unwrap()
+            .to_string(),
+        "0.5"
+    );
+    assert_eq!(
+        u("-0.509")
+            .round(2, Rounding::TowardZero)
+            .unwrap()
+            .to_string(),
+        "-0.5"
+    );
+    assert_eq!(
+        u("0.5").round(0, Rounding::TowardZero).unwrap().to_string(),
+        "0",
+        "an exact half rounds toward zero, not away from it"
+    );
+    assert_eq!(
+        u("-0.5")
+            .round(0, Rounding::TowardZero)
+            .unwrap()
+            .to_string(),
+        "0",
+        "and so does a negative one"
     );
     assert_eq!(
         u("-0.005").round(2, Rounding::HalfUp).unwrap().to_string(),

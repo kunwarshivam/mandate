@@ -304,6 +304,7 @@ fn round_quotient(
         }
         Rounding::HalfUp => half != Ordering::Less,
         Rounding::Ceiling => !negative && !remainder.is_zero(),
+        Rounding::TowardZero => false,
     };
     if away_from_zero {
         quotient

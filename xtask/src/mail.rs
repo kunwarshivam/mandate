@@ -22,14 +22,12 @@ pub(crate) const GUARD: &str = "xtask/mail-guard.toml";
 /// The trait whose implementors are guarded.
 const TRAIT: &str = "MailTransport";
 
-/// The words that may stand before an implementor's type name and are not it.
-const KEYWORDS: [&str; 5] = ["crate", "dyn", "mut", "self", "super"];
-
 #[derive(Deserialize)]
 pub(crate) struct Guard {
     spec: String,
     placeholder: String,
     founder_transport_crate: String,
+    trait_file: String,
     transport: Vec<Allowed>,
     denied: Denied,
 }
@@ -40,6 +38,7 @@ struct Allowed {
     krate: String,
     #[serde(rename = "type")]
     ty: String,
+    file: String,
 }
 
 #[derive(Deserialize)]
@@ -64,14 +63,16 @@ struct Locked {
 pub(crate) fn guard_in(root: &Path) -> Result<()> {
     eprintln!("    mail-guard: checking that no mail can reach anyone but the founder (DEC-2511)");
     let home = repo_root()?;
-    let guard: Guard = toml::from_str(&fs::read_to_string(home.join(GUARD))?)
-        .with_context(|| format!("parsing {GUARD}"))?;
+    let config =
+        fs::read_to_string(home.join(GUARD)).with_context(|| format!("reading {GUARD}"))?;
+    let guard: Guard = toml::from_str(&config).with_context(|| format!("parsing {GUARD}"))?;
     let spec = fs::read_to_string(home.join(&guard.spec))
         .with_context(|| format!("reading {}", guard.spec))?;
     if !spec.contains(&guard.placeholder) {
         return Ok(());
     }
     let meta = metadata_in(root)?;
+    let base = fs::canonicalize(root).with_context(|| format!("resolving {}", root.display()))?;
     let mut sources = Vec::new();
     for pkg in workspace_packages(&meta) {
         let Some(dir) = pkg.manifest_path.parent() else {
@@ -81,7 +82,7 @@ pub(crate) fn guard_in(root: &Path) -> Result<()> {
             let src =
                 fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
             let shown = file
-                .strip_prefix(root)
+                .strip_prefix(&base)
                 .unwrap_or(&file)
                 .display()
                 .to_string();
@@ -96,42 +97,169 @@ pub(crate) fn guard_in(root: &Path) -> Result<()> {
     report(problems, "mail-guard")
 }
 
-/// Every `impl ... MailTransport for <Type>` in `sources`, each `(crate, path, source)`, whose type
-/// is not one [`Guard`] allows in that crate. A blanket or generic impl names a type parameter,
-/// which no entry allows, so it fails too.
+/// Every way `sources`, each `(crate, path, source)`, could reach a transport [`Guard`] does not
+/// allow (DEC-2511 items 3 and 6). Every `MailTransport` token must stand in one of four places:
+/// an `impl ... MailTransport for <Name>` in the allowed type's own file, naming it bare; the
+/// trait's own definition in its file; a bound (`T: MailTransport`, `+ MailTransport`, `dyn` or
+/// `impl MailTransport`); or a plain `use` path with no `as`. Anywhere else, a macro's arguments
+/// included, it fails, so no macro can be handed the trait. In an allowed type's crate, its name
+/// is declared once, by `struct` in its file, and is never given to anything else by `type`,
+/// `enum`, `union` or `as`.
 fn transport_problems(guard: &Guard, sources: &[(String, String, String)]) -> Vec<String> {
     let mut problems = Vec::new();
+    let mut declared: Vec<(&str, &str)> = Vec::new();
     for (krate, path, src) in sources {
         let toks = tokens(src);
+        let in_macro = macro_arguments(&toks);
         for (i, (tok, line)) in toks.iter().enumerate() {
-            let implements = matches!(tok, Token::Ident(name) if name == TRAIT)
-                && matches!(toks.get(i + 1), Some((Token::Ident(word), _)) if word == "for");
-            if !implements {
+            let Token::Ident(word) = tok else {
+                continue;
+            };
+            let at = |k: usize| toks.get(k).map(|(t, _)| t);
+            let before = |back: usize| i.checked_sub(back).and_then(at);
+            let next = at(i + 1);
+            for allowed in guard.transport.iter().filter(|a| a.krate == *krate) {
+                let declares = matches!(next, Some(Token::Ident(n)) if *n == allowed.ty);
+                if declares && word == "struct" && *path == allowed.file {
+                    declared.push((allowed.ty.as_str(), path.as_str()));
+                } else if declares
+                    && ["struct", "enum", "union", "type", "as"].contains(&word.as_str())
+                {
+                    problems.push(format!(
+                        "{path}:{line}: `{word} {}` in `{krate}`; the allowed transport is declared \
+                         once, by `struct` in {} ({GUARD})",
+                        allowed.ty, allowed.file
+                    ));
+                }
+            }
+            if word != TRAIT {
                 continue;
             }
-            let ty = toks
-                .get(i + 2..)
-                .unwrap_or_default()
-                .iter()
-                .find_map(|(t, _)| match t {
-                    Token::Ident(name) if !KEYWORDS.contains(&name.as_str()) => Some(name.as_str()),
-                    _ => None,
-                });
-            let allowed = guard
-                .transport
-                .iter()
-                .any(|a| a.krate == *krate && Some(a.ty.as_str()) == ty);
-            if !allowed {
+            let placed = if in_macro.get(i).copied().unwrap_or(true) {
+                Err("inside a macro's arguments".to_owned())
+            } else if matches!(next, Some(Token::Ident(n)) if n == "for") {
+                let ty = self_type(toks.get(i + 2..).unwrap_or_default());
+                let allowed = guard
+                    .transport
+                    .iter()
+                    .any(|a| a.krate == *krate && a.file == *path && Some(a.ty.as_str()) == ty);
+                if allowed {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "implemented for `{}`; while the general footer is unresolved only the \
+                         recorded fixture and the founder-only transport may be, each in its own \
+                         file and by its bare name",
+                        ty.unwrap_or("a type that is not a bare name")
+                    ))
+                }
+            } else if matches!(before(1), Some(Token::Ident(w)) if w == "trait") {
+                if *path == guard.trait_file {
+                    Ok(())
+                } else {
+                    Err(format!("defined outside {}", guard.trait_file))
+                }
+            } else if matches!(next, Some(Token::Ident(n)) if n == "as") {
+                Err("imported or re-exported under another name".to_owned())
+            } else if in_use(&toks, i)
+                || matches!(before(1), Some(Token::Punct('+')))
+                || matches!(before(1), Some(Token::Ident(w)) if w == "dyn" || w == "impl")
+                || (matches!(before(1), Some(Token::Punct(':')))
+                    && !matches!(before(2), Some(Token::Punct(':'))))
+            {
+                Ok(())
+            } else {
+                Err(
+                    "named where it is neither implemented, defined, a bound, nor imported"
+                        .to_owned(),
+                )
+            };
+            if let Err(why) = placed {
                 problems.push(format!(
-                    "{path}:{line}: `{TRAIT}` is implemented for `{}` in `{krate}`; while the \
-                     general footer is unresolved only the recorded fixture and the founder-only \
-                     transport may be ({GUARD})",
-                    ty.unwrap_or("?")
+                    "{path}:{line}: `{TRAIT}` {why} in `{krate}` ({GUARD})"
                 ));
             }
         }
     }
+    for allowed in &guard.transport {
+        let count = declared.iter().filter(|(ty, _)| *ty == allowed.ty).count();
+        if count > 1 {
+            problems.push(format!(
+                "{}: `struct {}` is declared {count} times; once is allowed ({GUARD})",
+                allowed.file, allowed.ty
+            ));
+        }
+    }
     problems
+}
+
+/// Whether each token lies inside a macro invocation's delimited arguments (`name!(...)`,
+/// `name![...]`, `name!{...}`), so no macro can be handed the trait to build an impl from. A token
+/// the scan cannot place reads as inside, failing closed.
+fn macro_arguments(toks: &[(Token, usize)]) -> Vec<bool> {
+    let mut inside = vec![false; toks.len()];
+    for (i, window) in toks.windows(3).enumerate() {
+        let opens = match (&window[0].0, &window[1].0, &window[2].0) {
+            (Token::Ident(_), Token::Punct('!'), Token::Punct(c)) => match c {
+                '(' => Some((')', '(')),
+                '[' => Some((']', '[')),
+                '{' => Some(('}', '{')),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some((close, open)) = opens else {
+            continue;
+        };
+        let mut depth = 0usize;
+        let mut end = toks.len();
+        for (k, (t, _)) in toks.iter().enumerate().skip(i + 2) {
+            match t {
+                Token::Punct(c) if *c == open => depth += 1,
+                Token::Punct(c) if *c == close => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        end = k;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        for flag in inside.iter_mut().take(end).skip(i + 3) {
+            *flag = true;
+        }
+    }
+    inside
+}
+
+/// Whether the token at `i` is a segment of a `use` path: walking back over path tokens (names,
+/// `::`, `{`, `,`, `*`) reaches `use` before anything else.
+fn in_use(toks: &[(Token, usize)], i: usize) -> bool {
+    for (tok, _) in toks.iter().take(i).rev() {
+        match tok {
+            Token::Ident(word) if word == "use" => return true,
+            Token::Ident(_) | Token::Punct(':' | '{' | ',' | '*') => {}
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// The name of an impl's self type, read from the tokens after `for` up to `{` or `where`, when
+/// that type is one bare name; `None` for any other type, so a path, a reference, a tuple, a
+/// generic or a `dyn` never passes as an allowed one.
+fn self_type(toks: &[(Token, usize)]) -> Option<&str> {
+    match toks {
+        [(Token::Ident(name), _), (end, _), ..]
+            if name != "dyn"
+                && (matches!(end, Token::Punct('{'))
+                    || matches!(end, Token::Ident(w) if w == "where")) =>
+        {
+            Some(name.as_str())
+        }
+        _ => None,
+    }
 }
 
 /// Every denied crate a workspace member other than the founder-only transport's crate depends on
@@ -184,11 +312,30 @@ mod tests {
     }
 
     fn source(krate: &str, src: &str) -> (String, String, String) {
+        let file = match krate {
+            "mandate-dispatcher" => "crates/mandate-dispatcher/src/email.rs".to_owned(),
+            "mandate-mail-smtp" => "crates/mandate-mail-smtp/src/lib.rs".to_owned(),
+            other => format!("crates/{other}/src/lib.rs"),
+        };
+        (krate.to_owned(), file, src.to_owned())
+    }
+
+    fn elsewhere(krate: &str, src: &str) -> (String, String, String) {
         (
             krate.to_owned(),
-            format!("crates/{krate}/src/lib.rs"),
+            format!("crates/{krate}/src/other.rs"),
             src.to_owned(),
         )
+    }
+
+    fn fails(sources: &[(String, String, String)]) -> Vec<String> {
+        let problems = transport_problems(&guard(), sources);
+        assert!(
+            !problems.is_empty(),
+            "{:?} passes",
+            sources.iter().map(|s| &s.2).collect::<Vec<_>>()
+        );
+        problems
     }
 
     fn package(name: &str, deps: &[&str]) -> Package {
@@ -226,58 +373,112 @@ mod tests {
     }
 
     #[test]
-    fn the_allowed_implementors_pass_in_their_own_crates() {
+    fn the_allowed_implementors_pass_in_their_own_files() {
         let sources = [
             source(
                 "mandate-dispatcher",
-                "impl MailTransport for RecordedTransport { }",
+                "pub trait MailTransport { }\npub struct RecordedTransport;\n\
+                 impl MailTransport for RecordedTransport { }\n\
+                 impl<T: MailTransport> Provider for EmailProvider<T> where T: Send + MailTransport { }\n\
+                 fn f(t: &mut dyn MailTransport, u: impl MailTransport) { }",
             ),
             source(
                 "mandate-mail-smtp",
-                "impl mandate_dispatcher::MailTransport for FounderSmtpTransport { }",
+                "use mandate_dispatcher::{FounderMail, MailTransport};\npub struct FounderSmtpTransport;\n\
+                 impl MailTransport for FounderSmtpTransport where Self: Sized { }",
             ),
-            source(
+            elsewhere(
+                "mandate-dispatcher",
+                "pub use email::{EmailProvider, MailTransport, RecordedTransport};",
+            ),
+            elsewhere(
                 "mandate-dispatcher",
                 "/// impl MailTransport for Other\nconst X: &str = \"impl MailTransport for Other\";",
             ),
+            elsewhere("mandate-gateway", "pub struct RecordedTransport;"),
         ];
         assert_eq!(transport_problems(&guard(), &sources), Vec::<String>::new());
     }
 
     #[test]
     fn any_other_implementor_fails() {
-        let cases = [
+        for (krate, src) in [
             (
                 "mandate-dispatcher",
                 "impl MailTransport for SmtpTransport { }",
-                "SmtpTransport",
             ),
             (
                 "mandate-api",
                 "impl MailTransport for RecordedTransport { }",
-                "RecordedTransport",
             ),
             (
                 "mandate-dispatcher",
                 "impl<T: Send> MailTransport for T { }",
-                "T",
             ),
             (
                 "mandate-dispatcher",
                 "impl MailTransport for Box<dyn Send> { }",
-                "Box",
             ),
             (
                 "mandate-dispatcher",
-                "impl MailTransport for &mut RecordedFake { }",
-                "RecordedFake",
+                "impl MailTransport for &mut RecordedTransport { }",
             ),
-        ];
-        for (krate, src, ty) in cases {
-            let problems = transport_problems(&guard(), &[source(krate, src)]);
-            assert_eq!(problems.len(), 1, "{src}");
-            assert!(problems[0].contains(&format!("`{ty}`")), "{problems:?}");
+            (
+                "mandate-dispatcher",
+                "impl MailTransport for (RecordedTransport, E) { }",
+            ),
+            ("mandate-dispatcher", "impl MailTransport for dyn Send { }"),
+            (
+                "mandate-dispatcher",
+                "impl MailTransport for evil::RecordedTransport { }",
+            ),
+            (
+                "mandate-dispatcher",
+                "impl MailTransport for crate::email::RecordedTransport { }",
+            ),
+        ] {
+            fails(&[source(krate, src)]);
         }
+        fails(&[elsewhere(
+            "mandate-dispatcher",
+            "impl MailTransport for RecordedTransport { }",
+        )]);
+    }
+
+    #[test]
+    fn a_macro_handed_the_trait_fails() {
+        for src in [
+            "macro_rules! m { ($t:path, $s:ty) => { impl $t for $s {} } }\nm!(MailTransport, Evil);",
+            "macro_rules! m { ($t:ident) => { use crate::email::$t as T; } }\nm!(MailTransport);",
+            "m!(x: MailTransport, Evil);",
+            "m![crate::email::MailTransport];",
+            "macro_rules! m { ($s:ty) => { impl MailTransport for $s {} } }",
+        ] {
+            fails(&[elsewhere("mandate-dispatcher", src)]);
+        }
+    }
+
+    #[test]
+    fn a_renamed_trait_or_a_borrowed_name_fails() {
+        for src in [
+            "use mandate_dispatcher::MailTransport as Transport;",
+            "pub use email::{MailTransport as Sender};",
+            "type RecordedTransport = Evil;",
+            "use evil::Evil as RecordedTransport;",
+            "pub enum RecordedTransport { }",
+            "pub trait MailTransport { }",
+            "fn f() -> MailTransport::Error { }",
+        ] {
+            fails(&[elsewhere("mandate-dispatcher", src)]);
+        }
+        fails(&[source(
+            "mandate-dispatcher",
+            "pub struct RecordedTransport;\nmod evil { pub struct RecordedTransport; }",
+        )]);
+        fails(&[elsewhere(
+            "mandate-mail-smtp",
+            "pub type FounderSmtpTransport = lettre::SmtpTransport;",
+        )]);
     }
 
     #[test]

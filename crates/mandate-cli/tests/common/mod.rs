@@ -234,6 +234,9 @@ pub struct Journal {
     pub behind_next: u32,
     /// Appends to commit and then answer `Ambiguous`.
     pub ambiguous_next: u32,
+    /// Drafts another writer commits just before the next control-stream append, after the
+    /// command has read the rows it decided on.
+    pub land_before_next: Vec<Vec<u8>>,
     /// Commit the next control-stream append, answer it `Ambiguous`, and answer every later one
     /// `Unavailable`, until cleared.
     pub lost_for_good: bool,
@@ -369,6 +372,11 @@ impl ControlJournal for Journal {
             return Ok(AppendOutcome::Fenced {
                 current_epoch: state.0,
             });
+        }
+        if stream.as_str() == CONTROL && !self.land_before_next.is_empty() {
+            let landed: Vec<Vec<u8>> = std::mem::take(&mut self.land_before_next);
+            let refs: Vec<&[u8]> = landed.iter().map(Vec::as_slice).collect();
+            self.store(stream, recorded_at, &refs)?;
         }
         if self.behind_next > 0 {
             self.behind_next -= 1;

@@ -17,7 +17,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, anyhow};
 use clap::{Args, Subcommand, ValueEnum};
+use mandate_connections::record::ConnectionId;
 use mandate_vault::SourceError;
+use mandate_vault::credentials::{check_credential_dir, read_token_file, write_credentials};
+use mandate_vault::openbao::{OpenBaoConfig, provision};
+use mandate_vault::policy::Mounts;
 use mandate_vault_local::VaultError;
 use mandate_vault_local::import::{import_client_secret, resolve_ids};
 use mandate_vault_local::startup::{Inputs, Role};
@@ -128,7 +132,34 @@ pub fn run_import(
 }
 
 /// Runs the provisioning and prints, to `out`, the name of each file written and nothing else.
-/// A refusal names its reason code; none carries a token, a secret id, or a response body.
-pub fn run_provision(_args: &ProvisionArgs, _out: &mut impl Write) -> anyhow::Result<()> {
-    Err(anyhow!(SourceError::Unimplemented { story: "E21-32" }))
+/// `--out` is checked before the vault is reached, so a directory the write would refuse leaves no
+/// secret id issued and unwritten. A refusal names its reason code; none carries a token, a
+/// secret id, or a response body.
+pub fn run_provision(args: &ProvisionArgs, out: &mut impl Write) -> anyhow::Result<()> {
+    let refused = |e: SourceError| anyhow!("{e} ({})", e.code());
+    let connections = args
+        .connections
+        .iter()
+        .map(|id| {
+            ConnectionId::new(id).map_err(|_| anyhow!("a connection id is malformed (connection)"))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let operator = read_token_file(&args.operator_token_file).map_err(refused)?;
+    check_credential_dir(&args.out, &connections).map_err(refused)?;
+    let config = OpenBaoConfig {
+        address: args.address.clone(),
+        ca_pem: fs::read(&args.ca).map_err(|_| refused(SourceError::Config))?,
+        mounts: Mounts::default(),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("starting the provisioning's runtime")?;
+    let credentials = runtime
+        .block_on(provision(&config, &operator, &connections))
+        .map_err(refused)?;
+    for name in write_credentials(&args.out, &credentials).map_err(refused)? {
+        writeln!(out, "{name}")?;
+    }
+    Ok(())
 }

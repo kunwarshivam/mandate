@@ -20,9 +20,10 @@
 //!
 //! Every entry point returns a `Result`, so a stub reports `Unimplemented` (DEC-77).
 
-use mandate_notify::email::{FounderAddress, FounderMail};
+use mandate_notify::email::{FounderAddress, FounderMail, founder_mail};
 use mandate_notify::{
-    AddressHandle, IdempotencyKey, Notification, NotifyError, Origin, Outcome, Provider, Recipient,
+    AddressHandle, IdempotencyKey, Notification, NotifyError, Origin, Outcome, Provider,
+    PushChannel, Reason, Recipient,
 };
 
 /// Why a transport did not take a message: a closed code, holding nothing the provider said.
@@ -78,8 +79,7 @@ impl RecordedTransport {
     /// # Errors
     /// None once implemented. The `Result` is the stub API's shape.
     pub fn bound_to(address: FounderAddress) -> Result<Self, NotifyError> {
-        let _ = address;
-        Err(NotifyError::Unimplemented { story: "E8-11" })
+        Self::failing(address, Vec::new())
     }
 
     /// A fixture transport bound to `address` that answers `script`'s failures first, in order.
@@ -87,8 +87,13 @@ impl RecordedTransport {
     /// # Errors
     /// None once implemented. The `Result` is the stub API's shape.
     pub fn failing(address: FounderAddress, script: Vec<MailFailure>) -> Result<Self, NotifyError> {
-        let _ = (address, script);
-        Err(NotifyError::Unimplemented { story: "E8-11" })
+        let mut script = script;
+        script.reverse();
+        Ok(Self {
+            address,
+            script,
+            captured: Vec::new(),
+        })
     }
 
     /// The wire form of every message taken, in order.
@@ -96,8 +101,7 @@ impl RecordedTransport {
     /// # Errors
     /// None once implemented. The `Result` is the stub API's shape.
     pub fn captured(&self) -> Result<&[Vec<u8>], NotifyError> {
-        let _ = (&self.address, &self.script, &self.captured);
-        Err(NotifyError::Unimplemented { story: "E8-11" })
+        Ok(&self.captured)
     }
 }
 
@@ -107,8 +111,14 @@ impl MailTransport for RecordedTransport {
         mail: &FounderMail,
         key: &IdempotencyKey,
     ) -> Result<Result<Submitted, MailFailure>, NotifyError> {
-        let _ = (mail, key);
-        Err(NotifyError::Unimplemented { story: "E8-11" })
+        let _ = key;
+        if let Some(failure) = self.script.pop() {
+            return Ok(Err(failure));
+        }
+        self.captured.push(mail.wire(&self.address)?);
+        Ok(Ok(Submitted {
+            message_id: format!("recorded-{}", self.captured.len()),
+        }))
     }
 }
 
@@ -125,8 +135,7 @@ impl<T: MailTransport> EmailProvider<T> {
     /// # Errors
     /// None once implemented. The `Result` is the stub API's shape.
     pub fn new(founder: Recipient, transport: T) -> Result<Self, NotifyError> {
-        let _ = (founder, transport);
-        Err(NotifyError::Unimplemented { story: "E8-11" })
+        Ok(Self { founder, transport })
     }
 
     /// The transport, for a test to read what it captured.
@@ -134,8 +143,7 @@ impl<T: MailTransport> EmailProvider<T> {
     /// # Errors
     /// None once implemented. The `Result` is the stub API's shape.
     pub fn transport(&self) -> Result<&T, NotifyError> {
-        let _ = (&self.founder, &self.transport);
-        Err(NotifyError::Unimplemented { story: "E8-11" })
+        Ok(&self.transport)
     }
 }
 
@@ -147,7 +155,48 @@ impl<T: MailTransport> Provider for EmailProvider<T> {
         address: &AddressHandle,
         key: &IdempotencyKey,
     ) -> Result<Outcome, NotifyError> {
-        let _ = (origin, notification, address, key);
-        Err(NotifyError::Unimplemented { story: "E8-11" })
+        let refused = Outcome::Permanent {
+            reason: Reason::RecipientNotPermitted,
+        };
+        if address.channel != PushChannel::Email || address.recipient != self.founder {
+            return Ok(refused);
+        }
+        let mail = match founder_mail(origin, notification) {
+            Ok(mail) => mail,
+            Err(NotifyError::MailNotPermitted) => return Ok(refused),
+            Err(e) => return Err(e),
+        };
+        Ok(match self.transport.submit(&mail, key)? {
+            Ok(submitted) => Outcome::Accepted {
+                provider_message_id: submitted.message_id,
+            },
+            Err(failure) => outcome_of(failure),
+        })
+    }
+}
+
+/// A transport failure's outcome (spec §5.2, DEC-2510 item 3): the failures a later attempt may
+/// clear are retryable, and the provider's refusals of the sender, the address, or the size are
+/// permanent.
+fn outcome_of(failure: MailFailure) -> Outcome {
+    match failure {
+        MailFailure::Timeout => Outcome::Retryable {
+            reason: Reason::Timeout,
+        },
+        MailFailure::RateLimited => Outcome::Retryable {
+            reason: Reason::RateLimited,
+        },
+        MailFailure::Unavailable => Outcome::Retryable {
+            reason: Reason::ProviderError,
+        },
+        MailFailure::AuthFailed => Outcome::Permanent {
+            reason: Reason::AuthFailed,
+        },
+        MailFailure::AddressRejected => Outcome::Permanent {
+            reason: Reason::AddressRejected,
+        },
+        MailFailure::TooLarge => Outcome::Permanent {
+            reason: Reason::TooLarge,
+        },
     }
 }
