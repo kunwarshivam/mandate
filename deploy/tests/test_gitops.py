@@ -826,14 +826,16 @@ def test_rendered_objects_match_the_kubernetes_schemas(overlay, tmp_path):
 # policies, and the runbook. A
 # manifest anywhere else would be reconciled by nothing, or checked by nothing.
 # The external hosts each process may reach in a hosted cluster (DEC-2058), written out here from the
-# decision, not read from the overlay: infrastructure §3.1's external slots, as names. Paper only:
-# Alpaca's live trading host is never one of them (AGENTS.md rule 8).
+# decision, not read from the overlay: infrastructure §3.1's external slots, as names. Alpaca's live
+# host is the token-exchange Job's alone, for its one OAuth call (DEC-821 items 2 and 4, DEC-2059);
+# every other process trades on paper only (AGENTS.md rule 8).
 FQDN_EGRESS = {
     "api": {"wyyxngmblqqokcvraflx.supabase.co"},
     "control": {"wyyxngmblqqokcvraflx.supabase.co"},
     "executor": {"paper-api.alpaca.markets"},
     "data": {"data.alpaca.markets", "stream.data.alpaca.markets"},
     "model-gateway": {"openrouter.ai"},
+    "token-exchange": {"api.alpaca.markets"},
 }
 LIVE_HOST = re.compile(r"(?<![\w.-])api\.alpaca\.markets\b")
 KUBE_DNS = {"io.kubernetes.pod.namespace": "kube-system", "k8s-app": "kube-dns"}
@@ -842,8 +844,25 @@ KUBE_DNS = {"io.kubernetes.pod.namespace": "kube-system", "k8s-app": "kube-dns"}
 def fqdn_egress(docs: list[dict], hosts: dict[str, set[str]]) -> list[str]:
     """Every CiliumNetworkPolicy in a hosted overlay lets exactly one process of the workspace reach
     exactly its own hosts, by exact name on TCP 443, after asking the cluster DNS through Cilium's
-    proxy; nothing else, no ingress. Every process `hosts` names has one, and no live host appears."""
-    problems = [f"{d['kind']} {d['metadata']['name']} names api.alpaca.markets" for d in docs if LIVE_HOST.search(str(d))]
+    proxy; nothing else, no ingress. Every process `hosts` names has one. Alpaca's live host appears
+    once at most, and only as an exact name in the one policy that selects the workspace's
+    token-exchange pods (DEC-2059)."""
+    problems = []
+    live = sum(len(LIVE_HOST.findall(str(d))) for d in docs)
+    granted = [
+        d
+        for d in docs
+        if d["kind"] == "CiliumNetworkPolicy"
+        and d["spec"].get("endpointSelector", {}).get("matchLabels")
+        == {"mandate.dev/workspace": "ws1", "mandate.dev/process": "token-exchange"}
+        and any(
+            f == {"matchName": "api.alpaca.markets"}
+            for r in d["spec"].get("egress", [])
+            for f in r.get("toFQDNs", [])
+        )
+    ]
+    if live != len(granted) or len(granted) > 1:
+        problems.append(f"api.alpaca.markets appears {live} times, granted to the token exchange {len(granted)} times")
     seen = set()
     for policy in [d for d in docs if d["kind"] == "CiliumNetworkPolicy"]:
         name = policy["metadata"]["name"]
@@ -910,6 +929,26 @@ def test_each_fqdn_egress_bug_is_caught(tmp_path):
         lambda: policy("control")["spec"]["endpointSelector"]["matchLabels"].pop("mandate.dev/workspace"),
         lambda: policy("data")["spec"].update(ingress=[{}]),
         lambda: docs.remove(policy("model-gateway")),
+        lambda: host_rule("data")["toFQDNs"].append({"matchName": "api.alpaca.markets"}),
+        lambda: host_rule("token-exchange")["toFQDNs"].append({"matchName": "paper-api.alpaca.markets"}),
+        lambda: host_rule("token-exchange")["toPorts"][0]["ports"].append({"port": "80", "protocol": "TCP"}),
+        lambda: host_rule("token-exchange")["toFQDNs"].append({"matchPattern": "*.alpaca.markets"}),
+        lambda: policy("token-exchange")["spec"]["egress"].append({"toCIDR": ["0.0.0.0/0"]}),
+        lambda: policy("token-exchange")["spec"]["endpointSelector"]["matchLabels"].pop("mandate.dev/workspace"),
+        lambda: docs.append(
+            {
+                **copy.deepcopy(policy("token-exchange")),
+                "metadata": {"name": "egress-fqdn-token-exchange-ws2", "namespace": "ws-ws1"},
+                "spec": {
+                    **copy.deepcopy(policy("token-exchange")["spec"]),
+                    "endpointSelector": {
+                        "matchLabels": {"mandate.dev/workspace": "ws2", "mandate.dev/process": "token-exchange"}
+                    },
+                },
+            }
+        ),
+        lambda: docs.append({**copy.deepcopy(policy("token-exchange")), "metadata": {"name": "twice", "namespace": "ws-ws1"}}),
+        lambda: docs.append({"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "x"}, "data": {"h": "api.alpaca.markets"}}),
     ]
     pristine = copy.deepcopy(docs)
     for seed in seeds:
