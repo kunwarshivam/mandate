@@ -280,6 +280,10 @@ the spec invariants (DP-n) its tests cover.
   to fail on a seeded bug; zero missed mutants. *Slice 2:* corporate actions through the
   accounting fold, several instruments at once, and one shared mapping from a mandate document to
   the gate's mandate for the backtest and the shell.
+  *The risk state's corporate actions landed* ([DEC-2303](decisions/DEC-2303.md), #1656, #1671,
+  #1672): MC-R27 to MC-R32 pass. *Follow-up:* `dividends_due` is folded but not reported; a spec and
+  code pair adds it to `ref.py`'s risk snapshot and `mandate-spec`'s `Snapshot`, with every
+  `risk_state` case's expectation and the refcases harness reading it.
 - **E4-5 (Must, M5)** As an owner, I want my backtest report kept as a record with a stable shape,
   so that the go-live screen and the web app show exactly the report that was produced
   ([DEC-1001](decisions/DEC-1001.md)). *Accepted when:* the report is canonical JSON at
@@ -565,6 +569,10 @@ the spec invariants (DP-n) its tests cover.
     latch oracle that derives the latched set from the appended records alone.
   - **C:** the wiring in `mandate-shell`'s `adapters.rs`, `paper/gate.rs`, and `paper/context.rs`,
     which are R0 files. It waits for R0 to close, or for the founder's call.
+  - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
+    "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
+    one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which
+    fails closed through staleness.
 
   *Accepted when:* every MC-R, MC-T, MC-L, and MC-W case, driven through journaled records, gives the
   harness's snapshot and events. A restart rebuilds the same view. Every fail-closed cause holds
@@ -855,6 +863,20 @@ after U-A1 to U-A5 are recorded.
   `xtask/src/main.rs` is empty, and `cargo xtask live-feature` still exits 0 on the repository.
   Beside it, the stronger artifact-level check DEC-851 item 6's threat model names: assert from
   `cargo metadata` and the build plan that no CI job resolves the `live` feature.
+- **E7-29 (Must, M6, lane X's next story after E21-30's X1b)** As an owner, I want every exit at
+  the market handed to the executor core as a market order, so that none is held waiting on a
+  floor I did not confirm. Today the core takes only limit orders from a handoff, so the executor
+  process prices an owner's market exit at the floor its instrument-scoped `OwnerExitRequested`
+  confirmed, and holds any other exit at the market with one opaque alert (`owner_exit_unpriced`
+  or `exit_unpriced`), a gap against rule 13 that [DEC-2033](decisions/DEC-2033.md) item 4
+  records. *Accepted when:* `IntentBody::Order` carries an order type; the core receives, gates
+  and submits a market exit (trading spec §5.1, §5.5) with the same write-before-acting and
+  rule-13 exemptions as a limit exit; the executor process hands every exit and raises neither
+  alert; `Purpose::exempt_from_pacing` is checked for `OwnerExit` (owner exits are paced only by
+  participation caps, rule 13); and the owner-exit property (`mandate-executord`'s
+  `tests/owner_exits.rs`) is re-seeded once the fixture fills, with a held position, gate facts
+  and an `Unknown` order in the instrument, and shows no owner exit is refused for conduct,
+  eligibility, day-trade budget, buying power or opening-session reasons.
 
 ### E8 Escalation and approvals
 
@@ -2851,13 +2873,21 @@ enables `live` (ES-23, OPS-5).
   ServiceAccount and a Role over pods alone, bounded by a ValidatingAdmissionPolicy to pods shaped
   like its templates, its `kube-api` egress and an egress gate that probes a denied destination, the
   runtime's and executor's pod templates, which mount no service-account token, and the
-  `mandate.dev/subject-key` label. *Left:* reading the account from `AgentDeployed`
-  version 2 ([DEC-1171](decisions/DEC-1171.md)), until which the process starts nothing for a
-  deployment; the Compose adapter; the restart drill through `cargo xtask cell drill`; the owner's
-  resume lifting a crash-loop pause once the runtime copies the pause (E21-30); alerts through the
-  cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting exited pods; the
-  CLI and the workspace API writing version 2, and the writers' checks of rules 200 and 201 (a
-  writer writes version 2 exactly when rule 201 holds, and version 1 otherwise, as today). From
+  `mandate.dev/subject-key` label. *Slice 3* ([DEC-1171](decisions/DEC-1171.md),
+  [DEC-1173](decisions/DEC-1173.md)): `AgentDeployed` version 2 registered, rule 201 in §11's
+  `connection_lifecycle_mismatch` and rule 200 in §9.2's mapping; the manager reads a deployment's
+  account from version 2 and its connection's establishment, and the resolver is gone; a stop is
+  final, read or not, and a version-1 deployment raises `deployment_unread`; the CLI and the
+  workspace API write version 2 exactly when rule 201 holds, rule 200 holding by construction (the
+  connection taken from the document, the draft appended at the head read), and never redeploy a
+  stopped agent's id. *Left:* the Compose adapter; the restart drill through `cargo xtask cell
+  drill`; the owner's resume lifting a crash-loop pause once the runtime copies the pause (E21-30);
+  alerts through the cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting
+  exited pods; the demo's runtime, which needs a version-2 deployment and so `connection record`
+  for the demo's paper connection, waiting on the executor's connect check (E21-30, lane X). From
+  #1737's review, minors left under the freeze rule: a version-2 deployment rule 201 refuses (its
+  connection revoked or never established) starts nothing silently, where a once-per-process opaque
+  alert like `deployment_unread` would show it; and RB-14 has no page under `docs/runbooks/`. From
   slice 2's review, minors left under the freeze rule:
   - The manager's egress gate reads any connection failure on port 9153 as filtered, so a dead or
     restarting resolver fails open; a positive control first (TCP 53 on the same address) would
@@ -2866,20 +2896,6 @@ enables `live` (ES-23, OPS-5).
   - The chart test of the gate seeds no 9153 allow in the manager's policy.
   - `PgControl`'s `rows_after` reads the whole control stream on every pass.
   - `pg.rs` has no competing-writer test for the writer epoch taken for each append.
-  Follow-ups from DEC-1171's review (minors, freeze rule), decided in
-  [DEC-1173](decisions/DEC-1173.md) and specified in journal spec v0.56:
-  - m1 (decided, writers to build): an agent id is deployed once, so a writer refuses an agent an
-    `AgentStopped` names; the CLI's `agent_stopped` and the workspace API's refusal land with the
-    writers.
-  - m2 (done in the vectors; the manager to build): a stop is final even for a deployment the
-    manager never read.
-  - m3 (decided; the manager to build): a version-1 deployment is retired before the manager runs
-    its workspace, and the manager raises `deployment_unread` for one it finds.
-  - m4 (done): the oracle's revocation-after-deployment case now fails two seeded bugs, and a
-    vector shows rule 201 refusing an account stream's copy.
-  - m5 (done): the §9 catalogue row names version 2.
-  - m6 (half done): `docs/specs/workspace-api.md` states the version its deployment writes;
-    `docs/design/infrastructure.md` changes with the manager's code.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*

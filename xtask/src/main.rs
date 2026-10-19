@@ -5266,6 +5266,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "DO_NOT_TRACK",
     "EVENT",
     "FAST_RESULT",
+    "FLUX_SHA256",
+    "FLUX_VERSION",
     "FULL_CHECKS_RESULT",
     "FULL_CHECKS_SELECTED",
     "FULL_RESULT",
@@ -5289,6 +5291,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_MUTANTS_PLANNED",
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
+    "MANDATE_GITOPS_REQUIRED",
     "MANDATE_MUTANT_SHARD",
     "MANDATE_OPENBAO_ADDR",
     "MANDATE_OPENBAO_CA",
@@ -15531,6 +15534,34 @@ mod tests {
                 "`full` with schema-mutants {result:?}"
             );
         }
+        Ok(())
+    }
+
+    /// DEC-2611 (amending DEC-2606): CodeQL's pushes to `main` share one group in which a started
+    /// analysis finishes and a newer push replaces only the one waiting, so the latest commit,
+    /// which holds every earlier one, is always analysed; a pull request's runs cancel the older
+    /// run of their ref; the weekly schedule has a group of its own.
+    #[test]
+    fn codeql_runs_one_analysis_of_main_at_a_time() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/codeql.yml"))?;
+        assert!(
+            workflow.contains(
+                "concurrency:\n  group: codeql-${{ github.event_name == 'schedule' && \
+                 github.run_id || github.ref }}\n  cancel-in-progress: ${{ github.event_name == \
+                 'pull_request' }}\n"
+            ),
+            "pushes to main share codeql-refs/heads/main and are never cancelled once started, a \
+             pull request's runs cancel their older run, and the schedule has its own group \
+             (DEC-2611)"
+        );
+        assert!(
+            workflow.contains("  push:\n    branches: [ \"main\" ]\n"),
+            "every push to main is still analysed (DEC-2606 item 3)"
+        );
+        assert!(
+            workflow.contains("  schedule:\n    - cron: '42 2 * * 1'\n"),
+            "the weekly analysis stays (DEC-2606 item 3)"
+        );
         Ok(())
     }
 

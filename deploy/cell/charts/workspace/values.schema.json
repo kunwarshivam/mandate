@@ -333,6 +333,10 @@
         "owner": {
           "type": "string",
           "pattern": "^$|^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "research": {
+          "type": "string",
+          "pattern": "^$|^/usr/local/share/mandate/research$"
         }
       }
     },

@@ -3,7 +3,7 @@
 //! a change to any of them is a new pin (DEC-431 item 5).
 
 use mandate_canon::{Int, Key, Object, Value};
-use mandate_gateway::registry::{Identity, Mode, PinnedContent, Template};
+use mandate_gateway::registry::{Identity, Mode, PinnedContent, Snapshot, Template};
 
 use crate::output::OutputBounds;
 use crate::plan::RetrievalPlan;
@@ -49,7 +49,55 @@ pub struct ResearchEntry {
     pub bounds: OutputBounds,
 }
 
+/// Why a recorded research entry could not be read: the member that is missing or not what it
+/// must be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryError {
+    Member(&'static str),
+}
+
 impl ResearchEntry {
+    /// The research entry a recording names (DEC-2210 item 1, DEC-2247 item 1): `model_id`,
+    /// `model_version`, `provider`, `model_name`, a dated `snapshot`, `deadline_ms`,
+    /// `max_output_tokens` and `seed`, with the fixed `v0_1` plan and bounds. Nothing is defaulted:
+    /// the recorded bundle's loader and `model register --entry` read it here alike, so the pin a
+    /// run carries and the hash a registration records are of the same content.
+    ///
+    /// # Errors
+    /// [`EntryError::Member`] naming the first member that is missing, empty, or out of range.
+    pub fn recorded(entry: &Value) -> Result<Self, EntryError> {
+        let text = |member: &'static str| {
+            entry
+                .get(member)
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_owned)
+                .ok_or(EntryError::Member(member))
+        };
+        let int = |member: &'static str| {
+            entry
+                .get(member)
+                .and_then(Value::as_int)
+                .ok_or(EntryError::Member(member))
+        };
+        Ok(Self {
+            model_id: text("model_id")?,
+            model_version: text("model_version")?,
+            identity: Identity {
+                provider: text("provider")?,
+                model_name: text("model_name")?,
+                snapshot: Snapshot::Dated(text("snapshot")?),
+                quantization: None,
+            },
+            deadline_ms: int("deadline_ms")?,
+            max_output_tokens: u32::try_from(int("max_output_tokens")?)
+                .map_err(|_| EntryError::Member("max_output_tokens"))?,
+            seed: Some(int("seed")?),
+            plan: RetrievalPlan::v0_1(),
+            bounds: OutputBounds::v0_1(),
+        })
+    }
+
     /// The pinned content the registry holds and the mandate's pin names by its hash.
     pub fn content(&self) -> PinnedContent {
         PinnedContent {
