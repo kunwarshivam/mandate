@@ -1,0 +1,161 @@
+[
+  {
+    "label": "no account",
+    "set": {
+      "/account_ref": null,
+      "/orders": []
+    }
+  },
+  {
+    "label": "no intent",
+    "set": {
+      "/orders/0/intent_id": null
+    }
+  },
+  {
+    "label": "a market order",
+    "set": {
+      "/orders/0/type": "market",
+      "/orders/0/limit_price": null
+    }
+  },
+  {
+    "label": "a protective stop",
+    "set": {
+      "/orders/0/stop_price": "500"
+    }
+  },
+  {
+    "label": "state not reported",
+    "set": {
+      "/orders/0/state": null,
+      "/orders/0/filled_qty": null
+    }
+  },
+  {
+    "label": "a sell",
+    "set": {
+      "/orders/0/side": "sell"
+    }
+  },
+  {
+    "label": "state intent",
+    "set": {
+      "/orders/0/state": "intent"
+    }
+  },
+  {
+    "label": "state submitting",
+    "set": {
+      "/orders/0/state": "submitting"
+    }
+  },
+  {
+    "label": "state accepted",
+    "set": {
+      "/orders/0/state": "accepted"
+    }
+  },
+  {
+    "label": "state partially_filled",
+    "set": {
+      "/orders/0/state": "partially_filled"
+    }
+  },
+  {
+    "label": "state pending_cancel",
+    "set": {
+      "/orders/0/state": "pending_cancel"
+    }
+  },
+  {
+    "label": "state pending_replace",
+    "set": {
+      "/orders/0/state": "pending_replace"
+    }
+  },
+  {
+    "label": "state unknown",
+    "set": {
+      "/orders/0/state": "unknown"
+    }
+  },
+  {
+    "label": "state filled",
+    "set": {
+      "/orders/0/state": "filled"
+    }
+  },
+  {
+    "label": "state canceled",
+    "set": {
+      "/orders/0/state": "canceled"
+    }
+  },
+  {
+    "label": "state rejected",
+    "set": {
+      "/orders/0/state": "rejected"
+    }
+  },
+  {
+    "label": "state expired",
+    "set": {
+      "/orders/0/state": "expired"
+    }
+  },
+  {
+    "label": "state replaced",
+    "set": {
+      "/orders/0/state": "replaced"
+    }
+  },
+  {
+    "label": "state abandoned",
+    "set": {
+      "/orders/0/state": "abandoned"
+    }
+  },
+  {
+    "label": "purpose open",
+    "set": {
+      "/orders/0/purpose": "open"
+    }
+  },
+  {
+    "label": "purpose increase",
+    "set": {
+      "/orders/0/purpose": "increase"
+    }
+  },
+  {
+    "label": "purpose discretionary_exit",
+    "set": {
+      "/orders/0/purpose": "discretionary_exit"
+    }
+  },
+  {
+    "label": "purpose risk_exit",
+    "set": {
+      "/orders/0/purpose": "risk_exit"
+    }
+  },
+  {
+    "label": "purpose owner_exit",
+    "set": {
+      "/orders/0/purpose": "owner_exit"
+    }
+  },
+  {
+    "label": "purpose protective",
+    "set": {
+      "/orders/0/purpose": "protective"
+    }
+  },
+  {
+    "label": "purpose flatten",
+    "set": {
+      "/orders/0/purpose": "flatten"
+    }
+  }
+]
