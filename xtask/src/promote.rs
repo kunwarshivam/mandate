@@ -208,6 +208,28 @@ fn cluster_dir(root: &Path, environment: Environment) -> PathBuf {
     root.join("deploy/gitops/clusters").join(environment.name())
 }
 
+/// Writes each file beside its target first and renames it into place only once every one is on
+/// disk, so a failed write leaves the overlay as it was, with no file half written and no stray
+/// sibling (DEC-2048 item 3). The renames run one after another, so a rename that fails can still
+/// leave one file replaced and the other not; the next promotion rewrites both.
+fn write_all(files: &[(PathBuf, String)]) -> Result<()> {
+    let mut written: Vec<(PathBuf, &Path)> = Vec::new();
+    for (path, contents) in files {
+        let beside = path.with_extension("yaml.promoting");
+        if let Err(error) = fs::write(&beside, contents) {
+            for (left, _) in &written {
+                fs::remove_file(left).ok();
+            }
+            return Err(error).with_context(|| format!("writing {}", beside.display()));
+        }
+        written.push((beside, path));
+    }
+    for (beside, path) in written {
+        fs::rename(&beside, path).with_context(|| format!("replacing {}", path.display()))?;
+    }
+    Ok(())
+}
+
 fn read(path: &Path) -> Result<String> {
     fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
 }
@@ -241,8 +263,10 @@ pub(crate) fn promote(
     };
     let dir = cluster_dir(root, environment);
     let charts = rewrite_charts(&read(&dir.join("charts.yaml"))?, &digests)?;
-    fs::write(dir.join("charts.yaml"), charts)?;
-    fs::write(dir.join("images.yaml"), images_yaml(environment, &images))?;
+    write_all(&[
+        (dir.join("charts.yaml"), charts),
+        (dir.join("images.yaml"), images_yaml(environment, &images)),
+    ])?;
     eprintln!(
         "    gitops: wrote {}'s charts.yaml and images.yaml",
         environment.name()
@@ -303,6 +327,29 @@ mod tests {
             }
         }
         Ok(root)
+    }
+
+    /// A write that fails partway leaves every file as it was and no sibling behind.
+    #[test]
+    fn a_failed_write_changes_nothing() -> Result<()> {
+        let root = scratch_root("atomic")?;
+        let dir = cluster_dir(&root, Environment::Staging);
+        let charts = dir.join("charts.yaml");
+        let before = read(&charts)?;
+        let missing = dir.join("absent").join("images.yaml");
+        assert!(
+            write_all(&[
+                (charts.clone(), "changed\n".to_owned()),
+                (missing, String::new())
+            ])
+            .is_err()
+        );
+        assert_eq!(read(&charts)?, before);
+        assert!(!charts.with_extension("yaml.promoting").exists());
+        write_all(&[(charts.clone(), "changed\n".to_owned())])?;
+        assert_eq!(read(&charts)?, "changed\n");
+        fs::remove_dir_all(&root)?;
+        Ok(())
     }
 
     #[test]
