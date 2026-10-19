@@ -107,6 +107,8 @@ impl Bao {
         let mounts = Mounts {
             kv: format!("kv-{suffix}"),
             auth: format!("approle-{suffix}"),
+            kubernetes_executor: format!("kubernetes-executor-{suffix}"),
+            kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
         };
         let direct = OpenBaoConfig {
             address: address.clone(),

@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::SourceError;
 use crate::kubernetes::{
-    KubernetesLayout, kubernetes_policy, kubernetes_policy_name, provisioner_policy, role_request,
+    kubernetes_policy, kubernetes_policy_name, provisioner_policy, role_request,
     service_account_name,
 };
 use crate::policy::{Identity, Mounts};
@@ -15,13 +15,8 @@ fn c(id: &str) -> ConnectionId {
     ConnectionId::new(id).unwrap()
 }
 
-fn layout() -> KubernetesLayout {
-    KubernetesLayout {
-        executor_mount: "kubernetes-executor".to_owned(),
-        exchange_mount: "kubernetes-exchange".to_owned(),
-        namespace: "ws-ws1".to_owned(),
-    }
-}
+/// The workspace's namespace, where both kinds' ServiceAccounts are.
+const NAMESPACE: &str = "ws-ws1";
 
 const TEMPLATE: &str =
     "{{identity.entity.aliases.auth_kubernetes_1a2b.metadata.service_account_name}}";
@@ -187,7 +182,7 @@ fn the_provisioners_policy_pins_every_parameter_but_the_name() {
         )
     };
     assert_eq!(
-        provisioner_policy(&Mounts::default(), &layout()),
+        provisioner_policy(&Mounts::default(), NAMESPACE),
         Ok(format!(
             "{}{}",
             block(
@@ -209,28 +204,41 @@ fn the_provisioners_policy_pins_every_parameter_but_the_name() {
 }
 
 #[test]
-fn a_layout_that_is_not_plain_names_is_refused() {
-    let bad: [fn(&mut KubernetesLayout); 6] = [
-        |l| l.executor_mount = "kubernetes/executor".to_owned(),
-        |l| l.exchange_mount = String::new(),
-        |l| l.namespace = "WS".to_owned(),
-        |l| l.namespace = "ws_ws1".to_owned(),
-        |l| l.namespace = "-ws".to_owned(),
-        |l| l.executor_mount = "kubernetes\"\n}".to_owned(),
+fn mounts_or_a_namespace_that_are_not_plain_names_are_refused() {
+    let bad_mounts: [fn(&mut Mounts); 3] = [
+        |m| m.kubernetes_executor = "kubernetes/executor".to_owned(),
+        |m| m.kubernetes_exchange = String::new(),
+        |m| m.kubernetes_executor = "kubernetes\"\n}".to_owned(),
     ];
-    for (at, break_it) in bad.iter().enumerate() {
-        let mut broken = layout();
+    for (at, break_it) in bad_mounts.iter().enumerate() {
+        let mut broken = Mounts::default();
         break_it(&mut broken);
         assert_eq!(
-            provisioner_policy(&Mounts::default(), &broken),
+            provisioner_policy(&broken, NAMESPACE),
             Err(SourceError::Config),
-            "case {at}"
+            "mounts {at}"
         );
         assert_eq!(
-            role_request(&Identity::Executor(c("c1")), &Mounts::default(), &broken)
-                .map(|(path, _)| path),
+            role_request(&Identity::Executor(c("c1")), &broken, NAMESPACE).map(|(path, _)| path),
             Err(SourceError::Config),
-            "case {at}"
+            "mounts {at}"
+        );
+    }
+    for namespace in ["WS", "ws_ws1", "-ws", ""] {
+        assert_eq!(
+            provisioner_policy(&Mounts::default(), namespace),
+            Err(SourceError::Config),
+            "{namespace:?}"
+        );
+        assert_eq!(
+            role_request(
+                &Identity::TokenExchange(c("c1")),
+                &Mounts::default(),
+                namespace
+            )
+            .map(|(path, _)| path),
+            Err(SourceError::Config),
+            "{namespace:?}"
         );
     }
 }
@@ -238,7 +246,7 @@ fn a_layout_that_is_not_plain_names_is_refused() {
 #[test]
 fn an_executors_role_binds_exactly_its_service_account_in_its_namespace() {
     assert_eq!(
-        role_request(&Identity::Executor(c("c1")), &Mounts::default(), &layout()),
+        role_request(&Identity::Executor(c("c1")), &Mounts::default(), NAMESPACE),
         Ok((
             "auth/kubernetes-executor/role/c1".to_owned(),
             json!({
@@ -261,7 +269,7 @@ fn an_exchanges_role_binds_exactly_its_service_account_in_its_namespace() {
         role_request(
             &Identity::TokenExchange(c("c2")),
             &Mounts::default(),
-            &layout()
+            NAMESPACE
         ),
         Ok((
             "auth/kubernetes-exchange/role/c2".to_owned(),
@@ -284,14 +292,14 @@ fn an_exchanges_role_binds_exactly_its_service_account_in_its_namespace() {
 /// the policy's text, not the code that wrote it.
 #[test]
 fn every_role_request_is_one_the_provisioners_policy_allows() {
-    let written = provisioner_policy(&Mounts::default(), &layout());
+    let written = provisioner_policy(&Mounts::default(), NAMESPACE);
     assert!(written.is_ok(), "{written:?}");
     let policy = written.unwrap_or_default();
     for identity in [
         Identity::Executor(c("c1")),
         Identity::TokenExchange(c("Zz_9")),
     ] {
-        let request = role_request(&identity, &Mounts::default(), &layout());
+        let request = role_request(&identity, &Mounts::default(), NAMESPACE);
         assert!(request.is_ok(), "{request:?}");
         let (path, body) = request.unwrap_or_default();
         let mount = path.split('/').nth(1).unwrap_or_default();

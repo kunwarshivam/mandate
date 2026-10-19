@@ -53,32 +53,32 @@ fn is_segment(segment: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// `layout`, refused [`SourceError::Config`] unless its mounts are plain segments and its
-/// namespaces Kubernetes labels.
-fn checked(layout: &KubernetesLayout) -> Result<&KubernetesLayout, SourceError> {
-    let plain = is_segment(&layout.executor_mount)
-        && is_segment(&layout.exchange_mount)
-        && is_label(&layout.namespace);
+/// Refuses, [`SourceError::Config`], Kubernetes mounts that are not plain path segments or a
+/// namespace that is not a Kubernetes label.
+fn checked(mounts: &Mounts, namespace: &str) -> Result<(), SourceError> {
+    let plain = is_segment(&mounts.kubernetes_executor)
+        && is_segment(&mounts.kubernetes_exchange)
+        && is_label(namespace);
     if plain {
-        Ok(layout)
+        Ok(())
     } else {
         Err(SourceError::Config)
     }
 }
 
 /// The executor's place and the exchange's, in that order.
-fn kinds<'a>(mounts: &Mounts, layout: &'a KubernetesLayout) -> [Kind<'a>; 2] {
+fn kinds<'a>(mounts: &'a Mounts, namespace: &'a str) -> [Kind<'a>; 2] {
     [
         Kind {
-            mount: &layout.executor_mount,
-            namespace: &layout.namespace,
+            mount: &mounts.kubernetes_executor,
+            namespace,
             policy: format!("{}-kubernetes-executor", mounts.kv),
             ttl: LEASE_SECS,
             max_ttl: EXECUTOR_TOKEN_MAX_SECS,
         },
         Kind {
-            mount: &layout.exchange_mount,
-            namespace: &layout.namespace,
+            mount: &mounts.kubernetes_exchange,
+            namespace,
             policy: format!("{}-kubernetes-exchange", mounts.kv),
             ttl: GRANT_SECS,
             max_ttl: GRANT_SECS,
@@ -89,16 +89,6 @@ fn kinds<'a>(mounts: &Mounts, layout: &'a KubernetesLayout) -> [Kind<'a>; 2] {
 /// The audience every ServiceAccount token a process logs in with is projected for, so a token
 /// the cluster's API server accepts is not one the vault accepts.
 pub const AUDIENCE: &str = "mandate-vault";
-
-/// Where the per-connection roles live: the Kubernetes auth mount of each kind, and the namespace
-/// both kinds' ServiceAccounts are in, the workspace's own, so its default deny, its egress
-/// policies and its admission rules cover them.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KubernetesLayout {
-    pub executor_mount: String,
-    pub exchange_mount: String,
-    pub namespace: String,
-}
 
 /// The ServiceAccount a connection's executor or token exchange runs as: the connection id's
 /// bytes in lowercase hexadecimal, after an `x` for the exchange, a valid Kubernetes name for
@@ -176,15 +166,14 @@ pub fn kubernetes_policy(
 /// The provisioner's policy, in HCL: it may create, update and read roles on the two Kubernetes
 /// auth mounts and nothing else, every parameter but the ServiceAccount's name pinned to its one
 /// value, so it can neither widen a role's namespace, policy, audience or lifetime nor reach a
-/// policy, a token or a secret. A layout whose mounts are not one plain path segment, or whose
-/// namespace is not a Kubernetes label, is [`SourceError::Config`].
-pub fn provisioner_policy(
-    mounts: &Mounts,
-    layout: &KubernetesLayout,
-) -> Result<String, SourceError> {
-    let layout = checked(layout)?;
+/// policy, a token or a secret. Both kinds' ServiceAccounts are in `namespace`, the workspace's
+/// own, so its default deny, egress policies and admission rules cover them. Kubernetes mounts
+/// that are not one plain path segment, or a namespace that is not a Kubernetes label, are
+/// [`SourceError::Config`].
+pub fn provisioner_policy(mounts: &Mounts, namespace: &str) -> Result<String, SourceError> {
+    checked(mounts, namespace)?;
     let required: Vec<String> = REQUIRED.iter().map(|name| format!("\"{name}\"")).collect();
-    Ok(kinds(mounts, layout)
+    Ok(kinds(mounts, namespace)
         .iter()
         .map(|kind| {
             format!(
@@ -213,15 +202,16 @@ pub fn provisioner_policy(
 }
 
 /// The request that makes `identity`'s role: its path, `auth/<mount>/role/<connection id>`, and
-/// its body, bound to exactly its ServiceAccount in exactly the workspace's namespace. Anything but an
-/// executor or a token exchange is [`SourceError::Config`].
+/// its body, bound to exactly its ServiceAccount in exactly `namespace`, the workspace's. Anything
+/// but an executor or a token exchange, or mounts or a namespace [`provisioner_policy`] refuses, is
+/// [`SourceError::Config`].
 pub fn role_request(
     identity: &Identity,
     mounts: &Mounts,
-    layout: &KubernetesLayout,
+    namespace: &str,
 ) -> Result<(String, Value), SourceError> {
-    let layout = checked(layout)?;
-    let [executor, exchange] = kinds(mounts, layout);
+    checked(mounts, namespace)?;
+    let [executor, exchange] = kinds(mounts, namespace);
     let (kind, connection) = match identity {
         Identity::Executor(connection) => (executor, connection),
         Identity::TokenExchange(connection) => (exchange, connection),
