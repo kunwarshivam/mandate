@@ -1402,6 +1402,95 @@ def test_ingress_only_by_tunnel():
     assert ingress_only_by_tunnel(wide)
 
 
+TUNNEL_TOKEN = "/run/secrets/tunnel/token"
+
+
+def tunnel_route(docs: list[dict]) -> list[str]:
+    """The tunnel reaches the API's loopback listener, the origin lane IAC routes the API's host to
+    (`http://127.0.0.1:8080`), by running in the API's pod: with the API, cloudflared is a second
+    container there and no other pod runs one, so every connector of the tunnel can reach the API;
+    without it, cloudflared runs alone. Only cloudflared reads the tunnel token, it mounts nothing of
+    the API's, and the tunnel's egress policy selects the pod it runs in."""
+    problems = []
+    if "egress-cloudflared" not in policies(docs):
+        return problems
+    runners = [
+        (w, c) for w in workloads(docs) for c in pod_spec(w)["containers"] if c["name"] == "cloudflared"
+    ]
+    api = [w for w in workloads(docs) if w["metadata"]["name"] == "api"]
+    want = api[0]["metadata"]["name"] if api else "cloudflared"
+    if [w["metadata"]["name"] for w, _ in runners] != [want]:
+        problems.append(f"cloudflared runs in {[w['metadata']['name'] for w, _ in runners]}, want [{want!r}]")
+        return problems
+    pod, tunnel = runners[0]
+    selector = policies(docs)["egress-cloudflared"]["spec"]["podSelector"]["matchLabels"]
+    if any(pod["spec"]["template"]["metadata"]["labels"].get(k) != v for k, v in selector.items()):
+        problems.append(f"the tunnel's egress policy selects {selector}, not its pod")
+    token_volume = next(
+        (
+            v["name"]
+            for v in pod_spec(pod).get("volumes", [])
+            if any(i.get("path") == "token" for i in v.get("secret", {}).get("items", []))
+        ),
+        None,
+    )
+    for c in [*pod_spec(pod).get("initContainers", []), *pod_spec(pod)["containers"]]:
+        names = {m["name"] for m in c.get("volumeMounts", [])}
+        if c is tunnel:
+            if token_volume not in names or TUNNEL_TOKEN not in c.get("args", []):
+                problems.append("cloudflared does not read the tunnel token's file")
+            if names - {token_volume, "tmp"}:
+                problems.append(f"cloudflared mounts {sorted(names - {token_volume, 'tmp'})}")
+        elif token_volume in names:
+            problems.append(f"{c['name']} mounts the tunnel token")
+    return problems
+
+
+def tunnelled(*extra: str) -> list[dict]:
+    return render_all("-f", str(CELL / "values" / "managed.yaml"), "--set", "localImages=true", *extra)
+
+
+def test_the_tunnel_runs_beside_the_api():
+    docs = tunnelled()
+    assert tunnel_route(docs) == []
+    api = owner_workload(docs)
+    assert [c["name"] for c in pod_spec(api)["containers"]] == ["api", "cloudflared"]
+    assert api_contained(docs) == [], "the API still listens on its pod's loopback only"
+    assert not [d for d in docs if d["kind"] in ("Service", "Ingress")]
+    alone = render("-f", str(CELL / "values" / "k3s.yaml"))
+    assert tunnel_route(alone) == []
+    assert [d["metadata"]["name"] for d in alone if d["kind"] == "Deployment"] == ["cloudflared"]
+    standalone = next(d for d in alone if d["kind"] == "Deployment" and d["metadata"]["name"] == "cloudflared")
+    seeds = [
+        [*docs, standalone],
+        mutate(docs, "api", "Deployment", lambda w: pod_spec(w)["containers"].pop()),
+        mutate(
+            docs,
+            "egress-cloudflared",
+            "NetworkPolicy",
+            lambda p: p["spec"]["podSelector"]["matchLabels"].update({"mandate.dev/process": "cloudflared"}),
+        ),
+        mutate(
+            docs,
+            "api",
+            "Deployment",
+            lambda w: first_container(w)["volumeMounts"].append(
+                {"name": "tunnel", "mountPath": "/run/secrets/tunnel", "readOnly": True}
+            ),
+        ),
+        mutate(
+            docs,
+            "api",
+            "Deployment",
+            lambda w: pod_spec(w)["containers"][1]["volumeMounts"].append(
+                {"name": "credentials", "mountPath": "/run/credentials", "readOnly": True}
+            ),
+        ),
+    ]
+    for seeded in seeds:
+        assert tunnel_route(seeded), seeded
+
+
 def test_environment_is_paper_or_backtest():
     assert render("--set", "environment=backtest")
     for refused in ("live", "production", ""):

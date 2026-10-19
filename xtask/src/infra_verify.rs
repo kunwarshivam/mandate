@@ -795,39 +795,38 @@ mod tests {
         Ok(())
     }
 
-    /// Until the tunnel connector lands, an unhealthy tunnel or an API Access cannot reach is a
-    /// pending note that fails nothing; an API that answers without Access fails all the same; and
-    /// with nothing pending, both are MISSING.
+    /// The tunnel's connector runs beside the API (DEC-2056), so an unhealthy tunnel or an API
+    /// Access cannot reach fails; a pending change, when one is named, turns either into a note
+    /// that fails nothing; and an API that answers without Access fails whatever is pending.
     #[test]
-    fn the_edge_waits_on_the_connector_but_never_on_an_open_api() -> Result<()> {
+    fn the_edge_fails_unless_a_change_is_pending_but_never_on_an_open_api() -> Result<()> {
         let mut staging = Staging::up();
         staging.tunnel = "down";
         staging.api = 502;
         let text = run(&staging)?;
-        assert_eq!(missing(&text), Vec::<&str>::new(), "{text}");
-        assert_eq!(staging.pauses.get(), 0);
-        for line in [
-            "[pending #1539] the tunnel is healthy (Cloudflare reports down)",
-            "[pending #1539] the API answers only through Access (502 without credentials)",
-        ] {
-            assert!(text.contains(line), "{line}: {text}");
-        }
-        let list = checks(&|args| staging.kubectl(args), &staging, &edge(), None)?;
         assert_eq!(
-            missing(&list.render_titled("infra verify (staging)")),
+            missing(&text),
             [
                 "the tunnel is healthy (Cloudflare reports down)",
                 "the API answers only through Access (502 without credentials)",
-            ]
+            ],
+            "{text}"
         );
-        assert!(!list.complete());
+        let list = checks(&|args| staging.kubectl(args), &staging, &edge(), Some("#1"))?;
+        let text = list.render_titled("infra verify (staging)");
+        assert_eq!(missing(&text), Vec::<&str>::new(), "{text}");
+        for line in [
+            "[pending #1] the tunnel is healthy (Cloudflare reports down)",
+            "[pending #1] the API answers only through Access (502 without credentials)",
+        ] {
+            assert!(text.contains(line), "{line}: {text}");
+        }
         let mut staging = Staging::up();
         staging.api = 200;
-        let text = run(&staging)?;
+        let list = checks(&|args| staging.kubectl(args), &staging, &edge(), Some("#1"))?;
         assert_eq!(
-            missing(&text),
-            ["the API answers only through Access (200 without credentials)"],
-            "{text}"
+            missing(&list.render_titled("infra verify (staging)")),
+            ["the API answers only through Access (200 without credentials)"]
         );
         Ok(())
     }
