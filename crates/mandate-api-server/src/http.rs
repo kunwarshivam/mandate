@@ -23,6 +23,7 @@ use crate::clock::Clock;
 use crate::journal::Journal;
 use crate::journal_reads;
 use crate::lifecycle::{Drain, Lifecycle};
+use crate::me;
 use crate::members::{Hosted, ParseMembers};
 use crate::objects::ObjectStore;
 use crate::routes;
@@ -108,6 +109,14 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/sessions/current",
             delete(end_session).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/me/session",
+            get(me::session).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/me/workspaces",
+            get(me::workspaces).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/agents",
