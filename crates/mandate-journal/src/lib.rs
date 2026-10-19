@@ -57,13 +57,9 @@ pub use agent::{
 /// The deployment meter stream is the platform operator's and no workspace's, whatever its
 /// deployment id (journal spec v0.53 §2). Every workspace read and every record naming a workspace's
 /// streams asks this one function, so no copy can drift.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn workspace_owns(workspace: &str, stream: &StreamId) -> bool {
-    let _ = (workspace, stream);
-    todo!()
+    stream.stream_type() != StreamType::DeploymentMeter
+        && stream.as_str().split(':').nth(1) == Some(workspace)
 }
 
 /// Whether the journal closes `event_type` at `schema_version` on `stream`: the catalogue admits it

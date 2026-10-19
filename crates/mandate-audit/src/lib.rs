@@ -86,8 +86,7 @@ fn segment(tenant: &impl Tenant) -> Result<String, AuditError> {
 /// deployment meter stream is the platform operator's, never a workspace's, whatever its deployment
 /// id (journal spec v0.53 §2).
 fn owns(segment: &str, stream: &StreamId) -> bool {
-    stream.stream_type() != mandate_journal::StreamType::DeploymentMeter
-        && stream.as_str().split(':').nth(1) == Some(segment)
+    mandate_journal::workspace_owns(segment, stream)
 }
 
 /// How many events or streams one page may hold: `1..=1000`, and 100 when the caller names none

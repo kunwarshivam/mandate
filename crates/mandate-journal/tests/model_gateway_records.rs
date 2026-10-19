@@ -490,7 +490,6 @@ fn the_deployment_meter_stream_opens_naming_itself_and_keeps_rule_158() {
 /// workspace's id whole, never by prefix, and the deployment meter stream is no workspace's, even
 /// when its deployment id is the workspace's own segment.
 #[test]
-#[ignore = "pending E21-61"]
 fn the_deployment_meter_stream_is_no_workspace_s_whatever_its_id() {
     use mandate_journal::workspace_owns;
     let stream = |id: &str| StreamId::parse(id).unwrap();
