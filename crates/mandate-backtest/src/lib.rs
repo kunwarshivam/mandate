@@ -51,8 +51,8 @@ use core::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use mandate_accounting::{
-    Account, AccountType, AccountingError, AssetClass, Execution, FeeFamily, Input, InstrumentId,
-    Side,
+    Account, AccountType, AccountingError, AssetClass, CorporateAction, Execution, FeeFamily,
+    Input, InstrumentId, Side,
 };
 use mandate_num::{Adverse, NumError, Price, Qty, Ratio, TickRule, Usd};
 use mandate_sim::{
@@ -77,6 +77,15 @@ pub enum BacktestError {
     StrategyWindowsCrossed,
     #[error("a year must hold at least one period")]
     PeriodsPerYearNotPositive,
+    /// A split applies while an order still works: its limit and quantity are pre-split, and the
+    /// bars after it raw post-split prices, so the run refuses rather than guess an adjustment
+    /// (DEC-2245 item 2).
+    #[error("an order is still working when the split with ex-date {0} applies")]
+    OrderWorkingAcrossSplit(Date),
+    /// The stubs of this story's tests PR return this, so every pending test fails on them
+    /// (DEC-77); the implementation PR replaces the stub and removes the variant.
+    #[error("not implemented until {story}")]
+    Unimplemented { story: &'static str },
     #[error(transparent)]
     Sim(#[from] SimError),
     #[error(transparent)]
@@ -96,6 +105,8 @@ impl BacktestError {
             Self::EquityNotPositive(_) => "equity_not_positive",
             Self::StrategyWindowsCrossed => "strategy_windows_crossed",
             Self::PeriodsPerYearNotPositive => "periods_per_year_not_positive",
+            Self::OrderWorkingAcrossSplit(_) => "order_working_across_split",
+            Self::Unimplemented { .. } => "unimplemented",
             Self::Sim(e) => e.code(),
             Self::Accounting(e) => e.code(),
             Self::Num(e) => e.code(),
@@ -137,6 +148,13 @@ pub struct BacktestInput<'a> {
     pub bars: &'a [SimBar],
     pub coverage_start: UtcNanos,
     pub first_bar_volumes: &'a dyn FirstBarVolumes,
+    /// The corporate actions the data snapshot holds for the instrument, in ex-date order (DEC-2245
+    /// items 1 and 2). Each applies at 20:00 New York time on the last trading day before its
+    /// ex-date: after every bar traded before the ex-date and before the first traded on or after
+    /// it, the trade-date boundary the accounting fold keys on (trading spec §8.5). One on or before
+    /// the first bar's trade date applies before any position exists, and one after the last bar's
+    /// is never reached, so neither changes anything.
+    pub corporate_actions: &'a [CorporateAction],
 }
 
 /// One period's closing equity, at the bar that closed it (DEC-127 item 3).
@@ -386,6 +404,34 @@ impl Working {
     }
 }
 
+fn ex_date(action: &CorporateAction) -> Date {
+    match action {
+        CorporateAction::Split(split) => split.ex_date,
+        CorporateAction::CashDividend(dividend) => dividend.ex_date(),
+    }
+}
+
+fn action_instrument(action: &CorporateAction) -> &InstrumentId {
+    match action {
+        CorporateAction::Split(split) => &split.instrument,
+        CorporateAction::CashDividend(dividend) => dividend.instrument(),
+    }
+}
+
+/// Refuses actions the walk cannot apply as given (DEC-2245 item 7): it takes them in the order
+/// given, so a slice out of ex-date order would skip an action, and one for another instrument
+/// than the run's would act on a position the run does not hold.
+fn check_actions(input: &BacktestInput<'_>) -> Result<(), BacktestError> {
+    let actions = input.corporate_actions;
+    let foreign = actions
+        .iter()
+        .any(|action| action_instrument(action) != &input.config.instrument_id);
+    if foreign || !actions.is_sorted_by_key(ex_date) {
+        return Err(BacktestError::Unimplemented { story: "E4-4" });
+    }
+    Ok(())
+}
+
 /// Walks the bars once, in index order, doing at each bar what DEC-127 item 2 fixes: the cash
 /// movements `Account::due` makes due, the bar's fills, the bar-close mark, the fee charges spec §6.2
 /// and §6.3 date, the period observation when this bar closes a period, and last the decision.
@@ -400,9 +446,23 @@ pub fn walk(input: &BacktestInput<'_>, strategy: Strategy) -> Result<Walk, Backt
     let mut dates: BTreeSet<Date> = BTreeSet::new();
     let mut charged: BTreeSet<Date> = BTreeSet::new();
     let mut period: u32 = 0;
+    check_actions(input)?;
+    let mut actions = input.corporate_actions.iter().peekable();
     for ((index, bar), closes_period) in input.bars.iter().enumerate().zip(closing_bars(input.bars))
     {
         dates.insert(bar.trade_date);
+        while let Some(action) = actions.next_if(|action| ex_date(action) <= bar.trade_date) {
+            let working_across = matches!(action, CorporateAction::Split(_))
+                && working
+                    .as_ref()
+                    .is_some_and(|order| !order.free_before(index));
+            if working_across {
+                return Err(BacktestError::OrderWorkingAcrossSplit(ex_date(action)));
+            }
+            account = account
+                .apply(&Input::CorporateAction(action.clone()), &config.fees)?
+                .account;
+        }
         for due in account.due(bar.start)? {
             account = account.apply(&due, &config.fees)?.account;
         }

@@ -38,7 +38,8 @@
 //!   reaches, from the step, its job or its workflow, and every step after it in its job, runs
 //!   only one reviewed line of [`SECRET_RUNS`] or one of xtask's pinned `READ_ACTIONS`, sets only
 //!   that entry's `env:` names and no `shell:` or `working-directory:`; every step before it
-//!   runs only a [`PRE_RUNS`] entry or a pinned action. Its job sets no
+//!   runs only a [`PRE_RUNS`] entry or a pinned action, with [`PRE_ENV`]'s `env:` names, and each
+//!   reviewed action takes only [`STEP_WITH`]'s inputs. Its job sets no
 //!   `container:`, `services:` or unreviewed `defaults:`, and a secret job runs no local action.
 //!   Every `uses:` anywhere is pinned to a 40-character commit.
 //! - **L12, triggers:** `pull_request_target` and `workflow_run` only in `merge.yml`, which names no
@@ -280,6 +281,86 @@ const PRE_RUNS: &[(&str, &str)] = &[
     ),
 ];
 
+/// The `with:` inputs a reviewed action may take in a job holding a secret step, by workflow and
+/// action, each key and value exactly, a literal block's lines trimmed and joined by a line feed
+/// (L9). A checkout takes no `repository:`, `ref:`, `path:`, `token:` or `submodules:`, so the
+/// reviewed build always builds this repository's own commit.
+const STEP_WITH: &[StepWith] = &[
+    (
+        ".github/workflows/infra.yml",
+        "actions/checkout",
+        &[("persist-credentials", "false"), ("fetch-depth", "0")],
+    ),
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "actions/checkout",
+        &[("persist-credentials", "false")],
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "actions/checkout",
+        &[("persist-credentials", "false")],
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "actions/setup-node",
+        &[("node-version-file", "web/.nvmrc")],
+    ),
+    (
+        ".github/workflows/release.yml",
+        "actions/checkout",
+        &[
+            ("persist-credentials", "false"),
+            ("sparse-checkout", ".github/scripts"),
+        ],
+    ),
+    (
+        ".github/workflows/release.yml",
+        "actions/download-artifact",
+        &[
+            (
+                "name",
+                "release-to-sign-${{ github.sha }}-${{ matrix.arch }}",
+            ),
+            ("path", "dist"),
+        ],
+    ),
+    (
+        ".github/workflows/release.yml",
+        "actions/upload-artifact",
+        &[
+            (
+                "name",
+                "release-signatures-${{ github.sha }}-${{ matrix.arch }}",
+            ),
+            ("path", "dist/SHA256SUMS\nsignatures/"),
+            ("if-no-files-found", "error"),
+            ("retention-days", "90"),
+        ],
+    ),
+];
+
+/// One [`STEP_WITH`] entry: the workflow, the action, and the `with:` inputs it may take.
+type StepWith = (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+);
+
+/// The `env:` names a step before the first secret step of a job holding one may set, by
+/// workflow, exactly (L9): `web-deploy.yml`'s public build settings. So no `RUSTC_WRAPPER`,
+/// `PATH` or `LD_PRELOAD` reaches the build the secret step's binary comes from.
+const PRE_ENV: &[(&str, &[&str])] = &[(
+    ".github/workflows/web-deploy.yml",
+    &[
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN",
+        "NEXT_PUBLIC_OWLHEAD_SITE_ORIGIN",
+        "NEXT_PUBLIC_OWLHEAD_APP_ORIGIN",
+    ],
+)];
+
 /// One [`SECRET_RUNS`] entry: the workflow, the `run:` line, and the `env:` names its step may set.
 type SecretRun = (&'static str, &'static str, &'static [&'static str]);
 
@@ -390,8 +471,9 @@ pub(crate) fn sources(root: &Path) -> Result<Vec<Source>> {
             if dir.ends_with("workflows") && !(name.ends_with(".yml") || name.ends_with(".yaml")) {
                 continue;
             }
-            let text =
-                fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+            let text = fs::read_to_string(&path)
+                .with_context(|| format!("reading {}", path.display()))?
+                .replace("\r\n", "\n");
             found.push(Source {
                 path: format!("{dir}/{name}"),
                 text,
@@ -1585,12 +1667,12 @@ fn step_value<'a>(step: &'a Step, key: &str) -> Option<(usize, &'a str)> {
         .map(|(number, _, value)| (number, value))
 }
 
-/// A step's own `run:` text, with its line: the value on its line, or a block scalar's lines,
-/// each trimmed, joined by a line feed.
-fn run_text(step: &Step) -> Option<(usize, String)> {
-    let (number, value) = step_value(step, "run")?;
+/// The text of the value a step's line `number` gives its key: the value itself, or a literal
+/// block's (`|`) lines, each trimmed, joined by a line feed. A folded block (`>`) keeps its header
+/// in front, so it never equals a reviewed entry: folding joins lines GitHub then runs as one.
+fn value_text(step: &Step, number: usize, value: &str) -> String {
     if !value.starts_with(['|', '>']) {
-        return Some((number, value.to_owned()));
+        return value.to_owned();
     }
     let key_indent = step
         .lines
@@ -1615,34 +1697,133 @@ fn run_text(step: &Step) -> Option<(usize, String)> {
         .map(|(_, raw)| raw.trim())
         .filter(|line| !line.is_empty())
         .collect();
-    Some((number, body.join("\n")))
+    let text = body.join("\n");
+    if value.starts_with('>') {
+        format!("{value}\n{text}")
+    } else {
+        text
+    }
 }
 
-/// Why a step before a job's first secret step is outside L9's closed world, if it is: its own
-/// `run:` is no [`PRE_RUNS`] entry for its workflow, or its own `uses:` no `READ_ACTIONS` pin.
-fn before_secret_problem(path: &str, step: &Step) -> Option<(usize, &'static str)> {
+/// A step's own `run:` text ([`value_text`]), with its line.
+fn run_text(step: &Step) -> Option<(usize, String)> {
+    let (number, value) = step_value(step, "run")?;
+    Some((number, value_text(step, number, value)))
+}
+
+/// The `key: value` pairs one level under a step's own `key:` (`with:`, `env:`), each with its
+/// line, the value read by [`value_text`].
+fn child_pairs(step: &Step, key: &str) -> Vec<(usize, String, String)> {
+    let Some((at, _)) = step_value(step, key) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut column: Option<usize> = None;
+    for (number, raw) in &step.lines {
+        let indent = raw.len().saturating_sub(raw.trim_start().len());
+        let trimmed = uncommented(raw.trim());
+        if *number == at {
+            column = Some(indent.saturating_add(if trimmed.starts_with("- ") { 4 } else { 2 }));
+            continue;
+        }
+        let Some(column) = column else {
+            continue;
+        };
+        if trimmed.is_empty() || raw.trim_start().starts_with('#') {
+            continue;
+        }
+        if indent < column {
+            break;
+        }
+        if indent == column
+            && let Some((name, value)) = trimmed.split_once(':')
+        {
+            out.push((
+                *number,
+                name.to_owned(),
+                value_text(step, *number, value.trim()),
+            ));
+        }
+    }
+    out
+}
+
+/// Why a reviewed action's step in a job holding a secret step is outside L9's closed world: a
+/// `with:` input, by key and value, that [`STEP_WITH`] does not list for that action in that
+/// workflow. An input can point a reviewed action at other code (`repository:`, `ref:`, `path:`,
+/// `tool:`), so only the inputs main uses are read.
+fn with_problems(path: &str, step: &Step) -> Vec<(usize, &'static str)> {
+    let Some((_, uses)) = step_value(step, "uses") else {
+        return Vec::new();
+    };
+    let action = uses
+        .trim_matches(['"', '\''])
+        .split('@')
+        .next()
+        .unwrap_or_default();
+    let reviewed: &[(&str, &str)] = STEP_WITH
+        .iter()
+        .find(|(file, name, _)| *file == path && *name == action)
+        .map_or(&[], |(_, _, inputs)| inputs);
+    child_pairs(step, "with")
+        .into_iter()
+        .filter(|(_, key, value)| !reviewed.contains(&(key.as_str(), value.as_str())))
+        .map(|(number, _, _)| {
+            (
+                number,
+                "a reviewed action in a job holding a secret step takes only the `with:` inputs \
+                 xtask/src/leak.rs's STEP_WITH lists",
+            )
+        })
+        .collect()
+}
+
+/// Why a step before a job's first secret step is outside L9's closed world: its own `run:` is
+/// no [`PRE_RUNS`] entry for its workflow, its own `uses:` no `READ_ACTIONS` pin, a `with:` input
+/// is not [`STEP_WITH`]'s, or an `env:` name is not [`PRE_ENV`]'s.
+fn before_secret_problems(path: &str, step: &Step) -> Vec<(usize, &'static str)> {
+    let mut out = Vec::new();
     if let Some((number, text)) = run_text(step)
         && !PRE_RUNS.contains(&(path, text.as_str()))
     {
-        return Some((
+        out.push((
             number,
             "a step before the secret step, in its job, runs only one of xtask/src/leak.rs's \
              PRE_RUNS",
         ));
     }
-    let (number, uses) = step_value(step, "uses")?;
-    let action = uses
-        .trim_matches(['"', '\''])
-        .split_whitespace()
-        .next()
-        .unwrap_or_default();
-    let reviewed = crate::READ_ACTIONS
+    if let Some((number, uses)) = step_value(step, "uses") {
+        let action = uses
+            .trim_matches(['"', '\''])
+            .split_whitespace()
+            .next()
+            .unwrap_or_default();
+        let reviewed = crate::READ_ACTIONS
+            .iter()
+            .any(|(name, only)| *name == action && only.is_none_or(|only| only == path));
+        if !reviewed {
+            out.push((
+                number,
+                "a step before the secret step, in its job, uses only an action xtask's \
+                 READ_ACTIONS pins",
+            ));
+        }
+        out.extend(with_problems(path, step));
+    }
+    let allowed: &[&str] = PRE_ENV
         .iter()
-        .any(|(name, only)| *name == action && only.is_none_or(|only| only == path));
-    (!reviewed).then_some((
-        number,
-        "a step before the secret step, in its job, uses only an action xtask's READ_ACTIONS pins",
-    ))
+        .find(|(file, _)| *file == path)
+        .map_or(&[], |(_, names)| names);
+    for (number, name, _) in child_pairs(step, "env") {
+        if !allowed.contains(&name.as_str()) {
+            out.push((
+                number,
+                "a step before the secret step, in its job, sets only the `env:` names \
+                 xtask/src/leak.rs's PRE_ENV lists",
+            ));
+        }
+    }
+    out
 }
 
 /// The names a step's own `env:` sets, each with its line: the keys one level under it.
@@ -1721,6 +1902,7 @@ fn outside_closed_world(path: &str, step: &Step) -> Vec<(usize, &'static str)> {
                  READ_ACTIONS pins",
             ));
         }
+        out.extend(with_problems(path, step));
     }
     if let Some((env_at, _)) = step_value(step, "env") {
         let allowed: &[&str] = entry.map_or(job_env_names(path), |(_, _, names)| names);
@@ -1825,8 +2007,10 @@ fn step_shape(
             for (at, why) in outside_closed_world(path, step) {
                 out.push(("L9", at, line_of(at), why));
             }
-        } else if holds_secret_step && let Some((at, why)) = before_secret_problem(path, step) {
-            out.push(("L9", at, line_of(at), why));
+        } else if holds_secret_step {
+            for (at, why) in before_secret_problems(path, step) {
+                out.push(("L9", at, line_of(at), why));
+            }
         }
         after_secret |= secret;
     }
@@ -3045,6 +3229,88 @@ mod tests {
                 ),
             ),
         ]
+    }
+
+    /// The #1731 fourth review's probes, each a step before the secret step in [`R2_HEAD`]'s job,
+    /// once let through because a pre-step's `with:` was not read; and its nits: a `>` fold of a
+    /// reviewed block and a pre-step's `RUSTC_WRAPPER`. Every one is refused.
+    fn fourth_review_probes() -> Vec<(&'static str, String)> {
+        let build = "      - run: cargo build --locked --package mandate-objectstore --example r2_finding\n";
+        let checkout = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n";
+        let head = R2_HEAD.replace(
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          persist-credentials: false\n",
+            "",
+        );
+        let head = head.as_str();
+        vec![
+            (
+                "p01",
+                format!(
+                    "{head}{checkout}          persist-credentials: false\n          repository: evil/x\n{build}{R2_STEP}"
+                ),
+            ),
+            (
+                "p01b",
+                format!(
+                    "{head}{checkout}          repository: evil/x\n          ref: main\n          path: .\n{build}{R2_STEP}"
+                ),
+            ),
+            (
+                "p02",
+                format!(
+                    "{R2_HEAD}{checkout}          repository: evil/x\n          path: crates\n{build}{R2_STEP}"
+                ),
+            ),
+            (
+                "p02b",
+                format!(
+                    "{R2_HEAD}      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172\n        with:\n          tool: evil@1\n{build}{R2_STEP}"
+                ),
+            ),
+            (
+                "folded",
+                format!(
+                    "{R2_HEAD}      - run: >\n          rustup show active-toolchain || rustup toolchain install\n{build}{R2_STEP}"
+                ),
+            ),
+            (
+                "pre-env",
+                format!(
+                    "{R2_HEAD}      - run: cargo build --locked --package mandate-objectstore --example r2_finding\n        env:\n          RUSTC_WRAPPER: ./evil\n{R2_STEP}"
+                ),
+            ),
+            (
+                "post-with",
+                format!("{R2_HEAD}{R2_STEP}{checkout}          repository: evil/x\n"),
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_probe_the_l9_fourth_review_found_is_refused() {
+        let path = ".github/workflows/r2-lockcheck.yml";
+        for (name, text) in fourth_review_probes() {
+            assert!(
+                whole(path, &text).iter().any(|f| f.rule == "L9"),
+                "{name}: {:?}",
+                whole(path, &text)
+            );
+        }
+    }
+
+    /// A workflow written with CRLF line ends reads as its LF form: the guard normalises it when
+    /// it reads the file, so no CR reaches a rule.
+    #[test]
+    fn a_crlf_workflow_reads_as_its_lf_form() -> Result<()> {
+        let dir = crate::unique_temp_path("mandate-xtask-leak-crlf", "");
+        let workflows = dir.join(".github/workflows");
+        fs::create_dir_all(&workflows)?;
+        let text = format!("{R2_HEAD}{R2_STEP}").replace('\n', "\r\n");
+        fs::write(workflows.join("r2-lockcheck.yml"), text)?;
+        let found = findings(&sources(&dir)?);
+        fs::remove_dir_all(&dir)?;
+        assert_eq!(found, Vec::new());
+        Ok(())
     }
 
     #[test]

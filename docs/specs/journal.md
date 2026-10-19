@@ -2,16 +2,38 @@
 
 | | |
 |---|---|
-| **Status** | v0.62 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 adds the agent stream's invalidation verdict, `ThesisInvalidated`, [DEC-2202](../project/decisions/DEC-2202.md); v0.50 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md); v0.51 closes the control stream's `NotificationAddressChanged` and adds `NoticeAttempted` version 3, which names the web-push address an attempt went to, [DEC-2505](../project/decisions/DEC-2505.md); v0.52 types `EvaluationRunRecorded`'s `theses_head` as record hashes, [DEC-1142](../project/decisions/DEC-1142.md); v0.53 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md); v0.54 names the deployment's connection on `AgentDeployed` version 2, with rules 200 and 201, [DEC-1171](../project/decisions/DEC-1171.md); v0.55 adds the desk's `OwnerQuestionSubmitted` and the `answer` tool's check codes, [DEC-2240](../project/decisions/DEC-2240.md); v0.56 deploys an agent id once and reads a stop as final whether or not its deployment was read, [DEC-1173](../project/decisions/DEC-1173.md); v0.57 closes the owner's acknowledgment and adds its request, [DEC-2509](../project/decisions/DEC-2509.md); v0.58 closes the account stream's risk-limit records, [DEC-2301](../project/decisions/DEC-2301.md); v0.59 names `copied_from` on the account stream's `KillSwitchActivated`, [DEC-2003](../project/decisions/DEC-2003.md) item 4; v0.60 names `cancels` on the account stream's `KillSwitchActivated` as the orders whose cancel never lapses, [DEC-2302](../project/decisions/DEC-2302.md) item 2; v0.61 says when §9.28's executor judges an acknowledgment's step-up and reads the control stream for reuse, and adds §9.28's vectors, [DEC-2509](../project/decisions/DEC-2509.md); v0.62 adds the control stream's `StepUpConfirmed`, [DEC-2104](../project/decisions/DEC-2104.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.64 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 adds the agent stream's invalidation verdict, `ThesisInvalidated`, [DEC-2202](../project/decisions/DEC-2202.md); v0.50 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md); v0.51 closes the control stream's `NotificationAddressChanged` and adds `NoticeAttempted` version 3, which names the web-push address an attempt went to, [DEC-2505](../project/decisions/DEC-2505.md); v0.52 types `EvaluationRunRecorded`'s `theses_head` as record hashes, [DEC-1142](../project/decisions/DEC-1142.md); v0.53 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md); v0.54 names the deployment's connection on `AgentDeployed` version 2, with rules 200 and 201, [DEC-1171](../project/decisions/DEC-1171.md); v0.55 adds the desk's `OwnerQuestionSubmitted` and the `answer` tool's check codes, [DEC-2240](../project/decisions/DEC-2240.md); v0.56 deploys an agent id once and reads a stop as final whether or not its deployment was read, [DEC-1173](../project/decisions/DEC-1173.md); v0.57 closes the owner's acknowledgment and adds its request, [DEC-2509](../project/decisions/DEC-2509.md); v0.58 closes the account stream's risk-limit records, [DEC-2301](../project/decisions/DEC-2301.md); v0.59 names `copied_from` on the account stream's `KillSwitchActivated`, [DEC-2003](../project/decisions/DEC-2003.md) item 4; v0.60 names `cancels` on the account stream's `KillSwitchActivated` as the orders whose cancel never lapses, [DEC-2302](../project/decisions/DEC-2302.md) item 2; v0.61 says when §9.28's executor judges an acknowledgment's step-up and reads the control stream for reuse, and adds §9.28's vectors, [DEC-2509](../project/decisions/DEC-2509.md); v0.62 adds the control stream's `StepUpConfirmed`, [DEC-2104](../project/decisions/DEC-2104.md); v0.63 adds `MarkUpdated` version 2, with the risk mark's bid, sanity verdict, and session, [DEC-2305](../project/decisions/DEC-2305.md); v0.64 states that rule 200 holds at the writers by construction, [DEC-1171](../project/decisions/DEC-1171.md)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `backtest_records` section of §9.18, `model_gateway` section of §9.19, `deployment_manager` section of §9.21, `thesis_invalidation` section of §9.22, `agent_deployed` section of §9.24, `risk_limits` section of §9.27, `acknowledgments` section of §9.28, and `step_up_confirmations` section of §9.29; [reference/journal/generate.py](../../reference/journal/generate.py)) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5 and its `protection_shapes` section of rules 41 and 44, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `backtest_records` section of §9.18, `model_gateway` section of §9.19, `deployment_manager` section of §9.21, `thesis_invalidation` section of §9.22, `agent_deployed` section of §9.24, `risk_limits` section of §9.27, `acknowledgments` section of §9.28, `step_up_confirmations` section of §9.29, and `risk_marks` section of §9.30; [reference/journal/generate.py](../../reference/journal/generate.py)) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.64 ([DEC-1171](../project/decisions/DEC-1171.md); E21-33, claim #1491):** §9.24 rule 200's
+  writer bullet said each writer refuses a draft whose `connection_id` differs from its document's.
+  The writers take `connection_id` from the document, so it cannot differ. The bullet now says rule
+  200 holds there by construction, and that the draft is appended at the head the writer read, so a
+  revocation written in between is decided again (the CLI, at most three decisions, then a journal
+  error) or answered `journal_unavailable` (the workspace API, 503). `workspace-api.md`'s deploy row
+  says the same.
+  Wording only: no record, rule outcome or vector changes.
+  - **Versions.** v0.63 (DEC-2305, #1778) is on main, so this change takes v0.64.
+- **v0.63 ([DEC-2305](../project/decisions/DEC-2305.md); E6-15, claim #1599):** §9.30 closes the
+  account stream's `MarkUpdated` at schema version 2: version 1's members, then `bid`, `sane`, and
+  `session`, the three readings mandate spec §5.2's risk fold takes from a mark (trading spec §8.2's
+  bid for a long, its sanity verdict, and the session it arrived in). Rule 244 refuses a sane mark
+  without a positive bid. Version 1 stays registered; the risk fold reads it as no verdict, never
+  as sane, so staleness keeps counting from the last sane version-2 mark. Agent-accepted under
+  DEC-176 on the coordinator's ruling: it adds a version that tightens what a risk input proves,
+  and loosens nothing.
+  - **§9.27's `breach_time_s`.** A scale rung carries 0, not at least `breach_confirm_s`: mandate spec
+    §5.5 applies `scale_sizes` immediately, with no confirmation, as DEC-2301 item 1 and the risk
+    fold already read it. The row now says so. No rule or vector changes.
+  - **Versions.** v0.62 (DEC-2104, #1722) is on main, so this change takes v0.63, §9.30, and rule
+    244, which no other section uses. It renumbers at merge if that order changes.
 - **v0.62 ([DEC-2104](../project/decisions/DEC-2104.md); E9-4, claim #759):** §9.29 adds the
   control stream's `StepUpConfirmed` at schema version 1: the CLI's record that the owner confirmed,
   on the host, one step-up challenge the workspace API issued for a paper grant made in the web app
@@ -1358,7 +1380,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `BrokerExchangeRecorded` | — | direction, endpoint, `raw` (or artifact), status; credentials redacted |
 | `FillApplied`, `LateFillApplied` | fee, cal, set, ins | fill ID, client order ID, gross quantity, price, fees, trade date |
 | `FeesCharged` | fee | family, day, accrued, charged |
-| `MarkUpdated` | — | instrument, price, source, feed |
+| `MarkUpdated` | — | instrument, price, source, feed; version 2 adds the risk mark's `bid`, its `sane` verdict, and its `session`, closed in §9.30 ([DEC-2305](../project/decisions/DEC-2305.md)) |
 | `SettlementPosted`, `DividendPaid`, `CashInLieuPosted` | set | date, instrument, amount |
 | `CorporateActionPrepared`, `CorporateActionApplied` | ins | instrument, action, ratio or amount, ex-date |
 | `ProtectionChanged` | — | instrument, action, orders, unprotected-interval start or end; closed in §9.5 |
@@ -2181,8 +2203,8 @@ pinned byte for byte by the version-3 vectors. Each version-2 record carries `ri
 requires it (DEC-302 item 1). `StreamOpened` carries none — at seq 1 the stream has seen no tick —
 and `OwnerCommandRefused` none, whose schema is shared with the agent stream
 ([DEC-447](../project/decisions/DEC-447.md)). `FillApplied` and `MarkUpdated` carry it already at
-version 1 (DEC-81); the rest of the account catalogue closes with its own stories. At either
-version the protective prices are never members of `IntentReceived`
+version 1 (DEC-81), and `MarkUpdated` version 2 is §9.30's; the rest of the account catalogue
+closes with its own stories. At either version the protective prices are never members of `IntentReceived`
 ([DEC-446](../project/decisions/DEC-446.md) item 5): they move to the `intended`
 `ProtectionChanged`, journaled beside the intent in its own batch, so the copy of the proposal
 stays exact and replay restores the protection the opening was handed in with (`AGENTS.md` rule
@@ -4977,10 +4999,15 @@ a writer that has not moved fails closed, never open.
 
 200. `AgentDeployed` version 2: `connection_id` equals the `connection_id` of the stored mandate
      document `mandate_version` names. It is judged in two places, and by nothing else:
-     - **By the writer, before `append`.** Each writer of version 2 (the CLI's `agent deploy` and
+     - **By the writer, by construction.** Each writer of version 2 (the CLI's `agent deploy` and
        the workspace API's deployment) already holds the stored document it deploys and validates
-       it; it takes `connection_id` from that document and refuses the draft, appending nothing,
-       when the two differ.
+       it, and takes `connection_id` from that document, so the two never differ and there is
+       nothing to compare. It appends the draft at the control stream's head it read, so a record
+       written in between (a revocation) fails the append's head check and nothing is appended.
+       The CLI reads the rows and decides again from the new head, at most three decisions in
+       all; when the stream keeps moving it commits nothing and returns a journal error. The
+       workspace API answers `journal_unavailable` (503, retryable), and a retry reads the rows
+       again.
      - **By §9.2's mapping.** Where the mapping reads the document for `AgentVersionActive`, a
        version-2 record whose `connection_id` differs from the document's is refused as malformed
        at `payload.connection_id`, as a record whose document is not stored is refused, never
@@ -5187,7 +5214,7 @@ after the input, which mandate spec §5.10 lists as E, H, DD, E₀, C, L and §9
 | `limit` | `limit_key` | The limit |
 | `action` | `scale_sizes` \| `exits_only` \| `flatten_and_pause` \| `end_delegations` | What it does while it holds: a rung's own action, the daily loss's `daily_loss_action`, or a tripwire's: rule 230 |
 | `reason` | `hard_trigger` \| `hard_breach_pending` \| `resolved_at_rollover` \| `new_day_breach` \| `after_reset` \| `tripwire_condition`, or `null` | Why, when it is not plain confirmation by breach time: rule 230 |
-| `breach_time_s` | `integer?` | The breach time (mandate spec §5.6) the limit's confirmation holds at the input that produced the record, in whole seconds. The risk fold's event carries no breach time, so the writer reads the confirmation at that input, before the fold's latch removes it. A trigger confirmed by breach time, a plain confirmed scale rung or a confirmed `new_day_breach` included, carries at least `breach_confirm_s`. A hard trigger and `hard_breach_pending` carry whatever had accumulated, which may be more than 0 and less than `breach_confirm_s`. It is 0 only where the limit has no confirmation at that input, as for an `after_reset` rung. `null` for a tripwire: rule 232 |
+| `breach_time_s` | `integer?` | The breach time (mandate spec §5.6) the limit's confirmation holds at the input that produced the record, in whole seconds. The risk fold's event carries no breach time, so the writer reads the confirmation at that input, before the fold's latch removes it. A trigger confirmed by breach time, a confirmed `new_day_breach` included, carries at least `breach_confirm_s`. A hard trigger and `hard_breach_pending` carry whatever had accumulated, which may be more than 0 and less than `breach_confirm_s`. It is 0 only where the limit has no confirmation at that input, as for a scale rung, which mandate spec §5.5 applies immediately, or an `after_reset` rung. `null` for a tripwire: rule 232 |
 | `metric` | `consecutive_losing_exits` \| `realized_loss_usd` \| `new_instruments`, or `null` | A tripwire's metric: rule 232 |
 | `threshold` | `decimal?` | A tripwire's threshold: rules 232 and 233 |
 | `value` | `decimal?` | The metric's value reached: rules 232 and 233 |
@@ -5508,6 +5535,97 @@ A confirmation for a challenge the API no longer holds, or never issued, verifie
 for each clause of rule 242, valid drafts for the members no rule reads, and control streams for
 rule 243: a second confirmation of one challenge, and two confirmations of two. The vectors stay
 version 3.
+
+### 9.30 The risk mark's verdict ([DEC-2305](../project/decisions/DEC-2305.md))
+
+This subsection closes the account stream's `MarkUpdated` at `schema_version` 2. Version 1 (§9's
+row: `instrument_id`, `price`, `source`, `feed`, and `risk_clock`) is never edited (§8) and stays
+registered, so `append` and verification accept both. §9.2's conventions apply: §9.1's and §9.2's
+types, the absent-member rule, the report order, and no required `config_refs`. The rule numbers
+from 244.
+
+[Mandate spec §5.2](mandate.md#52-inputs-the-risk-clock-and-determinism) folds a `MarkUpdated` as a
+risk input and reads three things from it that version 1 does not carry: the risk mark, which
+[trading spec §8.2](trading-domain.md#82-marks-and-equity) makes the bid for a long (no short sales in
+v1, `AGENTS.md` rule 12); whether the quote passed §8.2's checks, since only a sane mark updates
+E and restarts the staleness count, and a mark that fails them restricts its instrument
+(`stale_mark`); and the session the mark arrived in, since for an equity only a regular-session
+mark updates E. Version 1's `price` is a price under a `source`, with no verdict, and the session
+could be derived only from a trading calendar the record does not name. Version 2 records all
+three, so the risk fold replays from the journal alone and never re-judges a quote the journal does
+not hold.
+
+**`MarkUpdated`** on the account stream at `schema_version` 2: the version-1 members, then `bid`,
+`sane`, and `session`, with `risk_clock` last.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `instrument_id` | `text` | As version 1 |
+| `price` | `decimal` | As version 1: the mark's price under `source`. The risk fold does not read it |
+| `source` | `text` | As version 1 |
+| `feed` | `text` | As version 1 |
+| `bid` | `decimal?` | The quote's bid: a long's risk mark (trading spec §8.2). `null` only for a quote with no bid, which is never sane (rule 244) |
+| `sane` | `boolean` | Whether the quote met every condition trading spec §8.2 sets on a risk mark from a quote: 0 < bid ≤ ask, the spread within the data profile's limit, and the quote fresher than the profile's staleness threshold at `risk_clock` (freshness counts, DEC-2305 item 5) |
+| `session` | `overnight` \| `pre_market` \| `regular` \| `after_hours` \| `crypto` | The market session the writer placed the mark in at `risk_clock`, by its trading calendar; `crypto` for a crypto instrument |
+| `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
+
+**Consistency rule** (reason `schema`; the path is the member named):
+
+244. `MarkUpdated` at `schema_version` 2: when `sane` is true, `bid` is non-null and greater than 0
+     (`payload.bid`). Trading spec §8.2's checks require 0 < bid, so a sane verdict without a
+     positive bid contradicts itself. A mark that is not sane may carry any bid, or none: the fold
+     reads `bid` only from a sane mark.
+
+No rule ties `bid` to `price`, `sane` to `session`, or `session` to the instrument: the journal
+cannot see the quote's ask, the data profile, or the instrument's asset class, so those are the
+writer's. A sane mark outside the regular session is well formed; mandate spec §5.2 decides that an
+equity's does not update E.
+
+**How the risk fold reads a mark** (E6-15). A version-2 mark is a risk input with its verdict:
+mandate spec §5.2 ignores an equity's mark outside the regular session, sane or not; otherwise it
+applies `bid` from a sane mark, and restricts a held instrument whose mark is not sane. A version-1
+mark has **no verdict**. It is not a risk input: the fold applies nothing from it, as at a tick, so
+whether the fold settles time at it changes no result (MI-13). It is never read as sane, which
+would update E from a price no check judged and restart the staleness count, loosening §5.2. So E
+is not updated from it, and the instrument's staleness keeps counting from its last sane
+version-2 mark: once its age reaches `mark_max_age_s`, `stale_mark` holds openings and increases
+in that instrument, and never its exits, protective orders, or kill switches (`AGENTS.md` rule 13).
+A sane version-2 mark restarts the count only in a session §5.2 counts, so an equity's sane
+after-hours mark does not, and a mark that is not sane restricts at once and restarts nothing.
+**The calendar.** An equity's age counts the regular-session seconds of the trading calendar
+([trading spec §2.2](trading-domain.md#22-time-and-calendars), §4.3), which the risk fold's
+`SessionClock` is given by its caller (`mandate_spec::risk`): `mandate-time`'s committed NYSE data,
+`crates/mandate-time/data/us-equities.calendar`, with its weekends, holidays, and early closes, so
+a weekend, a `closed` day, and the hours after an `early_close` count nothing. Crypto's counts all
+time. It is not read as unreadable either (DEC-2301 item 3): a version-1 mark is a well-formed record the stream
+holds legitimately, and holding every opening on any stream that holds one would add nothing that
+staleness, per instrument, does not already hold.
+
+**Who writes it.** Today the shell's paper path writes `MarkUpdated` at version 1, as the executor,
+with the IEX quote's bid as `price` (DEC-943 item 1); the executor writes none and its own fold
+applies nothing from one. Version 2 is written by the executor's mark path from the E6-15 slice
+that builds it, once `mandate-journal` registers it; until then `append` refuses it as
+`unknown_schema`, and version 1 continues. **A writer never records a false session:** a mark its
+trading calendar places in no session, such as an equity's quote while the market is closed, is
+never mapped to the nearest session. The writer writes no `MarkUpdated` for it, and the
+instrument's staleness keeps counting (DEC-2305 item 6). Version 2's `bid` is a quote's bid, so no
+writer records a last-trade risk mark (trading spec §8.2) until a later version carries one.
+
+**No `JournaledFact`.** It feeds no `ValidationContext`. **Vectors**: `reference/journal`'s
+`risk_marks` section holds a version-2 base draft and a version-1 base draft, both valid; an
+invalid draft for every member type, each missing or extra member, each clause of rule 244, a
+version-1 draft carrying a version-2 member, and version 3; valid drafts for the marks rule 244
+might be misread to refuse (not sane with no bid, a zero bid, or a bid above the price) and for every
+session, with `session: "closed"` refused at `payload.session`; the fold's reading of each base
+and valid draft: `no_verdict` for version 1, and `sane`, `session`, and, when sane, `bid` for
+version 2; and staleness sequences in which a held instrument with only version-1 marks since its
+last sane mark, or since it opened, reaches `stale_mark` exactly at `mark_max_age_s`, with its
+openings and increases denied and each exit path, protective order, and kill switch not held: an
+equity within one session, across a close, from Friday to Monday, across Thanksgiving 2026, and
+across the early close the day after; an equity's sane after-hours mark and its regular-session
+mark that is not sane; and crypto over a weekend. The reference counts an equity's seconds by
+reading the same `us-equities.calendar` file `mandate-time` embeds, so the two cannot drift. The
+vectors stay version 3.
 
 ## 10. Anchoring
 

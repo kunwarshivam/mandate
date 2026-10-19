@@ -19,7 +19,7 @@ use anyhow::{Context, anyhow};
 use clap::{Args, Subcommand, ValueEnum};
 use mandate_connections::record::ConnectionId;
 use mandate_vault::SourceError;
-use mandate_vault::credentials::{read_token_file, write_credentials};
+use mandate_vault::credentials::{check_credential_dir, read_token_file, write_credentials};
 use mandate_vault::openbao::{OpenBaoConfig, provision};
 use mandate_vault::policy::Mounts;
 use mandate_vault_local::VaultError;
@@ -132,7 +132,9 @@ pub fn run_import(
 }
 
 /// Runs the provisioning and prints, to `out`, the name of each file written and nothing else.
-/// A refusal names its reason code; none carries a token, a secret id, or a response body.
+/// `--out` is checked before the vault is reached, so a directory the write would refuse leaves no
+/// secret id issued and unwritten. A refusal names its reason code; none carries a token, a
+/// secret id, or a response body.
 pub fn run_provision(args: &ProvisionArgs, out: &mut impl Write) -> anyhow::Result<()> {
     let refused = |e: SourceError| anyhow!("{e} ({})", e.code());
     let connections = args
@@ -143,6 +145,7 @@ pub fn run_provision(args: &ProvisionArgs, out: &mut impl Write) -> anyhow::Resu
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     let operator = read_token_file(&args.operator_token_file).map_err(refused)?;
+    check_credential_dir(&args.out, &connections).map_err(refused)?;
     let config = OpenBaoConfig {
         address: args.address.clone(),
         ca_pem: fs::read(&args.ca).map_err(|_| refused(SourceError::Config))?,

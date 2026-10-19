@@ -638,6 +638,12 @@ pub(crate) fn images(root: &Path, dist: &Path, out: &Path, test_sign: bool) -> R
         };
         let bytes = fs::read(&binary).with_context(|| format!("reading {}", binary.display()))?;
         let layout = image::layout(name, arch.oci(), &bytes, signature.as_deref(), &revision);
+        ensure!(
+            !image::carries_cell_research(&layout),
+            "the {name} release image holds /{}, the local cell's recorded research, which only \
+             its interim runtime image carries (DEC-2246)",
+            image::CELL_RESEARCH
+        );
         image::write(&layout, &out.join("images").join(name))?;
         listing.push_str(&format!("sha256:{}  {name}\n", layout.manifest));
     }
@@ -1881,10 +1887,13 @@ mod tests {
         )?;
         let ordered = [
             "grep -Evq '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' \"$sums\"",
-            "if [ \"${names[*]}\" != \"${present[*]}\" ]; then",
-            "(cd dist/bin && sha256sum --check --strict ../SHA256SUMS)",
-            "echo \"${DIGEST}  dist/SHA256SUMS\" | sha256sum --check --strict",
-            "trap 'rm -rf \"$key_dir\"' EXIT",
+            "echo \"SHA256SUMS lists $name twice; nothing is signed\" >&2",
+            "echo \"dist/bin holds $name, which SHA256SUMS does not list; nothing is signed\" >&2",
+            "if [ \"${#present[@]}\" -ne \"${#names[@]}\" ]; then",
+            "trap 'rm -rf \"$key_dir\" \"$verified\"' EXIT",
+            "cp -- \"dist/bin/$name\" \"$verified/bin/$name\"",
+            "(cd \"$verified/bin\" && sha256sum --check --strict ../SHA256SUMS)",
+            "sha256sum --check --strict \"$verified/DIGEST\"",
             "sha256sum --check --strict \"$tools/cosign.sha256\"",
             "base64 --decode \"$key_dir/cosign.key.base64\" > \"$key_dir/cosign.key\"",
             "unset RELEASE_SIGNING_KEY",
@@ -1904,8 +1913,10 @@ mod tests {
             assert!(!script.contains(absent), "release-sign.sh holds {absent:?}");
         }
         assert!(
-            script.contains("for file in \"${names[@]/#/dist/bin/}\" \"$sums\"; do"),
-            "release-sign.sh must sign exactly the names SHA256SUMS lists"
+            script.contains(
+                "for file in \"${names[@]/#/$verified/bin/}\" \"$verified/SHA256SUMS\"; do"
+            ),
+            "release-sign.sh must sign exactly the verified copies of the names SHA256SUMS lists"
         );
         let check = jobs
             .get("release-signing-check")
@@ -1915,98 +1926,159 @@ mod tests {
         Ok(())
     }
 
-    /// One case of [`the_signer_signs_only_what_sha256sums_lists`]: its name, the files in
-    /// `dist/bin` with their text (`->target` makes a symlink), the text of `SHA256SUMS`, and what
-    /// the signer prints as it stops.
-    type SignerCase<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a str, &'a str);
+    /// The `SHA256SUMS` of the exact `dist` every signer case starts from: `a` and `b`, holding
+    /// the text `a` and `b`.
+    const SIGNER_SUMS: &str = concat!(
+        "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb  a\n",
+        "3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d  b\n",
+    );
 
-    /// `release-sign.sh` signs only a `dist/bin` that holds exactly the names `SHA256SUMS` lists,
-    /// as regular files: a planted extra file or dotfile, a subdirectory, a symlink, a missing
-    /// binary, a duplicate line, or a line with a space or a carriage return stops it before
-    /// the key is decoded or cosign is fetched, so the key job is no signing oracle. The control,
-    /// an exact `dist`, passes that check and stops only at the wrong digest it is handed.
+    /// One case of [`the_signer_signs_only_what_sha256sums_lists`]: its name, what it changes in
+    /// the exact `dist` under the directory it is handed, and what the signer prints as it stops.
+    type SignerCase = (&'static str, fn(&Path) -> io::Result<()>, &'static str);
+
+    fn write_sums(dir: &Path, text: &str) -> io::Result<()> {
+        fs::write(dir.join("dist/SHA256SUMS"), text)
+    }
+
+    /// `release-sign.sh` signs only a `dist` that is a real directory holding a regular
+    /// `SHA256SUMS` and a real `dist/bin` of regular files, exactly the names it lists, once
+    /// each. Every other shape stops it, with its own message, before the key is decoded or
+    /// cosign is fetched, so the key job is no signing oracle; the control, an exact `dist`,
+    /// passes every check and stops only at the wrong digest it is handed. Each stop leaves
+    /// nothing under `RUNNER_TEMP`: the verified copies it signs from are removed on exit.
     #[test]
     fn the_signer_signs_only_what_sha256sums_lists() -> Result<()> {
         let script =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
         let root =
             env::temp_dir().join(format!("mandate-xtask-release-sign-{}", std::process::id()));
-        let line = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb  a\n";
-        let cases: [SignerCase<'_>; 11] = [
-            ("exact", &[("a", "a")], line, "FAILED"),
+        let refused = "none a symlink";
+        let not_regular = "not a regular file";
+        let malformed = "is not '<sha256>  <name>'";
+        let cases: Vec<SignerCase> = vec![
+            ("exact", |_| Ok(()), "FAILED"),
+            (
+                "tampered",
+                |d| fs::write(d.join("dist/bin/a"), "x"),
+                "FAILED",
+            ),
             (
                 "extra",
-                &[("a", "a"), ("b", "b")],
-                line,
-                "nothing is signed",
-            ),
-            ("missing", &[], line, "nothing is signed"),
-            (
-                "nested",
-                &[("a", "a"), ("sub/c", "c")],
-                line,
-                "not a regular file",
-            ),
-            (
-                "symlink",
-                &[("a", "->../SHA256SUMS")],
-                line,
-                "not a regular file",
+                |d| fs::write(d.join("dist/bin/c"), "c"),
+                "dist/bin holds c, which",
             ),
             (
                 "dotfile",
-                &[("a", "a"), (".hidden", "h")],
-                line,
-                "nothing is signed",
+                |d| fs::write(d.join("dist/bin/.h"), "h"),
+                "dist/bin holds .h, which",
+            ),
+            (
+                "missing",
+                |d| fs::remove_file(d.join("dist/bin/b")),
+                "SHA256SUMS lists a binary dist/bin does not hold",
             ),
             (
                 "duplicate",
-                &[("a", "a")],
-                &line.repeat(2),
-                "nothing is signed",
+                |d| write_sums(d, &format!("{SIGNER_SUMS}{}", &SIGNER_SUMS[..67])),
+                "SHA256SUMS lists a twice",
+            ),
+            (
+                "nested",
+                |d| {
+                    fs::create_dir(d.join("dist/bin/sub"))?;
+                    fs::write(d.join("dist/bin/sub/c"), "c")
+                },
+                not_regular,
+            ),
+            (
+                "empty-dir",
+                |d| fs::create_dir(d.join("dist/bin/sub")),
+                not_regular,
+            ),
+            (
+                "fifo",
+                |d| {
+                    let made = Command::new("mkfifo").arg(d.join("dist/bin/f")).status()?;
+                    made.success()
+                        .then_some(())
+                        .ok_or_else(|| io::Error::other("mkfifo"))
+                },
+                not_regular,
+            ),
+            (
+                "symlink-to-listed",
+                |d| {
+                    fs::remove_file(d.join("dist/bin/b"))?;
+                    symlink("a", d.join("dist/bin/b"))
+                },
+                not_regular,
+            ),
+            (
+                "symlink-outside",
+                |d| {
+                    fs::remove_file(d.join("dist/bin/b"))?;
+                    symlink("../SHA256SUMS", d.join("dist/bin/b"))
+                },
+                not_regular,
+            ),
+            (
+                "symlinked-bin",
+                |d| {
+                    fs::rename(d.join("dist/bin"), d.join("dist/real"))?;
+                    symlink("real", d.join("dist/bin"))
+                },
+                refused,
+            ),
+            (
+                "symlinked-sums",
+                |d| {
+                    fs::rename(d.join("dist/SHA256SUMS"), d.join("dist/sums"))?;
+                    symlink("sums", d.join("dist/SHA256SUMS"))
+                },
+                refused,
+            ),
+            (
+                "symlinked-dist",
+                |d| {
+                    fs::rename(d.join("dist"), d.join("real"))?;
+                    symlink("real", d.join("dist"))
+                },
+                refused,
             ),
             (
                 "crlf",
-                &[("a", "a")],
-                &line.replace('\n', "\r\n"),
-                "is not '<sha256>  <name>'",
+                |d| write_sums(d, &SIGNER_SUMS.replace('\n', "\r\n")),
+                malformed,
             ),
             (
                 "space",
-                &[("a b", "a")],
-                &line.replace("  a", "  a b"),
-                "is not '<sha256>  <name>'",
+                |d| write_sums(d, &SIGNER_SUMS.replace("  b", "  b c")),
+                malformed,
             ),
             (
                 "malformed",
-                &[("a", "a")],
-                &line.replace("  a", "  a extra"),
-                "is not '<sha256>  <name>'",
+                |d| write_sums(d, &SIGNER_SUMS.replace("  a", "  a x")),
+                malformed,
             ),
-            ("empty", &[], "", "is not '<sha256>  <name>'"),
+            ("empty", |d| write_sums(d, ""), malformed),
         ];
-        for (name, files, sums, expected) in cases {
+        for (name, change, expected) in cases {
             let dir = root.join(name);
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(dir.join("dist/bin"))?;
-            for (path, text) in files {
-                let file = dir.join("dist/bin").join(path);
-                if let Some(parent) = file.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                match text.strip_prefix("->") {
-                    Some(target) => symlink(target, &file)?,
-                    None => fs::write(file, text)?,
-                }
-            }
-            fs::write(dir.join("dist/SHA256SUMS"), sums)?;
+            fs::write(dir.join("dist/bin/a"), "a")?;
+            fs::write(dir.join("dist/bin/b"), "b")?;
+            write_sums(&dir, SIGNER_SUMS)?;
+            change(&dir)?;
+            let runner = dir.join("runner");
             let output = Command::new("bash")
                 .arg(&script)
                 .current_dir(&dir)
                 .env_clear()
                 .env("PATH", "/usr/bin:/bin")
                 .env("DIGEST", "0".repeat(64))
-                .env("RUNNER_TEMP", dir.join("runner"))
+                .env("RUNNER_TEMP", &runner)
                 .output()?;
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2015,10 +2087,12 @@ mod tests {
                 stderr.contains(expected) || stdout.contains(expected),
                 "{name}: expected {expected:?}, got {stdout:?} {stderr:?}"
             );
-            assert!(
-                !dir.join("runner").exists(),
-                "{name}: the signer reached the key"
-            );
+            for left in ["release-key", "release-tools", "release-verified"] {
+                assert!(
+                    !runner.join(left).exists(),
+                    "{name}: {left} is left or was reached"
+                );
+            }
             assert!(
                 !dir.join("signatures").exists(),
                 "{name}: the signer reached signing"

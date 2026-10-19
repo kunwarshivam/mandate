@@ -142,7 +142,7 @@ impl Fold {
             });
         }
         let equity = before.equity.checked_add(delta)?;
-        let exposure = self.qty.notional(self.mark)?;
+        let exposure = self.market_value()?;
         let latched = !self.latched.is_empty() || self.daily.is_some() || self.tripwire_latched;
         let refused = if UsdExact::of(delta).is_positive()? && latched {
             Some(Rejection::IncreaseBlockedWhileLatched)

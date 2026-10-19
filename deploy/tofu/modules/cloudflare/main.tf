@@ -23,7 +23,8 @@ variable "name" {
 }
 
 variable "account_id" {
-  type = string
+  type      = string
+  sensitive = true
 
   validation {
     condition     = can(regex("^[0-9a-f]{32}$", var.account_id))
@@ -240,7 +241,8 @@ output "archive_bucket" {
 }
 
 output "archive_endpoint" {
-  value = "https://${var.account_id}.r2.cloudflarestorage.com"
+  value     = "https://${var.account_id}.r2.cloudflarestorage.com"
+  sensitive = true
 }
 
 output "archive_access_key_id" {

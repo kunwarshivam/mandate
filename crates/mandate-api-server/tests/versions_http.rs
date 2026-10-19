@@ -20,13 +20,19 @@ use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Sessions};
-use mandate_api_server::stepup::{Action, StepUp, Unbound};
+use mandate_api_server::stepup::{Action, Judged, StepUp, Unbound};
 use mandate_api_server::token::{FixedKeys, Issuer};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_canon::{Digest, Value, parse, to_canonical};
-use mandate_identity::{MembershipEvent, MembershipRecord, PrincipalId, Role, StepUpActionKind};
+use mandate_identity::MembershipState::Active;
+use mandate_identity::SessionKind::Full;
+use mandate_identity::{
+    Authorized, MembershipEvent, MembershipRecord, OrgId, Permission, Principal, PrincipalId, Role,
+    Scope, SessionRef, StepUpActionKind, WorkspaceId, authorize,
+};
 use mandate_identity_seal::Seal;
+use mandate_identity_testkit::{StaticLookup, membership, session};
 use mandate_journal::{ArtifactRef, Draft, StoredEvent, get_artifact};
 use mandate_time::UtcNanos;
 
@@ -67,8 +73,7 @@ impl StepUp for Accepting {
         &self,
         _evidence: &StepUpEvidence,
         action: &Action,
-        _principal: PrincipalId,
-        _now: UtcNanos,
+        _judged: &Judged<'_>,
     ) -> Result<(), ProblemCode> {
         self.0
             .lock()
@@ -1169,8 +1174,29 @@ fn the_unbound_port_counts_no_evidence() {
         kind: StepUpActionKind::Deploy,
         digest: Digest::ZERO,
     };
+    let scope = Scope::Workspace {
+        org: OrgId(1),
+        workspace: WorkspaceId(2),
+    };
+    let held = membership(alice(), scope, Active, &[(Role::Operator, at(T0 - 1))]);
+    let tenant = match authorize(
+        &StaticLookup(vec![held.clone()]),
+        &Principal::User { id: alice() },
+        &session(SessionRef(3), Full, vec![held]),
+        scope,
+        Permission::Deploy,
+        at(T0),
+    ) {
+        Ok(Authorized::Workspace { tenant, .. }) => tenant,
+        other => panic!("the operator may deploy: {other:?}"),
+    };
+    let judged = Judged {
+        tenant: &tenant,
+        control: &[],
+        now: at(T0),
+    };
     assert_eq!(
-        Unbound.verify(&evidence, &action, alice(), at(T0)),
+        Unbound.verify(&evidence, &action, &judged),
         Err(ProblemCode::StepUpMissing)
     );
 }
@@ -1354,4 +1380,195 @@ fn another_connections_records_leave_the_documents_connection_unrecorded() {
         "{:?}",
         String::from_utf8_lossy(&reply.body)
     );
+}
+
+/// `seed_control` at schema version 2.
+fn seed_control_v2(f: &Fixture, event_type: &str, payload: &str) {
+    let mut streams = f.journal.streams.lock().expect("unpoisoned");
+    let rows = streams.get_mut(&ctl()).expect("seeded");
+    let seq = u64::try_from(rows.len()).expect("a count") + 1;
+    let added = row(&ctl(), 10 + seq, event_type, payload);
+    rows.push(StoredEvent {
+        seq,
+        schema_version: 2,
+        ..added
+    });
+}
+
+/// Journal spec v0.54 §9.24 (DEC-1171): the deployment is version 2, naming the document's
+/// connection, exactly when the control stream holds a version-2 establishment of it whose latest
+/// establishment or revocation is an establishment (rule 201); a requested connection, which
+/// names an account but is not established, gives version 1, as before.
+#[test]
+fn a_deploy_names_its_connection_exactly_when_rule_201_holds() {
+    let established = format!(
+        r#"{{"account_ref":"{ACCOUNT}","broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","margin_attestation":null,"scopes":["data","trading"],"step_up":{EVIDENCE},"user":"alice"}}"#
+    );
+    let revoked = format!(r#"{{"connection_id":"{CONNECTION}"}}"#);
+    let established_v1 = format!(
+        r#"{{"broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","scopes":["data","trading"]}}"#
+    );
+    for (name, reconnect, expected) in [
+        ("requested only", 0, (1, None)),
+        ("established at version 1", 0, (1, None)),
+        ("established", 1, (2, Some(CONNECTION))),
+        ("reconnected", 2, (2, Some(CONNECTION))),
+    ] {
+        let f = fixture();
+        let cookie = signed_in(&f, alice());
+        if name == "established at version 1" {
+            seed_control(&f, "ConnectionEstablished", &established_v1);
+        }
+        for nth in 0..reconnect {
+            if nth > 0 {
+                seed_control(&f, "ConnectionRevoked", &revoked);
+            }
+            seed_control_v2(&f, "ConnectionEstablished", &established);
+        }
+        let mut snapshot = row(
+            &account(),
+            2,
+            "AccountSnapshotRecorded",
+            r#"{"equity":"25000"}"#,
+        );
+        snapshot.recorded_at = "2026-10-17T11:00:00.000000000Z".to_owned();
+        f.journal
+            .streams
+            .lock()
+            .expect("unpoisoned")
+            .insert(account(), vec![snapshot]);
+        confirmed(&f, &cookie, "v1");
+        let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE));
+        assert_eq!(
+            reply.status,
+            202,
+            "{name}: {:?}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        let deployed = events(&f, "AgentDeployed");
+        let row = deployed.last().expect("one deployment");
+        let connection = payload(row).get("connection_id").cloned();
+        let got = (row.schema_version, connection);
+        let want = (expected.0, expected.1.map(|c| Value::Str(c.to_owned())));
+        assert_eq!(got, want, "{name}");
+        journal_accepts(&f);
+    }
+}
+
+/// A connection established and then revoked fails rule 201, but is never deployed at version 1:
+/// the fold knows it with no environment, so V-001 refuses the deployment, 422, and nothing is
+/// written (journal spec §9.24, "Revoked").
+#[test]
+fn a_revoked_connection_is_refused_rather_than_deployed_at_version_1() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    seed_control_v2(
+        &f,
+        "ConnectionEstablished",
+        &format!(
+            r#"{{"account_ref":"{ACCOUNT}","broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","margin_attestation":null,"scopes":["data","trading"],"step_up":{EVIDENCE},"user":"alice"}}"#
+        ),
+    );
+    let mut snapshot = row(
+        &account(),
+        2,
+        "AccountSnapshotRecorded",
+        r#"{"equity":"25000"}"#,
+    );
+    snapshot.recorded_at = "2026-10-17T11:00:00.000000000Z".to_owned();
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .insert(account(), vec![snapshot]);
+    confirmed(&f, &cookie, "v1");
+    seed_control(
+        &f,
+        "ConnectionRevoked",
+        &format!(r#"{{"connection_id":"{CONNECTION}"}}"#),
+    );
+    let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE));
+    let body = String::from_utf8_lossy(&reply.body);
+    assert_eq!(reply.status, 422, "{body}");
+    assert!(body.contains(r#""code":"V-001""#), "{body}");
+    assert!(events(&f, "AgentDeployed").is_empty(), "nothing is written");
+    journal_accepts(&f);
+}
+
+/// An agent id is deployed once (DEC-1173 item 1): one an `AgentStopped` names is `invalid` at
+/// `/agent_id`, whatever version, and nothing is written.
+#[test]
+fn a_stopped_agent_is_never_deployed_again() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    confirmed(&f, &cookie, "v1");
+    seed_control(
+        &f,
+        "AgentDeployed",
+        &format!(
+            r#"{{"agent_id":"agt_a","mandate_version":"{}","record_ref":"{}"}}"#,
+            version("v1"),
+            reference("{}")
+        ),
+    );
+    seed_control(
+        &f,
+        "AgentStopped",
+        &format!(
+            r#"{{"agent_id":"agt_a","connection_id":"{CONNECTION}","loss_added":"0","reason":"owner_stop","retired_on":"2026-09-20"}}"#
+        ),
+    );
+    let before = control(&f).len();
+    let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE));
+    assert_eq!(
+        violations(&reply),
+        vec![("/agent_id".to_owned(), "agent_stopped".to_owned())]
+    );
+    assert_eq!(control(&f).len(), before, "nothing written");
+}
+
+/// A version-2 deployment is appended at the head the request read the control stream at, so rule
+/// 201 still holds at the append: a stream that moved first (another writer's revocation, say)
+/// stores nothing and answers `journal_unavailable`, and a retry reads the rows again (#1748
+/// review). A version-1 deployment settles at the head as it is, as every command does.
+#[test]
+fn a_version_2_deploy_is_appended_only_at_the_head_it_read() {
+    let established = format!(
+        r#"{{"account_ref":"{ACCOUNT}","broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","margin_attestation":null,"scopes":["data","trading"],"step_up":{EVIDENCE},"user":"alice"}}"#
+    );
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    seed_control_v2(&f, "ConnectionEstablished", &established);
+    let mut snapshot = row(
+        &account(),
+        2,
+        "AccountSnapshotRecorded",
+        r#"{"equity":"25000"}"#,
+    );
+    snapshot.recorded_at = "2026-10-17T11:00:00.000000000Z".to_owned();
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .insert(account(), vec![snapshot]);
+    confirmed(&f, &cookie, "v1");
+    let head = control(&f).last().expect("rows").seq;
+    let before = f.journal.appends.lock().expect("unpoisoned").len();
+    f.journal.script(&[Scripted::HeadMismatch]);
+    let moved = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE));
+    refused(&moved, 503, ProblemCode::JournalUnavailable);
+    let appends = f.journal.appends.lock().expect("unpoisoned")[before..].to_vec();
+    let heads: Vec<u64> = appends.iter().map(|(_, expected, _)| *expected).collect();
+    assert_eq!(heads, vec![head], "one attempt, at the head it read");
+    assert!(events(&f, "AgentDeployed").is_empty(), "nothing stored");
+    let again = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE));
+    assert_eq!(
+        again.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&again.body)
+    );
+    let deployed = events(&f, "AgentDeployed");
+    assert_eq!(deployed.len(), 1);
+    assert_eq!(deployed[0].schema_version, 2);
 }

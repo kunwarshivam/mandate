@@ -9,7 +9,8 @@ use mandate_api::envelope::StepUpEvidence;
 use mandate_api::problem::ProblemCode;
 use mandate_api::wire::encode;
 use mandate_canon::{Digest, Value, parse};
-use mandate_identity::{PrincipalId, StepUpActionKind};
+use mandate_identity::{StepUpActionKind, TenantContext};
+use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
 /// The one action a step-up assertion must be bound to (§3.6, API-17).
@@ -21,12 +22,22 @@ pub struct Action {
     pub digest: Digest,
 }
 
+/// What a call's evidence is judged under: the context `authorize` returned for the request
+/// (identity spec ID-8), whose principal and workspace the evidence must be bound to; the
+/// workspace's control stream as the request read it; and the server's clock at receipt.
+#[derive(Debug, Clone, Copy)]
+pub struct Judged<'a> {
+    pub tenant: &'a TenantContext,
+    pub control: &'a [StoredEvent],
+    pub now: UtcNanos,
+}
+
 /// Judges evidence a call carries for one action.
 pub trait StepUp: Send + Sync {
-    /// `Ok` when `evidence` is a valid, unused assertion by `principal`, bound to `action`, at
-    /// `now`; else the §3.5 code of the first check that fails, in identity spec §7.2 step 4's
-    /// order. The journal records `evidence` exactly as presented, so a verifier accepts only
-    /// evidence it would have the journal hold.
+    /// `Ok` when `evidence` is a valid, unused assertion by the request's principal, bound to
+    /// `action` in the request's workspace, at `judged.now`; else the §3.5 code of the first check
+    /// that fails, in identity spec §7.2 step 4's order. The journal records `evidence` exactly as
+    /// presented, so a verifier accepts only evidence it would have the journal hold.
     ///
     /// # Errors
     /// One of the five `step_up_*` codes but `step_up_required`.
@@ -34,8 +45,7 @@ pub trait StepUp: Send + Sync {
         &self,
         evidence: &StepUpEvidence,
         action: &Action,
-        principal: PrincipalId,
-        now: UtcNanos,
+        judged: &Judged<'_>,
     ) -> Result<(), ProblemCode>;
 }
 
@@ -48,8 +58,7 @@ impl StepUp for Unbound {
         &self,
         _evidence: &StepUpEvidence,
         _action: &Action,
-        _principal: PrincipalId,
-        _now: UtcNanos,
+        _judged: &Judged<'_>,
     ) -> Result<(), ProblemCode> {
         Err(ProblemCode::StepUpMissing)
     }
