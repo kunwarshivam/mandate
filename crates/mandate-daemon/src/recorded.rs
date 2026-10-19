@@ -127,7 +127,10 @@ impl Bundle {
         let endpoint = research.member("endpoint")?;
         let caps = research.member("caps")?;
         let reply = research.member("reply")?;
-        let slug = entry.text("model_name")?;
+        let pinned = ResearchEntry::recorded(entry.value).map_err(|error| match error {
+            EntryError::Member(member) => entry.malformed(member),
+        })?;
+        let slug = pinned.identity.model_name.clone();
         let reported_provider = endpoint.text("reported_provider")?;
         let prices = PriceTable::new(
             endpoint.per_million("input_per_million")?,
@@ -161,9 +164,7 @@ impl Bundle {
         let halted = halts(&research, &plane.instruments)?;
         let allowlist = allowlist(&research)?;
         Ok(Self {
-            entry: ResearchEntry::recorded(entry.value).map_err(|error| match error {
-                EntryError::Member(member) => entry.malformed(member),
-            })?,
+            entry: pinned,
             endpoint: Endpoint {
                 id: endpoint.text("id")?.to_owned(),
                 host: endpoint.text("host")?.to_owned(),
@@ -176,7 +177,7 @@ impl Bundle {
                 prices,
             },
             probe: Reported {
-                model: Some(slug.to_owned()),
+                model: Some(slug),
                 provider: Some(reported_provider.to_owned()),
             },
             workspace_cap: caps.usd6("workspace_monthly_usd")?,
