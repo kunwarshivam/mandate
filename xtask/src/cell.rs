@@ -1490,7 +1490,7 @@ fn vault_drill_script(seeded: bool) -> String {
          op=$(cat /work/token)\n\
          {puts}{plant}\
          check() {{\n\
-           t=$(bao write -field=token auth/approle/login role_id=@/work/creds/$1.role-id secret_id=@/work/creds/$1.secret-id)\n\
+           t=$(bao write -field=token auth/approle/login role_id=@/work/private/creds/$1.role-id secret_id=@/work/private/creds/$1.secret-id)\n\
            if out=$(BAO_TOKEN=\"$t\" bao kv get -mount=mandate -field=value \"$2\" 2>&1 >/dev/null); then echo \"$1 $2 allowed\"\n\
            elif echo \"$out\" | grep -q 'permission denied'; then echo \"$1 $2 denied\"\n\
            else echo \"$1 $2 error\"; fi\n\
@@ -1504,7 +1504,9 @@ fn vault_drill_script(seeded: bool) -> String {
 
 /// The vault drill (E21-32, DEC-2022 item 3). A Job labelled as the executor, so its egress
 /// reaches the vault and the vault admits it: the vault's image copies the cell's fake operator
-/// token into a file only the pod's user reads, `mandate vault provision` writes every role's
+/// token into a file only the pod's user reads and makes `/work/private` owner-only, since an
+/// emptyDir is 0777 without the sticky bit and `--out`'s parent must not be; the cell's `mandate`
+/// image, the one `images.mandate` names, runs `mandate vault provision`, which writes every role's
 /// credentials, and the vault's image then logs in as each and reads (see
 /// [`vault_drill_script`]). The operator token is the local cell's fake root token, put in a
 /// Secret for the drill and deleted after it.
@@ -1521,13 +1523,7 @@ fn vault_drill(seeded: bool) -> Result<Verdict> {
         "type": "Opaque",
         "stringData": {"token": root}
     });
-    let rendered = render(&[], None)?;
-    let mandate = rendered
-        .iter()
-        .find(|o| o["kind"] == "Job" && o["metadata"]["name"] == "migrate")
-        .and_then(|j| j["spec"]["template"]["spec"]["containers"][0]["image"].as_str())
-        .context("the migration Job did not render, so there is no mandate image")?
-        .to_string();
+    let mandate = image_tag()?;
     let bao = kubectl(&[
         "get",
         "statefulset",
@@ -1565,7 +1561,7 @@ fn vault_drill(seeded: bool) -> Result<Verdict> {
         "--operator-token-file".to_owned(),
         "/work/token".to_owned(),
         "--out".to_owned(),
-        "/work/creds".to_owned(),
+        "/work/private/creds".to_owned(),
     ];
     for c in VAULT_DRILL_CONNECTIONS {
         provision.extend(["--connection".to_owned(), c.to_owned()]);
@@ -1576,7 +1572,7 @@ fn vault_drill(seeded: bool) -> Result<Verdict> {
         {
             "name": "operator-token",
             "image": bao.trim(),
-            "command": ["sh", "-c", "umask 077 && cp /operator/token /work/token"],
+            "command": ["sh", "-c", "umask 077 && mkdir /work/private && cp /operator/token /work/token"],
             "securityContext": hardened, "resources": small,
             "volumeMounts": [{"name": "work", "mountPath": "/work"}, {"name": "operator", "mountPath": "/operator", "readOnly": true}]
         },
