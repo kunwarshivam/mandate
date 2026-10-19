@@ -122,7 +122,10 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || crate::acknowledgments::RECORDS.contains(&event_type)
                 || EXECUTOR.contains(&event_type)
         }
-        StreamType::Scheduler | StreamType::Notice | StreamType::Meter => false,
+        StreamType::Scheduler
+        | StreamType::Notice
+        | StreamType::Meter
+        | StreamType::DeploymentMeter => false,
     }
 }
 
@@ -407,7 +410,11 @@ pub(crate) fn subject_and_copy(
     let allowed: &[&str] = match stream.stream_type() {
         StreamType::Account => &["acknowledge"],
         StreamType::Agent => &["resume", "stop", "lift_hold"],
-        StreamType::Control | StreamType::Scheduler | StreamType::Notice | StreamType::Meter => &[],
+        StreamType::Control
+        | StreamType::Scheduler
+        | StreamType::Notice
+        | StreamType::Meter
+        | StreamType::DeploymentMeter => &[],
     };
     ensure(
         allowed.contains(&p.text("command")),

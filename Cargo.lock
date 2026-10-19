@@ -2619,10 +2619,12 @@ dependencies = [
  "base64 0.22.1",
  "mandate-api-server",
  "mandate-authn",
+ "mandate-connections",
  "mandate-identity",
  "mandate-journal",
  "mandate-release",
  "mandate-time",
+ "proptest",
  "ring",
  "serde_json",
  "tokio",
@@ -2655,6 +2657,17 @@ dependencies = [
  "jiff",
  "proptest",
  "thiserror",
+]
+
+[[package]]
+name = "mandate-token-exchange"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-connections",
+ "mandate-release",
+ "proptest",
+ "secrecy",
 ]
 
 [[package]]
