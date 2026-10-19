@@ -14,10 +14,11 @@
 use std::collections::BTreeSet;
 
 use mandate_canon::{Key, Object, Value, to_canonical};
+use mandate_num::Price;
 
 use crate::agentic::{Code, LoopBounds, Tool, ToolCall, ToolCallId, ToolClass, ToolOutcome};
 use crate::error::ResearchRunError;
-use crate::item::{Bar, ItemId, ItemKind, NewsItem, Symbol};
+use crate::item::{Bar, ItemId, ItemKind, NewsItem, Quote, Symbol};
 use crate::plan::Scope;
 use crate::ports::{FilingEntry, FilingText, NewsText, ReadError, Readers};
 use crate::retrieve::{RetrievedItem, TextRead, cut, digest, int, reserved, text, window_start};
@@ -526,8 +527,43 @@ fn quotes(
     scope: &Scope,
     readers: Readers<'_>,
 ) -> Result<Answer, ResearchRunError> {
-    let _ = (call, scope, readers);
-    Err(ResearchRunError::Unimplemented { story: "E19-13" })
+    let Ok(arguments) = mandate_canon::parse(call.arguments.as_bytes()) else {
+        return Ok(Answer::Failed);
+    };
+    let Some(symbols) = arguments
+        .get("symbols")
+        .and_then(|listed| symbols(listed, 10))
+    else {
+        return Ok(Answer::Failed);
+    };
+    if outside(&symbols, scope) {
+        return Ok(Answer::Refused(Code::OutOfUniverse));
+    }
+    let mut kept = Vec::with_capacity(symbols.len());
+    for symbol in &symbols {
+        match readers.bars.last_quote(symbol, scope.cut_off) {
+            Ok(Some(quote)) => {
+                if quote.symbol == *symbol && quote.knowledge_at <= scope.cut_off {
+                    kept.push(RetrievedItem::Quote(quote));
+                }
+            }
+            Ok(None) => {}
+            Err(_) => return Ok(Answer::Failed),
+        }
+    }
+    Ok(Answer::Read(Read {
+        items: kept,
+        trimmed: false,
+        untrusted: false,
+        stored: None,
+        stored_bytes: Vec::new(),
+        range_offset: None,
+    }))
+}
+
+/// DEC-2255 item 5's structural sanity: both sides priced, and the bid at or below the ask.
+fn sane(quote: &Quote) -> bool {
+    matches!((quote.bid, quote.ask), (Some(bid), Some(ask)) if bid <= ask)
 }
 
 fn outside(symbols: &BTreeSet<Symbol>, scope: &Scope) -> bool {
@@ -643,7 +679,24 @@ fn render(
                 }
                 ("untrusted", fields)
             }
-            RetrievedItem::Instrument(_) | RetrievedItem::Quote(_) => {
+            RetrievedItem::Quote(quote) => {
+                let price = |side: Option<Price>| {
+                    side.map_or(Value::Null, |price| text(&price.to_string()))
+                };
+                (
+                    "untrusted",
+                    vec![
+                        ("symbol", text(quote.symbol.as_str())),
+                        ("quoted_at", text(&quote.knowledge_at.to_string())),
+                        ("bid", price(quote.bid)),
+                        ("bid_size", text(&quote.bid_size.to_string())),
+                        ("ask", price(quote.ask)),
+                        ("ask_size", text(&quote.ask_size.to_string())),
+                        ("sane", Value::Bool(sane(quote))),
+                    ],
+                )
+            }
+            RetrievedItem::Instrument(_) => {
                 return Err(ResearchRunError::LoopOrder {
                     what: "an item no dispatched read returns",
                 });
