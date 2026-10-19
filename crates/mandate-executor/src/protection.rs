@@ -4259,6 +4259,7 @@ mod sequence_tests {
                 purpose,
                 protection: None,
             },
+            confirmation: None,
         }))
     }
 
