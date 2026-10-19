@@ -154,6 +154,14 @@ impl Link {
         if self.state != LinkState::Down {
             self.last_received = Some(at);
         }
+        let missed_halt = frame
+            .refused
+            .iter()
+            .any(|refused| matches!(refused.kind.as_deref(), Some("s" | "l")));
+        if missed_halt && matches!(self.state, LinkState::Resyncing | LinkState::Live) {
+            self.down(at, jitter, actions);
+            return;
+        }
         for message in frame.messages {
             if let StreamMessage::Error(fault) = &message {
                 match fault.disposition {
@@ -163,7 +171,18 @@ impl Link {
                         actions.push(LinkAction::Alert("stream_credential_rejected"));
                         return;
                     }
-                    Disposition::Narrow => continue,
+                    Disposition::Narrow => {
+                        self.channels = self.channels.narrowed();
+                        self.state = LinkState::Connecting;
+                        self.clear();
+                        match subscribe_frame(&self.channels) {
+                            Ok(frame) => actions.push(LinkAction::Subscribe(frame)),
+                            Err(_) => {
+                                actions.push(LinkAction::Alert("stream_subscription_invalid"));
+                            }
+                        }
+                        return;
+                    }
                     Disposition::Overflow => {
                         actions.push(LinkAction::Alert("stream_symbol_limit"));
                         continue;

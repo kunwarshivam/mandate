@@ -335,7 +335,7 @@ pub fn read_frame(text: &str) -> Result<Frame, WireError> {
             Ok(message) => frame.messages.push(message),
             Err(reason) => frame.refused.push(Refused {
                 index,
-                kind: None,
+                kind: kind_of(item),
                 reason,
             }),
         }
@@ -344,6 +344,12 @@ pub fn read_frame(text: &str) -> Result<Frame, WireError> {
 }
 
 type Fields<'a> = BTreeMap<String, &'a RawValue>;
+
+/// A message's `T`, when the message is an object whose `T` is text.
+fn kind_of(raw: &RawValue) -> Option<String> {
+    let f = raw_object(raw, "message").ok()?;
+    text(&f, "T").ok()
+}
 
 fn message(raw: &RawValue) -> Result<StreamMessage, WireError> {
     let f = raw_object(raw, "message")?;
@@ -478,7 +484,7 @@ fn side(
     size_field: &'static str,
     exchange_field: &'static str,
 ) -> Result<Option<QuoteSide>, WireError> {
-    if token(f, price_field)? == "0" {
+    if matches!(token(f, price_field)?.as_str(), "0" | "-0") {
         return Ok(None);
     }
     Ok(Some(QuoteSide {

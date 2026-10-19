@@ -343,14 +343,18 @@ fn a_rejected_channel_narrows_the_subscription_and_never_reconnects() {
             subscribe_frame(&channels().narrowed()).unwrap()
         )]
     );
-    assert_eq!(link.state(), LinkState::Connecting, "awaits the narrowed echo");
+    assert_eq!(
+        link.state(),
+        LinkState::Connecting,
+        "awaits the narrowed echo"
+    );
     link.on(
         at(2),
         frame(&[r#"{"T":"subscription","trades":["AAPL"],"quotes":["AAPL","SPY"]}"#.to_owned()]),
         0,
     );
     assert_eq!(link.state(), LinkState::Resyncing);
-    link.on(at(3), frame(&[quote("AAPL"), status("AAPL")]), 0);
+    link.on(at(3), frame(&[quote("AAPL"), quote("AAPL")]), 0);
     assert!(
         !link.opens(&id("AAPL")),
         "no status channel now, so no opening under the live rule"
@@ -371,7 +375,7 @@ fn a_status_or_band_that_cannot_be_read_resyncs_the_connection() {
             0,
         );
         assert_eq!(link.state(), LinkState::Live);
-        let actions = link.on(at(2), frame(&[unreadable.clone()]), 0);
+        let actions = link.on(at(2), frame(std::slice::from_ref(&unreadable)), 0);
         assert_eq!(link.state(), LinkState::Down, "{unreadable}");
         assert!(reconnect_after(&actions).is_some());
     }

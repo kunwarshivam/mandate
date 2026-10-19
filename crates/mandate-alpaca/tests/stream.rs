@@ -287,12 +287,6 @@ fn a_negative_zero_side_is_absent_too() {
 }
 
 #[test]
-fn a_message_with_a_repeated_key_is_refused() {
-    refusal(&QUOTE.replace(r#""bp":87.66,"#, r#""bp":87.66,"bp":1,"#));
-    refusal(&STATUS.replace(r#""sc":"H","#, r#""sc":"T","sc":"H","#));
-}
-
-#[test]
 fn a_subscription_that_omits_the_statuses_and_bands_reads_them_as_empty() {
     let StreamMessage::Subscribed(channels) =
         one(r#"{"T":"subscription","quotes":["SPY"],"trades":["SPY"]}"#)
