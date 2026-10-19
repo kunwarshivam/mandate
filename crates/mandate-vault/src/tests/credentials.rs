@@ -533,7 +533,6 @@ fn token_read(input: &[u8]) -> Result<String, SourceError> {
 
 /// A piped token is read by the file's rules: the token alone, or with one trailing newline.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_piped_token_is_read_with_at_most_one_trailing_newline() {
     assert_eq!(token_read(b"s.abc"), Ok("s.abc".to_owned()));
     assert_eq!(token_read(b"s.abc\n"), Ok("s.abc".to_owned()));
@@ -541,7 +540,6 @@ fn a_piped_token_is_read_with_at_most_one_trailing_newline() {
 
 /// An empty pipe, a second line, or a carriage return anywhere is refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_piped_token_that_is_empty_or_not_one_line_is_refused() {
     for input in [
         &b""[..],
@@ -563,7 +561,6 @@ fn a_piped_token_that_is_empty_or_not_one_line_is_refused() {
 
 /// A pipe holding more than 4096 bytes is refused, newline or not; 4096 is read.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_piped_token_longer_than_its_bound_is_refused() {
     let longest = "a".repeat(4096);
     assert_eq!(token_read(longest.as_bytes()), Ok(longest.clone()));
@@ -579,7 +576,6 @@ fn a_piped_token_longer_than_its_bound_is_refused() {
 
 /// A pipe that is not UTF-8 is refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_piped_token_that_is_not_utf8_is_refused() {
     assert_eq!(token_read(b"s.\xffabc"), Err(SourceError::CredentialFile));
 }

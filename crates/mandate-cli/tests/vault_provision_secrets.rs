@@ -8,7 +8,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use mandate_cli::vault::{ProvisionArgs, run_provision};
+use mandate_cli::vault::{ProvisionArgs, Terminals, run_provision};
 use serde_json::Value;
 
 const CANARY: &str = "canary-5be3f1d2-operator-token-do-not-print";
@@ -59,7 +59,6 @@ fn refused(output: &Output, code: &str, case: &str) {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_piped_token_is_read_and_the_vault_reached() {
     let output = provision(
         NOWHERE,
@@ -77,7 +76,6 @@ fn a_piped_token_is_read_and_the_vault_reached() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_piped_token_that_is_not_one_line_is_refused_before_any_vault_is_reached() {
     for (stdin, case) in [
         ("", "an empty pipe"),
@@ -96,7 +94,6 @@ fn a_piped_token_that_is_not_one_line_is_refused_before_any_vault_is_reached() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_namespace_that_is_not_a_label_is_refused_before_any_vault_is_reached() {
     for namespace in ["WS", "a_b", "-a", "a."] {
         let output = provision(
@@ -114,7 +111,6 @@ fn a_namespace_that_is_not_a_label_is_refused_before_any_vault_is_reached() {
 
 /// A terminal never receives the Secrets: the refusal comes before stdin is read.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_terminal_never_receives_the_secrets() {
     let args = ProvisionArgs {
         address: NOWHERE.to_owned(),
@@ -128,7 +124,12 @@ fn a_terminal_never_receives_the_secrets() {
     let stdin = format!("{CANARY}\n");
     let mut piped = stdin.as_bytes();
     let mut printed = Vec::new();
-    let answer = run_provision(&args, &mut piped, true, &mut printed).map_err(|e| e.to_string());
+    let terminals = Terminals {
+        stdin: false,
+        stdout: true,
+    };
+    let answer =
+        run_provision(&args, &mut piped, terminals, &mut printed).map_err(|e| e.to_string());
     let error = answer
         .as_ref()
         .err()
@@ -140,6 +141,39 @@ fn a_terminal_never_receives_the_secrets() {
     );
     assert!(printed.is_empty());
     assert_eq!(piped.len(), stdin.len(), "stdin was read");
+}
+
+/// A terminal on stdin is refused before it is read, so a token is never typed where it echoes;
+/// with `--operator-token-file`, stdin is not read and a terminal there is no matter.
+#[test]
+fn a_token_is_never_read_from_a_terminal() {
+    let mut args = ProvisionArgs {
+        address: NOWHERE.to_owned(),
+        ca: ca(),
+        operator_token_file: None,
+        operator_token_stdin: true,
+        connections: vec!["c1".to_owned()],
+        out: None,
+        secrets_namespace: Some("ws-ws1".to_owned()),
+    };
+    let terminals = Terminals {
+        stdin: true,
+        stdout: false,
+    };
+    let stdin = format!("{CANARY}\n");
+    let mut piped = stdin.as_bytes();
+    let answer = run_provision(&args, &mut piped, terminals, &mut Vec::new());
+    let error = answer.map_err(|e| e.to_string()).err().unwrap_or_default();
+    assert!(
+        error.contains("(config)") && error.contains("terminal"),
+        "{error}"
+    );
+    assert_eq!(piped.len(), stdin.len(), "stdin was read");
+    args.operator_token_stdin = false;
+    args.operator_token_file = Some(PathBuf::from("/nonexistent/token"));
+    let answer = run_provision(&args, &mut piped, terminals, &mut Vec::new());
+    let error = answer.map_err(|e| e.to_string()).err().unwrap_or_default();
+    assert!(error.contains("credential_file"), "{error}");
 }
 
 #[test]
@@ -183,7 +217,6 @@ fn server() -> Option<(String, PathBuf, PathBuf)> {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn provisioning_prints_each_identitys_secret_and_nothing_else() {
     a_piped_token_is_read_and_the_vault_reached();
     let Some((address, ca, operator)) = server() else {
