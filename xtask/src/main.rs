@@ -17,6 +17,7 @@ mod cell;
 mod gitops;
 mod image;
 mod infra_preflight;
+mod infra_window;
 mod leak;
 mod mail;
 mod mask;
@@ -1284,8 +1285,9 @@ const INFRA_CLOSE_IF: &str = "      - if: always() && steps.build.outcome == 'su
 /// through cargo: [`INFRA_RUN`]'s and [`INFRA_CLOSE`]'s, which an earlier step of the same job
 /// built from the checkout with `cargo build --locked --package xtask`.
 const INFRA_BINARY_ARGS: [&[&str]; 2] = [&["infra"], &["infra", "close"]];
-/// The one secret [`INFRA_CLOSE`]'s step may read.
-const INFRA_CLOSE_SECRET: &str = "DIGITAL_OCEAN_API_KEY";
+/// The only secrets [`INFRA_CLOSE`]'s step may read: the DigitalOcean token, to delete the run's
+/// Spaces key and close the window, and the founder's CIDRs, which the closed window keeps.
+const INFRA_CLOSE_SECRETS: [&str; 2] = ["DIGITAL_OCEAN_API_KEY", "KUBE_API_ALLOWED_CIDRS"];
 /// The secrets that step reads, each from the environment `infra-<environment>` the founder
 /// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Spaces key is
 /// minted per run, never stored (DEC-2030 item 4). The Cloudflare token goes to OpenTofu as a
@@ -1407,21 +1409,92 @@ fn infra() -> Result<()> {
     let read = |name: &str| env::var(name).ok();
     let preflight = infra_preflight::preflight(&environment, &run, !commands.is_empty(), &read)?;
     eprint!("{}", preflight.checklist.render(&environment));
+    let mut window = None;
     let outcome = if preflight.checklist.complete() {
-        run_tofu(&commands, preflight.key.key(), &sha, &plan_file)
+        match opens_window(&environment, &action)
+            .then(|| infra_window::open_window(&infra_window::Curl))
+            .transpose()
+        {
+            Ok(opened) => {
+                window = opened;
+                run_tofu(
+                    &commands,
+                    preflight.key.key(),
+                    &sha,
+                    &plan_file,
+                    window.as_deref(),
+                    &run,
+                )
+            }
+            Err(error) => Err(error),
+        }
     } else {
         Err(anyhow::anyhow!(
             "infra preflight: each MISSING line above is a step in deploy/tofu/README.md; nothing \
              was planned"
         ))
     };
-    if !preflight.key.release()? {
-        bail!(
+    let closed = window.is_some().then(|| {
+        let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
+        let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
+        infra_window::close_window(
+            &infra_window::Curl,
+            &token,
+            &environment,
+            founder.as_deref(),
+        )
+    });
+    let applied = outcome.is_ok();
+    let keys = match preflight.key.release() {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(anyhow::anyhow!(
             "this run's Spaces key was not deleted; `infra close` and the next run of \
              {environment} delete it (DEC-2030 item 4)"
-        );
+        )),
+        Err(error) => Err(error),
+    };
+    settle(outcome, closed, applied, keys)
+}
+
+/// How a run that may have opened a window ends (the review of #1771, B1 and B2): the window's
+/// close and the Spaces key's deletion are each attempted and reported, whatever came before, and
+/// the first error is returned. A close reports the window closed only when the cluster was read
+/// back admitting exactly the closed addresses, or had no such cluster when none was expected;
+/// `cluster_expected` makes a missing cluster an error, as after a successful apply.
+fn settle(
+    outcome: Result<()>,
+    closed: Option<Result<infra_window::Window>>,
+    cluster_expected: bool,
+    keys: Result<()>,
+) -> Result<()> {
+    let window = match closed {
+        None => Ok(()),
+        Some(Ok(infra_window::Window::Closed | infra_window::Window::AlreadyClosed)) => {
+            eprintln!("    the control plane's window is closed (DEC-2028 item 3)");
+            Ok(())
+        }
+        Some(Ok(infra_window::Window::NoCluster)) if !cluster_expected => {
+            eprintln!("    no cluster exists, so no window is open (DEC-2028 item 3)");
+            Ok(())
+        }
+        Some(Ok(infra_window::Window::NoCluster)) => Err(anyhow::anyhow!(
+            "the apply succeeded but DigitalOcean lists no such cluster, so the window's close \
+             could not be confirmed"
+        )),
+        Some(Err(error)) => Err(error),
     }
-    outcome
+    .context("the control plane's window may be open; `infra close` and the next run close it");
+    let mut first = None;
+    for result in [outcome, window, keys] {
+        if let Err(error) = result {
+            if first.is_some() {
+                eprintln!("    also: {error:#}");
+            } else {
+                first = Some(error);
+            }
+        }
+    }
+    first.map_or(Ok(()), Err)
 }
 
 /// The dispatch's `sha` input, which the founder approves the run for (the audit's item 5).
@@ -1472,10 +1545,11 @@ const INFRA_PATHS: [&str; 7] = [
     ".cargo/",
 ];
 
-/// `cargo xtask infra close` (DEC-2030 item 4): `infra.yml`'s last step, which runs `if:
-/// always()` with only the DigitalOcean token, deletes every Spaces key this environment's runs
-/// minted, so a run killed before its own guard ran leaves none. Like `infra`, it runs only in
-/// that job on `main`.
+/// `cargo xtask infra close` (DEC-2030 item 4, DEC-2028 item 3): `infra.yml`'s last step, which
+/// runs `if: always()` with only the DigitalOcean token and the founder's CIDRs, closes staging's
+/// window first and then deletes every Spaces key this environment's runs minted, each attempted
+/// whatever the other did, so a run killed before its own guard ran leaves neither. Like `infra`,
+/// it runs only in that job on `main`.
 fn infra_close() -> Result<()> {
     let actions = env::var("GITHUB_ACTIONS").unwrap_or_default();
     let reference = env::var("GITHUB_REF").unwrap_or_default();
@@ -1488,9 +1562,79 @@ fn infra_close() -> Result<()> {
         eprintln!("    infra close: DIGITAL_OCEAN_API_KEY is not set, so no key was minted");
         return Ok(());
     }
-    let deleted = infra_preflight::close(&environment, &token)?;
-    eprintln!("    infra close: deleted {deleted} Spaces key(s) this environment's runs minted");
-    Ok(())
+    let closed = opens_window(&environment, "apply").then(|| {
+        let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
+        for value in tofu_audit::list_items(founder.as_deref().unwrap_or_default()) {
+            mask::add_mask(&value);
+        }
+        infra_window::close_window(
+            &infra_window::Curl,
+            &token,
+            &environment,
+            founder.as_deref(),
+        )
+    });
+    let keys = infra_preflight::close(&environment, &token).map(|deleted| {
+        eprintln!(
+            "    infra close: deleted {deleted} Spaces key(s) this environment's runs minted"
+        );
+    });
+    settle(Ok(()), closed, false, keys)
+}
+
+/// Whether `action` on `environment` opens the control plane to its own runner and bootstraps
+/// the cluster (DEC-2028): an `apply` on staging, the one environment lane GO's bootstrap runs in
+/// from CI today.
+fn opens_window(environment: &str, action: &str) -> bool {
+    environment == "staging" && action == "apply"
+}
+
+/// Lane GO's bootstrap after staging's apply (DEC-2018 item 7, DEC-2028): the workload secrets
+/// from OpenTofu's outputs, each wrapped in a [`gitops::Secret`], which masks it, the moment it is
+/// read; a kubeconfig that expires in 900 seconds, at mode 0600 in `$RUNNER_TEMP` and deleted
+/// however the bootstrap ends; and the bootstrap itself, which confirms the context first.
+fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str) -> Result<()> {
+    let output = |name: &str| -> Result<String> {
+        let out = tofu(&[
+            chdir.to_owned(),
+            "output".to_owned(),
+            "-no-color".to_owned(),
+            "-raw".to_owned(),
+            name.to_owned(),
+        ])
+        .output()
+        .context("starting `tofu`")?;
+        if !out.status.success() {
+            bail!("`tofu output {name}` failed");
+        }
+        String::from_utf8(out.stdout)
+            .ok()
+            .with_context(|| format!("`tofu output {name}` is not UTF-8"))
+    };
+    let secrets = gitops::WorkloadSecrets {
+        archive_access_key_id: gitops::Secret::new(output("archive_access_key_id")?),
+        archive_secret_access_key: gitops::Secret::new(output("archive_secret_access_key")?),
+        tunnel_token: gitops::Secret::new(output("tunnel_token")?),
+    };
+    let cluster_id = output("cluster_id")?;
+    let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
+    let temp = env::var("RUNNER_TEMP").context("RUNNER_TEMP is not set")?;
+    let (_, context) = infra_window::cluster_names("staging");
+    let kubeconfig = infra_window::fetch_kubeconfig(
+        &infra_window::Curl,
+        &token,
+        cluster_id.trim(),
+        &context,
+        Path::new(&temp),
+        run,
+    )?;
+    gitops::bootstrap_from_infra(
+        &repo_root()?,
+        gitops::Environment::Staging,
+        kubeconfig.path(),
+        &context,
+        &secrets,
+    )
 }
 
 /// Runs each `tofu` command in turn, with the run's Spaces key in the child's environment alone,
@@ -1506,6 +1650,8 @@ fn run_tofu(
     key: Option<&infra_preflight::SpacesKey>,
     sha: &str,
     plan_file: &Path,
+    window: Option<&str>,
+    run: &str,
 ) -> Result<()> {
     let tofu = |args: &[String]| {
         let mut command = Command::new("tofu");
@@ -1513,6 +1659,9 @@ fn run_tofu(
             .args(args)
             .env("TF_IN_AUTOMATION", "1")
             .env("TF_VAR_commit_sha", sha);
+        if let Some(window) = window {
+            command.env("TF_VAR_bootstrap_runner_cidr", window);
+        }
         if let Some(key) = key {
             for name in ["SPACES_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID"] {
                 command.env(name, &key.access_key);
@@ -1557,7 +1706,13 @@ fn run_tofu(
                     eprintln!("      {line}");
                 }
             }
-            Some("apply") => eprintln!("    applied exactly the plan above"),
+            Some("apply") => {
+                eprintln!("    applied exactly the plan above");
+                if window.is_some() {
+                    bootstrap_staging(&tofu, &chdir, run)?;
+                    eprintln!("    the cluster is bootstrapped (lane GO, DEC-2018)");
+                }
+            }
             _ => {}
         }
     }
@@ -2030,7 +2185,7 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
         let allowed: &[&str] = if running == [at] {
             &INFRA_SECRETS
         } else if closing == [at] {
-            &[INFRA_CLOSE_SECRET]
+            &INFRA_CLOSE_SECRETS
         } else {
             &[]
         };
@@ -2040,8 +2195,9 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
         {
             fail(&format!(
                 "only the step that runs `{INFRA_RUN}` may read a secret, and only {}; the \
-                 closing step reads {INFRA_CLOSE_SECRET} alone",
-                INFRA_SECRETS.join(", ")
+                 closing step reads {} alone",
+                INFRA_SECRETS.join(", "),
+                INFRA_CLOSE_SECRETS.join(" and ")
             ));
         }
     }
@@ -5110,6 +5266,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "DO_NOT_TRACK",
     "EVENT",
     "FAST_RESULT",
+    "FLUX_SHA256",
+    "FLUX_VERSION",
     "FULL_CHECKS_RESULT",
     "FULL_CHECKS_SELECTED",
     "FULL_RESULT",
@@ -5118,6 +5276,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "GITLEAKS_VERSION",
     "HELM_SHA256",
     "HELM_VERSION",
+    "FLUX_SHA256",
+    "FLUX_VERSION",
+    "KUBECTL_SHA256",
+    "KUBECTL_VERSION",
     "IMPECCABLE_NO_TELEMETRY",
     "K3D_SHA256",
     "K3D_VERSION",
@@ -5129,6 +5291,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_MUTANTS_PLANNED",
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
+    "MANDATE_GITOPS_REQUIRED",
     "MANDATE_MUTANT_SHARD",
     "MANDATE_OPENBAO_ADDR",
     "MANDATE_OPENBAO_CA",
@@ -15374,6 +15537,34 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-2611 (amending DEC-2606): CodeQL's pushes to `main` share one group in which a started
+    /// analysis finishes and a newer push replaces only the one waiting, so the latest commit,
+    /// which holds every earlier one, is always analysed; a pull request's runs cancel the older
+    /// run of their ref; the weekly schedule has a group of its own.
+    #[test]
+    fn codeql_runs_one_analysis_of_main_at_a_time() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/codeql.yml"))?;
+        assert!(
+            workflow.contains(
+                "concurrency:\n  group: codeql-${{ github.event_name == 'schedule' && \
+                 github.run_id || github.ref }}\n  cancel-in-progress: ${{ github.event_name == \
+                 'pull_request' }}\n"
+            ),
+            "pushes to main share codeql-refs/heads/main and are never cancelled once started, a \
+             pull request's runs cancel their older run, and the schedule has its own group \
+             (DEC-2611)"
+        );
+        assert!(
+            workflow.contains("  push:\n    branches: [ \"main\" ]\n"),
+            "every push to main is still analysed (DEC-2606 item 3)"
+        );
+        assert!(
+            workflow.contains("  schedule:\n    - cron: '42 2 * * 1'\n"),
+            "the weekly analysis stays (DEC-2606 item 3)"
+        );
+        Ok(())
+    }
+
     /// DEC-610: a draft runs no `ci` job. `select`, `fast-lint` and the mutation plan are skipped
     /// while the pull request is a draft, the scoped jobs follow `select` (DEC-1190) and the matrix
     /// its plan, `fast` and `full` are skipped too rather than judging skipped jobs, the failure
@@ -16521,6 +16712,158 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    /// DEC-2028 (F2): staging's apply opens the window only after its address is masked, opens
+    /// it in the plan the founder approved, bootstraps only after that plan is applied, wraps every
+    /// workload secret before anything else holds it, and closes the window after `tofu` however
+    /// it ended; `infra close` closes it again. Read from the source, since all of it runs only in
+    /// `infra.yml`'s job.
+    #[test]
+    fn the_window_opens_masked_and_always_closes() {
+        let source = include_str!("main.rs");
+        let body = |head: &str| {
+            source
+                .split(head)
+                .nth(1)
+                .and_then(|rest| rest.split("\n}\n").next())
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let infra = body("\nfn infra() -> Result<()> {");
+        let at = |text: &str, needle: &str| text.find(needle);
+        let open = at(&infra, "infra_window::open_window");
+        let run = at(&infra, "window = opened;\n                run_tofu(");
+        let close = at(&infra, "infra_window::close_window(");
+        assert!(
+            open.is_some() && open < run,
+            "the window is opened, and masked, before tofu runs"
+        );
+        assert!(
+            run.is_some() && run < close,
+            "the window is closed after tofu, however it ended"
+        );
+        assert!(
+            at(&infra, "opens_window(&environment, &action)").is_some(),
+            "only staging's apply opens a window"
+        );
+        let tofu = body("\nfn run_tofu(");
+        assert!(
+            at(
+                &tofu,
+                "command.env(\"TF_VAR_bootstrap_runner_cidr\", window);"
+            )
+            .is_some(),
+            "the window reaches tofu as the variable the doks module validates"
+        );
+        let apply = at(&tofu, "applied exactly the plan above");
+        let bootstrap = at(&tofu, "bootstrap_staging(&tofu, &chdir, run)?;");
+        assert!(
+            apply.is_some() && apply < bootstrap,
+            "the bootstrap follows the applied plan"
+        );
+        let staging = body("\nfn bootstrap_staging(");
+        let wrapped = staging.matches("gitops::Secret::new(output(").count();
+        assert_eq!(wrapped, 3, "each workload secret is wrapped as it is read");
+        let kubeconfig = at(&staging, "infra_window::fetch_kubeconfig(");
+        let last_secret = staging.rfind("gitops::Secret::new(output(");
+        assert!(
+            last_secret < kubeconfig && kubeconfig < at(&staging, "gitops::bootstrap_from_infra("),
+            "the kubeconfig is fetched after the secrets are wrapped and before the bootstrap"
+        );
+        let close_step = body("\nfn infra_close() -> Result<()> {");
+        let masks = at(&close_step, "mask::add_mask(&value);");
+        let closes = at(&close_step, "infra_window::close_window(");
+        assert!(
+            masks.is_some() && masks < closes,
+            "`infra close` masks the CIDRs, then closes"
+        );
+        let keys = at(&close_step, "infra_preflight::close(");
+        assert!(
+            keys.is_some()
+                && closes < keys
+                && !close_step[closes.unwrap_or_default()..].contains(")?;"),
+            "`infra close` closes the window before the keys, and no error skips either"
+        );
+        assert!(super::opens_window("staging", "apply"));
+        for (environment, action) in [
+            ("staging", "plan"),
+            ("staging", "preflight"),
+            ("production", "apply"),
+        ] {
+            assert!(
+                !super::opens_window(environment, action),
+                "{environment} {action} opens nothing"
+            );
+        }
+    }
+
+    /// The review of #1771, B1 and B2: every close is attempted and the first error is returned; a
+    /// window is reported closed only when it was, and a missing cluster after an apply is an
+    /// error.
+    #[test]
+    fn a_run_settles_every_close_and_keeps_the_first_error() {
+        fn fail<T>(text: &str) -> Result<T> {
+            Err(anyhow::anyhow!("{text}"))
+        }
+        let message = |result: Result<()>| result.err().map(|error| format!("{error:#}"));
+        assert!(super::settle(Ok(()), None, true, Ok(())).is_ok());
+        for closed in [
+            super::infra_window::Window::Closed,
+            super::infra_window::Window::AlreadyClosed,
+        ] {
+            assert!(super::settle(Ok(()), Some(Ok(closed)), true, Ok(())).is_ok());
+        }
+        assert!(
+            super::settle(
+                Ok(()),
+                Some(Ok(super::infra_window::Window::NoCluster)),
+                false,
+                Ok(())
+            )
+            .is_ok()
+        );
+        let missing = message(super::settle(
+            Ok(()),
+            Some(Ok(super::infra_window::Window::NoCluster)),
+            true,
+            Ok(()),
+        ));
+        assert!(
+            missing.is_some_and(|text| text.contains("lists no such cluster")),
+            "a missing cluster after an apply is an error"
+        );
+        let open = message(super::settle(
+            Ok(()),
+            Some(fail("still open")),
+            false,
+            Ok(()),
+        ));
+        assert!(
+            open.is_some_and(|text| text.contains("may be open") && text.contains("still open"))
+        );
+        assert_eq!(
+            message(super::settle(Ok(()), None, false, fail("key kept"))).as_deref(),
+            Some("key kept")
+        );
+        assert_eq!(
+            message(super::settle(
+                fail("apply failed"),
+                Some(fail("still open")),
+                false,
+                fail("key kept")
+            ))
+            .as_deref(),
+            Some("apply failed"),
+            "the first error is returned"
+        );
+        let window_first = message(super::settle(
+            Ok(()),
+            Some(fail("still open")),
+            false,
+            fail("key kept"),
+        ));
+        assert!(window_first.is_some_and(|text| text.contains("still open")));
     }
 
     /// The review's major (2): `infra` masks every item of the CIDR and email list secrets, each

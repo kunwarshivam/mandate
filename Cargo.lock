@@ -1693,6 +1693,7 @@ dependencies = [
  "mandate-canon",
  "mandate-identity",
  "mandate-identity-seal",
+ "mandate-identity-testkit",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-passkey",

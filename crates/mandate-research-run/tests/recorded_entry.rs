@@ -40,7 +40,6 @@ fn with(member: &str, value: Option<Value>) -> Value {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn the_demo_recording_reads_as_its_entry_with_the_fixed_plan_and_bounds() {
     let expected = ResearchEntry {
         model_id: "llm.research_agent".to_owned(),
@@ -61,7 +60,6 @@ fn the_demo_recording_reads_as_its_entry_with_the_fixed_plan_and_bounds() {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn each_member_missing_empty_or_out_of_range_is_refused_by_name() {
     for member in MEMBERS {
         assert_eq!(
