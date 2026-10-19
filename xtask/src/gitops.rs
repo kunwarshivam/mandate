@@ -18,6 +18,7 @@
 //! `gitops secrets <environment>` writes the workload secrets alone, to set or rotate them.
 
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::io::{self, BufRead as _, IsTerminal as _, Write as _};
 use std::path::Path;
@@ -211,6 +212,48 @@ fn infra_refusal(run: &Run<'_>) -> Option<&'static str> {
 /// The `flux` the pins in [`FLUX_IMAGES`] belong to.
 const FLUX_VERSION: &str = "2.9.6";
 
+/// The only variables `kubectl` and `flux` inherit (the review of #1771): where to find programs,
+/// their home and kubeconfig, temporary files, locale, and the proxy and TLS settings a runner or
+/// the founder's machine may need. Everything else, every secret `infra.yml` hands the step
+/// included, and any added later, is left out.
+const TOOL_ENVS: [&str; 18] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "KUBECONFIG",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+];
+
+/// `program`, `kubectl` or `flux`, with an environment of [`TOOL_ENVS`] alone.
+fn tool(program: &str) -> Command {
+    tool_with(program, |name| env::var_os(name))
+}
+
+/// [`tool`] over `read`, the environment it copies from.
+fn tool_with(program: &str, read: impl Fn(&str) -> Option<OsString>) -> Command {
+    let mut command = Command::new(program);
+    command.env_clear();
+    for name in TOOL_ENVS {
+        if let Some(value) = read(name) {
+            command.env(name, value);
+        }
+    }
+    command
+}
+
 /// `manifest`, from `flux install --export`, with every image pinned by digest. It refuses an image
 /// that [`FLUX_IMAGES`] does not name, and a pinned image the manifest never uses, since either
 /// means the CLI is not the pinned version.
@@ -311,7 +354,7 @@ fn founder_confirms(environment: Environment, action: &str) -> Result<String> {
 
 /// The kubeconfig's current context.
 fn current_context() -> Result<String> {
-    let out = Command::new("kubectl")
+    let out = tool("kubectl")
         .args(["config", "current-context"])
         .output()
         .context("starting kubectl (deploy/gitops/BOOTSTRAP.md)")?;
@@ -349,7 +392,7 @@ fn confirm(
 
 /// Runs `kubectl` against `cluster` with `stdin` as its input.
 fn kubectl(cluster: &Cluster<'_>, args: &[&str], stdin: Option<&str>) -> Result<()> {
-    let mut command = Command::new("kubectl");
+    let mut command = tool("kubectl");
     if let Some(kubeconfig) = cluster.kubeconfig {
         command.arg("--kubeconfig").arg(kubeconfig);
     }
@@ -421,7 +464,7 @@ fn prepare(root: &Path, environment: Environment) -> Result<(String, String)> {
         .join(environment.name())
         .join("sync.yaml");
     let sync = fs::read_to_string(&sync).with_context(|| format!("reading {}", sync.display()))?;
-    let version = Command::new("flux")
+    let version = tool("flux")
         .args(["version", "--client"])
         .output()
         .context("starting flux (deploy/gitops/BOOTSTRAP.md)")?;
@@ -431,7 +474,7 @@ fn prepare(root: &Path, environment: Environment) -> Result<(String, String)> {
         "flux {} is not the pinned v{FLUX_VERSION}",
         printed.trim()
     );
-    let exported = Command::new("flux")
+    let exported = tool("flux")
         .args(["install", "--export", "--components", FLUX_COMPONENTS])
         .output()
         .context("starting flux")?;
@@ -502,13 +545,6 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
 /// the short-lived kubeconfig it fetched and the secrets from its sensitive outputs, all in memory.
 /// It refuses unless this is `infra.yml` on `main` in GitHub Actions, and unless the kubeconfig's
 /// current context is `expected_context`; then it applies exactly what the founder's path applies.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "lane IAC's `cargo xtask infra apply` calls it (E21-56 F2)"
-    )
-)]
 pub(crate) fn bootstrap_from_infra(
     root: &Path,
     environment: Environment,
@@ -533,7 +569,7 @@ pub(crate) fn bootstrap_from_infra(
     }) {
         bail!("{reason} (DEC-2018)");
     }
-    let out = Command::new("kubectl")
+    let out = tool("kubectl")
         .args(["--v=0", "--kubeconfig"])
         .arg(kubeconfig)
         .args(["config", "current-context"])
@@ -563,6 +599,56 @@ pub(crate) fn bootstrap_from_infra(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `kubectl` and `flux` start with an environment of [`TOOL_ENVS`] alone, so no secret, token
+    /// or step output `infra.yml` hands the step reaches them, and only they are started.
+    #[test]
+    fn the_tools_inherit_no_infra_secret() -> Result<()> {
+        let workflow = include_str!("../../.github/workflows/infra.yml");
+        let handed: Vec<&str> = workflow
+            .lines()
+            .filter(|line| {
+                ["${{ secrets.", "${{ github.token", "${{ steps."]
+                    .iter()
+                    .any(|source| line.contains(source))
+            })
+            .filter_map(|line| line.trim().split(':').next())
+            .collect();
+        assert!(
+            !handed.is_empty(),
+            "the workflow hands secrets to its steps"
+        );
+        for name in handed {
+            assert!(
+                !TOOL_ENVS.contains(&name),
+                "{name} reaches kubectl and flux"
+            );
+        }
+        let fake = |name: &str| {
+            ["PATH", "DIGITALOCEAN_TOKEN", "TF_VAR_state_passphrase"]
+                .contains(&name)
+                .then(|| env::var_os("PATH").unwrap_or_default())
+        };
+        let out = tool_with("env", fake).output()?;
+        assert!(out.status.success(), "`env` runs");
+        let names: Vec<String> = String::from_utf8(out.stdout)?
+            .lines()
+            .filter_map(|line| line.split('=').next())
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(
+            names,
+            ["PATH"],
+            "only listed variables are passed, and nothing inherited"
+        );
+        let source = include_str!("gitops.rs");
+        assert_eq!(
+            source.matches(concat!("Command", "::new(")).count(),
+            1,
+            "every child gitops starts goes through `tool`"
+        );
+        Ok(())
+    }
 
     /// An excerpt of `flux install --export` for v2.9.6, its image lines as the CLI prints them.
     fn exported() -> String {
