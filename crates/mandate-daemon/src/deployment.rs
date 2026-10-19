@@ -34,33 +34,7 @@ pub fn resolved(
     environment: Environment,
     store: &dyn ArtifactSource,
 ) -> Result<Resolved, &'static str> {
-    let mut latest = None;
-    for row in control.iter().rev().filter(|row| {
-        row.environment == environment.as_str()
-            && matches!(row.event_type.as_str(), "AgentDeployed" | "AgentStopped")
-    }) {
-        let body = body(row).ok_or("control_unreadable")?;
-        let named = text(&body, &["payload", "agent_id"]).ok_or("control_unreadable")?;
-        if named == agent {
-            latest = Some((row, body));
-            break;
-        }
-    }
-    let version = match latest {
-        Some((row, body)) if row.event_type == "AgentDeployed" => {
-            text(&body, &["payload", "mandate_version"]).map(str::to_owned)
-        }
-        _ => None,
-    }
-    .ok_or("agent_not_deployed")?;
-    let document = ArtifactRef::parse(&version)
-        .and_then(|reference| get_artifact(store, &reference).ok())
-        .and_then(|bytes| parse(&bytes).ok())
-        .filter(|document| Mandate::parse(document).is_ok())
-        .ok_or("mandate_document_unavailable")?;
-    if text(&document, &["environment"]) != Some(environment.as_str()) {
-        return Err("mandate_environment_mismatch");
-    }
+    let (version, document) = document(control, agent, environment, store)?;
     let connection = text(&document, &["connection_id"])
         .ok_or("mandate_document_unavailable")?
         .to_owned();
@@ -89,6 +63,48 @@ pub fn resolved(
         approvers,
         author,
     })
+}
+
+/// The mandate version `agent` is deployed with in `environment`, and its stored document: the
+/// read [`resolved`] makes, for a caller that needs the document itself.
+///
+/// # Errors
+/// `control_unreadable`, `agent_not_deployed`, `mandate_document_unavailable`, or
+/// `mandate_environment_mismatch`.
+pub fn document(
+    control: &[StoredEvent],
+    agent: &str,
+    environment: Environment,
+    store: &dyn ArtifactSource,
+) -> Result<(String, Value), &'static str> {
+    let mut latest = None;
+    for row in control.iter().rev().filter(|row| {
+        row.environment == environment.as_str()
+            && matches!(row.event_type.as_str(), "AgentDeployed" | "AgentStopped")
+    }) {
+        let body = body(row).ok_or("control_unreadable")?;
+        let named = text(&body, &["payload", "agent_id"]).ok_or("control_unreadable")?;
+        if named == agent {
+            latest = Some((row, body));
+            break;
+        }
+    }
+    let version = match latest {
+        Some((row, body)) if row.event_type == "AgentDeployed" => {
+            text(&body, &["payload", "mandate_version"]).map(str::to_owned)
+        }
+        _ => None,
+    }
+    .ok_or("agent_not_deployed")?;
+    let document = ArtifactRef::parse(&version)
+        .and_then(|reference| get_artifact(store, &reference).ok())
+        .and_then(|bytes| parse(&bytes).ok())
+        .filter(|document| Mandate::parse(document).is_ok())
+        .ok_or("mandate_document_unavailable")?;
+    if text(&document, &["environment"]) != Some(environment.as_str()) {
+        return Err("mandate_environment_mismatch");
+    }
+    Ok((version, document))
 }
 
 fn body(row: &StoredEvent) -> Option<Value> {
