@@ -21,7 +21,7 @@
 //! Every entry point returns a `Result`, so a stub reports [`NotifyError::Unimplemented`]
 //! (DEC-77).
 
-use crate::{Notification, NotifyError, Origin, TextKey};
+use crate::{Notification, NotifyError, Origin, TextKey, link};
 
 /// The sentence every mail body carries between the text and the link (spec §4.4).
 pub const OPEN_SENTENCE: &str = "Open Owlhead to see it.";
@@ -45,8 +45,13 @@ impl FounderAddress {
     /// # Errors
     /// [`NotifyError::NotAnAddress`] for anything else; the error names no part of the text.
     pub fn parse(text: &str) -> Result<Self, NotifyError> {
-        let _ = text;
-        Err(NotifyError::Unimplemented { story: "E8-11" })
+        let plain = |part: &str| !part.is_empty() && part.bytes().all(is_address_byte);
+        match text.split_once('@') {
+            Some((local, domain)) if plain(local) && plain(domain) && !domain.contains('@') => {
+                Ok(Self(text.to_owned()))
+            }
+            _ => Err(NotifyError::NotAnAddress),
+        }
     }
 }
 
@@ -69,9 +74,30 @@ pub fn founder_mail(
     origin: &Origin,
     notification: &Notification,
 ) -> Result<FounderMail, NotifyError> {
-    let _ = (origin, notification, TextKey::BriefReady);
-    Err(NotifyError::Unimplemented { story: "E8-11" })
+    if notification.text == TextKey::BriefReady {
+        return Err(NotifyError::MailNotPermitted);
+    }
+    let text = notification.text.text()?;
+    let link = link(origin, &notification.notice)?;
+    Ok(FounderMail {
+        subject: text.to_owned(),
+        text: format!("{text}\n\n{OPEN_SENTENCE}\n{link}\n\n{FOUNDER_FOOTER}\n"),
+        html: format!(
+            "<!doctype html>\n<html><body>\n<p>{text}</p>\n<p>{OPEN_SENTENCE}<br>\
+             <a href=\"{link}\">{link}</a></p>\n<p>{FOUNDER_FOOTER}</p>\n</body></html>\n"
+        ),
+    })
 }
+
+/// The bytes a plain address may hold on either side of its `@`: printable ASCII but space and
+/// the specials that would start a list, a display name, a comment, or a quote.
+fn is_address_byte(byte: u8) -> bool {
+    byte.is_ascii_graphic() && !b"@,;:<>()[]\\\"".contains(&byte)
+}
+
+/// The boundary between the two parts: fixed, since no part holds anything but fixed text, a hex
+/// notice id and the origin, none of which contains `=_`.
+const BOUNDARY: &str = "=_mandate_alternative";
 
 impl FounderMail {
     /// The message as it is submitted: `From` [`SENDER`], `To` `to` and nobody else, `Subject`,
@@ -81,7 +107,27 @@ impl FounderMail {
     /// # Errors
     /// None once implemented. The `Result` is the stub API's shape.
     pub fn wire(&self, to: &FounderAddress) -> Result<Vec<u8>, NotifyError> {
-        let _ = to;
-        Err(NotifyError::Unimplemented { story: "E8-11" })
+        let lines = [
+            format!("From: {SENDER}"),
+            format!("To: {}", to.0),
+            format!("Subject: {}", self.subject),
+            "MIME-Version: 1.0".to_owned(),
+            format!("Content-Type: multipart/alternative; boundary=\"{BOUNDARY}\""),
+            String::new(),
+            format!("--{BOUNDARY}"),
+            "Content-Type: text/plain; charset=utf-8".to_owned(),
+            String::new(),
+            self.text.trim_end_matches('\n').to_owned(),
+            format!("--{BOUNDARY}"),
+            "Content-Type: text/html; charset=utf-8".to_owned(),
+            String::new(),
+            self.html.trim_end_matches('\n').to_owned(),
+            format!("--{BOUNDARY}--"),
+        ];
+        Ok(lines
+            .iter()
+            .map(|line| format!("{}\r\n", line.replace('\n', "\r\n")))
+            .collect::<String>()
+            .into_bytes())
     }
 }

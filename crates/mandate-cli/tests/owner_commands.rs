@@ -190,7 +190,6 @@ fn the_binary_offers_status_resume_stop_and_exit() {
 /// DEC-2507 item 1: without a code a resume and a Stop print the code `agent::code` gives and
 /// commit nothing; a release prints the warning the payload records as shown, before its code.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_resume_or_stop_without_a_code_shows_it_and_commits_nothing() {
     let (mut fx, mut ids) = (Fixture::new(), FixedIds::default());
     for (command, warned) in [
@@ -213,7 +212,6 @@ fn a_resume_or_stop_without_a_code_shows_it_and_commits_nothing() {
 
 /// The right code commits one `OwnerCommandIssued` with step-up evidence, and the line names it.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_resume_or_stop_with_its_code_commits_one_command_and_names_it() {
     let (mut fx, mut ids) = (Fixture::new(), FixedIds::default());
     let commands = [
@@ -235,7 +233,6 @@ fn a_resume_or_stop_with_its_code_commits_one_command_and_names_it() {
 /// PX-4: a resume and a Stop need the code, so a wrong one is refused `step_up_missing`, prints
 /// nothing and commits nothing.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_wrong_code_refuses_a_resume_or_stop_and_commits_nothing() {
     let (mut fx, mut ids) = (Fixture::new(), FixedIds::default());
     for command in [Owned::Resume, Owned::Stop { release: false }] {
@@ -263,7 +260,6 @@ fn a_wrong_code_refuses_a_resume_or_stop_and_commits_nothing() {
 /// one, and only the right one carries step-up evidence; `--show-code` prints the code and commits
 /// nothing.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_exit_is_never_refused_and_only_its_code_carries_step_up() {
     let (mut fx, mut ids) = (Fixture::new(), FixedIds::default());
     let shown = code_now(&fx, &exit(None));
@@ -307,7 +303,6 @@ fn an_exit_is_never_refused_and_only_its_code_carries_step_up() {
 /// above the bid. A floor equal to the bid is a confirmation, and the exit without the bid flags
 /// always commits.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_exit_with_an_unusable_bid_confirmation_is_refused_and_commits_nothing() {
     let (mut fx, mut ids) = (Fixture::new(), FixedIds::default());
     for (bid, bid_size, floor) in [
@@ -383,7 +378,6 @@ fn an_exit_with_an_unusable_bid_confirmation_is_refused_and_commits_nothing() {
 /// owner types as displayed (`501.20`, `00.50`, `495.`) shows and commits the same code and payload
 /// as its canonical text.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_exit_normalizes_its_bid_confirmation_before_binding_it() {
     let (mut fx, mut ids) = (Fixture::new(), FixedIds::default());
     let typed = Owned::Exit {
@@ -447,7 +441,6 @@ fn an_exit_normalizes_its_bid_confirmation_before_binding_it() {
 /// The M7 brief's `status` row and PX-3: the mode, the startup hold, the pending count, each
 /// restriction in [`Status`]'s order or `restrictions none`, then the controls, pause first.
 #[test]
-#[ignore = "pending E8-3"]
 fn status_prints_its_facts_then_the_controls_in_px3_order() {
     let restrictions = vec![
         Restriction::Agent {
@@ -511,7 +504,6 @@ const SENTINELS: [&str; 4] = [
 /// no refusal prints anything or names the DSN. An exit's refusal here is the owner's or the
 /// journal's, never the exit's own.
 #[test]
-#[ignore = "pending E8-3"]
 fn every_command_refuses_without_a_database() {
     let [user, password, host, db] = SENTINELS;
     let dsn = format!("postgres://{user}:{password}@{host}:1/{db}");
