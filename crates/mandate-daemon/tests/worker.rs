@@ -8,11 +8,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::rc::Rc;
 
+use mandate_canon::Digest;
+use mandate_daemon::meter::CellMeter;
 use mandate_daemon::recorded::Bundle;
+use mandate_daemon::source::{Rows, SourceFor};
 use mandate_daemon::worker::{RecordedWorker, StoreSink, WorkerFor};
 use mandate_daemon::{ArtifactSink, ResearchParts, ResearchWorker};
 use mandate_gateway::Outcome as CallOutcome;
-use mandate_journal::{ArtifactRef, ArtifactStore};
+use mandate_gateway::meter::{MeterRecord, SharedMeter};
+use mandate_journal::{ArtifactRef, ArtifactStore, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_research::{
     AdmissionFacts, AllowlistVersion, AssetClass, AssetId, AutonomyDecision, LineageState,
@@ -262,6 +266,124 @@ proptest! {
         prop_assert!(record.prompt_ref.is_some_and(|d| stored.contains(&d)));
         prop_assert!(record.response_ref.is_some_and(|d| stored.contains(&d)));
     }
+}
+
+/// The agent stream: one call record at 19:00Z on the cut-off's risk day, its `reservation` the
+/// JSON given, or nothing.
+struct AgentRows(Vec<StoredEvent>);
+
+impl AgentRows {
+    fn with_call(reservation: Option<&str>) -> Self {
+        let Some(reservation) = reservation else {
+            return Self(Vec::new());
+        };
+        let body = format!(
+            r#"{{"envelope_version":1,"environment":"paper","event_id":"01J8Z3MA000000000000000001","stream_id":"agent:ws1:agent-a","event_type":"ModelInvocationRecorded","schema_version":1,"event_time":"2026-10-16T19:00:00.000000000Z","clock_source":"system","causation_id":null,"correlation_id":"01RUN","actor":{{"kind":"agent","id":"agent-a","version":"1","build":null}},"config_refs":{{}},"payload":{{"cost_usd":"0.25","reservation":{reservation}}},"artifact_refs":[],"pii_refs":[]}}"#
+        );
+        Self(vec![StoredEvent {
+            stream_id: "agent:ws1:agent-a".into(),
+            seq: 1,
+            event_id: "01J8Z3MA000000000000000001".into(),
+            event_type: "ModelInvocationRecorded".into(),
+            schema_version: 1,
+            environment: "paper".into(),
+            recorded_at: "2026-10-16T19:00:00.000000000Z".into(),
+            prev_hash: Digest::of(b"prev"),
+            hash: Digest::of(body.as_bytes()),
+            body: body.into_bytes(),
+        }])
+    }
+}
+
+impl Rows for AgentRows {
+    fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
+        Some(if stream.as_str() == "agent:ws1:agent-a" {
+            self.0.clone()
+        } else {
+            Vec::new()
+        })
+    }
+}
+
+/// A worker whose gateway reserves through a meter over `store`, the agent stream holding one call
+/// record whose reservation is `reservation`, if any, and its clock at the worker's own `now`.
+fn metered(shelf: &Shelf, store: &SharedMeter, reservation: Option<&str>) -> RecordedWorker {
+    let who = WorkerFor {
+        workspace: "ws1".to_owned(),
+        agent: "agent-a".to_owned(),
+        description: "Long-only US large caps, on public news and filings.".to_owned(),
+    };
+    let clock = || UtcNanos::from_parts(CUT_OFF + 5, 0).unwrap();
+    let meter = CellMeter::new(
+        store.clone(),
+        Rc::new(AgentRows::with_call(reservation)),
+        SourceFor {
+            workspace: "ws1".to_owned(),
+            agent: "agent-a".to_owned(),
+            environment: Environment::Paper,
+        },
+        Rc::new(clock),
+    );
+    RecordedWorker::metered(
+        &bundle(),
+        who,
+        Box::new(shelf.clone()),
+        Box::new(clock),
+        meter,
+    )
+    .unwrap()
+}
+
+/// The call the run makes, through `worker`: its one answer's record.
+fn called(worker: &mut RecordedWorker) -> mandate_gateway::CallRecord {
+    start(worker);
+    let retrieved = worker.answers(RiskClock::from_secs(CUT_OFF + 1));
+    let Some(ResearchInput::Retrieved { items, .. }) = retrieved.first() else {
+        panic!("the run retrieved: {retrieved:?}");
+    };
+    worker.hand(&ResearchRequest::Call(call_plan(items.len())), &parts());
+    let answers = worker.answers(RiskClock::from_secs(CUT_OFF + 2));
+    let [ResearchInput::Called { record, .. }] = answers.as_slice() else {
+        panic!("the call answered once: {answers:?}");
+    };
+    (**record).clone()
+}
+
+/// DEC-2249 item 3: the worker's gateway reserves and settles through the shared meter, so the
+/// source can count what it reserved. After a restart, while the agent stream records a reserved
+/// call earlier on the risk day that the meter does not hold, the gateway refuses the call
+/// `meter_unavailable`, reserves nothing, and sends nothing.
+#[test]
+#[ignore = "pending E21-59"]
+fn a_held_meter_refuses_the_call_and_a_free_one_holds_its_reservation() {
+    let (shelf, store) = (Shelf::default(), SharedMeter::new());
+    let record = called(&mut metered(&shelf, &store, None));
+    assert_eq!(record.outcome, CallOutcome::Ok);
+    let reservation = record.reservation.expect("an ok call is reserved");
+    let records = store.records();
+    assert!(
+        records
+            .iter()
+            .any(|r| matches!(r, MeterRecord::Reserved(x) if x.event_id == reservation)),
+        "the shared store holds the call's reservation: {records:?}"
+    );
+    assert!(
+        records
+            .iter()
+            .any(|r| matches!(r, MeterRecord::Settled(x) if x.reservation == reservation)),
+        "and its settlement"
+    );
+
+    let (shelf, store) = (Shelf::default(), SharedMeter::new());
+    let record = called(&mut metered(
+        &shelf,
+        &store,
+        Some(r#""01J8Z3MR000000000000000777""#),
+    ));
+    assert_eq!(record.outcome, CallOutcome::MeterUnavailable);
+    assert_eq!(record.reservation, None);
+    assert!(store.records().is_empty(), "nothing reserved while held");
+    assert_eq!(record.response_ref, None, "nothing was sent");
 }
 
 /// An artifact store that answers every put with a reference other than the bytes'.
