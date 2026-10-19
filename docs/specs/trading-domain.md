@@ -9,10 +9,10 @@
 
 ## Change history
 
-- **v0.20:** §5.7: within one run, a kill switch's unconfirmed cancel is sent again at the
-  `Unknown` lookup cadence, by the risk clock, up to that pair's cap, each re-send journaled first,
-  with an operator alert on the last, so a lost answer cannot leave the order working until the
-  next start ([DEC-2302](../project/decisions/DEC-2302.md) item 7). A tightening under DEC-176.
+- **v0.20:** §5.7: within each run, a kill switch's unconfirmed cancel is sent again at the
+  `Unknown` lookup cadence, by the risk clock, up to that pair's cap per run, each re-send journaled
+  first, with an operator alert when the last window passes unconfirmed, so a lost answer cannot
+  leave the order working ([DEC-2302](../project/decisions/DEC-2302.md) item 7). A tightening under DEC-176.
 - **v0.19:** §5.7: a pending cancel ends only by the broker's answer to it. A working status
   keeps a `PendingCancel` order whose cancel is unconfirmed in `PendingCancel`. A refusal takes the
   "cancel rejected" edge, except for a kill switch's cancel. `Expired` and `Rejected` end a pending
@@ -731,15 +731,17 @@ PartiallyFilled); fills during either pending state update filled quantity witho
   - Within one run, a kill switch's order stays `PendingCancel` until the broker reports a
     terminal status. This holds whatever happens to the cancel's answer: a 429 or 5xx, an answer in doubt, no reply, or a lookup unanswered or answered 404.
     Such an order never returns to `PriorState` and is never dropped.
-  - **Within one run, a kill switch's unconfirmed cancel is retried.** Once
+  - **Within each run, a kill switch's unconfirmed cancel is retried.** Once
     `unknown_absent_window_s` has passed by the risk clock since the journal last asked it, the
-    cancel is asked again, at most `unknown_absent_lookups` times after the first. The pair that
-    paces lookups of an `Unknown` order paces these re-sends too.
+    cancel is asked again, at most `unknown_absent_lookups` times in each run. The pair that paces
+    lookups of an `Unknown` order paces these re-sends too. An order an ignored ask left `Accepted`
+    or `PartiallyFilled` with the cancel unconfirmed is retried the same way.
     - Each re-send journals `OrderStateChanged` (`PendingCancel`, `cancel_requested`) before it is
-      sent. The count is the journal's, so a replay keeps it.
-    - The last re-send raises an operator alert under an opaque key.
-    - After the last re-send nothing more is sent within the run, the order stays `PendingCancel`,
-      and the next start sends the cancel again.
+      sent. A run counts the asks journaled since its start, so every run has its own budget.
+    - When the window after the run's last re-send passes with the cancel still unconfirmed, an
+      operator alert sounds once, under an opaque key.
+    - After that nothing more is sent within the run, the order stays `PendingCancel`, and the next
+      start sends the cancel again with a new budget.
     - No other cancel is retried this way: protection keeps §5.4's own bound, and an `Unknown`
       order is queried, never cancelled blind ([DEC-2302](../project/decisions/DEC-2302.md) item 7).
   - A terminal status ends the order, the reservation is released, and its cancel is never sent
