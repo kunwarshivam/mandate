@@ -33,7 +33,6 @@ fn granted() -> (String, Vec<String>) {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_entry_is_exactly_its_canonical_form() {
     let scopes = check_scope("trading data").unwrap();
     let entry = encode(&token(TOKEN), &scopes).unwrap();
@@ -47,13 +46,11 @@ fn the_entry_is_exactly_its_canonical_form() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_entry_decodes_to_its_token_and_scopes() {
     assert_eq!(decoded(ENTRY.as_bytes()), Ok(granted()));
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn every_other_form_is_refused() {
     let refused: Vec<String> = vec![
         String::new(),
@@ -94,7 +91,6 @@ fn every_other_form_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_token_outside_the_form_is_never_written() {
     let scopes = check_scope("trading data").unwrap();
     let long = "t".repeat(MAX_TOKEN_LEN + 1);
@@ -108,7 +104,6 @@ fn a_token_outside_the_form_is_never_written() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_refusal_and_a_decoded_entry_name_nothing_of_the_token() {
     let refusal = decode(ENTRY.replace("bearer", "mac").as_bytes()).unwrap_err();
     let entry = decode(ENTRY.as_bytes()).unwrap();
@@ -124,7 +119,6 @@ fn a_refusal_and_a_decoded_entry_name_nothing_of_the_token() {
 /// Every token of the form round-trips, and its entry is canonical JSON, checked by the journal's
 /// own canonicalizer, an implementation the codec does not use.
 #[test]
-#[ignore = "pending E10-13"]
 fn every_token_of_the_form_round_trips_as_canonical_json() {
     let scopes = check_scope("data trading").unwrap();
     let allowed: Vec<char> = ('!'..='~').filter(|c| !matches!(c, '"' | '\\')).collect();

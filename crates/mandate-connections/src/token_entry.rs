@@ -10,10 +10,10 @@
 //! form around the token, so nothing but the token is copied out, and only into a
 //! [`secrecy::SecretString`] (OPS-1).
 
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::ConnectError;
-use crate::grant::GrantedScopes;
+use crate::grant::{GrantedScopes, REQUESTED_SCOPES_SORTED};
 use crate::vault::AccessToken;
 
 /// The entry's format; a later shape, an expiry among them, is a new format, never an optional
@@ -22,6 +22,20 @@ pub const FORMAT: u64 = 1;
 
 /// The longest token an entry holds, in bytes.
 pub const MAX_TOKEN_LEN: usize = 4096;
+
+/// The entry's bytes before the token.
+const BEFORE: &str = r#"{"access_token":""#;
+
+/// The entry's bytes after the token: format 1, the requested scopes sorted, and the token type.
+const AFTER: &str = r#"","format":1,"scope":["data","trading"],"token_type":"bearer"}"#;
+
+/// Whether `token` is 1 to [`MAX_TOKEN_LEN`] bytes from `!` to `~`, none of them `"` or `\`.
+fn in_form(token: &str) -> bool {
+    (1..=MAX_TOKEN_LEN).contains(&token.len())
+        && token
+            .bytes()
+            .all(|b| (b'!'..=b'~').contains(&b) && b != b'"' && b != b'\\')
+}
 
 /// One decoded entry: the token, and the scopes granted with it.
 #[derive(Debug)]
@@ -34,12 +48,12 @@ pub struct TokenEntry {
 ///
 /// # Errors
 /// [`ConnectError::TokenEntryInvalid`] for a token outside the entry's form.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub fn encode(_token: &AccessToken, _scopes: &GrantedScopes) -> Result<SecretString, ConnectError> {
-    todo!()
+pub fn encode(token: &AccessToken, scopes: &GrantedScopes) -> Result<SecretString, ConnectError> {
+    let token = token.0.expose_secret();
+    if !in_form(token) || !scopes.iter().eq(REQUESTED_SCOPES_SORTED) {
+        return Err(ConnectError::TokenEntryInvalid);
+    }
+    Ok(SecretString::from(format!("{BEFORE}{token}{AFTER}")))
 }
 
 /// The token and scopes of an entry's bytes.
@@ -47,10 +61,15 @@ pub fn encode(_token: &AccessToken, _scopes: &GrantedScopes) -> Result<SecretStr
 /// # Errors
 /// [`ConnectError::TokenEntryInvalid`] for any bytes but format 1's exact form; the error names
 /// nothing of the bytes.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub fn decode(_bytes: &[u8]) -> Result<TokenEntry, ConnectError> {
-    todo!()
+pub fn decode(bytes: &[u8]) -> Result<TokenEntry, ConnectError> {
+    let token = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| text.strip_prefix(BEFORE))
+        .and_then(|rest| rest.strip_suffix(AFTER))
+        .filter(|token| in_form(token))
+        .ok_or(ConnectError::TokenEntryInvalid)?;
+    Ok(TokenEntry {
+        token: AccessToken(SecretString::from(token.to_owned())),
+        scopes: GrantedScopes(REQUESTED_SCOPES_SORTED.map(str::to_owned).into()),
+    })
 }
