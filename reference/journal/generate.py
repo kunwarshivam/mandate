@@ -48,6 +48,7 @@ import control
 import gateway
 import holds
 import invalidation
+import marks
 import membership
 import membership_fold
 import requests
@@ -3863,6 +3864,7 @@ def render(
     risk_limits_section: dict,
     acknowledgments_section: dict,
     confirmations_section: dict,
+    marks_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3902,6 +3904,7 @@ def render(
             "risk_limits": risk_limits_section,
             "acknowledgments": acknowledgments_section,
             "step_up_confirmations": confirmations_section,
+            "risk_marks": marks_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3972,6 +3975,7 @@ def main(argv: list[str] | None = None) -> int:
     risk_limits_section = risk_limits.build_section()
     acknowledgments_section = acknowledgments.build_section()
     confirmations_section = confirmations.build_section()
+    marks_section = marks.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4015,6 +4019,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += acknowledgments.run_mutants(acknowledgments_section)
     problems += confirmations.check_section(confirmations_section)
     problems += confirmations.run_mutants(confirmations_section)
+    problems += marks.check_section(marks_section)
+    problems += marks.run_mutants(marks_section)
     problems += check_broker_profile(broker_profile)
     problems += run_broker_profile_mutants(broker_profile)
     problems += connections.check_section(connections_section)
@@ -4085,6 +4091,7 @@ def main(argv: list[str] | None = None) -> int:
         risk_limits_section,
         acknowledgments_section,
         confirmations_section,
+        marks_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -4123,6 +4130,7 @@ def main(argv: list[str] | None = None) -> int:
         or risk_limits.check_section(reread["risk_limits"])
         or acknowledgments.check_section(reread["acknowledgments"])
         or confirmations.check_section(reread["step_up_confirmations"])
+        or marks.check_section(reread["risk_marks"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -4182,6 +4190,11 @@ def main(argv: list[str] | None = None) -> int:
         f"step-up confirmation drafts, {len(confirmations_section['streams'])} rule-243 streams, "
         f"{len(confirmations.VALIDATOR_MUTANTS)} validator and "
         f"{len(confirmations.vector_mutants(confirmations_section))} vector mutants caught; "
+        f"{len(marks_section['invalid_drafts'])} invalid and {len(marks_section['valid_drafts'])} valid "
+        f"MarkUpdated drafts, {len(marks_section['readings'])} fold readings, "
+        f"{len(marks_section['staleness'])} staleness sequences, {len(marks.VALIDATOR_MUTANTS)} validator, "
+        f"{len(marks.READING_MUTANTS)} reading, {len(marks.FOLD_MUTANTS)} fold, and "
+        f"{len(marks.vector_mutants(marks_section))} vector mutants caught; "
         f"{len(control_plane_section['invalid_drafts'])} invalid and {len(control_plane_section['valid_drafts'])} valid "
         f"control-plane drafts, {len(control_plane.VALIDATOR_MUTANTS)} validator and "
         f"{len(control_plane.vector_mutants(control_plane_section))} vector mutants caught; "

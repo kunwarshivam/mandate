@@ -15378,6 +15378,34 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-2611 (amending DEC-2606): CodeQL's pushes to `main` share one group in which a started
+    /// analysis finishes and a newer push replaces only the one waiting, so the latest commit,
+    /// which holds every earlier one, is always analysed; a pull request's runs cancel the older
+    /// run of their ref; the weekly schedule has a group of its own.
+    #[test]
+    fn codeql_runs_one_analysis_of_main_at_a_time() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/codeql.yml"))?;
+        assert!(
+            workflow.contains(
+                "concurrency:\n  group: codeql-${{ github.event_name == 'schedule' && \
+                 github.run_id || github.ref }}\n  cancel-in-progress: ${{ github.event_name == \
+                 'pull_request' }}\n"
+            ),
+            "pushes to main share codeql-refs/heads/main and are never cancelled once started, a \
+             pull request's runs cancel their older run, and the schedule has its own group \
+             (DEC-2611)"
+        );
+        assert!(
+            workflow.contains("  push:\n    branches: [ \"main\" ]\n"),
+            "every push to main is still analysed (DEC-2606 item 3)"
+        );
+        assert!(
+            workflow.contains("  schedule:\n    - cron: '42 2 * * 1'\n"),
+            "the weekly analysis stays (DEC-2606 item 3)"
+        );
+        Ok(())
+    }
+
     /// DEC-610: a draft runs no `ci` job. `select`, `fast-lint` and the mutation plan are skipped
     /// while the pull request is a draft, the scoped jobs follow `select` (DEC-1190) and the matrix
     /// its plan, `fast` and `full` are skipped too rather than judging skipped jobs, the failure
