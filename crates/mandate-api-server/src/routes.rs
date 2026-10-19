@@ -30,6 +30,7 @@ use mandate_time::UtcNanos;
 use crate::backtests::{
     Found, Outcome, backtest, backtest_report, evaluation, evaluation_report, paper,
 };
+use crate::connections::{ConnectionView, connections};
 use crate::documents::{Envelope, checked, envelope};
 use crate::http::{App, problem, problem_body, session_cookie, unauthenticated, with_type};
 use crate::members::ControlLookup;
@@ -341,6 +342,98 @@ pub async fn list_agents(
         .collect();
     let streams: Vec<&[StoredEvent]> = read.iter().map(|(_, rows)| rows.as_slice()).collect();
     served(&reader, &streams, vec![("agents", Value::Array(agents))])
+}
+
+/// `GET /v1/workspaces/{ws}/connections` (§4.5, DEC-2620): `read-models/connections`, for the
+/// workspace admin only (DEC-2631 item 1).
+pub async fn list_connections(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<String>, PathRejection>,
+) -> Response {
+    let Ok(Path(workspace)) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let reader = match connections_reader(&app, &headers, &workspace).await {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let views = connections(&reader.control)
+        .iter()
+        .map(connection_value)
+        .collect();
+    served(&reader, &[], vec![("connections", Value::Array(views))])
+}
+
+/// `GET /v1/workspaces/{ws}/connections/{id}` (§4.5, DEC-2620): `read-models/connection`, the
+/// role checked before the id (DEC-2631 item 2).
+pub async fn one_connection(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((workspace, id))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let reader = match connections_reader(&app, &headers, &workspace).await {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let Some(view) = connections(&reader.control)
+        .into_iter()
+        .find(|view| view.connection_id == id)
+    else {
+        return Refused::NotFound.response();
+    };
+    served(&reader, &[], vec![("connection", connection_value(&view))])
+}
+
+/// The session, then the broker-connection row (DEC-2631 item 1), before anything is looked up.
+async fn connections_reader(
+    app: &App,
+    headers: &HeaderMap,
+    workspace: &str,
+) -> Result<Reader, Refused> {
+    let (admitted, now) = session(app, headers, Request::Other)?;
+    authorized(
+        app,
+        &admitted,
+        now,
+        workspace,
+        Permission::BrokerConnection,
+        Unreadable::Read,
+    )
+    .await
+}
+
+/// `read-models/connection`'s `Connection` (DEC-2620 item 2).
+fn connection_value(view: &ConnectionView) -> Value {
+    let texts = |items: &[String]| Value::Array(items.iter().map(|item| string(item)).collect());
+    object(vec![
+        ("connection_id", string(&view.connection_id)),
+        ("broker", string(&view.broker)),
+        ("environment", string(&view.environment)),
+        ("state", string(view.state.code())),
+        ("scopes", view.scopes.as_deref().map_or(Value::Null, texts)),
+        ("since", string(&view.since)),
+        (
+            "refusal",
+            view.refusal.as_ref().map_or(Value::Null, |refusal| {
+                object(vec![
+                    (
+                        "check",
+                        refusal.check.as_deref().map_or(Value::Null, string),
+                    ),
+                    ("reason", string(&refusal.reason)),
+                ])
+            }),
+        ),
+        (
+            "revoked_reason",
+            view.revoked_reason.as_deref().map_or(Value::Null, string),
+        ),
+        ("agents", texts(&view.agents)),
+    ])
 }
 
 /// `GET /v1/workspaces/{ws}/agents/{agent_id}`.
