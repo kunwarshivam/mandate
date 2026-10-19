@@ -855,6 +855,21 @@ asset class, side, quantity, limit, order dollars, and purpose, and version 2's
 | My workspaces | `GET /v1/me/workspaces` | — | (planned: E10-10) The signed-in user's own workspace memberships, at the principal's own scope and outside every workspace path: identity spec §4.5's *List one's own workspace memberships*, which [#811](https://github.com/kunwarshivam/mandate/pull/811) adds. Returns only the caller's memberships (API-9) |
 | Clients | `GET /clients`, `POST /clients`, `DELETE /clients/{id}` | `ClientConnected`, `ClientRevoked` (journal spec §9.10) | Create needs step-up and shows the scopes in words (E10-8); revoke needs none |
 
+**The connections read** ([DEC-2620](../project/decisions/DEC-2620.md)). `GET /connections` returns
+`read-models/connections`, every connection the control stream names, in the order its first record
+names it, and `GET /connections/{id}` returns `read-models/connection`, or `not_found` for an id the
+control stream does not name. Each is folded from the control stream alone (API-14), with its
+watermark in `as_of`: `connection_id`, `broker`, `environment`; `state` (`connecting` after
+`ConnectionRequested`, `established` after `ConnectionEstablished`, `refused` after a connect's
+`ConnectionRefused`, `revoked` after `ConnectionRevoked`; a later request, a rotation, and a
+`reconnect` or `reauthorize` refusal leave it as it was); `scopes`, the latest establishment's
+grant, `null` before one; `since`, when the record that set `state` was recorded; `refusal`, the
+connect refusal's `check` and `reason`, set exactly when `refused`; `revoked_reason`, version 2's
+`owner` or `compromised` when `revoked`, `null` for a version-1 revocation, which names none; and
+`agents`, those whose latest `AgentDeployed` is version 2, names it, and is not stopped. The
+journaled `account_ref`, `user`, and `step_up` are not served. The 1× check, the data profile, the
+restrictions, and the loss carry are planned as optional members. **(planned: E10-13)**
+
 **The ordinary revoke's refusals** (`compromised` `false` or absent; [DEC-693](../project/decisions/DEC-693.md)
 items 6 and 7, [DEC-698](../project/decisions/DEC-698.md)). The API decides them from the journal's
 folds, never from a read model (§4.7, §6.2): the control stream for which agents are on the
