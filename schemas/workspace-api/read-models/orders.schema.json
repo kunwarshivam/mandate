@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/orders.schema.json",
+  "description": "GET /agents/{id}/orders (§4.7 D3, DEC-2111): the agent's orders on the account stream of the connection its deployed mandate document names, one per client_order_id whose OrderRequestRecorded names the agent, in the order first submitted. account_ref is null, and orders empty, when the document or the account stream is not found. as_of names the control stream and the account stream read.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "agent_id",
+    "account_ref",
+    "orders"
+  ],
+  "properties": {
+    "agent_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "account_ref": {
+      "anyOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "orders": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Order"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Order": {
+      "description": "One order (journal spec §9.5): its request as the first OrderSubmitted and its OrderRequestRecorded companion journal it, and its state as the last OrderStateChanged gives it. state and filled_qty are null before any OrderStateChanged (not reported, never assumed); unknown is served as unknown (trading spec §5.7). submitted_at is the first OrderSubmitted's recorded_at; updated_at the last record's of the order.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client_order_id",
+        "intent_id",
+        "purpose",
+        "instrument_id",
+        "side",
+        "type",
+        "tif",
+        "qty",
+        "limit_price",
+        "stop_price",
+        "state",
+        "filled_qty",
+        "submitted_at",
+        "updated_at"
+      ],
+      "properties": {
+        "client_order_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/EventId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "purpose": {
+          "enum": [
+            "open",
+            "increase",
+            "discretionary_exit",
+            "risk_exit",
+            "owner_exit",
+            "protective",
+            "flatten"
+          ]
+        },
+        "instrument_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "side": {
+          "enum": [
+            "buy",
+            "sell"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "tif": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "qty": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "limit_price": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stop_price": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "enum": [
+                "intent",
+                "submitting",
+                "accepted",
+                "partially_filled",
+                "pending_cancel",
+                "pending_replace",
+                "unknown",
+                "filled",
+                "canceled",
+                "rejected",
+                "expired",
+                "replaced",
+                "abandoned"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "filled_qty": {
+          "anyOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submitted_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        }
+      }
+    }
+  }
+}
