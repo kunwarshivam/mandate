@@ -4,8 +4,7 @@
 //! object, the record from DEC-2106's items, and whether the journal accepts it from
 //! `mandate_journal::Draft::parse`, which judges rule 242. Each refusal is paired with the commit
 //! of [`a_confirmation_appends_one_record_the_journal_accepts`], so a command that does nothing
-//! passes none of them. The flags' checks are `tests/step_up_check.rs`. The tests are pending E9-4
-//! and fail on the stubs' `ControlError::Unimplemented` (DEC-77, DEC-110).
+//! passes none of them. The flags' checks are `tests/step_up_check.rs`.
 
 mod common;
 
@@ -83,7 +82,6 @@ fn control(fx: &Fixture) -> Vec<Value> {
 /// DEC-2104 items 2 and 3: exactly one `StepUpConfirmed` on the control stream, its members
 /// closed and computed here, which the journal accepts under rule 242.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_confirmation_appends_one_record_the_journal_accepts() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "3", ASKED_AT);
@@ -187,7 +185,6 @@ fn arranged(on: [bool; 6]) -> (Fixture, String, i64) {
 /// with any it is refused by the first in DEC-2106 item 2's order, and appends and attempts
 /// nothing. The oracle is [`FAULTS`]' own order, not the command's.
 #[test]
-#[ignore = "pending E9-4"]
 fn every_mix_of_faults_is_refused_by_its_first_and_appends_nothing() {
     for mask in 0..64u8 {
         let on: [bool; 6] = std::array::from_fn(|i| mask >> i & 1 == 1);
@@ -209,9 +206,10 @@ fn every_mix_of_faults_is_refused_by_its_first_and_appends_nothing() {
     }
 }
 
-/// DEC-2106 item 3 (DEC-290): a re-run with the same code finds the record, whatever its second.
+/// DEC-2106 item 3 (DEC-290): a re-run with the same digest, principal and code finds the record,
+/// whatever its second. DEC-2107: the exception reaches item 2.9 alone, so a re-run at the deadline
+/// is `late`, and a re-run by another principal is `challenge_confirmed`.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_re_run_finds_its_confirmation_and_appends_nothing() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "3", ASKED_AT);
@@ -244,7 +242,6 @@ fn a_re_run_finds_its_confirmation_and_appends_nothing() {
 /// after its first attempt was refused. Another confirmation of the challenge: refused. The same
 /// confirmation, another writer's: found, and nothing appended (item 3).
 #[test]
-#[ignore = "pending E9-4"]
 fn what_lands_before_the_append_is_judged_on_a_second_read() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "3", ASKED_AT);
@@ -296,7 +293,6 @@ fn what_lands_before_the_append_is_judged_on_a_second_read() {
 /// DEC-2106 item 5: the approval as `approvals show` prints it, then the outcome line; a refusal
 /// prints nothing.
 #[test]
-#[ignore = "pending E9-4"]
 fn the_command_prints_the_approval_then_its_confirmation() {
     let mut fx = Fixture::new();
     let asked = fx.ask(AGENT, "3", ASKED_AT);
