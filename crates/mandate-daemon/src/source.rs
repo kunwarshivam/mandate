@@ -75,7 +75,9 @@ const UNFOLDED: [&str; 4] = [
 pub struct CellSource {
     who: SourceFor,
     allowlist: SourceAllowlist,
-    halted: BTreeSet<AssetId>,
+    /// The bundle's halted instruments, or `None` when one cannot be read as an asset, which gives
+    /// every pass no context.
+    halted: Option<BTreeSet<AssetId>>,
     instruments: Vec<InstrumentFact>,
     rows: Box<dyn Rows>,
     documents: Box<dyn ArtifactSource>,
@@ -96,7 +98,7 @@ impl CellSource {
             halted: bundle
                 .halted
                 .iter()
-                .filter_map(|id| AssetId::new(id.as_str()).ok())
+                .map(|id| AssetId::new(id.as_str()).ok())
                 .collect(),
             instruments: bundle.plane.instruments.clone(),
             rows,
@@ -204,7 +206,7 @@ impl ResearchSource for CellSource {
                     .map(|(asset, group)| Some((asset?, group?)))
                     .collect::<Option<_>>()?,
                 claimed_by_other_agents: BTreeSet::new(),
-                halted_instruments: self.halted.clone(),
+                halted_instruments: self.halted.clone()?,
                 disclosures_accepted: BTreeSet::new(),
                 data_universe: Some(self.instruments.iter().map(asset).collect::<Option<_>>()?),
                 research_spend_usd_today: spend,
