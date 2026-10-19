@@ -314,6 +314,7 @@ pub fn entry() -> ResearchEntry {
         seed: Some(7),
         plan: RetrievalPlan::v0_1(),
         bounds: OutputBounds::v0_1(),
+        agentic: None,
     }
 }
 
