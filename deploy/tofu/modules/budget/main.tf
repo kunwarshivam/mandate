@@ -1,5 +1,6 @@
 # The environment's monthly estimate and its share of DEC-2011's cap (DEC-2012 item 7). The node
-# price is DigitalOcean's own size list; Spaces and block storage are list prices. The plan fails
+# price, and the regions that offer the size, are DigitalOcean's own size list; Spaces and block
+# storage are list prices. The plan fails when the size is not offered in the cluster's region, or
 # when the estimate passes the cap. The 80% billing alert itself is the founder's step: no
 # DigitalOcean API sets one.
 
@@ -16,6 +17,11 @@ terraform {
 
 variable "node_size" {
   type = string
+}
+
+variable "region" {
+  description = "The cluster's region, where DigitalOcean must offer the node size."
+  type        = string
 }
 
 variable "node_count" {
@@ -50,8 +56,9 @@ data "digitalocean_sizes" "node" {
 }
 
 locals {
-  node_prices = [for size in data.digitalocean_sizes.node.sizes : size.price_monthly]
-  estimate    = (length(local.node_prices) == 1 ? local.node_prices[0] : 0) * var.node_count + var.spaces_monthly_usd + var.block_storage_gb * var.block_storage_usd_per_gb
+  node_prices  = [for size in data.digitalocean_sizes.node.sizes : size.price_monthly]
+  node_regions = sort(distinct(flatten([for size in data.digitalocean_sizes.node.sizes : size.regions if size.available])))
+  estimate     = (length(local.node_prices) == 1 ? local.node_prices[0] : 0) * var.node_count + var.spaces_monthly_usd + var.block_storage_gb * var.block_storage_usd_per_gb
 }
 
 resource "terraform_data" "cap" {
@@ -61,6 +68,11 @@ resource "terraform_data" "cap" {
     precondition {
       condition     = length(local.node_prices) == 1
       error_message = "DigitalOcean lists no single size ${var.node_size}, so its price is unknown."
+    }
+
+    precondition {
+      condition     = contains(local.node_regions, var.region)
+      error_message = "DigitalOcean does not offer ${var.node_size} in ${var.region}; it offers it in: ${join(", ", local.node_regions)} (DEC-2044 item 2)."
     }
 
     precondition {

@@ -458,49 +458,73 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
             "pods",
             "",
             CONTROL_LABEL.format("object.metadata.labels"),
-            f"request.userInfo.username in {JOB_CONTROLLER}",
+            f"request.userInfo.username in {JOB_CONTROLLER} && has(object.metadata.ownerReferences) "
+            "&& object.metadata.ownerReferences.exists(r, r.apiVersion == 'batch/v1' && r.kind == 'Job' "
+            "&& has(r.controller) && r.controller)",
+            ["CREATE", "UPDATE"],
         ),
         "mandate-control-jobs": (
             jobs,
             "jobs",
             "batch",
             CONTROL_LABEL.format("object.spec.template.metadata.labels"),
-            "!request.userInfo.username.startsWith('system:serviceaccount:')",
+            "!request.userInfo.username.startsWith('system:serviceaccount:') "
+            "&& !(has(object.metadata.ownerReferences) "
+            "&& object.metadata.ownerReferences.exists(r, r.kind == 'CronJob'))",
+            ["CREATE", "UPDATE"],
         ),
     }
-    for name, (spec, resource, group, label, allowed) in expected.items():
+    for name, (spec, resource, group, label, allowed, operations) in expected.items():
         constraints = spec.get("matchConstraints", {})
         rules = constraints.get("resourceRules", [])
         if spec.get("failurePolicy") != "Fail":
             problems.append(f"{name}: does not fail closed")
-        if constraints.get("namespaceSelector") != {"matchLabels": {"kubernetes.io/metadata.name": "ws-ws1"}}:
-            problems.append(f"{name}: not the workspace's namespace")
+        if constraints.get("namespaceSelector") != {"matchLabels": ADMISSION_LABEL}:
+            problems.append(f"{name}: not every namespace the signature webhooks check")
         if [(r.get("apiGroups"), r.get("resources"), sorted(r.get("operations", []))) for r in rules] != [
-            ([group], [resource], ["CREATE", "UPDATE"])
+            ([group], [resource], operations)
         ]:
             problems.append(f"{name}: matches {rules}")
         conditions = {
             c.get("name"): squash(c.get("expression", "").split()) for c in spec.get("matchConditions", [])
         }
-        if conditions.get("labelled-control") != label:
+        newly = "request.operation == 'CREATE' || !(" + label.replace("object.", "oldObject.") + ")"
+        if set(conditions) != {"labelled-control", "newly-control"} or conditions["labelled-control"] != label:
             problems.append(f"{name}: matches {conditions.get('labelled-control')!r}, not the control label")
+        elif conditions["newly-control"] != newly:
+            problems.append(f"{name}: matches {conditions['newly-control']!r}, not only a newly control label")
         validations = [squash(v.get("expression", "").split()) for v in spec.get("validations", [])]
         if validations != [allowed]:
             problems.append(f"{name}: allows {validations}")
         binding = (bindings.get(name) or {}).get("spec", {})
         if binding != {"policyName": name, "validationActions": ["Deny"]}:
             problems.append(f"{name}: bound {binding}, not denying")
-    newly = "request.operation == 'CREATE' || !(" + CONTROL_LABEL.format("oldObject.metadata.labels") + ")"
-    conditions = {
-        c.get("name"): " ".join(c.get("expression", "").split()) for c in pods.get("matchConditions", [])
-    }
-    if set(conditions) != {"labelled-control", "newly-control"} or conditions.get("newly-control") != newly:
-        problems.append(f"mandate-control-pods: conditions {sorted(conditions)}")
     return problems
 
 
 def test_kill_switch_exemption(overlay):
     assert kill_switch_exemption(overlay[1]) == []
+
+
+def uncovered_workspaces(docs: list[dict]) -> list[str]:
+    """Every workspace's namespace (`ws-*`) carries the label that puts it under the signature
+    webhooks and the kill-switch policies, so a new workspace cannot land unchecked."""
+    return sorted(
+        name
+        for name, namespace in of_kind(docs, "Namespace").items()
+        if name.startswith("ws-")
+        and {k: (namespace["metadata"].get("labels") or {}).get(k) for k in ADMISSION_LABEL}
+        != ADMISSION_LABEL
+    )
+
+
+def test_every_workspace_namespace_is_covered(overlay):
+    assert uncovered_workspaces(overlay[1]) == []
+
+
+def test_an_uncovered_workspace_namespace_is_caught(overlay):
+    added = {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "ws-ws2"}}
+    assert uncovered_workspaces([*overlay[1], added]) == ["ws-ws2"]
 
 
 def policies() -> list[dict]:
@@ -710,7 +734,35 @@ DOC_BUGS = [
         kill_switch_exemption,
         "ValidatingAdmissionPolicy",
         "mandate-control-jobs",
-        lambda d: d["spec"]["matchConstraints"]["resourceRules"][0].update(operations=["UPDATE"]),
+        lambda d: d["spec"]["matchConstraints"]["resourceRules"][0].update(operations=["CREATE"]),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"]["matchConditions"].pop(),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"]["matchConditions"][1].update(expression="true"),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"]["validations"][0].update(
+            expression="!request.userInfo.username.startsWith('system:serviceaccount:')"
+        ),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-pods",
+        lambda d: d["spec"]["validations"][0].update(
+            expression=d["spec"]["validations"][0]["expression"].split(" && has(")[0]
+        ),
     ),
     (
         kill_switch_exemption,
@@ -870,3 +922,43 @@ def test_an_extra_source_is_caught(tmp_path):
     assert sources_pinned([*docs, extra]) == [
         "mandate-extra: an OCIRepository the hosted clusters do not run"
     ]
+
+
+# Production moves only by copying what staging already ran on main (DEC-2016).
+STAGING_FILES = ("deploy/gitops/clusters/staging/charts.yaml", "deploy/gitops/clusters/staging/images.yaml")
+PRODUCTION_FILES = (
+    "deploy/gitops/clusters/production/charts.yaml",
+    "deploy/gitops/clusters/production/images.yaml",
+)
+ANY_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def unstaged_digests(production: str, staged: str) -> list[str]:
+    """Each digest production pins that staging's history on main never held."""
+    return sorted(set(ANY_DIGEST.findall(production)) - set(ANY_DIGEST.findall(staged)))
+
+
+def git(*args: str) -> str:
+    done = subprocess.run(["git", *args], capture_output=True, text=True, check=False, cwd=ROOT)
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+def test_production_runs_only_what_staging_ran():
+    if subprocess.run(
+        ["git", "rev-parse", "--verify", "-q", "origin/main"], cwd=ROOT, check=False
+    ).returncode:
+        if REQUIRED:
+            raise RuntimeError("MANDATE_GITOPS_REQUIRED is set but origin/main is not fetched")
+        pytest.skip("origin/main is not fetched")
+    base = git("merge-base", "HEAD", "origin/main").strip()
+    staged = git("log", "-p", "--format=", base, "--", *STAGING_FILES)
+    production = "".join((ROOT / path).read_text() for path in PRODUCTION_FILES)
+    assert unstaged_digests(production, staged) == [], "production gains a digest staging never ran on main"
+
+
+def test_a_production_digest_staging_never_ran_is_caught():
+    ran, new = f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"
+    staged = f"+    digest: {ran}\n"
+    assert unstaged_digests(f"    digest: {ran}\n", staged) == []
+    assert unstaged_digests(f"    digest: {ran}\n  mandate: ghcr.io/x@{new}\n", staged) == [new]

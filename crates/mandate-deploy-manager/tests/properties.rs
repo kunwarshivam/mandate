@@ -17,6 +17,9 @@
 //! - within any crash-loop window a process is started at most seven times (a first start, five
 //!   restarts, and one start answering kill switches from before the window), plus once per kill
 //!   switch in the window that covers it;
+//! - each deployment rule 201 refuses, of an agent not stopped, raises one opaque
+//!   `deployment_unconnected` alert in each manager process that reads it, and nothing else raises
+//!   one (DEC-2038);
 //! - all of it across the manager's own restarts and the orchestrator's garbage collection.
 //!
 //! The oracle computes what is wanted, what a switch covers, and the counts from its own record of
@@ -32,6 +35,7 @@ use common::{
 };
 use mandate_deploy_manager::Slot;
 use mandate_deploy_manager::fake::Call;
+use mandate_deploy_manager::orchestrator::DEPLOYMENT_UNCONNECTED;
 use proptest::prelude::*;
 
 const AGENTS: [(&str, &str); 3] = [
@@ -118,6 +122,10 @@ struct Oracle {
     unanswered: BTreeMap<Slot, usize>,
     /// The slots whose crash loop is journaled, until the control stream stops wanting them.
     looped: BTreeSet<Slot>,
+    /// The refused deployments the current manager process has reported, and how many reports
+    /// every process has raised in all.
+    reported: BTreeSet<usize>,
+    unconnected_alerts: usize,
 }
 
 impl Oracle {
@@ -221,7 +229,10 @@ fn run_seeded(ops: &[Op], seed: Seed) -> Result<(), TestCaseError> {
             Op::LoseNode(k) => m.orchestrator().fake.lose_node(&all[*k]),
             Op::Vanish(k) => m.orchestrator().fake.vanish(&all[*k]),
             Op::Advance(secs) => now += secs,
-            Op::Restart => m = restart(m),
+            Op::Restart => {
+                m = restart(m);
+                oracle.reported.clear();
+            }
             Op::Collect => m.orchestrator().fake.collect(),
         }
         for slot in &covered {
@@ -232,6 +243,29 @@ fn run_seeded(ops: &[Op], seed: Seed) -> Result<(), TestCaseError> {
         oracle.looped.retain(|s| wanted_now.contains(s));
         block_on(m.tick(at(now))).map_err(|h| TestCaseError::fail(format!("{op:?}: {h:?}")))?;
 
+        let refused: Vec<usize> = oracle
+            .journaled
+            .iter()
+            .copied()
+            .filter(|i| !oracle.deployed.contains(i) && !oracle.stopped.contains(i))
+            .collect();
+        for i in refused {
+            if oracle.reported.insert(i) {
+                oracle.unconnected_alerts += 1;
+            }
+        }
+        let raised = m
+            .alerts()
+            .0
+            .iter()
+            .filter(|alert| **alert == DEPLOYMENT_UNCONNECTED)
+            .count();
+        prop_assert_eq!(
+            raised,
+            oracle.unconnected_alerts,
+            "{:?}: unconnected-deployment alerts",
+            op
+        );
         let violations = m.orchestrator().violations.clone();
         prop_assert!(violations.is_empty(), "{op:?}: {violations:?}");
         let calls = m.orchestrator().fake.calls().to_vec();
@@ -327,6 +361,23 @@ fn a_long_crash_loop_is_bounded_and_a_kill_switch_still_reaches_it() {
     ops.push(Op::Crash(0));
     ops.push(Op::Advance(700));
     run(&ops).unwrap();
+}
+
+/// A deployment on a revoked connection is reported once per manager process, and a stop before a
+/// restart leaves the new process nothing to report.
+#[test]
+fn a_refused_deployment_is_reported_once_per_process_until_it_is_stopped() {
+    run(&[
+        Op::Revoke(0),
+        Op::Deploy(0),
+        Op::Advance(5),
+        Op::Restart,
+        Op::Advance(5),
+        Op::Stop(0),
+        Op::Restart,
+        Op::Advance(5),
+    ])
+    .unwrap();
 }
 
 /// Each check of the oracle fails on the bug seeded for it, before it is trusted.
