@@ -337,6 +337,44 @@ def strings(value, path=""):
         yield path, value
 
 
+# A process image a hosted cluster names: a release binary's index under this repository's GHCR
+# path, by digest alone (DEC-2016, DEC-2026); `promote` writes only these.
+OWN_IMAGE = re.compile(r"ghcr\.io/kunwarshivam/mandate/mandate[a-z-]*@sha256:[0-9a-f]{64}")
+
+
+# A ULID, as the API server's org and workspace ids are (MANDATE_API_ORG, MANDATE_API_WORKSPACE).
+ULID = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
+API_URLS = ("issuer", "jwksUrl", "appOrigin")
+
+
+def api_settings(values: dict[str, dict]) -> list[str]:
+    """No placeholder anywhere in a hosted workspace's values (`placeholder`, as in
+    `placeholder.invalid`, or the all-zero ULID); and once the API server's settings
+    are written, each is set: its org and workspace as ULIDs, its issuer, key set and app origin
+    over https, the key set under the issuer, and an audience."""
+    workspace = values.get("workspace", {})
+    problems = [
+        f"workspace: {path} is a placeholder"
+        for path, text in strings(workspace)
+        if "placeholder" in text.lower() or text == "0" * 26
+    ]
+    api = {key: str(value) for key, value in (workspace.get("api") or {}).items() if value}
+    named = (workspace.get("images") or {}).get("api")
+    if not named and not set(api) - {"subjectLinks"}:
+        return problems
+    for key in ("org", "workspace"):
+        if not ULID.fullmatch(api.get(key, "")):
+            problems.append(f"workspace: api.{key} is not a ULID")
+    for key in API_URLS:
+        if not api.get(key, "").startswith("https://"):
+            problems.append(f"workspace: api.{key} is not an https URL")
+    if not api.get("audience"):
+        problems.append("workspace: api.audience is not set")
+    if not api.get("jwksUrl", "").startswith(api.get("issuer", "") + "/"):
+        problems.append("workspace: api.jwksUrl is not the issuer's own key set")
+    return problems
+
+
 def values_policy(values: dict[str, dict], environment: str) -> list[str]:
     """No stub tier, no `live`, the paper environment, every image by digest, two journal instances
     on separate nodes."""
@@ -360,6 +398,8 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
             problems.append("workspace: the stub issuer is named")
         elif reference and not PINNED.search(reference):
             problems.append(f"workspace: image {image} not pinned by digest: {reference}")
+        elif reference and image != "postgres" and not OWN_IMAGE.fullmatch(reference):
+            problems.append(f"workspace: image {image} is not this repository's release: {reference}")
     for name in ("cnpg", "barman-cloud"):
         tree = values.get(name, {})
         for key in ("image", "sidecarImage"):
@@ -713,6 +753,37 @@ def test_never_pruned(overlay):
     assert never_pruned(overlay[1]) == []
 
 
+def test_api_settings(overlay):
+    assert api_settings(overlay[2]) == []
+
+
+@pytest.mark.parametrize(
+    "api",
+    [
+        {"issuer": "https://placeholder.invalid"},
+        {"org": "0" * 26},
+        {"org": "01KDEM0000000000000000000R", "workspace": "ws1"},
+        {"issuer": "http://issuer.example"},
+        {"appOrigin": "https://app.example", "audience": ""},
+        {"jwksUrl": "https://other.example/jwks.json"},
+    ],
+)
+def test_each_api_settings_bug_is_caught(overlay, api):
+    good = {
+        "org": "01KDEM0000000000000000000R",
+        "workspace": "01KDEM0000000000000000000W",
+        "issuer": "https://issuer.example",
+        "audience": "authenticated",
+        "jwksUrl": "https://issuer.example/jwks.json",
+        "appOrigin": "https://app.example",
+    }
+    values = copy.deepcopy(overlay[2])
+    values["workspace"] = merge(values["workspace"], {"api": good})
+    assert api_settings(values) == []
+    values["workspace"] = merge(values["workspace"], {"api": api})
+    assert api_settings(values), f"api_settings missed {api}"
+
+
 def test_values_policy(overlay):
     assert values_policy(overlay[2], overlay[0]) == []
 
@@ -998,6 +1069,9 @@ def test_each_overlay_seeded_bug_is_caught(check, kind, name, change, tmp_path):
 
 
 VALUE_BUGS = [
+    ("workspace", {"images": {"mandate": "docker.io/library/busybox@sha256:" + "a" * 64}}),
+    ("workspace", {"images": {"api": "ghcr.io/kunwarshivam/mandate/mandate:signed-abc"}}),
+    ("workspace", {"images": {"runtime": "ghcr.io/someone/mandate/mandate@sha256:" + "a" * 64}}),
     ("workspace", {"deploymentTier": "dev"}),
     ("workspace", {"deploymentTier": "ci"}),
     ("workspace", {"environment": "live"}),

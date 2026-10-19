@@ -137,6 +137,20 @@ fn record(workspace: &str, account: &str, checked: &str, code: Option<&str>) -> 
 
 /// The second Job's gestures: the workspace opened and founded, and the record shown.
 pub fn opening(workspace: &str, account: &str, checked: &str) -> Vec<Gesture> {
+    let mut all = workspace_opened(workspace);
+    all.push(gesture(
+        3,
+        "the connection's record and its code, shown (nothing committed)",
+        record(workspace, account, checked, None),
+        "code ".into(),
+    ));
+    all
+}
+
+/// The workspace's paper control stream, opened, and the founder's membership: what both runs
+/// need before the deployment's gestures, the seeded run included, so its only difference is the
+/// connection left unrecorded.
+pub fn workspace_opened(workspace: &str) -> Vec<Gesture> {
     let target = ["--journal", JOURNAL, "--store", STORE];
     let open = [
         "workspace",
@@ -166,12 +180,6 @@ pub fn opening(workspace: &str, account: &str, checked: &str) -> Vec<Gesture> {
             "the founder's membership",
             strings(&[&found[..], &["--method", "oidc"], &target].concat()),
             format!("founded ctl:{workspace} for member {FOUNDER}"),
-        ),
-        gesture(
-            3,
-            "the connection's record and its code, shown (nothing committed)",
-            record(workspace, account, checked, None),
-            "code ".into(),
         ),
     ]
 }
@@ -284,6 +292,12 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         ),
     ];
     let recorded = if seeded {
+        let (done, logs) = gestures(&id, "o", &workspace_opened(&workspace), &files)?;
+        if !done {
+            return Ok(Verdict::Broken(format!(
+                "the workspace failed to open:\n{logs}"
+            )));
+        }
         None
     } else {
         let check = render(
@@ -385,6 +399,7 @@ fn gestures(
         &all,
         &format!("executor-in-{id}{suffix}"),
         files,
+        NAMESPACE,
     )?)
 }
 
@@ -443,6 +458,21 @@ mod tests {
         let names: Vec<_> = with.iter().map(|g| g.container.clone()).collect();
         let unique: BTreeSet<_> = names.iter().collect();
         assert_eq!(unique.len(), names.len(), "{names:?}");
+    }
+
+    /// Both runs open the workspace's control stream and found its member before the deployment,
+    /// so the seeded run reaches the deployment manager and differs only by the missing record.
+    #[test]
+    fn both_runs_open_the_workspace_first() {
+        let opened = workspace_opened("w");
+        let heads: Vec<_> = opened.iter().map(|g| g.args[..2].to_vec()).collect();
+        assert_eq!(heads, [["workspace", "open"], ["workspace", "found"]]);
+        let full = opening("w", "a", "c");
+        assert_eq!(full.len(), opened.len() + 1);
+        for (a, b) in full.iter().zip(&opened) {
+            assert_eq!(a.args, b.args);
+        }
+        assert_eq!(full.last().unwrap().args[..2], ["connection", "record"]);
     }
 
     #[test]

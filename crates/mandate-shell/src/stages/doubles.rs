@@ -771,7 +771,7 @@ impl Sink for ConvertingSink {
                 instrument: instrument.clone(),
                 side: *side,
                 qty: *qty,
-                limit: *limit,
+                limit: Some(*limit),
                 purpose: executor_purpose(*purpose),
                 protection: execution
                     .protection
@@ -796,6 +796,7 @@ impl Sink for ConvertingSink {
                 RuntimeTimeInForce::Ioc => mandate_executor::TimeInForce::Ioc,
             }),
             body,
+            confirmation: None,
         })
     }
 }
@@ -875,6 +876,9 @@ impl PaperExecutor {
                 what: "the tracer hands no flatten",
             });
         };
+        let limit = limit.ok_or(Cause::Absent {
+            what: "the tracer hands no market order",
+        })?;
         let client = ClientOrderId::for_intent(&handoff.intent_id)?;
         self.last_client_order_id = Some(client.clone());
         let qty_text = qty.to_string();
@@ -904,7 +908,7 @@ impl PaperExecutor {
             qty: *qty,
             order_type: OrderType::Limit,
             tif: TimeInForce::Day,
-            limit_price: Some(*limit),
+            limit_price: Some(limit),
             stop_price: None,
             bracket: None,
             oco: None,

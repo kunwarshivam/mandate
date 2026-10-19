@@ -191,13 +191,17 @@ pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
 /// the old primary's rejoin; `cargo xtask ci cell-failover` runs it in a job of its own (DEC-464).
 pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 
-/// The kill-switch drill (OPS-4, E21-34), the admission drill, and the executor drill (E21-30),
-/// which `cargo xtask ci cell-kill-switch` runs on a cell of its own so `ci cell` stays within its
-/// ten minutes (DEC-464, DEC-2602, DEC-2035).
-pub const KILL_SWITCH_DRILLS: [Drill; 3] = [Drill::KillSwitch, Drill::Admission, Drill::Executor];
+/// The kill-switch drill (OPS-4, E21-34) and the admission drill, which `cargo xtask ci
+/// cell-kill-switch` runs on a cell of its own so `ci cell` stays within its ten minutes (DEC-464,
+/// DEC-2602).
+pub const KILL_SWITCH_DRILLS: [Drill; 2] = [Drill::KillSwitch, Drill::Admission];
 
-/// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-kill-switch` runs after the
-/// kill switch's, on that job's cell, so `ci cell` stays within its ten minutes (DEC-464).
+/// The executor drill (E21-30, DEC-2035), which `cargo xtask ci cell-executor` runs on a cell of
+/// its own, so `ci cell-kill-switch` stays within its ten minutes (DEC-464, DEC-2615).
+pub const EXECUTOR_DRILLS: [Drill; 1] = [Drill::Executor];
+
+/// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-vault` runs on a cell of its
+/// own, so each cell job stays within its ten minutes (DEC-464, DEC-2616).
 pub const VAULT_DRILLS: [Drill; 1] = [Drill::Vault];
 
 impl Drill {
@@ -223,6 +227,7 @@ impl Drill {
             .chain(JOURNAL_DRILLS)
             .chain(FAILOVER_DRILLS)
             .chain(KILL_SWITCH_DRILLS)
+            .chain(EXECUTOR_DRILLS)
             .chain(VAULT_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
@@ -325,8 +330,8 @@ pub fn ci() -> Result<()> {
     demo(false)
 }
 
-/// `cargo xtask ci cell-journal`, `ci cell-failover` and `ci cell-kill-switch`: the cell, then
-/// `drills`, plain and seeded (E21-41, DEC-2602). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+/// `cargo xtask ci cell-journal`, `ci cell-failover`, `ci cell-kill-switch`, `ci cell-executor` and
+/// `ci cell-vault`: the cell, then `drills`, plain and seeded (E21-41, DEC-2602, DEC-2615, DEC-2616). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
 pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
@@ -1822,27 +1827,58 @@ fn apply_as(objects: &[Value], extra: &[&str]) -> Result<()> {
 /// The chart rendered with the cell's values and `sets`, as the JSON documents it emits.
 pub fn render(sets: &[String], show_only: Option<&str>) -> Result<Vec<Value>> {
     let images = image_sets()?;
-    let egress = egress_sets()?;
-    let mut args = vec![
+    let json_sets: Vec<String> = egress_sets()?
+        .into_iter()
+        .chain(sets.iter().cloned())
+        .collect();
+    render_with(&template_args(
+        NAMESPACE,
+        &[WORKSPACE_VALUES],
+        &images,
+        &json_sets,
+        show_only,
+    ))
+}
+
+/// `helm template`'s arguments for the workspace chart in `namespace`: each values file in order,
+/// each of `sets` as `--set` and each of `json_sets` as `--set-json`, and `show_only` when given.
+/// Pure, so a dry run's render is checked without a cluster.
+pub fn template_args(
+    namespace: &str,
+    values: &[&str],
+    sets: &[String],
+    json_sets: &[String],
+    show_only: Option<&str>,
+) -> Vec<String> {
+    let mut args: Vec<String> = [
         "template",
         "workspace",
         WORKSPACE_CHART,
         "--namespace",
-        NAMESPACE,
-        "-f",
-        WORKSPACE_VALUES,
-    ];
-    for image in &images {
-        args.extend(["--set", image.as_str()]);
+        namespace,
+    ]
+    .iter()
+    .map(|a| a.to_string())
+    .collect();
+    for file in values {
+        args.extend(["-f".to_string(), file.to_string()]);
     }
-    for set in egress.iter().chain(sets) {
-        args.push("--set-json");
-        args.push(set);
+    for set in sets {
+        args.extend(["--set".to_string(), set.clone()]);
+    }
+    for set in json_sets {
+        args.extend(["--set-json".to_string(), set.clone()]);
     }
     if let Some(template) = show_only {
-        args.push("--show-only");
-        args.push(template);
+        args.extend(["--show-only".to_string(), template.to_string()]);
     }
+    args
+}
+
+/// The chart rendered by `helm` with `args` ([`template_args`]): `helm template` alone, which
+/// reads no kubeconfig and reaches no cluster.
+pub fn render_with(args: &[String]) -> Result<Vec<Value>> {
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     parse_documents(&output("helm", &args)?)
 }
 

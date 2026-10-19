@@ -551,6 +551,25 @@ fn a_retirement_whose_append_may_have_committed_is_found_and_no_command_is_sent(
     assert_eq!(stop_commands(&world, AGENT), 0, "no command beside it");
 }
 
+/// Every round of the Stop finds the control stream moved, and the last round's `AgentStopped` did
+/// commit although its answer reports a moved head: the Stop finds it after the last round and
+/// returns it, and sends no command beside it. An earlier Stop's claim stands, so every append
+/// the Stop makes is on the control stream.
+#[test]
+fn a_retirement_committed_in_the_last_round_is_found_and_no_command_is_sent() {
+    let mut world = World::new();
+    world.established();
+    world.deployed(AGENT, true);
+    world.opened(AGENT, CLAIMANT);
+    let code = world.code(AGENT);
+    world.journal.behind_next = 2;
+    world.journal.mismatch_after_commit = 1;
+    let outcome = world.stop(AGENT, Some(&code));
+    assert!(outcome.is_ok(), "the Stop was refused: {outcome:?}");
+    assert_eq!(stops_of(&world, AGENT), 1, "the AgentStopped committed");
+    assert_eq!(stop_commands(&world, AGENT), 0, "no command beside it");
+}
+
 /// The claim is stored and the `AgentStopped`'s append then fails: the Stop goes by command, the
 /// stream stays claimed (its first record the owner's, so a runtime started on it refuses it,
 /// journal spec §9.1), and a later Stop resumes the claim and completes the retirement.
@@ -586,6 +605,11 @@ enum Op {
     StopFenced(usize),
     /// A Stop whose claim the journal answers with a conflict, a refusal, or an error.
     StopRefused(usize, Refusal),
+    /// A Stop whose first control-stream append commits but whose answer is lost, and every later
+    /// one is unavailable.
+    StopLost(usize),
+    /// A Stop whose first control-stream append fails, storing nothing.
+    StopFailing(usize),
     Stop(usize),
 }
 
@@ -604,6 +628,8 @@ fn op() -> impl Strategy<Value = Op> {
             prop_oneof![Just(Refusal::Conflict), Just(Refusal::Invalid), Just(Refusal::Fails)]
         )
             .prop_map(|(i, refusal)| Op::StopRefused(i, refusal)),
+        1 => agent.clone().prop_map(Op::StopLost),
+        1 => agent.clone().prop_map(Op::StopFailing),
         3 => agent.prop_map(Op::Stop),
     ]
 }
@@ -642,7 +668,12 @@ proptest! {
                         ran[*i] = true;
                     }
                 }
-                Op::StopRaced(i) | Op::StopFenced(i) | Op::StopRefused(i, _) | Op::Stop(i) => {
+                Op::StopRaced(i)
+                | Op::StopFenced(i)
+                | Op::StopRefused(i, _)
+                | Op::StopLost(i)
+                | Op::StopFailing(i)
+                | Op::Stop(i) => {
                     let before = world.of("AgentStopped").len();
                     let records = world.agent_kinds(AGENTS[*i]).len();
                     let code = world.code(AGENTS[*i]);
@@ -657,17 +688,28 @@ proptest! {
                     if let Op::StopRefused(_, refusal) = op {
                         world.journal.agent_refusal = Some(*refusal);
                     }
+                    let faulty = matches!(op, Op::StopLost(_) | Op::StopFailing(_));
+                    world.journal.lost_for_good = matches!(op, Op::StopLost(_));
+                    if matches!(op, Op::StopFailing(_)) {
+                        world.journal.control_failures = 1;
+                    }
                     let commands = world.of("OwnerCommandIssued").len();
                     let effects = stops_of(&world, AGENTS[*i]) + stop_commands(&world, AGENTS[*i]);
                     let retired_before = stops_of(&world, AGENTS[*i]) > 0;
                     let outcome = world.stop(AGENTS[*i], Some(&code));
+                    world.journal.recover();
+                    world.journal.control_failures = 0;
                     let refused = matches!(op, Op::StopRefused(..))
                         && world.journal.agent_refusal.take().is_none();
-                    prop_assert!(outcome.is_ok(), "{:?}: the Stop was refused: {:?}", op, outcome);
-                    let added = stops_of(&world, AGENTS[*i]) + stop_commands(&world, AGENTS[*i]) - effects;
                     prop_assert!(
-                        added == 1 || (added == 0 && retired_before),
-                        "{:?}: the Stop left {} effects", op, added
+                        outcome.is_ok() || faulty,
+                        "{:?}: the Stop was refused: {:?}", op, outcome
+                    );
+                    let added = stops_of(&world, AGENTS[*i]) + stop_commands(&world, AGENTS[*i]) - effects;
+                    prop_assert!(added <= 1, "{:?}: the Stop left {} effects", op, added);
+                    prop_assert!(
+                        outcome.is_err() || added == 1 || retired_before,
+                        "{:?}: a Stop that succeeded left no effect", op
                     );
                     if refused {
                         prop_assert!(

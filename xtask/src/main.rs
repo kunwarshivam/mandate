@@ -38,8 +38,8 @@ commands:
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
                         postgres | openbao | objectstore | stub-release | mutants |
-                        schema-mutants | cell |
-                        cell-demo | cell-journal | cell-failover | cell-kill-switch | sweep; or
+                        schema-mutants | cell | cell-demo | cell-journal | cell-failover |
+                        cell-kill-switch | cell-executor | cell-vault | sweep; or
                         one part of test: test-nextest | test-doc | test-rh-sim | test-python.
                         Tests, pending tests,
                         doctests, the rehearsal, Postgres, OpenBao and object-store runs and
@@ -117,10 +117,13 @@ commands:
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
                         ready and what waits on its lane, then web/ at 127.0.0.1:4317
   cell demo --scenario demo
-                        the demo's six steps in order on the local cell: each gesture on main run
+                        the demo's steps in order on the local cell: each gesture on main run
                         in the cell, each missing link named by its PR or story (E21-54)
+  cell demo --scenario demo --dry-run --image <ref@sha256:...> --workspace <ULID> [--namespace <ns>]
+                        render the demo's gestures' Job and inputs for staging (ws-ws1 by default)
+                        with helm template and print them; reads no kubeconfig, applies nothing
   cell web-kill-switch <workspace> [agent]
-                        step 6 from web/ against a running cell with sign-in ready: next dev, then
+                        step 7 from web/ against a running cell with sign-in ready: next dev, then
                         Playwright presses one listed agent's kill switch (DEC-2406)
   cell down             delete the local cell
   cell hosted           cell #1's bring-up (deploy/hosted/) against a two-node k3d cluster of
@@ -174,6 +177,8 @@ const PR_JOBS: &[&str] = &[
     "cell-journal",
     "cell-failover",
     "cell-kill-switch",
+    "cell-executor",
+    "cell-vault",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -377,6 +382,9 @@ fn run() -> Result<()> {
         ["cell", "demo"] => cell::demo(true),
         ["cell", "demo", "--no-web"] => cell::demo(false),
         ["cell", "demo", "--scenario", name] => cell::scenario::run(name),
+        ["cell", "demo", "--scenario", name, "--dry-run", target @ ..] => {
+            cell::scenario::dry_run(name, target)
+        }
         ["cell", "web-kill-switch", workspace] => {
             cell::web::report(cell::web::kill_switch_from_web(workspace, None))
         }
@@ -396,6 +404,7 @@ fn run() -> Result<()> {
                     .chain(cell::JOURNAL_DRILLS)
                     .chain(cell::FAILOVER_DRILLS)
                     .chain(cell::KILL_SWITCH_DRILLS)
+                    .chain(cell::EXECUTOR_DRILLS)
                     .chain(cell::VAULT_DRILLS)
                     .collect()
             } else {
@@ -436,10 +445,9 @@ fn ci(job: &str) -> Result<()> {
         "cell-demo" => cell::scenario::ci(),
         "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
-        "cell-kill-switch" => cell::ci_drills(
-            job,
-            &[&cell::KILL_SWITCH_DRILLS[..], &cell::VAULT_DRILLS[..]].concat(),
-        ),
+        "cell-kill-switch" => cell::ci_drills(job, &cell::KILL_SWITCH_DRILLS),
+        "cell-executor" => cell::ci_drills(job, &cell::EXECUTOR_DRILLS),
+        "cell-vault" => cell::ci_drills(job, &cell::VAULT_DRILLS),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -16396,7 +16404,7 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 13] = [
+    const SELECT_GATES: [(&str, &str); 15] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
@@ -16410,6 +16418,8 @@ mod tests {
         ("cell-journal", "cell"),
         ("cell-failover", "cell"),
         ("cell-kill-switch", "cell"),
+        ("cell-executor", "cell"),
+        ("cell-vault", "cell"),
     ];
 
     /// DEC-1190 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
@@ -18565,12 +18575,13 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            19,
+            21,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
              `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
-             `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), and `hosted-k3d` \
+             `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), `cell-executor` \
+             (DEC-2615), `cell-vault` (DEC-2616), and `hosted-k3d` \
              (E21-51)"
         );
         for checkout in checkouts {
