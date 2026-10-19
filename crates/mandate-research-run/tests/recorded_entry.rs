@@ -126,13 +126,11 @@ fn a_recording_without_the_member_is_a_single_call_entry() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_recording_naming_the_v0_2_loop_reads_its_bounds() {
     assert_eq!(agentic().agentic, Some(LoopBounds::v0_2()));
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_recording_naming_any_other_loop_is_refused_by_name() {
     for named in [
         Value::Str("v0_3".to_owned()),
@@ -150,7 +148,6 @@ fn a_recording_naming_any_other_loop_is_refused_by_name() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_agentic_entry_pins_its_loop_and_its_own_system_text() {
     let entry = agentic();
     let content = entry.content();
@@ -172,7 +169,6 @@ fn the_agentic_entry_pins_its_loop_and_its_own_system_text() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_agentic_system_text_says_what_the_tools_may_do_and_never_to_trade() {
     let system = agentic().content().template.system.to_lowercase();
     for said in ["tools", "read", "note", "never orders", "untrusted"] {

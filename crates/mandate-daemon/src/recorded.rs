@@ -129,7 +129,6 @@ impl Bundle {
         let reply = research.member("reply")?;
         let pinned = ResearchEntry::recorded(entry.value).map_err(|error| match error {
             EntryError::Member(member) => entry.malformed(member),
-            EntryError::Unimplemented { .. } => entry.malformed("agentic"),
         })?;
         let slug = pinned.identity.model_name.clone();
         let reported_provider = endpoint.text("reported_provider")?;
