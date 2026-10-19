@@ -20,6 +20,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   as sane, so staleness keeps counting from the last sane version-2 mark. Agent-accepted under
   DEC-176 on the coordinator's ruling: it adds a version that tightens what a risk input proves,
   and loosens nothing.
+  - **§9.27's `breach_time_s`.** A scale rung carries 0, not at least `breach_confirm_s`: mandate spec
+    §5.5 applies `scale_sizes` immediately, with no confirmation, as DEC-2301 item 1 and the risk
+    fold already read it. The row now says so. No rule or vector changes.
   - **Versions.** v0.62 (DEC-2104, #1722) is on main, so this change takes v0.63, §9.30, and rule
     244, which no other section uses. It renumbers at merge if that order changes.
 - **v0.62 ([DEC-2104](../project/decisions/DEC-2104.md); E9-4, claim #759):** §9.29 adds the
@@ -5197,7 +5200,7 @@ after the input, which mandate spec §5.10 lists as E, H, DD, E₀, C, L and §9
 | `limit` | `limit_key` | The limit |
 | `action` | `scale_sizes` \| `exits_only` \| `flatten_and_pause` \| `end_delegations` | What it does while it holds: a rung's own action, the daily loss's `daily_loss_action`, or a tripwire's: rule 230 |
 | `reason` | `hard_trigger` \| `hard_breach_pending` \| `resolved_at_rollover` \| `new_day_breach` \| `after_reset` \| `tripwire_condition`, or `null` | Why, when it is not plain confirmation by breach time: rule 230 |
-| `breach_time_s` | `integer?` | The breach time (mandate spec §5.6) the limit's confirmation holds at the input that produced the record, in whole seconds. The risk fold's event carries no breach time, so the writer reads the confirmation at that input, before the fold's latch removes it. A trigger confirmed by breach time, a plain confirmed scale rung or a confirmed `new_day_breach` included, carries at least `breach_confirm_s`. A hard trigger and `hard_breach_pending` carry whatever had accumulated, which may be more than 0 and less than `breach_confirm_s`. It is 0 only where the limit has no confirmation at that input, as for an `after_reset` rung. `null` for a tripwire: rule 232 |
+| `breach_time_s` | `integer?` | The breach time (mandate spec §5.6) the limit's confirmation holds at the input that produced the record, in whole seconds. The risk fold's event carries no breach time, so the writer reads the confirmation at that input, before the fold's latch removes it. A trigger confirmed by breach time, a confirmed `new_day_breach` included, carries at least `breach_confirm_s`. A hard trigger and `hard_breach_pending` carry whatever had accumulated, which may be more than 0 and less than `breach_confirm_s`. It is 0 only where the limit has no confirmation at that input, as for a scale rung, which mandate spec §5.5 applies immediately, or an `after_reset` rung. `null` for a tripwire: rule 232 |
 | `metric` | `consecutive_losing_exits` \| `realized_loss_usd` \| `new_instruments`, or `null` | A tripwire's metric: rule 232 |
 | `threshold` | `decimal?` | A tripwire's threshold: rules 232 and 233 |
 | `value` | `decimal?` | The metric's value reached: rules 232 and 233 |
