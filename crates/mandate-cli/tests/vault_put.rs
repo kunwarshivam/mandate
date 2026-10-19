@@ -71,6 +71,19 @@ fn three_lines_are_read_and_the_vault_reached() {
     }
 }
 
+/// Stdin of exactly 16384 bytes is read and reaches the vault; one byte more is refused.
+#[test]
+#[ignore = "pending E21-32"]
+fn stdin_is_read_up_to_its_bound_and_no_further() {
+    let head = format!("{ROLE}\n{SECRET_ID}\n");
+    let longest = format!("{head}{}", "k".repeat(16384 - head.len()));
+    assert_eq!(longest.len(), 16384);
+    let output = put("model-provider-key", NOWHERE, &ca(), &longest);
+    refused(&output, "unavailable", "the longest stdin");
+    let output = put("model-provider-key", NOWHERE, &ca(), &format!("{longest}k"));
+    refused(&output, "credential_file", "one byte more");
+}
+
 #[test]
 #[ignore = "pending E21-32"]
 fn stdin_that_is_not_three_lines_is_refused_before_any_vault_is_reached() {
