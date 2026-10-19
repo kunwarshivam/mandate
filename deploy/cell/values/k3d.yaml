@@ -12,6 +12,9 @@ runtime:
   agent: demo-agent
   connection: demo-paper
   owner: demo-owner
+  # The recorded research bundle the interim runtime image carries (DEC-2246). Every runtime pod the
+  # manager starts is handed it; only an agent whose confirmed envelope researches uses it.
+  research: /usr/local/share/mandate/research
 # The workspace API server, when `cargo xtask cell up` names its image. It hosts the demo workspace
 # (`cargo xtask cell demo` opens it under this id). The issuer is the local stub of DEC-2100 on the
 # pod's loopback, which lane SI adds: until then no key set is fetched and every sign-in is refused,

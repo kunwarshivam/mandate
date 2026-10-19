@@ -169,7 +169,6 @@ fn a_manager_launch_refuses_until_its_deployment_is_resolved() {
 /// be read from the journal whose bundle does not load, which refuses before any journal is named.
 /// A bundle that loads leaves the start to its journal.
 #[test]
-#[ignore = "pending E21-54"]
 fn a_refused_research_opt_in_stops_the_start() {
     let path = socket("research");
     let refused = |code: &str| (Some(2), format!("runtime_start_failed: {code}\n"));
@@ -206,6 +205,45 @@ fn a_refused_research_opt_in_stops_the_start() {
     };
     assert_eq!(launch(&missing), refused("research_bundle_unreadable"));
     assert_eq!(launch(Path::new(BUNDLE)), refused("journal_dsn_missing"));
+    assert!(!path.exists(), "a refused process serves no probe");
+}
+
+/// `--research` with no bundle after it, an empty one, another flag where the bundle belongs, or
+/// written `--research=` with or without a bundle, refuses before the process is ready, rather
+/// than running deny-all as if research were not asked for (DEC-2215 item 2).
+#[test]
+fn research_asked_for_without_a_bundle_refuses() {
+    let path = socket("research-missing");
+    let launch = |tail: &[&str]| {
+        let mut args = vec!["run"];
+        args.extend(DEPLOYMENT);
+        args.push("--probe");
+        let out = Command::new(BIN)
+            .args(&args)
+            .arg(&path)
+            .args(tail)
+            .env_remove("MANDATE_JOURNAL_DSN")
+            .env_remove("MANDATE_ARTIFACTS")
+            .stdin(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        (out.status.code(), String::from_utf8(out.stderr).unwrap())
+    };
+    let refused = (Some(2), "research_bundle_missing\n".to_owned());
+    assert_eq!(launch(&["--research"]), refused);
+    assert_eq!(launch(&["--research", ""]), refused);
+    assert_eq!(launch(&["--research", "--probe"]), refused);
+    assert_eq!(launch(&["--research="]), refused);
+    let joined = format!("--research={BUNDLE}");
+    assert_eq!(launch(&[joined.as_str()]), refused);
+    assert_eq!(
+        launch(&["--research", BUNDLE]),
+        (
+            Some(2),
+            "runtime_start_failed: research_needs_resolved_deployment\n".to_owned()
+        )
+    );
     assert!(!path.exists(), "a refused process serves no probe");
 }
 

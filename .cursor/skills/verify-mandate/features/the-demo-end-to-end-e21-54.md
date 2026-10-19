@@ -1,10 +1,10 @@
 # The demo, end to end, on the local cell (E21-54)
 
 - **Spec:** the managed-cells plan (`docs/project/tasks/managed-cells.md`), DEC-967, DEC-995 (the
-  2026-10-26 demo), DEC-2002, DEC-2004, DEC-2010, DEC-2023; journal spec §11 for the closing
+  2026-10-26 demo), DEC-2002, DEC-2004, DEC-2010, DEC-2023, DEC-2036; journal spec §11 for the closing
   verification.
 - **Code:** `xtask/src/cell/scenario.rs` and lane W2's `xtask/src/cell/web.rs` (`cargo xtask cell demo --scenario demo`, `cargo xtask ci
-  cell-demo`), the demo's envelope and instrument under `deploy/cell/demo/`, and the backtest
+  cell-demo`), the demo's envelopes and instruments under `deploy/cell/demo/`, and the backtest
   runner's demo inputs and golden store under `crates/mandate-backtest-runner/tests/fixtures/`.
 - **Tests:** `xtask/src/cell/scenario.rs`'s unit tests: the demo files are canonical JSON and the
   envelope is paper and asks every opening; the plan runs the six steps in order and types only the
@@ -12,8 +12,8 @@
   exported; every gesture is in the run's workspace and never live; each run takes a fresh ULID
   workspace founded for the demo owner; step 1 checks the API's refusal with no session, the
   owner's sign-in and the signed-in read of the run's agents, and step 5 the signed-in read of its
-  backtest; a body check holds only for what it names; step 2 deploys a second agent that
-  step 6's web check kills, and a web check runs only on its own recorded kill switch; step 5 registers a rule set, runs the backtest
+  backtest; a body check holds only for what it names; the second agent's envelope is the demo's on another instrument, and step 6
+  deploys it after step 5's record and has web/'s check kill it, and a web check runs only on its own recorded kill switch; step 5 registers a rule set, runs the backtest
   runner on its committed demo inputs and records the payload it stores, which is pinned to the
   runner's golden store; every gap cites what of it is on `main` and waits on
   a named lane with its backlog story; each step reads ready, partial or skipped from its parts;
