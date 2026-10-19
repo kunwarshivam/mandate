@@ -63,10 +63,11 @@ pub const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
 /// The bid, bid size and floor the owner's exit confirms, as the CLI's canonical text (DEC-2507
 /// item 1): fixed values the scenario types, since the cell shows no live quote.
 const EXIT_BID: (&str, &str, &str) = ("501.25", "100", "500");
-/// The run's control stream head when the owner's exit code is shown: every control record the
-/// gestures before it commit. The CLI binds it into the code (DEC-279 item 1), so a gesture that
-/// adds a control record before the exit moves it, and the shown code's check fails loudly.
-const EXIT_CONTROL_HEAD: u64 = 0;
+/// The run's control stream head when the owner's exit code is shown: the seq of the last control
+/// record before it, step 5's `backtest record` (the run's report on `main` numbers the records
+/// before it 1 to 9). The CLI binds it into the code (DEC-279 item 1), so a gesture that adds a
+/// control record before the exit moves it, and the shown code's check fails the run loudly.
+const EXIT_CONTROL_HEAD: u64 = 9;
 /// A second agent, on its own envelope ([`WEB_MANDATE_FILE`]), deployed for `web/`'s kill switch:
 /// the CLI stops [`AGENT`] inside the Job, and `web/` offers nothing to stop on a stopped agent, so
 /// the browser presses this one's (lane W2's D10).
@@ -484,9 +485,7 @@ pub fn plan(
                 &[
                     "agent",
                     "exit",
-                    "--agent",
                     AGENT,
-                    "--instrument",
                     SPY,
                     "--confirm-bid",
                     bid,
@@ -1700,6 +1699,11 @@ mod tests {
         assert_eq!(confirm_code(version), "e869cb19");
         assert_eq!(deploy_code(AGENT, version), "63fbe39f");
         assert_eq!(code(""), "e3b0c442");
+        assert_eq!(
+            exit_code(AGENT, SPY, EXIT_BID, 1),
+            "b0e0242b",
+            "the code `agent exit --show-code` showed with the control stream at seq 1"
+        );
         let research = reference(&research_mandate());
         assert_eq!(
             research,
@@ -2055,14 +2059,8 @@ mod tests {
                 .position(|g| g.args[..head.len()] == *head && g.args.iter().any(|a| a == last))
                 .unwrap()
         };
-        let shown = at(
-            &["agent", "exit", "--agent", AGENT, "--instrument", SPY],
-            "--show-code",
-        );
-        let typed = at(
-            &["agent", "exit", "--agent", AGENT, "--instrument", SPY],
-            "--code",
-        );
+        let shown = at(&["agent", "exit", AGENT, SPY], "--show-code");
+        let typed = at(&["agent", "exit", AGENT, SPY], "--code");
         let code = exit_code(AGENT, SPY, EXIT_BID, EXIT_CONTROL_HEAD);
         assert_eq!(all[shown].expect, format!("code {code}"));
         assert!(
