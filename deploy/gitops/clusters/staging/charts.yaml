@@ -1,6 +1,6 @@
 # The repository's own charts as staging runs them: OCI artifacts that release.yml's publish-index
-# job pushed from `main` (`cargo xtask release publish-charts`; these from 2fc268f6, release run
-# 39173190442), pinned by digest, and used only once Flux has verified the digest's keyless
+# job pushed from `main` (`cargo xtask release publish-charts`; these from a58f954d, release run
+# 39254559497, whose images run 39262450314 signed), pinned by digest, and used only once Flux has verified the digest's keyless
 # signature from that workflow on `main` (DEC-2015 item 3). Promotion rewrites the digests here and
 # in images.yaml together (DEC-2016).
 ---
@@ -13,7 +13,7 @@ spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-backup-plugin-tls
   ref:
-    digest: sha256:8aaafe721058ebc1501843dae331c98bc8ed9aaa8b111ca54c7776f570e08e40
+    digest: sha256:5578601d4ff96ead5c5ec1d5a711cd8f26b3092670a6238d4bd4788f6735a10e
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
@@ -32,7 +32,7 @@ spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-journal-db
   ref:
-    digest: sha256:439f2dcabd530866d9e21dc5a2e6345a4d840ab91e48502c8a9d41ce65699cee
+    digest: sha256:1e9f66340d2395abd3fa698f95a8a0cdd6326c0f1516d944a67bb0f8479e718c
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
@@ -51,7 +51,26 @@ spec:
   interval: 1h
   url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-workspace
   ref:
-    digest: sha256:5b377bc40b420cb2167aeebc434d3d7fe549c7937e16a6948a6dbdca070d457a
+    digest: sha256:cde06627078ad6eae7c080152af3cff97b54f28412b428bb99b54b49df8d4bdf
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  verify:
+    provider: cosign
+    matchOIDCIdentity:
+      - issuer: ^https://token\.actions\.githubusercontent\.com$
+        subject: ^https://github\.com/kunwarshivam/mandate/\.github/workflows/release\.yml@refs/heads/main$
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: mandate-vault-server
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-vault-server
+  ref:
+    digest: sha256:113c656ce66c1bf8d886d6c2967b8312db29685802f64cb724686b4f09c5146c
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy

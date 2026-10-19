@@ -9,7 +9,9 @@
 - **Tests:** `deploy/tests/test_cell.py` (each chart and Compose invariant, each shown failing on a
   seeded bug), `deploy/tests/test_artifacts.py` (the shared artifact store's mode in each pod); the
   drills `boot`, `journal`, `egress` and `compose`, each also run with its bug planted, and
-  `kill-switch` and `admission` (DEC-2045) in `cargo xtask ci cell-kill-switch` (DEC-2602); `restart` runs in
+  `kill-switch` and `admission` (DEC-2045) in `cargo xtask ci cell-kill-switch` (DEC-2602), and
+  `executor` (`xtask/src/cell/executor.rs`, DEC-2035) in `cargo xtask ci cell-executor` (DEC-2615),
+  and `vault` in `cargo xtask ci cell-vault` (DEC-2616); `restart` runs in
   `cargo xtask ci cell-failover` (E21-41)
   (`cargo xtask cell drill --seeded`).
 - **Run:** `cargo xtask ci cell` (needs docker, k3d, helm and kubeconform; `deploy/cell/README.md`);

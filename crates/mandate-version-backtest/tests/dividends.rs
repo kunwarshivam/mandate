@@ -88,7 +88,6 @@ fn equity_on(series: &[mandate_backtest::Observation], date: Date) -> mandate_nu
 /// the close before. The control without the action shows the fall the receivable offsets: its
 /// version equity at the ex-date's close is lower by Q × 0.25, Q the shares the run filled.
 #[test]
-#[ignore = "pending E4-4"]
 fn both_equities_are_flat_across_an_ex_date_and_a_pay_date() {
     let days = trading_days(DAYS);
     let run = run_dividend(EX, days[PAY], 25);
@@ -139,7 +138,6 @@ fn both_equities_are_flat_across_an_ex_date_and_a_pay_date() {
 /// A dividend paid after the last bar stays in equity as a receivable: the version's last
 /// equity equals its equity at the close before the ex-date.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_dividend_paid_after_the_last_bar_stays_in_equity() {
     let days = trading_days(DAYS);
     let after = (0..10).fold(days[DAYS - 1], |date, _| date.next().unwrap());
@@ -154,7 +152,6 @@ fn a_dividend_paid_after_the_last_bar_stays_in_equity() {
 /// the run holds is 60 USD, the tight ladder's 0.6% flatten rung on its own, and the run latches
 /// nothing and ends no more restricted than a flat walk.
 #[test]
-#[ignore = "pending E4-4"]
 fn the_risk_state_reads_no_drawdown_from_a_dividend() {
     let days = trading_days(DAYS);
     let control = run_with(
@@ -210,7 +207,6 @@ fn ex_date_row(
 /// prices it, and the gate's prior close agrees, where the cum-dividend close of 100 would set a
 /// limit 5 above the market.
 #[test]
-#[ignore = "pending E4-4"]
 fn an_opening_on_the_ex_date_reads_the_ex_dividend_close() {
     let days = trading_days(DAYS);
     let outputs = daily_outputs(&days[EX..], "0.5");
@@ -229,7 +225,6 @@ fn an_opening_on_the_ex_date_reads_the_ex_dividend_close() {
 /// A dividend whose ex-date is the first bar's trade date was taken before the run, which holds
 /// nothing then: the run completes as it would without it.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_dividend_on_the_first_bars_date_changes_nothing() {
     let days = trading_days(DAYS);
     let outputs = daily_outputs(&days, "0.5");
@@ -247,4 +242,22 @@ fn a_dividend_on_the_first_bars_date_changes_nothing() {
         .unwrap_or_else(|e| panic!("the control completes: {}", e.code()));
     assert_eq!(with.report.strategy_equity, without.report.strategy_equity);
     assert_eq!(with.orders.len(), without.orders.len());
+}
+
+/// A dividend finer than the tick is rounded down onto it (DEC-2253 item 2): 100 less 0.333 is
+/// 99.667, so the ex-date's opening quotes 99.66, as a run whose bars were at 99.66 all along does,
+/// and not 99.67, which would lift a buy's limit above the market's.
+#[test]
+fn a_sub_tick_dividend_lowers_the_close_onto_the_tick_below() {
+    let days = trading_days(DAYS);
+    let outputs = daily_outputs(&days[EX..], "0.5");
+    let action = RecordedAction::CashDividend {
+        ex_date: days[EX],
+        pay_date: days[PAY],
+        per_share: price("0.333"),
+    };
+    let with = ex_date_row(&ex_bars(EX, 34, 1_000_000), &outputs, &[action]);
+    let control = ex_date_row(&ex_bars(0, 34, 1_000_000), &outputs, &[]);
+    assert_eq!(with.outcome, DecisionOutcome::Submitted, "{with:?}");
+    assert_eq!((with.qty, with.limit), (control.qty, control.limit));
 }

@@ -1,5 +1,10 @@
-//! `mandate agent status`, `resume`, `stop` and `exit` (E8-3's `clap` follow-up, DEC-279 item 10;
-//! DEC-2507): [`crate::agent`]'s owner commands over P0's `--journal`, run as D1b's owner.
+//! `mandate agent status`, `resume`, `stop`, `exit`, `acknowledge` and `request-ack` (E8-3's `clap`
+//! follow-up, DEC-279 item 10; DEC-2507, DEC-2512): [`crate::agent`]'s owner commands over P0's
+//! `--journal`, run as D1b's owner.
+//!
+//! `acknowledge` and `request-ack` take a code as `resume` does: without `--code` they print it and
+//! commit nothing. An acknowledgment naming `--request` is refused, committing nothing, under
+//! journal spec §9.28's rules 239 to 241.
 //!
 //! `resume` and `stop` without `--code` print the code [`crate::agent::code`] gives and commit
 //! nothing; with it they commit one `OwnerCommandIssued`, and a wrong code is refused with nothing
@@ -11,13 +16,15 @@
 use std::io::Write;
 
 use clap::Args;
+use mandate_journal::ArtifactSource;
 use mandate_num::{Price, Qty};
 
 use crate::agent::{self, Command, Confirmed, RELEASE_WARNING, Restriction, Status};
 use crate::control::{ControlError, ControlJournal, Ids, Now, Owner, Submitted};
 use crate::inbox::InstantIds;
 use crate::postgres::{JournalArgs, PgControlJournal};
-use crate::register::OwnerArgs;
+use crate::register::{OwnerArgs, open};
+use crate::retire;
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
@@ -54,6 +61,40 @@ pub struct StopArgs {
     #[arg(long)]
     pub release: bool,
     /// The code `agent stop` showed; without it, nothing is committed.
+    #[arg(long, value_name = "CODE")]
+    pub code: Option<String>,
+    #[command(flatten)]
+    pub owner: OwnerArgs,
+    #[command(flatten)]
+    pub target: JournalArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct AcknowledgeArgs {
+    /// The agent's id.
+    pub agent: String,
+    /// The `event_id` of the account stream's `RiskLimitTriggered` to acknowledge.
+    pub event: String,
+    /// The `event_id` of the `OwnerAcknowledgmentRequested` another user recorded, where an
+    /// independent user must acknowledge.
+    #[arg(long, value_name = "ID")]
+    pub request: Option<String>,
+    /// The code `agent acknowledge` showed; without it, nothing is committed.
+    #[arg(long, value_name = "CODE")]
+    pub code: Option<String>,
+    #[command(flatten)]
+    pub owner: OwnerArgs,
+    #[command(flatten)]
+    pub target: JournalArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct RequestAckArgs {
+    /// The agent's id.
+    pub agent: String,
+    /// The `event_id` of the account stream's `RiskLimitTriggered` to ask another user to lift.
+    pub event: String,
+    /// The code `agent request-ack` showed; without it, nothing is committed.
     #[arg(long, value_name = "CODE")]
     pub code: Option<String>,
     #[command(flatten)]
@@ -130,6 +171,39 @@ impl ResumeArgs {
     }
 }
 
+impl AcknowledgeArgs {
+    #[must_use]
+    pub fn typed(&self) -> Typed<'_> {
+        self.code
+            .as_deref()
+            .map_or(Typed::Show, |c| Typed::Commit(Some(c)))
+    }
+
+    #[must_use]
+    pub fn command(&self) -> Command {
+        Command::Acknowledge {
+            event: self.event.clone(),
+            request: self.request.clone(),
+        }
+    }
+}
+
+impl RequestAckArgs {
+    #[must_use]
+    pub fn typed(&self) -> Typed<'_> {
+        self.code
+            .as_deref()
+            .map_or(Typed::Show, |c| Typed::Commit(Some(c)))
+    }
+
+    #[must_use]
+    pub fn command(&self) -> Command {
+        Command::RequestAcknowledgment {
+            event: self.event.clone(),
+        }
+    }
+}
+
 impl StopArgs {
     #[must_use]
     pub fn typed(&self) -> Typed<'_> {
@@ -174,8 +248,13 @@ impl ExitArgs {
 /// committing nothing, for an exit whose confirmed bid, bid size or floor is not a positive
 /// fixed-point decimal or whose floor is above its bid. A well-formed confirmation is normalized to
 /// its canonical text before the code binds it (DEC-2507 item 1).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the journal, store, ids and owner every gesture takes, and the command's four inputs"
+)]
 pub fn answer(
     journal: &mut dyn ControlJournal,
+    store: &dyn ArtifactSource,
     ids: &mut dyn Ids,
     owner: &Owner,
     agent: &str,
@@ -207,8 +286,12 @@ pub fn answer(
         }
         return Ok(lines);
     };
-    let Submitted { event_id, seq } =
-        agent::command(journal, ids, owner, agent, command, typed, now)?;
+    let Submitted { event_id, seq } = match command {
+        Command::Stop { release } => {
+            retire::stop(journal, store, ids, owner, agent, *release, typed, now)?
+        }
+        other => agent::command(journal, ids, owner, agent, other, typed, now)?,
+    };
     let named = match command {
         Command::Exit { instrument, .. } => format!("owner_exit {agent} {instrument}"),
         Command::Resume => format!("resume {agent}"),
@@ -304,9 +387,18 @@ fn run(
     report: &mut impl Write,
 ) -> anyhow::Result<()> {
     let owner = flags.owner()?;
-    let mut journal = PgControlJournal::open(target)?;
+    let (mut journal, store) = open(target)?;
     let mut ids = InstantIds::new(&owner, now);
-    let lines = answer(&mut journal, &mut ids, &owner, agent, command, typed, now)?;
+    let lines = answer(
+        &mut journal,
+        &store,
+        &mut ids,
+        &owner,
+        agent,
+        command,
+        typed,
+        now,
+    )?;
     for line in lines {
         writeln!(report, "{line}")?;
     }
@@ -349,6 +441,48 @@ pub fn run_resume(args: &ResumeArgs, now: Now, report: &mut impl Write) -> anyho
 /// # Errors
 /// As [`run_resume`].
 pub fn run_stop(args: &StopArgs, now: Now, report: &mut impl Write) -> anyhow::Result<()> {
+    let (command, typed) = (args.command(), args.typed());
+    run(
+        &args.owner,
+        &args.target,
+        &args.agent,
+        &command,
+        typed,
+        now,
+        report,
+    )
+}
+
+/// Runs `agent acknowledge` and prints [`answer`]'s lines.
+///
+/// # Errors
+/// As [`run_resume`], and §9.28's refusals of an acknowledgment naming a request.
+pub fn run_acknowledge(
+    args: &AcknowledgeArgs,
+    now: Now,
+    report: &mut impl Write,
+) -> anyhow::Result<()> {
+    let (command, typed) = (args.command(), args.typed());
+    run(
+        &args.owner,
+        &args.target,
+        &args.agent,
+        &command,
+        typed,
+        now,
+        report,
+    )
+}
+
+/// Runs `agent request-ack` and prints [`answer`]'s lines.
+///
+/// # Errors
+/// As [`run_resume`].
+pub fn run_request_ack(
+    args: &RequestAckArgs,
+    now: Now,
+    report: &mut impl Write,
+) -> anyhow::Result<()> {
     let (command, typed) = (args.command(), args.typed());
     run(
         &args.owner,
