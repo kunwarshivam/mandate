@@ -58,21 +58,6 @@ pub enum UnreadableCause {
     RefusedToDecide,
 }
 
-impl UnreadableCause {
-    /// The stable spelling of the cause, for logs and the operator's view.
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Undecodable => "undecodable",
-            Self::UnknownSchemaVersion => "unknown_schema_version",
-            Self::SeqGap => "seq_gap",
-            Self::UnfoldedEventType => "unfolded_event_type",
-            Self::NotReproduced => "not_reproduced",
-            Self::AppendFailed => "append_failed",
-            Self::RefusedToDecide => "refused_to_decide",
-        }
-    }
-}
-
 /// What the gate reads of the account's risk state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RiskView {

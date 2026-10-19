@@ -213,6 +213,47 @@ fn a_failed_append_makes_the_view_unreadable_for_good() {
     assert_eq!(unreadable(fold.view()).0, UnreadableCause::AppendFailed);
 }
 
+/// Only `paused` or `stopped` holds an exit or a protective order, and no mode holds a kill switch
+/// (`AGENTS.md` rule 13), readable or not.
+#[test]
+fn only_paused_or_stopped_holds_an_exit_and_nothing_holds_a_kill_switch() {
+    let mandate = mandate();
+    let opened = open(&mandate, &Wall).view().clone();
+    for path in [
+        OrderPath::OwnerExit,
+        OrderPath::DiscretionaryExit,
+        OrderPath::RiskExit,
+        OrderPath::ProtectiveOrder,
+        OrderPath::KillSwitch,
+    ] {
+        assert!(
+            !opened.holds(path),
+            "a readable `normal` view holds no {path:?}"
+        );
+    }
+    for mode in [AgentMode::Paused, AgentMode::Stopped] {
+        let view = RiskView::Unreadable {
+            cause: UnreadableCause::SeqGap,
+            head: 1,
+            mode,
+        };
+        assert_eq!(view.mode(), mode);
+        for path in [
+            OrderPath::Opening,
+            OrderPath::OwnerExit,
+            OrderPath::DiscretionaryExit,
+            OrderPath::RiskExit,
+            OrderPath::ProtectiveOrder,
+        ] {
+            assert!(view.holds(path), "{mode:?} holds {path:?}");
+        }
+        assert!(
+            !view.holds(OrderPath::KillSwitch),
+            "{mode:?} never holds a kill switch"
+        );
+    }
+}
+
 #[test]
 #[ignore = "pending E6-15"]
 fn a_row_the_fold_does_not_read_advances_its_head() {
