@@ -389,7 +389,7 @@
         "retries": 6,
         "test": [
           "CMD",
-          "/usr/local/bin/mandate-daemon",
+          "/mandate-daemon",
           "probe",
           "readyz",
           "--probe",
