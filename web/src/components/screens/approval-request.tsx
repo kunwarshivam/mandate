@@ -223,8 +223,6 @@ function Request({ approvalId }: { approvalId: string }) {
   if (!approval || !snap) return <NotFound />;
   const a = snap.approval;
   const b = a.bound;
-  const capped = a.risk_impact.filter((f) => f.cap);
-  const uncapped = a.risk_impact.filter((f) => !f.cap);
   const answer = (choice: "approve" | "skip") => {
     setAnswered(true);
     respond(approval.approval_id, choice, { screen: "D6", environment: snap.environment, shown: requestLines(snap, modelOutputExpanded), modelOutputExpanded });
@@ -236,85 +234,71 @@ function Request({ approvalId }: { approvalId: string }) {
    * thing on the page the article gives that space back and they stay on the tab bar to the very end.
    */
   return (
-    <article className={cn("mx-auto grid w-full max-w-2xl grid-cols-1 gap-6", (open || response) && "max-lg:-mb-[calc(4.5rem-1px)]")} aria-labelledby="request-title">
+    <article className={cn("mx-auto grid w-full max-w-3xl grid-cols-1 gap-4", (open || response) && "max-lg:-mb-[calc(4.5rem-1px)]")} aria-labelledby="request-title">
       <Link href="/approvals" className={BACK}>
         <ArrowLeft className="size-6" aria-hidden />
         Approvals
       </Link>
 
-      <div data-slot="record" className="grid grid-cols-1 gap-(--section-gap)">
-        <header className="reveal grid gap-4">
+      <div data-slot="record" className="grid grid-cols-1 gap-4">
+        <header className="reveal grid gap-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h1 id="request-title" className="text-sm font-medium text-muted-foreground">
               Approval request
             </h1>
             <EnvironmentBadge environment={snap.environment} />
           </div>
-          <div className="grid gap-2">
-            <p className="text-muted-foreground">{snap.proposer}</p>
-            <p className="grid gap-1">
-              <span className="text-hero">
-                Buy <span className="tabular">{quantity(b.qty)}</span> {b.symbol}
-              </span>{" "}
-              <span className="text-h1 font-medium">
-                at a limit of <span className="tabular">{price(b.limit)}</span>
-              </span>
+          <div className="grid gap-1">
+            <p className="text-sm text-muted-foreground">{snap.proposer}</p>
+            <p className="text-h1 text-pretty">
+              Buy <span className="tabular">{quantity(b.qty)}</span> {b.symbol} at a limit of <span className="tabular">{price(b.limit)}</span>
             </p>
           </div>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 pt-2 sm:grid-cols-3">
-            <div className="grid gap-1">
-              <dt className="text-sm text-muted-foreground">Order value</dt>
-              <dd className="font-mono text-figure tabular">{orderValueOf(a)}</dd>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
+            <div className="grid gap-0.5">
+              <dt className="text-caption text-muted-foreground">Order value</dt>
+              <dd className="font-mono text-sm font-medium tabular">{orderValueOf(a)}</dd>
             </div>
-            <div className="grid gap-1">
-              <dt className="text-sm text-muted-foreground">Purpose</dt>
-              <dd className="text-figure">{PURPOSE_LABEL[b.purpose]}</dd>
+            <div className="grid gap-0.5">
+              <dt className="text-caption text-muted-foreground">Purpose</dt>
+              <dd className="text-sm font-medium">{PURPOSE_LABEL[b.purpose]}</dd>
             </div>
-            <div className="col-span-2 grid gap-1 sm:col-span-1">
-              <dt className="text-sm text-muted-foreground">Mandate version</dt>
-              <dd className="font-mono text-sm leading-7">{b.mandate_version.slice(7, 19)}</dd>
+            <div className="col-span-2 grid gap-0.5 sm:col-span-1">
+              <dt className="text-caption text-muted-foreground">Mandate version</dt>
+              <dd className="font-mono text-sm leading-5">{b.mandate_version.slice(7, 19)}</dd>
             </div>
           </dl>
         </header>
 
-        <section aria-labelledby="why-title" className="reveal grid gap-4" style={{ "--i": 1 } as CSSProperties}>
-          <div className="grid gap-1.5">
-            <h2 id="why-title" className="text-h2">
+        <section aria-labelledby="why-title" className="reveal grid gap-1.5" style={{ "--i": 1 } as CSSProperties}>
+          <div className="grid gap-0.5">
+            <h2 id="why-title" className="text-sm font-medium">
               Why you are asked
             </h2>
-            <p className="text-lg text-pretty">{a.trigger}</p>
+            <p className="text-sm text-pretty">{a.trigger}</p>
           </div>
-          <p className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-border/70 pt-3">
-            <span className="text-sm text-muted-foreground">Combined model score, not a probability of profit</span>
-            <span className="font-mono text-figure tabular">{b.combined_score}</span>
+          <p className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-border/70 pt-2">
+            <span className="text-caption text-muted-foreground">Combined model score, not a probability of profit</span>
+            <span className="font-mono text-sm font-medium tabular">{b.combined_score}</span>
           </p>
         </section>
 
         <section
           aria-labelledby="risk-title"
-          className="reveal grid gap-5 rounded-2xl bg-mandate px-5 py-5 text-mandate-foreground"
+          className="reveal grid gap-2 rounded-2xl bg-mandate px-4 py-2 text-mandate-foreground"
           style={{ "--i": 2 } as CSSProperties}
         >
-          <div className="grid gap-1">
-            <h2 id="risk-title" className="text-h2 text-mandate-strong">
+          <div className="grid gap-0.5">
+            <h2 id="risk-title" className="text-sm font-medium text-mandate-strong">
               Risk impact in dollars
             </h2>
             <p className="text-sm text-mandate-muted">Measured against your mandate, as if this order fills.</p>
           </div>
-          {capped.length > 0 ? (
-            <div className="grid gap-5">
-              {capped.map((f) => (
-                <RiskFigureRow key={f.field} figure={f} />
-              ))}
-            </div>
-          ) : null}
-          {uncapped.length > 0 ? (
-            <dl className="grid gap-2.5 border-t border-mandate-strong/15 pt-4">
-              {uncapped.map((f) => (
-                <RiskFigureRow key={f.field} figure={f} />
-              ))}
-            </dl>
-          ) : null}
+          <div className="grid gap-3 lg:grid-cols-2">
+            {a.risk_impact.map((f) => (
+              <RiskFigureRow key={f.field} figure={f} />
+            ))}
+          </div>
         </section>
 
         <ApprovalChart approval={a} className="reveal" />
@@ -365,7 +349,7 @@ function Request({ approvalId }: { approvalId: string }) {
             <AfterResponse approval={approval} response={response} focusOnShow={answered} />
           ) : (
             <div className="grid gap-1">
-              <p className="text-h3">If you do nothing, this action is skipped.</p>
+              <p className="text-sm font-medium">If you do nothing, this action is skipped.</p>
               <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
             </div>
           )}

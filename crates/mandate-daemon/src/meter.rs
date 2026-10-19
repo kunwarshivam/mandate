@@ -8,6 +8,7 @@
 //! The gateway then refuses every call `meter_unavailable`, and the pass gets no context, until the
 //! next risk day (E21-61 journals the meter stream instead).
 
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -25,7 +26,7 @@ use crate::source::{Rows, SourceFor};
 /// The meter store a cell's research worker and source share.
 #[derive(Clone)]
 pub struct CellMeter {
-    store: SharedMeter,
+    store: Rc<RefCell<Box<dyn MeterStore>>>,
     rows: Rc<dyn Rows>,
     who: SourceFor,
     clock: Rc<dyn Fn() -> UtcNanos>,
@@ -40,8 +41,20 @@ impl CellMeter {
         who: SourceFor,
         clock: Rc<dyn Fn() -> UtcNanos>,
     ) -> Self {
+        Self::over(Box::new(store), rows, who, clock)
+    }
+
+    /// As [`CellMeter::new`], over any meter store: in a process given a journal, the workspace's
+    /// journaled `meter:{workspace_id}` stream (DEC-2259 item 1), so a restart folds every
+    /// reservation the gateway made before it and the hold, a cross-check now, holds nothing.
+    pub fn over(
+        store: Box<dyn MeterStore>,
+        rows: Rc<dyn Rows>,
+        who: SourceFor,
+        clock: Rc<dyn Fn() -> UtcNanos>,
+    ) -> Self {
         Self {
-            store,
+            store: Rc::new(RefCell::new(store)),
             rows,
             who,
             clock,
@@ -61,7 +74,7 @@ impl CellMeter {
     fn unheld_call(&self, at: UtcNanos) -> Option<bool> {
         let stream = StreamId::parse(&format!("agent:{}:{}", self.who.workspace, self.who.agent))?;
         let rows = self.rows.rows(&stream)?;
-        let records = self.store.read().ok()?;
+        let records = self.store.borrow().read().ok()?;
         let held: BTreeSet<&str> = records
             .iter()
             .filter_map(|record| match record {
@@ -98,7 +111,7 @@ impl CellMeter {
             return None;
         }
         let day = risk_day(at).ok()?.day;
-        let records = self.store.read().ok()?;
+        let records = self.store.borrow().read().ok()?;
         let spent = spend(
             &records,
             &Scope::Agent(self.who.agent.clone()),
@@ -114,14 +127,14 @@ impl MeterStore for CellMeter {
         if self.held((self.clock)()) {
             return Err(StoreError::Unavailable);
         }
-        self.store.read()
+        self.store.borrow().read()
     }
 
     fn append(&mut self, record: MeterRecord) -> Result<(), StoreError> {
         if self.held((self.clock)()) {
             return Err(StoreError::Unavailable);
         }
-        self.store.append(record)
+        self.store.borrow_mut().append(record)
     }
 }
 
