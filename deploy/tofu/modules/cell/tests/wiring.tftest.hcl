@@ -5,7 +5,7 @@
 mock_provider "digitalocean" {
   mock_data "digitalocean_kubernetes_versions" {
     defaults = {
-      valid_versions = ["1.35.1-do.0"]
+      valid_versions = ["1.35.9-do.1"]
     }
   }
 
@@ -19,7 +19,7 @@ mock_provider "digitalocean" {
 variables {
   environment                = "staging"
   vpc_ip_range               = "10.110.0.0/20"
-  kubernetes_version         = "1.35.1-do.0"
+  kubernetes_version         = "1.35.9-do.1"
   kube_api_allowed_addresses = ["203.0.113.7/32"]
   spaces_monthly_usd         = 5
   block_storage_gb           = 40
