@@ -23,10 +23,10 @@ use mandate_gateway::registry::{
 use mandate_gateway::{Gateway, RateCaps, Settings};
 use mandate_num::{Price, Qty};
 use mandate_research_run::{
-    Allowlist, Bar, BarReader, Filing, FilingReader, GatewayParts, InstrumentFact,
-    InstrumentReader, ItemId, ModelPin, NewsItem, NewsReader, NoHostedTransport, OutputBounds,
-    ReadError, Readers, ResearchEntry, ResearchTransport, RetrievalPlan, Scope, Selection,
-    SourceId, Symbol, TextQuery, recorded_reply, research_gateway,
+    Allowlist, Bar, BarReader, Filing, FilingEntry, FilingReader, GatewayParts, InstrumentFact,
+    InstrumentReader, ItemId, ModelPin, NewsItem, NewsReader, NewsText, NoHostedTransport,
+    OutputBounds, ReadError, Readers, ResearchEntry, ResearchTransport, RetrievalPlan, Scope,
+    Selection, SourceId, Symbol, TextQuery, recorded_reply, research_gateway,
 };
 use mandate_time::UtcNanos;
 
@@ -154,6 +154,10 @@ pub struct Fixture {
     pub calls: Cell<u32>,
     pub queries: std::cell::RefCell<Vec<TextQuery>>,
     pub terms: std::cell::RefCell<Vec<Vec<String>>>,
+    pub texts: Vec<NewsText>,
+    pub text_asks: std::cell::RefCell<Vec<(ItemId, UtcNanos, u32)>>,
+    pub filing_entries: Vec<FilingEntry>,
+    pub forms: std::cell::RefCell<Vec<Vec<String>>>,
 }
 
 impl Fixture {
@@ -202,12 +206,37 @@ impl NewsReader for Fixture {
         self.terms.borrow_mut().push(terms.to_vec());
         self.news(query)
     }
+
+    fn news_text(
+        &self,
+        item: &ItemId,
+        cut_off: UtcNanos,
+        allowlist_version: u32,
+    ) -> Result<NewsText, ReadError> {
+        self.text_asks
+            .borrow_mut()
+            .push((item.clone(), cut_off, allowlist_version));
+        let answered = self.answer(&self.texts)?;
+        answered.into_iter().next().ok_or(ReadError::Unavailable)
+    }
 }
 
 impl FilingReader for Fixture {
     fn filings(&self, query: &TextQuery) -> Result<Vec<Filing>, ReadError> {
         self.queries.borrow_mut().push(query.clone());
         self.answer(&self.filings)
+    }
+
+    fn search(
+        &self,
+        query: &TextQuery,
+        forms: &[String],
+        terms: &[String],
+    ) -> Result<Vec<FilingEntry>, ReadError> {
+        self.queries.borrow_mut().push(query.clone());
+        self.forms.borrow_mut().push(forms.to_vec());
+        self.terms.borrow_mut().push(terms.to_vec());
+        self.answer(&self.filing_entries)
     }
 }
 

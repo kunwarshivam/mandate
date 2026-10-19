@@ -109,6 +109,8 @@ impl Fold {
         for (index, rung) in &mut self.scale {
             if rung.active_s.is_none() {
                 rung.active_s = Some(0);
+                self.breach_times
+                    .insert(journal.len(), (LimitKey::DrawdownRung(*index), 0));
                 journal.push(RiskEvent::RiskLimitTriggered {
                     limit: LimitKey::DrawdownRung(*index),
                     action: LadderAction::ScaleSizes,

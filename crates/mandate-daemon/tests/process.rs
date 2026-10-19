@@ -163,6 +163,42 @@ fn a_manager_launch_refuses_until_its_deployment_is_resolved() {
     assert!(!path.exists(), "a refused process serves no probe");
 }
 
+/// A pod the deployment manager starts never runs on the in-memory journal: `--fixture` there is
+/// refused before anything starts, even with the connection and owner named by flags, so the pod
+/// never forgets its journal at exit (`AGENTS.md` rule 3; the executor's guard, #1754).
+#[test]
+fn the_fixture_journal_is_refused_on_a_managers_pod() {
+    let path = socket("manager-fixture");
+    let mut pod = Guard(
+        Command::new(BIN)
+            .args([
+                "run",
+                "--fixture",
+                "--connection",
+                "conn1",
+                "--owner",
+                "user-owner",
+            ])
+            .args(["--probe"])
+            .arg(&path)
+            .env_remove("MANDATE_JOURNAL_DSN")
+            .env("MANDATE_WORKSPACE", "ws1")
+            .env("MANDATE_PROCESS", "runtime")
+            .env("MANDATE_SUBJECT", "agent-a")
+            .env("MANDATE_GENERATION", "1")
+            .env_remove("MANDATE_ARTIFACTS")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let (status, stderr) = pod.exited();
+    assert_eq!(status.code(), Some(2));
+    assert_eq!(stderr, "fixture_under_manager\n");
+    assert!(!path.exists(), "a refused pod serves no probe");
+}
+
 /// Research asked for and refused stops the start before the process is ready, so asking for
 /// research and getting none is never silent, and the deny-all runtime never starts in its place
 /// (DEC-2215 item 2): on a deployment handed by flags, with or without `--fixture`, and on one to
