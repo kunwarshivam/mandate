@@ -116,7 +116,8 @@ cargo xtask cell down
 cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills, demo --no-web
 cargo xtask ci cell-journal       # and beside it: up, then standby-down and archive, plain and seeded
 cargo xtask ci cell-failover      # and beside it: up, then restart (a failover with the standby), plain and seeded
-cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch, admission, executor and vault, plain and seeded (DEC-2602, DEC-2022, DEC-2035)
+cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch and admission, plain and seeded (DEC-2602)
+cargo xtask ci cell-executor      # and beside it: up, then executor and vault, plain and seeded (DEC-2615, DEC-2022, DEC-2035)
 ```
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
