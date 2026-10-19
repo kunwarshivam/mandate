@@ -155,6 +155,46 @@ fn a_revocation_stops_nothing_but_a_deployment_after_it_starts_nothing() {
     clean(&mut m);
 }
 
+/// DEC-2038: a version-2 record rule 201 refuses, of an agent already running or already stopped,
+/// is no deployment the manager failed to run, so nothing reports it.
+#[test]
+fn a_refused_record_of_an_agent_running_or_stopped_is_not_reported() {
+    let journal = Journal::new();
+    let mut m = manager(
+        &journal,
+        accounts(&[
+            ("agent_a", "01J8Z2ACCT00000000000000A1"),
+            ("agent_b", "01J8Z2ACCT00000000000000A1"),
+        ]),
+    );
+    deploy(&journal, &mut m, "agent_a", 1);
+    deploy(&journal, &mut m, "agent_b", 2);
+    journal.services(&stopped("agent_b", "01J8Z2ACCT00000000000000A1"), at(3));
+    tick(&mut m, 3);
+    journal.services(&revoked("conn_01J8Z2ACCT00000000000000A1"), at(4));
+    journal.services(
+        &redeployed("agent_a", "01J8Z2ACCT00000000000000A1", 2),
+        at(4),
+    );
+    journal.services(
+        &redeployed("agent_b", "01J8Z2ACCT00000000000000A1", 2),
+        at(4),
+    );
+    for s in 4..7 {
+        tick(&mut m, s);
+    }
+    assert!(m.alerts().0.is_empty(), "{:?}", m.alerts().0);
+    assert_eq!(
+        starts(&mut m, &rt("agent_a")),
+        vec![1],
+        "agent_a keeps running"
+    );
+    assert!(
+        starts(&mut m, &rt("agent_b")).len() == 1,
+        "agent_b is not started again"
+    );
+}
+
 /// DEC-2038: a deployment rule 201 refuses is reported once per manager process, a later
 /// establishment revives it no more than it starts it, and a stop leaves nothing to report.
 #[test]
