@@ -2095,8 +2095,9 @@ mod tests {
     }
 
     /// The second agent in the run's workspace has an envelope of its own, deployed only after
-    /// step 5's backtest is recorded (the research agent deploys in its own workspace, step 3): `agent deploy` and `backtest record` each take only the workspace's latest
-    /// confirmed version, so its confirmation comes after the record and its deployment after its
+    /// step 5's backtest is recorded (the research agent deploys in its own workspace, in step 3).
+    /// `agent deploy` and `backtest record` each take only the workspace's latest confirmed
+    /// version, so its confirmation comes after the record and its deployment after its
     /// confirmation. Its snapshot is registered before its version is created, and web/ presses
     /// that agent's kill switch, never the one the CLI stops (DEC-2036).
     #[test]
