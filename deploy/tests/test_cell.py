@@ -585,31 +585,6 @@ def test_the_connect_check_runs_the_executor_on_its_journal_role_alone():
     assert egress_exact(docs) == []
 
 
-def test_a_runs_files_are_written_to_its_work_directory_first():
-    """`run.files` reach the run's `/work` before it starts, each named file holding exactly its
-    content, passed in the environment rather than a shell word (DEC-2035)."""
-    docs = render_all("--set-json", 'run.files={"mandate.json":"{\\"a\\": \\"$(x) \'q\'\\"}"}')
-    job = next(w for w in workloads(docs) if w["metadata"]["labels"].get("mandate.dev/process") == "control")
-    files = next(c for c in pod_spec(job)["initContainers"] if c["name"] == "files")
-    assert {"name": "work", "mountPath": "/work"} in files["volumeMounts"]
-    assert [e["value"] for e in files["env"]] == ['{"a": "$(x) \'q\'"}']
-    assert "/work/mandate.json" in " ".join(files["command"])
-    assert "$(x)" not in " ".join(files["command"])
-    assert (
-        helm(
-            CHART,
-            "-f",
-            str(CELL / "values" / "k3d.yaml"),
-            *every_image(),
-            "--set",
-            "run.id=t1",
-            "--set-json",
-            'run.files={"../x":"y"}',
-        ).returncode
-        != 0
-    )
-
-
 def test_a_process_renders_only_with_its_image():
     docs = render("-f", str(CELL / "values" / "k3d.yaml"))
     assert {w["metadata"]["name"] for w in workloads(docs)} == {"migrate"}
@@ -618,9 +593,9 @@ def test_a_process_renders_only_with_its_image():
 
 def test_each_service_starts_and_is_probed_as_its_process_list_says():
     """A service with `args` starts with them and is asked `readyz` and `livez` with its `probe`, every
-        placeholder filled from the values (DEC-1013, DEC-994 item 5). Without the deployment manager, so
-    the processes it starts render as Deployments of their own; its pod templates are
-    `test_deploy_manager_contained`'s."""
+    placeholder filled from the values (DEC-1013, DEC-994 item 5). Without the deployment manager, so
+the processes it starts render as Deployments of their own; its pod templates are
+`test_deploy_manager_contained`'s."""
     docs = render_all("--set", f"images.{MANAGER}=")
     for p in PROCESSES:
         if p["kind"] != "service" or not (p.get("args") or p.get("probe")):
@@ -900,11 +875,7 @@ def test_deploy_manager_contained():
         probes = [container[k]["exec"]["command"] for k in ("livenessProbe", "readinessProbe")]
         listed = next(p for p in PROCESSES if p["name"] == pod["metadata"]["name"])
         words = listed.get("probe") or [
-            "/usr/local/bin/mandate-daemon",
-            "probe",
-            "{probe}",
-            "--probe",
-            "/tmp/process.sock",
+            "/usr/local/bin/mandate-daemon", "probe", "{probe}", "--probe", "/tmp/process.sock"
         ]
         assert probes == [[x.replace("{probe}", k) for x in words] for k in ("livez", "readyz")], probes
     only_runtime = render_all("--set", "images.executor=")
@@ -1127,9 +1098,7 @@ def attacks(pod: dict) -> list[tuple[str, dict]]:
         ),
         changed(
             "the artifact store read-write",
-            lambda b: spec(b)["volumes"].append(
-                {"name": "w", "persistentVolumeClaim": {"claimName": "artifacts"}}
-            ),
+            lambda b: spec(b)["volumes"].append({"name": "w", "persistentVolumeClaim": {"claimName": "artifacts"}}),
         ),
         changed(
             "another claim",
@@ -1247,8 +1216,6 @@ def test_deploy_manager_admission():
     assert deploy_manager_admission(only_runtime) == []
     policy = next(d for d in only_runtime if d["kind"] == POLICY)
     assert policy_variables(policy)["allowedSecrets"] == ["journal-ca", "journal-role-mandate-runtime"]
-
-
 STUB = "mandate.local/stub-issuer:0123456789ab"
 STUB_BIND = "127.0.0.1:8090"
 

@@ -293,20 +293,6 @@
           "description": "The run process this run runs (DEC-2035); a name that is no run process fails the render",
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]{0,39}$"
-        },
-        "files": {
-          "description": "Files written into the run's /work before it starts (DEC-2035): plain names, never a path",
-          "type": "object",
-          "propertyNames": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$",
-            "not": {
-              "pattern": "\\.\\."
-            }
-          },
-          "additionalProperties": {
-            "type": "string",
-            "maxLength": 65536
-          }
         }
       }
     },
