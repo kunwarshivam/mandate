@@ -54,10 +54,13 @@ enum Retirement {
 /// The owner's Stop of `agent`, with the code `typed`: the `AgentStopped` of an agent no process
 /// ran, or the `OwnerCommandIssued` of any other.
 ///
+/// Nothing in the retirement refuses the Stop (DEC-2039 item 6, `AGENTS.md` rule 13): a claim the
+/// journal refuses or cannot take, a read or append that fails, or a control stream that keeps
+/// moving under the retirement sends it as [`crate::agent::command`] does, as before.
+///
 /// # Errors
-/// [`crate::agent::command`]'s, a wrong or missing code refused as `step_up_missing` with nothing
-/// committed; [`ControlError::Journal`] for a journal or store that fails, or a control stream that
-/// keeps moving under the retirement.
+/// [`crate::agent::command`]'s alone: a wrong or missing code refused as `step_up_missing` with
+/// nothing committed, or a journal that cannot take the `OwnerCommandIssued` either.
 #[allow(
     clippy::too_many_arguments,
     reason = "the journal, store, ids and owner every gesture takes, and the Stop's four inputs"
@@ -77,10 +80,11 @@ pub fn stop(
         .is_some_and(|code| typed == Some(code.as_str()));
     if confirmed {
         for _ in 0..DECISIONS {
-            match retire(journal, store, owner, agent, now)? {
-                Retirement::Retired(submitted) => return Ok(submitted),
-                Retirement::Ran | Retirement::NeverDeployed | Retirement::DocumentUnread => break,
-                Retirement::Moved => {}
+            match retire(journal, store, owner, agent, now) {
+                Ok(Retirement::Retired(submitted)) => return Ok(submitted),
+                Ok(Retirement::Ran | Retirement::NeverDeployed | Retirement::DocumentUnread)
+                | Err(_) => break,
+                Ok(Retirement::Moved) => {}
             }
         }
     }
@@ -105,8 +109,9 @@ fn is_claim(first: &StoredEvent) -> Result<bool, ControlError> {
     Ok(first.event_type == OPENED && kind != Some("agent"))
 }
 
-/// Whether the agent's stream is claimed, by this Stop or an earlier one, or was opened or taken
-/// by a runtime first.
+/// Whether the agent's stream is claimed, by this Stop or an earlier one. `false` when a runtime
+/// opened or took it first, or the journal stored no claim: a conflicting event under the claim's
+/// id, or a claim its checks refuse, is no claim, and the Stop goes by command.
 fn claim(
     journal: &mut dyn ControlJournal,
     owner: &Owner,
@@ -128,12 +133,7 @@ fn claim(
             Some(first) => is_claim(first),
             None => Ok(false),
         },
-        AppendOutcome::IdempotencyConflict { stored_seq } => Err(ControlError::Journal(format!(
-            "another event is stored under the claim's id at seq {stored_seq}"
-        ))),
-        AppendOutcome::Invalid { error, .. } => Err(ControlError::Journal(format!(
-            "the claim was refused: {error:?}"
-        ))),
+        AppendOutcome::IdempotencyConflict { .. } | AppendOutcome::Invalid { .. } => Ok(false),
     }
 }
 
