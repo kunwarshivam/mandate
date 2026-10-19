@@ -19,7 +19,8 @@ use crate::gitops::Environment;
 /// The published binaries the workspace chart runs, each with the chart's `images` key it fills.
 /// A binary not named here (`mandate-agentd`, `mandate-rh-sim`) is not a chart process yet, and
 /// the simulator never is. A lane that publishes a process's binary adds its row here.
-const CHART_IMAGE_FOR_BINARY: [(&str, &str); 1] = [("mandate", "mandate")];
+const CHART_IMAGE_FOR_BINARY: [(&str, &str); 2] =
+    [("mandate", "mandate"), ("mandate-api-server", "api")];
 
 /// The charts `release.yml` publishes (`HOSTED_CHARTS`), by the name `CHARTS` lists. An overlay
 /// pins those it installs; promotion rewrites exactly those.

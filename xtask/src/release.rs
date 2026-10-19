@@ -84,10 +84,13 @@ const TARGET_CC: &str = "gcc";
 
 /// What a release ships: each package and the binary it builds. `mandate-rh-sim` is the
 /// loopback test double the local cell runs beside the executor (DEC-124), never a broker.
-pub(crate) const BINARIES: [(&str, &str); 3] = [
+/// `mandate-api-server` is the workspace API server a hosted cell runs as its chart's `api`
+/// process, so its image must be signed and published like the others (DEC-2026).
+pub(crate) const BINARIES: [(&str, &str); 4] = [
     ("mandate-cli", "mandate"),
     ("mandate-agentd", "mandate-agentd"),
     ("mandate-rh-sim", "mandate-rh-sim"),
+    ("mandate-api-server", "mandate-api-server"),
 ];
 
 /// Where `release build` keeps its own target directory, apart from the workspace's, because its
