@@ -5,6 +5,8 @@ use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
 use mandate_risk::GatePass;
 
+use mandate_num::Price;
+
 use crate::batch::{Batch, config_refs};
 use crate::codec::{order_type_name, purpose_name, side_name, tif_name};
 use crate::error::ExecutorError;
@@ -12,7 +14,7 @@ use crate::gate::{
     PartialGateDecision, Proposal, SESSION_CLOSED, SESSION_UNKNOWN, UNPRICED, binding_checks,
 };
 use crate::ids::{ClientOrderId, IntentId};
-use crate::kill::is_flatten;
+use crate::kill::{confirmed_bid, is_flatten};
 use crate::payload::{int, text};
 use crate::protection::{
     ExitPrice, alone, awaits_cancel, begin_exit, crypto_add, exit_limit, fallback, passive_exit,
@@ -22,8 +24,8 @@ use crate::session::{closed_hold, extended_hours};
 use crate::shape::offers_bracket;
 use crate::state::IntentOutcome;
 use crate::types::{
-    AgentId, BracketLegs, BrokerRequest, EventId, GateVerdict, IntentBody, IntentHandoff,
-    OrderType, ProtectionPrices, Purpose, SubmitOrder, TimeInForce,
+    AgentId, BracketLegs, BrokerRequest, EventId, GateVerdict, HandedConfirmation, IntentBody,
+    IntentHandoff, OrderType, ProtectionPrices, Purpose, SubmitOrder, TimeInForce,
 };
 
 /// `Input::Intent`: deduplicated by the fold lookup, journaled as `IntentReceived`, then gated.
@@ -34,9 +36,6 @@ pub(crate) fn received(
 ) -> Result<(), ExecutorError> {
     if batch.view.intents.contains_key(&handoff.intent_id) {
         return Ok(());
-    }
-    if handoff.confirmation.is_some() {
-        return Err(ExecutorError::Unimplemented { story: "E7-30" });
     }
     let IntentBody::Order {
         instrument,
@@ -52,6 +51,9 @@ pub(crate) fn received(
         return Err(ExecutorError::NonCanonicalPayload {
             field: "limit_price".to_owned(),
         });
+    }
+    if let Some(confirmation) = &handoff.confirmation {
+        fits(confirmation, *purpose, *limit)?;
     }
     let tif = handoff
         .tif
@@ -70,6 +72,13 @@ pub(crate) fn received(
         refs,
         intent_received_fields(&handoff.intent_id, &handoff.agent, &handoff.body, tif)?,
     )?;
+    if let Some(confirmation) = &handoff.confirmation {
+        batch.journal(
+            "OwnerConfirmationReceived",
+            None,
+            confirmation_fields(&handoff.intent_id, confirmation),
+        )?;
+    }
     if let Some(prices) = protection {
         batch.journal(
             "ProtectionChanged",
@@ -78,6 +87,46 @@ pub(crate) fn received(
         )?;
     }
     gate_and_submit(batch, &handoff.intent_id)
+}
+
+/// DEC-2039 item 1: a confirmation only for an owner's exit, with a positive bid size, and never
+/// under a limit below its floor; anything else is non-canonical, refused before it is journaled.
+fn fits(
+    confirmation: &HandedConfirmation,
+    purpose: Purpose,
+    limit: Option<Price>,
+) -> Result<(), ExecutorError> {
+    let refuse = |field: &str| {
+        Err(ExecutorError::NonCanonicalPayload {
+            field: field.to_owned(),
+        })
+    };
+    if purpose != Purpose::OwnerExit {
+        return refuse("confirmation");
+    }
+    if confirmation.bid_size.is_zero() {
+        return refuse("bid_size");
+    }
+    if limit.is_some_and(|limit| limit < confirmation.floor) {
+        return refuse("limit_price");
+    }
+    Ok(())
+}
+
+/// `OwnerConfirmationReceived` (§9.5, DEC-2039 item 2): the owner's confirmation, journaled
+/// immediately after its intent's `IntentReceived` in the same batch (rule 247), so replay reads
+/// the bid and floor back.
+fn confirmation_fields(
+    intent: &IntentId,
+    confirmation: &HandedConfirmation,
+) -> Vec<(&'static str, Value)> {
+    vec![
+        ("intent_id", text(intent.0.0.clone())),
+        ("bid", text(confirmation.bid.to_string())),
+        ("bid_size", text(confirmation.bid_size.to_string())),
+        ("floor", text(confirmation.floor.to_string())),
+        ("copied_from", text(confirmation.copied_from.0.clone())),
+    ]
 }
 
 /// The `intended` `ProtectionChanged` (§9.5, DEC-446 item 5): the receipt-time protective prices
@@ -223,6 +272,7 @@ fn decide(
             market: limit.is_none(),
             tif: order_tif(batch, instrument),
             flatten: is_flatten(&batch.view, intent),
+            owner_confirmed_bid: confirmed_bid(&batch.view, intent),
         },
         pass,
         batch.ports,
@@ -386,8 +436,9 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         Some(_) => TimeInForce::Gtc,
         None => order_tif(batch, &instrument),
     };
-    let extended_hours =
-        bracket.is_none() && extended_hours(batch.ports, &instrument, batch.at(), purpose);
+    let confirmed = confirmed_bid(&batch.view, intent).is_some();
+    let extended_hours = bracket.is_none()
+        && extended_hours(batch.ports, &instrument, batch.at(), (purpose, confirmed));
     let request = SubmitOrder {
         client_order_id: ClientOrderId::for_intent(intent)?,
         instrument,

@@ -128,7 +128,6 @@ fn member<'a>(ran: &'a Ran, event_type: &str, name: &str) -> Option<&'a Value> {
 /// 154.23, from the confirmed bid and not the feed's 150. The confirmation is journaled
 /// immediately after the intent, as rule 247 requires.
 #[test]
-#[ignore = "pending E7-30"]
 fn a_confirmed_owner_exit_before_the_open_sells_in_extended_hours_from_the_confirmed_bid() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -186,7 +185,6 @@ fn a_confirmed_owner_exit_before_the_open_sells_in_extended_hours_from_the_confi
 
 /// A rung the floor clamps rests at the floor: 151 × 0.995 = 150.245 is below the floor of 150.8.
 #[test]
-#[ignore = "pending E7-30"]
 fn the_floor_binds_a_confirmed_owner_exit_before_the_open() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -242,7 +240,6 @@ fn an_unconfirmed_owner_exit_before_the_open_waits_for_the_session() {
 /// In the regular session, on a fresh quote, a confirmed exit at the market goes at the market:
 /// the floor binds only the ladder (§5.1, §5.5; DEC-2039 item 3).
 #[test]
-#[ignore = "pending E7-30"]
 fn a_confirmed_owner_exit_in_the_regular_session_goes_at_the_market() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -271,7 +268,6 @@ fn a_confirmed_owner_exit_in_the_regular_session_goes_at_the_market() {
 /// The fold reads the confirmation back: an exit held overnight, across a restart, sells at the
 /// pre-market open from the confirmed bid, extended-hours.
 #[test]
-#[ignore = "pending E7-30"]
 fn a_restart_keeps_the_confirmation_of_an_exit_held_overnight() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -330,7 +326,6 @@ fn refused(input: Input) -> ExecutorError {
 /// DEC-2039 item 1: a confirmation on any purpose but an owner exit, a bid size that is not
 /// positive, or a limit below the floor is non-canonical, refused before anything is journaled.
 #[test]
-#[ignore = "pending E7-30"]
 fn a_confirmation_that_does_not_fit_its_exit_is_non_canonical() {
     let field = |name: &str| ExecutorError::NonCanonicalPayload {
         field: name.to_owned(),

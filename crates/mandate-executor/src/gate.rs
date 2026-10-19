@@ -273,6 +273,9 @@ pub(crate) struct Proposal<'s> {
     pub(crate) tif: TimeInForce,
     /// Whether the order is a kill switch's own flatten (§5.5), which the agent's mode never holds.
     pub(crate) flatten: bool,
+    /// The bid the owner confirmed for an owner's exit, which lets it go outside the regular
+    /// session (§5.5, DEC-2039 item 3); it overrides the snapshot's.
+    pub(crate) owner_confirmed_bid: Option<Price>,
 }
 
 /// Runs the checks in trading-domain spec §9.1's evaluation order against fresh folded state.
@@ -495,7 +498,9 @@ fn evaluate_binding(
         },
         extended_hours: false,
         origin: origin(proposal.purpose),
-        owner_confirmed_bid: snapshot.owner_confirmed_bid,
+        owner_confirmed_bid: proposal
+            .owner_confirmed_bid
+            .or(snapshot.owner_confirmed_bid),
         client_order_id: snapshot.gate_client_order_id,
         fee_reservation: snapshot.fee_reservation,
     };
@@ -896,6 +901,7 @@ mod attribution_tests {
                     market: false,
                     tif: crate::types::TimeInForce::Day,
                     flatten: false,
+                    owner_confirmed_bid: None,
                 },
                 &ports,
             )
@@ -1039,6 +1045,7 @@ mod remainder_tests {
                 market: false,
                 tif: crate::types::TimeInForce::Day,
                 flatten: false,
+                owner_confirmed_bid: None,
             },
             &ports,
         )

@@ -18,7 +18,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::kill::{flatten_closes, floor_of, is_flatten, mode_holds};
+use crate::kill::{confirmed_bid, flatten_closes, floor_of, is_flatten, mode_holds};
 use crate::listing::query_unknown;
 use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
@@ -316,7 +316,7 @@ pub(crate) fn exit_limit(
     let tier = batch.ports.instruments.exit_tier(instrument);
     match exit_price(
         tier,
-        &observed(batch, instrument),
+        &observed_for(batch, intent, instrument),
         0,
         batch.at(),
         floor_of(&batch.view, intent),
@@ -340,7 +340,7 @@ pub(crate) fn reference_price(
     purpose: Purpose,
 ) -> Option<Price> {
     let tier = batch.ports.instruments.exit_tier(instrument);
-    let observations = observed(batch, instrument);
+    let observations = observed_for(batch, intent, instrument);
     let floor = floor_of(&batch.view, intent);
     match exit_price(tier, &observations, 0, batch.at(), floor, purpose, None) {
         ExitPrice::Laddered(rung) => Some(ticked(
@@ -591,7 +591,7 @@ fn next_rung(
     let own = limit.or_else(|| last_rung_limit(batch, intent, rung));
     let step = rung.saturating_add(1);
     let tier = batch.ports.instruments.exit_tier(instrument);
-    let observations = observed(batch, instrument);
+    let observations = observed_for(batch, intent, instrument);
     let floor = floor_of(&batch.view, intent);
     let rung = tier.map(|tier| ladder_price(tier, &observations, step, batch.at(), floor));
     let (price, at_floor) = match rung {
@@ -618,7 +618,12 @@ fn next_rung(
         stop_price: None,
         bracket: None,
         oco: None,
-        extended_hours: extended_hours(batch.ports, instrument, batch.at(), purpose),
+        extended_hours: extended_hours(
+            batch.ports,
+            instrument,
+            batch.at(),
+            (purpose, confirmed_bid(&batch.view, intent).is_some()),
+        ),
         purpose,
     };
     let extra = vec![
@@ -644,6 +649,33 @@ fn last_rung_limit(batch: &Batch<'_, '_>, intent: &IntentId, rung: u32) -> Optio
 /// What §5.6 prices `instrument` from, oldest to newest by when each was observed: the last sane
 /// quote with a trade, the last sane bid, and the latest quote. A trade printed in another session
 /// prices nothing (§8.2: a last trade counts only in-session).
+/// What an intent's exit prices from: outside the regular session, an exit the owner confirmed
+/// prices from the bid they confirmed, not from a quote they never saw (§5.5, DEC-2039 item 3);
+/// every other exit, and a confirmed one in the regular session, from [`observed`].
+fn observed_for(
+    batch: &Batch<'_, '_>,
+    intent: &IntentId,
+    instrument: &InstrumentId,
+) -> Vec<MarketObservation> {
+    let outside = matches!(
+        venue(batch.ports, instrument, batch.at()),
+        Venue::Extended | Venue::Closed
+    );
+    match confirmed_bid(&batch.view, intent).filter(|_| outside) {
+        Some(bid) => vec![MarketObservation {
+            instrument: instrument.clone(),
+            bid: Some(bid),
+            bid_size: None,
+            ask: None,
+            last_trade: None,
+            mark: None,
+            sane: true,
+            observed_at: batch.at(),
+        }],
+        None => observed(batch, instrument),
+    }
+}
+
 fn observed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Vec<MarketObservation> {
     let mut seen: Vec<MarketObservation> = [
         &batch.view.trades,
@@ -15167,6 +15199,7 @@ mod remainder_pins {
                     market: false,
                     tif: crate::types::TimeInForce::Day,
                     flatten: false,
+                    owner_confirmed_bid: None,
                 },
                 ports,
             )

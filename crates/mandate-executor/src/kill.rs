@@ -331,10 +331,25 @@ fn switch_of<'s>(view: &'s ExecutorState, intent: &IntentId) -> Option<&'s Switc
     closes_with(switch, ordinal, &record.agent, instrument).then_some(switch)
 }
 
-/// The floor an exit's ladder never prices below (§5.5, §5.6): the owner's confirmed floor for a
-/// flatten raised by a confirmed switch, nothing for any other exit.
+/// The floor an exit's ladder never prices below (§5.5, §5.6): the owner's confirmed floor for an
+/// owner's exit received with one, or for a flatten raised by a confirmed switch, the higher where
+/// both are; nothing for any other exit (DEC-2039 item 3).
 pub(crate) fn floor_of(view: &ExecutorState, intent: &IntentId) -> Option<Price> {
-    switch_of(view, intent)?.floor
+    let own = view
+        .confirmations
+        .get(intent)
+        .map(|confirmed| confirmed.floor);
+    own.max(switch_of(view, intent).and_then(|switch| switch.floor))
+}
+
+/// The bid the owner confirmed for an owner's exit received with one, or for a flatten raised by a
+/// confirmed switch: with it the exit sells outside the regular session, priced from that bid
+/// (§5.5, DEC-2039 item 3).
+pub(crate) fn confirmed_bid(view: &ExecutorState, intent: &IntentId) -> Option<Price> {
+    view.confirmations
+        .get(intent)
+        .map(|confirmed| confirmed.bid)
+        .or_else(|| switch_of(view, intent).and_then(|switch| switch.bid))
 }
 
 /// Whether an intent is a journaled switch's own flatten, which the agent's mode never holds.

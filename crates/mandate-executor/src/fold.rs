@@ -17,8 +17,8 @@ use crate::payload::{
 };
 use crate::protection::climbs;
 use crate::state::{
-    Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder, LoneLadder,
-    ObservedAccount, OrderDetail, PendingRequest, PriorBase, Replacement, Switch,
+    Adoption, Confirmed, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder,
+    LoneLadder, ObservedAccount, OrderDetail, PendingRequest, PriorBase, Replacement, Switch,
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
@@ -142,6 +142,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "KillSwitchActivated" => kill_switch_activated(state, event),
+        "OwnerConfirmationReceived" => owner_confirmation_received(state, payload),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
         "TradingDayStarted" => {
             let date = Date::parse(required_text(payload, "date")?)?;
@@ -256,6 +257,7 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "ExternalActivityIngested"
         | "ConductBreachDetected"
         | "KillSwitchActivated"
+        | "OwnerConfirmationReceived"
         | "ConnectionChecked" => None,
         "RelatedAccountsCoordination" => Some("E7-5"),
         "MandateVersionApplied"
@@ -396,6 +398,22 @@ fn intent_received(
     Ok(())
 }
 
+/// One `OwnerConfirmationReceived` (§9.5, DEC-2039 item 2): the bid and floor the owner confirmed
+/// for the intent it names, which the gate, the session and the ladder read for that exit.
+fn owner_confirmation_received(
+    state: &mut ExecutorState,
+    payload: &Value,
+) -> Result<(), ExecutorError> {
+    let intent = intent_id(payload)?;
+    let price = |member: &str| optional_price(payload, member)?.ok_or_else(|| refused(member));
+    let confirmed = Confirmed {
+        bid: price("bid")?,
+        floor: price("floor")?,
+    };
+    state.confirmations.insert(intent, confirmed);
+    Ok(())
+}
+
 /// One agent-scoped `KillSwitchActivated` (§5.5, DEC-485 item 3): the agent, the purpose its
 /// sells carry, the owner's confirmed floor if any, and the closes it named, now or deferred,
 /// every one pending until its flatten's `IntentReceived` folds. Any other scope, the account and
@@ -436,6 +454,7 @@ fn kill_switch_activated(
         copied_from: optional_text(payload, "copied_from").map(|id| EventId(id.to_owned())),
         purpose: purpose_of(required_text(payload, "purpose")?)?,
         floor: optional_price(payload, "floor")?,
+        bid: optional_price(payload, "bid")?,
         pending: instruments.iter().cloned().collect(),
         instruments,
     };
