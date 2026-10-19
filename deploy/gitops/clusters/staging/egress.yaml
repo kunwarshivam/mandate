@@ -4,7 +4,7 @@
 # OpenRouter's is allowed without opening every address its CDN serves. The workspace chart's own
 # NetworkPolicies stay as they are, with no CIDR for these slots; Cilium adds these allows to them.
 # The chart stays portable (DEC-967 item 6): this file is the hosted cluster's alone. Alpaca's live
-# host is the token-exchange Job's alone, for its one OAuth call (DEC-2059); every other process
+# host is the token-exchange process's alone, for its one OAuth call (DEC-2059); every other process
 # trades on paper only (AGENTS.md rule 8), and test_gitops refuses the host anywhere else.
 ---
 # api: the identity provider's key set (DEC-2057).

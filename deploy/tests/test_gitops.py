@@ -827,7 +827,7 @@ def test_rendered_objects_match_the_kubernetes_schemas(overlay, tmp_path):
 # manifest anywhere else would be reconciled by nothing, or checked by nothing.
 # The external hosts each process may reach in a hosted cluster (DEC-2058), written out here from the
 # decision, not read from the overlay: infrastructure §3.1's external slots, as names. Alpaca's live
-# host is the token-exchange Job's alone, for its one OAuth call (DEC-821 items 2 and 4, DEC-2059);
+# host is the token-exchange process's alone, for its one OAuth call (DEC-821 items 2 and 4, DEC-2059);
 # every other process trades on paper only (AGENTS.md rule 8).
 FQDN_EGRESS = {
     "api": {"wyyxngmblqqokcvraflx.supabase.co"},
@@ -837,7 +837,10 @@ FQDN_EGRESS = {
     "model-gateway": {"openrouter.ai"},
     "token-exchange": {"api.alpaca.markets"},
 }
-LIVE_HOST = re.compile(r"(?<![\w.-])api\.alpaca\.markets\b")
+LIVE_HOST = re.compile(r"(?<![\w.-])api\.alpaca\.markets\b", re.IGNORECASE)
+# Every kind that can grant egress, and the one a hosted overlay may hold: the chart renders its own
+# NetworkPolicies, which the overlay's build never holds, so any other here is a back door.
+EGRESS_KINDS = {"NetworkPolicy", "CiliumNetworkPolicy", "CiliumClusterwideNetworkPolicy"}
 KUBE_DNS = {"io.kubernetes.pod.namespace": "kube-system", "k8s-app": "kube-dns"}
 
 
@@ -847,7 +850,17 @@ def fqdn_egress(docs: list[dict], hosts: dict[str, set[str]]) -> list[str]:
     proxy; nothing else, no ingress. Every process `hosts` names has one. Alpaca's live host appears
     once at most, and only as an exact name in the one policy that selects the workspace's
     token-exchange pods (DEC-2059)."""
-    problems = []
+    problems = [
+        f"{d['kind']} {d['metadata']['name']} may grant egress"
+        for d in docs
+        if d["kind"] in EGRESS_KINDS
+        and not (
+            d["kind"] == "CiliumNetworkPolicy"
+            and d["apiVersion"] == "cilium.io/v2"
+            and d["metadata"]["name"]
+            in {f"egress-fqdn-{process}" for process in hosts}
+        )
+    ]
     live = sum(len(LIVE_HOST.findall(str(d))) for d in docs)
     granted = [
         d
@@ -887,7 +900,7 @@ def fqdn_egress(docs: list[dict], hosts: dict[str, set[str]]) -> list[str]:
             problems.append(f"{name} is not one DNS rule and one host rule")
             continue
         rule = named[0]
-        names = {str(f.get("matchName")) for f in rule.get("toFQDNs", [])}
+        names = {str(f.get("matchName")).lower() for f in rule.get("toFQDNs", [])}
         if set(rule) != {"toFQDNs", "toPorts"} or any(set(f) != {"matchName"} for f in rule.get("toFQDNs", [])):
             problems.append(f"{name} reaches more than exact names: {rule}")
         if rule.get("toPorts") != [{"ports": [{"port": "443", "protocol": "TCP"}]}]:
