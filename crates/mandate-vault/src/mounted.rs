@@ -8,6 +8,8 @@ use std::io::Read;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path};
 
+use rustix::fs::{Mode, OFlags, open};
+use secrecy::zeroize::Zeroize;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::SourceError;
@@ -20,9 +22,21 @@ const OPEN_TO_OTHERS: u32 = 0o077;
 /// Reads the file `name` of the mounted directory `dir` whole: `name` is one plain path
 /// component, and the file it names, its links followed, is a plain file inside `dir` that no
 /// group or other may read, write, or run. Anything else, a link that leaves `dir` by a relative
-/// or an absolute target included, is [`SourceError::CredentialFile`]. The file opened must be the
-/// file checked, by its device and inode, so a link swapped in after the check is refused too.
+/// or an absolute target included, is [`SourceError::CredentialFile`]. The file is opened without
+/// following a link and without blocking, and its type, mode, device and inode are judged on the
+/// opened handle against the path checked, so a file, link, or pipe swapped in after the check is
+/// refused too. A partial read is zeroized before it is dropped.
 pub fn read_mounted(dir: &Path, name: &str) -> Result<SecretString, SourceError> {
+    read_checked(dir, name, &|_| {})
+}
+
+/// [`read_mounted`], calling `between` with the path reached after it is checked and before it is
+/// opened, the moment a swap would race.
+pub(crate) fn read_checked(
+    dir: &Path,
+    name: &str,
+    between: &dyn Fn(&Path),
+) -> Result<SecretString, SourceError> {
     let refused = |_| SourceError::CredentialFile;
     let mut components = Path::new(name).components();
     let one_component = matches!(
@@ -38,17 +52,29 @@ pub fn read_mounted(dir: &Path, name: &str) -> Result<SecretString, SourceError>
         return Err(SourceError::CredentialFile);
     }
     let checked = fs::symlink_metadata(&reached).map_err(refused)?;
-    if !checked.is_file() || checked.permissions().mode() & OPEN_TO_OTHERS != 0 {
-        return Err(SourceError::CredentialFile);
-    }
-    let mut file = File::open(&reached).map_err(refused)?;
+    between(&reached);
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let mut file =
+        File::from(open(&reached, flags, Mode::empty()).map_err(|_| SourceError::CredentialFile)?);
     let opened = file.metadata().map_err(refused)?;
-    if (opened.dev(), opened.ino()) != (checked.dev(), checked.ino()) {
+    if !opened.is_file()
+        || opened.permissions().mode() & OPEN_TO_OTHERS != 0
+        || (opened.dev(), opened.ino()) != (checked.dev(), checked.ino())
+    {
         return Err(SourceError::CredentialFile);
     }
-    let mut text = String::new();
-    file.read_to_string(&mut text).map_err(refused)?;
-    Ok(SecretString::from(text))
+    let mut bytes = Vec::new();
+    if file.read_to_end(&mut bytes).is_err() {
+        bytes.zeroize();
+        return Err(SourceError::CredentialFile);
+    }
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(SecretString::from(text)),
+        Err(invalid) => {
+            invalid.into_bytes().zeroize();
+            Err(SourceError::CredentialFile)
+        }
+    }
 }
 
 /// `value` as one line: at most one trailing newline, which is dropped, and no other line break

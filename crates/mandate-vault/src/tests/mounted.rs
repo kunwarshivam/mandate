@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use mandate_connections::record::ConnectionId;
+use rustix::fs::{CWD, FileType, Mode, mknodat};
 use secrecy::ExposeSecret;
 
 use crate::SourceError;
-use crate::mounted::{read_mounted, read_mounted_credentials};
+use crate::mounted::{read_checked, read_mounted, read_mounted_credentials};
 use crate::policy::Identity;
 
 static NEXT: AtomicU32 = AtomicU32::new(0);
@@ -204,4 +205,87 @@ fn a_token_exchange_has_no_mounted_credentials() {
         ),
         Err(SourceError::Config)
     );
+}
+
+fn read_swapped(dir: &Path, name: &str, swap: &dyn Fn(&Path)) -> Result<String, SourceError> {
+    read_checked(dir, name, swap).map(|value| value.expose_secret().to_owned())
+}
+
+fn fifo(path: &Path) {
+    mknodat(CWD, path, FileType::Fifo, Mode::from_raw_mode(0o600), 0).unwrap();
+}
+
+/// Another owner-only file renamed over the checked one before it is opened is refused, by its
+/// inode, though it would pass every other check.
+#[test]
+fn a_file_swapped_in_after_the_check_is_refused() {
+    let dir = Fresh::new("swap-file");
+    write(&dir.0.join("ca.crt"), "checked", 0o400);
+    write(&dir.0.join("other"), "swapped", 0o400);
+    let swap = |reached: &Path| fs::rename(reached.with_file_name("other"), reached).unwrap();
+    assert_eq!(
+        read_swapped(&dir.0, "ca.crt", &swap),
+        Err(SourceError::CredentialFile)
+    );
+}
+
+/// A link swapped in for the checked file is not followed.
+#[test]
+fn a_link_swapped_in_after_the_check_is_refused() {
+    let dir = Fresh::new("swap-link");
+    write(&dir.0.join("ca.crt"), "checked", 0o400);
+    write(&dir.0.join("other"), "swapped", 0o400);
+    let swap = |reached: &Path| {
+        fs::remove_file(reached).unwrap();
+        symlink("other", reached).unwrap();
+    };
+    assert_eq!(
+        read_swapped(&dir.0, "ca.crt", &swap),
+        Err(SourceError::CredentialFile)
+    );
+}
+
+/// A pipe swapped in for the checked file is refused without waiting for a writer.
+#[test]
+fn a_pipe_swapped_in_after_the_check_is_refused_without_blocking() {
+    let dir = Fresh::new("swap-fifo");
+    write(&dir.0.join("ca.crt"), "checked", 0o400);
+    let swap = |reached: &Path| {
+        fs::remove_file(reached).unwrap();
+        fifo(reached);
+    };
+    assert_eq!(
+        read_swapped(&dir.0, "ca.crt", &swap),
+        Err(SourceError::CredentialFile)
+    );
+}
+
+/// An owner-only pipe at the name itself is refused, not read as empty.
+#[test]
+fn a_pipe_at_the_name_is_refused() {
+    let dir = Fresh::new("fifo");
+    fifo(&dir.0.join("ca.crt"));
+    assert_eq!(read(&dir.0, "ca.crt"), Err(SourceError::CredentialFile));
+}
+
+/// A mode widened on the checked file before it is opened is judged on the handle and refused.
+#[test]
+fn a_mode_widened_after_the_check_is_refused() {
+    let dir = Fresh::new("swap-mode");
+    write(&dir.0.join("ca.crt"), "checked", 0o400);
+    let widen = |reached: &Path| {
+        fs::set_permissions(reached, fs::Permissions::from_mode(0o444)).unwrap();
+    };
+    assert_eq!(
+        read_swapped(&dir.0, "ca.crt", &widen),
+        Err(SourceError::CredentialFile)
+    );
+}
+
+#[test]
+fn a_file_that_is_not_utf8_is_refused() {
+    let dir = Fresh::new("utf8");
+    fs::write(dir.0.join("ca.crt"), b"\xff\xfe").unwrap();
+    fs::set_permissions(dir.0.join("ca.crt"), fs::Permissions::from_mode(0o400)).unwrap();
+    assert_eq!(read(&dir.0, "ca.crt"), Err(SourceError::CredentialFile));
 }
