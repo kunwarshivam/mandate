@@ -89,6 +89,23 @@ def setting(hcl: str, key: str) -> list[str]:
     return re.findall(rf'^\s*{key}\s*=\s*"?([^"\n]*)"?\s*$', hcl, re.MULTILINE)
 
 
+def root_generation_on_loopback_only(docs: list[dict]) -> list[str]:
+    """Root generation from the recovery keys is answered only where they exist, staging's static
+    seal, and only on a second listener bound to the pod's loopback (DEC-2630); the listener every
+    process reaches keeps it off, as it is by default."""
+    found = []
+    hcl = config(docs)
+    staged = blocks(hcl, "seal") == ["static"]
+    addresses = setting(hcl, "address")
+    opened = setting(hcl, "disable_unauthed_generate_root_endpoints")
+    want = ["0.0.0.0:8200", "127.0.0.1:8210"] if staged else ["0.0.0.0:8200"]
+    if addresses != want:
+        found.append(f"the listeners bind {addresses}, not {want}")
+    if opened != (["false"] if staged else []):
+        found.append(f"root generation is {opened} with the seal {blocks(hcl, 'seal')}")
+    return found
+
+
 def server_mode(docs: list[dict]) -> list[str]:
     """Server mode on integrated storage, never the dev server: the one command, no argument and
     no environment variable that turns dev mode on, and raft storage alone (DEC-977 item 6)."""
@@ -112,16 +129,16 @@ def tls_only(docs: list[dict]) -> list[str]:
     (the probe's and the operator's `bao`) speaking HTTPS and checking the certificate."""
     found = []
     hcl = config(docs)
-    if blocks(hcl, "listener") != ["tcp"]:
-        found.append(f"the listeners are {blocks(hcl, 'listener')}")
+    listeners = blocks(hcl, "listener")
+    if listeners not in (["tcp"], ["tcp", "tcp"]):
+        found.append(f"the listeners are {listeners}")
     if setting(hcl, "tls_disable"):
         found.append("a listener disables TLS")
-    if setting(hcl, "tls_min_version") != ["tls13"]:
+    if setting(hcl, "tls_min_version") != ["tls13"] * len(listeners):
         found.append(f"the TLS floor is {setting(hcl, 'tls_min_version')}")
-    if setting(hcl, "tls_cert_file") != ["/openbao/tls/tls.crt"] or setting(hcl, "tls_key_file") != [
-        "/openbao/tls/tls.key"
-    ]:
-        found.append("the listener does not use the chart's certificate")
+    certs = setting(hcl, "tls_cert_file"), setting(hcl, "tls_key_file")
+    if certs != (["/openbao/tls/tls.crt"] * len(listeners), ["/openbao/tls/tls.key"] * len(listeners)):
+        found.append("a listener does not use the chart's certificate")
     env = {e["name"]: e.get("value") for e in container(docs).get("env", [])}
     if not str(env.get("BAO_ADDR")).startswith("https://") or env.get("BAO_CACERT") != "/openbao/tls/ca.crt":
         found.append(f"the pod's own client speaks to {env.get('BAO_ADDR')} trusting {env.get('BAO_CACERT')}")
@@ -298,6 +315,7 @@ def every(docs: list[dict]) -> list[str]:
         *tls_only(docs),
         *sealed_is_not_ready(docs),
         *reached_only_by_its_processes(docs),
+        *root_generation_on_loopback_only(docs),
         *hardened(docs),
         *secrets_as_files(docs),
         *certificate(docs),
@@ -362,6 +380,18 @@ def with_config(docs: list[dict], old: str, new: str) -> list[dict]:
     assert old in data["config.hcl"]
     data["config.hcl"] = data["config.hcl"].replace(old, new)
     return bad
+
+
+def test_root_generation_catches_it_on_the_shared_listener_or_outside_staging():
+    staged = render("-f", str(STAGING))
+    assert root_generation_on_loopback_only(staged) == []
+    root_on = "disable_unauthed_generate_root_endpoints = false"
+    shared = with_config(staged, 'cluster_address = "127.0.0.1:8201"', f'cluster_address = "127.0.0.1:8201"\n      {root_on}')
+    assert root_generation_on_loopback_only(shared)
+    widened = with_config(staged, 'address = "127.0.0.1:8210"', 'address = "0.0.0.0:8210"')
+    assert root_generation_on_loopback_only(widened)
+    loopback = f'listener "tcp" {{\n      address = "127.0.0.1:8210"\n      {root_on}\n    }}\n    storage "raft"'
+    assert root_generation_on_loopback_only(with_config(render(), 'storage "raft"', loopback))
 
 
 def test_server_mode_catches_the_dev_server():
