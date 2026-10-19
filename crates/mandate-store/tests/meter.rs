@@ -92,7 +92,6 @@ fn event_types(store: &MemoryStore) -> Vec<String> {
 /// draft at its own event id that §9.19 accepts, written by a `system` actor, and each reads back,
 /// in stream order, as itself.
 #[test]
-#[ignore = "pending E21-61"]
 fn what_it_writes_reads_back_and_the_first_record_opens_the_stream() {
     let store = MemoryStore::default();
     let mut meter = open(store.clone(), 1 << 70);
@@ -139,7 +138,6 @@ fn what_it_writes_reads_back_and_the_first_record_opens_the_stream() {
 /// DEC-2258, E21-61's acceptance: a gateway restarted over the same journal folds the reservation
 /// its predecessor left open at its maximum, so the day's research cap holds across the restart.
 #[test]
-#[ignore = "pending E21-61"]
 fn a_restart_keeps_the_cap_with_a_reservation_still_open() {
     let store = MemoryStore::default();
     let caps = || {
@@ -175,7 +173,6 @@ fn a_restart_keeps_the_cap_with_a_reservation_still_open() {
 /// DEC-2258 item 1: a newer writer fences an older one, whose appends then fail `Fenced` and leave
 /// the stream as the newer writer wrote it.
 #[test]
-#[ignore = "pending E21-61"]
 fn a_newer_writer_fences_an_older_one() {
     let store = MemoryStore::default();
     let mut older = open(store.clone(), 1 << 70);
@@ -199,7 +196,6 @@ fn a_newer_writer_fences_an_older_one() {
 /// DEC-2258 item 5: rule 158 is checked before anything is written: a second reservation of one
 /// call, a settlement of no reservation, and a second settlement are refused and write nothing.
 #[test]
-#[ignore = "pending E21-61"]
 fn rule_158_refuses_before_anything_is_written() {
     let store = MemoryStore::default();
     let mut meter = open(store.clone(), 1 << 70);
@@ -288,7 +284,6 @@ impl Store for Faulty {
 /// writer the store granted no epoch, and an append the store cannot confirm all fail
 /// `Unavailable`, so the gateway refuses `meter_unavailable` and sends nothing.
 #[test]
-#[ignore = "pending E21-61"]
 fn anything_it_cannot_read_or_confirm_fails_closed() {
     let store = Faulty::default();
     let mut meter = open(store.clone(), 1 << 70);

@@ -621,7 +621,6 @@ fn canon(value: &serde_json::Value) -> Value {
 /// DEC-2258 item 3: every meter draft of journal spec §9.19's vectors reads back as the record the
 /// vectors' own fields give, and the stream's `StreamOpened` as none.
 #[test]
-#[ignore = "pending E21-61"]
 fn every_vectors_meter_draft_reads_back_as_its_record() {
     let mut drafts: Vec<serde_json::Value> = ["reserved", "settled"]
         .iter()
@@ -647,7 +646,6 @@ fn every_vectors_meter_draft_reads_back_as_its_record() {
 /// DEC-2258 item 3: a meter payload with a member missing, an unlisted member, or a value of the
 /// wrong kind or out of its range reads back as nothing, as does an event type of no meter record.
 #[test]
-#[ignore = "pending E21-61"]
 fn a_payload_it_cannot_read_back_is_no_record() {
     for name in ["reserved", "settled"] {
         let draft = &section()["drafts"][name];
@@ -793,7 +791,6 @@ fn generated_record() -> impl Strategy<Value = MeterRecord> {
 /// DEC-2258 item 3: any meter record reads back from its own payload, at its own event id, as
 /// itself, over 256 generated records.
 #[test]
-#[ignore = "pending E21-61"]
 fn any_meter_record_reads_back_from_its_payload() {
     let config = ProptestConfig {
         cases: 256,
