@@ -65,6 +65,15 @@ its password anywhere but GitHub's secret form.
      --insecure-ignore-tlog=true SHA256SUMS
    ```
 
+5. Then `release-signing-publish` publishes the images a hosted cell runs (DEC-2026). It
+   checks every signature against the committed public half again, then pushes each arch's
+   images with their binary's release signature as `signed-<commit>-<arch>`, and
+   `release-signing-publish-index` pushes the multi-arch `signed-<commit>` index. Both are signed
+   keyless, like a push's `main-<commit>` images. The run's artifact `signed-published-<commit>`
+   lists the references by digest. A hosted cell runs only these: a `main-*` image carries no
+   release signature and starts only at `dev` and `ci`. Pointing the hosted overlays at them is
+   part of promotion (E21-58), not of this run.
+
 **If `release-signing-check` fails at a signature or at "did not start at tier production",** the
 key in the environment is not the one in `RELEASE_KEYS`: the secrets hold a different pair from
 the committed public half. Nothing was published, and nothing changes until the two match.
