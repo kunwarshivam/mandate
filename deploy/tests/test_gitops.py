@@ -868,7 +868,7 @@ def fqdn_egress(docs: list[dict], hosts: dict[str, set[str]]) -> list[str]:
             problems.append(f"{name} is not one DNS rule and one host rule")
             continue
         rule = named[0]
-        names = {f.get("matchName") for f in rule.get("toFQDNs", [])}
+        names = {str(f.get("matchName")) for f in rule.get("toFQDNs", [])}
         if set(rule) != {"toFQDNs", "toPorts"} or any(set(f) != {"matchName"} for f in rule.get("toFQDNs", [])):
             problems.append(f"{name} reaches more than exact names: {rule}")
         if rule.get("toPorts") != [{"ports": [{"port": "443", "protocol": "TCP"}]}]:
