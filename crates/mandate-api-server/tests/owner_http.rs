@@ -114,6 +114,7 @@ fn fixture(accepting: bool) -> Fixture {
         objects: None,
         step_up,
         challenges: Arc::default(),
+        connect: None,
     };
     let f = Fixture {
         addr: serve(http::api(app, Drain::new())),

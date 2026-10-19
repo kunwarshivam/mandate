@@ -38,6 +38,7 @@ import audit
 import backtest_records
 import canceled
 import confirmations
+import credentials
 import control_plane
 import deployed
 import deployment_manager
@@ -3871,6 +3872,7 @@ def render(
     market_intents_section: dict,
     owner_confirmations_section: dict,
     connection_requested_section: dict,
+    credentials_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3914,6 +3916,7 @@ def render(
             "market_intents": market_intents_section,
             "owner_confirmations": owner_confirmations_section,
             "connection_requested": connection_requested_section,
+            "credentials": credentials_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3988,6 +3991,7 @@ def main(argv: list[str] | None = None) -> int:
     market_intents_section = market_intents.build_section()
     owner_confirmations_section = owner_confirmations.build_section()
     connection_requested_section = connection_requested.build_section()
+    credentials_section = credentials.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4031,6 +4035,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += acknowledgments.run_mutants(acknowledgments_section)
     problems += confirmations.check_section(confirmations_section)
     problems += confirmations.run_mutants(confirmations_section)
+    problems += credentials.check_section(credentials_section)
+    problems += credentials.run_mutants(credentials_section)
     problems += marks.check_section(marks_section)
     problems += marks.run_mutants(marks_section)
     problems += market_intents.check_section(market_intents_section)
@@ -4113,6 +4119,7 @@ def main(argv: list[str] | None = None) -> int:
         market_intents_section,
         owner_confirmations_section,
         connection_requested_section,
+        credentials_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -4229,6 +4236,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(connection_requested_section['invalid_drafts'])} invalid and {len(connection_requested_section['valid_drafts'])} valid "
         f"rule-255 ConnectionRequested drafts, {len(connection_requested.VALIDATOR_MUTANTS)} validator and "
         f"{len(connection_requested.vector_mutants(connection_requested_section))} vector mutants caught; "
+        f"{len(credentials_section['invalid_drafts'])} invalid and {len(credentials_section['valid_drafts'])} valid "
+        f"credential drafts, {len(credentials_section['streams'])} rule-251 streams, "
+        f"{len(credentials.VALIDATOR_MUTANTS)} validator, {len(credentials.STREAM_MUTANTS)} stream and "
+        f"{len(credentials.vector_mutants(credentials_section))} vector mutants caught; "
         f"{len(control_plane_section['invalid_drafts'])} invalid and {len(control_plane_section['valid_drafts'])} valid "
         f"control-plane drafts, {len(control_plane.VALIDATOR_MUTANTS)} validator and "
         f"{len(control_plane.vector_mutants(control_plane_section))} vector mutants caught; "
