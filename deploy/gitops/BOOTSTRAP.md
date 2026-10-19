@@ -128,7 +128,9 @@ cluster:
    file once at start. Its log reads `founding: linked` or `founding: no founder subject is set:
    nobody is linked`, then `, unchanged` or `; api restarted`. The subject is masked and never
    reaches the cluster, a log, or a file left behind. The founder's ULID is `founding.member` in
-   `clusters/staging/workspace.yaml`. Rotating it, or removing the secret, is a rerun.
+   `clusters/staging/workspace.yaml`. Rotating it, or removing the secret, is a rerun. If the
+   secret is ever unset by mistake, the next apply unlinks you (its log says `nobody is linked`)
+   and, once the API restarts, staging refuses every sign-in: set the secret again and rerun.
 2. **The mount.** Once an apply has written the ConfigMap, staging's values set
    `api.subjectLinks: subject-links`, so the API server reads it.
 3. **The grant.** Once the `mandate` image staging runs has `workspace found --open`, staging's

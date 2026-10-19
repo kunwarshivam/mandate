@@ -1573,7 +1573,7 @@ const INFRA_SHA_ENV: &str = "MANDATE_INFRA_SHA";
 
 /// The commit `git` has checked out.
 fn head_commit() -> Result<String> {
-    let out = Command::new("git")
+    let out = founding::without_step_secrets(&mut Command::new("git"))
         .args(["rev-parse", "HEAD"])
         .output()
         .context("starting `git`")?;
@@ -1882,7 +1882,7 @@ fn run_tofu(
 ) -> Result<()> {
     let tofu = |args: &[String]| {
         let mut command = Command::new("tofu");
-        command
+        founding::without_step_secrets(&mut command)
             .args(args)
             .env("TF_IN_AUTOMATION", "1")
             .env("TF_VAR_commit_sha", sha);
@@ -1975,7 +1975,7 @@ fn changed_since_applied(
         eprintln!("    state was last applied at this same commit");
         return Ok(());
     }
-    let diff = Command::new("git")
+    let diff = founding::without_step_secrets(&mut Command::new("git"))
         .args(["diff", "--name-status", &applied, sha, "--"])
         .args(INFRA_PATHS)
         .output()

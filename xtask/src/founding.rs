@@ -212,11 +212,25 @@ fn configmap(text: &str) -> String {
     .to_string()
 }
 
+/// The secrets the infra step's own environment holds under a `MANDATE_` name, each read once by
+/// the step that needs it and handed on only on a child's standard input (DEC-2114, DEC-2630).
+pub(crate) const STEP_SECRETS: [&str; 2] = [SUBJECT_VAR, "MANDATE_OPENROUTER_API_KEY"];
+
+/// `command` with none of [`STEP_SECRETS`] in its environment, for a child that inherits the
+/// step's environment rather than starting from an empty one.
+pub(crate) fn without_step_secrets(command: &mut Command) -> &mut Command {
+    for name in STEP_SECRETS {
+        command.env_remove(name);
+    }
+    command
+}
+
 /// Runs the built `mandate` at `cli` with `args`, an empty environment, `stdin` on its standard
-/// input, and its output discarded, answering whether it succeeded.
+/// input, and its output discarded, answering whether it succeeded. It is waited for even when
+/// writing its input fails, so its exit is always reaped.
 ///
 /// # Errors
-/// When it cannot be started or written to.
+/// When it cannot be started, written to, or waited for.
 pub(crate) fn run_mandate(cli: &Path, args: &[String], stdin: &str) -> Result<bool> {
     let mut child = Command::new(cli)
         .args(args)
@@ -226,12 +240,14 @@ pub(crate) fn run_mandate(cli: &Path, args: &[String], stdin: &str) -> Result<bo
         .stderr(Stdio::null())
         .spawn()
         .context("starting the built mandate")?;
-    child
+    let written = child
         .stdin
         .take()
-        .context("mandate's stdin")?
-        .write_all(stdin.as_bytes())?;
-    Ok(child.wait().context("waiting for mandate")?.success())
+        .context("mandate's stdin")
+        .and_then(|mut input| Ok(input.write_all(stdin.as_bytes())?));
+    let status = child.wait().context("waiting for mandate")?;
+    written?;
+    Ok(status.success())
 }
 
 #[cfg(test)]
@@ -241,7 +257,13 @@ mod tests {
 
     use anyhow::{Result, bail};
 
-    use super::{CONFIGMAP, Founder, Steps, link_command, link_founder, staging_founder, value_in};
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    use super::{
+        CONFIGMAP, Founder, STEP_SECRETS, Steps, link_command, link_founder, run_mandate,
+        staging_founder, value_in, without_step_secrets,
+    };
 
     const CANARY: &str = "canary-subject-7f3c2b19-e4a1";
     const DIGEST: &str = "sha256:0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6";
@@ -496,6 +518,121 @@ mod tests {
         assert!(value_in(later, "api", "issuer").is_err(), "not the block's");
         let empty = "    founding:\n      member: \"\"\n";
         assert!(value_in(empty, "founding", "member").is_err(), "empty");
+    }
+
+    #[test]
+    fn the_real_run_mandate_clears_the_environment_and_discards_the_output() {
+        let dir = scratch();
+        let seen = dir.join("seen");
+        let stub = dir.join("mandate");
+        std::fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\n\
+                 env > '{seen}.env'\n\
+                 printf '%s\\n' \"$@\" > '{seen}.args'\n\
+                 cat > '{seen}.stdin'\n\
+                 out=$(readlink /proc/$$/fd/1)\n\
+                 err=$(readlink /proc/$$/fd/2)\n\
+                 echo \"$out\" > '{seen}.out'\n\
+                 echo \"$err\" > '{seen}.err'\n\
+                 echo {CANARY}\n\
+                 exit \"$1\"\n",
+                seen = seen.display()
+            ),
+        )
+        .expect("the stub");
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o700)).expect("mode");
+        let read = |ext: &str| {
+            std::fs::read_to_string(format!("{}.{ext}", seen.display())).expect("recorded")
+        };
+        assert!(run_mandate(&stub, &["0".to_owned(), "link".to_owned()], CANARY).expect("ran"));
+        assert_eq!(read("stdin"), CANARY, "the subject is its standard input");
+        assert_eq!(read("args"), "0\nlink\n", "and no argument");
+        let env = read("env");
+        for inherited in ["PATH=", "HOME="] {
+            assert!(
+                !env.contains(inherited),
+                "the environment is cleared: {env}"
+            );
+        }
+        assert_eq!(read("out").trim(), "/dev/null", "its output is discarded");
+        assert_eq!(read("err").trim(), "/dev/null", "its errors are discarded");
+        assert!(
+            !run_mandate(&stub, &["3".to_owned()], CANARY).expect("ran"),
+            "a refusal"
+        );
+    }
+
+    #[test]
+    fn a_child_that_inherits_the_step_s_environment_drops_its_secrets() {
+        let mut command = Command::new("tofu");
+        let envs: Vec<_> = without_step_secrets(&mut command)
+            .get_envs()
+            .map(|(name, value)| (name.to_owned(), value.map(ToOwned::to_owned)))
+            .collect();
+        for secret in STEP_SECRETS {
+            assert!(
+                envs.contains(&(secret.into(), None)),
+                "{secret} is removed: {envs:?}"
+            );
+        }
+        assert!(STEP_SECRETS.contains(&super::SUBJECT_VAR));
+    }
+
+    /// Every child the infra step starts either begins from an empty environment or drops the
+    /// step's secrets: a `Command::new(` with neither close by is refused.
+    #[test]
+    fn every_child_of_the_infra_step_starts_without_the_step_s_secrets() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let read = |file: &str| std::fs::read_to_string(src.join(file)).expect("source");
+        let main = read("main.rs");
+        let mut bodies: Vec<(String, String)> = [
+            "infra_preflight.rs",
+            "infra_window.rs",
+            "infra_verify.rs",
+            "vault_init.rs",
+            "vault_provision.rs",
+            "gitops.rs",
+            "founding.rs",
+        ]
+        .into_iter()
+        .map(|file| {
+            let text = read(file);
+            let code = text
+                .split("#[cfg(test)]\nmod tests")
+                .next()
+                .unwrap_or_default();
+            (file.to_owned(), code.to_owned())
+        })
+        .collect();
+        for function in [
+            "\nfn head_commit(",
+            "\nfn run_tofu(",
+            "\nfn changed_since_applied(",
+            "\nfn bootstrap_staging(",
+        ] {
+            let start = main.find(function).expect(function);
+            let end = main[start + 1..].find("\n}\n").expect("its end") + start + 3;
+            bodies.push((function.trim().to_owned(), main[start..end].to_owned()));
+        }
+        let mut problems = Vec::new();
+        for (name, code) in &bodies {
+            for (at, _) in code.match_indices("Command::new(") {
+                let before = &code[at.saturating_sub(40)..at];
+                let near = &code[at..(at + 400).min(code.len())];
+                if !(before.contains("without_step_secrets(&mut ")
+                    || near.contains("env_clear()")
+                    || near.contains("without_step_secrets(&mut command)"))
+                {
+                    problems.push(format!("{name}: {}", &code[at..(at + 60).min(code.len())]));
+                }
+            }
+        }
+        assert!(
+            problems.is_empty(),
+            "children inheriting the step's secrets: {problems:#?}"
+        );
     }
 
     fn walk(dir: &Path) -> Vec<PathBuf> {
