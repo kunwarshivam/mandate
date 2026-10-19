@@ -539,9 +539,9 @@ pub struct Outcome {
     /// Limits with breach time accumulating, shown in the agent's state (§5.6).
     pub pending: BTreeSet<LimitKey>,
     pub rejection: Option<Rejection>,
-    /// Each `RiskLimitTriggered`'s breach time by its position in `journal`, which
+    /// Each `RiskLimitTriggered`'s limit and breach time by its position in `journal`, which
     /// [`Outcome::breach_time_s`] reads.
-    breach_times: BTreeMap<usize, u64>,
+    breach_times: BTreeMap<usize, (LimitKey, u64)>,
 }
 
 impl Outcome {
@@ -552,16 +552,34 @@ impl Outcome {
     /// 0 where the limit has no confirmation: a `scale_sizes` rung, `after_reset` or not.
     ///
     /// Keyed by the event's position rather than by its limit, because the writer fills the member
-    /// one record at a time and a position names exactly one record, where a limit could name two in
-    /// an allocation change's settled batch. `Ok(None)` for any other event and for a position past
-    /// the journal's end. A tripwire's trigger is in [`Outcome::tripwire_journal`], never here, so
-    /// its `null` needs nothing from this accessor.
+    /// one record at a time and a position names exactly one record. Each time is stored with the
+    /// limit it was read for, and answered only for that limit's trigger at that position, because
+    /// `journal` is a public field a caller can edit. `Ok(None)` for any other event the step
+    /// journalled. A tripwire's trigger is in [`Outcome::tripwire_journal`], never here, so its
+    /// `null` needs nothing from this accessor.
     ///
     /// # Errors
-    /// None today: the `Result` keeps the accessor's signature, so a writer already fails closed
-    /// on a step whose breach time could not be decided.
+    /// `invalid_input` whenever `journal` and the recorded times disagree, so a writer fails closed
+    /// rather than put one record's breach time on another: a position past the journal's end, a
+    /// trigger with no time recorded, a time recorded at an event that is not a trigger, or a
+    /// trigger whose limit is not the one its time was read for.
     pub fn breach_time_s(&self, event: usize) -> Result<Option<u64>, SpecError> {
-        Ok(self.breach_times.get(&event).copied())
+        let triggered = match self.journal.get(event) {
+            None => {
+                return Err(SpecError::InvalidInput {
+                    what: "a position past the end of the step's journal",
+                });
+            }
+            Some(RiskEvent::RiskLimitTriggered { limit, .. }) => Some(*limit),
+            Some(_) => None,
+        };
+        match (triggered, self.breach_times.get(&event)) {
+            (None, None) => Ok(None),
+            (Some(limit), Some((recorded, seconds))) if limit == *recorded => Ok(Some(*seconds)),
+            _ => Err(SpecError::InvalidInput {
+                what: "a journal that no longer matches the breach times its step recorded",
+            }),
+        }
     }
 }
 

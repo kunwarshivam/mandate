@@ -137,7 +137,7 @@ impl Fold {
         )? || (hard && moment.quote);
         if renewed {
             self.breach_times
-                .insert(journal.len(), self.breach_s(limit.key));
+                .insert(journal.len(), (limit.key, self.breach_s(limit.key)));
             self.confirmations.remove(&limit.key);
             self.daily = Some(DailyLatch::at(self.at));
             journal.push(RiskEvent::RiskLimitTriggered {

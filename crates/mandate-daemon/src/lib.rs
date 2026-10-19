@@ -35,6 +35,7 @@ pub mod cell;
 pub mod deployment;
 pub mod fixture;
 pub mod launch;
+pub mod meter;
 pub mod recorded;
 pub mod runtime;
 pub mod source;

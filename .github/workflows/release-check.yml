@@ -1,0 +1,158 @@
+# The release build's check on a pull request that changes it (E21-8, DEC-972; DEC-2032 L12):
+# each arch's two builds of the pull request's merge commit, on two runners in two checkout paths
+# with no cache, compared by `compare`, and each `build-a` builds its images, signed by an
+# ephemeral test key, and drills the start-up signature check on them, as `release.yml` does on
+# `main`. It keeps, publishes and signs nothing, and it holds no deploy gate and no credential,
+# as leak-guard L12 requires of a workflow a pull request can run. `release.yml` runs the same
+# builds on `main` and on dispatch, and alone publishes and signs.
+name: release-check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/workflows/release.yml"
+      - ".github/workflows/release-check.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "rust-toolchain.toml"
+      - "crates/mandate-release/**"
+      - "xtask/**"
+
+permissions: {}
+
+# A new push to a pull request cancels its older run.
+concurrency:
+  group: release-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-a-amd64:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    # Not a required check (DEC-464's ten minutes bind those): one uncached three-binary musl
+    # build took about three minutes on four cores, and a two-core runner may take twice that.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Build the release
+        id: build
+        run: cargo xtask release build dist | tee -a "$GITHUB_OUTPUT"
+      - name: Build the images, signed by an ephemeral test key
+        run: cargo xtask release images dist images --test-sign
+      - name: Drill the start-up check on signed, unsigned and wrongly signed images
+        run: cargo xtask release drill dist images
+
+  build-b-amd64:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: elsewhere/src
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: elsewhere/src
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Build the release again, elsewhere
+        id: build
+        run: cargo xtask release build out | tee -a "$GITHUB_OUTPUT"
+
+  build-a-arm64:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04-arm
+    # Not a required check (DEC-464's ten minutes bind those): one uncached three-binary musl
+    # build took about three minutes on four cores, and a two-core runner may take twice that.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Build the release
+        id: build
+        run: cargo xtask release build dist | tee -a "$GITHUB_OUTPUT"
+      - name: Build the images, signed by an ephemeral test key
+        run: cargo xtask release images dist images --test-sign
+      - name: Drill the start-up check on signed, unsigned and wrongly signed images
+        run: cargo xtask release drill dist images
+
+  build-b-arm64:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: elsewhere/src
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: elsewhere/src
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Build the release again, elsewhere
+        id: build
+        run: cargo xtask release build out | tee -a "$GITHUB_OUTPUT"
+
+  # Runs whatever the builds did, so a failed or cancelled build fails this job rather than
+  # skipping it.
+  compare:
+    needs: [build-a-amd64, build-b-amd64, build-a-arm64, build-b-arm64]
+    if: ${{ always() && !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: A build did not finish
+        if: needs.build-a-amd64.result != 'success' || needs.build-b-amd64.result != 'success' || needs.build-a-arm64.result != 'success' || needs.build-b-arm64.result != 'success'
+        run: |
+          echo "a release build of this commit did not succeed"
+          exit 1
+      - name: The two amd64 builds differ
+        if: needs.build-a-amd64.outputs.digest == '' || needs.build-a-amd64.outputs.digest != needs.build-b-amd64.outputs.digest
+        run: |
+          echo "the two amd64 release builds of this commit differ, or one printed no digest; each build's log lists its SHA256SUMS and toolchain"
+          exit 1
+      - name: The two arm64 builds differ
+        if: needs.build-a-arm64.outputs.digest == '' || needs.build-a-arm64.outputs.digest != needs.build-b-arm64.outputs.digest
+        run: |
+          echo "the two arm64 release builds of this commit differ, or one printed no digest; each build's log lists its SHA256SUMS and toolchain"
+          exit 1
+      - name: Each arch's two builds are identical
+        run: echo "each arch's two release builds of this commit printed the same SHA256SUMS digest"
