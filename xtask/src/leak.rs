@@ -33,13 +33,15 @@
 //!   workflow command, in any case and after an escaped line break too; and nothing anywhere issues
 //!   `::add-mask::`, in any case, but a reviewed line that escapes its value first (`%` to `%25`,
 //!   then CR to `%0D` and LF to `%0A`).
-//! - **L9, the secret step's shape:** in a secret job, the step that reads `secrets.` starts with no
-//!   `cargo`, `npm`, `npx` or `make`, and no step after it builds, so the secret never sits beside
-//!   a build of a change's code; and every `uses:` anywhere is pinned to a 40-character commit.
+//! - **L9, the closed world:** a step a secret reaches, from the step, its job or its workflow,
+//!   and every step after it in its job, runs only one reviewed line of [`SECRET_RUNS`] or one of
+//!   xtask's pinned `READ_ACTIONS`, sets no `shell:`, and a secret job runs no local action; and
+//!   every `uses:` anywhere is pinned to a 40-character commit.
 //! - **L12, triggers:** `pull_request_target` and `workflow_run` only in `merge.yml`, which names no
-//!   `head.sha`, `head.ref` or `head_ref`; a workflow holding an `environment:` triggers only on
-//!   `workflow_dispatch` or a push to `main`, and each job with one has an `if:` naming
-//!   `refs/heads/main`.
+//!   `head.sha`, `head.ref` or `head_ref`; no trigger anyone can raise (a comment, an issue, a
+//!   review, a discussion, a dispatch); a workflow holding an `environment:` triggers only on
+//!   `workflow_dispatch` or a push to exactly `main`, and each job with one has an `if:` that
+//!   holds `github.ref == 'refs/heads/main'` with no `||`, `!=` or negation.
 //! - **L10, Rust in xtask and `crates/*/examples`:** no `{command:?}`, `{cmd:?}` or `{child:?}`
 //!   (a command's `Debug` form prints its environment), no `dbg!`, no `env::vars()` or
 //!   `env::vars_os()` but on reviewed lines, no `#[derive(Debug)]` on a struct with a token,
@@ -84,9 +86,6 @@ const GUARDED_DIRS: [&str; 2] = [".github/workflows", ".github/scripts"];
 ///   names that look like a credential's (DEC-964).
 /// - `release.yml`'s build jobs upload `images/test-key/cosign.pub`, the public half of an
 ///   ephemeral test key made for the run's drill (E21-35), which signs nothing that ships.
-/// - `web-deploy.yml`'s deploy step runs `npx wrangler deploy`, the Worker deploy tool the earlier
-///   `npm ci --ignore-scripts` installed from the lockfile, on `main` only; `web/scripts/workers.mjs`
-///   pins the job's shape (#1700).
 /// - `main.rs`'s nextest command removes every `PROPTEST_*` variable by name, and `release.rs`'s
 ///   refusal reads the environment's names only (DEC-2027); neither reads a value.
 /// - `gitops.rs`'s `WorkloadSecrets` derives `Debug` over fields of its `Secret` type, whose
@@ -107,11 +106,6 @@ const ALLOWED: &[(&str, &str, &str)] = &[
         "L5",
         ".github/workflows/release.yml",
         "images/test-key/cosign.pub",
-    ),
-    (
-        "L9",
-        ".github/workflows/web-deploy.yml",
-        "- run: npx wrangler deploy",
     ),
     (
         "L10",
@@ -150,8 +144,30 @@ const ALLOWED: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// The programs a secret step may not start with, and no step after it may run (L9).
-const BUILDS: [&str; 4] = ["cargo", "npm", "npx", "make"];
+/// Every `run:` a step that a secret reaches may hold, by workflow and line, matched exactly, and
+/// so every `run:` a step after one may hold (L9's closed world). Each runs a binary or script
+/// built or checked out before any secret is in reach, never a build:
+/// - `infra.yml`'s two steps run the xtask binary its secret-free step built (DEC-2014, #1703);
+/// - `r2-lockcheck.yml`'s step runs the example its secret-free step built;
+/// - `release.yml`'s signing step runs the reviewed `release-sign.sh` (DEC-2024);
+/// - `web-deploy.yml`'s step runs the deploy tool its earlier `npm ci --ignore-scripts` installed
+///   from the lockfile, its job's shape pinned by `web/scripts/workers.mjs` (#1700).
+const SECRET_RUNS: &[(&str, &str)] = &[
+    (".github/workflows/infra.yml", "target/debug/xtask infra"),
+    (
+        ".github/workflows/infra.yml",
+        "target/debug/xtask infra close",
+    ),
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "target/debug/examples/r2_finding",
+    ),
+    (
+        ".github/workflows/release.yml",
+        ".github/scripts/release-sign.sh",
+    ),
+    (".github/workflows/web-deploy.yml", "npx wrangler deploy"),
+];
 
 /// Every path an `upload-artifact` step may upload, by workflow and path, matched exactly (L5):
 /// the mutation cost reports, the release build's binaries, SBOMs, images and their test-key
@@ -1299,10 +1315,9 @@ fn upload_findings(
 /// L5, L6 and L8 for a workflow: what its jobs and steps hold, by rule, line number, text and why.
 fn job_findings(path: &str, text: &str) -> Vec<(&'static str, usize, String, &'static str)> {
     let mut out = Vec::new();
+    let workflow_secret = workflow_level_secret(text);
     for job in jobs(text) {
-        if job.secret {
-            out.extend(step_shape(&job));
-        }
+        out.extend(step_shape(path, &job, workflow_secret));
         for step in step_lines(&job) {
             out.extend(upload_findings(path, &step));
             if job.secret {
@@ -1320,89 +1335,145 @@ fn job_findings(path: &str, text: &str) -> Vec<(&'static str, usize, String, &'s
     out
 }
 
-/// One step of a job: its lines, whether it reads a secret, and the programs its `run:` starts.
+/// One step of a job: its lines, and whether a secret reaches it from its own `env:`, `with:` or
+/// `run:` (`secrets.` or `secrets[`, in any case).
 struct Step {
     lines: Vec<(usize, String)>,
     secret: bool,
-    programs: Vec<String>,
 }
 
-/// The steps of a job, as [`step_lines`] finds them, each with whether it reads a secret
-/// (`secrets.` or `secrets[`, in any case) and the programs its `run:` starts.
+/// Whether a line reads a secret: `secrets.` or `secrets[`, in any case and spacing.
+fn reads_secret(line: &str) -> bool {
+    let lower = compact(line);
+    lower.contains("secrets.") || lower.contains("secrets[")
+}
+
+/// The steps of a job, as [`step_lines`] finds them, each with whether it reads a secret itself.
 fn steps(job: &Job) -> Vec<Step> {
-    let mut out: Vec<Step> = step_lines(job)
+    step_lines(job)
         .into_iter()
         .map(|lines| Step {
-            secret: lines.iter().any(|(_, raw)| {
-                let lower = compact(raw);
-                lower.contains("secrets.") || lower.contains("secrets[")
-            }),
+            secret: lines.iter().any(|(_, raw)| reads_secret(raw)),
             lines,
-            programs: Vec::new(),
         })
-        .collect();
-    for step in &mut out {
-        let mut block: Option<usize> = None;
-        let mut text: Vec<String> = Vec::new();
-        for (_, raw) in &step.lines {
-            let trimmed = raw.trim();
-            let indent = raw.len().saturating_sub(raw.trim_start().len());
-            if let Some(from) = block {
-                if indent > from {
-                    text.push(trimmed.to_owned());
-                    continue;
-                }
-                block = None;
-            }
-            let key = trimmed.trim_start_matches("- ");
-            if let Some(value) = key.strip_prefix("run:") {
-                let value = value.trim();
-                if value.starts_with('|') || value.starts_with('>') || value.is_empty() {
-                    block = Some(indent);
-                } else {
-                    text.push(value.to_owned());
-                }
-            }
-        }
-        step.programs = text
-            .iter()
-            .flat_map(|line| segments(line))
-            .map(|words| program(&words).to_owned())
-            .collect();
-    }
-    out
+        .collect()
 }
 
-/// L9 for a secret job: the secret step starts no build and no build follows it.
-fn step_shape(job: &Job) -> Vec<(&'static str, usize, String, &'static str)> {
+/// Whether a secret reaches every step of a job from outside them: a job line no step holds, its
+/// own `env:` or a reusable workflow's `with:` or `secrets:`, reads one.
+fn job_level_secret(job: &Job) -> bool {
+    let in_steps: Vec<usize> = step_lines(job)
+        .iter()
+        .flatten()
+        .map(|(number, _)| *number)
+        .collect();
+    job.lines
+        .iter()
+        .filter(|(number, _)| !in_steps.contains(number))
+        .any(|(_, raw)| !raw.trim().starts_with('#') && reads_secret(raw))
+}
+
+/// Whether the workflow's top-level `env:`, which every step of every job inherits, reads a secret.
+fn workflow_level_secret(text: &str) -> bool {
+    let mut in_env = false;
+    for raw in text.lines() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if !raw.starts_with(' ') {
+            in_env = uncommented(trimmed) == "env:" || trimmed.starts_with("env:");
+            if in_env && reads_secret(trimmed) {
+                return true;
+            }
+            continue;
+        }
+        if in_env && reads_secret(trimmed) {
+            return true;
+        }
+    }
+    false
+}
+
+/// The value of a step's `key:`, its first line's text after the key, wherever in the step it is.
+fn step_value<'a>(step: &'a Step, key: &str) -> Option<(usize, &'a str)> {
+    step.lines.iter().find_map(|(number, raw)| {
+        uncommented(raw.trim())
+            .trim_start_matches("- ")
+            .strip_prefix(key)
+            .and_then(|rest| rest.strip_prefix(':'))
+            .map(|value| (*number, value.trim()))
+    })
+}
+
+/// Why a step that a secret reaches, or that follows one in its job, is outside L9's closed world,
+/// or `None` when it is inside it. Its `run:` is one line of [`SECRET_RUNS`] for its workflow,
+/// exactly, never a block; its `uses:` is one of xtask's reviewed pins, `READ_ACTIONS`, never a
+/// local action; and it sets no `shell:`.
+fn outside_closed_world(path: &str, step: &Step) -> Option<&'static str> {
+    if step_value(step, "shell").is_some() {
+        return Some("a step a secret reaches sets no `shell:`");
+    }
+    if let Some((_, run)) = step_value(step, "run")
+        && !SECRET_RUNS.contains(&(path, run))
+    {
+        return Some(
+            "a step a secret reaches, or that follows one, runs only one line of xtask/src/leak.rs's \
+             SECRET_RUNS",
+        );
+    }
+    if let Some((_, uses)) = step_value(step, "uses") {
+        let action = uses
+            .trim_matches(['"', '\''])
+            .split_whitespace()
+            .next()
+            .unwrap_or_default();
+        let reviewed = crate::READ_ACTIONS
+            .iter()
+            .any(|(name, only)| *name == action && only.is_none_or(|only| only == path));
+        if !reviewed {
+            return Some(
+                "a step a secret reaches, or that follows one, uses only an action xtask's \
+                 READ_ACTIONS pins",
+            );
+        }
+    }
+    None
+}
+
+/// L9 for a job: every step a secret reaches, from the step, the job or the workflow, and every
+/// step after the first such step, is inside the closed world; and a secret job runs no local
+/// action, whose steps no reviewer has read here.
+fn step_shape(
+    path: &str,
+    job: &Job,
+    workflow_secret: bool,
+) -> Vec<(&'static str, usize, String, &'static str)> {
     let mut out = Vec::new();
+    let job_secret = workflow_secret || job_level_secret(job);
     let mut after_secret = false;
     for step in steps(job) {
         let Some((number, first)) = step.lines.first() else {
             continue;
         };
-        let builds = step.programs.iter().any(|p| BUILDS.contains(&p.as_str()));
-        if step.secret
-            && step
-                .programs
-                .first()
-                .is_some_and(|p| BUILDS.contains(&p.as_str()))
+        if job.secret
+            && step_value(&step, "uses")
+                .is_some_and(|(_, uses)| uses.trim_matches(['"', '\'']).starts_with("./"))
         {
             out.push((
                 "L9",
                 *number,
                 first.trim().to_owned(),
-                "the step holding a secret starts no `cargo`, `npm`, `npx` or `make`",
-            ));
-        } else if after_secret && builds {
-            out.push((
-                "L9",
-                *number,
-                first.trim().to_owned(),
-                "no build step follows the step holding a secret",
+                "a secret job runs no local action",
             ));
         }
-        after_secret |= step.secret;
+        let secret = step.secret || job_secret;
+        if (secret || after_secret)
+            && let Some(why) = outside_closed_world(path, &step)
+        {
+            out.push(("L9", *number, first.trim().to_owned(), why));
+        }
+        after_secret |= secret;
     }
     out
 }
@@ -1432,13 +1503,16 @@ fn workflow_findings(path: &str, text: &str) -> Vec<(&'static str, usize, String
             }
         }
         if indent == 0 {
-            in_on = trimmed.starts_with("on:");
+            let on = ["on:", "\"on\":", "'on':", "true:"]
+                .iter()
+                .find_map(|key| trimmed.strip_prefix(key));
+            in_on = on.is_some();
             trigger = None;
-            if let Some(inline) = trimmed.strip_prefix("on:").map(str::trim) {
+            if let Some(inline) = on.map(|rest| uncommented(rest.trim())) {
                 for name in inline
                     .trim_matches(['[', ']'])
                     .split(',')
-                    .map(str::trim)
+                    .map(|name| name.trim().trim_matches(['"', '\'']))
                     .filter(|name| !name.is_empty())
                 {
                     triggers.push((number, name.to_owned(), String::new()));
@@ -1448,8 +1522,13 @@ fn workflow_findings(path: &str, text: &str) -> Vec<(&'static str, usize, String
         }
         if in_on {
             if indent == 2 {
-                let name = trimmed.trim_end_matches(':').to_owned();
-                let name = name.split(':').next().unwrap_or_default().trim().to_owned();
+                let name = trimmed
+                    .split(':')
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .trim_matches(['"', '\''])
+                    .to_owned();
                 triggers.push((number, name.clone(), String::new()));
                 trigger = Some(name);
             } else if trigger.is_some()
@@ -1468,6 +1547,14 @@ fn workflow_findings(path: &str, text: &str) -> Vec<(&'static str, usize, String
                 *number,
                 format!("{name}:"),
                 "`pull_request_target` and `workflow_run` run only in `merge.yml`",
+            ));
+        }
+        if OUTSIDE_TRIGGERS.contains(&name.as_str()) {
+            out.push((
+                "L12",
+                *number,
+                format!("{name}:"),
+                "no workflow runs on an event anyone can raise with the default branch's secrets",
             ));
         }
     }
@@ -1498,9 +1585,7 @@ fn workflow_findings(path: &str, text: &str) -> Vec<(&'static str, usize, String
         .collect();
     if !environment_jobs.is_empty() {
         for (number, name, body) in &triggers {
-            let main_push = name == "push"
-                && (body.contains("branches: [main]") || body.contains("branches:\n- main\n"))
-                && !body.contains("tags");
+            let main_push = name == "push" && pushes_only_main(body);
             if !(name == "workflow_dispatch" || main_push) {
                 out.push((
                     "L12",
@@ -1513,8 +1598,12 @@ fn workflow_findings(path: &str, text: &str) -> Vec<(&'static str, usize, String
         }
         for job in &environment_jobs {
             let gated = job.lines.iter().any(|(_, line)| {
-                let trimmed = line.trim();
-                trimmed.starts_with("if:") && trimmed.contains("refs/heads/main")
+                let indent = line.len().saturating_sub(line.trim_start().len());
+                indent == 4
+                    && line
+                        .trim()
+                        .strip_prefix("if:")
+                        .is_some_and(|value| gates_on_main(uncommented(value.trim())))
             });
             if !gated && let Some((number, header)) = job.lines.first() {
                 out.push((
@@ -1527,6 +1616,70 @@ fn workflow_findings(path: &str, text: &str) -> Vec<(&'static str, usize, String
         }
     }
     out
+}
+
+/// The triggers that run a workflow, with the default branch's secrets, on an event anyone can
+/// raise: a comment, an issue, a review, a discussion, or an API dispatch (L12).
+const OUTSIDE_TRIGGERS: [&str; 7] = [
+    "issue_comment",
+    "issues",
+    "pull_request_review",
+    "pull_request_review_comment",
+    "discussion",
+    "discussion_comment",
+    "repository_dispatch",
+];
+
+/// Whether a `push` trigger's body names exactly one branch, `main`, in either list style, and no
+/// tags or ignored branches. A body with no `branches:` pushes on every branch.
+fn pushes_only_main(body: &str) -> bool {
+    let mut key = String::new();
+    let mut branches: Vec<String> = Vec::new();
+    for line in body.lines().map(|line| uncommented(line.trim())) {
+        if let Some(item) = line.strip_prefix("- ") {
+            if key == "branches" {
+                branches.push(item.trim().trim_matches(['"', '\'']).to_owned());
+            }
+            continue;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        key = name.trim().trim_matches(['"', '\'']).to_owned();
+        if matches!(key.as_str(), "tags" | "tags-ignore" | "branches-ignore") {
+            return false;
+        }
+        let value = value.trim();
+        if key == "branches" && !value.is_empty() {
+            branches.extend(
+                value
+                    .trim_matches(['[', ']'])
+                    .split(',')
+                    .map(|name| name.trim().trim_matches(['"', '\'']).to_owned())
+                    .filter(|name| !name.is_empty()),
+            );
+        }
+    }
+    branches == ["main"]
+}
+
+/// Whether a job's `if:` admits only `main`: `github.ref == 'refs/heads/main'` alone or joined to
+/// other terms by `&&`, with no `||`, no `!=` and no negation anywhere, so no other term can widen it.
+fn gates_on_main(value: &str) -> bool {
+    let expression = compact(value);
+    let expression = expression
+        .strip_prefix("${{")
+        .and_then(|rest| rest.strip_suffix("}}"))
+        .unwrap_or(&expression);
+    if expression.contains("||") || expression.contains('!') {
+        return false;
+    }
+    expression.split("&&").any(|term| {
+        matches!(
+            term.trim_matches(['(', ')']),
+            "github.ref=='refs/heads/main'" | "'refs/heads/main'==github.ref"
+        )
+    })
 }
 
 /// A `uses:` value pinned to a 40-character lowercase hex commit.
@@ -2087,32 +2240,74 @@ mod tests {
         }
     }
 
-    /// L9: in a secret job, the secret step starts no build, and no build follows it; a build
-    /// before it, or in a job without a secret, passes.
+    /// L9's closed world: a step a secret reaches, from the step, its job or its workflow, and
+    /// every step after it, runs only one `SECRET_RUNS` line or one `READ_ACTIONS` pin; a build
+    /// before it passes.
     #[test]
-    fn a_secret_step_starts_no_build_and_none_follows_it() {
-        let job = |steps: &str| {
+    fn a_secret_step_runs_only_a_reviewed_line() {
+        let path = ".github/workflows/r2-lockcheck.yml";
+        let flow = |env: &str, job_env: &str, steps: &str| {
             format!(
-                "on: workflow_dispatch\njobs:\n  a:\n    if: github.ref == 'refs/heads/main'\n\
-                 \x20   steps:\n{steps}"
+                "on: workflow_dispatch\n{env}jobs:\n  a:\n    if: github.ref == 'refs/heads/main'\n\
+                 {job_env}    steps:\n{steps}"
             )
         };
+        let checkout = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n";
         let build = "      - run: cargo build --locked\n";
-        let run = "      - run: target/debug/x\n        env:\n          T: ${{ secrets.T }}\n";
-        let built_in_secret =
-            "      - run: cargo run --locked\n        env:\n          T: ${{ secrets.T }}\n";
-        assert_eq!(
-            rules(WORKFLOW, &job(&format!("{build}{run}"))),
-            Vec::<&str>::new()
-        );
-        assert_eq!(rules(WORKFLOW, &job(built_in_secret)), ["L9"]);
-        assert_eq!(rules(WORKFLOW, &job(&format!("{run}{build}"))), ["L9"]);
-        let block = "      - name: x\n        env:\n          T: ${{ secrets.T }}\n        run: |\n          make deploy\n";
-        assert_eq!(rules(WORKFLOW, &job(block)), ["L9"]);
+        let run = "      - run: target/debug/examples/r2_finding\n        env:\n          T: ${{ secrets.T }}\n";
+        for steps in [format!("{checkout}{build}{run}"), run.to_owned()] {
+            assert_eq!(one(path, &flow("", "", &steps)), Vec::new(), "{steps}");
+        }
+        let job_env = "    env:\n      T: ${{ secrets.T }}\n";
+        let workflow_env = "env:\n  T: ${{ secrets.T }}\n";
+        assert_eq!(rules(path, &flow("", job_env, build)), ["L9"]);
+        assert_eq!(rules(path, &flow(workflow_env, "", build)), ["L9"]);
+        assert_eq!(rules(path, &flow("", job_env, run)), Vec::<&str>::new());
+        assert_eq!(rules(WORKFLOW, &flow("", "", run)), ["L9"]);
+        for secret_step in L9_SECRET_STEPS {
+            let steps = format!("{secret_step}        env:\n          T: ${{{{ secrets.T }}}}\n");
+            assert!(
+                rules(path, &flow("", "", &steps)).contains(&"L9"),
+                "{secret_step}"
+            );
+        }
+        for later in L9_LATER_STEPS {
+            assert!(
+                rules(path, &flow("", "", &format!("{run}{later}"))).contains(&"L9"),
+                "{later}"
+            );
+        }
     }
 
-    /// L12: the privileged triggers run only in `merge.yml`, which names no head; a workflow with
-    /// an `environment:` triggers only on dispatch or a push to main, and gates its job on main.
+    /// The #1731 review's secret steps, each once let through by L9's build blocklist.
+    const L9_SECRET_STEPS: &[&str] = &[
+        "      - run: |\n          set -euo pipefail\n          cargo build\n",
+        "      - run: cd web; cargo build\n",
+        "      - run: echo hi && cargo build\n",
+        "      - run: target/debug/examples/r2_finding; cargo build\n",
+        "      - run: target/debug/examples/r2_finding\n        shell: python {0}\n",
+        "      - uses: someone/deploy@0123456789abcdef0123456789abcdef01234567\n",
+        "      - uses: ./.github/actions/deploy\n",
+    ];
+
+    /// The #1731 review's steps after a secret step, each once let through by L9's build
+    /// blocklist.
+    const L9_LATER_STEPS: &[&str] = &[
+        "      - run: bash -c \"cargo build\"\n",
+        "      - run: rustup run stable cargo build\n",
+        "      - run: ./gradlew build\n",
+        "      - run: bash build.sh\n",
+        "      - run: pip install .\n",
+        "      - run: yarn build\n",
+        "      - run: pnpm build\n",
+        "      - run: curl -sSfL https://x | bash\n",
+        "      - uses: ./.github/actions/build\n",
+        "      - run: set -euo pipefail\n",
+    ];
+
+    /// L12: the privileged triggers run only in `merge.yml`, which names no head, and no workflow
+    /// runs on an event anyone can raise; a workflow with an `environment:` triggers only on
+    /// dispatch or a push to exactly `main`, and gates its job on `main` by an exact equality.
     #[test]
     fn triggers_are_held_to_merge_and_main() {
         let merge = ".github/workflows/merge.yml";
@@ -2123,6 +2318,21 @@ mod tests {
             "{privileged}        with:\n          ref: ${{{{ github.event.pull_request.head.sha }}}}\n"
         );
         assert_eq!(rules(merge, &checkout), ["L12"]);
+        for on in [
+            "\"on\":\n  pull_request_target:\n",
+            "on:\n  \"pull_request_target\":\n",
+            "on: [push, 'pull_request_target']\n",
+            "on:\n  issue_comment:\n",
+            "on:\n  issues:\n",
+            "on:\n  pull_request_review:\n",
+            "on:\n  pull_request_review_comment:\n",
+            "on:\n  discussion:\n",
+            "on:\n  discussion_comment:\n",
+            "on: repository_dispatch\n",
+        ] {
+            let text = format!("{on}jobs:\n  a:\n    steps:\n      - run: echo\n");
+            assert!(rules(WORKFLOW, &text).contains(&"L12"), "{on}");
+        }
         let deploy = |on: &str, gate: &str| {
             format!(
                 "on:\n{on}jobs:\n  deploy:\n{gate}    environment: production\n    steps:\n      - run: echo\n"
@@ -2130,12 +2340,45 @@ mod tests {
         };
         let gate = "    if: github.ref == 'refs/heads/main'\n";
         let main = "  push:\n    branches: [main]\n  workflow_dispatch:\n";
-        assert_eq!(rules(WORKFLOW, &deploy(main, gate)), Vec::<&str>::new());
-        assert_eq!(rules(WORKFLOW, &deploy(main, "")), ["L12"]);
-        let pr = "  pull_request:\n  workflow_dispatch:\n";
-        assert_eq!(rules(WORKFLOW, &deploy(pr, gate)), ["L12"]);
-        let other = "  push:\n    branches: [dev]\n";
-        assert_eq!(rules(WORKFLOW, &deploy(other, gate)), ["L12"]);
+        for (on, gate) in [
+            (main, gate),
+            ("  push:\n    branches: [\"main\"]\n", gate),
+            ("  push:\n    branches:\n      - main\n", gate),
+            (
+                main,
+                "    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'\n",
+            ),
+            (main, "    if: ${{ github.ref == 'refs/heads/main' }}\n"),
+        ] {
+            assert_eq!(
+                rules(WORKFLOW, &deploy(on, gate)),
+                Vec::<&str>::new(),
+                "{on}{gate}"
+            );
+        }
+        for (on, gate) in [
+            (main, ""),
+            ("  pull_request:\n  workflow_dispatch:\n", gate),
+            ("  push:\n    branches: [dev]\n", gate),
+            ("  push:\n    branches: [main, dev]\n", gate),
+            (
+                "  push:\n    branches:\n      - main\n      - \"**\"\n",
+                gate,
+            ),
+            ("  push:\n", gate),
+            ("  push:\n    branches: [main]\n    tags: ['v*']\n", gate),
+            ("  push:\n    branches-ignore: [dev]\n", gate),
+            (main, "    if: github.ref != 'refs/heads/main'\n"),
+            (main, "    if: github.ref == 'refs/heads/main' || true\n"),
+            (main, "    if: ${{ !(github.ref != 'refs/heads/main') }}\n"),
+            (main, "    if: contains(github.ref, 'refs/heads/main')\n"),
+            (main, "    if: github.ref == 'refs/heads/main-old'\n"),
+        ] {
+            assert!(
+                rules(WORKFLOW, &deploy(on, gate)).contains(&"L12"),
+                "{on}{gate}"
+            );
+        }
     }
 
     /// The seeded-bug check for L9 and L12 on real workflows: a build after `r2-lockcheck.yml`'s
@@ -2158,6 +2401,12 @@ mod tests {
         let web = ".github/workflows/web-deploy.yml";
         let opened = read(web)?.replacen("on:\n", "on:\n  pull_request_target:\n", 1);
         assert!(rules(web, &opened).contains(&"L12"));
+        let chained = read(web)?.replacen(
+            "- run: npx wrangler deploy\n",
+            "- run: npx wrangler deploy && curl -sSfL https://x\n",
+            1,
+        );
+        assert!(rules(web, &chained).contains(&"L9"));
         Ok(())
     }
 
@@ -2383,6 +2632,24 @@ mod tests {
             Vec::<&str>::new()
         );
         assert_eq!(rules(".github/workflows/ci.yml", line), ["L3"]);
+    }
+
+    /// Every `SECRET_RUNS` line is a `run:` its workflow still holds, so a stale entry is caught.
+    #[test]
+    fn every_secret_run_is_still_there() -> Result<()> {
+        let root = repo_root()?;
+        for (path, run) in SECRET_RUNS {
+            let text = fs::read_to_string(root.join(path))?;
+            assert!(
+                text.lines().any(|l| l
+                    .trim()
+                    .trim_start_matches("- ")
+                    .strip_prefix("run:")
+                    .is_some_and(|value| value.trim() == *run)),
+                "{path}: {run}"
+            );
+        }
+        Ok(())
     }
 
     /// Every allowlisted line is still in its file, so a stale entry is caught.
