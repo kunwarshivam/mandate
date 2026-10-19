@@ -2,6 +2,8 @@
 //! bundle, the deployment's mandate document, and the workspace's control and agent streams. A
 //! fact it cannot read gives the pass no context; it never fills one in (DEC-2210 item 4).
 
+use std::fmt;
+
 use mandate_canon::Value;
 use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
 use mandate_research::MandateEnvelope;
@@ -35,6 +37,19 @@ pub enum SourceError {
     /// The member at this path is missing or out of its range.
     Unreadable { member: &'static str },
 }
+
+impl fmt::Display for SourceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unimplemented => f.write_str("the research envelope read is not implemented"),
+            Self::Unreadable { member } => {
+                write!(f, "the mandate document's `{member}` cannot be read")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SourceError {}
 
 /// Who the source reads for.
 #[derive(Debug, Clone, PartialEq, Eq)]
