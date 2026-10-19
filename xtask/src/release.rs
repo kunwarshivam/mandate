@@ -1800,6 +1800,29 @@ mod tests {
             let holds = body.contains("secrets.") || body.contains("environment:");
             assert_eq!(holds, name == "release-signing", "{name}");
         }
+        let workflows = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows");
+        for entry in fs::read_dir(&workflows)? {
+            let path = entry?.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            if name == "release.yml" {
+                continue;
+            }
+            let text = fs::read_to_string(&path)?;
+            assert!(
+                !text.contains("RELEASE_SIGNING") && !text.contains("release-signing"),
+                "{name} names the release key or its environment"
+            );
+            if name == "release-check.yml" {
+                assert!(
+                    !text.contains("secrets.") && !text.contains("environment:"),
+                    "release-check.yml, which a pull request runs, holds no secret"
+                );
+            }
+        }
         for name in [
             "release-signing-build",
             "release-signing",

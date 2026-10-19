@@ -48,10 +48,6 @@ const GUARDED_DIRS: [&str; 2] = [".github/workflows", ".github/scripts"];
 ///   names that look like a credential's (DEC-964).
 /// - `release.yml`'s build jobs upload `images/test-key/cosign.pub`, the public half of an
 ///   ephemeral test key made for the run's drill (E21-35), which signs nothing that ships.
-/// - `release.yml` builds on a pull request that changes the release build, and its one
-///   `environment:` job, `release-signing`, runs only on `workflow_dispatch` from `main` (its
-///   `if:`), with the environment's own deployment rule on top; a pull request's run never reaches
-///   it (DEC-2024).
 /// - `web-deploy.yml`'s deploy step runs `npx wrangler deploy`, the Worker deploy tool the earlier
 ///   `npm ci --ignore-scripts` installed from the lockfile, on `main` only; `web/scripts/workers.mjs`
 ///   pins the job's shape (#1700).
@@ -68,7 +64,6 @@ const ALLOWED: &[(&str, &str, &str)] = &[
         ".github/workflows/release.yml",
         "images/test-key/cosign.pub",
     ),
-    ("L12", ".github/workflows/release.yml", "pull_request:"),
     (
         "L9",
         ".github/workflows/web-deploy.yml",
