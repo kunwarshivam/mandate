@@ -46,6 +46,7 @@ pub mod record;
 pub mod registry;
 pub mod schema;
 pub mod tools;
+pub mod wire;
 
 pub use call::{CallRequest, Gateway, RateCaps, RequestError, Settings};
 pub use kinds::{KeyOwner, Outcome, Purpose};
