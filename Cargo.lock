@@ -1691,6 +1691,7 @@ dependencies = [
  "mandate-artifacts-fs",
  "mandate-authn",
  "mandate-canon",
+ "mandate-connections",
  "mandate-identity",
  "mandate-identity-seal",
  "mandate-identity-testkit",
