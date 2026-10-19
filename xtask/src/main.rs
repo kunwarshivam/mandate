@@ -1175,14 +1175,33 @@ const INFRA_CLOSE_SECRET: &str = "DIGITAL_OCEAN_API_KEY";
 /// The secrets that step reads, each from the environment `infra-<environment>` the founder
 /// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Spaces key is
 /// minted per run, never stored (DEC-2030 item 4). The Cloudflare token goes to OpenTofu as a
-/// variable under a `CF_` name, since `web/scripts/workers.mjs`
-/// keeps every `CLOUDFLARE_` name to `web-deploy.yml`'s deploy step (DEC-1005 item 2).
+/// variable under a `CF_` name, since `web/scripts/workers.mjs` keeps every `CLOUDFLARE_` name
+/// to `web-deploy.yml`'s deploy step (DEC-1005 item 2); the account id is read from Cloudflare,
+/// never configured (DEC-2030 item 1). Production's Access emails are a secret, since GitHub
+/// prints a variable in a step's environment in the public log (DEC-2030 item 2).
 const INFRA_SECRETS: [&str; 4] = [
     "DIGITAL_OCEAN_API_KEY",
     "CF_INFRA_API_TOKEN",
-    "ACCESS_ALLOWED_EMAILS",
     "TOFU_STATE_PASSPHRASE",
+    "ACCESS_ALLOWED_EMAILS",
 ];
+/// The list inputs `infra.yml` hands OpenTofu as JSON, which `infra` leaves out of `tofu`'s
+/// environment when blank or empty, so a root with a default takes it and a root without one
+/// fails on the missing variable by name, never on `""`, which is no list (DEC-2030 item 3).
+const INFRA_LIST_INPUTS: [&str; 2] = [
+    "TF_VAR_kube_api_allowed_addresses",
+    "TF_VAR_access_allowed_emails",
+];
+
+/// Whether `value`, a JSON list as `infra.yml` hands it on, names nothing: unset, blank, or an
+/// empty list.
+fn names_nothing(value: Option<&str>) -> bool {
+    value.is_none_or(|value| {
+        value
+            .chars()
+            .all(|c| c.is_whitespace() || c == '[' || c == ']')
+    })
+}
 /// The environment variables `infra.yml` hands `cargo xtask infra`: which environment and
 /// whether to apply, from the dispatch's choice inputs.
 const INFRA_ENVIRONMENT_ENV: &str = "MANDATE_INFRA_ENVIRONMENT";
@@ -1311,8 +1330,6 @@ fn run_tofu(
     key: Option<&infra_preflight::SpacesKey>,
     plan_file: &Path,
 ) -> Result<()> {
-    let cidrs = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
-    let emails = env::var(infra_preflight::EMAILS_ENV).ok();
     let tofu = |args: &[String]| {
         let mut command = Command::new("tofu");
         command.args(args).env("TF_IN_AUTOMATION", "1");
@@ -1324,11 +1341,10 @@ fn run_tofu(
                 command.env(name, &key.secret_key);
             }
         }
-        if infra_preflight::no_cidrs(cidrs.as_deref()) {
-            command.env_remove(infra_preflight::KUBE_CIDRS_ENV);
-        }
-        if infra_preflight::no_cidrs(emails.as_deref()) {
-            command.env_remove(infra_preflight::EMAILS_ENV);
+        for name in INFRA_LIST_INPUTS {
+            if names_nothing(env::var(name).ok().as_deref()) {
+                command.env_remove(name);
+            }
         }
         command
     };
@@ -16136,6 +16152,28 @@ mod tests {
             "a line reviewed for web-deploy.yml is not allowed in ci.yml"
         );
         Ok(())
+    }
+
+    /// DEC-2030 item 3: a blank or empty list input is left out of `tofu`'s environment, so
+    /// staging's root takes its empty default rather than failing on `""`; a named list is kept.
+    #[test]
+    fn empty_list_inputs_are_left_out() {
+        for value in [None, Some(""), Some("  "), Some("[]"), Some(" [ ] ")] {
+            assert!(crate::names_nothing(value), "{value:?} names nothing");
+        }
+        for value in ["[\"203.0.113.7/32\"]", "[\"you@example.com\"]"] {
+            assert!(
+                !crate::names_nothing(Some(value)),
+                "{value} names something"
+            );
+        }
+        assert_eq!(
+            crate::INFRA_LIST_INPUTS,
+            [
+                "TF_VAR_kube_api_allowed_addresses",
+                "TF_VAR_access_allowed_emails"
+            ]
+        );
     }
 
     /// E21-56 (DEC-2014, DEC-2030): `preflight` runs no `tofu` command; `plan` inits and saves a
