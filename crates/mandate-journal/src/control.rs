@@ -108,6 +108,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || crate::backtest_records::CONTROL.contains(&event_type)
                 || crate::membership::CONTROL.contains(&event_type)
                 || crate::deployment::CONTROL.contains(&event_type)
+                || crate::acknowledgments::RECORDS.contains(&event_type)
         }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
@@ -117,6 +118,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || event_type == ACCOUNT_STATE
                 || RISK_STATE.contains(&event_type)
                 || crate::risk_limits::ACCOUNT.contains(&event_type)
+                || crate::acknowledgments::RECORDS.contains(&event_type)
                 || EXECUTOR.contains(&event_type)
         }
         StreamType::Scheduler | StreamType::Notice | StreamType::Meter => false,
@@ -142,6 +144,7 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::invalidation::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::runs::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::risk_limits::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::acknowledgments::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
             _ => schema(event_type, schema_version),
@@ -202,6 +205,7 @@ pub(crate) fn payload(
     crate::notices::rules(event_type, &payload, causation_id)?;
     crate::membership::rules(event_type, &payload, actor, event_time)?;
     crate::risk_limits::rules(event_type, &payload, causation_id)?;
+    crate::acknowledgments::rules(event_type, &payload)?;
     let p = Payload(&payload);
     match event_type {
         "MandateVersionCreated" => {
@@ -406,7 +410,8 @@ pub(crate) fn subject_and_copy(
         "payload.command",
     )?;
     ensure(
-        p.text("reason") != NOT_INDEPENDENT || stream.stream_type() == StreamType::Account,
+        !ACCOUNT_ONLY_REASONS.contains(&p.text("reason"))
+            || stream.stream_type() == StreamType::Account,
         InvalidReason::StreamMismatch,
         "payload.reason",
     )?;
@@ -420,6 +425,20 @@ pub(crate) fn subject_and_copy(
 /// The refusal only the executor writes, of an acknowledgment that lifts a fired tripwire under
 /// `independent_approval_required` (rule 28; mandate spec §5.8, §6.7; DEC-351 items 5 and 6).
 const NOT_INDEPENDENT: &str = "not_independent";
+
+/// The executor's refusals of an acknowledgment copy for its trigger or its request (§9.28 checks
+/// 1, 2 and 4; DEC-2509).
+pub(crate) const ACKNOWLEDGMENT_REASONS: [&str; 3] =
+    ["trigger_unknown", "trigger_superseded", "request_invalid"];
+
+/// Rule 28: the reasons only an acknowledgment, on the account stream, is refused for. A resume,
+/// Stop, or lift is refused only for its step-up.
+const ACCOUNT_ONLY_REASONS: [&str; 4] = [
+    NOT_INDEPENDENT,
+    ACKNOWLEDGMENT_REASONS[0],
+    ACKNOWLEDGMENT_REASONS[1],
+    ACKNOWLEDGMENT_REASONS[2],
+];
 
 /// `ConfigSnapshotRegistered`'s kind for a signal model.
 const MODEL_KIND: &str = "model_version";
@@ -1364,6 +1383,9 @@ static OWNER_COMMAND_REFUSED: Ty = Ty::Record(&[
             "step_up_reused",
             "step_up_method",
             NOT_INDEPENDENT,
+            ACKNOWLEDGMENT_REASONS[0],
+            ACKNOWLEDGMENT_REASONS[1],
+            ACKNOWLEDGMENT_REASONS[2],
         ]),
     ),
     ("effective_at", Ty::Timestamp),

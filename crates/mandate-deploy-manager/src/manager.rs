@@ -8,7 +8,9 @@ use mandate_process::{CRASH_LOOP_WINDOW, crash_loop};
 use mandate_time::UtcNanos;
 
 use crate::control::{Cause, Fact, Process, Scope, Slot};
-use crate::orchestrator::{CRASH_LOOP, DEPLOYMENT_UNREAD, Effect, Instance};
+use crate::orchestrator::{
+    CRASH_LOOP, DEPLOYMENT_UNCONNECTED, DEPLOYMENT_UNREAD, Effect, Instance,
+};
 use crate::record::Record;
 
 /// The first restart's back-off; each restart counted in the crash-loop window doubles it.
@@ -77,6 +79,9 @@ pub struct Manager {
     /// The version-1 deployments of agents not stopped and never read, which the manager cannot
     /// run, and whether it has reported each (DEC-1173 item 3).
     unread: BTreeMap<String, bool>,
+    /// The version-2 deployments rule 201 refused, of agents not stopped and never run, and
+    /// whether this manager has reported each (DEC-2038).
+    unconnected: BTreeMap<String, bool>,
     slots: BTreeMap<Slot, SlotState>,
 }
 
@@ -118,11 +123,15 @@ impl Manager {
                     .contains(connection)
                     .then(|| self.connections.get(connection).cloned())
                     .flatten();
+                let known = self.agents.contains_key(agent) || self.stopped.contains(agent);
+                if account.is_none() && !known {
+                    self.unconnected.entry(agent.clone()).or_insert(false);
+                }
                 if let Some(account) = account
-                    && !self.agents.contains_key(agent)
-                    && !self.stopped.contains(agent)
+                    && !known
                 {
                     self.unread.remove(agent);
+                    self.unconnected.remove(agent);
                     let executor = Slot::executor(&account);
                     if !self.desired(&executor) {
                         self.resume(&executor);
@@ -141,6 +150,7 @@ impl Manager {
             Fact::Stopped { agent } => {
                 self.stopped.insert(agent.clone());
                 self.unread.remove(agent);
+                self.unconnected.remove(agent);
                 let account = self.agents.get_mut(agent).map(|known| {
                     known.stopped = true;
                     known.account.clone()
@@ -266,8 +276,8 @@ impl Manager {
         self.slots.get(slot).is_some_and(|state| state.looped)
     }
 
-    /// One operator alert for each unread deployment not yet reported, then at most one step per
-    /// slot, from what the orchestrator lists at `now`. The alerts come first: raising one never
+    /// One operator alert for each unread deployment, and each one rule 201 refused, not yet
+    /// reported, then at most one step per slot, from what the orchestrator lists at `now`. The alerts come first: raising one never
     /// fails, so a journal append that halts the pass after them cannot lose one that is already
     /// marked reported. A slot with a live instance is never started again and, while desired,
     /// never stopped: neither readiness nor a kill switch stops a process.
@@ -276,6 +286,10 @@ impl Manager {
         for reported in self.unread.values_mut().filter(|reported| !**reported) {
             *reported = true;
             decisions.push(Decision::Retry(Effect::Alert(DEPLOYMENT_UNREAD)));
+        }
+        for reported in self.unconnected.values_mut().filter(|reported| !**reported) {
+            *reported = true;
+            decisions.push(Decision::Retry(Effect::Alert(DEPLOYMENT_UNCONNECTED)));
         }
         let slots: Vec<Slot> = self.slots.keys().cloned().collect();
         decisions.extend(slots.into_iter().filter_map(|slot| {

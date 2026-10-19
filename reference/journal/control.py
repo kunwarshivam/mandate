@@ -1254,9 +1254,12 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "ProtectionChanged", 1): PROTECTION_CHANGED,
     ("acct", "OwnerConfirmationReceived", 1): rec(
         ("intent_id", ULID),
+        ("instrument_id", STR),
+        ("qty", DEC),
         ("bid", DEC),
         ("bid_size", DEC),
         ("floor", DEC),
+        ("expires_at", INT),
         ("copied_from", ULID),
         ("risk_clock", RISK_CLOCK),
     ),
@@ -1704,13 +1707,14 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         wrong = next((m for m, ok in clauses if not ok), None)
         rule("245", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
     if event_type == "OwnerConfirmationReceived":
-        prices = ["bid", "bid_size", "floor"]
+        prices = ["qty", "bid", "bid_size", "floor", "expires_at"]
         if "order.rule_247_floor_first" in skip:
             prices.reverse()
         zero_allowed = "boundary.rule_247_zero" in skip
 
         def positive(member: str) -> bool:
-            value = normalize_decimal(p[member])
+            raw = p[member]
+            value = Decimal(raw) if isinstance(raw, int) else normalize_decimal(raw)
             if f"rule.247.{member}" in skip or value is None:
                 return True
             return Decimal(value) >= 0 if zero_allowed else Decimal(value) > 0

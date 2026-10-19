@@ -44,7 +44,8 @@ FLOOR = "150"
 INTENT_DRAFT = "intent"
 CONFIRMATION = "confirmation"
 EVENT_IDS = {INTENT_DRAFT: "01JAB1N0A000000000000000E1", CONFIRMATION: "01JAB1N0A000000000000000E2"}
-PRICES = ("bid", "bid_size", "floor")
+PRICES = ("qty", "bid", "bid_size", "floor")
+EXPIRES_AT = 1_790_089_200
 RULE_247 = "rule 247"
 RULE_248 = "rule 248"
 
@@ -85,9 +86,12 @@ def base_drafts() -> dict[str, dict]:
     }
     confirmation = {
         "intent_id": INTENT,
+        "instrument_id": "AAPL",
+        "qty": "10",
         "bid": "152.10",
         "bid_size": "300",
         "floor": FLOOR,
+        "expires_at": EXPIRES_AT,
         "copied_from": REQUEST,
         "risk_clock": RISK_CLOCK,
     }
@@ -112,6 +116,8 @@ def invalid_drafts() -> list[dict]:
         for member in PRICES
     ]
     out += [
+        bad("zero_expires_at", f"{RULE_247}: `expires_at` is positive", [change("payload.expires_at", 0)], "schema", "payload.expires_at"),
+        bad("negative_expires_at", f"{RULE_247}: `expires_at` is positive", [change("payload.expires_at", -1)], "schema", "payload.expires_at"),
         bad(
             "zero_bid_and_floor",
             f"{RULE_247}: reported at the first that fails, `bid` before `floor`",
@@ -164,6 +170,10 @@ def batch_failure(drafts: list[dict], skip: frozenset[str] = frozenset()) -> dic
         at = drafts.index(before)
         if q["intent_id"] != p["intent_id"] and "batch.248.intent" not in skip:
             return {"index": i, "reason": "schema", "path": "payload.intent_id"}
+        if q["instrument_id"] != p["instrument_id"] and "batch.248.instrument" not in skip:
+            return {"index": i, "reason": "schema", "path": "payload.instrument_id"}
+        if Decimal(q["qty"]) != Decimal(p["qty"]) and "batch.248.qty" not in skip:
+            return {"index": i, "reason": "schema", "path": "payload.qty"}
         if q["purpose"] != "owner_exit" and "batch.248.purpose" not in skip:
             return {"index": at, "reason": "schema", "path": "payload.purpose"}
         limit = q["limit_price"]
@@ -200,6 +210,9 @@ def batch_cases() -> list[dict]:
     other = with_id(intent, "01JAB1N0A000000000000000E3", [change("payload.intent_id", OTHER_INTENT)])
     second = with_id(confirmation, "01JAB1N0A000000000000000E4", [])
     risk_exit = with_id(intent, intent["event_id"], [change("payload.purpose", "risk_exit")])
+    larger = with_id(intent, intent["event_id"], [change("payload.qty", "100")])
+    elsewhere = with_id(intent, intent["event_id"], [change("payload.instrument_id", "MSFT")])
+    same_qty = with_id(intent, intent["event_id"], [change("payload.qty", "10.0")])
     return [
         case("the_intent_then_its_confirmation", f"{RULE_248}: one batch, the intent first", [intent, confirmation], ok),
         case("a_limit_at_the_floor", f"{RULE_248}: a limit not below the floor", [limited(FLOOR), confirmation], ok),
@@ -211,6 +224,9 @@ def batch_cases() -> list[dict]:
         case("twice", f"{RULE_248}: one confirmation per intent", [intent, confirmation, second], at(2, "event_type")),
         case("after_another_intent", f"{RULE_248}: immediately after its own intent", [intent, other, confirmation], at(2, "payload.intent_id")),
         case("of_another_intent", f"{RULE_248}: the same intent", [other, confirmation], at(1, "payload.intent_id")),
+        case("of_another_instrument", f"{RULE_248}: the instrument the owner confirmed", [elsewhere, confirmation], at(1, "payload.instrument_id")),
+        case("a_larger_intent", f"{RULE_248}: never more than the quantity confirmed", [larger, confirmation], at(1, "payload.qty")),
+        case("the_same_quantity_written_otherwise", f"{RULE_248}: quantities compared as decimals", [same_qty, confirmation], ok),
         case("of_a_risk_exit", f"{RULE_248}: only an owner's exit is confirmed", [risk_exit, confirmation], at(0, "payload.purpose")),
         case("a_limit_below_the_floor", f"{RULE_248}: never a limit below the floor", [limited("149.99"), confirmation], at(0, "payload.limit_price")),
         case("a_bad_confirmation", "each draft's own rules first", [intent, with_id(confirmation, confirmation["event_id"], [change("payload.floor", "0")])], at(1, "payload.floor")),
@@ -241,9 +257,9 @@ def oracle_247(draft: dict) -> str | None:
     """Rule 247 from the members alone: the first price that is not positive, or None."""
     if draft["event_type"] != "OwnerConfirmationReceived":
         return None
-    for member in PRICES:
+    for member in (*PRICES, "expires_at"):
         value = draft["payload"].get(member)
-        if isinstance(value, str) and Decimal(value) <= 0:
+        if isinstance(value, (str, int)) and not isinstance(value, bool) and Decimal(value) <= 0:
             return f"payload.{member}"
     return None
 
@@ -258,6 +274,10 @@ def oracle_248(drafts: list[dict]) -> tuple[int, str] | None:
             j, before = last
             if before["payload"]["intent_id"] != draft["payload"]["intent_id"]:
                 return (i, "payload.intent_id")
+            for member in ("instrument_id", "qty"):
+                mine, theirs = draft["payload"][member], before["payload"][member]
+                if (Decimal(mine) != Decimal(theirs)) if member == "qty" else mine != theirs:
+                    return (i, f"payload.{member}")
             if before["payload"]["purpose"] != "owner_exit":
                 return (j, "payload.purpose")
             limit = before["payload"]["limit_price"]
@@ -316,6 +336,8 @@ VALIDATOR_MUTANTS = (
     "rule.247.bid",
     "rule.247.bid_size",
     "rule.247.floor",
+    "rule.247.qty",
+    "rule.247.expires_at",
     "boundary.rule_247_zero",
     "order.rule_247_floor_first",
 )
@@ -323,6 +345,8 @@ BATCH_MUTANTS = (
     "batch.248.present",
     "batch.248.adjacent",
     "batch.248.intent",
+    "batch.248.instrument",
+    "batch.248.qty",
     "batch.248.purpose",
     "batch.248.limit",
     "boundary.batch_248_equal",
