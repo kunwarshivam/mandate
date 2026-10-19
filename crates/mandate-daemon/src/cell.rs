@@ -11,6 +11,7 @@ use std::rc::Rc;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Key, Object, Value};
 use mandate_gateway::meter::SharedMeter;
+use mandate_gateway::money::Usd6;
 use mandate_journal::{Environment, StreamId};
 use mandate_runtime::{EventDraft, ResearchConfig};
 use mandate_time::UtcNanos;
@@ -124,6 +125,22 @@ pub fn opt_in(dir: &Path, deployment: &CellDeployment) -> Result<OptIn, CellErro
         bundle: Bundle::load(dir).map_err(CellError::Bundle)?,
         deployment: deployment.clone(),
     })
+}
+
+/// The agent's daily research cap (DEC-2254 items 1 to 3): the mandate document's
+/// `behavior.research.cost_cap_usd_per_day` tightened by the research profile, the value and overlay
+/// the source hands the core, and zero for a mandate with no `behavior.research`.
+///
+/// # Errors
+/// [`CellError::Mandate`] with `mandate_document_unavailable` when the document gives no cap the
+/// gateway can hold.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn research_daily_cap(document: &Value) -> Result<Usd6, CellError> {
+    let _ = document;
+    todo!()
 }
 
 /// The research `opted` asks for, reading the streams through `rows` and the mandate documents and
