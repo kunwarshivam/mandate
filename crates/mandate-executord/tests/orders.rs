@@ -320,11 +320,10 @@ fn an_owner_exit_at_the_market_goes_as_a_limit_at_its_confirmed_floor() -> Resul
     Ok(())
 }
 
-/// An owner's exit at the market with no confirmed floor is neither refused nor handed: it raises
-/// one opaque alert naming the intent, stops nothing, and the exit behind it still goes (DEC-2033
-/// item 4, `AGENTS.md` rule 13).
+/// An owner's exit at the market with no confirmed floor is handed with no limit, received as a
+/// market order, and the exit behind it still goes (DEC-2037 item 7, `AGENTS.md` rule 13).
 #[test]
-fn an_owner_exit_at_the_market_without_a_floor_alerts_and_stops_nothing() -> Result<(), Error> {
+fn an_owner_exit_at_the_market_without_a_floor_is_handed_with_no_limit() -> Result<(), Error> {
     let journal = deployed()?;
     owner_exit(&journal, AGENT, OWNER, None)?;
     propose_owner_market_exit(&journal, AGENT, OTHER_EXIT, OWNER)?;
@@ -332,20 +331,24 @@ fn an_owner_exit_at_the_market_without_a_floor_alerts_and_stops_nothing() -> Res
     let broker = Paper::new(&journal);
     held(&broker)?;
     let mut process = start(&journal, &broker)?;
-    let first = process.step(at(NOON)?);
-    let second = process.step(at(NOON)?);
+    process.step(at(NOON)?);
+    process.step(at(NOON)?);
     assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
-    assert_eq!(journal.received(), [EXIT]);
-    assert!(journal.payloads("GateDecided").len() <= 1);
-    let unpriced = |alerts: &[Alert]| {
-        alerts
-            .iter()
-            .filter(|alert| {
-                alert.key == "owner_exit_unpriced" && alert.subject.as_deref() == Some(OTHER_EXIT)
-            })
-            .count()
-    };
-    assert_eq!((unpriced(&first), unpriced(&second)), (1, 0));
+    assert_eq!(journal.received(), [OTHER_EXIT, EXIT]);
+    let received: Vec<_> = journal
+        .payloads("IntentReceived")
+        .iter()
+        .map(|payload| {
+            (
+                payload.get("type").cloned(),
+                payload.get("limit_price").cloned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        received[0],
+        (Some(Value::Str("market".to_owned())), Some(Value::Null))
+    );
     Ok(())
 }
 
@@ -375,11 +378,11 @@ fn an_exit_goes_under_its_agents_deployed_version_when_the_port_knows_none() -> 
     Ok(())
 }
 
-/// A risk or discretionary exit at the market is neither refused nor handed: it raises one opaque
-/// `exit_unpriced` alert naming the intent, stops nothing, and the exit behind it still goes, on
-/// this pass and after a restart (`AGENTS.md` rule 13; DEC-2033 item 4).
+/// A risk or discretionary exit at the market is handed with no limit, received as a market
+/// order, and the exit behind it still goes, on this pass and after a restart, which hands
+/// nothing again (DEC-2037 item 7, `AGENTS.md` rule 13).
 #[test]
-fn an_exit_at_the_market_alerts_and_stops_nothing() -> Result<(), Error> {
+fn an_exit_at_the_market_is_handed_with_no_limit() -> Result<(), Error> {
     for purpose in ["risk_exit", "discretionary_exit"] {
         let journal = deployed()?;
         propose_market_exit(&journal, AGENT, OTHER_EXIT, purpose, "decision")?;
@@ -387,28 +390,33 @@ fn an_exit_at_the_market_alerts_and_stops_nothing() -> Result<(), Error> {
         let broker = Paper::new(&journal);
         held(&broker)?;
         let mut process = start(&journal, &broker)?;
-        let first = process.step(at(NOON)?);
-        let second = process.step(at(NOON)?);
+        process.step(at(NOON)?);
+        process.step(at(NOON)?);
         assert!(
             !matches!(process.lifecycle().state(), State::Exited(_)),
             "{purpose}"
         );
-        assert_eq!(journal.received(), [EXIT], "{purpose}");
-        let unpriced = |alerts: &[Alert]| {
-            alerts
-                .iter()
-                .filter(|alert| {
-                    alert.key == "exit_unpriced" && alert.subject.as_deref() == Some(OTHER_EXIT)
-                })
-                .count()
-        };
-        assert_eq!((unpriced(&first), unpriced(&second)), (1, 0), "{purpose}");
+        assert_eq!(journal.received(), [OTHER_EXIT, EXIT], "{purpose}");
+        let types: Vec<_> = journal
+            .payloads("IntentReceived")
+            .iter()
+            .filter_map(|payload| payload.get("type").cloned())
+            .collect();
+        assert_eq!(
+            types,
+            [
+                Value::Str("market".to_owned()),
+                Value::Str("limit".to_owned())
+            ],
+            "{purpose}"
+        );
         let mut restarted = start(&journal, &broker)?;
         restarted.step(at(NOON)?);
         assert!(
             !matches!(restarted.lifecycle().state(), State::Exited(_)),
             "{purpose}"
         );
+        assert_eq!(journal.received(), [OTHER_EXIT, EXIT], "{purpose}");
     }
     Ok(())
 }
