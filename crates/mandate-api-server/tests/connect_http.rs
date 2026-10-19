@@ -5,10 +5,9 @@ mod common;
 mod support_connect;
 
 use mandate_api::problem::ProblemCode;
-use mandate_api_server::connect::{ACCOUNT_OPERATION, CONNECTION_OPERATION, OPERATION};
 use mandate_canon::{Value, parse, to_canonical};
 use mandate_connections::ConnectError;
-use mandate_connections::start::{AUTHORIZE_URL, Environment, STATE_LIFETIME_SECS};
+use mandate_connections::start::Environment;
 use mandate_identity::StepUpActionKind;
 use support_connect::{
     ALICE, DRAWS, KEY, T0, appended, at, b64, base, challenge, code, derived, digest, fixture,
@@ -18,7 +17,7 @@ use support_connect::{
 /// The authorization URL's query pairs, sorted.
 fn pairs(url: &str) -> Vec<String> {
     let (page, query) = url.split_once('?').expect("a query");
-    assert_eq!(page, AUTHORIZE_URL);
+    assert_eq!(page, "https://app.alpaca.markets/oauth/authorize");
     let mut pairs: Vec<String> = query.split('&').map(str::to_owned).collect();
     pairs.sort();
     pairs
@@ -57,12 +56,9 @@ fn admitted() -> (support_connect::Fixture, Value) {
 #[ignore = "pending E10-13"]
 fn a_start_answers_the_pending_connection_and_its_authorization_url() {
     let (_f, body) = admitted();
-    let connection = format!("conn_{}", derived(CONNECTION_OPERATION));
+    let connection = format!("conn_{}", derived("connect_connection"));
     assert_eq!(text(&body, &["connection_id"]), connection);
-    assert_eq!(
-        text(&body, &["expires_at"]),
-        at(T0 + STATE_LIFETIME_SECS).to_string()
-    );
+    assert_eq!(text(&body, &["expires_at"]), at(T0 + 600).to_string());
     let url = text(&body, &["authorization_url"]);
     let (state, verifier) = drawn(url);
     let mut expected = vec![
@@ -90,7 +86,7 @@ fn a_start_commits_connection_requested_version_two_with_the_step_up_it_spent() 
         (row.event_type.as_str(), row.schema_version),
         ("ConnectionRequested", 2)
     );
-    assert_eq!(row.event_id, derived(OPERATION));
+    assert_eq!(row.event_id, derived("connect"));
     let payload = parse(&row.body)
         .expect("JSON")
         .get("payload")
@@ -98,8 +94,8 @@ fn a_start_commits_connection_requested_version_two_with_the_step_up_it_spent() 
         .expect("a payload");
     let expected = format!(
         r#"{{"account_ref":"{}","breadth":{{"disclosure":{{"document":"alpaca_oauth_token_breadth","version":"1"}},"other_environment":"may_reach"}},"broker":"alpaca","connection_id":"conn_{}","credential":"oauth","environment":"paper","step_up":{},"user":"{ALICE}"}}"#,
-        derived(ACCOUNT_OPERATION),
-        derived(CONNECTION_OPERATION),
+        derived("connect_account"),
+        derived("connect_connection"),
         String::from_utf8(to_canonical(base().get("step_up").expect("evidence"))).expect("UTF-8"),
     );
     assert_eq!(
@@ -201,7 +197,7 @@ fn a_retry_after_the_state_is_redeemed_or_expired_finds_the_key_spent() {
     assert_eq!(code(&again), (409, ProblemCode::IdempotencyConflict));
 
     let (expired, _) = admitted();
-    expired.clock.set(T0 + STATE_LIFETIME_SECS);
+    expired.clock.set(T0 + 600);
     let cookie = signed_in(&expired, ALICE);
     let again = start(&expired, Some(&cookie), Some(KEY), &to_canonical(&base()));
     assert_eq!(code(&again), (409, ProblemCode::IdempotencyConflict));
