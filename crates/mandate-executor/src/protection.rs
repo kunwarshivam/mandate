@@ -4356,6 +4356,37 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// The bid-less ladder is for an exit with no limit only: an exit with its own limit beside a
+    /// fresh quote that shows a trade and no bid keeps that limit (139), as before, rather than
+    /// being laddered from the trade (150 × (1 − 0.005) = 149.25).
+    #[test]
+    fn an_exit_with_its_own_limit_beside_a_bid_less_quote_keeps_its_limit()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        executor.run(
+            Input::Market(MarketObservation {
+                instrument: aapl()?,
+                bid: None,
+                bid_size: None,
+                ask: None,
+                last_trade: Some(Price::parse("150")?),
+                mark: None,
+                sane: true,
+                observed_at: RiskClock::from_secs(0),
+            }),
+            &ports,
+        )?;
+        let effects = executor.run(sell(EXIT, "10", "139", Purpose::RiskExit)?, &ports)?;
+        let sent: Vec<_> = submissions(&effects)
+            .iter()
+            .map(|order| order.limit_price)
+            .collect();
+        assert_eq!(sent, vec![Some(Price::parse("139")?)]);
+        Ok(())
+    }
+
     /// The protective purpose's hold with no limit is unreachable: a protective order is always the
     /// executor's own, priced from its stop, and never handed with no limit. Pinned here so a
     /// change that reaches it is seen: whatever the tier and the quotes, it holds rather than
