@@ -130,3 +130,7 @@ output "endpoint" {
 output "node_count" {
   value = local.node_count
 }
+
+output "region" {
+  value = digitalocean_kubernetes_cluster.this.region
+}

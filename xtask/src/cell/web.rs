@@ -271,7 +271,7 @@ fn signal(sig: &str, pgid: u32) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Step 6 from `web/`, in `workspace`, the one the cell's API hosts (the scenario passes its own run's,
+/// Step 7 from `web/`, in `workspace`, the one the cell's API hosts (the scenario passes its own run's,
 /// never a fixed id), and to `agent` when it names one (else the first listed agent not stopped; a
 /// named agent already stopped is an `Err`, since D10 offers nothing to confirm for it): starts
 /// `next dev` against the cell's API as the demo owner, signs in through

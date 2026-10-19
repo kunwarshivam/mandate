@@ -514,16 +514,26 @@ def test_kill_switch_exemption(overlay):
     assert kill_switch_exemption(overlay[1]) == []
 
 
-# What reaches into a running pod. Exec and attach are CONNECT requests whose admission object is
-# the exec options, not the pod, so no policy can tell a kill switch's pod from another: RBAC holds
-# them, and nothing the hosted clusters apply grants them (DEC-2046).
-POD_ACCESS = {"pods/exec", "pods/attach", "pods/ephemeralcontainers", "pods/*", "*"}
+# What reaches into a running pod. Exec, attach, port-forward and proxy are CONNECT requests whose
+# admission object is their options, not the pod, so no policy can tell a kill switch's pod from
+# another: RBAC holds them, and nothing the overlays or this repository's charts apply grants them
+# (DEC-2046). The third-party charts (policy-controller, CloudNativePG) are not rendered here, and a
+# role is read by its own rules, so an aggregated ClusterRole's borrowed rules are not seen.
+POD_ACCESS = {
+    "pods/exec",
+    "pods/attach",
+    "pods/portforward",
+    "pods/proxy",
+    "pods/ephemeralcontainers",
+    "pods/*",
+    "*",
+}
 BROAD_ROLES = {"cluster-admin", "admin", "edit"}
 
 
 def pod_access(objects: list[dict]) -> list[str]:
-    """No Role or ClusterRole the hosted clusters apply reaches into a pod, and no binding hands out
-    a built-in role that does."""
+    """No Role or ClusterRole the overlays or this repository's charts apply reaches into a pod, and no
+    binding hands out a built-in role that does."""
     problems = []
     for doc in objects:
         where = f"{doc.get('kind')} {doc.get('metadata', {}).get('name')}"
@@ -567,6 +577,13 @@ def test_nothing_reaches_into_a_pod(overlay):
             "kind": "RoleBinding",
             "metadata": {"name": "editor"},
             "roleRef": {"kind": "ClusterRole", "name": "edit"},
+        },
+        {
+            "kind": "Role",
+            "metadata": {"name": "tunnel"},
+            "rules": [
+                {"apiGroups": [""], "resources": ["pods/portforward", "pods/proxy"], "verbs": ["create"]}
+            ],
         },
     ],
 )

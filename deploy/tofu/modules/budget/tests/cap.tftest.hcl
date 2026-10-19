@@ -11,6 +11,7 @@ mock_provider "digitalocean" {
 
 variables {
   node_size          = "s-2vcpu-4gb"
+  region             = "nyc3"
   node_count         = 2
   spaces_monthly_usd = 5
   block_storage_gb   = 40
@@ -48,6 +49,17 @@ run "refuses_an_unlisted_size" {
     values = {
       sizes = []
     }
+  }
+
+  expect_failures = [terraform_data.cap]
+}
+
+# DEC-2044 item 2: a size DigitalOcean does not offer in the cluster's region fails the plan by name.
+run "refuses_a_size_the_region_does_not_offer" {
+  command = plan
+
+  variables {
+    region = "nyc1"
   }
 
   expect_failures = [terraform_data.cap]

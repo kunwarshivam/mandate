@@ -23,8 +23,8 @@ and never dispatch the workflow (AGENTS.md rules 7 and 8).
 
 ## Runbook: what the founder creates
 
-All of it is two tokens, one passphrase, two console steps and an approval per run
-([DEC-2030](../../docs/project/decisions/DEC-2030.md)). Nothing below goes in the repository, a
+All of it is two tokens, one passphrase, three console steps and an approval per run
+([DEC-2030](../../docs/project/decisions/DEC-2030.md), [DEC-2044](../../docs/project/decisions/DEC-2044.md)). Nothing below goes in the repository, a
 chat or an issue. Each value goes straight into the GitHub environment as a secret. Do it once per
 environment; production can wait until staging is up. **Actions → infra → Run workflow** with
 action `preflight` checks all of it and prints a checklist of what is still missing, by name,
@@ -62,7 +62,10 @@ never a value.
 
 1. **Console: R2 enabled on the account.** In **R2 Object Storage**, subscribe to R2 once (it asks
    for a payment method even on the free tier). The preflight says whether it is.
-2. **An API token, `CF_INFRA_API_TOKEN`.** In **My Profile → API Tokens → Create Token → Custom
+2. **Console: Cloudflare Access enabled.** In **Zero Trust**, set up a team once: choose a team
+   name and the free plan. Until then Cloudflare refuses every Access policy, as staging's first
+   apply found (DEC-2044 item 1). The preflight says whether it is.
+3. **An API token, `CF_INFRA_API_TOKEN`.** In **My Profile → API Tokens → Create Token → Custom
    token**, named `mandate-tofu`, with only these permissions:
 
    | Scope | Permission | Level | Why |
@@ -81,10 +84,10 @@ never a value.
    the archive's lock rule: R2's lock is governance-equivalent (DEC-973 item 5). Account API
    Tokens Edit makes the token admin-level: it can mint any token, which you accepted for the
    automation (DEC-2029; DEC-2605 row 12). Keep it in the environment alone.
-3. **Nothing else to copy.** The account id is read from the token's one account. Access admits
+4. **Nothing else to copy.** The account id is read from the token's one account. Access admits
    the members of your Cloudflare account, so no email is configured. Barman's R2 token is
    minted by OpenTofu (DEC-2029).
-4. **Before production only:** `api.owlhead.ai` already has DEC-822's hand-made record. The
+5. **Before production only:** `api.owlhead.ai` already has DEC-822's hand-made record. The
    production apply refuses to create a second one, so delete that record (or tell lane IAC to
    adopt it) when production is to take the name. Staging uses `api-staging.owlhead.ai`, which
    is free.
@@ -144,6 +147,9 @@ and actions.
    Nothing is destroyed.
    - If it fails with "DOKS does not offer 1.35.9-do.1; it offers: …", tell lane IAC the list.
      The pin changes in a one-line pull request.
+   - If `apply` fails with "region has insufficient capacity", or the plan says DigitalOcean does
+     not offer the node size in the region, tell lane IAC: staging's region is one line
+     (DEC-2044 item 2). Staging's cluster runs in `nyc1`; its state bucket stays in `nyc3`.
 3. Dispatch again with action `apply` and `sha` set to the commit the plan printed, and approve
    it. The job plans again after your approval, prints that plan, and applies exactly it, so the
    apply reflects the commit and the cloud as they are when the job runs. Dispatch `apply` only at
