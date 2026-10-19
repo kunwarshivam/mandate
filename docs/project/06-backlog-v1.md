@@ -880,6 +880,15 @@ after U-A1 to U-A5 are recorded.
   and an `Unknown` order in the instrument, and shows no owner exit is refused for conduct,
   eligibility, day-trade budget, buying power or opening-session reasons.
 
+- **E7-30 (Should, M6, after E7-29)** As an owner, I want my confirmed exit to sell outside the
+  regular session when I confirmed the displayed bid, as rule 13 allows, so that a runtime-proposed
+  owner exit is not held to the session the way an unconfirmed one is. Today the handoff carries
+  no confirmation, so the core treats every handed owner exit as unconfirmed
+  ([DEC-2037](decisions/DEC-2037.md) item 6). *Accepted when:* the handoff carries the owner's
+  confirmed bid, bid size and floor from the `OwnerExitRequested`; the core sends such an exit in
+  extended hours as a limit never below the floor, as a confirmed kill switch's close does
+  (trading spec §5.5); and an unconfirmed one still waits for the session.
+
 ### E8 Escalation and approvals
 
 - **E8-1 (Must, M7)** As an approver, I want requests with the proposed action, alternatives,
