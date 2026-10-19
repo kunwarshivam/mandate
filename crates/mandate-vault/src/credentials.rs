@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process;
 
 use mandate_connections::record::ConnectionId;
+use secrecy::zeroize::Zeroize;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::SourceError;
@@ -186,17 +187,22 @@ pub const TOKEN_MAX: u64 = 4096;
 
 /// Reads an operator's token from `input`, a pipe its caller owns, by the rules of
 /// [`read_token_file`]'s text: the token and at most one trailing newline. Input longer than
-/// [`TOKEN_MAX`] bytes, or not UTF-8, is [`SourceError::CredentialFile`] too.
+/// [`TOKEN_MAX`] bytes, or not UTF-8, is [`SourceError::CredentialFile`] too; whatever was read
+/// of a refused input is zeroized before it is dropped.
 pub fn read_token(input: &mut impl Read) -> Result<SecretString, SourceError> {
     let mut bytes = Vec::new();
-    input
+    let read = input
         .take(TOKEN_MAX.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|_| SourceError::CredentialFile)?;
-    if u64::try_from(bytes.len()).is_ok_and(|read| read <= TOKEN_MAX) {
-        let text = String::from_utf8(bytes).map_err(|_| SourceError::CredentialFile)?;
-        token_from(SecretString::from(text).expose_secret())
-    } else {
-        Err(SourceError::CredentialFile)
+        .read_to_end(&mut bytes);
+    if read.is_err() || u64::try_from(bytes.len()).map_or(true, |read| read > TOKEN_MAX) {
+        bytes.zeroize();
+        return Err(SourceError::CredentialFile);
+    }
+    match String::from_utf8(bytes) {
+        Ok(text) => token_from(SecretString::from(text).expose_secret()),
+        Err(invalid) => {
+            invalid.into_bytes().zeroize();
+            Err(SourceError::CredentialFile)
+        }
     }
 }

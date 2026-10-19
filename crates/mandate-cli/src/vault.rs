@@ -74,9 +74,18 @@ pub struct ProvisionArgs {
     )]
     pub out: Option<PathBuf>,
     /// Print the credentials instead, as Kubernetes Secrets in this namespace: one `v1` `List`
-    /// on stdout, which must be a pipe, never a terminal (DEC-2630).
+    /// on stdout, which must be a pipe to `kubectl apply -f -`, never a terminal; redirected to a
+    /// file, it leaves every secret id there at your umask (DEC-2630).
     #[arg(long)]
     pub secrets_namespace: Option<String>,
+}
+
+/// Which of the process's standard streams are terminals, which `vault provision` refuses for its
+/// token and its Secrets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Terminals {
+    pub stdin: bool,
+    pub stdout: bool,
 }
 
 #[derive(Debug, Args)]
@@ -159,12 +168,14 @@ pub fn run_import(
 /// With `--secrets-namespace` it writes no file and prints instead the credentials' Secrets as one
 /// `v1` `List` (DEC-2630), for its caller to hand `kubectl` on stdin. A namespace that is not a
 /// Kubernetes label, or an `out` that is a terminal, is refused `config` before the token is read
-/// or the vault reached. With `--operator-token-stdin` the token is read from `stdin` by
-/// [`mandate_vault::credentials::read_token`].
+/// or the vault reached. Its output is meant for `kubectl apply -f -`: redirected to a file, it
+/// leaves every secret id there at the caller's umask. With `--operator-token-stdin` the token is
+/// read from `stdin` by [`mandate_vault::credentials::read_token`], and a `stdin` that is a
+/// terminal is refused `config` before it is read, so a token is never typed where it echoes.
 pub fn run_provision(
     args: &ProvisionArgs,
     stdin: &mut impl Read,
-    stdout_is_terminal: bool,
+    terminals: Terminals,
     out: &mut impl Write,
 ) -> anyhow::Result<()> {
     let refused = |e: SourceError| anyhow!("{e} ({})", e.code());
@@ -176,12 +187,17 @@ pub fn run_provision(
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     if let Some(namespace) = &args.secrets_namespace {
-        if stdout_is_terminal {
+        if terminals.stdout {
             return Err(anyhow!(
                 "the Secrets are printed only to a pipe, never a terminal (config)"
             ));
         }
         kube_secrets(namespace, &[]).map_err(refused)?;
+    }
+    if args.operator_token_stdin && terminals.stdin {
+        return Err(anyhow!(
+            "the operator's token is read only from a pipe, never a terminal (config)"
+        ));
     }
     let operator = match &args.operator_token_file {
         Some(path) => read_token_file(path),

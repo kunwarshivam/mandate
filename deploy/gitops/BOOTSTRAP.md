@@ -108,6 +108,11 @@ admin:
 kubectl -n vault-recovery get secret vault-init -o jsonpath='{.data.init\.json}' | base64 -d
 ```
 
+If you ever provision by hand rather than through the apply (DEC-2630), pipe `mandate vault
+provision --operator-token-stdin --secrets-namespace ws-ws1` straight into `kubectl apply -f -`:
+its output holds every process's secret id, and redirected to a file it leaves them there at your
+umask. It refuses a terminal on either end.
+
 Never paste them into an issue, a CI job or a chat. The break-glass bootstrap from your machine
 still asks for a seal key when none exists (`openssl rand -hex 32`, not shown as you type; if you
 stop it there with Ctrl-C, run `stty echo`), and keeps one that does.
