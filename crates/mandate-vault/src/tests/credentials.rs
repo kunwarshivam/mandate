@@ -2,7 +2,7 @@
 //! tightened, a directory or token open to others refused, against names written out by hand.
 
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -73,7 +73,6 @@ fn listing(dir: &Path) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn each_identitys_two_files_are_written_owner_only() {
     let dir = fresh("out");
     let written = write_credentials(
@@ -111,7 +110,6 @@ fn each_identitys_two_files_are_written_owner_only() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_earlier_file_is_replaced_and_tightened() {
     let dir = fresh("again");
     fs::create_dir(&dir).unwrap();
@@ -125,7 +123,6 @@ fn an_earlier_file_is_replaced_and_tightened() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_directory_open_to_others_or_linked_is_refused_and_nothing_is_written() {
     let one = [credential(Identity::Api, "role-a", "secret-a")];
     for bits in [0o750, 0o705, 0o770, 0o755, 0o500, 0o300] {
@@ -158,7 +155,6 @@ fn a_directory_open_to_others_or_linked_is_refused_and_nothing_is_written() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_owner_only_token_is_read_without_its_newline() {
     for (text, want) in [("tok-1\n", "tok-1"), ("tok-2", "tok-2")] {
         let file = fresh("token");
@@ -171,7 +167,6 @@ fn an_owner_only_token_is_read_without_its_newline() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_token_open_to_others_missing_empty_or_linked_is_refused() {
     let refused = |path: &Path| {
         let read = read_token_file(path).map(|t| t.expose_secret().to_owned());
@@ -205,7 +200,6 @@ fn a_token_open_to_others_missing_empty_or_linked_is_refused() {
 /// A symbolic link planted at an output name is refused, not followed: the link stays, its target
 /// is neither read nor written, and nothing else is written (DEC-2022 item 1).
 #[test]
-#[ignore = "pending E21-32"]
 fn a_link_planted_at_an_output_name_is_refused_and_its_target_untouched() {
     let dir = fresh("planted");
     fs::create_dir(&dir).unwrap();
@@ -228,10 +222,113 @@ fn a_link_planted_at_an_output_name_is_refused_and_its_target_untouched() {
     assert_eq!(listing(&dir), ["api.secret-id"]);
 }
 
+/// A hard link planted at an output name, which the pre-check sees as a plain file, is replaced
+/// rather than written through: the file it shares stays as it was (DEC-2022 item 1).
+#[test]
+fn a_hard_link_planted_at_an_output_name_is_replaced_not_written_through() {
+    let dir = fresh("hard-linked");
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    let shared = fresh("shared-by-hard-link");
+    fs::write(&shared, "someone-elses-file").unwrap();
+    set_mode(&shared, 0o644);
+    let planted = dir.join("api.secret-id");
+    fs::hard_link(&shared, &planted).unwrap();
+    let written = write_credentials(&dir, &[credential(Identity::Api, "role-a", "secret-a")]);
+    assert_eq!(
+        written,
+        Ok(vec!["api.role-id".to_owned(), "api.secret-id".to_owned()])
+    );
+    assert_eq!(fs::read_to_string(&shared).unwrap(), "someone-elses-file");
+    assert_eq!(mode(&shared), 0o644);
+    assert_eq!(fs::read_to_string(&planted).unwrap(), "secret-a");
+    assert_eq!(mode(&planted), 0o600);
+    assert_eq!(fs::symlink_metadata(&planted).unwrap().nlink(), 1);
+    assert_eq!(listing(&dir), ["api.role-id", "api.secret-id"]);
+}
+
+/// A temporary file a crashed write left at an output's name is removed by the next write; one
+/// that is not a plain file, and files only like it, are left as they are (DEC-2022 item 1).
+#[test]
+fn a_crashed_writes_temporary_file_is_removed_by_the_next_write() {
+    let dir = fresh("crashed");
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    fs::write(dir.join(".api.secret-id.4242.0.tmp"), "secret-left").unwrap();
+    fs::create_dir(dir.join(".api.secret-id.held.tmp")).unwrap();
+    fs::write(dir.join(".api.secret-id.keep"), "kept").unwrap();
+    fs::write(dir.join("notes.tmp"), "kept").unwrap();
+    let written = write_credentials(&dir, &[credential(Identity::Api, "role-a", "secret-a")]);
+    assert!(written.is_ok(), "{written:?}");
+    assert_eq!(
+        listing(&dir),
+        [
+            ".api.secret-id.held.tmp",
+            ".api.secret-id.keep",
+            "api.role-id",
+            "api.secret-id",
+            "notes.tmp"
+        ]
+    );
+}
+
+/// A temporary name something else holds is passed over for the next; when every attempt's name
+/// is held, the write is refused (DEC-2022 item 1).
+#[test]
+fn a_held_temporary_name_is_passed_over_until_none_is_left() {
+    let held = |dir: &Path, attempts: u32| {
+        fs::create_dir(dir).unwrap();
+        set_mode(dir, 0o700);
+        for attempt in 0..attempts {
+            let name = format!(".api.secret-id.{}.{attempt}.tmp", std::process::id());
+            fs::create_dir(dir.join(name)).unwrap();
+        }
+    };
+    let one = [credential(Identity::Api, "role-a", "secret-a")];
+    let dir = fresh("held-one");
+    held(&dir, 1);
+    assert!(write_credentials(&dir, &one).is_ok());
+    assert_eq!(
+        fs::read_to_string(dir.join("api.secret-id")).unwrap(),
+        "secret-a"
+    );
+    let dir = fresh("held-all");
+    held(&dir, 8);
+    assert_eq!(
+        write_credentials(&dir, &one),
+        Err(SourceError::CredentialFile)
+    );
+    assert!(!dir.join("api.secret-id").exists());
+}
+
+/// A `dir` whose parent others may write without the sticky bit is refused, since they could
+/// rename it away; a sticky parent, as the temporary directory is, or an owner-only one is not
+/// (DEC-2022 item 1).
+#[test]
+fn a_parent_others_may_write_without_the_sticky_bit_is_refused() {
+    let one = [credential(Identity::Api, "role-a", "secret-a")];
+    for (bits, refused) in [
+        (0o777, true),
+        (0o775, true),
+        (0o757, true),
+        (0o1777, false),
+        (0o755, false),
+        (0o700, false),
+    ] {
+        let parent = fresh("parent");
+        fs::create_dir(&parent).unwrap();
+        set_mode(&parent, bits);
+        let dir = parent.join("out");
+        let written = write_credentials(&dir, &one);
+        assert_eq!(written.is_err(), refused, "a parent of mode {bits:o}");
+        assert_eq!(dir.exists(), !refused, "a parent of mode {bits:o}");
+        set_mode(&parent, 0o700);
+    }
+}
+
 /// A refusal changes no file: every output name is checked before any is written, so an earlier
 /// file stays as it was when a later name cannot be written (DEC-2022 item 1).
 #[test]
-#[ignore = "pending E21-32"]
 fn a_refusal_leaves_every_earlier_file_as_it_was() {
     let dir = fresh("partial");
     fs::create_dir(&dir).unwrap();
@@ -285,7 +382,6 @@ proptest! {
     /// For any set of identities, the files written are exactly two per identity under the
     /// oracle's names, each holding its value and owner-only.
     #[test]
-    #[ignore = "pending E21-32"]
     fn the_files_are_exactly_two_per_identity_under_the_oracles_names(
         identities in proptest::collection::vec(identity(), 0..6),
         value in "[a-z0-9-]{1,24}",

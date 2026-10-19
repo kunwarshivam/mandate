@@ -27,8 +27,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use mandate_canon::Digest;
 use mandate_deploy_manager::fake::Fake;
 use mandate_deploy_manager::kubernetes::{InCluster, Kubernetes};
-use mandate_deploy_manager::{Alerts, ControlJournal, Deployer, Identity, Orchestrator, Resolver};
-use mandate_deployd::{MemoryControl, NoStore, PgControl, StderrAlerts, input, templates};
+use mandate_deploy_manager::{Alerts, ControlJournal, Deployer, Identity, Orchestrator};
+use mandate_deployd::{MemoryControl, PgControl, StderrAlerts, input, templates};
 use mandate_journal::StreamId;
 use mandate_journal_pg::PgJournal;
 use mandate_process::probe::{self, Probe, Status};
@@ -115,7 +115,6 @@ fn run(workspace: &str, dir: &Path, socket: &Path, fixture: bool) -> Result<u8, 
             MemoryControl::new(stream),
             Fake::new(),
             StderrAlerts::default(),
-            NoStore,
         );
         return runtime.block_on(serve(deployer, socket, &terminate));
     }
@@ -139,14 +138,13 @@ fn run(workspace: &str, dir: &Path, socket: &Path, fixture: bool) -> Result<u8, 
             PgControl::new(journal, stream),
             orchestrator,
             StderrAlerts::default(),
-            NoStore,
         );
         serve(deployer, socket, &terminate).await
     })
 }
 
-async fn serve<J: ControlJournal, O: Orchestrator, A: Alerts, R: Resolver>(
-    mut deployer: Deployer<J, O, A, R>,
+async fn serve<J: ControlJournal, O: Orchestrator, A: Alerts>(
+    mut deployer: Deployer<J, O, A>,
     socket: &Path,
     terminate: &AtomicBool,
 ) -> Result<u8, &'static str> {
