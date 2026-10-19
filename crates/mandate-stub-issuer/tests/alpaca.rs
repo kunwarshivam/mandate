@@ -380,6 +380,11 @@ fn any_tampered_token_parameter_is_refused() {
         "code_verifier",
     ];
     let provider = provider();
+    let untampered = joined(&token_params(&code(&provider, T0)));
+    assert!(
+        provider.token(&untampered, T0 + 1).is_ok(),
+        "the untampered form redeems, so each refusal below is the tampering's"
+    );
     TestRunner::new(Config::with_cases(128))
         .run(
             &(0..names.len(), prop::collection::vec(any::<u8>(), 0..16)),
