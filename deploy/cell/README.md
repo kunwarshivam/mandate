@@ -200,9 +200,9 @@ release in `web/.nvmrc` and npm; the first run does `npm ci`.
 
 ### The demo's scenario
 
-`cargo xtask cell demo --scenario demo` (E21-54, DEC-2002) runs the demo's story on the cell, its
-six steps in order, with the owner's exit as step 6 before the kill switch (step 7), with paper and demo data only and no credential. Each gesture whose pieces are
-on `main` runs in the cell, in one Job of the `control` process, and passes only when it printed
+`cargo xtask cell demo --scenario demo` (E21-54, DEC-2002) runs the demo's story on the cell in
+order, the story's six steps with the owner's exit as step 6, before the kill switch (step 7), with
+paper and demo data only and no credential. Each gesture whose pieces are on `main` runs in the cell, in one Job of the `control` process, and passes only when it printed
 what its success prints. Each missing link prints as `gap` (DEC-2004): what of it is already on
 `main`, citing its PRs, and every lane it still waits on, with that lane's story, its open PR when
 there is one, and what the lane still has to land. A gap never fails the run and is never faked.
