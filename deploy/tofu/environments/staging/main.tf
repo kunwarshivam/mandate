@@ -1,8 +1,9 @@
 # Staging (DEC-2011 item 1): one DOKS cluster of two nodes in sfo2, its buckets, and the API host
 # behind the tunnel and Access. The founder put all of the infrastructure in the US West (DEC-2047):
-# the cluster, its VPC and the state bucket run in sfo2, and the archive in R2's wnam. DigitalOcean's provider reads its credentials from the environment
-# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
-# token as a variable; only infra.yml's job under infra-staging receives either.
+# the cluster, its VPC and the state bucket run in sfo2, and the archive in R2's wnam.
+# DigitalOcean's provider reads its credentials from the environment (DIGITALOCEAN_TOKEN,
+# SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its token as a variable;
+# only infra.yml's job under infra-staging receives either.
 
 provider "digitalocean" {}
 
@@ -22,9 +23,9 @@ locals {
 
 # Provider 5.27.0 asks for the next page of accounts until a page comes back empty or it holds
 # max_items (default 1000), and the accounts API answered every page with the same account, so the
-# founder's first plan listed one account 1000 times. So the list is read as its distinct ids. max_items = 2 keeps
-# it to two requests: a token that sees a second account lists both on the first page, which the
-# rule below refuses.
+# founder's first plan listed one account 1000 times. So the list is read as its distinct ids.
+# max_items = 2 keeps it to two requests: a token that sees a second account lists both on the first
+# page, which the rule below refuses.
 data "cloudflare_accounts" "visible" {
   max_items = 2
 

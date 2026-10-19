@@ -56,7 +56,9 @@ never a value.
    The first apply adopts the bucket, makes it versioned, and protects it from deletion. If the old
    `nyc3` bucket `mandate-tofu-state-<env>` still holds the state and the West one does not, the
    first `plan` or `apply` copies the encrypted state across byte for byte, reads it back,
-   compares it by SHA-256, and stops before planning if they differ (DEC-2047 item 6). It never
+   compares it by SHA-256, and stops before planning if they differ (DEC-2047 item 6). A verified
+   copy gets a marker object beside it holding its digest; a West copy without one is never
+   trusted while `nyc3` holds the state, so an interrupted run is simply copied again. It never
    changes or deletes the `nyc3` copy, which stays as the rollback. A `preflight` only reports
    what the next run will copy.
 3. **Console: the billing alert at 80% of the cap.** In **Billing → Billing Alerts**, set an alert
