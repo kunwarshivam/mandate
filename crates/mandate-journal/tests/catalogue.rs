@@ -954,7 +954,7 @@ fn registered_schemas_accept_their_payloads() {
                 &[MAN],
                 &format!(
                     r#"{{"intent_id":"{intent}","agent_id":"agent_a","instrument_id":"i","side":"buy",
-                "type":"limit","tif":"day","qty":"10.0","limit_price":null,"purpose":"open"}}"#
+                "type":"limit","tif":"day","qty":"10.0","limit_price":"150","purpose":"open"}}"#
                 ),
             ),
         ),
