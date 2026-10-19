@@ -663,7 +663,10 @@ fn next_rung(
             batch.ports,
             instrument,
             batch.at(),
-            (purpose, confirmed_bid(&batch.view, intent).is_some()),
+            (
+                purpose,
+                confirmed_bid(&batch.view, intent, batch.at()).is_some(),
+            ),
         ),
         purpose,
     };
@@ -702,7 +705,7 @@ fn observed_for(
         venue(batch.ports, instrument, batch.at()),
         Venue::Extended | Venue::Closed
     );
-    match confirmed_bid(&batch.view, intent).filter(|_| outside) {
+    match confirmed_bid(&batch.view, intent, batch.at()).filter(|_| outside) {
         Some(bid) => vec![MarketObservation {
             instrument: instrument.clone(),
             bid: Some(bid),

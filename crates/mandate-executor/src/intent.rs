@@ -5,7 +5,7 @@ use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
 use mandate_risk::GatePass;
 
-use mandate_num::Price;
+use mandate_num::{Price, Qty};
 
 use crate::batch::{Batch, config_refs};
 use crate::codec::{order_type_name, purpose_name, side_name, tif_name};
@@ -39,6 +39,7 @@ pub(crate) fn received(
     }
     let IntentBody::Order {
         instrument,
+        qty,
         protection,
         limit,
         purpose,
@@ -76,7 +77,7 @@ pub(crate) fn received(
         batch.journal(
             "OwnerConfirmationReceived",
             None,
-            confirmation_fields(&handoff.intent_id, confirmation),
+            confirmation_fields(&handoff.intent_id, (instrument, *qty), confirmation)?,
         )?;
     }
     if let Some(prices) = protection {
@@ -107,6 +108,9 @@ fn fits(
     if confirmation.bid_size.is_zero() {
         return refuse("bid_size");
     }
+    if confirmation.expires_at.secs() <= 0 {
+        return refuse("expires_at");
+    }
     if limit.is_some_and(|limit| limit < confirmation.floor) {
         return refuse("limit_price");
     }
@@ -118,15 +122,24 @@ fn fits(
 /// the bid and floor back.
 fn confirmation_fields(
     intent: &IntentId,
+    (instrument, qty): (&InstrumentId, Qty),
     confirmation: &HandedConfirmation,
-) -> Vec<(&'static str, Value)> {
-    vec![
+) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
+    let expires_at = u64::try_from(confirmation.expires_at.secs()).map_err(|_| {
+        ExecutorError::NonCanonicalPayload {
+            field: "expires_at".to_owned(),
+        }
+    })?;
+    Ok(vec![
         ("intent_id", text(intent.0.0.clone())),
+        ("instrument_id", text(instrument.as_str())),
+        ("qty", text(qty.to_string())),
         ("bid", text(confirmation.bid.to_string())),
         ("bid_size", text(confirmation.bid_size.to_string())),
         ("floor", text(confirmation.floor.to_string())),
+        ("expires_at", int(expires_at)?),
         ("copied_from", text(confirmation.copied_from.0.clone())),
-    ]
+    ])
 }
 
 /// The `intended` `ProtectionChanged` (§9.5, DEC-446 item 5): the receipt-time protective prices
@@ -272,7 +285,7 @@ fn decide(
             market: limit.is_none(),
             tif: order_tif(batch, instrument),
             flatten: is_flatten(&batch.view, intent),
-            owner_confirmed_bid: confirmed_bid(&batch.view, intent),
+            owner_confirmed_bid: confirmed_bid(&batch.view, intent, batch.at()),
         },
         pass,
         batch.ports,
@@ -436,7 +449,7 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         Some(_) => TimeInForce::Gtc,
         None => order_tif(batch, &instrument),
     };
-    let confirmed = confirmed_bid(&batch.view, intent).is_some();
+    let confirmed = confirmed_bid(&batch.view, intent, batch.at()).is_some();
     let extended_hours = bracket.is_none()
         && extended_hours(batch.ports, &instrument, batch.at(), (purpose, confirmed));
     let request = SubmitOrder {

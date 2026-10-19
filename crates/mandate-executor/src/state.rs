@@ -174,6 +174,8 @@ pub(crate) struct Switch {
 pub(crate) struct Confirmed {
     pub(crate) bid: Price,
     pub(crate) floor: Price,
+    /// From this instant the bid no longer applies, while the floor still does (DEC-2040 item 7).
+    pub(crate) expires_at: RiskClock,
 }
 
 /// What one `OrderRequestRecorded` carries (§9.5): the executor-only members of the order that

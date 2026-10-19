@@ -406,9 +406,13 @@ fn owner_confirmation_received(
 ) -> Result<(), ExecutorError> {
     let intent = intent_id(payload)?;
     let price = |member: &str| optional_price(payload, member)?.ok_or_else(|| refused(member));
+    let expires_at = optional_int(payload, "expires_at")
+        .and_then(|secs| i64::try_from(secs).ok())
+        .ok_or_else(|| refused("expires_at"))?;
     let confirmed = Confirmed {
         bid: price("bid")?,
         floor: price("floor")?,
+        expires_at: RiskClock::from_secs(expires_at),
     };
     state.confirmations.insert(intent, confirmed);
     Ok(())

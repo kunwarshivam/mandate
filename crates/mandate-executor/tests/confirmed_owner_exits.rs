@@ -328,7 +328,6 @@ fn a_restart_keeps_the_confirmation_of_an_exit_held_overnight() {
 /// and nothing goes extended-hours; handed one second before, it sells extended-hours from the
 /// confirmed bid. Either way the confirmation is journaled as it was handed.
 #[test]
-#[ignore = "pending E7-30"]
 fn a_confirmation_at_its_expiry_has_expired() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -374,7 +373,6 @@ fn a_confirmation_at_its_expiry_has_expired() {
 /// unconfirmed path: a regular-session limit, priced from the feed's last sane bid,
 /// 150 × (1 − 0.01) = 148.50, and clamped at the floor of 150.35, which still binds.
 #[test]
-#[ignore = "pending E7-30"]
 fn a_rung_after_the_confirmation_expires_takes_the_unconfirmed_path() {
     let (ids, mandates, instruments, config) = (
         TestIds,

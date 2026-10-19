@@ -19,7 +19,7 @@ use crate::session::{Venue, venue};
 use crate::state::{EVERY_AGENT, ExecutorState, IntentOutcome, Switch};
 use crate::types::{
     AgentId, BrokerRequest, EventId, Initiator, IntentBody, IntentHandoff, KillScope, Mode, Order,
-    OrderState, OwnerConfirmation, Purpose,
+    OrderState, OwnerConfirmation, Purpose, RiskClock,
 };
 
 /// The restriction the kill switch's final mode is recorded under (mandate spec §5.9).
@@ -342,12 +342,18 @@ pub(crate) fn floor_of(view: &ExecutorState, intent: &IntentId) -> Option<Price>
     own.max(switch_of(view, intent).and_then(|switch| switch.floor))
 }
 
-/// The bid the owner confirmed for an owner's exit received with one, or for a flatten raised by a
-/// confirmed switch: with it the exit sells outside the regular session, priced from that bid
-/// (§5.5, DEC-2040 item 3).
-pub(crate) fn confirmed_bid(view: &ExecutorState, intent: &IntentId) -> Option<Price> {
+/// The bid the owner confirmed for an owner's exit received with one, while it has not expired at
+/// `at`, the step's journaled clock, or for a flatten raised by a confirmed switch: with it the exit
+/// sells outside the regular session, priced from that bid (§5.5, DEC-2040 items 3 and 7). At
+/// exactly `expires_at` it has expired.
+pub(crate) fn confirmed_bid(
+    view: &ExecutorState,
+    intent: &IntentId,
+    at: RiskClock,
+) -> Option<Price> {
     view.confirmations
         .get(intent)
+        .filter(|confirmed| at < confirmed.expires_at)
         .map(|confirmed| confirmed.bid)
         .or_else(|| switch_of(view, intent).and_then(|switch| switch.bid))
 }
