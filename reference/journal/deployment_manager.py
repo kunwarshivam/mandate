@@ -1,5 +1,5 @@
 """Journal spec v0.48 §9.21's reference vectors for the deployment manager's records (DEC-1170), with
-v0.71's token exchange (DEC-1175): the starts, stops, and crash loops of the processes it runs,
+v0.70's token exchange (DEC-1175): the starts, stops, and crash loops of the processes it runs,
 written by workspace control services on the control stream before each takes effect.
 
 The schemas and rules 165 to 168 and 256 live in `control.py`, beside the other closed schemas, so
@@ -35,7 +35,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.71 §9.21 (DEC-1170, DEC-1175)"
+SPEC = "docs/specs/journal.md v0.70 §9.21 (DEC-1170, DEC-1175)"
 AT = "2026-10-17T15:00:00.000000000Z"
 ACCOUNT = "01J8Z2ACCT00000000000000A1"
 CAUSE = "01J8Z3P2A000000000000000Q3"

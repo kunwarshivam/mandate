@@ -5,110 +5,30 @@
 //! bundle, not the worker. A bundle naming the agentic loop registers it and gives the worker its
 //! bounds; one naming a loop no registry may pin is refused before any call (DEC-2263).
 
-use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
-use std::rc::Rc;
+mod cell_research;
 
-use mandate_canon::{Digest, Key, Value, parse};
-use mandate_daemon::recorded::{Bundle, BundleError};
+use std::collections::BTreeSet;
+
+use cell_research::{CUT_OFF, RUN, SOURCES, Shelf, agentic_bundle, bundle, parts, who};
+use mandate_canon::Digest;
+use mandate_daemon::recorded::BundleError;
 use mandate_daemon::worker::{DispatchError, RecordedWorker, WorkerError, WorkerFor};
-use mandate_daemon::{ArtifactSink, ResearchParts, ResearchWorker};
+use mandate_daemon::{ResearchParts, ResearchWorker};
 use mandate_gateway::registry::Mode;
-use mandate_num::Usd;
-use mandate_research::{
-    AdmissionFacts, AllowlistVersion, AssetClass, AssetId, AutonomyDecision, LineageState,
-    MandateEnvelope, PolicyOverlay, ResearchEnvelope, SourceAllowlist, SourceId, ValidatedMandate,
-    WorkingUniverse,
-};
+use mandate_research::AllowlistVersion;
 use mandate_research_run::agentic::{LoopBounds, Tool, ToolCall};
 use mandate_research_run::{
-    Allowlist, Dispatch, DispatchScope, OutputBounds, Readers, ResearchEntry, ResearchRunError,
-    Scope, SourceId as RunSource, Symbol, agentic_loop, dispatch,
+    Allowlist, Dispatch, DispatchScope, OutputBounds, Readers, ResearchRunError, Scope,
+    SourceId as RunSource, agentic_loop, dispatch,
 };
 use mandate_runtime::{
-    DispatchRequest, DispatchedResult, JournalCatalog, Preconditions, ResearchInput,
-    ResearchRequest, RetrievedObservation, RiskClock,
+    DispatchRequest, DispatchedResult, ResearchInput, ResearchRequest, RetrievedObservation,
+    RiskClock,
 };
 use mandate_time::UtcNanos;
 
-const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/research");
-const CUT_OFF: i64 = 1_792_180_800;
-const RUN: &str = "01RUNRECORDED";
-const SOURCES: [&str; 2] = ["src.newswire", "src.wire_two"];
 const TURN: u32 = 1;
 const LEFT: u32 = 96_000;
-
-fn bundle() -> Bundle {
-    Bundle::load(Path::new(FIXTURE)).unwrap()
-}
-
-/// An artifact store that keeps what it is given, and can refuse.
-#[derive(Clone, Default)]
-struct Shelf {
-    put: Rc<RefCell<Vec<Vec<u8>>>>,
-    refuse: Rc<Cell<bool>>,
-}
-
-impl ArtifactSink for Shelf {
-    fn put(&mut self, bytes: &[u8]) -> bool {
-        if self.refuse.get() {
-            return false;
-        }
-        self.put.borrow_mut().push(bytes.to_vec());
-        true
-    }
-}
-
-/// A pass's parts: the AAPL and MSFT data universe, both recorded wires allowlisted at version 3.
-fn parts() -> ResearchParts {
-    let envelope = MandateEnvelope {
-        universe_pinned: false,
-        max_instruments: 5,
-        asset_classes: BTreeSet::from([AssetClass::UsEquity]),
-        leveraged_etps_enabled: false,
-        leveraged_etp_disclosure_version: None,
-        admits_instruments: true,
-        research: Some(ResearchEnvelope {
-            interval_s: 3_600,
-            cost_cap_usd_per_day: Usd::parse("5").unwrap(),
-            max_revisions_per_lineage: 3,
-        }),
-        admission: AutonomyDecision::Ask,
-    };
-    let instruments = bundle().plane.instruments;
-    ResearchParts {
-        preconditions: Preconditions::read(&JournalCatalog::JOURNAL),
-        mandate: ValidatedMandate::from_validated_envelope(envelope),
-        overlay: PolicyOverlay::internal_research_profile(),
-        universe: WorkingUniverse::Known {
-            instruments: BTreeSet::new(),
-            pinned: false,
-        },
-        facts: AdmissionFacts {
-            allowlist: SourceAllowlist {
-                version: AllowlistVersion(3),
-                sources: SOURCES.iter().map(|s| SourceId::new(s).unwrap()).collect(),
-            },
-            eligibility_failures: BTreeSet::new(),
-            instrument_groups: BTreeMap::new(),
-            claimed_by_other_agents: BTreeSet::new(),
-            halted_instruments: BTreeSet::new(),
-            disclosures_accepted: BTreeSet::new(),
-            data_universe: Some(
-                instruments
-                    .iter()
-                    .map(|fact| AssetId::new(fact.asset_id.as_str()).unwrap())
-                    .collect(),
-            ),
-            research_spend_usd_today: Usd::parse("0").unwrap(),
-        },
-        lineages: LineageState::default(),
-        active: Vec::new(),
-        last_reservation: None,
-        data_symbols: BTreeSet::from([Symbol::new("AAPL").unwrap(), Symbol::new("MSFT").unwrap()]),
-    }
-}
 
 fn bare(shelf: &Shelf) -> RecordedWorker {
     let who = WorkerFor {
@@ -355,29 +275,6 @@ fn a_refused_store_answers_nothing() {
     shelf.refuse.set(true);
     let error = unanswered(&mut worker, &request(calls(), 3), &parts());
     assert_eq!(error, DispatchError::Unstored);
-}
-
-const RECORDING: &str = include_str!("fixtures/research/research.json");
-
-/// The recorded bundle with its entry naming the `v0_2` loop, read as `research.json` would be.
-fn agentic_bundle() -> Bundle {
-    let Some(Value::Object(mut entry)) = parse(RECORDING.as_bytes()).unwrap().get("entry").cloned()
-    else {
-        panic!("the recording has an entry")
-    };
-    entry.insert(Key::new("agentic").unwrap(), Value::Str("v0_2".to_owned()));
-    let mut bundle = bundle();
-    bundle.entry =
-        ResearchEntry::recorded(&Value::Object(entry)).unwrap_or_else(|e| panic!("{e:?}"));
-    bundle
-}
-
-fn who() -> WorkerFor {
-    WorkerFor {
-        workspace: "ws1".to_owned(),
-        agent: "agent-a".to_owned(),
-        description: "Long-only US large caps, on public news and filings.".to_owned(),
-    }
 }
 
 #[test]

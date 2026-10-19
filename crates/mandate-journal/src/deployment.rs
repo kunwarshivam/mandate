@@ -1,10 +1,10 @@
 //! The deployment manager's records journal spec v0.48 §9.21 closes at schema version 1
 //! (DEC-1170): the starts, stops, and crash loops of the processes it runs, on the workspace
-//! control stream, with consistency rules 165 to 168 and v0.71's rule 256 (DEC-1175), each refusing
-//! at its member. No member is
-//! free text: IDs, closed enumerations, and integers only. Workspace control services write them as
-//! a `system` actor (rule 165). Every rule only refuses a draft, and none compares one record with
-//! another: a slot's generations are the writer's to order at this version.
+//! control stream, with consistency rules 165 to 168 and v0.70's rule 256 (DEC-1175), each
+//! refusing at its member. No member is free text: IDs, closed enumerations, and integers only.
+//! Workspace control services write them as a `system` actor (rule 165). Every rule only refuses a
+//! draft, and none compares one record with another: a slot's generations, and a token exchange's
+//! one start and its stop only on its request's close, are the writer's to order at this version.
 
 use mandate_canon::Value;
 
@@ -19,7 +19,7 @@ const LOOPED: &str = "ProcessCrashLooped";
 pub(crate) const CONTROL: [&str; 3] = [STARTED, STOPPED, LOOPED];
 
 const PROCESSES: &[&str] = &["runtime", "executor"];
-/// The processes a start or a stop may name: v0.71 adds an OAuth connect's token exchange, which is
+/// The processes a start or a stop may name: v0.70 adds an OAuth connect's token exchange, which is
 /// started once, stopped only when its request closes, and never looped (DEC-1175).
 const STARTED_PROCESSES: &[&str] = &["runtime", "executor", "token_exchange"];
 
