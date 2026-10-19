@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use mandate_time::UtcNanos;
 
-use crate::item::{Bar, Filing, InstrumentFact, NewsItem, Symbol};
+use crate::item::{Bar, Filing, InstrumentFact, ItemId, NewsItem, Symbol};
 
 /// Why a read returned nothing. A failed read is an empty read: the run goes on with what it has,
 /// and the model is never told why (`AGENTS.md` rule 3).
@@ -29,6 +29,13 @@ pub struct TextQuery {
     pub cut_off: UtcNanos,
     pub allowlist_version: u32,
     pub max_items: u32,
+}
+
+/// One news item with the text the store holds for it, as `news.get` reads it (§6.10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewsText {
+    pub item: NewsItem,
+    pub text: String,
 }
 
 /// Daily bars (`mandate-marketdata`'s, through the shell's adapter).
@@ -58,6 +65,22 @@ pub trait NewsReader {
     /// [`ReadError`] when the store cannot answer.
     fn search(&self, query: &TextQuery, terms: &[String]) -> Result<Vec<NewsItem>, ReadError> {
         let _ = (query, terms);
+        Err(ReadError::Unavailable)
+    }
+
+    /// The stored text of one item the run already received, as of `cut_off` and from a source on
+    /// the allowlist version (data-plane spec §4.6's `items`). A reader that stores no text keeps
+    /// this default and answers [`ReadError::Unavailable`], which reads nothing (rule 3).
+    ///
+    /// # Errors
+    /// [`ReadError`] when the store cannot answer.
+    fn news_text(
+        &self,
+        item: &ItemId,
+        cut_off: UtcNanos,
+        allowlist_version: u32,
+    ) -> Result<NewsText, ReadError> {
+        let _ = (item, cut_off, allowlist_version);
         Err(ReadError::Unavailable)
     }
 }

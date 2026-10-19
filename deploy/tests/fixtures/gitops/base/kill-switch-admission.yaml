@@ -1,4 +1,4 @@
-# Who may make a kill switch's pod (DEC-2016 item 2). The signature webhooks fail closed but skip a
+# Who may make a kill switch's pod (DEC-2045). The signature webhooks fail closed but skip a
 # pod labelled `mandate.dev/process: control`, so that label must not be one anyone can set. These
 # policies run in the API server itself, with no webhook to go down, in every namespace the
 # signature webhooks check (labelled `policy.sigstore.dev/include`), so a new workspace's namespace

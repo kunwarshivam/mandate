@@ -1,4 +1,4 @@
-//! The `admission` drill (E21-58, DEC-2016 item 2): the hosted clusters' kill-switch admission
+//! The `admission` drill (E21-58, DEC-2045): the hosted clusters' kill-switch admission
 //! policies, `deploy/gitops/base/kill-switch-admission.yaml`, applied as they are to the cell's
 //! API server, with a signature webhook that is down and fails closed, skipping exactly the pods
 //! `deploy/gitops/base/admission.yaml`'s post-render patch exempts, as the hosted clusters' does

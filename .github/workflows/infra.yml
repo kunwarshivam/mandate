@@ -8,9 +8,10 @@
 # credential-free checks in `ci.yml` instead. xtask is built in a step that holds no secret, and
 # `target/debug/xtask infra`'s step, the built binary, receives them, so no build script ever runs
 # beside a secret; the last step, `if: always()` once the build succeeded, gets the DigitalOcean
-# token alone to delete the run's Spaces key. The run refuses unless `sha` is the commit checked
-# out, so the founder's approval binds to the commit they reviewed. `cargo xtask lint` checks this
-# shape.
+# token alone to delete the run's Spaces key. `apply` refuses unless `sha` is the commit checked
+# out, so the founder's approval binds to the commit they reviewed; `preflight` and `plan` may leave
+# `sha` empty and run at the commit main was at, which they print (DEC-2042). `cargo xtask lint`
+# checks this shape.
 name: infra
 
 on:
@@ -28,8 +29,9 @@ on:
         default: preflight
         options: [preflight, plan, apply]
       sha:
-        description: The full commit you reviewed; the run refuses unless it is the commit main was at when you dispatched
-        required: true
+        description: The full commit you reviewed. Required for apply, which refuses unless it is the commit main was at when you dispatched; preflight and plan may leave it empty and use main's commit, which they print
+        required: false
+        default: ""
         type: string
 
 permissions: {}
