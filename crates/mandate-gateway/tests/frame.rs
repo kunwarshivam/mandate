@@ -94,7 +94,6 @@ fn served_record() -> CallRecord {
 /// DEC-2264 item 1: any body within its bound is written as its big-endian length and then itself,
 /// and reads back as itself, taking nothing past its end; one past the bound is written as nothing.
 #[test]
-#[ignore = "pending E21-62"]
 fn any_body_within_its_bound_reads_back_as_itself() {
     let bodies = (proptest::collection::vec(any::<u8>(), 0..2048), 0_u32..64);
     runner()
@@ -123,7 +122,6 @@ fn any_body_within_its_bound_reads_back_as_itself() {
 /// DEC-2264 item 2: a length one past its bound, or any longer, is refused having read only the
 /// four bytes of the length, so a peer cannot make either side read or hold an oversized body.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_length_past_the_bound_is_refused_before_a_byte_of_the_body_is_read() {
     for (bound, length) in [
         (MAX_REQUEST_FRAME, MAX_REQUEST_FRAME + 1),
@@ -148,7 +146,6 @@ fn a_length_past_the_bound_is_refused_before_a_byte_of_the_body_is_read() {
 /// DEC-2264 item 2: a request frame cut short anywhere, in its length or its body, reads as
 /// truncated, and the service neither answers it nor writes a byte back.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_frame_cut_short_anywhere_is_never_answered() {
     let whole = framed(&request_bytes(&served_request()));
     for cut in 0..whole.len() {
@@ -167,7 +164,6 @@ fn a_frame_cut_short_anywhere_is_never_answered() {
 /// DEC-2264 items 2 and 5: a whole frame that does not decode to a request, one not JSON, empty,
 /// of another version, or a reply where a request belongs, is never answered and gets no reply.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_frame_that_does_not_decode_is_never_answered() {
     let request = String::from_utf8(request_bytes(&served_request())).unwrap();
     let bodies = [
@@ -194,7 +190,6 @@ fn a_frame_that_does_not_decode_is_never_answered() {
 /// DEC-2264 items 1, 5 and 6: over a real connection, a request reaches the service as itself and
 /// its record comes back whole, prompt and response included; a refusal comes back as itself.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_call_crosses_one_connection_and_comes_back_whole() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
@@ -235,7 +230,6 @@ fn a_call_crosses_one_connection_and_comes_back_whole() {
 /// DEC-2264 item 4: when the service holds a call past the caller's socket timeout, the caller's
 /// exchange ends as timed out rather than waiting on it.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_reply_that_does_not_come_in_time_reads_as_timed_out() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
@@ -261,7 +255,6 @@ fn a_reply_that_does_not_come_in_time_reads_as_timed_out() {
 /// DEC-2264 items 1 and 3: the service never writes a reply past its bound; it writes nothing, so
 /// the caller reads the call as lost. A request past its own bound is never sent.
 #[test]
-#[ignore = "pending E21-62"]
 fn neither_side_writes_a_frame_past_its_bound() {
     let mut record = served_record();
     record.response = Some(vec![0x5a; 13 * 1024 * 1024]);
