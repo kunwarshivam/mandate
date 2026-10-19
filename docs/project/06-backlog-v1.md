@@ -3250,6 +3250,13 @@ fully on-prem control plane; shared data plane; strategy marketplace.
      `exits_only`) and [connections spec](../specs/connections.md) CN-7 (never adopted as ours).
      Both are protected spec changes.
 
+- **Rotating Barman's minted R2 token** ([DEC-2029](decisions/DEC-2029.md); E21-56's review).
+  The `cloudflare` module mints the journal archive's bucket-scoped token with no `expires_on`, so
+  it lives until the token resource is replaced. Wanted: an expiry, a rotation that mints the next
+  token before the old one lapses and hands it to the cluster through lane GO's bootstrap, and a
+  check that alerts before the expiry. Until then the founder can rotate it by tainting
+  `module.cloudflare.cloudflare_account_token.journal_archive` in a reviewed apply.
+
 ## Enterprise harness (proposed, DEC-149)
 
 Epic **E18**, from the [harness engineering research](../product/11-harness-engineering.md#7-recommendations)

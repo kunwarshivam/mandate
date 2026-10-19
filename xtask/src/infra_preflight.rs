@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
-use crate::tofu_audit;
+use crate::mask;
 
 const DO_API: &str = "https://api.digitalocean.com/v2";
 const CF_API: &str = "https://api.cloudflare.com/client/v4";
@@ -400,8 +400,8 @@ fn mint_key(token: &str, name: &str) -> Result<Option<SpacesKey>> {
     let (Some(access_key), Some(secret_key)) = (field("access_key"), field("secret_key")) else {
         bail!("DigitalOcean's minted key lacks its access key or secret");
     };
-    tofu_audit::mask(&access_key);
-    tofu_audit::mask(&secret_key);
+    mask::add_mask(&access_key);
+    mask::add_mask(&secret_key);
     Ok(Some(SpacesKey {
         access_key,
         secret_key,
@@ -540,7 +540,7 @@ fn cloudflare(list: &mut Checklist, token: &str) -> Result<()> {
         return Ok(());
     };
     let account = &account.id;
-    tofu_audit::mask(account);
+    mask::add_mask(account);
     let mut record = None;
     for (verify, read) in [
         (
@@ -560,7 +560,7 @@ fn cloudflare(list: &mut Checklist, token: &str) -> Result<()> {
             .context("Cloudflare's token verification is not its JSON")?
             .result
             .id;
-        tofu_audit::mask(&id);
+        mask::add_mask(&id);
         record = Some(api("GET", &format!("{read}{id}"), token, None)?);
         break;
     }

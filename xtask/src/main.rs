@@ -1030,6 +1030,24 @@ fn provider_schemas_mask(
     Ok(used_here)
 }
 
+/// OpenTofu's functions that read a file from disk: refused in `deploy/tofu/` when called, since
+/// what they load (a template, a script, a key) would reach OpenTofu and not the raw scan
+/// (DEC-2014 item 6).
+const TOFU_FILE_FUNCTIONS: [&str; 12] = [
+    "file",
+    "fileexists",
+    "fileset",
+    "filebase64",
+    "filebase64sha256",
+    "filebase64sha512",
+    "filemd5",
+    "filesha1",
+    "filesha256",
+    "filesha512",
+    "templatefile",
+    "templatestring",
+];
+
 /// The provider sources `deploy/tofu/` may name (DEC-2012 item 4).
 const TOFU_PROVIDER_SOURCES: [&str; 2] = ["digitalocean/digitalocean", "cloudflare/cloudflare"];
 
@@ -1109,6 +1127,26 @@ fn tofu_forbidden_blocks(files: &[(String, String)]) -> Vec<String> {
             }) {
                 refuse(
                     "names `http` other than in a URL, the data source deploy/tofu never may use",
+                );
+            }
+            let called = |name: &str| {
+                whole_words(&line, name).any(|at| {
+                    line.get(at.saturating_add(name.len())..)
+                        .is_some_and(|rest| rest.trim_start().starts_with('('))
+                })
+            };
+            if TOFU_FILE_FUNCTIONS.iter().any(|name| called(name)) {
+                refuse(
+                    "calls a function that reads a file, which could load configuration the scan \
+                     never sees",
+                );
+            }
+            if whole_words(&line, "terraform_remote_state")
+                .next()
+                .is_some()
+            {
+                refuse(
+                    "names `terraform_remote_state`, which reads another state deploy/tofu never may",
                 );
             }
             if whole_words(&line, "source").next().is_some() && !allowed_source_line(&line) {
@@ -1344,7 +1382,7 @@ fn infra() -> Result<()> {
     let commands = infra_commands(&environment, &action, &plan_file.to_string_lossy())?;
     for name in [infra_preflight::KUBE_CIDRS_ENV, infra_preflight::EMAILS_ENV] {
         for value in tofu_audit::list_items(&env::var(name).unwrap_or_default()) {
-            tofu_audit::mask(&value);
+            mask::add_mask(&value);
         }
     }
     let read = |name: &str| env::var(name).ok();
@@ -16202,6 +16240,23 @@ mod tests {
                 !one("m/a.tf", text).is_empty(),
                 "{text:?}: a backslash is refused"
             );
+        }
+        for text in [
+            "x = file(\"secret.pem\")\n",
+            "x = templatefile (\"a.tftpl\", {})\n",
+            "x = FILEBASE64(\"k\")\n",
+            "data \"terraform_remote_state\" \"other\" {}\n",
+        ] {
+            assert!(
+                !one("m/a.tf", text).is_empty(),
+                "{text:?}: a file read or another state is refused"
+            );
+        }
+        for text in [
+            "# the state file stays encrypted\n",
+            "description = \"a profile name\"\n",
+        ] {
+            assert!(one("m/a.tf", text).is_empty(), "{text:?} is allowed");
         }
         let root = env::temp_dir().join(format!("mandate-tofu-links-{}", std::process::id()));
         if root.exists() {

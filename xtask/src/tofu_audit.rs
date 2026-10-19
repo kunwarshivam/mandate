@@ -1,14 +1,13 @@
 //! What keeps `infra.yml`'s public log free of values (E21-56, DEC-2030 item 6): the providers'
 //! own `sensitive` flags on every attribute a credential could sit in, a plan summary that names
-//! only addresses and actions, and GitHub's masks for every value fetched at run time. The
+//! only addresses and actions, and which items of a list secret to mask. The masks themselves are
+//! [`crate::mask`]'s, the one place a workflow command `::add-mask::` is written. The
 //! repository is public, so its Actions logs are too, and GitHub masks only the secrets it
 //! handed the job, never a value a step fetched.
 
 use std::collections::BTreeSet;
 
 use serde_json::Value;
-
-use crate::image::base64;
 
 /// The name parts a credential is held under, in any resource or data source this tree uses: an
 /// attribute whose name contains one (`tunnel_secret`, `client_secret`, `api_key`,
@@ -189,63 +188,6 @@ pub(crate) fn plan_summary(plan: &Value) -> Vec<String> {
     }
 }
 
-/// The forms of `value` a log could carry, each of which GitHub must mask: the value itself, its
-/// standard and URL-safe base64 with and without padding, its URL encoding, its JSON-escaped
-/// form, and each of its lines. Empty forms are dropped. A multi-line form is kept: its command
-/// escapes the line breaks ([`command_escaped`]).
-pub(crate) fn mask_forms(value: &str) -> BTreeSet<String> {
-    let standard = base64(value.as_bytes());
-    let url_safe = standard.replace('+', "-").replace('/', "_");
-    let json = serde_json::to_string(value).unwrap_or_default();
-    let mut forms: BTreeSet<String> = [
-        value.to_owned(),
-        standard.trim_end_matches('=').to_owned(),
-        url_safe.trim_end_matches('=').to_owned(),
-        standard,
-        url_safe,
-        percent_encoded(value),
-        json.get(1..json.len().saturating_sub(1))
-            .unwrap_or_default()
-            .to_owned(),
-    ]
-    .into();
-    forms.extend(value.lines().map(str::to_owned));
-    forms.retain(|form| !form.trim().is_empty());
-    forms
-}
-
-/// `value` percent-encoded, every byte but RFC 3986's unreserved ones.
-fn percent_encoded(value: &str) -> String {
-    value
-        .bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-                char::from(byte).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
-}
-
-/// `data` escaped as a workflow command's data: `%` first, then CR and LF, as the runner decodes
-/// them. Unescaped, a `%` in the value (every URL-encoded form holds one) or a line break would
-/// register a different mask from the value it is meant to hide.
-pub(crate) fn command_escaped(data: &str) -> String {
-    data.replace('%', "%25")
-        .replace('\r', "%0D")
-        .replace('\n', "%0A")
-}
-
-/// The workflow commands that mask `value` in every form (see [`mask_forms`]), each one's data
-/// [`command_escaped`]; GitHub hides the commands themselves from the log.
-pub(crate) fn mask_commands(value: &str) -> Vec<String> {
-    mask_forms(value)
-        .into_iter()
-        .map(|form| format!("::add-mask::{}", command_escaped(&form)))
-        .collect()
-}
-
 /// What to mask of a JSON list secret, `KUBE_API_ALLOWED_CIDRS` or `ACCESS_ALLOWED_EMAILS`:
 /// GitHub masks the secret only as the whole string it stored, so each item, and each CIDR's
 /// bare address, is masked on its own before any `tofu` call could print one (the review's B2).
@@ -263,15 +205,6 @@ pub(crate) fn list_items(json: &str) -> Vec<String> {
     }
     out.retain(|item| !item.trim().is_empty());
     out
-}
-
-/// Masks `value` when running in GitHub Actions, before anything else can print it.
-pub(crate) fn mask(value: &str) {
-    if std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
-        for command in mask_commands(value) {
-            println!("{command}");
-        }
-    }
 }
 
 #[cfg(test)]
@@ -431,55 +364,5 @@ mod tests {
         assert!(list_items("").is_empty());
         assert!(list_items("not json").is_empty());
         assert!(list_items("[\"\", 7]").is_empty());
-    }
-
-    /// The audit's item 3: every form a log could carry is masked.
-    #[test]
-    fn every_form_of_a_value_is_masked() {
-        let value = "ab+/c\"d\nsecond line";
-        let forms = mask_forms(value);
-        let standard = base64(value.as_bytes());
-        assert!(
-            forms.contains(value),
-            "the whole multi-line value is masked too"
-        );
-        assert!(mask_forms("single").contains("single"));
-        for form in [
-            standard.clone(),
-            standard.replace('+', "-").replace('/', "_"),
-            standard.trim_end_matches('=').to_owned(),
-            "ab%2B%2Fc%22d%0Asecond%20line".to_owned(),
-            "ab+/c\\\"d\\nsecond line".to_owned(),
-            "ab+/c\"d".to_owned(),
-            "second line".to_owned(),
-        ] {
-            assert!(forms.contains(&form), "{form:?} is not masked: {forms:?}");
-        }
-        assert!(mask_forms("").is_empty(), "an empty value masks nothing");
-        let commands = mask_commands("a%b\r\nc");
-        assert!(
-            commands.contains(&"::add-mask::a%25b%0D%0Ac".to_owned()),
-            "the whole value, its % and its line breaks escaped: {commands:?}"
-        );
-        assert!(
-            commands.contains(&"::add-mask::a%2525b%250D%250Ac".to_owned()),
-            "the URL-encoded form's own % escaped: {commands:?}"
-        );
-        assert!(
-            commands
-                .iter()
-                .all(|command| !command.contains(['\r', '\n'])),
-            "no printed command spans lines: {commands:?}"
-        );
-        assert_eq!(
-            command_escaped("%0A"),
-            "%250A",
-            "% is escaped before the line breaks"
-        );
-        assert!(
-            mask_commands("x")
-                .iter()
-                .all(|command| command.starts_with("::add-mask::"))
-        );
     }
 }
