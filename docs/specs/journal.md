@@ -16,7 +16,9 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   writer bullet said each writer refuses a draft whose `connection_id` differs from its document's.
   The writers take `connection_id` from the document, so it cannot differ. The bullet now says rule
   200 holds there by construction, and that the draft is appended at the head the writer read, so a
-  revocation written in between is decided again (CLI) or answered `unavailable` (the workspace API).
+  revocation written in between is decided again (the CLI, at most three decisions, then a journal
+  error) or answered `journal_unavailable` (the workspace API, 503). `workspace-api.md`'s deploy row
+  says the same.
   Wording only: no record, rule outcome or vector changes.
   - **Versions.** v0.63 is held by TW's #1778 (`MarkUpdated` version 2), so this change takes v0.64.
 - **v0.62 ([DEC-2104](../project/decisions/DEC-2104.md); E9-4, claim #759):** §9.29 adds the
@@ -4988,9 +4990,11 @@ a writer that has not moved fails closed, never open.
        the workspace API's deployment) already holds the stored document it deploys and validates
        it, and takes `connection_id` from that document, so the two never differ and there is
        nothing to compare. It appends the draft at the control stream's head it read, so a record
-       written in between (a revocation) fails the append's head check and nothing is appended:
-       the CLI decides again from the new head, and the workspace API answers `unavailable` (503,
-       retryable).
+       written in between (a revocation) fails the append's head check and nothing is appended.
+       The CLI reads the rows and decides again from the new head, at most three decisions in
+       all; when the stream keeps moving it commits nothing and returns a journal error. The
+       workspace API answers `journal_unavailable` (503, retryable), and a retry reads the rows
+       again.
      - **By §9.2's mapping.** Where the mapping reads the document for `AgentVersionActive`, a
        version-2 record whose `connection_id` differs from the document's is refused as malformed
        at `payload.connection_id`, as a record whose document is not stored is refused, never
