@@ -786,6 +786,7 @@ layer = 7
 safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "secrecy", "tokio"]
+allowed_external = ["secrecy"]
 allowed_dependents = []
 
 [crates.mandate-api-server]

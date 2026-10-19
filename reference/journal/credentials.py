@@ -134,7 +134,9 @@ def member_drafts() -> list[dict]:
         out.append(invalid(f"{base}.{member}.form", "§9.31 types", base, [change(path, wrong_form)], "non_canonical", path, also))
     for shape, value in CREDENTIAL_SHAPES:
         out.append(invalid(f"credential.{shape}", "§9.31 `credential_id`", FIRST, [change("payload.credential", value)], "non_canonical", "payload.credential"))
-    for name, value in (("negative", -1), ("past_32_bits", 4294967296), ("text", "0"), ("boolean", True)):
+    # A negative integer has no canonical JSON (journal spec §4), so the journal refuses it before any
+    # rule and no vector can carry one: `sign_count`'s lower bound needs no case of its own.
+    for name, value in (("past_32_bits", 4294967296), ("text", "0"), ("boolean", True)):
         out.append(invalid(f"sign_count.{name}", "§9.31 `sign_count`", FIRST, [change("payload.sign_count", value)], "schema", "payload.sign_count"))
     out.append(invalid("alg.rs256", "§9.31 `passkey_alg`", FIRST, [change("payload.alg", "rs256")], "non_canonical", "payload.alg"))
     out.append(invalid("alg.kind", "§9.31 `passkey_alg`", FIRST, [change("payload.alg", 7)], "schema", "payload.alg"))
