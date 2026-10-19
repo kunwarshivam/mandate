@@ -96,29 +96,47 @@ impl Refs for ResearchRefs {
     }
 }
 
-/// The research for `deployment`, or `None` when `asked` names no bundle.
+/// Research asked for over a recorded bundle, for a resolved paper deployment: made only by
+/// [`opt_in`], so no research is built for any other deployment.
+pub struct OptIn {
+    bundle: Bundle,
+    deployment: CellDeployment,
+}
+
+/// The opt-in for research over the recorded bundle at `dir`, for `deployment`. It reads no journal
+/// and no artifact store, so a refused opt-in stops the start before the process connects to either.
 ///
 /// # Errors
-/// [`CellError`] when research is asked for and anything it needs is missing.
-pub fn research(
-    asked: Option<&Path>,
-    deployment: &CellDeployment,
-    rows: Box<dyn Rows>,
-    artifacts: &Path,
-    now: Box<dyn FnMut() -> UtcNanos>,
-) -> Result<Option<CellResearch>, CellError> {
-    let Some(bundle) = asked else {
-        return Ok(None);
-    };
+/// [`CellError::NotPaper`] or [`CellError::Unresolved`] for any but a resolved paper deployment, and
+/// [`CellError::Bundle`] when the bundle does not load.
+pub fn opt_in(dir: &Path, deployment: &CellDeployment) -> Result<OptIn, CellError> {
     if deployment.environment != Environment::Paper {
         return Err(CellError::NotPaper);
     }
     if !deployment.resolved {
         return Err(CellError::Unresolved);
     }
+    Ok(OptIn {
+        bundle: Bundle::load(dir).map_err(CellError::Bundle)?,
+        deployment: deployment.clone(),
+    })
+}
+
+/// The research `opted` asks for, reading the streams through `rows` and the mandate documents and
+/// artifacts from the store at `artifacts`.
+///
+/// # Errors
+/// [`CellError`] when the artifact store, the deployment, its mandate document, or the worker cannot
+/// be had.
+pub fn research(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    artifacts: &Path,
+    now: Box<dyn FnMut() -> UtcNanos>,
+) -> Result<CellResearch, CellError> {
+    let OptIn { bundle, deployment } = opted;
     let open =
         || FsArtifactStore::open_existing(artifacts).map_err(|_| CellError::ArtifactsUnavailable);
-    let bundle = Bundle::load(bundle).map_err(CellError::Bundle)?;
     let control = StreamId::parse(&format!("ctl:{}", deployment.workspace))
         .ok_or(CellError::Mandate("deployment_missing"))?;
     let rows_now = rows
@@ -169,7 +187,7 @@ pub fn research(
         mandate_version: version,
         model_version: pin.content_hash,
     };
-    Ok(Some(CellResearch {
+    Ok(CellResearch {
         wiring: ResearchWiring {
             config: ResearchConfig {
                 pin,
@@ -186,5 +204,5 @@ pub fn research(
             artifacts: Box::new(StoreSink(open()?)),
         },
         refs: Box::new(refs),
-    }))
+    })
 }

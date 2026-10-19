@@ -11,12 +11,13 @@
 use std::ffi::OsStr;
 use std::io::Read;
 use std::os::unix::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
 const BIN: &str = env!("CARGO_BIN_EXE_mandate-daemon");
+const BUNDLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/research");
 const BOUND: Duration = Duration::from_secs(10);
 const DEPLOYMENT: [&str; 8] = [
     "--workspace",
@@ -159,6 +160,51 @@ fn a_manager_launch_refuses_until_its_deployment_is_resolved() {
         unreadable.stderr, b"process_not_runtime\n",
         "an unreadable value is not taken as unset"
     );
+    assert!(!path.exists(), "a refused process serves no probe");
+}
+
+/// Research asked for and refused stops the start before the process is ready, so asking for
+/// research and getting none is never silent, and the deny-all runtime never starts in its place
+/// (DEC-2215 item 2): on a deployment handed by flags, with or without `--fixture`, and on one to
+/// be read from the journal whose bundle does not load, which refuses before any journal is named.
+/// A bundle that loads leaves the start to its journal.
+#[test]
+fn a_refused_research_opt_in_stops_the_start() {
+    let path = socket("research");
+    let refused = |code: &str| (Some(2), format!("runtime_start_failed: {code}\n"));
+    for extra in [&[][..], &["--fixture"][..]] {
+        let mut run = vec!["run"];
+        run.extend(DEPLOYMENT);
+        run.extend(extra);
+        run.extend(["--research", BUNDLE]);
+        let (status, stderr) = Guard::spawn(&run, &path).exited();
+        assert_eq!(
+            (status.code(), stderr),
+            refused("research_needs_resolved_deployment"),
+            "{extra:?}"
+        );
+    }
+    let store = std::env::temp_dir().join(format!("daemon-{}-research", std::process::id()));
+    std::fs::create_dir_all(store.join("sha256")).unwrap();
+    let missing = std::env::temp_dir().join(format!("daemon-{}-no-bundle", std::process::id()));
+    let launch = |bundle: &Path| {
+        let out = Command::new(BIN)
+            .args(["run", "--research"])
+            .arg(bundle)
+            .arg("--probe")
+            .arg(&path)
+            .env_remove("MANDATE_JOURNAL_DSN")
+            .env("MANDATE_WORKSPACE", "ws1")
+            .env("MANDATE_PROCESS", "runtime")
+            .env("MANDATE_SUBJECT", "agent-a")
+            .env("MANDATE_ARTIFACTS", &store)
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        (out.status.code(), String::from_utf8(out.stderr).unwrap())
+    };
+    assert_eq!(launch(&missing), refused("research_bundle_unreadable"));
+    assert_eq!(launch(Path::new(BUNDLE)), refused("journal_dsn_missing"));
     assert!(!path.exists(), "a refused process serves no probe");
 }
 

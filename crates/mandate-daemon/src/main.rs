@@ -156,23 +156,20 @@ fn run(
         }
         Given::Named { .. } => None,
     };
-    let asked = |resolved: bool| CellDeployment {
-        workspace: workspace.clone(),
-        agent: agent.clone(),
-        environment: Environment::Paper,
-        resolved,
-    };
-    if research.is_some() && matches!(given, Given::Named { .. }) {
-        cell::research(
-            research,
-            &asked(false),
-            Box::new(MemoryStore::default()),
-            Path::new(""),
-            Box::new(host_now),
-        )
+    let opted = research
+        .map(|dir| {
+            cell::opt_in(
+                dir,
+                &CellDeployment {
+                    workspace: workspace.clone(),
+                    agent: agent.clone(),
+                    environment: Environment::Paper,
+                    resolved: matches!(given, Given::Resolve { .. }),
+                },
+            )
+        })
+        .transpose()
         .map_err(|error| error.code())?;
-        return Err("research_unwired");
-    }
     if fixture {
         let Given::Named { connection, owner } = given else {
             return Err("deployment_unresolved");
@@ -195,17 +192,14 @@ fn run(
             let rows = store.rows(&control).ok_or("journal_unavailable")?;
             let found = deployment::resolved(&rows, &agent, Environment::Paper, &artifacts)?;
             let mut wiring = fixture::wiring_for(&found.approvers, &found.author);
-            if research.is_some() {
-                let reader = PgStore::connect(&dsn)?;
+            if let Some(opted) = opted {
                 let wired = cell::research(
-                    research,
-                    &asked(true),
-                    Box::new(reader),
+                    opted,
+                    Box::new(PgStore::connect(&dsn)?),
                     Path::new(&root),
                     Box::new(host_now),
                 )
-                .map_err(|error| error.code())?
-                .ok_or("research_unwired")?;
+                .map_err(|error| error.code())?;
                 wiring.research = Some(wired.wiring);
                 wiring.refs = wired.refs;
             }

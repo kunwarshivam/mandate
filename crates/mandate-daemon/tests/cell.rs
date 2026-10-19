@@ -1,7 +1,8 @@
-//! The cell's research opt-in (DEC-2210 item 5, DEC-2215): no research unless asked for, never for
-//! a deployment that is not a paper one read from the journal, and, when asked, the bundle's entry
-//! over the recorded worker and the cell's source, with records naming the deployed mandate and
-//! the entry.
+//! The cell's research opt-in (DEC-2210 item 5, DEC-2215): never for a deployment that is not a
+//! paper one read from the journal, nor over a bundle that does not load, and, once opted in, the
+//! bundle's entry over the recorded worker and the cell's source, with records naming the deployed
+//! mandate and the entry. Without the opt-in the binary runs deny-all, and a refused opt-in stops
+//! its start (`tests/process.rs`).
 
 use std::cell::RefCell;
 use std::fs;
@@ -10,7 +11,7 @@ use std::rc::Rc;
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
-use mandate_daemon::cell::{CellDeployment, CellError, research};
+use mandate_daemon::cell::{CellDeployment, CellError, OptIn, opt_in, research};
 use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_daemon::source::Rows;
 use mandate_journal::{ArtifactStore, Environment, StoredEvent, StreamId};
@@ -101,75 +102,53 @@ fn now() -> Box<dyn FnMut() -> UtcNanos> {
     Box::new(|| UtcNanos::from_parts(1_792_180_800, 0).unwrap())
 }
 
-/// Without the opt-in the process runs deny-all, whatever the deployment.
-#[test]
-fn without_the_opt_in_there_is_no_research() {
-    let (root, control, _, _) = deployed("none");
-    for deployment in [
-        paper(true),
-        paper(false),
-        CellDeployment {
-            environment: Environment::Live,
-            ..paper(true)
-        },
-    ] {
-        let wired = research(None, &deployment, Box::new(control.clone()), &root, now()).unwrap();
-        assert!(wired.is_none(), "{deployment:?}");
-    }
+/// The opt-in over the test fixture's bundle for a resolved paper deployment.
+fn opted() -> OptIn {
+    opt_in(Path::new(FIXTURE), &paper(true)).unwrap_or_else(|error| panic!("{error:?}"))
 }
 
-/// Research is asked for only on a paper deployment the process read from the journal.
+/// Research is asked for only on a paper deployment the process read from the journal; a live one
+/// is refused first, read from the journal or not.
 #[test]
 fn the_opt_in_refuses_any_but_a_resolved_paper_deployment() {
-    let (root, control, _, _) = deployed("refused");
-    let bundle = Some(Path::new(FIXTURE));
-    let live = CellDeployment {
+    let live = |resolved| CellDeployment {
         environment: Environment::Live,
-        ..paper(true)
+        ..paper(resolved)
     };
-    let refused = |deployment: &CellDeployment| {
-        research(bundle, deployment, Box::new(control.clone()), &root, now())
-            .err()
-            .unwrap()
-    };
-    assert_eq!(refused(&live), CellError::NotPaper);
+    let refused =
+        |deployment: &CellDeployment| opt_in(Path::new(FIXTURE), deployment).err().unwrap();
+    assert_eq!(refused(&live(true)), CellError::NotPaper);
+    assert_eq!(refused(&live(false)), CellError::NotPaper);
     assert_eq!(refused(&paper(false)), CellError::Unresolved);
+    opted();
 }
 
-/// What research needs and cannot read refuses the opt-in: the bundle, the deployment, or the
-/// artifact store.
+/// A bundle that does not load refuses the opt-in.
 #[test]
-fn the_opt_in_refuses_what_it_cannot_read() {
-    let (root, control, _, _) = deployed("unreadable");
+fn the_opt_in_refuses_a_bundle_it_cannot_read() {
     let missing = std::env::temp_dir().join(format!("daemon-{}-no-bundle", std::process::id()));
-    let refused = research(
-        Some(&missing),
-        &paper(true),
-        Box::new(control.clone()),
-        &root,
-        now(),
-    )
-    .err()
-    .unwrap();
     assert_eq!(
-        refused,
+        opt_in(&missing, &paper(true)).err().unwrap(),
         CellError::Bundle(BundleError::Unreadable {
             file: "research.json"
         })
     );
+}
 
-    let bundle = Some(Path::new(FIXTURE));
+/// What opted-in research needs and cannot read refuses it: the deployment, or the artifact store.
+#[test]
+fn the_research_refuses_what_it_cannot_read() {
+    let (root, control, _, _) = deployed("unreadable");
     let nobody = Control::default();
     assert_eq!(
-        research(bundle, &paper(true), Box::new(nobody), &root, now())
+        research(opted(), Box::new(nobody), &root, now())
             .err()
             .unwrap(),
         CellError::Mandate("agent_not_deployed")
     );
-
     let nowhere = std::env::temp_dir().join(format!("daemon-{}-no-store", std::process::id()));
     assert_eq!(
-        research(bundle, &paper(true), Box::new(control), &nowhere, now())
+        research(opted(), Box::new(control), &nowhere, now())
             .err()
             .unwrap(),
         CellError::ArtifactsUnavailable
@@ -182,15 +161,8 @@ fn the_opt_in_refuses_what_it_cannot_read() {
 #[test]
 fn the_opted_in_research_is_the_bundle_s_entry_for_the_deployed_mandate() {
     let (root, control, version, document) = deployed("wired");
-    let wired = research(
-        Some(Path::new(FIXTURE)),
-        &paper(true),
-        Box::new(control),
-        &root,
-        now(),
-    )
-    .unwrap()
-    .unwrap();
+    let wired = research(opted(), Box::new(control), &root, now())
+        .unwrap_or_else(|error| panic!("{error:?}"));
     let bundle = Bundle::load(Path::new(FIXTURE)).unwrap();
     let config = &wired.wiring.config;
     assert_eq!(config.pin, bundle.entry.content().model_ref());
@@ -246,6 +218,7 @@ fn each_refusal_is_a_code() {
         ),
     ];
     for (error, code) in codes {
+        assert_eq!(error.code(), code);
         assert_eq!(error.to_string(), code);
         let as_error: &dyn std::error::Error = &error;
         assert!(as_error.source().is_none());
