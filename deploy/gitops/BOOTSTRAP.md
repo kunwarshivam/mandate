@@ -106,9 +106,12 @@ once:
    kubectl -n ws-ws1 exec -it vault-0 -- bao operator init -recovery-shares=3 -recovery-threshold=2
    ```
 
-   Keep the three recovery keys and the root token offline (DEC-2021 item 4). They are needed only
-   to make a new root token or to rotate the seal, never to unseal: from now on the vault unseals
-   itself on every restart. Staging's verify line for `vault-0` reads `[pending founder init]`
+   Its output is the three recovery keys and the initial root token: copy them from your terminal
+   to offline storage, and never paste them into an issue, a CI job or a chat (DEC-2021 item 4).
+   The recovery keys are needed only to make a new root token or to rotate the seal, never to
+   unseal: from now on the vault unseals itself on every restart. Once `mandate vault provision`
+   has run with the root token (DEC-2022), revoke it with `bao token revoke -self`; the recovery
+   keys can make another. Staging's verify line for `vault-0` reads `[pending founder init]`
    until this step, and `[ok]` after it.
 
 ## When the journal does not install
