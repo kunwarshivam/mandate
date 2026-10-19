@@ -274,7 +274,7 @@ pub(crate) struct Proposal<'s> {
     /// Whether the order is a kill switch's own flatten (§5.5), which the agent's mode never holds.
     pub(crate) flatten: bool,
     /// The bid the owner confirmed for an owner's exit, which lets it go outside the regular
-    /// session (§5.5, DEC-2039 item 3); it overrides the snapshot's.
+    /// session (§5.5, DEC-2040 item 3); it overrides the snapshot's.
     pub(crate) owner_confirmed_bid: Option<Price>,
 }
 

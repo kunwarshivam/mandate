@@ -4215,7 +4215,7 @@ def main(argv: list[str] | None = None) -> int:
         f"rule-245 IntentReceived drafts, {len(market_intents.VALIDATOR_MUTANTS)} validator and "
         f"{len(market_intents.vector_mutants(market_intents_section))} vector mutants caught; "
         f"{len(owner_confirmations_section['invalid_drafts'])} invalid and {len(owner_confirmations_section['valid_drafts'])} valid "
-        f"rule-246 drafts and {len(owner_confirmations_section['batches'])} rule-247 batches, "
+        f"rule-247 drafts and {len(owner_confirmations_section['batches'])} rule-248 batches, "
         f"{len(owner_confirmations.VALIDATOR_MUTANTS)} validator, {len(owner_confirmations.BATCH_MUTANTS)} batch and "
         f"{len(owner_confirmations.vector_mutants(owner_confirmations_section))} vector mutants caught; "
         f"{len(control_plane_section['invalid_drafts'])} invalid and {len(control_plane_section['valid_drafts'])} valid "

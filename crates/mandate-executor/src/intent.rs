@@ -89,7 +89,7 @@ pub(crate) fn received(
     gate_and_submit(batch, &handoff.intent_id)
 }
 
-/// DEC-2039 item 1: a confirmation only for an owner's exit, with a positive bid size, and never
+/// DEC-2040 item 1: a confirmation only for an owner's exit, with a positive bid size, and never
 /// under a limit below its floor; anything else is non-canonical, refused before it is journaled.
 fn fits(
     confirmation: &HandedConfirmation,
@@ -113,8 +113,8 @@ fn fits(
     Ok(())
 }
 
-/// `OwnerConfirmationReceived` (§9.5, DEC-2039 item 2): the owner's confirmation, journaled
-/// immediately after its intent's `IntentReceived` in the same batch (rule 247), so replay reads
+/// `OwnerConfirmationReceived` (§9.5, DEC-2040 item 2): the owner's confirmation, journaled
+/// immediately after its intent's `IntentReceived` in the same batch (rule 248), so replay reads
 /// the bid and floor back.
 fn confirmation_fields(
     intent: &IntentId,

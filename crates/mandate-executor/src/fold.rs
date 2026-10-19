@@ -398,7 +398,7 @@ fn intent_received(
     Ok(())
 }
 
-/// One `OwnerConfirmationReceived` (§9.5, DEC-2039 item 2): the bid and floor the owner confirmed
+/// One `OwnerConfirmationReceived` (§9.5, DEC-2040 item 2): the bid and floor the owner confirmed
 /// for the intent it names, which the gate, the session and the ladder read for that exit.
 fn owner_confirmation_received(
     state: &mut ExecutorState,

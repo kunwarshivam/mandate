@@ -141,7 +141,7 @@ fn reopens(at: RiskClock) -> bool {
 /// opening never does (§3.1), and a discretionary or an unconfirmed owner exit waits for the
 /// regular session (§5.5, §9.6): it goes as a regular-session limit, which the broker queues to
 /// that session (§5.2), rule 13's broker hold. An owner exit the owner `confirmed` goes there too
-/// (§5.5, DEC-2039 item 3, amending DEC-260 (13)).
+/// (§5.5, DEC-2040 item 3, amending DEC-260 (13)).
 pub(crate) fn extended_hours(
     ports: &Ports<'_>,
     instrument: &InstrumentId,

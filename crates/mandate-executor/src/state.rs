@@ -133,7 +133,7 @@ pub struct ExecutorState {
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
     /// The owner's confirmation each owner's exit was received with, by intent, from its
-    /// `OwnerConfirmationReceived` (journal spec §9.5, DEC-2039 item 2).
+    /// `OwnerConfirmationReceived` (journal spec §9.5, DEC-2040 item 2).
     pub(crate) confirmations: BTreeMap<IntentId, Confirmed>,
     pub(crate) now: Option<RiskClock>,
     /// The latest tick before the one now handed, a running field `step.rs` writes and the fold
@@ -159,7 +159,7 @@ pub(crate) struct Switch {
     pub(crate) purpose: Purpose,
     pub(crate) floor: Option<Price>,
     /// The bid the owner confirmed, with which an owner's switch sells outside the regular session
-    /// (§5.5, DEC-2039 item 3).
+    /// (§5.5, DEC-2040 item 3).
     pub(crate) bid: Option<Price>,
     pub(crate) instruments: Vec<InstrumentId>,
     pub(crate) pending: BTreeSet<InstrumentId>,
@@ -168,7 +168,7 @@ pub(crate) struct Switch {
     pub(crate) cancels: BTreeSet<ClientOrderId>,
 }
 
-/// The bid and floor an owner confirmed for an owner's exit (§5.5, DEC-2039): the ladder prices
+/// The bid and floor an owner confirmed for an owner's exit (§5.5, DEC-2040): the ladder prices
 /// from the bid outside the regular session and never below the floor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Confirmed {

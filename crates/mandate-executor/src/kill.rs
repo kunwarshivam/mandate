@@ -333,7 +333,7 @@ fn switch_of<'s>(view: &'s ExecutorState, intent: &IntentId) -> Option<&'s Switc
 
 /// The floor an exit's ladder never prices below (§5.5, §5.6): the owner's confirmed floor for an
 /// owner's exit received with one, or for a flatten raised by a confirmed switch, the higher where
-/// both are; nothing for any other exit (DEC-2039 item 3).
+/// both are; nothing for any other exit (DEC-2040 item 3).
 pub(crate) fn floor_of(view: &ExecutorState, intent: &IntentId) -> Option<Price> {
     let own = view
         .confirmations
@@ -344,7 +344,7 @@ pub(crate) fn floor_of(view: &ExecutorState, intent: &IntentId) -> Option<Price>
 
 /// The bid the owner confirmed for an owner's exit received with one, or for a flatten raised by a
 /// confirmed switch: with it the exit sells outside the regular session, priced from that bid
-/// (§5.5, DEC-2039 item 3).
+/// (§5.5, DEC-2040 item 3).
 pub(crate) fn confirmed_bid(view: &ExecutorState, intent: &IntentId) -> Option<Price> {
     view.confirmations
         .get(intent)

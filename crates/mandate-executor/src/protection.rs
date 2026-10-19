@@ -291,7 +291,8 @@ pub(crate) fn alone(
 /// oldest first; every other order keeps its intent's limit, and so does the exit of a passive
 /// sequence, which is placed as its new OCO's take-profit at that limit (§5.4) and needs nothing
 /// to price from. An unsequenced exit with no limit goes at the market where §5.1 allows it, and
-/// is laddered elsewhere (DEC-2037 item 4).
+/// is laddered elsewhere (DEC-2037 item 4); one with an owner's confirmed floor never goes at the
+/// market, so it never fills below the floor (DEC-2040 item 6).
 pub(crate) fn exit_limit(
     batch: &Batch<'_, '_>,
     intent: &IntentId,
@@ -310,7 +311,12 @@ pub(crate) fn exit_limit(
         Some(own) if passive || unsequenced && !alone(batch, instrument, purpose, limit) => {
             return ExitPrice::Own(own);
         }
-        None if unsequenced && market_allowed(batch, instrument) => return ExitPrice::Market,
+        None if unsequenced
+            && market_allowed(batch, instrument)
+            && floor_of(&batch.view, intent).is_none() =>
+        {
+            return ExitPrice::Market;
+        }
         _ => {}
     }
     let tier = batch.ports.instruments.exit_tier(instrument);
@@ -650,7 +656,7 @@ fn last_rung_limit(batch: &Batch<'_, '_>, intent: &IntentId, rung: u32) -> Optio
 /// quote with a trade, the last sane bid, and the latest quote. A trade printed in another session
 /// prices nothing (§8.2: a last trade counts only in-session).
 /// What an intent's exit prices from: outside the regular session, an exit the owner confirmed
-/// prices from the bid they confirmed, not from a quote they never saw (§5.5, DEC-2039 item 3);
+/// prices from the bid they confirmed, not from a quote they never saw (§5.5, DEC-2040 item 3);
 /// every other exit, and a confirmed one in the regular session, from [`observed`].
 fn observed_for(
     batch: &Batch<'_, '_>,

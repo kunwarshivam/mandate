@@ -198,7 +198,7 @@ pub struct OwnerConfirmation {
 /// The owner's confirmation an owner's exit of one instrument is handed with: the bid, bid size,
 /// and floor confirmed on the agent stream's `OwnerExitRequested` the intent follows from, and that
 /// record's id. The executor journals it beside the intent as `OwnerConfirmationReceived` (journal
-/// spec §9.5, DEC-2039), and with it the exit may sell outside the regular session, priced from the
+/// spec §9.5, DEC-2040), and with it the exit may sell outside the regular session, priced from the
 /// confirmed bid and never below the floor (trading spec §5.5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandedConfirmation {
@@ -276,7 +276,7 @@ pub struct IntentHandoff {
     pub body: IntentBody,
     /// The owner's confirmation, only for an owner's exit: refused as non-canonical on any other
     /// purpose, with a bid size that is not positive, or under a limit below the floor
-    /// (DEC-2039 item 1).
+    /// (DEC-2040 item 1).
     pub confirmation: Option<HandedConfirmation>,
 }
 
