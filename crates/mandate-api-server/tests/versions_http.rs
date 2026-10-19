@@ -1455,6 +1455,46 @@ fn a_deploy_names_its_connection_exactly_when_rule_201_holds() {
     }
 }
 
+/// A connection established and then revoked fails rule 201, but is never deployed at version 1:
+/// the fold knows it with no environment, so V-001 refuses the deployment, 422, and nothing is
+/// written (journal spec §9.24, "Revoked").
+#[test]
+fn a_revoked_connection_is_refused_rather_than_deployed_at_version_1() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    seed_control_v2(
+        &f,
+        "ConnectionEstablished",
+        &format!(
+            r#"{{"account_ref":"{ACCOUNT}","broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","margin_attestation":null,"scopes":["data","trading"],"step_up":{EVIDENCE},"user":"alice"}}"#
+        ),
+    );
+    let mut snapshot = row(
+        &account(),
+        2,
+        "AccountSnapshotRecorded",
+        r#"{"equity":"25000"}"#,
+    );
+    snapshot.recorded_at = "2026-10-17T11:00:00.000000000Z".to_owned();
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .insert(account(), vec![snapshot]);
+    confirmed(&f, &cookie, "v1");
+    seed_control(
+        &f,
+        "ConnectionRevoked",
+        &format!(r#"{{"connection_id":"{CONNECTION}"}}"#),
+    );
+    let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_a", "v1", EVIDENCE));
+    let body = String::from_utf8_lossy(&reply.body);
+    assert_eq!(reply.status, 422, "{body}");
+    assert!(body.contains(r#""code":"V-001""#), "{body}");
+    assert!(events(&f, "AgentDeployed").is_empty(), "nothing is written");
+    journal_accepts(&f);
+}
+
 /// An agent id is deployed once (DEC-1173 item 1): one an `AgentStopped` names is `invalid` at
 /// `/agent_id`, whatever version, and nothing is written.
 #[test]
