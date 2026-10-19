@@ -329,7 +329,6 @@ const REFUSED_REDIRECTS: [&str; 23] = [
 ];
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_redirect_uri_is_an_https_origin_or_a_loopback_http_one_with_the_callback_path() {
     for text in ACCEPTED_REDIRECTS {
         assert_eq!(
@@ -352,7 +351,6 @@ fn a_redirect_uri_is_an_https_origin_or_a_loopback_http_one_with_the_callback_pa
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_authorization_url_carries_the_deployments_own_redirect_uri() {
     let staging = OAuthClient {
         client_id: ClientId("client-1".to_owned()),
@@ -380,7 +378,6 @@ fn the_authorization_url_carries_the_deployments_own_redirect_uri() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn pruning_drops_only_the_expired_states() {
     let mut states = PendingStates::default();
     begin_with(&mut states, "st-old", ("ws-a", "u1"), "verifier-a", 1000).unwrap();
