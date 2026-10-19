@@ -128,7 +128,6 @@ fn a_sink_that_only_stores_gives_nothing_back() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_first_turn_answers_the_recorded_reply_with_its_prompt_and_response_stored() {
     let shelf = Shelf::default();
     let (mut worker, items) = started(&shelf);
@@ -160,7 +159,6 @@ fn a_first_turn_answers_the_recorded_reply_with_its_prompt_and_response_stored()
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_later_turn_loads_its_transcript_through_the_sink() {
     let shelf = Shelf::default();
     let (mut worker, items) = started(&shelf);
@@ -185,7 +183,6 @@ fn a_later_turn_loads_its_transcript_through_the_sink() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_transcript_artifact_the_sink_cannot_give_answers_nothing() {
     let shelf = Shelf::default();
     let (mut worker, items) = started(&shelf);
@@ -209,7 +206,6 @@ fn a_transcript_artifact_the_sink_cannot_give_answers_nothing() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_turn_without_the_loop_its_run_or_a_fitting_transcript_answers_nothing() {
     let shelf = Shelf::default();
     let (mut worker, items) = started(&shelf);
@@ -240,7 +236,6 @@ fn a_turn_without_the_loop_its_run_or_a_fitting_transcript_answers_nothing() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_turn_the_gateway_refuses_is_answered_refused() {
     let shelf = Shelf::default();
     let (mut worker, items) = started(&shelf);
@@ -259,7 +254,6 @@ fn a_turn_the_gateway_refuses_is_answered_refused() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_core_s_turn_request_is_run_when_handed() {
     let called_shelf = Shelf::default();
     let (mut called, items) = started(&called_shelf);
