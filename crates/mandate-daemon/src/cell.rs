@@ -16,7 +16,7 @@ use mandate_gateway::provider::SequentialIds;
 use mandate_journal::{Environment, StreamId};
 use mandate_num::Usd;
 use mandate_research::PolicyOverlay;
-use mandate_runtime::{EventDraft, ResearchConfig};
+use mandate_runtime::{AgenticConfig, EventDraft, ResearchConfig};
 use mandate_time::UtcNanos;
 
 use crate::deployment;
@@ -52,6 +52,8 @@ pub enum CellError {
     Mandate(&'static str),
     /// The recorded worker could not be built.
     Worker(WorkerError),
+    /// The body of the tests commit's stub (DEC-77).
+    Unimplemented,
 }
 
 impl CellError {
@@ -64,6 +66,7 @@ impl CellError {
             Self::Bundle(_) => "research_bundle_unreadable",
             Self::Mandate(code) => code,
             Self::Worker(_) => "research_worker_unbuilt",
+            Self::Unimplemented => "unimplemented",
         }
     }
 }
@@ -109,6 +112,7 @@ impl Refs for ResearchRefs {
 pub struct OptIn {
     bundle: Bundle,
     deployment: CellDeployment,
+    agentic: Option<AgenticConfig>,
 }
 
 /// The opt-in for research over the recorded bundle at `dir`, for `deployment`. It reads no journal
@@ -124,10 +128,28 @@ pub fn opt_in(dir: &Path, deployment: &CellDeployment) -> Result<OptIn, CellErro
     if !deployment.resolved {
         return Err(CellError::Unresolved);
     }
+    let bundle = Bundle::load(dir).map_err(CellError::Bundle)?;
+    let agentic = bundle
+        .entry
+        .agentic
+        .map(|_| agentic_config(&bundle))
+        .transpose()?;
     Ok(OptIn {
-        bundle: Bundle::load(dir).map_err(CellError::Bundle)?,
+        bundle,
         deployment: deployment.clone(),
+        agentic,
     })
+}
+
+/// An agentic bundle's loop as the core runs it (DEC-2268): `final_output`, the entry's pinned
+/// bounds, both menus the entry's declared tools with any action left out (each is on both kinds'
+/// menus, DEC-2262 item 2), and the recorded run cap as the run's cost ceiling. An agentic bundle that records no run cap is refused, so no agentic run
+/// starts without one (agent harness spec §6.11).
+///
+/// # Errors
+/// [`CellError::Bundle`] with `run_usd` malformed when the bundle records no run cap.
+pub fn agentic_config(_bundle: &Bundle) -> Result<AgenticConfig, CellError> {
+    Err(CellError::Unimplemented)
 }
 
 /// The agent's daily research cap (DEC-2254 items 1 to 3): the mandate document's
@@ -203,7 +225,11 @@ fn wired(
     artifacts: &Path,
     now: Box<dyn FnMut() -> UtcNanos>,
 ) -> Result<CellResearch, CellError> {
-    let OptIn { bundle, deployment } = opted;
+    let OptIn {
+        bundle,
+        deployment,
+        agentic,
+    } = opted;
     let rows: Rc<dyn Rows> = Rc::from(rows);
     let now = Rc::new(RefCell::new(now));
     let clock = {
@@ -272,7 +298,7 @@ fn wired(
                 bounds: bundle.entry.bounds,
                 description,
                 revisions_enabled: false,
-                agentic: None,
+                agentic,
             },
             source: Box::new(source),
             worker: Box::new(worker),
