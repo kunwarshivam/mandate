@@ -255,7 +255,6 @@ fn expected(row: &StoredEvent) -> (u64, String, String, String, String, String, 
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn a_page_serves_the_stored_bodies_after_its_cursor_with_the_head() {
     let f = fixture();
     let rows = chain(&ctl(WORKSPACE), 3);
@@ -302,7 +301,6 @@ fn a_page_serves_the_stored_bodies_after_its_cursor_with_the_head() {
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn a_page_at_or_past_the_head_is_empty_at_the_head_and_never_404() {
     let f = fixture();
     let rows = chain(&ctl(WORKSPACE), 3);
@@ -320,7 +318,6 @@ fn a_page_at_or_past_the_head_is_empty_at_the_head_and_never_404() {
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn the_page_size_defaults_to_100_and_takes_up_to_1000() {
     let f = fixture();
     seed(&f, chain(&ctl(WORKSPACE), 1_001));
@@ -334,7 +331,6 @@ fn the_page_size_defaults_to_100_and_takes_up_to_1000() {
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn only_the_records_roles_read_the_journal_and_a_role_is_checked_before_any_id() {
     let f = fixture();
     seed(&f, chain(&ctl(WORKSPACE), 2));
@@ -364,7 +360,6 @@ fn only_the_records_roles_read_the_journal_and_a_role_is_checked_before_any_id()
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn every_id_outside_the_workspaces_streams_is_the_same_not_found() {
     let f = fixture();
     seed(&f, chain(&ctl(WORKSPACE), 2));
@@ -400,7 +395,6 @@ fn every_id_outside_the_workspaces_streams_is_the_same_not_found() {
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn query_members_are_refused_before_any_id_is_resolved_and_never_clamped() {
     let f = fixture();
     seed(&f, chain(&ctl(WORKSPACE), 2));
@@ -465,7 +459,6 @@ fn walk(
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn pages_concatenate_to_the_stream_and_chain_from_zeros() {
     let f = fixture();
     let cookie = auditor(&f);
