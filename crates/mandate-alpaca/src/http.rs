@@ -250,6 +250,11 @@ pub trait TradingTransport {
     -> impl Future<Output = Result<Response, TransportError>>;
 }
 
+/// The vault secret's member holding the key id (DEC-2306 item 2).
+const VAULT_KEY_ID: &str = "key_id";
+/// The vault secret's member holding the secret key (DEC-2306 item 2).
+const VAULT_SECRET: &str = "secret";
+
 /// The paper account's trading credentials, read through an injected lookup so a test never
 /// touches the process environment.
 ///
@@ -297,8 +302,29 @@ impl Credentials {
     /// (DEC-2306 item 2): the canonical JSON object `{"key_id": …, "secret": …}`, both members
     /// non-empty strings and no other member. Every refusal names its rule and never the secret.
     pub fn from_vault_secret(secret: &[u8]) -> Result<Self, CredentialsError> {
-        let _ = secret;
-        Err(CredentialsError::Unimplemented { story: "E21-30" })
+        let value = mandate_canon::parse(secret).map_err(|_| CredentialsError::NotJson)?;
+        if mandate_canon::to_canonical(&value) != secret {
+            return Err(CredentialsError::NotCanonical);
+        }
+        let object = value.as_object().ok_or(CredentialsError::NotAnObject)?;
+        if object
+            .keys()
+            .any(|key| !matches!(key.as_str(), VAULT_KEY_ID | VAULT_SECRET))
+        {
+            return Err(CredentialsError::UnknownMember);
+        }
+        let member = |member: &'static str| match object.get(member) {
+            None => Err(CredentialsError::Missing { variable: member }),
+            Some(value) => match value.as_str() {
+                None => Err(CredentialsError::NotAString { member }),
+                Some("") => Err(CredentialsError::Missing { variable: member }),
+                Some(text) => Ok(SecretString::from(text.to_owned())),
+            },
+        };
+        Ok(Self {
+            key_id: member(VAULT_KEY_ID)?,
+            secret: member(VAULT_SECRET)?,
+        })
     }
 }
 

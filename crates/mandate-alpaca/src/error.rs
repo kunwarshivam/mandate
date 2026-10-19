@@ -42,17 +42,27 @@ impl TransportError {
 pub enum CredentialsError {
     #[error("{variable} is not set or empty")]
     Missing { variable: &'static str },
-    /// The stubs of this story's tests PR return this, so every pending test fails on them
-    /// (DEC-77); the implementation PR replaces the stub and removes the variant.
-    #[error("not implemented until {story}")]
-    Unimplemented { story: &'static str },
+    #[error("the vault secret is not JSON")]
+    NotJson,
+    #[error("the vault secret is JSON but not its canonical form")]
+    NotCanonical,
+    #[error("the vault secret is not a JSON object")]
+    NotAnObject,
+    #[error("the vault secret's {member} is not a string")]
+    NotAString { member: &'static str },
+    #[error("the vault secret holds a member other than key_id and secret")]
+    UnknownMember,
 }
 
 impl CredentialsError {
     pub fn code(self) -> &'static str {
         match self {
             Self::Missing { .. } => "missing",
-            Self::Unimplemented { .. } => "unimplemented",
+            Self::NotJson => "not_json",
+            Self::NotCanonical => "not_canonical",
+            Self::NotAnObject => "not_an_object",
+            Self::NotAString { .. } => "not_a_string",
+            Self::UnknownMember => "unknown_member",
         }
     }
 }

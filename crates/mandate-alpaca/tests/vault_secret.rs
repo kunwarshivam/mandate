@@ -44,7 +44,6 @@ fn credentials_are_equal_when_both_values_are() {
 }
 
 #[test]
-#[ignore = "pending E21-30"]
 fn the_vault_secret_reads_as_the_same_credentials() {
     let read =
         Credentials::from_vault_secret(&secret_of(&[("key_id", KEY_ID), ("secret", SECRET)]))
@@ -54,7 +53,6 @@ fn the_vault_secret_reads_as_the_same_credentials() {
 
 /// Each malformed secret is refused with its own code, and neither value appears in the error.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_malformed_secret_is_refused_by_its_rule_without_echoing_it() {
     let both = secret_of(&[("key_id", KEY_ID), ("secret", SECRET)]);
     let spaced = format!(r#"{{ "key_id": "{KEY_ID}", "secret": "{SECRET}" }}"#);
@@ -101,7 +99,6 @@ fn a_malformed_secret_is_refused_by_its_rule_without_echoing_it() {
 
 /// Any non-empty pair of printable values reads back as the credentials holding them.
 #[test]
-#[ignore = "pending E21-30"]
 fn any_canonical_pair_reads_as_its_credentials() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 64,
