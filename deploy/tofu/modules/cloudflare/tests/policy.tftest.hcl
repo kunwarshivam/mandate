@@ -2,6 +2,12 @@
 # checked on the plan against a mocked provider.
 
 mock_provider "cloudflare" {
+  mock_data "cloudflare_account_api_token_permission_groups_list" {
+    defaults = {
+      result = [{ id = "c0ffee00c0ffee00c0ffee00c0ffee00", name = "Workers R2 Storage Bucket Item Write", category = "r2", is_selectable = true, scopes = ["com.cloudflare.edge.r2.bucket"] }]
+    }
+  }
+
   mock_data "cloudflare_zone" {
     defaults = {
       zone_id = "0123456789abcdef0123456789abcdef"
@@ -16,13 +22,12 @@ mock_provider "cloudflare" {
 }
 
 variables {
-  name                  = "mandate-staging"
-  account_id            = "fedcba9876543210fedcba9876543210"
-  zone_name             = "example.com"
-  api_hostname          = "api-staging.example.com"
-  api_origin            = "http://127.0.0.1:8080"
-  access_allowed_emails = ["founder@example.com"]
-  archive_bucket        = "mandate-journal-archive-staging"
+  name           = "mandate-staging"
+  account_id     = "fedcba9876543210fedcba9876543210"
+  zone_name      = "example.com"
+  api_hostname   = "api-staging.example.com"
+  api_origin     = "http://127.0.0.1:8080"
+  archive_bucket = "mandate-journal-archive-staging"
 }
 
 run "api_host_is_tunnel_only_and_behind_access" {
@@ -61,9 +66,9 @@ run "api_host_is_tunnel_only_and_behind_access" {
     condition = (
       cloudflare_zero_trust_access_policy.operators.decision == "allow" &&
       length(cloudflare_zero_trust_access_policy.operators.include) == 1 &&
-      alltrue([for rule in cloudflare_zero_trust_access_policy.operators.include : rule.email.email == "founder@example.com" && rule.everyone == null])
+      alltrue([for rule in cloudflare_zero_trust_access_policy.operators.include : rule.cloudflare_account_member.account_id == "fedcba9876543210fedcba9876543210" && rule.everyone == null && rule.email_domain == null])
     )
-    error_message = "The policy admits the named emails alone, never everyone."
+    error_message = "The policy admits members of the founder's Cloudflare account alone, never everyone or a domain."
   }
 }
 
@@ -92,6 +97,34 @@ run "the_archive_is_locked_for_its_retention" {
   }
 }
 
+run "barman_token_reaches_the_archive_bucket_alone" {
+  command = plan
+
+  assert {
+    condition = (
+      length(cloudflare_account_token.journal_archive.policies) == 1 &&
+      cloudflare_account_token.journal_archive.policies[0].effect == "allow" &&
+      length(cloudflare_account_token.journal_archive.policies[0].permission_groups) == 1 &&
+      cloudflare_account_token.journal_archive.policies[0].permission_groups[0].id == "c0ffee00c0ffee00c0ffee00c0ffee00" &&
+      jsondecode(cloudflare_account_token.journal_archive.policies[0].resources) == { "com.cloudflare.edge.r2.bucket.fedcba9876543210fedcba9876543210_default_mandate-journal-archive-staging" = "*" }
+    )
+    error_message = "The minted token holds Object Read and Write on the archive bucket and nothing else."
+  }
+}
+
+run "refuses_an_ambiguous_permission_group" {
+  command = plan
+
+  override_data {
+    target = data.cloudflare_account_api_token_permission_groups_list.r2_object_write
+    values = {
+      result = []
+    }
+  }
+
+  expect_failures = [cloudflare_account_token.journal_archive]
+}
+
 run "refuses_a_lock_shorter_than_the_retention" {
   command = plan
 
@@ -102,14 +135,20 @@ run "refuses_a_lock_shorter_than_the_retention" {
   expect_failures = [var.archive_retention_days]
 }
 
-run "refuses_no_email" {
+run "named_emails_replace_account_membership" {
   command = plan
 
   variables {
-    access_allowed_emails = []
+    access_allowed_emails = ["founder@example.com"]
   }
 
-  expect_failures = [var.access_allowed_emails]
+  assert {
+    condition = (
+      length(cloudflare_zero_trust_access_policy.operators.include) == 1 &&
+      alltrue([for rule in cloudflare_zero_trust_access_policy.operators.include : rule.email.email == "founder@example.com" && rule.cloudflare_account_member == null && rule.everyone == null])
+    )
+    error_message = "With emails named, the policy admits those emails alone, not the account's members."
+  }
 }
 
 run "refuses_a_wildcard_email" {
@@ -117,6 +156,16 @@ run "refuses_a_wildcard_email" {
 
   variables {
     access_allowed_emails = ["*@example.com"]
+  }
+
+  expect_failures = [var.access_allowed_emails]
+}
+
+run "refuses_a_spaced_email" {
+  command = plan
+
+  variables {
+    access_allowed_emails = ["founder @example.com"]
   }
 
   expect_failures = [var.access_allowed_emails]

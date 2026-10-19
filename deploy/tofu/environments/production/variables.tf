@@ -15,22 +15,17 @@ variable "state_passphrase" {
 variable "kube_api_allowed_addresses" {
   description = "KUBE_API_ALLOWED_CIDRS: the only CIDRs the control plane admits, as a JSON list."
   type        = list(string)
+
+  validation {
+    condition     = length(var.kube_api_allowed_addresses) > 0
+    error_message = "Production's control plane needs at least one of the founder's CIDRs; only staging may rely on a run's window alone."
+  }
 }
 
 variable "cloudflare_api_token" {
   description = "CF_INFRA_API_TOKEN: the Cloudflare token scoped to what this plan needs."
   type        = string
   sensitive   = true
-}
-
-variable "cloudflare_account_id" {
-  description = "CF_ACCOUNT_ID."
-  type        = string
-}
-
-variable "access_allowed_emails" {
-  description = "ACCESS_ALLOWED_EMAILS: who Access admits to the API host, as a JSON list."
-  type        = list(string)
 }
 
 variable "adopt_state_bucket" {
@@ -45,7 +40,24 @@ variable "api_origin" {
   default     = "http://127.0.0.1:8080"
 
   validation {
-    condition     = can(regex("^http://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+(\\.[a-z0-9-]+)*\\.svc\\.cluster\\.local):[0-9]{1,5}$", var.api_origin))
+    condition     = can(regex("^http://(127[.]0[.]0[.]1|localhost|[a-z0-9-]+([.][a-z0-9-]+)*[.]svc[.]cluster[.]local):[0-9]{1,5}$", var.api_origin))
     error_message = "The API origin is a loopback or in-cluster Service address with a port, never a public host."
+  }
+}
+
+variable "bootstrap_runner_cidr" {
+  description = "Set only by `cargo xtask infra apply` for its own run, then cleared (DEC-2028)."
+  type        = string
+  default     = ""
+}
+
+variable "access_allowed_emails" {
+  description = "ACCESS_ALLOWED_EMAILS: who Access admits to production's API host, as a JSON list; production names them, as before DEC-2030, so a future member of the Cloudflare account is not admitted by default."
+  type        = list(string)
+  sensitive   = true
+
+  validation {
+    condition     = length(var.access_allowed_emails) > 0
+    error_message = "Production's Access needs at least one named email."
   }
 }

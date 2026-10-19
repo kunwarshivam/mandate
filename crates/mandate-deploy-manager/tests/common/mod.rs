@@ -1,6 +1,6 @@
 //! The harness the deployment manager's tests share: the control stream in a [`MemoryJournal`]
-//! with the journal's own draft checks, control services' drafts, a resolver, an orchestrator that
-//! checks the journal before it acts, and a clock.
+//! with the journal's own draft checks, control services' drafts, the accounts a test's agents run
+//! on, an orchestrator that checks the journal before it acts, and a clock.
 
 #![allow(dead_code, reason = "each test file uses part of the harness")]
 
@@ -12,8 +12,8 @@ use std::rc::Rc;
 use mandate_canon::{Digest, parse};
 use mandate_deploy_manager::fake::Fake;
 use mandate_deploy_manager::{
-    Alerts, ControlJournal, Deployer, Identity, Instance, OperatorAlert, Orchestrator, Resolver,
-    Slot, Unavailable,
+    Alerts, ControlJournal, Deployer, Identity, Instance, OperatorAlert, Orchestrator, Slot,
+    Unavailable,
 };
 use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
 use mandate_time::UtcNanos;
@@ -50,9 +50,13 @@ pub type Shared = Rc<RefCell<MemoryJournal>>;
 pub struct Journal {
     pub inner: Shared,
     pub unavailable: Rc<RefCell<bool>>,
+    /// How many of the manager's next appends fail as unavailable, its reads still answered.
+    pub failing_appends: Rc<RefCell<u32>>,
     /// Control services' drafts committed right after the manager's next append, as a writer
     /// racing it would.
     pub after_append: Rc<RefCell<Vec<Vec<u8>>>>,
+    /// The account each test agent runs on, so its deployment names that account's connection.
+    pub agents: Rc<RefCell<BTreeMap<String, String>>>,
 }
 
 impl Journal {
@@ -60,10 +64,18 @@ impl Journal {
         let journal = Self {
             inner: Rc::new(RefCell::new(MemoryJournal::new())),
             unavailable: Rc::new(RefCell::new(false)),
+            failing_appends: Rc::new(RefCell::new(0)),
             after_append: Rc::new(RefCell::new(Vec::new())),
+            agents: Rc::new(RefCell::new(BTreeMap::new())),
         };
         journal.services(&opened(), at(0));
         journal
+    }
+
+    /// A version-2 deployment of `agent` on the account [`manager`] was given for it.
+    pub fn deployed(&self, agent: &str) -> Vec<u8> {
+        let account = self.agents.borrow().get(agent).cloned().unwrap();
+        deployed(agent, &account)
     }
 
     fn stream() -> StreamId {
@@ -130,6 +142,12 @@ impl ControlJournal for Journal {
         if *self.unavailable.borrow() {
             return Err(Unavailable);
         }
+        let mut failing = self.failing_appends.borrow_mut();
+        if *failing > 0 {
+            *failing -= 1;
+            return Err(Unavailable);
+        }
+        drop(failing);
         let outcome = append(&self.inner, draft, recorded_at);
         let racing: Vec<Vec<u8>> = self.after_append.borrow_mut().drain(..).collect();
         for other in racing {
@@ -264,22 +282,12 @@ impl Alerts for Captured {
     }
 }
 
-/// Mandate versions and connections to accounts, as the stored documents would say.
+/// The connections a test's agents run on, each to its account, established on the control stream
+/// before the manager starts.
 #[derive(Debug, Clone, Default)]
 pub struct Accounts {
-    pub versions: BTreeMap<String, String>,
+    pub agents: BTreeMap<String, String>,
     pub connections: BTreeMap<String, String>,
-    /// While set, the store cannot answer.
-    pub unavailable: Rc<RefCell<bool>>,
-}
-
-impl Resolver for Accounts {
-    fn account_of_version(&self, version: &str) -> Result<Option<String>, Unavailable> {
-        if *self.unavailable.borrow() {
-            return Err(Unavailable);
-        }
-        Ok(self.versions.get(version).cloned())
-    }
 }
 
 /// The mandate version an agent is deployed with in these tests.
@@ -292,29 +300,30 @@ pub fn connection_of(account: &str) -> String {
     format!("conn_{account}")
 }
 
-/// A resolver for `agents`, each `(agent, account)`.
+/// The connections of `agents`, each `(agent, account)`.
 pub fn accounts(agents: &[(&str, &str)]) -> Accounts {
     let mut out = Accounts::default();
     for (agent, account) in agents {
-        out.versions
-            .insert(version_of(agent), (*account).to_owned());
+        out.agents
+            .insert((*agent).to_owned(), (*account).to_owned());
         out.connections
             .insert(connection_of(account), (*account).to_owned());
     }
     out
 }
 
-pub type Manager = Deployer<Journal, Checked, Captured, Accounts>;
+pub type Manager = Deployer<Journal, Checked, Captured>;
 
 /// A new manager over the ports of `old`, as after the manager's own restart: it keeps nothing in
 /// memory, so it rebuilds everything from the journal and the orchestrator.
 pub fn restart(old: Manager) -> Manager {
-    let (journal, orchestrator, alerts, resolver) = old.into_ports();
-    Deployer::new(identity(), journal, orchestrator, alerts, resolver)
+    let (journal, orchestrator, alerts) = old.into_ports();
+    Deployer::new(identity(), journal, orchestrator, alerts)
 }
 
-pub fn manager(journal: &Journal, resolver: Accounts) -> Manager {
-    for (connection, account) in &resolver.connections {
+pub fn manager(journal: &Journal, accounts: Accounts) -> Manager {
+    journal.agents.borrow_mut().extend(accounts.agents);
+    for (connection, account) in &accounts.connections {
         let outcome = append(&journal.inner, &established(connection, account), at(0));
         assert!(
             matches!(
@@ -329,7 +338,6 @@ pub fn manager(journal: &Journal, resolver: Accounts) -> Manager {
         journal.clone(),
         Checked::new(journal.clone()),
         Captured::default(),
-        resolver,
     )
 }
 
@@ -374,8 +382,17 @@ pub fn opened() -> Vec<u8> {
 /// A connection established on the control stream, as control services write it (journal spec
 /// §9.8), naming its account.
 pub fn established(connection: &str, account: &str) -> Vec<u8> {
+    established_again(connection, account, 0)
+}
+
+/// The `nth` establishment of `connection`, each its own event; the first is [`established`].
+pub fn established_again(connection: &str, account: &str, nth: u32) -> Vec<u8> {
+    let seed = match nth {
+        0 => format!("established {connection}"),
+        _ => format!("established {connection} {nth}"),
+    };
     let draft = envelope(
-        &event_id(&format!("established {connection}")),
+        &event_id(&seed),
         "ConnectionEstablished",
         SERVICES,
         "{}",
@@ -384,13 +401,10 @@ pub fn established(connection: &str, account: &str) -> Vec<u8> {
         ),
         "[]",
     );
+    let draft = at_version_2(&draft);
     let mandate_canon::Value::Object(mut body) = parse(&draft).unwrap() else {
         unreachable!("an envelope is an object")
     };
-    body.insert(
-        mandate_canon::Key::new("schema_version").unwrap(),
-        mandate_canon::Value::Int(mandate_canon::Int::new(2).unwrap()),
-    );
     body.insert(
         mandate_canon::Key::new("causation_id").unwrap(),
         mandate_canon::Value::Str(event_id(&format!("checked {connection}"))),
@@ -398,44 +412,83 @@ pub fn established(connection: &str, account: &str) -> Vec<u8> {
     mandate_canon::to_canonical(&mandate_canon::Value::Object(body))
 }
 
-pub fn deployed(agent: &str) -> Vec<u8> {
-    let version = version_of(agent);
-    let record = format!(
-        "sha256:{}",
-        Digest::of(format!("record {agent}").as_bytes()).to_hex()
+/// `draft` at schema version 2.
+fn at_version_2(draft: &[u8]) -> Vec<u8> {
+    let mandate_canon::Value::Object(mut body) = parse(draft).unwrap() else {
+        unreachable!("an envelope is an object")
+    };
+    body.insert(
+        mandate_canon::Key::new("schema_version").unwrap(),
+        mandate_canon::Value::Int(mandate_canon::Int::new(2).unwrap()),
     );
-    let mut refs = [record.clone(), version.clone()];
-    refs.sort();
-    envelope(
-        &event_id(&format!("deployed {agent}")),
-        "AgentDeployed",
-        OWNER,
-        &format!(r#"{{"mandate_version":"{version}"}}"#),
-        &format!(
-            r#"{{"agent_id":"{agent}","mandate_version":"{version}","record_ref":"{record}"}}"#
-        ),
-        &format!(r#"["{}","{}"]"#, refs[0], refs[1]),
+    mandate_canon::to_canonical(&mandate_canon::Value::Object(body))
+}
+
+/// A version-2 deployment of `agent` on the connection of `account` (journal spec §9.24).
+pub fn deployed(agent: &str, account: &str) -> Vec<u8> {
+    deployment(&format!("deployed {agent}"), agent, Some(account), "")
+}
+
+/// A version-1 deployment of `agent`, which names no connection.
+pub fn deployed_v1(agent: &str) -> Vec<u8> {
+    deployment(&format!("deployed v1 {agent}"), agent, None, "")
+}
+
+/// A second version-2 `AgentDeployed` for an agent, with its own event id.
+pub fn redeployed(agent: &str, account: &str, nth: u32) -> Vec<u8> {
+    deployment(
+        &format!("redeployed {agent} {nth}"),
+        agent,
+        Some(account),
+        &format!(" {nth}"),
     )
 }
 
-/// A second `AgentDeployed` for an agent, with its own event id.
-pub fn redeployed(agent: &str, nth: u32) -> Vec<u8> {
+fn deployment(seed: &str, agent: &str, account: Option<&str>, nth: &str) -> Vec<u8> {
     let version = version_of(agent);
     let record = format!(
         "sha256:{}",
-        Digest::of(format!("record {agent} {nth}").as_bytes()).to_hex()
+        Digest::of(format!("record {agent}{nth}").as_bytes()).to_hex()
     );
     let mut refs = [record.clone(), version.clone()];
     refs.sort();
-    envelope(
-        &event_id(&format!("redeployed {agent} {nth}")),
+    let connection = account.map_or(String::new(), |account| {
+        format!(r#","connection_id":"{}""#, connection_of(account))
+    });
+    let draft = envelope(
+        &event_id(seed),
         "AgentDeployed",
         OWNER,
         &format!(r#"{{"mandate_version":"{version}"}}"#),
         &format!(
-            r#"{{"agent_id":"{agent}","mandate_version":"{version}","record_ref":"{record}"}}"#
+            r#"{{"agent_id":"{agent}","mandate_version":"{version}","record_ref":"{record}"{connection}}}"#
         ),
         &format!(r#"["{}","{}"]"#, refs[0], refs[1]),
+    );
+    match account {
+        Some(_) => at_version_2(&draft),
+        None => draft,
+    }
+}
+
+/// A connection's revocation on the control stream, as control services write it (journal spec §9.10).
+pub fn revoked(connection: &str) -> Vec<u8> {
+    revoked_again(connection, 0)
+}
+
+/// The `nth` revocation of `connection`, each its own event; the first is [`revoked`].
+pub fn revoked_again(connection: &str, nth: u32) -> Vec<u8> {
+    let seed = match nth {
+        0 => format!("revoked {connection}"),
+        _ => format!("revoked {connection} {nth}"),
+    };
+    envelope(
+        &event_id(&seed),
+        "ConnectionRevoked",
+        SERVICES,
+        "{}",
+        &format!(r#"{{"connection_id":"{connection}"}}"#),
+        "[]",
     )
 }
 

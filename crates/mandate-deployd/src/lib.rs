@@ -16,9 +16,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use mandate_deploy_manager::{
-    Alerts, ControlJournal, Halt, OperatorAlert, Process, Resolver, Unavailable,
-};
+use mandate_deploy_manager::{Alerts, ControlJournal, Halt, OperatorAlert, Process, Unavailable};
 use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
 use mandate_journal_pg::PgJournal;
 use mandate_process::Input;
@@ -115,18 +113,6 @@ impl ControlJournal for MemoryControl {
     }
 }
 
-/// The resolver until a deployment names its connection on the journal: it answers that no
-/// account is known, so the manager starts nothing for that deployment (fail closed, `AGENTS.md`
-/// rule 3). Kill switches never ask it.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoStore;
-
-impl Resolver for NoStore {
-    fn account_of_version(&self, _version: &str) -> Result<Option<String>, Unavailable> {
-        Ok(None)
-    }
-}
-
 /// Operator alerts as one stderr line each: a stable code and its runbook, never content (design
 /// §8.2). The alert path de-duplicates (DEC-988 item 6).
 #[derive(Debug, Default)]
@@ -149,9 +135,7 @@ pub fn input(pass: &Result<(), Halt>) -> Input {
     match pass {
         Ok(()) => Input::Heartbeat,
         Err(Halt::Refused { .. }) => Input::Failed,
-        Err(Halt::Journal | Halt::Orchestrator | Halt::Resolver | Halt::NotOpened) => {
-            Input::Heartbeat
-        }
+        Err(Halt::Journal | Halt::Orchestrator | Halt::NotOpened) => Input::Heartbeat,
     }
 }
 

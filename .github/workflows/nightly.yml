@@ -224,4 +224,8 @@ jobs:
           VERDICTS: changed ${{ needs.changed.result }}, dispatch-ci ${{ needs.dispatch-ci.result }}, postgres-oldest ${{ needs.postgres-oldest.result }}, reference ${{ needs.reference.result }}, sweep-plan ${{ needs.sweep-plan.result }}, sweep ${{ needs.sweep.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" --jq '.[].title' | grep -Fqx "nightly failed at ${GITHUB_SHA}"; then
+            echo "An open issue already reports the nightly failing at ${GITHUB_SHA}"
+            exit 0
+          fi
           gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="nightly failed at ${GITHUB_SHA}" -f body="The nightly run on main failed (${VERDICTS}): ${RUN_URL} (DEC-1190)"

@@ -5,9 +5,10 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use mandate_canon::{Digest, Value, parse, to_canonical};
+use mandate_canon::{Digest, Key, Value, parse, to_canonical};
 use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_gateway::money::Usd6;
+use mandate_research::AllowlistVersion;
 use mandate_research_run::{
     Allowlist, FilingReader, InstrumentReader, NewsReader, Readers, RetrievalPlan, RetrievedItem,
     Scope, SourceId, Symbol, TextQuery, retrieve,
@@ -170,6 +171,189 @@ fn the_plane_gives_no_filings_and_only_the_instruments_asked_for() {
         .unwrap();
     let symbols: Vec<_> = facts.iter().map(|f| f.symbol.as_str().to_owned()).collect();
     assert_eq!(symbols, ["MSFT"]);
+}
+
+/// The bundle records the source allowlist version its items were recorded under, and a bundle that
+/// does not say refuses the load (DEC-2214 item 1).
+#[test]
+fn the_bundle_records_its_allowlist_and_refuses_without_it() {
+    let allowlist = Bundle::load(Path::new(FIXTURE)).unwrap().allowlist;
+    assert_eq!(allowlist.version, AllowlistVersion(3));
+    assert_eq!(
+        allowlist
+            .sources
+            .iter()
+            .map(|source| source.as_str())
+            .collect::<Vec<_>>(),
+        ["src.newswire", "src.wire_two"]
+    );
+    for (index, path) in [
+        &["allowlist"][..],
+        &["allowlist", "version"],
+        &["allowlist", "sources"],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let dir = copy(&format!("allowlist-{index}"), "research.json", |value| {
+            remove(value, path)
+        });
+        assert_eq!(
+            Bundle::load(&dir),
+            Err(BundleError::Malformed {
+                file: "research.json",
+                member: "allowlist"
+            }),
+            "{path:?}"
+        );
+    }
+}
+
+/// The allowlist and halts are read strictly. An empty source list is read as it stands, an
+/// allowlist that admits no source, which refuses more, and version 0 is read as the recorded
+/// number. A version that is not an integer, or not one a `u32` holds, a source that is empty or
+/// not a string, and a halt that is not a string each refuse the load (DEC-2214 item 1).
+#[test]
+fn the_bundle_s_allowlist_and_halts_are_read_strictly() {
+    let set = |name: &str, member: &str, value: Value| {
+        copy(name, "research.json", |research| {
+            let Value::Object(object) = research else {
+                panic!("research.json is an object");
+            };
+            if member == "halted_instruments" {
+                object.insert(Key::new(member).unwrap(), value);
+                return;
+            }
+            let Some(Value::Object(allowlist)) = object.get_mut(&Key::new("allowlist").unwrap())
+            else {
+                panic!("the fixture has an allowlist");
+            };
+            allowlist.insert(Key::new(member).unwrap(), value);
+        })
+    };
+
+    let empty = Bundle::load(&set("allowlist-empty", "sources", Value::Array(Vec::new())))
+        .unwrap()
+        .allowlist;
+    assert!(
+        empty.sources.is_empty(),
+        "an empty allowlist admits no source"
+    );
+    let zero = Bundle::load(&set("allowlist-zero", "version", parse(b"0").unwrap()))
+        .unwrap()
+        .allowlist;
+    assert_eq!(zero.version, AllowlistVersion(0));
+
+    let refused = [
+        (
+            "allowlist-text",
+            "version",
+            Value::Str("3".to_owned()),
+            "allowlist",
+        ),
+        (
+            "allowlist-wide",
+            "version",
+            parse(b"4294967296").unwrap(),
+            "allowlist",
+        ),
+        (
+            "allowlist-empty-source",
+            "sources",
+            Value::Array(vec![Value::Str(String::new())]),
+            "allowlist",
+        ),
+        (
+            "allowlist-number-source",
+            "sources",
+            Value::Array(vec![parse(b"7").unwrap()]),
+            "allowlist",
+        ),
+        (
+            "halted-number",
+            "halted_instruments",
+            Value::Array(vec![parse(b"7").unwrap()]),
+            "halted_instruments",
+        ),
+    ];
+    for (name, member, value, refused_as) in refused {
+        assert_eq!(
+            Bundle::load(&set(name, member, value)),
+            Err(BundleError::Malformed {
+                file: "research.json",
+                member: refused_as
+            }),
+            "{name}"
+        );
+    }
+
+    let dir = copy("allowlist-negative", "", |_| {});
+    let research = fs::read_to_string(dir.join("research.json")).unwrap();
+    let negative = research.replacen(r#""version":3"#, r#""version":-3"#, 1);
+    assert_ne!(negative, research, "the fixture's version is written as 3");
+    fs::write(dir.join("research.json"), negative).unwrap();
+    assert_eq!(
+        Bundle::load(&dir),
+        Err(BundleError::Malformed {
+            file: "research.json",
+            member: ""
+        }),
+        "a negative version is not strict JSON"
+    );
+}
+
+/// The bundle records which of its instruments are halted at its as-of time, and a bundle that
+/// does not say refuses the load: an absent halt list would admit more (DEC-2214 item 1).
+#[test]
+fn the_bundle_records_its_halts_and_refuses_without_them() {
+    assert!(Bundle::load(Path::new(FIXTURE)).unwrap().halted.is_empty());
+
+    let dir = copy("halted", "research.json", |value| {
+        let Value::Object(object) = value else {
+            panic!("research.json is an object");
+        };
+        object.insert(
+            Key::new("halted_instruments").unwrap(),
+            Value::Array(vec![Value::Str("MSFT".to_owned())]),
+        );
+    });
+    let halted = Bundle::load(&dir).unwrap().halted;
+    assert_eq!(
+        halted.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+        ["7b4a1c2e-2222-4a2b-9c3d-000000000002"],
+        "a halt names the recorded instrument's asset"
+    );
+
+    let dir = copy("halted-missing", "research.json", |value| {
+        remove(value, &["halted_instruments"]);
+    });
+    assert_eq!(
+        Bundle::load(&dir),
+        Err(BundleError::Malformed {
+            file: "research.json",
+            member: "halted_instruments"
+        })
+    );
+
+    for (name, halts) in [("halted-unrecorded", "TSLA"), ("halted-not-a-symbol", "")] {
+        let dir = copy(name, "research.json", |value| {
+            let Value::Object(object) = value else {
+                panic!("research.json is an object");
+            };
+            object.insert(
+                Key::new("halted_instruments").unwrap(),
+                Value::Array(vec![Value::Str(halts.to_owned())]),
+            );
+        });
+        assert_eq!(
+            Bundle::load(&dir),
+            Err(BundleError::Malformed {
+                file: "research.json",
+                member: "halted_instruments"
+            }),
+            "{halts:?}"
+        );
+    }
 }
 
 /// One recorded filing row, as `filings.json` holds it.
