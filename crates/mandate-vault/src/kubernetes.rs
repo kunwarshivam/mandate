@@ -9,22 +9,28 @@
 //! one role per connection, bound to exactly that ServiceAccount in exactly that namespace, with
 //! the one policy, audience and lifetimes pinned.
 
-use mandate_connections::record::ConnectionId;
 use serde_json::{Value, json};
 
 use crate::SourceError;
 use crate::kube::is_label;
 use crate::lease::LEASE_SECS;
 use crate::openbao::EXECUTOR_TOKEN_MAX_SECS;
-use crate::policy::{Identity, Mounts, SecretPath, kv_path};
+use crate::policy::{
+    Identity, Mounts, SEGMENT_PREFIX, SecretPath, connection_hex, connection_segment, kv_path,
+};
 use crate::source::GRANT_SECS;
 
-/// The parameters a role request must send, in the order the provisioner's policy names them.
-const REQUIRED: [&str; 4] = [
+/// The parameters a role request must send, every one it sends, in the order the provisioner's
+/// policy names them, so no parameter is left to the mount's default.
+const REQUIRED: [&str; 8] = [
+    "alias_name_source",
+    "audience",
     "bound_service_account_names",
     "bound_service_account_namespaces",
-    "audience",
+    "token_max_ttl",
+    "token_no_default_policy",
     "token_policies",
+    "token_ttl",
 ];
 
 /// One kind's place: its auth mount, its namespace, its policy, and its token's lifetimes.
@@ -34,15 +40,6 @@ struct Kind<'a> {
     policy: String,
     ttl: i64,
     max_ttl: i64,
-}
-
-/// `connection`'s bytes in lowercase hexadecimal.
-fn hex(connection: &ConnectionId) -> String {
-    connection
-        .as_str()
-        .bytes()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 /// Whether `segment` is one plain path segment: letters, digits, `_` and `-`, and not empty.
@@ -95,8 +92,8 @@ pub const AUDIENCE: &str = "mandate-vault";
 /// every id. The exchange's name is the path segment both kinds' policies reach.
 pub fn service_account_name(identity: &Identity) -> Result<String, SourceError> {
     match identity {
-        Identity::Executor(connection) => Ok(hex(connection)),
-        Identity::TokenExchange(connection) => Ok(format!("x{}", hex(connection))),
+        Identity::Executor(connection) => Ok(connection_hex(connection)),
+        Identity::TokenExchange(connection) => connection_segment(connection),
         Identity::Api
         | Identity::ConnectionManager
         | Identity::Runtime
@@ -122,14 +119,18 @@ pub fn kubernetes_policy_name(identity: &Identity, mounts: &Mounts) -> Result<St
 
 /// The templated policy, in HCL, of `identity`'s kind, keyed by the ServiceAccount name in the
 /// login's alias metadata on the auth mount whose accessor is `accessor`, an `x` before an
-/// executor's. An executor reads its connection's token; a token exchange writes it, reads and
-/// deletes its code, and reads the platform's client secret. Anything else is
-/// [`SourceError::Config`].
+/// executor's, so both kinds reach [`crate::policy::connection_segment`]. An executor reads its
+/// connection's token; a token exchange writes it, reads and deletes its code, and reads the
+/// platform's client secret. Anything else, or an accessor that is not one plain path segment (a
+/// quote, a brace or a newline would end the template or the policy), is [`SourceError::Config`].
 pub fn kubernetes_policy(
     identity: &Identity,
     mounts: &Mounts,
     accessor: &str,
 ) -> Result<String, SourceError> {
+    if !is_segment(accessor) {
+        return Err(SourceError::Config);
+    }
     let own = format!("{{{{identity.entity.aliases.{accessor}.metadata.service_account_name}}}}");
     let block = |prefix: &str, path: &str, capabilities: &str| {
         format!(
@@ -140,11 +141,11 @@ pub fn kubernetes_policy(
     match identity {
         Identity::Executor(_) => Ok(block(
             "data",
-            &format!("connections/x{own}/token"),
+            &format!("connections/{SEGMENT_PREFIX}{own}/token"),
             "\"read\"",
         )),
         Identity::TokenExchange(_) => Ok([
-            block("data", &kv_path(&SecretPath::ClientSecret), "\"read\""),
+            block("data", &kv_path(&SecretPath::ClientSecret)?, "\"read\""),
             block("data", &format!("connections/{own}/code"), "\"read\""),
             block("metadata", &format!("connections/{own}/code"), "\"delete\""),
             block(
@@ -201,8 +202,9 @@ pub fn provisioner_policy(mounts: &Mounts, namespace: &str) -> Result<String, So
         .collect())
 }
 
-/// The request that makes `identity`'s role: its path, `auth/<mount>/role/<connection id>`, and
-/// its body, bound to exactly its ServiceAccount in exactly `namespace`, the workspace's. Anything
+/// The request that makes `identity`'s role: its path, `auth/<mount>/role/<name>`, the role named
+/// by its ServiceAccount, since OpenBao folds role names to lowercase and two ids differing in case
+/// would otherwise share one, and its body, bound to exactly its ServiceAccount in exactly `namespace`, the workspace's. Anything
 /// but an executor or a token exchange, or mounts or a namespace [`provisioner_policy`] refuses, is
 /// [`SourceError::Config`].
 pub fn role_request(
@@ -212,9 +214,9 @@ pub fn role_request(
 ) -> Result<(String, Value), SourceError> {
     checked(mounts, namespace)?;
     let [executor, exchange] = kinds(mounts, namespace);
-    let (kind, connection) = match identity {
-        Identity::Executor(connection) => (executor, connection),
-        Identity::TokenExchange(connection) => (exchange, connection),
+    let kind = match identity {
+        Identity::Executor(_) => executor,
+        Identity::TokenExchange(_) => exchange,
         Identity::Api
         | Identity::ConnectionManager
         | Identity::Runtime
@@ -222,10 +224,11 @@ pub fn role_request(
         | Identity::ModelGateway
         | Identity::EmailSender => return Err(SourceError::Config),
     };
+    let name = service_account_name(identity)?;
     Ok((
-        format!("auth/{}/role/{}", kind.mount, connection.as_str()),
+        format!("auth/{}/role/{name}", kind.mount),
         json!({
-            "bound_service_account_names": [service_account_name(identity)?],
+            "bound_service_account_names": [name],
             "bound_service_account_namespaces": [kind.namespace],
             "audience": AUDIENCE,
             "alias_name_source": "serviceaccount_uid",

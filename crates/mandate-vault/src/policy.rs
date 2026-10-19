@@ -165,11 +165,34 @@ pub fn role_name(identity: &Identity) -> String {
     }
 }
 
+/// `connection`'s bytes in lowercase hexadecimal: a valid Kubernetes object name and path segment
+/// for every id, and, being lowercase, never one OpenBao folds into another's, as it folds role
+/// and policy names (DEC-2060).
+pub(crate) fn connection_hex(connection: &ConnectionId) -> String {
+    connection
+        .as_str()
+        .bytes()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The one segment a connection's entries are stored under, `connections/<segment>/`: `x` and
+/// [`connection_hex`], the token exchange's ServiceAccount name, so the templated policies of
+/// both kinds reach exactly the path every writer and reader uses, and no two ids, whatever
+/// their case, share it (DEC-2060).
+pub fn connection_segment(connection: &ConnectionId) -> Result<String, SourceError> {
+    Ok(format!("{SEGMENT_PREFIX}{}", connection_hex(connection)))
+}
+
+/// What comes before the hex in [`connection_segment`], and so before the executor's
+/// ServiceAccount name in its templated policy.
+pub(crate) const SEGMENT_PREFIX: &str = "x";
+
 /// The path of `path` under the mount, without the mount and the `data/` or `metadata/` prefix.
-pub fn kv_path(path: &SecretPath) -> String {
-    match path {
-        SecretPath::Code(c) => format!("connections/{}/code", c.as_str()),
-        SecretPath::Token(c) => format!("connections/{}/token", c.as_str()),
+pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
+    Ok(match path {
+        SecretPath::Code(c) => format!("connections/{}/code", connection_segment(c)?),
+        SecretPath::Token(c) => format!("connections/{}/token", connection_segment(c)?),
         SecretPath::ClientSecret => "platform/alpaca-oauth-client-secret".to_owned(),
         SecretPath::Platform(PlatformSecret::ModelProviderKey) => {
             "platform/model-provider-key".to_owned()
@@ -177,7 +200,7 @@ pub fn kv_path(path: &SecretPath) -> String {
         SecretPath::Platform(PlatformSecret::EmailCredential) => {
             "platform/email-credential".to_owned()
         }
-    }
+    })
 }
 
 /// The OpenBao policy of `identity`, given every connection the cell holds, in HCL. Each path is
@@ -187,7 +210,7 @@ pub fn openbao_policy(
     identity: &Identity,
     connections: &[ConnectionId],
     mounts: &Mounts,
-) -> String {
+) -> Result<String, SourceError> {
     let mut paths: Vec<SecretPath> = vec![SecretPath::ClientSecret];
     paths.extend(PlatformSecret::ALL.map(SecretPath::Platform));
     for connection in connections {
@@ -205,7 +228,7 @@ pub fn openbao_policy(
                 hcl.push_str(&format!(
                     "path \"{}/{prefix}/{}\" {{\n  capabilities = [{capabilities}]\n}}\n",
                     mounts.kv,
-                    kv_path(path)
+                    kv_path(path)?
                 ));
             }
         }
@@ -228,7 +251,7 @@ pub fn openbao_policy(
     if hcl.is_empty() {
         hcl.push_str("# This identity reads, writes, and deletes nothing (infrastructure §5.2).\n");
     }
-    hcl
+    Ok(hcl)
 }
 
 /// Refuses as [`SourceError::Denied`] what [`allows`] does not allow.
