@@ -17,10 +17,10 @@ terraform {
   }
 
   backend "s3" {
-    bucket                      = "mandate-tofu-state-production"
+    bucket                      = "mandate-tofu-state-west-production"
     key                         = "production/tofu.tfstate"
     region                      = "us-east-1"
-    endpoints                   = { s3 = "https://nyc3.digitaloceanspaces.com" }
+    endpoints                   = { s3 = "https://sfo2.digitaloceanspaces.com" }
     skip_credentials_validation = true
     skip_region_validation      = true
     skip_requesting_account_id  = true
