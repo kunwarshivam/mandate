@@ -569,6 +569,10 @@ the spec invariants (DP-n) its tests cover.
     latch oracle that derives the latched set from the appended records alone.
   - **C:** the wiring in `mandate-shell`'s `adapters.rs`, `paper/gate.rs`, and `paper/context.rs`,
     which are R0 files. It waits for R0 to close, or for the founder's call.
+  - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
+    "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
+    one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which
+    fails closed through staleness.
 
   *Accepted when:* every MC-R, MC-T, MC-L, and MC-W case, driven through journaled records, gives the
   harness's snapshot and events. A restart rebuilds the same view. Every fail-closed cause holds
@@ -875,6 +879,15 @@ after U-A1 to U-A5 are recorded.
   `tests/owner_exits.rs`) is re-seeded once the fixture fills, with a held position, gate facts
   and an `Unknown` order in the instrument, and shows no owner exit is refused for conduct,
   eligibility, day-trade budget, buying power or opening-session reasons.
+
+- **E7-30 (Should, M6, after E7-29)** As an owner, I want my confirmed exit to sell outside the
+  regular session when I confirmed the displayed bid, as rule 13 allows, so that a runtime-proposed
+  owner exit is not held to the session the way an unconfirmed one is. Today the handoff carries
+  no confirmation, so the core treats every handed owner exit as unconfirmed
+  ([DEC-2037](decisions/DEC-2037.md) item 6). *Accepted when:* the handoff carries the owner's
+  confirmed bid, bid size and floor from the `OwnerExitRequested`; the core sends such an exit in
+  extended hours as a limit never below the floor, as a confirmed kill switch's close does
+  (trading spec §5.5); and an unconfirmed one still waits for the session.
 
 ### E8 Escalation and approvals
 
