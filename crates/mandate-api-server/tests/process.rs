@@ -175,7 +175,6 @@ type StartCase<'a> = (Option<&'a str>, &'a [(&'a str, &'a str)], &'a str);
 /// setting valid and an `https` key set, and before a secret-named variable or an `http` key set
 /// could refuse it; a signature that is not cosign's is refused in every tier.
 #[test]
-#[ignore = "pending E21-35"]
 fn outside_dev_and_ci_an_unsigned_or_wrongly_signed_build_refuses_first() {
     let garbage = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("mandate-api-server-{}.sig", std::process::id()));
