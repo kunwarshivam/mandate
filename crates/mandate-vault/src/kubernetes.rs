@@ -34,9 +34,10 @@ pub fn kubernetes_policy_name(identity: &Identity, mounts: &Mounts) -> Result<St
 
 /// The templated policy, in HCL, of `identity`'s kind, keyed by the ServiceAccount name in the
 /// login's alias metadata on the auth mount whose accessor is `accessor`, an `x` before an
-/// executor's. An executor reads its connection's token; a token exchange writes it, reads and
-/// deletes its code, and reads the platform's client secret. Anything else is
-/// [`SourceError::Config`].
+/// executor's, so both kinds reach [`crate::policy::connection_segment`]. An executor reads its
+/// connection's token; a token exchange writes it, reads and deletes its code, and reads the
+/// platform's client secret. Anything else, or an accessor that is not one plain path segment (a
+/// quote, a brace or a newline would end the template or the policy), is [`SourceError::Config`].
 pub fn kubernetes_policy(
     identity: &Identity,
     mounts: &Mounts,
@@ -58,8 +59,9 @@ pub fn provisioner_policy(mounts: &Mounts, namespace: &str) -> Result<String, So
     Err(SourceError::Unimplemented { story: "E21-32" })
 }
 
-/// The request that makes `identity`'s role: its path, `auth/<mount>/role/<connection id>`, and
-/// its body, bound to exactly its ServiceAccount in exactly `namespace`, the workspace's. Anything
+/// The request that makes `identity`'s role: its path, `auth/<mount>/role/<name>`, the role named
+/// by its ServiceAccount, since OpenBao folds role names to lowercase and two ids differing in case
+/// would otherwise share one, and its body, bound to exactly its ServiceAccount in exactly `namespace`, the workspace's. Anything
 /// but an executor or a token exchange, or mounts or a namespace [`provisioner_policy`] refuses, is
 /// [`SourceError::Config`].
 pub fn role_request(
