@@ -233,7 +233,7 @@ impl RecordedWorker {
             now,
             runs: BTreeMap::new(),
             ready: Vec::new(),
-            bounds: None,
+            bounds: bundle.entry.agentic,
         })
     }
 

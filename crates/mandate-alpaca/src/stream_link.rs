@@ -88,8 +88,8 @@ pub struct Link {
 }
 
 impl Link {
-    /// A link that will subscribe `channels`, alerting once it has been down for longer than
-    /// `down_alert` (the profile's staleness threshold, spec §3.2).
+    /// A link that will subscribe `channels`, alerting once it has been out of `live` for longer
+    /// than `down_alert` since its first loss (the profile's staleness threshold, spec §3.2).
     pub fn new(channels: Channels, down_alert: Duration) -> Self {
         Self {
             channels,
@@ -223,8 +223,6 @@ impl Link {
                     self.state = LinkState::Resyncing;
                     self.clear();
                     self.subscribed_at = Some(at);
-                    self.lost_at = None;
-                    self.alerted_down = false;
                     if let Some(from) = self.gap_from.take() {
                         actions.push(LinkAction::Gap { from, to: at });
                     }
@@ -240,6 +238,8 @@ impl Link {
             if self.state == LinkState::Resyncing && self.resynced() {
                 self.state = LinkState::Live;
                 self.attempts = 0;
+                self.lost_at = None;
+                self.alerted_down = false;
             }
         }
     }

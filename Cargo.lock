@@ -1691,6 +1691,7 @@ dependencies = [
  "mandate-artifacts-fs",
  "mandate-authn",
  "mandate-canon",
+ "mandate-connections",
  "mandate-identity",
  "mandate-identity-seal",
  "mandate-identity-testkit",
@@ -2300,11 +2301,15 @@ dependencies = [
  "mandate-accounting",
  "mandate-builder",
  "mandate-canon",
+ "mandate-domain",
+ "mandate-journal",
  "mandate-num",
  "mandate-risk",
  "mandate-runtime",
+ "mandate-spec",
  "mandate-time",
  "proptest",
+ "serde_json",
  "thiserror",
 ]
 

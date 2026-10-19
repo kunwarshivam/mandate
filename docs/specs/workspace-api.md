@@ -870,6 +870,22 @@ connect refusal's `check` and `reason`, set exactly when `refused`; `revoked_rea
 journaled `account_ref`, `user`, and `step_up` are not served. The 1× check, the data profile, the
 restrictions, and the loss carry are planned as optional members. **(planned: E10-13)**
 
+**The connect start** ([DEC-2623](../project/decisions/DEC-2623.md)). `POST
+/connections/oauth/start` takes `commands/oauth-start-request`: `broker` (`alpaca`), `environment`,
+`disclosure` (the token-breadth disclosure's document and version, which the connect digest binds,
+[DEC-2621](../project/decisions/DEC-2621.md) item 4), and `step_up`. It answers `201` with
+`commands/oauth-start-response`: `authorization_url`, `expires_at`, and the pending
+`connection_id`. One code per response, in this order: §3.4's session, CSRF mark, key, and body
+checks; the `BrokerConnection` permission, and `live_unavailable` for a `live` workspace; `invalid`
+at `/disclosure` for a version other than the current one; §3.5's step-up codes; then
+`live_unavailable` for `environment` `live`, `journal_unavailable` for a control-stream fold that
+cannot answer, and `idempotency_conflict` for a request already open, an establishment, or a used
+`account_ref` under the key's derived ids. A refused start appends nothing. The `connection_id` and
+`account_ref` are derived from the key, so a retry names the same pending connection; while its
+`state` is held and unredeemed the retry answers the same `201`, and after that the key is spent
+(`idempotency_conflict`). The redirect URI is the deployment's own, an API setting, and a deployment
+that names no OAuth client answers `not_found`. **(planned: E10-13)**
+
 **The ordinary revoke's refusals** (`compromised` `false` or absent; [DEC-693](../project/decisions/DEC-693.md)
 items 6 and 7, [DEC-698](../project/decisions/DEC-698.md)). The API decides them from the journal's
 folds, never from a read model (§4.7, §6.2): the control stream for which agents are on the

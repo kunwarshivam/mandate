@@ -19,8 +19,13 @@ use crate::gitops::Environment;
 /// The published binaries the workspace chart runs, each with the chart's `images` key it fills.
 /// A binary not named here (`mandate-agentd`, `mandate-rh-sim`) is not a chart process yet, and
 /// the simulator never is. A lane that publishes a process's binary adds its row here.
-const CHART_IMAGE_FOR_BINARY: [(&str, &str); 2] =
-    [("mandate", "mandate"), ("mandate-api-server", "api")];
+const CHART_IMAGE_FOR_BINARY: [(&str, &str); 5] = [
+    ("mandate", "mandate"),
+    ("mandate-api-server", "api"),
+    ("mandate-deployd", "deploy-manager"),
+    ("mandate-daemon", "runtime"),
+    ("mandate-executord", "executor"),
+];
 
 /// The charts `release.yml` publishes (`HOSTED_CHARTS`), by the name `CHARTS` lists. An overlay
 /// pins those it installs; promotion rewrites exactly those.
@@ -288,11 +293,17 @@ mod tests {
             "ghcr.io/kunwarshivam/mandate/mandate@{}  mandate\n\
              ghcr.io/kunwarshivam/mandate/mandate-agentd@{}  mandate-agentd\n\
              ghcr.io/kunwarshivam/mandate/mandate-rh-sim@{}  mandate-rh-sim\n\
-             ghcr.io/kunwarshivam/mandate/mandate-api-server@{}  mandate-api-server\n",
+             ghcr.io/kunwarshivam/mandate/mandate-api-server@{}  mandate-api-server\n\
+             ghcr.io/kunwarshivam/mandate/mandate-deployd@{}  mandate-deployd\n\
+             ghcr.io/kunwarshivam/mandate/mandate-daemon@{}  mandate-daemon\n\
+             ghcr.io/kunwarshivam/mandate/mandate-executord@{}  mandate-executord\n",
             digest('a'),
             digest('b'),
             digest('c'),
-            digest('d')
+            digest('d'),
+            digest('e'),
+            digest('f'),
+            digest('9')
         )
     }
 
@@ -369,8 +380,29 @@ mod tests {
                     )
                 ),
                 (
+                    "deploy-manager".to_owned(),
+                    format!(
+                        "ghcr.io/kunwarshivam/mandate/mandate-deployd@{}",
+                        digest('e')
+                    )
+                ),
+                (
+                    "executor".to_owned(),
+                    format!(
+                        "ghcr.io/kunwarshivam/mandate/mandate-executord@{}",
+                        digest('9')
+                    )
+                ),
+                (
                     "mandate".to_owned(),
                     format!("ghcr.io/kunwarshivam/mandate/mandate@{}", digest('a'))
+                ),
+                (
+                    "runtime".to_owned(),
+                    format!(
+                        "ghcr.io/kunwarshivam/mandate/mandate-daemon@{}",
+                        digest('f')
+                    )
                 ),
             ])
         );
@@ -381,7 +413,13 @@ mod tests {
             chart_images(&published().replace("ghcr.io/kunwarshivam", "ghcr.io/someone")).is_err()
         );
         assert!(chart_images(&published().replace("mandate@", "other/mandate@")).is_err());
-        for binary in ["mandate", "mandate-api-server"] {
+        for binary in [
+            "mandate",
+            "mandate-api-server",
+            "mandate-deployd",
+            "mandate-daemon",
+            "mandate-executord",
+        ] {
             let without: String = published()
                 .lines()
                 .filter(|line| !line.ends_with(&format!("  {binary}")))
@@ -407,10 +445,17 @@ mod tests {
                 "{binary} ({key}) is not released"
             );
         }
-        assert!(
-            CHART_IMAGE_FOR_BINARY.contains(&("mandate-api-server", "api")),
-            "the API server's image is not charted"
-        );
+        for row in [
+            ("mandate-api-server", "api"),
+            ("mandate-deployd", "deploy-manager"),
+            ("mandate-daemon", "runtime"),
+            ("mandate-executord", "executor"),
+        ] {
+            assert!(
+                CHART_IMAGE_FOR_BINARY.contains(&row),
+                "{row:?} is not charted"
+            );
+        }
     }
 
     #[test]

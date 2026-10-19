@@ -244,3 +244,32 @@ proptest! {
         }
     }
 }
+
+/// Journal spec v0.53 §2: the deployment meter stream is the platform operator's, and no workspace
+/// member reads it. A deployment whose id is a workspace's own segment still names no stream of
+/// that workspace: it is in no list and its pages are not found.
+#[test]
+fn a_deployment_meter_stream_is_no_workspace_s() {
+    let mut fx = Fixture::new(1);
+    let segment = text(WS_A);
+    let stream = format!("dmeter:{segment}");
+    fx.open(
+        &stream,
+        &format!(r#"{{"deployment_id":"{segment}","stream_type":"deployment_meter"}}"#),
+    );
+    let read = MemoryRead::new(&fx.journal);
+    let context = tenant(WS_A);
+    let me = permitted(&context);
+    let listed = read
+        .streams(&me, None, PageLimit::new(None).unwrap())
+        .unwrap();
+    assert!(
+        listed.iter().all(|entry| entry.stream_id != stream),
+        "{listed:?}"
+    );
+    assert_eq!(
+        read.page(&me, &stream, 0, PageLimit::new(None).unwrap())
+            .err(),
+        Some(AuditError::NotFound)
+    );
+}
