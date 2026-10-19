@@ -1564,6 +1564,14 @@ fn the_anchor_and_segment_records_are_catalogued_and_closed_on_the_control_strea
     closed_on_the_control_stream(&CLOSED_BY_SECTION_9_14);
 }
 
+/// Journal spec v0.62 §9.29 (DEC-2104): `StepUpConfirmed` is on the control stream alone, with no
+/// configuration, closed there at schema version 1.
+#[test]
+#[ignore = "pending E9-4"]
+fn the_step_up_confirmation_is_catalogued_and_closed_on_the_control_stream() {
+    closed_on_the_control_stream(&["StepUpConfirmed"]);
+}
+
 /// `VerificationRun` version 2 (journal spec v0.36 §9.13, DEC-788, DEC-789) is closed on the
 /// control stream as version 1 is: an unlisted member is refused `schema`, never `unknown_schema`.
 #[test]
@@ -1619,7 +1627,6 @@ fn the_risk_limit_records_are_closed_on_the_account_stream() {
 /// an unlisted member is refused `schema` there and `wrong_stream` on every other stream, and
 /// version 2 has no schema.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_acknowledgment_records_are_closed_on_the_control_and_account_streams() {
     for event_type in SECTION_9_28 {
         for kind in [ACCT, AGENT, CTL, CLOCK] {

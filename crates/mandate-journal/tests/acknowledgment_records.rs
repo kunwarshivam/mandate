@@ -121,7 +121,6 @@ fn the_acknowledgment_section_holds_every_part() {
 }
 
 #[test]
-#[ignore = "pending E8-3"]
 fn every_acknowledgment_base_and_valid_draft_parses() {
     let section = section();
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
@@ -145,7 +144,6 @@ fn every_acknowledgment_base_and_valid_draft_parses() {
 }
 
 #[test]
-#[ignore = "pending E8-3"]
 fn every_invalid_acknowledgment_draft_is_refused_with_its_reason_at_its_path() {
     let section = section();
     let mut failed = Vec::new();
@@ -168,7 +166,6 @@ fn every_invalid_acknowledgment_draft_is_refused_with_its_reason_at_its_path() {
 /// refusals of an acknowledgment copy, so each is accepted on the account stream and refused
 /// `stream_mismatch` at `payload.reason` on the agent stream, for a Stop and a lift alike.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_three_new_refusal_reasons_are_the_account_streams_alone() {
     let section = section();
     let drafts = section.get("drafts").unwrap();
@@ -207,7 +204,6 @@ fn the_three_new_refusal_reasons_are_the_account_streams_alone() {
 /// of a stream whose records all parse, since rules 240 and 241 are the writers' and the
 /// executor's (no §11 range check holds them yet).
 #[test]
-#[ignore = "pending E8-3"]
 fn append_judges_rule_239_alone_on_the_control_streams() {
     let section = section();
     let mut failed = Vec::new();
@@ -240,7 +236,6 @@ fn append_judges_rule_239_alone_on_the_control_streams() {
 /// each pass `append` but those the case lists as `refused_at_append`, which rule 239 refuses at
 /// their path. The judgment at processing is the executor's (E7-4) and not read here.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_executor_cases_acknowledgment_records_pass_append_but_where_rule_239_refuses_them() {
     let section = section();
     let mut failed = Vec::new();
