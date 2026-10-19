@@ -1258,7 +1258,8 @@ fn a_day_of_research(rig: &Rig, research: CellResearch) -> (usize, usize) {
 /// decides research. `demo-spy`'s mandate pins its universe and has no `behavior.research`, so
 /// opted in over the demo bundle it starts no run and journals no research record, so nothing is
 /// called, metered or spent, however long it runs. The same opt-in under an envelope that
-/// researches starts runs and journals their records, so the first answer is the envelope's, not
+/// researches (unpinned, a `behavior.research`, and one `llm.` model admitting instruments, as
+/// V-036 asks) starts runs and journals their records, so the first answer is the envelope's, not
 /// the harness's.
 #[test]
 fn the_demo_agent_opted_in_runs_no_research_and_spends_nothing() {
@@ -1274,7 +1275,18 @@ fn the_demo_agent_opted_in_runs_no_research_and_spends_nothing() {
     let research = opted_in(&researching, "researching", |document| {
         document["universe"]["pinned"] = serde_json::json!(false);
         document["universe"]["pinned_instruments"] = serde_json::json!([]);
-        document["behavior"]["signal_models"][0]["admits_instruments"] = serde_json::json!(true);
+        document["behavior"]["signal_models"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "id": "llm.research_agent",
+                "version": "0.1.0",
+                "content_hash": format!("sha256:{}", "4".repeat(64)),
+                "params": [],
+                "weight": "0.5",
+                "max_output_age_s": 3600,
+                "admits_instruments": true
+            }));
         document["behavior"]["research"] = serde_json::json!({
             "interval_s": 3600,
             "cost_cap_usd_per_day": "5",
