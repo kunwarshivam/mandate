@@ -223,9 +223,9 @@ fn the_backoff_doubles_with_jitter_and_is_capped_at_thirty_seconds() {
     assert_eq!(backoff(1, 0), Duration::from_secs(1));
     assert_eq!(backoff(2, 500), Duration::from_secs(3));
     assert_eq!(backoff(4, 1000), Duration::from_secs(16));
-    assert_eq!(backoff(5, 999), Duration::from_micros(29_992_500));
+    assert_eq!(backoff(5, 999), Duration::from_micros(29_985_000));
     assert_eq!(backoff(5, 0), Duration::from_secs(15));
-    assert_eq!(backoff(40, 999), Duration::from_micros(29_992_500));
+    assert_eq!(backoff(40, 999), Duration::from_micros(29_985_000));
     assert_eq!(backoff(u32::MAX, 1000), MAX_BACKOFF);
 }
 
@@ -272,6 +272,63 @@ fn a_connection_down_past_its_threshold_alerts_once() {
         link.on(at(7 + 2 * DOWN_ALERT_S), LinkInput::Tick, 0),
         [LinkAction::Alert("stream_down")],
         "a new loss alerts again"
+    );
+}
+
+#[test]
+fn a_frame_while_down_or_a_handshake_out_of_turn_asks_for_nothing() {
+    let mut link = fresh();
+    subscribe(&mut link, 0);
+    link.on(
+        at(1),
+        frame(&[quote("AAPL"), status("AAPL"), quote("SPY"), status("SPY")]),
+        0,
+    );
+    assert_eq!(link.on(at(2), frame(&[connected()]), 0), [], "live");
+    assert_eq!(link.on(at(2), frame(&[authenticated()]), 0), [], "live");
+    link.on(at(3), LinkInput::Lost, 0);
+    assert_eq!(
+        link.on(at(4), frame(&[error(500), quote("AAPL")]), 0),
+        [],
+        "already down: no second reconnect"
+    );
+    assert_eq!(link.on(at(4), LinkInput::Lost, 0), []);
+    assert_eq!(link.state(), LinkState::Down);
+}
+
+#[test]
+fn a_gap_runs_from_the_last_message_before_the_first_loss() {
+    let mut link = fresh();
+    link.on(at(0), frame(&[connected()]), 0);
+    link.on(at(1), LinkInput::Lost, 0);
+    link.on(at(2), LinkInput::Reconnecting, 0);
+    assert_eq!(
+        subscribe(&mut link, 3),
+        [],
+        "no gap before any subscription"
+    );
+    link.on(at(4), frame(&[quote("AAPL")]), 0);
+    link.on(at(5), LinkInput::Lost, 0);
+    link.on(at(6), LinkInput::Reconnecting, 0);
+    link.on(at(7), frame(&[connected()]), 0);
+    link.on(at(8), LinkInput::Lost, 0);
+    link.on(at(9), LinkInput::Reconnecting, 0);
+    assert_eq!(
+        subscribe(&mut link, 10),
+        [LinkAction::Gap {
+            from: at(4),
+            to: at(10)
+        }]
+    );
+    link.on(at(11), frame(&[quote("SPY")]), 0);
+    link.on(at(12), LinkInput::Reconnecting, 0);
+    assert_eq!(
+        subscribe(&mut link, 13),
+        [LinkAction::Gap {
+            from: at(11),
+            to: at(13)
+        }],
+        "a restart the link did not ask for is a gap too"
     );
 }
 
