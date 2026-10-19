@@ -109,6 +109,9 @@ pub enum VersionError {
     FlattenWithoutSell,
     #[error("the committed trading calendar could not be read")]
     CalendarUnavailable,
+    /// A step its story has not built yet (DEC-77): the stub's own report.
+    #[error("not implemented until {story}")]
+    Unimplemented { story: &'static str },
     #[error("a liquidity figure could not be computed: {0}")]
     Liquidity(&'static str),
     #[error(transparent)]
@@ -154,6 +157,7 @@ impl VersionError {
             Self::BarOutsideRegularSession(_) => "bar_outside_regular_session",
             Self::FlattenWithoutSell => "flatten_without_sell",
             Self::CalendarUnavailable => "calendar_unavailable",
+            Self::Unimplemented { .. } => "unimplemented",
             Self::Liquidity(code) | Self::Gate(code) => code,
             Self::Backtest(e) => e.code(),
             Self::Builder(e) => e.code(),
@@ -432,14 +436,14 @@ fn check_inputs(input: &VersionInput<'_>) -> Result<(), VersionError> {
     {
         return Err(VersionError::BarOutsideRegularSession(index));
     }
-    if let Some(date) = input
+    if let Some(_ex_date) = input
         .corporate_actions
         .iter()
         .filter(|action| matches!(action, RecordedAction::CashDividend { .. }))
         .map(RecordedAction::ex_date)
         .find(|date| first.trade_date <= *date && *date <= last.trade_date)
     {
-        return Err(VersionError::CorporateActionInRange(date));
+        return Err(VersionError::Unimplemented { story: "E4-4" });
     }
     let models = BuilderMandate::try_from(input.mandate)?.models;
     for (index, recorded) in input.outputs.iter().enumerate() {
