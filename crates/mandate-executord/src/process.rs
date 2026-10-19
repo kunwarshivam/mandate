@@ -535,6 +535,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 purpose: proposal.purpose,
                 protection,
             },
+            confirmation: None,
         };
         self.hand(now, now, Input::Intent(handoff), alerts, 0)
     }
@@ -858,6 +859,7 @@ mod tests {
                 purpose,
                 protection: None,
             },
+            confirmation: None,
         }))
     }
 

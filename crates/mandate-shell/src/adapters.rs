@@ -1716,6 +1716,7 @@ impl Sink for ExecutorSink {
             agent: ExecutorAgentId(self.agent.0.clone()),
             tif: executor_tif(handoff.execution),
             body,
+            confirmation: None,
         })
     }
 }

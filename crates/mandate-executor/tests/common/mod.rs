@@ -627,6 +627,7 @@ pub fn handoff(intent: &str, who: &str, body: mandate_executor::IntentBody) -> I
         agent: agent(who),
         tif: Some(TimeInForce::Day),
         body,
+        confirmation: None,
     })
 }
 
