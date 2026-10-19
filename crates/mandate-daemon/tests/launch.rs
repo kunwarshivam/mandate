@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use mandate_daemon::launch::{Named, named};
+use mandate_daemon::launch::{Named, fixture_permitted, named};
 
 fn flags(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
     let map: BTreeMap<String, String> = pairs
@@ -141,4 +141,21 @@ fn a_manager_variable_without_its_process_is_refused() {
         assert_eq!(named(&given, &var), Err("deployment_conflict"), "{stray}");
         assert_eq!(named(&none(), &var), Err("deployment_conflict"), "{stray}");
     }
+}
+
+/// The in-memory journal is refused on a pod the manager started, whatever the process it names,
+/// and allowed anywhere else; without `--fixture` the manager's pod keeps its journal (the
+/// executor's guard, #1754, applied to the runtime).
+#[test]
+fn the_fixture_journal_is_refused_on_a_managers_pod() {
+    for process in ["runtime", "executor", ""] {
+        assert_eq!(
+            fixture_permitted(true, &manager(process)),
+            Err("fixture_under_manager"),
+            "{process:?}"
+        );
+    }
+    assert_eq!(fixture_permitted(true, &none()), Ok(()));
+    assert_eq!(fixture_permitted(false, &manager("runtime")), Ok(()));
+    assert_eq!(fixture_permitted(false, &none()), Ok(()));
 }

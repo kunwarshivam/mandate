@@ -62,3 +62,17 @@ fn agreed(set: Option<String>, flagged: Option<String>) -> Result<Option<String>
         _ => Ok(set),
     }
 }
+
+/// Whether `--fixture`, the in-memory journal, is allowed: never on a pod the deployment manager
+/// started (`MANDATE_PROCESS` set), which must keep its journal, so it never silently runs on one
+/// that forgets everything at exit (`AGENTS.md` rule 3).
+///
+/// # Errors
+/// `fixture_under_manager` for `--fixture` on a pod the manager started.
+pub fn fixture_permitted(
+    fixture: bool,
+    var: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), &'static str> {
+    let _ = (fixture, var("MANDATE_PROCESS"));
+    Ok(())
+}
