@@ -502,13 +502,6 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
 /// the short-lived kubeconfig it fetched and the secrets from its sensitive outputs, all in memory.
 /// It refuses unless this is `infra.yml` on `main` in GitHub Actions, and unless the kubeconfig's
 /// current context is `expected_context`; then it applies exactly what the founder's path applies.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "lane IAC's `cargo xtask infra apply` calls it (E21-56 F2)"
-    )
-)]
 pub(crate) fn bootstrap_from_infra(
     root: &Path,
     environment: Environment,

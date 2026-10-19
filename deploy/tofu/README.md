@@ -148,10 +148,11 @@ have seen. The log never shows a value: only addresses and actions.
 4. **Handing over to lane GO (E21-58):** the outputs GO needs are the root outputs
    `archive_access_key_id`, `archive_secret_access_key` and `tunnel_token` (sensitive, never
    printed), and `archive_bucket`, `archive_endpoint`, `archive_destination_path`,
-   `archive_jurisdiction` and `cloudflare_account_id`. Once the automated bootstrap lands
-   (DEC-2028, lane GO's #1695), `infra.yml`'s apply writes the Secrets `ws-ws1/cloudflared-tunnel`
-   and `ws-ws1/journal-archive-key` itself, through kubectl's stdin, and Flux pulls from then on.
-   Until then, lane GO's `deploy/gitops/BOOTSTRAP.md` is the by-hand route, run from an address in
+   `archive_jurisdiction` and `cloudflare_account_id`. Staging's `apply` bootstraps the cluster
+   itself (DEC-2028): it opens the control plane to the run's own runner in the plan you approve,
+   writes the Secrets `ws-ws1/cloudflared-tunnel` and `ws-ws1/journal-archive-key` through lane
+   GO's code, and closes the window again, however the run ends. Flux pulls from then on.
+   Production's bootstrap is lane GO's `deploy/gitops/BOOTSTRAP.md`, run from an address in
    `KUBE_API_ALLOWED_CIDRS`.
 
 ## What this does not guard, said plainly
