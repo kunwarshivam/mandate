@@ -76,14 +76,14 @@ pub struct ExchangedGrant {
 ///
 /// 1. A connection that is not paper is refused before the vault or the endpoint is touched
 ///    (DEC-821 items 3 and 4).
-/// 2. The code and PKCE verifier are read once from the vault; with none waiting, the exchange
-///    is refused and nothing is written.
-/// 3. They are deleted before anything is sent, so the code is sent at most once, whatever stops
-///    this run or reruns it (DEC-2628 item 2). A run that cannot delete them sends nothing.
-/// 4. The endpoint receives the [`LiveTokenRequest`] and the form, verifier included.
-/// 5. The token type must be `bearer` and the scope must pass [`crate::grant::check_scope`].
+/// 2. The code and PKCE verifier are taken from the vault, read and deleted in one step no
+///    other run can interleave with, before anything is sent: the code is sent at most once,
+///    whatever stops this run, reruns it, or runs beside it (DEC-2628 item 2). With none waiting,
+///    or a take that fails, nothing is sent or written.
+/// 3. The endpoint receives the [`LiveTokenRequest`] and the form, verifier included.
+/// 4. The token type must be `bearer` and the scope must pass [`crate::grant::check_scope`].
 ///    On any refusal the token is dropped before any vault write, and nothing is left to delete.
-/// 6. The token is stored with the granted scopes, and the grant, without the token, is
+/// 5. The token is stored with the granted scopes, and the grant, without the token, is
 ///    returned. A run lost before this store loses the connect, which the deadline teardown
 ///    closes (connections spec §5.2 step 6).
 pub fn exchange_code(
@@ -97,8 +97,7 @@ pub fn exchange_code(
         return Err(ConnectError::EnvironmentRefused);
     }
     let key = &pending.vault_key;
-    let waiting = vault.read_code(key)?.ok_or(ConnectError::CodeMissing)?;
-    vault.delete_code(key)?;
+    let waiting = vault.take_code(key)?.ok_or(ConnectError::CodeMissing)?;
     let form = ExchangeForm {
         code: &waiting.code,
         code_verifier: &waiting.verifier,

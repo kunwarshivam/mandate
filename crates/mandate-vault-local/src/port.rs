@@ -24,7 +24,7 @@ pub struct ApiPort<'a> {
     pub environment: Environment,
 }
 
-/// The executor's (and the token exchange's) port for one connection: `read_code`,
+/// The executor's (and the token exchange's) port for one connection: `take_code`,
 /// `put_token`, `delete_code`, `delete`.
 #[derive(Debug)]
 pub struct ExecutorPort<'a> {
@@ -123,7 +123,7 @@ impl Vault for ApiPort<'_> {
         self.vault.put_code(&entry, &secret).map_err(|_| REFUSED)
     }
 
-    fn read_code(&mut self, _: &VaultKey) -> Result<Option<WaitingCode>, ConnectError> {
+    fn take_code(&mut self, _: &VaultKey) -> Result<Option<WaitingCode>, ConnectError> {
         Err(REFUSED)
     }
 
@@ -159,9 +159,9 @@ impl Vault for ExecutorPort<'_> {
         Err(REFUSED)
     }
 
-    fn read_code(&mut self, key: &VaultKey) -> Result<Option<WaitingCode>, ConnectError> {
+    fn take_code(&mut self, key: &VaultKey) -> Result<Option<WaitingCode>, ConnectError> {
         let entry = code_entry(key, &self.connection_id, self.environment)?;
-        match self.vault.read(&entry).map_err(|_| REFUSED)? {
+        match self.vault.take_code(&entry).map_err(|_| REFUSED)? {
             Some(secret) => decode_code(secret.expose_secret()).map(Some),
             None => Ok(None),
         }

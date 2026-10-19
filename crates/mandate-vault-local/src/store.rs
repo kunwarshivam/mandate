@@ -23,6 +23,7 @@ use std::fs::{self, File, Metadata, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use ring::rand::{SecureRandom, SystemRandom};
@@ -177,6 +178,48 @@ impl ExecutorVault {
     pub fn delete(&self, entry: &Entry) -> Result<(), VaultError> {
         unlink(&entry_path(&self.vault_dir, entry))
     }
+
+    /// Takes a code: renames it to a name only this call knows, reads and decrypts it there, and
+    /// unlinks it. The rename is atomic, so of any number of concurrent takers exactly one gets the
+    /// code and the rest `None` (DEC-2628 item 2). An entry this call cannot decrypt, such as one
+    /// bound to another connection, is renamed back and refused, so a wrong taker destroys nothing.
+    pub fn take_code(&self, entry: &Entry) -> Result<Option<SecretSlice<u8>>, VaultError> {
+        if entry.kind() != Kind::Code {
+            return Err(wrong_role(entry));
+        }
+        let path = entry_path(&self.vault_dir, entry);
+        let taken = taken_path(&path, entry);
+        match fs::rename(&path, &taken) {
+            Ok(()) => {}
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(VaultError::Io),
+        }
+        let read = read_checked(&taken, Kind::Code, &self.ids).and_then(|bytes| {
+            bytes
+                .map(|bytes| unseal(&self.pending_key, entry, bytes))
+                .transpose()
+        });
+        match read {
+            Ok(secret) => unlink(&taken).map(|()| secret),
+            Err(error) => {
+                let _restored = fs::rename(&taken, &path);
+                Err(error)
+            }
+        }
+    }
+}
+
+/// How many takes this process has begun, so each [`taken_path`] is its own.
+static TAKES: AtomicU64 = AtomicU64::new(0);
+
+/// A name beside `path` that only one take of this process uses.
+fn taken_path(path: &Path, entry: &Entry) -> PathBuf {
+    let take = TAKES.fetch_add(1, Ordering::Relaxed);
+    path.with_file_name(format!(
+        "{}.taken-{}-{take}",
+        entry.file_name(),
+        std::process::id()
+    ))
 }
 
 fn wrong_role(entry: &Entry) -> VaultError {

@@ -52,7 +52,7 @@ fn a_code_goes_in_through_the_api_and_out_through_the_executor() {
         connection_id: conn("c1"),
         environment: Environment::Paper,
     };
-    assert!(exec_port.read_code(&key()).unwrap().is_none());
+    assert!(exec_port.take_code(&key()).unwrap().is_none());
     api_port
         .put_code(&key(), code_secret("the-code"), verifier("the-verifier"))
         .unwrap();
@@ -61,7 +61,7 @@ fn a_code_goes_in_through_the_api_and_out_through_the_executor() {
         raw.expose_secret(),
         &fields(&["the-code", "the-verifier"])[..]
     );
-    let waiting = exec_port.read_code(&key()).unwrap().unwrap();
+    let waiting = exec_port.take_code(&key()).unwrap().unwrap();
     assert_eq!(waiting.code.0.expose_secret(), "the-code");
     assert_eq!(waiting.verifier.0.expose_secret(), "the-verifier");
 
@@ -75,7 +75,7 @@ fn a_code_goes_in_through_the_api_and_out_through_the_executor() {
         &fields(&["the-token", "data trading"])[..]
     );
     exec_port.delete_code(&key()).unwrap();
-    assert!(exec_port.read_code(&key()).unwrap().is_none());
+    assert!(exec_port.take_code(&key()).unwrap().is_none());
     assert_eq!(layout.names("tokens").len(), 1);
 }
 
@@ -97,10 +97,58 @@ fn a_code_bound_to_another_connection_or_environment_is_refused() {
             environment,
         };
         assert_eq!(
-            port.read_code(&key()).map(|w| w.is_some()),
+            port.take_code(&key()).map(|w| w.is_some()),
             Err(ConnectError::VaultUnavailable),
             "{connection} {environment:?}"
         );
+    }
+    let mut right = ExecutorPort {
+        vault: &executor,
+        connection_id: conn("c1"),
+        environment: Environment::Paper,
+    };
+    let waiting = right.take_code(&key()).unwrap();
+    assert!(
+        waiting.is_some(),
+        "a refused take puts the code back for its own connection"
+    );
+}
+
+/// Of concurrent takers of one code, exactly one gets it and nothing is left behind (DEC-2628
+/// item 2): the take is one rename, which only one of them can make.
+#[test]
+fn of_concurrent_takers_exactly_one_gets_the_code() {
+    for round in 0..20 {
+        let layout = Layout::new();
+        let (api, executor) = layout.both();
+        ApiPort {
+            vault: &api,
+            connection_id: conn("c1"),
+            environment: Environment::Paper,
+        }
+        .put_code(&key(), code_secret("c"), verifier("v"))
+        .unwrap();
+        let got = std::thread::scope(|scope| {
+            let takers: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let mut port = ExecutorPort {
+                            vault: &executor,
+                            connection_id: conn("c1"),
+                            environment: Environment::Paper,
+                        };
+                        port.take_code(&key()).unwrap().is_some()
+                    })
+                })
+                .collect();
+            takers
+                .into_iter()
+                .map(|taker| taker.join().unwrap())
+                .filter(|got| *got)
+                .count()
+        });
+        assert_eq!(got, 1, "round {round}");
+        assert!(layout.names("pending").is_empty(), "round {round}");
     }
 }
 
@@ -159,7 +207,7 @@ fn each_role_is_refused_the_calls_it_does_not_have() {
     };
     let scopes = check_scope("trading data").unwrap();
     assert_eq!(
-        api_port.read_code(&key()).map(|w| w.is_some()),
+        api_port.take_code(&key()).map(|w| w.is_some()),
         Err(ConnectError::VaultUnavailable)
     );
     assert_eq!(
@@ -198,7 +246,7 @@ fn an_invalid_vault_key_is_refused_by_every_call() {
     assert_eq!(api_port.delete_code(&bad), unavailable);
     assert_eq!(api_port.delete(&bad), unavailable);
     assert_eq!(
-        exec_port.read_code(&bad).map(|w| w.is_some()),
+        exec_port.take_code(&bad).map(|w| w.is_some()),
         Err(ConnectError::VaultUnavailable)
     );
     assert_eq!(exec_port.put_token(&bad, access("t"), &scopes), unavailable);
@@ -232,9 +280,29 @@ fn a_code_entry_that_does_not_parse_is_refused() {
         api.put_code(&entry, &secrecy::SecretSlice::from(bad.clone()))
             .unwrap();
         assert_eq!(
-            exec_port.read_code(&key()).map(|w| w.is_some()),
+            exec_port.take_code(&key()).map(|w| w.is_some()),
             Err(ConnectError::VaultUnavailable),
             "{bad:?}"
         );
     }
+}
+
+/// A take whose rename fails for any reason but an absent entry is refused, never read as "no code
+/// waiting": here the pending directory has been replaced by a file.
+#[test]
+fn a_take_the_vault_cannot_make_is_refused_not_none() {
+    let layout = Layout::new();
+    let (_api, executor) = layout.both();
+    let pending = layout.vault.join("pending");
+    std::fs::remove_dir_all(&pending).unwrap();
+    std::fs::write(&pending, b"not a directory").unwrap();
+    let mut port = ExecutorPort {
+        vault: &executor,
+        connection_id: conn("c1"),
+        environment: Environment::Paper,
+    };
+    assert_eq!(
+        port.take_code(&key()).map(|w| w.is_some()),
+        Err(ConnectError::VaultUnavailable)
+    );
 }

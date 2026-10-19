@@ -85,8 +85,8 @@ fn a_paper_exchange_sends_the_one_live_token_request_and_stores_only_the_token()
     assert!(!vault.has_code(), "the code and verifier are deleted");
     assert_eq!(
         vault.ops,
-        ["read_code", "delete_code", "put_token"],
-        "read once and consume the code and verifier, then store the token (DEC-2628 item 2)"
+        ["take_code", "put_token"],
+        "take the code and verifier in one step, then store the token (DEC-2628 item 2)"
     );
     assert_eq!(
         run(Environment::Paper, &mut vault, &mut provider),
@@ -104,7 +104,7 @@ fn with_no_code_waiting_nothing_is_sent_or_written() {
         Err(ConnectError::CodeMissing)
     );
     assert!(provider.calls.is_empty());
-    assert_eq!(vault.ops.first(), Some(&"read_code"));
+    assert_eq!(vault.ops.first(), Some(&"take_code"));
     assert_eq!(vault.writes(), Vec::<&str>::new());
     assert_eq!(vault.token(), None);
     assert!(!vault.has_code());
@@ -138,8 +138,8 @@ fn a_refused_grant_stores_no_token_and_deletes_the_entry() {
         assert_eq!(provider.calls.len(), 1, "never retried: {refusal:?}");
         assert_eq!(
             vault.ops,
-            ["read_code", "delete_code"],
-            "consumed before the request, so nothing is left to delete: {refusal:?}"
+            ["take_code"],
+            "taken before the request, so nothing is left to delete: {refusal:?}"
         );
         assert_eq!(vault.writes(), Vec::<&str>::new(), "{refusal:?}");
         assert!(!vault.has_code(), "{refusal:?}");
@@ -198,33 +198,33 @@ fn the_exchange_sends_the_redirect_uri_the_deployment_registered() {
     );
 }
 
-/// A run that cannot consume the code sends nothing: the code is sent only once it is gone from
+/// A run whose take fails sends nothing: the code is sent only once it is gone from
 /// the vault, so a later run is the first to send it (DEC-2628 item 2).
 #[test]
-fn a_code_that_cannot_be_consumed_is_never_sent() {
+fn a_code_that_cannot_be_taken_is_never_sent() {
     let mut vault = FixtureVault::with_code();
-    vault.failing = Some("delete_code");
+    vault.failing = Some("take_code");
     let mut provider = FixtureProvider::granting("bearer", "trading data");
     assert_eq!(
         run(Environment::Paper, &mut vault, &mut provider),
         Err(ConnectError::VaultUnavailable)
     );
-    assert!(provider.calls.is_empty(), "nothing sent before the consume");
+    assert!(provider.calls.is_empty(), "nothing sent before the take");
     assert_eq!(vault.token(), None);
     vault.failing = None;
     assert!(run(Environment::Paper, &mut vault, &mut provider).is_ok());
     assert_eq!(
         provider.calls.len(),
         1,
-        "the code is sent once, by the run that consumed it"
+        "the code is sent once, by the run that took it"
     );
 }
 
-/// A run that stops after consuming the code and before its request is answered loses the
+/// A run that stops after taking the code and before its request is answered loses the
 /// connect: nothing is stored, and a rerun finds no code and sends nothing. The request stays open
 /// for the deadline teardown (connections spec §5.2 step 6; `manager`'s teardown tests).
 #[test]
-fn a_run_lost_after_the_consume_leaves_nothing_for_a_rerun_to_send() {
+fn a_run_lost_after_the_take_leaves_nothing_for_a_rerun_to_send() {
     let mut vault = FixtureVault::with_code();
     let mut provider = FixtureProvider {
         answer: Err(ConnectError::EndpointFailed),
@@ -256,7 +256,7 @@ fn a_run_lost_after_the_request_and_before_the_token_never_exchanges_again() {
         Err(ConnectError::VaultUnavailable)
     );
     assert_eq!(provider.calls.len(), 1);
-    assert!(!vault.has_code(), "consumed before the request");
+    assert!(!vault.has_code(), "taken before the request");
     vault.failing = None;
     assert_eq!(
         run(Environment::Paper, &mut vault, &mut provider),
@@ -269,18 +269,13 @@ fn a_run_lost_after_the_request_and_before_the_token_never_exchanges_again() {
 /// One run of the exchange: the vault operation that fails, if any, and whether the endpoint
 /// answers with a grant.
 fn runs() -> impl Strategy<Value = Vec<(Option<&'static str>, bool)>> {
-    let failing = prop_oneof![
-        Just(None),
-        Just(Some("read_code")),
-        Just(Some("delete_code")),
-        Just(Some("put_token")),
-    ];
+    let failing = prop_oneof![Just(None), Just(Some("take_code")), Just(Some("put_token")),];
     prop::collection::vec((failing, any::<bool>()), 1..6)
 }
 
 /// Over any sequence of runs, each stopping anywhere, the code is sent at most once and only by a
-/// run that consumed it first, a token is stored only by a run that returned it, and no run after
-/// the code is consumed sends anything. The oracle follows the code by its own state, not by the
+/// run that took it first, a token is stored only by a run that returned it, and no run after
+/// the code is taken sends anything. The oracle follows the code by its own state, not by the
 /// exchange's order (DEC-2628 item 2).
 #[test]
 fn over_any_sequence_of_stopped_runs_the_code_is_sent_at_most_once() {
@@ -299,8 +294,7 @@ fn over_any_sequence_of_stopped_runs_the_code_is_sent_at_most_once() {
                     Err(ConnectError::EndpointFailed)
                 };
                 let result = run(Environment::Paper, &mut vault, &mut provider);
-                let consumed =
-                    code_waiting && !matches!(failing, Some("read_code" | "delete_code"));
+                let consumed = code_waiting && failing != Some("take_code");
                 if consumed {
                     code_waiting = false;
                     sent += 1;
