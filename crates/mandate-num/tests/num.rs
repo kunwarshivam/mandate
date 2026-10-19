@@ -2112,7 +2112,7 @@ fn cents_text(cents: i128) -> String {
 }
 
 /// A price less a dividend per share is exact at 9 places, and refuses `not_positive` at zero or
-/// below (DEC-2252 item 2).
+/// below (DEC-2253 item 2).
 #[test]
 fn a_price_less_another_is_exact_and_stays_positive() {
     assert_eq!(p("100").checked_sub(p("0.25")), Ok(p("99.75")));

@@ -326,7 +326,7 @@ impl Price {
     }
 
     /// `self − other`, exact at the 9 places a price holds: a price less a cash dividend per share
-    /// (DEC-2252 item 2). `not_positive` when it reaches zero or below.
+    /// (DEC-2253 item 2). `not_positive` when it reaches zero or below.
     pub fn checked_sub(self, other: Self) -> Result<Self, NumError> {
         self.exact()
             .sub(other.exact())?
