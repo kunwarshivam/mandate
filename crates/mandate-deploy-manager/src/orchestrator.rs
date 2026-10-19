@@ -82,6 +82,14 @@ pub const CRASH_LOOP: OperatorAlert = OperatorAlert {
     runbook: "RB-14",
 };
 
+/// A version-1 `AgentDeployed` of an agent not stopped: it names no connection, so the manager
+/// starts nothing for it until the owner stops it and deploys a new agent id at version 2
+/// (DEC-1173 item 3).
+pub const DEPLOYMENT_UNREAD: OperatorAlert = OperatorAlert {
+    code: "deployment_unread",
+    runbook: "RB-14",
+};
+
 /// Where operator alerts go. Raising one never fails the manager.
 pub trait Alerts {
     fn raise(&mut self, alert: OperatorAlert);
