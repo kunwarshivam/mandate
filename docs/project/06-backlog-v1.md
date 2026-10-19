@@ -866,7 +866,7 @@ after U-A1 to U-A5 are recorded.
   [DEC-800](decisions/DEC-800.md) item 14). *Accepted when:* a journal spec change after v0.20
   defines the event that records, with the connection, whether the token may reach the other
   environment, and the disclosure the owner confirmed, with vectors, tests first; and no Alpaca
-  OAuth connect appends `ConnectionEstablished` before that event. *Status:* the journal spec change is v0.69
+  OAuth connect appends `ConnectionEstablished` before that event. *Status:* the journal spec change is v0.68
   ([DEC-2621](decisions/DEC-2621.md)): `ConnectionRequested` version 2 and rule 255, with vectors;
   the disclosure's wording is [DEC-2622](decisions/DEC-2622.md), Proposed. `mandate-journal`'s
   registration (tests first) and the start route that writes version 2 (E10-13 slice 2) follow.

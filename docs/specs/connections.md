@@ -227,7 +227,7 @@ DEC-690 item 4; DEC-441 item 21). A live Alpaca OAuth connection needs a new dec
    `env=paper`. Before the redirect, the owner is shown the token's possible breadth (the residual
    risk below; DEC-821 item 4), and the step-up confirms that disclosure's document and version:
    the request is `ConnectionRequested` version 2, which records `credential` `oauth` and the
-   breadth (journal spec v0.69 §9.8, rule 255; [DEC-2621](../project/decisions/DEC-2621.md)).
+   breadth (journal spec v0.68 §9.8, rule 255; [DEC-2621](../project/decisions/DEC-2621.md)).
 2. **Authorize.** The browser goes to Alpaca's authorization page with these parameters:
    - the platform's client id;
    - the registered redirect URI;
@@ -323,7 +323,7 @@ DEC-690 item 4; DEC-441 item 21). A live Alpaca OAuth connection needs a new dec
 
    For an Alpaca OAuth connection, the token's possible breadth (the residual risk below) is
    journaled with the connection, and has been disclosed to the owner (step 1), before
-   `ConnectionEstablished` (DEC-821 item 4; DEC-441 item 22). Journal spec v0.69 records it on the
+   `ConnectionEstablished` (DEC-821 item 4; DEC-441 item 22). Journal spec v0.68 records it on the
    connect's `ConnectionRequested` version 2 (rule 255, DEC-2621), which the establishment closes
    (rule 131); until the code registers version 2, an Alpaca OAuth connect cannot complete.
 
@@ -826,5 +826,5 @@ each stays in force for every customer connection:
    registration with Alpaca (§5.2).
 6. A teardown reason of its own for a failed token exchange. Until the journal spec names one,
    §5.2 uses `start_failed`, because no executor was started. Adding one is a journal spec change;
-   journal spec v0.69 (DEC-2621), which journals the token's possible breadth (§5.2 step 5, DEC-821
+   journal spec v0.68 (DEC-2621), which journals the token's possible breadth (§5.2 step 5, DEC-821
    item 4), left it open.

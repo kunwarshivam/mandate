@@ -1803,7 +1803,7 @@ def request_invalid_drafts() -> list[dict]:
     req = "requested"
     return [
         *member_drafts(REQUEST_CASES, REQUEST_NULLED),
-        invalid("requested_version_3", "§9.8 v0.69: versions 1 and 2 only", req, [change("schema_version", 3)], "unknown_schema", "payload"),
+        invalid("requested_version_3", "§9.8 v0.68: versions 1 and 2 only", req, [change("schema_version", 3)], "unknown_schema", "payload"),
         invalid("requested_on_the_account_stream", "§9.8: a control-stream record", req, [change("stream_id", ACCOUNT_STREAM)],
                 "wrong_stream", "event_type"),
         invalid("requested_carries_the_code", "§9.8, CN-1: the code and verifier go to the vault only", req,
