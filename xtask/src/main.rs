@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 mod admission_drill;
 mod cell;
+mod founding;
 mod gitops;
 mod image;
 mod infra_preflight;
@@ -1354,14 +1355,16 @@ const INFRA_CLOSE_SECRETS: [&str; 2] = ["DIGITAL_OCEAN_API_KEY", "KUBE_API_ALLOW
 /// never configured (DEC-2030 item 1). Production's Access emails and the founder's CIDRs are
 /// secrets, since GitHub prints a variable in a step's environment in the public log (DEC-2030
 /// items 2 and 6). The model provider's key, staging's alone, goes to the vault on the CLI's
-/// stdin under a `MANDATE_` name, never `TF_VAR_`, so OpenTofu never reads it (DEC-2630).
-const INFRA_SECRETS: [&str; 6] = [
+/// stdin under a `MANDATE_` name, never `TF_VAR_`, so OpenTofu never reads it (DEC-2630). So does
+/// the founder's identity-provider subject, staging's alone, to the built CLI's stdin (DEC-2114).
+const INFRA_SECRETS: [&str; 7] = [
     "DIGITAL_OCEAN_API_KEY",
     "CF_INFRA_API_TOKEN",
     "TOFU_STATE_PASSPHRASE",
     "ACCESS_ALLOWED_EMAILS",
     "KUBE_API_ALLOWED_CIDRS",
     "OPENROUTER_API_KEY",
+    "FOUNDER_OIDC_SUBJECT",
 ];
 /// The list inputs `infra.yml` hands OpenTofu as JSON, which `infra` leaves out of `tofu`'s
 /// environment when blank or empty, so a root with a default takes it and a root without one
@@ -1724,6 +1727,11 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     if !model_key.is_empty() {
         mask::add_mask(&model_key);
     }
+    let founder_subject = env::var(founding::SUBJECT_VAR).unwrap_or_default();
+    if !founder_subject.is_empty() {
+        mask::add_mask(&founder_subject);
+    }
+    let founder = founding::staging_founder(&repo_root()?)?;
     let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
     let temp = env::var("RUNNER_TEMP").context("RUNNER_TEMP is not set")?;
     let (_, context) = infra_window::cluster_names("staging");
@@ -1811,6 +1819,16 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     for word in words {
         eprintln!("    vault-provision: {word} (DEC-2630)");
     }
+    let linked = founding::link_founder(
+        &founding::Steps {
+            kubectl: &in_cluster,
+            mandate: &|args, stdin| founding::run_mandate(&cli, args, stdin),
+            scratch: Path::new(&temp),
+        },
+        &founder,
+        &founder_subject,
+    )?;
+    eprintln!("    founding: {linked} (DEC-2114)");
     let account = output("cloudflare_account_id")?;
     mask::add_mask(account.trim());
     let (tunnel_id, api_hostname) = (output("tunnel_id")?, output("api_hostname")?);
@@ -2135,6 +2153,10 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         INFRA_WORKFLOW,
         "MANDATE_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "MANDATE_FOUNDER_OIDC_SUBJECT: ${{ secrets.FOUNDER_OIDC_SUBJECT }}",
     ),
 ];
 
@@ -5579,6 +5601,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_INFRA_ENVIRONMENT",
     "MANDATE_INFRA_SHA",
     "MANDATE_OPENROUTER_API_KEY",
+    "MANDATE_FOUNDER_OIDC_SUBJECT",
     "MANDATE_TOFU_REQUIRED",
     "DIGITALOCEAN_TOKEN",
     "TF_VAR_state_passphrase",
@@ -17066,6 +17089,24 @@ mod tests {
         assert!(
             init < provision && provision < at(&staging, "infra_verify::verify("),
             "staging's vault is provisioned after its init and before its verify (DEC-2630)"
+        );
+        let subject_read = at(&staging, "env::var(founding::SUBJECT_VAR)");
+        let subject_masked = at(&staging, "mask::add_mask(&founder_subject);");
+        let linked = at(&staging, concat!("founding::", "link_founder("));
+        assert!(
+            subject_read < subject_masked
+                && subject_masked < linked
+                && provision < linked
+                && linked < at(&staging, "infra_verify::verify("),
+            "the founder's subject is masked before any other use, and the founder is linked after \
+             the vault is provisioned and before staging's verify (DEC-2114)"
+        );
+        assert_eq!(
+            include_str!("main.rs")
+                .matches(concat!("founding::", "link_founder("))
+                .count(),
+            1,
+            "only staging's bootstrap links the founder (DEC-2114)"
         );
         assert!(
             include_str!("../../.github/workflows/infra.yml").contains(

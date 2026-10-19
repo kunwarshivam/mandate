@@ -162,7 +162,8 @@ const ALLOWED: &[(&str, &str, &str)] = &[
 /// `LD_PRELOAD`, `NODE_OPTIONS` or `BASH_ENV` reaches the secret step. `infra close`'s names
 /// include `TF_VAR_kube_api_allowed_addresses`, and `infra`'s `MANDATE_INFRA_SHA`, which IAC's
 /// #1771 adds, as [`SECRET_JOB_ENV`] does its kubectl and flux pins; `infra`'s also
-/// `MANDATE_OPENROUTER_API_KEY`, the model provider's key staging's vault imports (DEC-2630).
+/// `MANDATE_OPENROUTER_API_KEY`, the model provider's key staging's vault imports (DEC-2630), and
+/// `MANDATE_FOUNDER_OIDC_SUBJECT`, the founder's subject staging's link digests (DEC-2114).
 const SECRET_RUNS: &[SecretRun] = &[
     (
         ".github/workflows/infra.yml",
@@ -177,6 +178,7 @@ const SECRET_RUNS: &[SecretRun] = &[
             "TF_VAR_kube_api_allowed_addresses",
             "TF_VAR_access_allowed_emails",
             "MANDATE_OPENROUTER_API_KEY",
+            "MANDATE_FOUNDER_OIDC_SUBJECT",
         ],
     ),
     (

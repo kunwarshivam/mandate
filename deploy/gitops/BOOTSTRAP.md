@@ -112,6 +112,32 @@ Never paste them into an issue, a CI job or a chat. The break-glass bootstrap fr
 still asks for a seal key when none exists (`openssl rand -hex 32`, not shown as you type; if you
 stop it there with Ctrl-C, run `stty echo`), and keeps one that does.
 
+## Staging's founder
+
+Staging's web app signs you in only once your identity-provider subject is linked to the founder's
+principal, and lets you act only once that principal is the workspace's founder
+([DEC-2114](../../docs/project/decisions/DEC-2114.md)). Both happen with no step of yours on the
+cluster:
+
+1. **The link.** Add the `infra-staging` secret `FOUNDER_OIDC_SUBJECT` (your user id in staging's
+   Supabase project) and run the staging apply. After the vault is provisioned, it runs the
+   `mandate` binary it built, `identity link`, with your subject on standard input only, and applies
+   the one line it writes, `sha256:<digest> <founder ULID>`, as the ConfigMap `subject-links` in
+   `ws-ws1`. Its log reads `founding: linked`, or `founding: skipped: no founder subject is set`
+   without the secret. The subject is masked and never reaches the cluster, a log, or a file left
+   behind. The founder's ULID is `founding.member` in `clusters/staging/workspace.yaml`.
+2. **The mount.** Once an apply has written the ConfigMap, staging's values set
+   `api.subjectLinks: subject-links`, so the API server reads it.
+3. **The grant.** Once the `mandate` image staging runs has `workspace found --open`, staging's
+   values set `founding.enabled: true`. The workspace chart's `founding` hook then runs on every
+   apply: the first opens the workspace's control stream if it is empty and writes your founding
+   grant; every later one finds it and commits nothing.
+
+If the control stream already holds records and no membership, the grant is refused
+`workspace_not_new`: the release fails, and verify's `founding` Job line names only that code. The
+fix is a fresh workspace ULID in `api.workspace`, through a gitops change and a decision; no journal
+row is ever deleted.
+
 ## When the journal does not install
 
 The journal's release waits for `flux-system/journal-archive-endpoint` and never falls back to an
