@@ -114,7 +114,6 @@ fn held(
 
 /// Before the lease is due for renewal, nothing is asked and nothing changes.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_lease_not_yet_due_is_held_without_asking_the_vault() -> Result<(), Error> {
     let (mut leased, calls) = held(vec![])?;
     assert_eq!(leased.tick(at(0)?)?, Held::Unchanged);
@@ -129,7 +128,6 @@ fn a_lease_not_yet_due_is_held_without_asking_the_vault() -> Result<(), Error> {
 /// A renewal that hands back the same secret changes nothing; one that hands back a new secret
 /// rotates the credentials to it, once.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_renewal_keeps_or_rotates_the_secret() -> Result<(), Error> {
     let (mut leased, calls) = held(vec![Ok("ok-1"), Ok("ok-2")])?;
     assert_eq!(leased.tick(at(1)?)?, Held::Unchanged);
@@ -145,7 +143,6 @@ fn a_renewal_keeps_or_rotates_the_secret() -> Result<(), Error> {
 /// A vault outage keeps the lease it already holds until that lease expires, renewing at every
 /// due pass; at the expiry the credential is lost (E21-9).
 #[test]
-#[ignore = "pending E21-30"]
 fn an_outage_keeps_the_lease_until_it_expires() -> Result<(), Error> {
     let (mut leased, calls) = held(vec![
         Err(SourceError::Unavailable),
@@ -163,7 +160,6 @@ fn an_outage_keeps_the_lease_until_it_expires() -> Result<(), Error> {
 /// A renewal the vault refuses, or a new secret that does not read, loses the credential at
 /// once and for good: only a new lease, on restart, brings one back.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_refused_renewal_or_an_unreadable_secret_loses_the_credential() -> Result<(), Error> {
     let (mut refused, _) = held(vec![Err(SourceError::Denied), Ok("ok-2")])?;
     assert_eq!(refused.tick(at(1)?)?, Held::Lost);
@@ -176,7 +172,6 @@ fn a_refused_renewal_or_an_unreadable_secret_loses_the_credential() -> Result<()
 
 /// On stop the held lease is given back to the vault; with none held, nothing is asked.
 #[test]
-#[ignore = "pending E21-30"]
 fn stopping_gives_the_lease_back() -> Result<(), Error> {
     let (leased, calls) = held(vec![])?;
     leased.revoke()?;

@@ -9,16 +9,19 @@
 //! restart; a vault outage keeps the lease until it expires (`AGENTS.md` rule 3).
 
 use mandate_time::UtcNanos;
-use mandate_vault::lease::LeaseKeeper;
+use mandate_vault::lease::{Lease, LeaseKeeper};
 use mandate_vault::source::SecretSource;
+use secrecy::{ExposeSecret, SecretSlice};
+use tokio::runtime::Runtime;
 
-/// The code every stub of this story's tests PR returns, so every pending test fails at it
-/// (DEC-77); the implementation PR replaces the stubs and removes it.
-#[allow(
-    non_upper_case_globals,
-    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
-)]
-pub const Unimplemented: &str = "unimplemented";
+/// A current-thread runtime to drive one vault call: the process is not async, and the call
+/// holds nothing a later pass needs.
+fn runtime() -> Result<Runtime, &'static str> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| "runtime_unavailable")
+}
 
 /// What one pass found.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +39,8 @@ pub struct Leased<V, R> {
     vault: V,
     keeper: LeaseKeeper,
     read: R,
+    /// Set once the credential is lost: only a new lease, on restart, brings one back.
+    lost: bool,
 }
 
 impl<V: SecretSource, C, E, R: Fn(&[u8]) -> Result<C, E>> Leased<V, R> {
@@ -45,6 +50,7 @@ impl<V: SecretSource, C, E, R: Fn(&[u8]) -> Result<C, E>> Leased<V, R> {
             vault,
             keeper,
             read,
+            lost: false,
         }
     }
 
@@ -53,8 +59,28 @@ impl<V: SecretSource, C, E, R: Fn(&[u8]) -> Result<C, E>> Leased<V, R> {
     /// # Errors
     /// `runtime_unavailable` when the runtime that drives the vault cannot be built.
     pub fn tick(&mut self, now: UtcNanos) -> Result<Held<C>, &'static str> {
-        let _ = (&self.vault, &self.keeper, &self.read, now);
-        Err(Unimplemented)
+        if self.lost {
+            return Ok(Held::Lost);
+        }
+        let mut rotated = false;
+        if self.keeper.renewal_due(now)
+            && let Some(held) = self.keeper.lease()
+        {
+            let outcome = runtime()?.block_on(self.vault.renew(held, now));
+            rotated = outcome
+                .as_ref()
+                .is_ok_and(|renewed| renewed.secret.expose_secret() != held.secret.expose_secret());
+            self.keeper.apply(outcome, now);
+        }
+        let held = match self.keeper.secret(now) {
+            None => None,
+            Some(secret) if rotated => (self.read)(secret.expose_secret()).ok().map(Held::Rotated),
+            Some(_) => Some(Held::Unchanged),
+        };
+        Ok(held.unwrap_or_else(|| {
+            self.lost = true;
+            Held::Lost
+        }))
     }
 
     /// Ends the lease on stop, so the vault can take it back before it expires.
@@ -62,7 +88,17 @@ impl<V: SecretSource, C, E, R: Fn(&[u8]) -> Result<C, E>> Leased<V, R> {
     /// # Errors
     /// `runtime_unavailable`, or `revoke_failed` when the vault refused or could not be reached.
     pub fn revoke(self) -> Result<(), &'static str> {
-        let _ = self;
-        Err(Unimplemented)
+        let Some(held) = self.keeper.lease().filter(|_| !self.lost) else {
+            return Ok(());
+        };
+        let lease = Lease {
+            connection: held.connection.clone(),
+            secret: SecretSlice::from(held.secret.expose_secret().to_vec()),
+            expires_at: held.expires_at,
+            renew_at: held.renew_at,
+        };
+        runtime()?
+            .block_on(self.vault.revoke(lease))
+            .map_err(|_| "revoke_failed")
     }
 }
