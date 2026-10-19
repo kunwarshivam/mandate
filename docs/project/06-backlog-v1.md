@@ -890,7 +890,8 @@ after U-A1 to U-A5 are recorded.
   ([DEC-2037](decisions/DEC-2037.md) item 6). *Accepted when:* the handoff carries the owner's
   confirmed bid, bid size and floor from the `OwnerExitRequested`; the core sends such an exit in
   extended hours as a limit never below the floor, as a confirmed kill switch's close does
-  (trading spec §5.5); and an unconfirmed one still waits for the session.
+  (trading spec §5.5); and an unconfirmed one still waits for the session. Design:
+  [DEC-2040](decisions/DEC-2040.md).
 
 ### E8 Escalation and approvals
 
@@ -2955,7 +2956,9 @@ enables `live` (ES-23, OPS-5).
   `release-signing` job signs each binary and `SHA256SUMS` with it on a dispatch from `main`
   the founder approves ([runbook](../runbooks/release-signing-key.md)); the same run then
   publishes a hosted cell's images, each with its binary's release signature, as
-  `signed-<commit>` (DEC-2026), and pointing the hosted overlays at them is E21-58's. Staging
+  `signed-<commit>` (DEC-2026), and pointing the hosted overlays at them is E21-58's. A release
+  ships `mandate-api-server` beside the CLI, the agent daemon and the simulator, so promotion pins
+  the chart's `images.api` to its signed digest as it does `images.mandate`. Staging
   promotion waits on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single

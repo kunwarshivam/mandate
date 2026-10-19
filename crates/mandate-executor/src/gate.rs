@@ -264,10 +264,18 @@ pub(crate) struct Proposal<'s> {
     pub(crate) purpose: Purpose,
     /// Whether the order carries protection prices: a bracket, never a plain add (§5.4).
     pub(crate) protection: Option<ProtectionPrices>,
-    pub(crate) limit: Price,
+    /// The price the binding gate checks: the order's own limit, or for an exit at the market the
+    /// ladder's first rung (DEC-2037 item 3). `None` when an exit at the market has nothing to
+    /// price from, which only the account stream's checks then decide.
+    pub(crate) limit: Option<Price>,
+    /// Whether the order goes at the market: an exit handed with no limit (DEC-2037 item 1).
+    pub(crate) market: bool,
     pub(crate) tif: TimeInForce,
     /// Whether the order is a kill switch's own flatten (§5.5), which the agent's mode never holds.
     pub(crate) flatten: bool,
+    /// The bid the owner confirmed for an owner's exit, which lets it go outside the regular
+    /// session (§5.5, DEC-2040 item 3); it overrides the snapshot's.
+    pub(crate) owner_confirmed_bid: Option<Price>,
 }
 
 /// Runs the checks in trading-domain spec §9.1's evaluation order against fresh folded state.
@@ -384,7 +392,7 @@ pub(crate) fn binding_checks(
     source: Option<&dyn BindingGateSource>,
 ) -> Result<PartialGateDecision, ExecutorError> {
     let mut partial = account_stream_checks(state, proposal, ports)?;
-    let Some(source) = source else {
+    let (Some(source), Some(limit)) = (source, proposal.limit) else {
         return if proposal.purpose.adds_risk() {
             Err(ExecutorError::BindingGateInputMissing)
         } else {
@@ -396,7 +404,7 @@ pub(crate) fn binding_checks(
         instrument: proposal.instrument,
         side: proposal.side,
         qty: proposal.qty,
-        limit: proposal.limit,
+        limit,
         purpose: proposal.purpose,
         tif: proposal.tif,
         protection: proposal.protection,
@@ -426,7 +434,7 @@ pub(crate) fn binding_checks(
         partial.config_refs = refs;
         return Ok(partial);
     }
-    evaluate_binding(partial, proposal, pass, snapshot, refs)
+    evaluate_binding(partial, (proposal, limit), pass, snapshot, refs)
 }
 
 /// The configuration references a snapshot binds the gate's record to, its mandate reference the
@@ -464,7 +472,7 @@ fn bound_refs(
 
 fn evaluate_binding(
     mut partial: PartialGateDecision,
-    proposal: &Proposal<'_>,
+    (proposal, limit): (&Proposal<'_>, Price),
     pass: GatePass,
     snapshot: BindingGateInput,
     config_refs: Object,
@@ -474,14 +482,14 @@ fn evaluate_binding(
         instrument: snapshot.asset.clone(),
         side: proposal.side,
         qty: proposal.qty,
-        limit_price: proposal.limit,
-        kind: if let Some(protection) = proposal.protection {
-            ProposedKind::Bracket {
-                take_profit: protection.take_profit.unwrap_or(proposal.limit),
+        limit_price: limit,
+        kind: match proposal.protection {
+            Some(protection) => ProposedKind::Bracket {
+                take_profit: protection.take_profit.unwrap_or(limit),
                 stop: protection.stop,
-            }
-        } else {
-            ProposedKind::Plain
+            },
+            None if proposal.market => ProposedKind::Market,
+            None => ProposedKind::Plain,
         },
         tif: match proposal.tif {
             TimeInForce::Day => GateTimeInForce::Day,
@@ -490,7 +498,9 @@ fn evaluate_binding(
         },
         extended_hours: false,
         origin: origin(proposal.purpose),
-        owner_confirmed_bid: snapshot.owner_confirmed_bid,
+        owner_confirmed_bid: proposal
+            .owner_confirmed_bid
+            .or(snapshot.owner_confirmed_bid),
         client_order_id: snapshot.gate_client_order_id,
         fee_reservation: snapshot.fee_reservation,
     };
@@ -887,9 +897,11 @@ mod attribution_tests {
                     qty: Qty::parse("5")?,
                     purpose,
                     protection: None,
-                    limit: mandate_num::Price::parse("150")?,
+                    limit: Some(mandate_num::Price::parse("150")?),
+                    market: false,
                     tif: crate::types::TimeInForce::Day,
                     flatten: false,
+                    owner_confirmed_bid: None,
                 },
                 &ports,
             )
@@ -1029,9 +1041,11 @@ mod remainder_tests {
                 qty: Qty::parse(qty)?,
                 purpose,
                 protection: None,
-                limit: mandate_num::Price::parse("150")?,
+                limit: Some(mandate_num::Price::parse("150")?),
+                market: false,
                 tif: crate::types::TimeInForce::Day,
                 flatten: false,
+                owner_confirmed_bid: None,
             },
             &ports,
         )
