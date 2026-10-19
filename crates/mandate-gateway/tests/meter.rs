@@ -17,6 +17,7 @@ use mandate_gateway::meter::{
 use mandate_gateway::money::{Usage, Usd6};
 use mandate_gateway::registry::ModelRef;
 use mandate_time::Date;
+use proptest::prelude::*;
 
 const VECTORS: &str = include_str!("../../../fixtures/refcases/journal.json");
 
@@ -611,4 +612,199 @@ fn a_reservation_settled_twice_counts_its_higher_cost() {
         Ok(Usd6::parse("0.3").unwrap()),
         "a store that let a second settlement through never lowers spend"
     );
+}
+
+fn canon(value: &serde_json::Value) -> Value {
+    mandate_canon::parse(serde_json::to_string(value).unwrap().as_bytes()).unwrap()
+}
+
+/// DEC-2258 item 3: every meter draft of journal spec §9.19's vectors reads back as the record the
+/// vectors' own fields give, and the stream's `StreamOpened` as none.
+#[test]
+fn every_vectors_meter_draft_reads_back_as_its_record() {
+    let mut drafts: Vec<serde_json::Value> = ["reserved", "settled"]
+        .iter()
+        .map(|name| section()["drafts"][*name].clone())
+        .collect();
+    for case in section()["folds"].as_array().unwrap() {
+        drafts.extend(case["records"].as_array().unwrap().iter().cloned());
+    }
+    let mut opened = 0;
+    for draft in &drafts {
+        let event_type = draft["event_type"].as_str().unwrap();
+        let read = MeterRecord::from_journal(
+            event_type,
+            draft["event_id"].as_str().unwrap(),
+            &canon(&draft["payload"]),
+        );
+        assert_eq!(read, record(draft), "{event_type} {}", draft["event_id"]);
+        opened += usize::from(event_type == "StreamOpened");
+    }
+    assert!(drafts.len() > 20 && opened > 0, "{} {opened}", drafts.len());
+}
+
+/// DEC-2258 item 3: a meter payload with a member missing, an unlisted member, or a value of the
+/// wrong kind or out of its range reads back as nothing, as does an event type of no meter record.
+#[test]
+fn a_payload_it_cannot_read_back_is_no_record() {
+    for name in ["reserved", "settled"] {
+        let draft = &section()["drafts"][name];
+        let event_type = draft["event_type"].as_str().unwrap();
+        let event_id = draft["event_id"].as_str().unwrap();
+        let payload = &draft["payload"];
+        assert!(MeterRecord::from_journal(event_type, event_id, &canon(payload)).is_some());
+        assert_eq!(
+            MeterRecord::from_journal("ModelInvocationRecorded", event_id, &canon(payload)),
+            None
+        );
+        for member in payload.as_object().unwrap().keys() {
+            let mut missing = payload.clone();
+            missing.as_object_mut().unwrap().remove(member);
+            assert_eq!(
+                MeterRecord::from_journal(event_type, event_id, &canon(&missing)),
+                None,
+                "{name} without {member}"
+            );
+        }
+        let mut extra = payload.clone();
+        extra["note"] = serde_json::json!("x");
+        assert_eq!(
+            MeterRecord::from_journal(event_type, event_id, &canon(&extra)),
+            None,
+            "{name} with an unlisted member"
+        );
+    }
+    let reserved = &section()["drafts"]["reserved"];
+    let settled = &section()["drafts"]["settled"];
+    for (draft, member, value) in [
+        (reserved, "max_cost_usd", serde_json::json!("-1")),
+        (reserved, "max_cost_usd", serde_json::json!("0.0000001")),
+        (reserved, "purpose", serde_json::json!("trading")),
+        (reserved, "key_owner", serde_json::json!("nobody")),
+        (reserved, "risk_day", serde_json::json!("2026-13-01")),
+        (reserved, "price_table_ref", serde_json::json!("md5:00")),
+        (reserved, "agent_id", serde_json::json!(7)),
+        (settled, "outcome", serde_json::json!("budget_exhausted")),
+        (settled, "attempts", serde_json::json!("1")),
+        (settled, "attempts", serde_json::json!(4_294_967_296_u64)),
+        (settled, "cost_usd", serde_json::json!("-0.5")),
+        (settled, "tokens", serde_json::json!({"input": 1})),
+    ] {
+        let mut bad = draft["payload"].clone();
+        bad[member] = value.clone();
+        assert_eq!(
+            MeterRecord::from_journal(
+                draft["event_type"].as_str().unwrap(),
+                draft["event_id"].as_str().unwrap(),
+                &canon(&bad)
+            ),
+            None,
+            "{member} = {value}"
+        );
+    }
+}
+
+/// The outcomes a `MeterSettled` may carry (journal spec §9.19): every outcome but a refusal.
+const SETTLED_OUTCOMES: [Outcome; 8] = [
+    Outcome::Ok,
+    Outcome::DeadlineExceeded,
+    Outcome::ProviderUnavailable,
+    Outcome::RateLimitedProvider,
+    Outcome::CredentialInvalid,
+    Outcome::ContentRefused,
+    Outcome::SchemaInvalid,
+    Outcome::IdentityMismatch,
+];
+
+fn generated_record() -> impl Strategy<Value = MeterRecord> {
+    let model = || ModelRef {
+        model_id: "llm.research_agent".to_owned(),
+        model_version: "0.1.0".to_owned(),
+        content_hash: Digest::of(b"model"),
+    };
+    let reserved = (
+        1_u128..1 << 80,
+        proptest::option::of("[a-z][a-z0-9-]{0,11}"),
+        0_usize..4,
+        0_u64..1 << 40,
+        0_u32..3_360,
+        any::<bool>(),
+    )
+        .prop_map(move |(n, agent, purpose, max, days, platform)| {
+            let purpose = [
+                Purpose::Research,
+                Purpose::LlmSignal,
+                Purpose::FastSignal,
+                Purpose::Compiler,
+            ][purpose];
+            MeterRecord::Reserved(Reservation {
+                event_id: mandate_canon::encode_ulid(n),
+                call_id: mandate_canon::encode_ulid(n + 1),
+                agent_id: if purpose == Purpose::Compiler {
+                    None
+                } else {
+                    agent
+                },
+                purpose,
+                model: model(),
+                endpoint: format!("endpoint-{n}"),
+                key_owner: if platform {
+                    KeyOwner::Platform
+                } else {
+                    KeyOwner::Customer
+                },
+                price_table_ref: Digest::of(&n.to_be_bytes()),
+                max_cost: Usd6::from_micros(max),
+                risk_day: Date::new(
+                    2026 + u16::try_from(days / 336).unwrap(),
+                    u8::try_from(days % 12).unwrap() + 1,
+                    u8::try_from(days % 28).unwrap() + 1,
+                )
+                .unwrap(),
+            })
+        });
+    let settled = (
+        1_u128..1 << 80,
+        0_usize..SETTLED_OUTCOMES.len(),
+        0_u32..5,
+        (0_u64..1 << 30, 0_u64..1 << 30, 0_u64..1 << 30),
+        0_u64..1 << 40,
+    )
+        .prop_map(|(n, outcome, attempts, (input, output, cached), cost)| {
+            MeterRecord::Settled(Settlement {
+                event_id: mandate_canon::encode_ulid(n + 2),
+                call_id: mandate_canon::encode_ulid(n + 1),
+                reservation: mandate_canon::encode_ulid(n),
+                outcome: SETTLED_OUTCOMES[outcome],
+                attempts,
+                tokens: Usage {
+                    input,
+                    output,
+                    cached,
+                },
+                cost: Usd6::from_micros(cost),
+            })
+        });
+    prop_oneof![reserved, settled]
+}
+
+/// DEC-2258 item 3: any meter record reads back from its own payload, at its own event id, as
+/// itself, over 256 generated records.
+#[test]
+fn any_meter_record_reads_back_from_its_payload() {
+    let config = ProptestConfig {
+        cases: 256,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    };
+    let run = proptest::test_runner::TestRunner::new(config).run(&generated_record(), |record| {
+        prop_assert_eq!(
+            MeterRecord::from_journal(record.event_type(), record.event_id(), &record.payload()),
+            Some(record.clone())
+        );
+        Ok(())
+    });
+    if let Err(failure) = run {
+        panic!("{failure}");
+    }
 }
