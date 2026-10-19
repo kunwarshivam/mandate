@@ -114,6 +114,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             get(me::session).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/me/workspaces",
+            get(me::workspaces).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/agents",
             get(routes::list_agents)
                 .post(version_routes::deploy)

@@ -134,6 +134,20 @@ impl ControlLookup {
         .unwrap_or_default()
     }
 
+    /// `member`'s own row of the membership index (identity spec §4.5, DEC-2113 item 4): the roles
+    /// in effect at the lookup's instant when its membership of the hosted workspace is `active`,
+    /// and `None` in any other state or none.
+    ///
+    /// # Errors
+    /// [`LookupFailed`] when the control stream's records cannot be read or folded.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn own_roles(&self, _member: PrincipalId) -> Result<Option<BTreeSet<Role>>, LookupFailed> {
+        todo!()
+    }
+
     /// The hosted workspace's scope.
     fn scope(&self) -> Scope {
         Scope::Workspace {
