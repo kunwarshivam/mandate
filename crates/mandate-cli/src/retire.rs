@@ -37,7 +37,7 @@ const DECISIONS: u32 = 3;
 
 /// What one reading of the streams decides.
 enum Retirement {
-    /// The `AgentStopped` was written, or one already retires the agent.
+    /// The `AgentStopped` was written.
     Retired(Submitted),
     /// The agent may have run: its runtime opened its stream, or took the stream before the claim.
     /// The Stop goes as an `OwnerCommandIssued`, which its runtime judges.
@@ -82,6 +82,9 @@ pub fn stop(
         .is_some_and(|code| typed == Some(code.as_str()));
     if confirmed {
         for _ in 0..DECISIONS {
+            if let Some(submitted) = retired(journal, owner, agent) {
+                return Ok(submitted);
+            }
             match retire(journal, store, owner, agent, now) {
                 Ok(Retirement::Retired(submitted)) => return Ok(submitted),
                 Ok(Retirement::Ran | Retirement::NeverDeployed | Retirement::DocumentUnread) => {
@@ -98,22 +101,21 @@ pub fn stop(
     agent::command(journal, ids, owner, agent, &command, typed, now)
 }
 
-/// The `AgentStopped` that retires `agent`, read afresh after a retirement that failed: its append
-/// may have committed although no answer settled it, and a Stop has one effect, so the Stop returns
-/// it rather than send a command beside it. `None` when none is stored, or the control stream
-/// cannot be read.
+/// The `AgentStopped` that retires `agent`, read afresh: before each decision, so a Stop of an
+/// agent already retired writes nothing more, and after a retirement that failed, since its append
+/// may have committed although no answer settled it and a Stop has one effect. A stop is final
+/// (§9.21), so any `AgentStopped` naming the agent retires it. `None` when none is stored, or the
+/// control stream cannot be read.
 fn retired(journal: &dyn ControlJournal, owner: &Owner, agent: &str) -> Option<Submitted> {
     let rows = rows(journal, owner).ok()?;
-    last_of(&rows, agent)
-        .filter(|row| row.event_type == STOPPED)
-        .map(Row::submitted)
+    latest(&rows, STOPPED, agent).map(Row::submitted)
 }
 
-/// The agent's latest `AgentDeployed` or `AgentStopped`.
-fn last_of<'a>(rows: &'a [Row], agent: &str) -> Option<&'a Row> {
-    rows.iter().rev().find(|r| {
-        matches!(r.event_type.as_str(), DEPLOYED | STOPPED) && r.member("agent_id") == Some(agent)
-    })
+/// The latest `event_type` row naming `agent`.
+fn latest<'a>(rows: &'a [Row], event_type: &str, agent: &str) -> Option<&'a Row> {
+    rows.iter()
+        .rev()
+        .find(|r| r.event_type == event_type && r.member("agent_id") == Some(agent))
 }
 
 /// Whether `first`, the first record of an agent's stream, is a claim: a `StreamOpened` no `agent`
@@ -166,10 +168,8 @@ fn retire(
     let control = control_stream(owner)?;
     same_environment(journal, &control, owner)?;
     let rows = rows(journal, owner)?;
-    let deployed = match last_of(&rows, agent) {
-        None => return Ok(Retirement::NeverDeployed),
-        Some(row) if row.event_type == STOPPED => return Ok(Retirement::Retired(row.submitted())),
-        Some(row) => row,
+    let Some(deployed) = latest(&rows, DEPLOYED, agent) else {
+        return Ok(Retirement::NeverDeployed);
     };
     let version = deployed
         .member("mandate_version")
