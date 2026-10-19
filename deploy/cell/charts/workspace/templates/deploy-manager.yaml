@@ -1,8 +1,9 @@
 {{- /*
 The deployment manager (journal spec §9.21, infrastructure design §3.4, DEC-1170, DEC-1172): one
 replica per workspace, the one pod that holds an API token. Its ServiceAccount's one Role, in this
-namespace only, creates, reads, lists and deletes pods: no Secret, no exec, no other resource or
-verb, and no cluster scope. Creating a pod is itself powerful (a pod can mount any Secret in the
+namespace only, creates, reads, lists and deletes pods, and the ServiceAccounts a connection's token
+exchange and executor run as (DEC-1175 item 7, bounded by their own policy below): no Secret, no
+exec, no other resource or verb, and no cluster scope. Creating a pod is itself powerful (a pod can mount any Secret in the
 namespace, name any account, claim any egress label, or run privileged), so the admission policy
 below bounds every pod the manager makes to one shaped like its own process's template, read from
 the pod's `mandate.dev/process` label (DEC-1175): no service-account token, and no account but
@@ -42,6 +43,9 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["pods"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
     verbs: ["create", "get", "list", "delete"]
 {{- end -}}
 {{- define "mandate.deployManagerBinding" -}}
@@ -225,6 +229,65 @@ spec:
       reason: Forbidden
       message: a pod the deployment manager makes carries exactly its process's egress labels
 {{- end -}}
+{{- /*
+The bound on the manager's `create serviceaccounts` (DEC-1175 item 7). The manager makes one
+ServiceAccount for a connection's token exchange (`x` and the connection id's lowercase hex) and
+one for its executor (the hex alone), the names DEC-2060's vault roles admit, and deletes each
+when the request closes or the executor stops; RBAC cannot shape a name, so this policy refuses any
+other name, a mounted token, a Secret or a pull secret, and labels that are not the manager's, this
+workspace's, and the process the name is for. Which connection is open is the journal's, which CEL
+cannot read: the manager creates an account only from its record (K1, K2). It fails closed.
+*/ -}}
+{{- define "mandate.deployManagerAccountsName" -}}
+{{ printf "%s-%s-deploy-manager-accounts" .root.Release.Namespace .root.Release.Name }}
+{{- end -}}
+{{- define "mandate.deployManagerAccounts" -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "mandate.deployManagerAccountsName" . | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .root.Release.Namespace | quote }}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["serviceaccounts"]
+  matchConditions:
+    - name: the-deploy-manager
+      expression: {{ printf "request.userInfo.username == 'system:serviceaccount:%s:%s'" .root.Release.Namespace .p.name | quote }}
+  validations:
+    - expression: 'object.metadata.name.matches(''^x?[0-9a-f]+$'')'
+      reason: Forbidden
+      message: an account the deployment manager makes is named for a connection's exchange or executor
+    - expression: 'has(object.automountServiceAccountToken) && object.automountServiceAccountToken == false && !has(object.secrets) && !has(object.imagePullSecrets)'
+      reason: Forbidden
+      message: an account the deployment manager makes mounts no token and holds no Secret
+    - expression: 'has(object.metadata.labels) && "app.kubernetes.io/managed-by" in object.metadata.labels && object.metadata.labels["app.kubernetes.io/managed-by"] == "mandate-deploy-manager" && "mandate.dev/workspace" in object.metadata.labels && object.metadata.labels["mandate.dev/workspace"] == {{ .root.Values.workspace | toJson }} && "mandate.dev/process" in object.metadata.labels && object.metadata.labels["mandate.dev/process"] == (object.metadata.name.startsWith("x") ? "token-exchange" : "executor")'
+      reason: Forbidden
+      message: an account the deployment manager makes is its exchange's or executor's, in this workspace
+{{- end -}}
+{{- define "mandate.deployManagerAccountsBinding" -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "mandate.deployManagerAccountsName" . | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "mandate.deployManagerAccountsName" . | quote }}
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .root.Release.Namespace | quote }}
+{{- end -}}
 {{- define "mandate.deployManagerAdmissionBinding" -}}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -290,6 +353,10 @@ spec:
 {{ include "mandate.emit" (include "mandate.deployManagerAdmission" $ctx) }}
 ---
 {{ include "mandate.emit" (include "mandate.deployManagerAdmissionBinding" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.deployManagerAccounts" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.deployManagerAccountsBinding" $ctx) }}
 ---
 {{ include "mandate.emit" (include "mandate.deployManagerTemplates" $ctx) }}
 ---
