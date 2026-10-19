@@ -33,7 +33,7 @@ function mount(node: React.ReactNode, scenario: Scenario = "approvals", tamper?:
       </ApiRuntimeProvider>
     </RoleProvider>,
   );
-  return { posts };
+  return { posts, server };
 }
 
 const fixture = buildWorkspace("approvals");
@@ -123,12 +123,39 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     expect(screen.queryByText("PAPER")).toBeNull();
   });
 
-  it("an approve the deployment cannot take without step-up says nothing was approved", async () => {
+  it("Approve asks for a challenge bound to the request, shows its code and command, and grants only once the host confirmed it (DEC-2104)", async () => {
     const approval = pending[0];
-    mount(<ApiApproval approvalId={approval.approval_id} />);
+    const { posts, server } = mount(<ApiApproval approvalId={approval.approval_id} />);
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    expect(await screen.findByText(/nothing was approved/)).toBeTruthy();
-    expect(screen.queryByText(/^Approved/)).toBeNull();
+    const panel = await screen.findByRole("region", { name: "Confirm on your computer" });
+    const asked = posts.find((p) => p.path === "/step-up/challenges");
+    const answers = () => posts.filter((p) => p.path.endsWith("/responses"));
+    expect(asked?.body).toEqual({ action: { kind: "approve", digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) } });
+    expect(answers()).toHaveLength(0);
+    expect(within(panel).getByLabelText("Confirmation code").textContent).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+    const line = within(panel).getByLabelText("Command to run").textContent ?? "";
+    const challengeId = /--challenge ([0-9A-Z]{26})/.exec(line)?.[1] ?? "";
+    expect(line).toContain(`mandate step-up confirm --workspace ${WS} --principal '<your principal id>' --agent ${approval.agent_id} --approval ${approval.approval_id} --challenge `);
+
+    fireEvent.click(within(panel).getByRole("button", { name: "I confirmed it: approve" }));
+    expect(await screen.findByText(/has no confirmation of this code from your computer yet, so nothing was approved/)).toBeTruthy();
+    expect(answers()[0].body).toMatchObject({ verdict: "approved", content_hash: (asked?.body.action as { digest: string }).digest, step_up: { assertion_id: challengeId, method: "cli_confirm", authenticated_at: expect.stringMatching(/:\d{2}\.000000000Z$/) } });
+
+    expect(server.confirmStepUp(challengeId)).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "I confirmed it: approve" }));
+    expect(await screen.findByText(/^(Recorded in the journal: you approved|Approved: the gate re-ran its checks)/)).toBeTruthy();
+    expect(answers()).toHaveLength(2);
+    expect(screen.queryByRole("region", { name: "Confirm on your computer" })).toBeNull();
+  });
+
+  it("Cancel drops the code and sends nothing; a Skip never carries step-up", async () => {
+    const approval = pending[0];
+    const { posts } = mount(<ApiApproval approvalId={approval.approval_id} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(within(await screen.findByRole("region", { name: "Confirm on your computer" })).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
+    await waitFor(() => expect(posts.filter((p) => p.path.endsWith("/responses"))).toHaveLength(1));
+    expect(posts.find((p) => p.path.endsWith("/responses"))?.body).toMatchObject({ verdict: "skipped", step_up: null });
   });
 
   it("the agents screen lists every agent the API serves", async () => {

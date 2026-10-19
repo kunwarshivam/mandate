@@ -11,7 +11,7 @@
  */
 import type { WorkspaceClient } from "./client";
 import type { Classification } from "./confirm";
-import type { JsonObject, PreparedCommand } from "./types";
+import type { JsonObject, PreparedCommand, StepUpEvidence } from "./types";
 import type { AgentMode, ContentRef, ShownEnvironment } from "@/fixtures/types";
 import type { ApprovalRecord, CommandKind, CommandRecord, ConfirmRecord } from "@/lib/mock-runtime";
 import { sha256Hex } from "@/lib/sha256";
@@ -71,13 +71,20 @@ export function prepareOwnerCommand(client: WorkspaceClient, ws: CommandScope, k
   }
 }
 
-export function prepareApprovalResponse(client: WorkspaceClient, approval: { approval_id: string; content_hash?: ContentRef }, response: "approve" | "skip", record: ApprovalRecord): Prepared {
+/** `stepUp` is the evidence for an approve (DEC-2104 item 5); a Skip never carries any (API-7). */
+export function prepareApprovalResponse(
+  client: WorkspaceClient,
+  approval: { approval_id: string; content_hash?: ContentRef },
+  response: "approve" | "skip",
+  record: ApprovalRecord,
+  stepUp: StepUpEvidence | null = null,
+): Prepared {
   if (!approval.content_hash) return { ok: false, reason: "no_content_hash" };
   return one(
     client.prepare(
       "approval_response",
       { approval: approval.approval_id },
-      { verdict: response === "approve" ? "approved" : "skipped", content_hash: approval.content_hash, record: recordRef(record), step_up: null, delegation: null },
+      { verdict: response === "approve" ? "approved" : "skipped", content_hash: approval.content_hash, record: recordRef(record), step_up: response === "approve" && stepUp ? { ...stepUp } : null, delegation: null },
     ),
   );
 }

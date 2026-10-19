@@ -18,6 +18,7 @@ import {
   type DecodeIssue,
   type Decoder,
   type Effect,
+  type IssueOutcome,
   type JsonObject,
   type KillSwitchRequest,
   type Operation,
@@ -82,6 +83,8 @@ export interface WorkspaceClient {
   prepareKillSwitch(request: KillSwitchRequest): PreparedCommand;
   /** Sends a prepared command; sending it again is a retry with the same key and body. */
   send(command: PreparedCommand): Promise<CommandOutcome>;
+  /** Sends a command the server answers with a resource rather than an event (a step-up challenge, §3.6), decoded by `decoder`. */
+  issue<T>(command: PreparedCommand, decoder: Decoder<T>): Promise<IssueOutcome<T>>;
   commandStatus(eventId: string): Promise<ReadOutcome<CommandStatus>>;
 }
 
@@ -98,6 +101,7 @@ export const OPERATIONS: Readonly<Record<Operation, `/${string}`>> = {
   end_delegation: "/agents/{agent}/delegations/{delegation}/end",
   confirm_version: "/mandate-versions/{version}/confirm",
   create_version: "/mandate-versions",
+  step_up_challenge: "/step-up/challenges",
 };
 
 /** Spec §3.3's CSRF defence (L2's pin, DEC-681): a header a cross-site form cannot set, on every command. */
@@ -271,7 +275,8 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     return freeze("kill_switch", OPERATIONS.kill_switch, { scope, environment_shown, owner_exit, record, step_up });
   }
 
-  async function send(command: PreparedCommand): Promise<CommandOutcome> {
+  /** One POST of a prepared command: the 2xx body, or the call's `{code, effect}` with `unknown` where the answer does not say. */
+  async function post(command: PreparedCommand): Promise<{ ok: true; status: number; body: unknown } | { ok: false; error: ApiError }> {
     let response: Response;
     try {
       response = await fetch(baseUrl + command.path, {
@@ -281,21 +286,35 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
         body: command.body,
       });
     } catch {
-      return { ok: false, error: networkError("unknown"), command };
+      return { ok: false, error: networkError("unknown") };
     }
     const body = await parseBody(response);
     if (!response.ok) {
       const doc = decodeProblem(body);
       const error = doc ? problemError(response.status, doc, "unknown") : invalidResponse(response.status, "unknown", UNREADABLE, null);
       noteAuth(error);
-      return { ok: false, error, command };
+      return { ok: false, error };
     }
+    return { ok: true, status: response.status, body };
+  }
+
+  async function send(command: PreparedCommand): Promise<CommandOutcome> {
+    const answer = await post(command);
+    if (!answer.ok) return { ok: false, error: answer.error, command };
+    const { status, body } = answer;
     const accepted = decodeAccepted(body);
-    if (!accepted.ok) return { ok: false, error: invalidResponse(response.status, "unknown", accepted.issue, eventIdOf(body)), command };
+    if (!accepted.ok) return { ok: false, error: invalidResponse(status, "unknown", accepted.issue, eventIdOf(body)), command };
     return { ok: true, effect: "recorded", accepted: accepted.value, body };
+  }
+
+  async function issue<T>(command: PreparedCommand, decoder: Decoder<T>): Promise<IssueOutcome<T>> {
+    const answer = await post(command);
+    if (!answer.ok) return answer;
+    const value = decoder(answer.body, "");
+    return value.ok ? { ok: true, value: value.value } : { ok: false, error: invalidResponse(answer.status, "unknown", value.issue, null) };
   }
 
   const commandStatus = (eventId: string) => read(fillRoute("/commands/{event}", { event: eventId }), commandStatusOf);
 
-  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus });
+  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, issue, commandStatus });
 }

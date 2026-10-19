@@ -8,6 +8,7 @@ import { WEB_OPERATIONS, operationFor } from "./operations";
 import { type ApiView, loadApi } from "./read-models";
 import type { Operation } from "./types";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "./versions";
+import { issueStepUpChallenge, prepareStepUpChallenge } from "./step-up";
 import { buildWorkspace } from "@/fixtures/workspace";
 import type { CommandKind, ConfirmRecord } from "@/lib/mock-runtime";
 
@@ -37,7 +38,8 @@ function documented(): Map<string, Set<string>> {
     if (!method) continue;
     let path = match[2];
     if (path.startsWith(".../")) path = `${last.split(" ")[1].replace(/\/[^/]+$/, "")}/${path.slice(4)}`;
-    const [route, query = ""] = path.split("?");
+    const [full, query = ""] = path.split("?");
+    const route = full.startsWith("/v1/workspaces/{ws}/") ? full.slice("/v1/workspaces/{ws}".length) : full;
     if (route.startsWith("/v1/")) continue;
     last = `${method} ${route}`;
     const key = `${method} ${shape(route)}`;
@@ -60,6 +62,7 @@ const SCHEMA_OF: Readonly<Record<Operation, string>> = {
   end_delegation: "end-delegation-request",
   confirm_version: "confirm-request",
   create_version: "../../mandate",
+  step_up_challenge: "step-up-challenge-request",
 };
 
 /** A new agent's A5 record, as the set-up's confirm sends it (DEC-2401). */
@@ -145,6 +148,8 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
         const prepared = prepareApprovalResponse(client, approval, response, { screen: "D6", environment: scope.environment, shown: ["line"], modelOutputExpanded: false });
         if (prepared.ok) for (const command of prepared.commands) sent.push(await client.send(command));
       }
+    const challenge = await issueStepUpChallenge(client, prepareStepUpChallenge(client, "approve", CONFIRM_VERSION), "approve", CONFIRM_VERSION);
+    expect(challenge.ok).toBe(true);
     sent.push(await client.send(prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification: "risk_increasing" } })));
     const created = await client.send(prepareCreateVersion(client, buildWorkspace("normal").agents[0].mandate));
     const version = versionCreated(created.ok ? created.body : null);
@@ -178,7 +183,9 @@ describe("the web app calls only documented workspace API operations (E21-45, DE
       const c = prepareConfirm(client, { version: CONFIRM_VERSION, agentId: null, base: null, record: CONFIRM_RECORD, served: { screen_digest: SERVED_DIGEST, classification } });
       bodies.push({ operation: c.operation, body: JSON.parse(c.body) as Record<string, unknown> });
     }
-    expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response", "confirm_version"]));
+    const challenge = prepareStepUpChallenge(client, "approve", CONFIRM_VERSION);
+    bodies.push({ operation: challenge.operation, body: JSON.parse(challenge.body) as Record<string, unknown> });
+    expect(new Set(bodies.map((b) => b.operation))).toEqual(new Set(["pause", "resume", "stop", "kill_switch", "approval_response", "confirm_version", "step_up_challenge"]));
     for (const { operation, body } of bodies) {
       const schema = schemaFor(operation);
       for (const member of schema.required ?? []) expect(Object.hasOwn(body, member), `${operation} needs ${member}`).toBe(true);

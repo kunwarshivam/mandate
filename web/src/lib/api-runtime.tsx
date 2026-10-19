@@ -8,7 +8,8 @@ import { confirmAccepted } from "@/api/confirm";
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
-import type { CommandPhase, PreparedCommand } from "@/api/types";
+import { cliConfirmLine, issueStepUpChallenge, prepareStepUpChallenge } from "@/api/step-up";
+import type { CommandPhase, PreparedCommand, StepUpEvidence } from "@/api/types";
 import { prepareCreateVersion, readConfirmation, versionCreated } from "@/api/versions";
 import type { Iso, Workspace } from "@/fixtures/types";
 import type { ApiSource } from "./data-source";
@@ -23,6 +24,7 @@ import {
   type Runtime,
   RuntimeContext,
   type SetUp,
+  type StepUpRequest,
 } from "./mock-runtime";
 
 /** How many times an unanswered command is sent again, with the same key and body (API-4), before it is called unknown. */
@@ -230,12 +232,12 @@ export function ApiRuntimeProvider({
   );
 
   const respond = useCallback(
-    (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => {
+    (approvalId: string, response: "approve" | "skip", record: ApprovalRecord, stepUp: StepUpEvidence | null = null) => {
       const entry: ApprovalResponse = { approvalId, response, phase: "sent", sentAt: nowRef.current, record };
       const update = (patch: Partial<ApprovalResponse>) => setResponses((map) => ({ ...map, [approvalId]: { ...entry, ...map[approvalId], ...patch } }));
       setResponses((map) => ({ ...map, [approvalId]: entry }));
       const approval = lastRead.current?.view.approvals.find((a) => a.approval_id === approvalId);
-      const prepared = approval ? prepareApprovalResponse(client, approval, response, record) : ({ ok: false, reason: "not_found" } as const);
+      const prepared = approval ? prepareApprovalResponse(client, approval, response, record, stepUp) : ({ ok: false, reason: "not_found" } as const);
       void (async () => {
         if (!prepared.ok) return update({ phase: "undelivered", reason: prepared.reason });
         const [delivered] = await Promise.all(prepared.commands.map(deliver));
@@ -252,6 +254,18 @@ export function ApiRuntimeProvider({
       })();
     },
     [client, deliver, follow],
+  );
+
+  /** A challenge bound to the request's content hash as the API serves it now, never one the screen holds (spec §3.6). */
+  const stepUpChallenge = useCallback(
+    async (approvalId: string): Promise<StepUpRequest> => {
+      const approval = lastRead.current?.view.approvals.find((a) => a.approval_id === approvalId);
+      if (!approval) return { ok: false, reason: "not_found" };
+      const issued = await issueStepUpChallenge(client, prepareStepUpChallenge(client, "approve", approval.content_hash), "approve", approval.content_hash);
+      if (!issued.ok) return { ok: false, reason: issued.error.code };
+      return { ok: true, challenge: issued.value, line: cliConfirmLine(client.workspaceId, approval.agent_id, approvalId, issued.value) };
+    },
+    [client],
   );
 
   /** Mandate changes go through drafts, versions and confirmation (spec §4.1), which this slice does not send. */
@@ -358,8 +372,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUpChallenge, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUpChallenge, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

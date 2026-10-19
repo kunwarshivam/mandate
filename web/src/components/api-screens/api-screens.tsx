@@ -8,8 +8,10 @@ import { ModeBadge } from "@/components/domain/mode";
 import { DECISION_KEY, KEY } from "@/components/kumo/key";
 import { PAGE_GRID, Panel, Section, WorkspaceGate } from "@/components/screens/common";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
+import type { StepUpEvidence } from "@/api/types";
+import { ApproveStepUp } from "./approve-step-up";
 import { clock, percent, price, quantity, usd } from "@/lib/format";
-import { type ApprovalResponse, useRuntime } from "@/lib/mock-runtime";
+import { type ApprovalResponse, type StepUpRequest, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 
@@ -285,6 +287,16 @@ export function ApiApprovals() {
   );
 }
 
+/** The step-up refusals an approve can get (spec §3.5, DEC-2104 item 6), in words. */
+const UNDELIVERED: Readonly<Record<string, string>> = {
+  step_up_required: "Not recorded: approving needs a step-up check your deployment did not receive, so nothing was approved.",
+  step_up_missing: "Not recorded: your deployment has no confirmation of this code from your computer yet, so nothing was approved. Run the command, then approve again.",
+  step_up_stale: "Not recorded: the code expired, so nothing was approved. Cancel and approve again for a new code.",
+  step_up_reused: "Not recorded: that code was already used, so nothing was approved. Cancel and approve again for a new code.",
+  step_up_mismatch: "Not recorded: the confirmation was for another request, so nothing was approved. Cancel and approve again for a new code.",
+  step_up_method: "Not recorded: this request cannot be approved with a code from your computer, so nothing was approved.",
+};
+
 function responseText(response: ApprovalResponse): string {
   switch (response.phase) {
     case "sent":
@@ -294,9 +306,7 @@ function responseText(response: ApprovalResponse): string {
     case "decided":
       return "Approved: the gate re-ran its checks and allowed it.";
     case "undelivered":
-      return response.reason === "step_up_required"
-        ? "Not recorded: approving needs a passkey check your deployment did not receive, so nothing was approved."
-        : "Not recorded: your deployment answered that nothing was recorded, so nothing was approved.";
+      return UNDELIVERED[response.reason ?? ""] ?? "Not recorded: your deployment answered that nothing was recorded, so nothing was approved.";
     case "unknown":
       return "The result is unknown; we are checking. Until the journal answers, treat the request as not approved.";
     default: {
@@ -308,8 +318,9 @@ function responseText(response: ApprovalResponse): string {
 
 export function ApiApproval({ approvalId }: { approvalId: string }) {
   const view = useView();
-  const { respond, responses } = useRuntime();
+  const { respond, responses, stepUpChallenge } = useRuntime();
   const canRespond = useCan("approvals.respond");
+  const [stepUp, setStepUp] = useState<StepUpRequest | "asking" | null>(null);
   const approval = view?.approvals.find((a) => a.approval_id === approvalId);
   const agent = view?.agents.find((a) => a.agent_id === approval?.agent_id);
   const response = approval ? responses[approval.approval_id] : undefined;
@@ -327,7 +338,13 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
   ];
   const shown = [nameOf(agent) ?? "Name not reported", line, ...facts.map(([term, value]) => `${term}: ${value}`)];
   const environment = agent?.environment ?? "unknown";
-  const answer = (choice: "approve" | "skip") => respond(approval.approval_id, choice, { screen: "D6", environment, shown, modelOutputExpanded: false });
+  const answer = (choice: "approve" | "skip", evidence: StepUpEvidence | null = null) => respond(approval.approval_id, choice, { screen: "D6", environment, shown, modelOutputExpanded: false }, evidence);
+  const askStepUp = () => {
+    setStepUp("asking");
+    void stepUpChallenge(approval.approval_id).then(setStepUp);
+  };
+  /** Nothing was recorded, so answering again is safe; with a challenge still held, its grant is sent again. */
+  const canAnswer = approval.state === "pending" && canRespond && (!response || response.phase === "undelivered");
   return (
     <WorkspaceGate api>
       <article className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-6" aria-labelledby="api-request-title">
@@ -355,9 +372,12 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
           <p role="status" data-phase={response.phase} className="text-sm">
             {responseText(response)}
           </p>
-        ) : approval.state === "pending" && canRespond ? (
+        ) : null}
+        {canAnswer && stepUp !== null ? (
+          <ApproveStepUp request={stepUp} onApprove={(evidence) => answer("approve", evidence)} onCancel={() => setStepUp(null)} />
+        ) : canAnswer ? (
           <div className={cn("grid grid-cols-2 gap-3")}>
-            <button type="button" className={DECISION_KEY} onClick={() => answer("approve")}>
+            <button type="button" className={DECISION_KEY} onClick={askStepUp}>
               Approve
             </button>
             <button type="button" className={DECISION_KEY} onClick={() => answer("skip")}>

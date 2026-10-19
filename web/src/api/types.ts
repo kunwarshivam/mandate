@@ -62,6 +62,16 @@ export interface ApiError {
   decode: DecodeIssue | null;
 }
 
+/** Journal spec §9.2's step-up evidence (`envelope` `StepUpEvidence`); web/ sends `cli_confirm` only (DEC-2104). */
+export interface StepUpEvidence {
+  assertion_id: string;
+  authenticated_at: string;
+  method: "passkey" | "cli_confirm";
+}
+
+/** A command answered with a resource (201), decoded, or the call's `{code, effect}`. */
+export type IssueOutcome<T> = { ok: true; value: T } | { ok: false; error: ApiError };
+
 export type Json = null | boolean | number | string | Json[] | { [member: string]: Json };
 export type JsonObject = { [member: string]: Json };
 
@@ -89,7 +99,8 @@ export type Operation =
   | "approval_response"
   | "end_delegation"
   | "confirm_version"
-  | "create_version";
+  | "create_version"
+  | "step_up_challenge";
 
 /** One user gesture: its key, route and body are fixed when it is prepared, so every retry sends the same call (spec §3.4, API-4). */
 export interface PreparedCommand {

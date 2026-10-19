@@ -55,6 +55,7 @@ const COMMAND_SECTIONS: Readonly<Record<Operation, string>> = {
   end_delegation: "§4.4, §5.3",
   confirm_version: "§4.1, §5.1",
   create_version: "§3.11 item 11",
+  step_up_challenge: "§3.6",
 };
 
 export const WEB_OPERATIONS: readonly DocumentedOperation[] = [

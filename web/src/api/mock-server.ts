@@ -12,7 +12,10 @@
  * new mandate's (item 4), with a new `screen_digest` at each read. A confirm that does not carry the
  * digest it last served is `classification_changed`; one that does, without step-up, is
  * `step_up_required`, as the server does until E9-4 binds its step-up port (item 2); a version it
- * never created is `not_found`. A backtest
+ * never created is `not_found`. It issues step-up challenges (spec §3.6) and accepts an approve's
+ * `cli_confirm` evidence only for a challenge it issued for that approval's content hash, once, and
+ * only after `confirmStepUp` stands in for the owner's confirmation on the host (DEC-2104): before
+ * it the approve is `step_up_missing`, as the server's is. A backtest
  * is the fixture's served `backtest` member under the mock's own envelope (DEC-2400).
  */
 import { CSRF_HEADER, OPERATIONS, isIdempotencyKey, type Fetch } from "./client";
@@ -42,6 +45,8 @@ export interface MockServer {
   recorded(): RecordedCommand[];
   /** Every `screen_digest` the confirmation read has served, in order. */
   servedDigests(): string[];
+  /** The owner's `mandate step-up confirm` on the host (DEC-2104 item 2): false for a challenge the mock never issued. */
+  confirmStepUp(challengeId: string): boolean;
 }
 
 const API_VERSION = "v1";
@@ -61,6 +66,18 @@ function eventId(seed: string): string {
     bits >>= 5n;
   }
   return out;
+}
+
+const STEP_UP_KINDS = new Set(["confirm_version", "deploy", "approve", "connection", "resume", "stop", "acknowledge", "owner_exit", "kill_switch_privilege", "disclosure", "policy_loosen", "member_invite"]);
+const isAction = (action: unknown) => {
+  const a = typeof action === "object" && action !== null ? (action as Record<string, unknown>) : {};
+  return Object.keys(a).length === 2 && STEP_UP_KINDS.has(String(a.kind)) && typeof a.digest === "string" && /^sha256:[0-9a-f]{64}$/.test(a.digest);
+};
+
+/** Unpadded base64url of a hex string's bytes, as `webauthn_challenge` is (identity spec §7.2 step 2). */
+function base64url(hex: string): string {
+  const bytes = Uint8Array.from(hex.match(/../g) ?? [], (b) => parseInt(b, 16));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function respond(status: number, body: unknown, type = "application/json"): Response {
@@ -97,6 +114,8 @@ export function createMockServer(options: MockServerOptions): MockServer {
   /** The digest last served for each version: each read serves a new one, as the server's moves with the journal and the date (DEC-2101 item 4). */
   const screens = new Map<string, string>();
   const digests: string[] = [];
+  /** Challenges issued, by id: the action each binds, whether the host confirmed it, and whether a grant spent it. */
+  const challenges = new Map<string, { kind: string; digest: string; confirmed: boolean; spent: boolean }>();
 
   function asOf(): Watermark[] {
     const seq = commands.length;
@@ -228,6 +247,21 @@ export function createMockServer(options: MockServerOptions): MockServer {
     }
   }
 
+  /** DEC-2104 item 6's order, as far as the mock holds it: method, issued, bound, unspent, confirmed. `null` accepts and spends the challenge. */
+  function judgeStepUp(members: Record<string, unknown>): string | null {
+    const evidence = members.step_up;
+    if (evidence == null || typeof evidence !== "object") return "step_up_required";
+    const { assertion_id, method } = evidence as Record<string, unknown>;
+    if (method !== "cli_confirm") return "step_up_method";
+    const challenge = typeof assertion_id === "string" ? challenges.get(assertion_id) : undefined;
+    if (!challenge) return "step_up_missing";
+    if (challenge.kind !== "approve" || challenge.digest !== members.content_hash) return "step_up_mismatch";
+    if (challenge.spent) return "step_up_reused";
+    if (!challenge.confirmed) return "step_up_missing";
+    challenge.spent = true;
+    return null;
+  }
+
   function post(route: string, headers: Headers, body: string): Response {
     if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
     const match = ROUTES.find((r) => r.pattern.test(route));
@@ -241,7 +275,12 @@ export function createMockServer(options: MockServerOptions): MockServer {
       return problem(422, "invalid", "none");
     }
     const members = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
-    if (match.operation === "approval_response" && members.verdict === "approved" && members.step_up == null) return problem(401, "step_up_required", "none");
+    const replay = commands.some((c) => c.idempotency_key === key && c.path === prefix + route && c.body === body);
+    if (match.operation === "approval_response" && members.verdict === "approved" && !replay) {
+      const refused = judgeStepUp(members);
+      if (refused) return problem(401, refused, "none");
+    }
+    if (match.operation === "step_up_challenge" && !isAction(members.action)) return problem(422, "invalid", "none");
     if (match.operation === "confirm_version") {
       const version = decodeURIComponent(route.split("/")[2] ?? "");
       if (!versions.has(version)) return problem(404, "not_found", "none");
@@ -258,6 +297,15 @@ export function createMockServer(options: MockServerOptions): MockServer {
       apply(match.operation, path, members);
     }
     if (match.operation === "approval_response") return respond(202, { response_id: command.event_id, phase: "recorded" });
+    if (match.operation === "step_up_challenge") {
+      const action = members.action as { kind: string; digest: string };
+      const existing = challenges.get(command.event_id);
+      if (!existing) challenges.set(command.event_id, { ...action, confirmed: false, spent: false });
+      const issuedAt = `${servedAt.slice(0, 19)}.000000000Z`;
+      const expiresAt = `${new Date(Date.parse(issuedAt) + 300_000).toISOString().slice(0, 19)}.000000000Z`;
+      const webauthn = base64url(sha256Hex(`challenge:${command.event_id}`));
+      return respond(201, { api_version: API_VERSION, build: `sha256:${sha256Hex("mock-server")}`, served_at: servedAt, as_of: [], challenge_id: command.event_id, webauthn_challenge: webauthn, action, issued_at: issuedAt, expires_at: expiresAt });
+    }
     if (match.operation === "create_version") {
       const version = mandateVersion(members as unknown as Mandate);
       versions.set(version, members as unknown as Mandate);
@@ -281,5 +329,11 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return problem(404, "not_found", "none");
   };
 
-  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests] };
+  const confirmStepUp = (challengeId: string) => {
+    const challenge = challenges.get(challengeId);
+    if (challenge) challenge.confirmed = true;
+    return challenge !== undefined;
+  };
+
+  return { fetch, recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], confirmStepUp };
 }

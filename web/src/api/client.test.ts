@@ -322,6 +322,7 @@ describe("no order ticket (DEC-528)", () => {
     "read-models": ["agentRead", "agentsRead", "approvalRead", "approvalsRead", "deadlineIso", "loadApi"],
     reads: ["emptyWorkspace"],
     session: ["REFRESH_EVERY_MS", "SESSION_LOCK", "createSessionKeeper"],
+    "step-up": ["STEP_UP_KINDS", "UNKNOWN_PRINCIPAL", "cliConfirmCode", "cliConfirmEvidence", "cliConfirmLine", "issueStepUpChallenge", "prepareStepUpChallenge", "stepUpChallenge"],
     types: ["COMMAND_PHASES", "EFFECTS", "STEP_UP_STATUSES"],
     versions: ["prepareCreateVersion", "readConfirmation", "versionCreated"],
   };

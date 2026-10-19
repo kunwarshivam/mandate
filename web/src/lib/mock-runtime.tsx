@@ -9,6 +9,8 @@ import { RESTRICTIONS } from "./restrictions";
 import { type BacktestRead, backtestNotFound, servedBacktest } from "@/api/backtest";
 import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView } from "@/api/read-models";
+import type { StepUpChallenge } from "@/api/step-up";
+import type { StepUpEvidence } from "@/api/types";
 import type { Applies, Classification } from "@/api/confirm";
 
 /**
@@ -54,6 +56,9 @@ export interface ApprovalRecord {
   shown: string[];
   modelOutputExpanded: boolean;
 }
+
+/** A challenge issued for one approval, with the CLI line that confirms it, or why there is none (an API error code, `not_found`, or `not_available`). */
+export type StepUpRequest = { ok: true; challenge: StepUpChallenge; line: string } | { ok: false; reason: string };
 
 export interface ApprovalResponse {
   approvalId: string;
@@ -176,7 +181,10 @@ export interface Runtime {
   responses: Record<string, ApprovalResponse>;
   mandateChanges: MandateChangeRequest[];
   send: (kind: CommandKind, agentId: string | null, record?: CommandRecord) => Command;
-  respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => void;
+  /** An approve carries `stepUp` once the owner confirmed its challenge on the host (DEC-2104); a Skip never does. */
+  respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord, stepUp?: StepUpEvidence | null) => void;
+  /** A step-up challenge for approving one request (spec §3.6); the fixtures have none, so they answer `not_available`. */
+  stepUpChallenge: (approvalId: string) => Promise<StepUpRequest>;
   setUps: SetUp[];
   /** Step 1: `POST /mandate-drafts/{id}/versions`. */
   createVersion: (request: NewAgent) => SetUp;
@@ -429,6 +437,8 @@ export function RuntimeProvider({
     [silent, recordAfterMs, change],
   );
 
+  const stepUpChallenge = useCallback(async (): Promise<StepUpRequest> => ({ ok: false, reason: "not_available" }), []);
+
   const changeMandate = useCallback(
     (proposal: Proposal, origin: Origin, record: ChangeRecord): MandateChangeRequest => {
       counter.current += 1;
@@ -583,8 +593,8 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUpChallenge, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUpChallenge, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
