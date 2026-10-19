@@ -5543,7 +5543,8 @@ fn local_name_allowed(name: &str) -> bool {
 /// The remote actions and reusable workflows a `uses:` may name, exactly as the repository's
 /// workflows pin them, each in any workflow or only in the one it names (DEC-873 item 6, B6):
 /// `docker://` images, other actions, other pins and remote reusable workflows cannot be read.
-/// `codeql.yml` keeps GitHub's template's tag pins.
+/// `codeql.yml`'s CodeQL actions are pinned to v4.39.0's commit, as leak-guard's L9 requires
+/// (DEC-2032).
 const READ_ACTIONS: &[(&str, Option<&str>)] = &[
     (
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -5577,13 +5578,12 @@ const READ_ACTIONS: &[(&str, Option<&str>)] = &[
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         Some(".github/workflows/release.yml"),
     ),
-    ("actions/checkout@v7", Some(".github/workflows/codeql.yml")),
     (
-        "github/codeql-action/init@v4",
+        "github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",
         Some(".github/workflows/codeql.yml"),
     ),
     (
-        "github/codeql-action/analyze@v4",
+        "github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",
         Some(".github/workflows/codeql.yml"),
     ),
 ];
@@ -22257,9 +22257,10 @@ jq -r "$filter" "$src"
             ]),
             ci_file(
                 ".github/workflows/codeql.yml",
-                "on: push\njobs:\n  analyze:\n    steps:\n      - uses: actions/checkout@v7\n      \
-                 - uses: github/codeql-action/init@v4\n      - uses: \
-                 github/codeql-action/analyze@v4\n",
+                "on: push\njobs:\n  analyze:\n    steps:\n      - uses: \
+                 actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n      - uses: \
+                 github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee\n      - uses: \
+                 github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee\n",
             ),
         ];
         let problems = host_problems(&flows)?;
