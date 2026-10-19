@@ -450,7 +450,6 @@ fn capped(shelf: &Shelf, store: &SharedMeter, daily: Usd6) -> Result<RecordedWor
 /// `budget_exhausted`: nothing is reserved and nothing is sent. A cap above the workspace's
 /// monthly budget builds no worker (item 3).
 #[test]
-#[ignore = "pending E21-59"]
 fn a_call_over_the_daily_research_cap_is_refused_and_nothing_is_sent() {
     let (shelf, store) = (Shelf::default(), SharedMeter::new());
     let mut worker = capped(&shelf, &store, Usd6::from_micros(5_000_000)).unwrap();
