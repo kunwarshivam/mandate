@@ -62,7 +62,7 @@ pub trait Vault {
         token: AccessToken,
         scopes: &GrantedScopes,
     ) -> Result<(), ConnectError>;
-    /// Deletes the code and verifier, once the token is stored.
+    /// Deletes the code and verifier, once read and before the code is sent (DEC-2628 item 2).
     fn delete_code(&mut self, key: &VaultKey) -> Result<(), ConnectError>;
     /// Deletes everything stored under `key`.
     fn delete(&mut self, key: &VaultKey) -> Result<(), ConnectError>;

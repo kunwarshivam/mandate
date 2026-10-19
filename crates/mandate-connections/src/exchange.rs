@@ -78,12 +78,14 @@ pub struct ExchangedGrant {
 ///    (DEC-821 items 3 and 4).
 /// 2. The code and PKCE verifier are read once from the vault; with none waiting, the exchange
 ///    is refused and nothing is written.
-/// 3. The endpoint receives the [`LiveTokenRequest`] and the form, verifier included.
-/// 4. The token type must be `bearer` and the scope must pass [`crate::grant::check_scope`].
-///    On any refusal the token is dropped before any vault write, and the vault entry is
-///    deleted, since a read code is never tried again.
-/// 5. The token is stored with the granted scopes, then the code and verifier are deleted, and
-///    the grant, without the token, is returned.
+/// 3. They are deleted before anything is sent, so the code is sent at most once, whatever stops
+///    this run or reruns it (DEC-2628 item 2). A run that cannot delete them sends nothing.
+/// 4. The endpoint receives the [`LiveTokenRequest`] and the form, verifier included.
+/// 5. The token type must be `bearer` and the scope must pass [`crate::grant::check_scope`].
+///    On any refusal the token is dropped before any vault write, and nothing is left to delete.
+/// 6. The token is stored with the granted scopes, and the grant, without the token, is
+///    returned. A run lost before this store loses the connect, which the deadline teardown
+///    closes (connections spec §5.2 step 6).
 pub fn exchange_code(
     pending: &PendingConnect,
     client: &OAuthClient,
@@ -96,6 +98,7 @@ pub fn exchange_code(
     }
     let key = &pending.vault_key;
     let waiting = vault.read_code(key)?.ok_or(ConnectError::CodeMissing)?;
+    vault.delete_code(key)?;
     let form = ExchangeForm {
         code: &waiting.code,
         code_verifier: &waiting.verifier,
@@ -107,15 +110,8 @@ pub fn exchange_code(
         .post(LiveTokenRequest::token_endpoint(), &form)
         .and_then(checked_grant);
     drop(waiting);
-    let (token, scopes) = match checked {
-        Ok(grant) => grant,
-        Err(refusal) => {
-            vault.delete(key)?;
-            return Err(refusal);
-        }
-    };
+    let (token, scopes) = checked?;
     vault.put_token(key, token, &scopes)?;
-    vault.delete_code(key)?;
     Ok(ExchangedGrant {
         connection_id: pending.connection_id.clone(),
         environment: pending.environment,
