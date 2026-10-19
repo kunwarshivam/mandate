@@ -21,6 +21,7 @@ use mandate_journal::ArtifactSource;
 use crate::challenges::{self, Challenges};
 use crate::clock::Clock;
 use crate::journal::Journal;
+use crate::journal_reads;
 use crate::lifecycle::{Drain, Lifecycle};
 use crate::members::{Hosted, ParseMembers};
 use crate::objects::ObjectStore;
@@ -132,6 +133,14 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/approvals/{approval}",
             get(routes::one_approval).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/journal/events/{event}",
+            get(journal_reads::one_event).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/journal/streams/{stream}/events",
+            get(journal_reads::events).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/backtests/{backtest}",

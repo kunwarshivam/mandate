@@ -339,7 +339,7 @@ fn raw_json(body: &[u8]) -> Result<&RawValue, WireError> {
 }
 
 /// A JSON object whose values stay unparsed, so each number keeps its own text.
-fn raw_object<'a>(
+pub(crate) fn raw_object<'a>(
     raw: &'a RawValue,
     field: &'static str,
 ) -> Result<BTreeMap<String, &'a RawValue>, WireError> {
@@ -362,7 +362,10 @@ fn side_price(
 /// One number field's canonical text, taken from the JSON number token itself, never from a
 /// float: a string, a `null` or any other value is [`WireError::WrongType`], an exponent is
 /// [`WireError::ExponentForm`], and more than 9 places is [`WireError::TooManyPlaces`].
-fn token(fields: &BTreeMap<String, &RawValue>, field: &'static str) -> Result<String, WireError> {
+pub(crate) fn token(
+    fields: &BTreeMap<String, &RawValue>,
+    field: &'static str,
+) -> Result<String, WireError> {
     let text = fields
         .get(field)
         .ok_or(WireError::MissingField { field })?

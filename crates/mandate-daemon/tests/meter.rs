@@ -63,11 +63,25 @@ impl Stream {
     /// A `ModelInvocationRecorded` at `event_time` whose payload's `reservation` is `reservation`,
     /// written as JSON (a string, `null`, or anything else).
     fn call(&self, reservation: &str, event_time: &str) {
+        self.recorded(
+            &format!(r#"{{"cost_usd":"0.25","reservation":{reservation}}}"#),
+            event_time,
+        );
+    }
+
+    /// A `ModelInvocationRecorded` at `event_time` with `payload`, written as JSON.
+    fn recorded(&self, payload: &str, event_time: &str) {
         let seq = u64::try_from(self.rows.borrow().len()).unwrap() + 1;
         let event_id = format!("01J8Z3MA{seq:018}");
-        let body = format!(
-            r#"{{"envelope_version":1,"environment":"paper","event_id":"{event_id}","stream_id":"{AGENT_STREAM}","event_type":"ModelInvocationRecorded","schema_version":1,"event_time":"{event_time}","clock_source":"system","causation_id":null,"correlation_id":"01RUN","actor":{{"kind":"agent","id":"{AGENT}","version":"1","build":null}},"config_refs":{{}},"payload":{{"cost_usd":"0.25","reservation":{reservation}}},"artifact_refs":[],"pii_refs":[]}}"#
-        );
+        self.raw(format!(
+            r#"{{"envelope_version":1,"environment":"paper","event_id":"{event_id}","stream_id":"{AGENT_STREAM}","event_type":"ModelInvocationRecorded","schema_version":1,"event_time":"{event_time}","clock_source":"system","causation_id":null,"correlation_id":"01RUN","actor":{{"kind":"agent","id":"{AGENT}","version":"1","build":null}},"config_refs":{{}},"payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#
+        ), event_time);
+    }
+
+    /// A `ModelInvocationRecorded` whose stored body is `body`, whatever it holds.
+    fn raw(&self, body: String, event_time: &str) {
+        let seq = u64::try_from(self.rows.borrow().len()).unwrap() + 1;
+        let event_id = format!("01J8Z3MA{seq:018}");
         self.rows.borrow_mut().push(StoredEvent {
             stream_id: AGENT_STREAM.into(),
             seq,
@@ -264,4 +278,45 @@ fn a_call_record_or_a_stream_it_cannot_read_holds_the_store() {
     *stream.down.borrow_mut() = true;
     assert!(meter.held(at(NOW)), "an unreadable stream");
     assert_eq!(meter.read(), Err(StoreError::Unavailable));
+}
+
+/// A call record whose body is no JSON, or whose payload has no `reservation` member, holds the
+/// store as an unreadable reservation does: the meter cannot tell it was unreserved.
+#[test]
+fn a_call_record_with_no_body_or_no_reservation_member_holds_the_store() {
+    let unparseable =
+        |stream: &Stream| stream.raw("not json".to_owned(), "2026-10-16T14:00:00.000000000Z");
+    let unreserved = |stream: &Stream| {
+        stream.recorded(r#"{"cost_usd":"0.25"}"#, "2026-10-16T14:00:00.000000000Z")
+    };
+    for (case, record) in [
+        ("no body", &unparseable as &dyn Fn(&Stream)),
+        ("no reservation member", &unreserved),
+    ] {
+        let (store, stream, clock) = (SharedMeter::new(), Stream::default(), Clock::at(NOW));
+        record(&stream);
+        let meter = cell_meter(&store, &stream, &clock);
+        assert!(meter.held(at(NOW)), "{case}");
+        assert_eq!(meter.read(), Err(StoreError::Unavailable), "{case}");
+        assert_eq!(meter.research_spend(at(NOW)), None, "{case}");
+    }
+}
+
+/// Every spend the gateway can hold is a `Usd`: one micro-dollar, whole dollars, and the largest
+/// `Usd6` each come back as the same amount, so the spend is never refused for its size.
+#[test]
+fn every_spend_the_gateway_can_hold_converts_exactly() {
+    for (max, spent) in [
+        ("0.000001", "0.000001"),
+        ("7", "7"),
+        ("0.25", "0.25"),
+        ("18446744073709.551615", "18446744073709.551615"),
+    ] {
+        let (store, stream, clock) = (SharedMeter::new(), Stream::default(), Clock::at(NOW));
+        let mut meter = cell_meter(&store, &stream, &clock);
+        meter
+            .append(reserved("R9", AGENT, max, day(TODAY)))
+            .unwrap();
+        assert_eq!(meter.research_spend(at(NOW)), Some(usd(spent)), "{max}");
+    }
 }

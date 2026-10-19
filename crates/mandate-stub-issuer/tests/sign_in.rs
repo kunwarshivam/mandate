@@ -38,6 +38,9 @@ impl Journal for NoJournal {
     fn head<'a>(&'a self, _: &'a str) -> Answer<'a, u64> {
         Box::pin(async { Err(JournalUnavailable) })
     }
+    fn event<'a>(&'a self, _: &'a str) -> Answer<'a, Option<mandate_journal::StoredEvent>> {
+        Box::pin(async { Err(JournalUnavailable) })
+    }
     fn append<'a>(
         &'a self,
         _: &'a str,

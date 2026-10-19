@@ -209,7 +209,7 @@ async fn agent_rows(
     Ok(read)
 }
 
-fn object(members: Vec<(&str, Value)>) -> Value {
+pub(crate) fn object(members: Vec<(&str, Value)>) -> Value {
     let mut object = Object::new();
     for (key, value) in members {
         if let Ok(key) = Key::new(key) {
@@ -223,7 +223,7 @@ pub(crate) fn string(text: &str) -> Value {
     Value::Str(text.to_owned())
 }
 
-fn int(n: u64) -> Value {
+pub(crate) fn int(n: u64) -> Value {
     Int::new(n).map_or(Value::Null, Value::Int)
 }
 
