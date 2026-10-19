@@ -1,4 +1,4 @@
-//! A cash dividend inside a mandate-version run (DEC-2245 item 2, DEC-2252; trading spec §8.5;
+//! A cash dividend inside a mandate-version run (DEC-2245 item 2, DEC-2253; trading spec §8.5;
 //! mandate spec §5.2). Bars are stored raw (DEC-89), so from the ex-date the bars are lower by the
 //! dividend. At 20:00 New York time on the last trading day before the ex-date the run books
 //! round(Q × per_share, 2) as a receivable in its ledger, its risk state and the benchmark's ledger,
@@ -202,7 +202,7 @@ fn ex_date_row(
         .unwrap_or_else(|| panic!("a decision on the ex-date"))
 }
 
-/// The ex-date's decision quotes the last close less the dividend (DEC-2252 item 2): an opening on
+/// The ex-date's decision quotes the last close less the dividend (DEC-2253 item 2): an opening on
 /// the ex-date morning after a 5.00 dividend is priced as a run whose bars were at 95 all along
 /// prices it, and the gate's prior close agrees, where the cum-dividend close of 100 would set a
 /// limit 5 above the market.
