@@ -1391,12 +1391,20 @@ fn infra() -> Result<()> {
     if run.is_empty() || !run.chars().all(|c| c.is_ascii_digit()) {
         bail!("GITHUB_RUN_ID must be the run's number, which names its Spaces key");
     }
-    let sha = env::var(INFRA_SHA_ENV).unwrap_or_default();
-    reviewed_commit(
-        &sha,
+    let named = env::var(INFRA_SHA_ENV).unwrap_or_default();
+    let sha = run_commit(
+        &action,
+        &named,
         &env::var("GITHUB_SHA").unwrap_or_default(),
         &head_commit()?,
     )?;
+    eprintln!("==> infra {action} of {environment} at commit {sha}");
+    if named.is_empty() {
+        eprintln!(
+            "    no sha was given, so this run uses the commit main was at when it started; to \
+             apply this plan, dispatch apply with sha={sha} (DEC-2042)"
+        );
+    }
     let work = repo_root()?.join("target").join("tofu");
     fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
     let plan_file = work.join(format!("{environment}.tfplan"));
@@ -1539,7 +1547,24 @@ fn reviewed_commit(sha: &str, run_sha: &str, head: &str) -> Result<()> {
 /// reading a commit and dispatching; `apply` never does, so an apply still binds to the commit the
 /// founder named.
 fn run_commit(action: &str, sha: &str, run_sha: &str, head: &str) -> Result<String> {
-    bail!("run_commit is not written yet ({action}, {sha}, {run_sha}, {head})")
+    if !sha.is_empty() {
+        reviewed_commit(sha, run_sha, head)?;
+        return Ok(sha.to_owned());
+    }
+    match action {
+        "preflight" | "plan" => {
+            reviewed_commit(head, run_sha, head).context(
+                "no sha was given, so the run proceeds at the checkout, which must be the run's \
+                 full commit (DEC-2042)",
+            )?;
+            Ok(head.to_owned())
+        }
+        "apply" => bail!(
+            "apply needs {INFRA_SHA_ENV}, the full commit you reviewed, so the approval binds to \
+             it; plan first and dispatch apply naming the commit the plan printed (DEC-2042)"
+        ),
+        other => bail!("no infra action {other:?} (DEC-2042)"),
+    }
 }
 
 /// The paths a change to which changes what `infra.yml` does: the OpenTofu tree, the workflow, and
