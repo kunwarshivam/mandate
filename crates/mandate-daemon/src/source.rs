@@ -263,9 +263,8 @@ impl CellSource {
     /// Today's research spend: the recorded costs of the unreserved calls the agent stream records
     /// since the risk day of `clock` began, which counts a record the lagging clock has not reached
     /// yet, plus the meter's research spend for that day, which counts every reserved call at what
-    /// the meter holds for it (DEC-2249 item 3). `None` when the stream holds a record the source
-    /// cannot fold, or an unreserved cost or a time it cannot read, on any day, or while the meter
-    /// is held.
+    /// the meter holds for it (DEC-2249 item 3). `None` when the stream holds an unreserved
+    /// cost or a time it cannot read, on any day, or while the meter is held.
     fn spend(&self, agent: &[StoredEvent], clock: RiskClock) -> Option<Usd> {
         let now = UtcNanos::from_parts(clock.secs(), 0).ok()?;
         let day = risk_day(now).ok()?;
