@@ -38,6 +38,9 @@ pub enum Rounding {
     HalfUp,
     /// Towards positive infinity.
     Ceiling,
+    /// Towards zero: the risk state's split mark, which a rounding must never raise (mandate spec
+    /// §5.2, MI-33).
+    TowardZero,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

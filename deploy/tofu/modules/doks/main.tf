@@ -46,6 +46,7 @@ variable "node_size" {
 variable "kube_api_allowed_addresses" {
   description = "The founder's CIDRs, the only ones the control plane's public endpoint admits besides a run's window. Production's root refuses an empty list; staging's may be empty (DEC-2028)."
   type        = list(string)
+  sensitive   = true
 
   validation {
     condition = alltrue([
@@ -59,6 +60,7 @@ variable "kube_api_allowed_addresses" {
 variable "bootstrap_runner_cidr" {
   description = "One run's GitHub runner, opened for the bootstrap and closed again (DEC-2028); empty otherwise."
   type        = string
+  sensitive   = true
   default     = ""
 
   validation {
