@@ -715,8 +715,10 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 Part::Gap(Gap {
                     what: "the agent's processes stop on it",
                     on_main: "the runtime reads the kill switch first (#1521, image #1560), and \
-                              the executor process applies it first (#1596, image #1702)",
-                    waits: vec![D1_RUNTIME, X_EXECUTOR],
+                              the executor process applies it first (#1596, image #1702); the \
+                              deployment manager starts both from the account's deployment \
+                              (DEC-2031), so only D1 is left",
+                    waits: vec![D1_RUNTIME],
                 }),
             ],
         },
