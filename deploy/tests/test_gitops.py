@@ -455,26 +455,30 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
     expected = {
         "mandate-control-pods": (
             pods,
-            "pods",
+            ["pods", "pods/ephemeralcontainers"],
             "",
             CONTROL_LABEL.format("object.metadata.labels"),
             f"request.userInfo.username in {JOB_CONTROLLER} && has(object.metadata.ownerReferences) "
             "&& object.metadata.ownerReferences.exists(r, r.apiVersion == 'batch/v1' && r.kind == 'Job' "
             "&& has(r.controller) && r.controller)",
             ["CREATE", "UPDATE"],
+            "request.operation == 'CREATE' || object.spec != oldObject.spec || !("
+            + CONTROL_LABEL.format("oldObject.metadata.labels")
+            + ")",
         ),
         "mandate-control-jobs": (
             jobs,
-            "jobs",
+            ["jobs"],
             "batch",
             CONTROL_LABEL.format("object.spec.template.metadata.labels"),
             "!request.userInfo.username.startsWith('system:serviceaccount:') "
             "&& !(has(object.metadata.ownerReferences) "
             "&& object.metadata.ownerReferences.exists(r, r.kind == 'CronJob'))",
             ["CREATE", "UPDATE"],
+            "request.operation == 'CREATE' || object.spec != oldObject.spec",
         ),
     }
-    for name, (spec, resource, group, label, allowed, operations) in expected.items():
+    for name, (spec, resources, group, label, allowed, operations, changed) in expected.items():
         constraints = spec.get("matchConstraints", {})
         rules = constraints.get("resourceRules", [])
         if spec.get("failurePolicy") != "Fail":
@@ -482,17 +486,16 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
         if constraints.get("namespaceSelector") != {"matchLabels": ADMISSION_LABEL}:
             problems.append(f"{name}: not every namespace the signature webhooks check")
         if [(r.get("apiGroups"), r.get("resources"), sorted(r.get("operations", []))) for r in rules] != [
-            ([group], [resource], operations)
+            ([group], resources, operations)
         ]:
             problems.append(f"{name}: matches {rules}")
         conditions = {
             c.get("name"): squash(c.get("expression", "").split()) for c in spec.get("matchConditions", [])
         }
-        newly = "request.operation == 'CREATE' || !(" + label.replace("object.", "oldObject.") + ")"
-        if set(conditions) != {"labelled-control", "newly-control"} or conditions["labelled-control"] != label:
+        if set(conditions) != {"labelled-control", "changed-control"} or conditions["labelled-control"] != label:
             problems.append(f"{name}: matches {conditions.get('labelled-control')!r}, not the control label")
-        elif conditions["newly-control"] != newly:
-            problems.append(f"{name}: matches {conditions['newly-control']!r}, not only a newly control label")
+        elif conditions["changed-control"] != changed:
+            problems.append(f"{name}: matches {conditions['changed-control']!r}, not every change to a control spec")
         validations = [squash(v.get("expression", "").split()) for v in spec.get("validations", [])]
         if validations != [allowed]:
             problems.append(f"{name}: allows {validations}")
@@ -747,6 +750,32 @@ DOC_BUGS = [
         "ValidatingAdmissionPolicy",
         "mandate-control-jobs",
         lambda d: d["spec"]["matchConditions"][1].update(expression="true"),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"]["matchConditions"][1].update(
+            expression="request.operation == 'CREATE' || !("
+            + CONTROL_LABEL.format("oldObject.spec.template.metadata.labels")
+            + ")"
+        ),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-pods",
+        lambda d: d["spec"]["matchConditions"][1].update(
+            expression=d["spec"]["matchConditions"][1]["expression"].replace(
+                "object.spec != oldObject.spec || ", ""
+            )
+        ),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-pods",
+        lambda d: d["spec"]["matchConstraints"]["resourceRules"][0].update(resources=["pods"]),
     ),
     (
         kill_switch_exemption,

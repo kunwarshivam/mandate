@@ -158,8 +158,8 @@ pub enum Drill {
     KillSwitch,
     /// The hosted clusters' kill-switch admission policies on the cell's API server, with the
     /// signature webhook down and failing closed (DEC-2016 item 2): the founder's kill-switch Job is
-    /// admitted and its pod made, and every other way to a pod labelled `mandate.dev/process:
-    /// control` is refused.
+    /// admitted and its pod made, every other way to a pod labelled `mandate.dev/process: control`
+    /// is refused, and so is any change to such a pod or to a person's control Job.
     Admission,
     /// With the synchronous standby fenced, an append waits: nothing commits on the primary alone,
     /// and once the standby is back the cluster takes appends again and every stream it holds
@@ -228,7 +228,7 @@ impl Drill {
             }
             Self::KillSwitch => "the connection-scope kill switch never committed",
             Self::Admission => {
-                "the Job policy matches creation only, so a service account can relabel its suspended Job's pods"
+                "on update the Job policy fires only on a newly control label, so a service account can change a person's control Job"
             }
             Self::StandbyDown => {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
@@ -249,7 +249,7 @@ impl Drill {
             Self::Egress => "reached the live trading host",
             Self::Restart => "export_stream_empty",
             Self::KillSwitch => "no kill_switch of scope connection",
-            Self::Admission => "admitted the control label on a suspended Job",
+            Self::Admission => "admitted a service account's change to a person's control Job",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
         }
