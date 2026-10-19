@@ -57,9 +57,6 @@ const GUARDED_DIRS: [&str; 2] = [".github/workflows", ".github/scripts"];
 ///   names that look like a credential's (DEC-964).
 /// - `release.yml`'s build jobs upload `images/test-key/cosign.pub`, the public half of an
 ///   ephemeral test key made for the run's drill (E21-35), which signs nothing that ships.
-/// - `web-deploy.yml`'s deploy step runs `npx wrangler deploy`, the Worker deploy tool the earlier
-///   `npm ci --ignore-scripts` installed from the lockfile, on `main` only; `web/scripts/workers.mjs`
-///   pins the job's shape (#1700).
 /// - `merge.yml`'s `RUN_PRS` is the JSON list of the pull request numbers a `workflow_run` names,
 ///   which the event holds in public.
 /// - `merge.yml`'s merge job, whose `github.token` may write, writes the fixed `merged=true` as
