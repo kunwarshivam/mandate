@@ -504,6 +504,17 @@ pub fn tight_ladder() -> ValidatedMandate {
     validate(&document)
 }
 
+/// A cash dividend of 0.25 a share on `ex_date`, paid a week later.
+pub fn dividend_on(ex_date: Date) -> RecordedAction {
+    RecordedAction::CashDividend {
+        ex_date,
+        pay_date: (0..7).fold(ex_date, |date, _| {
+            date.next().unwrap_or_else(|e| panic!("{}", e.code()))
+        }),
+        per_share: price("0.25"),
+    }
+}
+
 /// A 2-for-1 split on `ex_date` with no cash in lieu posted.
 pub fn split_on(ex_date: Date) -> RecordedAction {
     RecordedAction::Split {
