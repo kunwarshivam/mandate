@@ -1101,6 +1101,42 @@ pub fn owner_exit(
     )
 }
 
+/// The owner's `OwnerExitRequested` of `AAPL` at `id`, confirming a bid of 150 for 100 and
+/// `floor`, with valid step-up authenticated at `authenticated_at` (DEC-2040 item 1).
+pub fn owner_exit_stepped_up(
+    journal: &Journal,
+    agent: &str,
+    id: &str,
+    floor: &str,
+    authenticated_at: &str,
+) -> Result<(), Error> {
+    journal.write(
+        &agent_stream(agent),
+        id,
+        "OwnerExitRequested",
+        1,
+        Some("command"),
+        object(vec![
+            ("bid", text("150")),
+            ("bid_size", text("100")),
+            ("confirmed", Value::Bool(true)),
+            ("floor", text(floor)),
+            ("scope", text("instrument")),
+            (
+                "step_up",
+                object(vec![
+                    ("assertion_id", text("a1")),
+                    ("authenticated_at", text(authenticated_at)),
+                    ("method", text("passkey")),
+                ])?,
+            ),
+            ("step_up_status", text("valid")),
+            ("subject", text(AAPL)),
+            ("user", text("u1")),
+        ])?,
+    )
+}
+
 /// The runtime's `IntentProposed` of the owner's exit of 10 AAPL at the market, following from
 /// `cause`.
 pub fn propose_owner_market_exit(

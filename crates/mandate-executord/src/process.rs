@@ -20,7 +20,7 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::UtcNanos;
 
-use crate::follow::{Proposal, Switch, agents_of, folded, proposals, switches};
+use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -535,7 +535,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 purpose: proposal.purpose,
                 protection,
             },
-            confirmation: None,
+            confirmation: proposal.confirmation.map(|handed| bounded(handed, now)),
         };
         self.hand(now, now, Input::Intent(handoff), alerts, 0)
     }
