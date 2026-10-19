@@ -4,28 +4,31 @@
 //! the risk clock of the pass it is handed in.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use mandate_domain::AssetClass;
 use mandate_gateway::fake::{Recorded, RecordedTransport};
 use mandate_gateway::guard::GuardContext;
-use mandate_gateway::meter::{Caps, DeploymentMeter, MemoryMeter, Meter};
+use mandate_gateway::meter::{Caps, DeploymentMeter, MemoryMeter, Meter, SharedMeter};
 use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::{Clock, Delivery, ManualClock, SequentialIds};
 use mandate_gateway::registry::Locality;
 use mandate_gateway::{CallRecord, Gateway, RateCaps, RequestError, Settings};
-use mandate_journal::{ArtifactRef, ArtifactStore};
+use mandate_journal::{ArtifactRef, ArtifactStore, Environment};
 use mandate_research::{AssetClass as EnvelopeClass, WorkingUniverse};
 use mandate_research_run::{
     Allowlist, Answer, CallContext, CallPlan, MemoryThesis, Readers, RecordedKey, Retrieval,
     RetrievalPlan, RetrievedItem, Scope, SourceId, call, recorded_reply, retrieve,
 };
 use mandate_runtime::{ResearchInput, ResearchRequest, RetrievedObservation, RiskClock};
+use mandate_store::MemoryStore;
 use mandate_time::UtcNanos;
 
 use crate::meter::CellMeter;
 use crate::recorded::{Bundle, BundleError, RecordedPlane, RecordedReply};
 use crate::runtime::{ArtifactSink, ResearchParts, ResearchWorker};
+use crate::source::SourceFor;
 
 /// Why the worker could not be built.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,7 +82,7 @@ struct Run {
 
 /// The cell's worker.
 pub struct RecordedWorker {
-    gateway: Gateway<RecordedTransport, MemoryMeter, ManualClock>,
+    gateway: Gateway<RecordedTransport, CellMeter, ManualClock>,
     plane: RecordedPlane,
     plan: RetrievalPlan,
     reply: RecordedReply,
@@ -95,28 +98,12 @@ pub struct RecordedWorker {
 }
 
 impl RecordedWorker {
-    /// As [`RecordedWorker::new`], with the gateway reserving and settling through `meter`, the
-    /// store the research source reads the agent's spend from (DEC-2249 item 3): while `meter` is
-    /// held, every call is refused `meter_unavailable` and nothing is sent.
+    /// The worker over `bundle`, storing through `sink`, its gateway's clock moved to `now()`, its
+    /// meter its own and never held: it reads an empty agent stream, so no call record asks it for a
+    /// reservation it does not hold.
     ///
-    /// # Errors
-    /// As [`RecordedWorker::new`].
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    pub fn metered(
-        bundle: &Bundle,
-        who: WorkerFor,
-        sink: Box<dyn ArtifactSink>,
-        now: Box<dyn FnMut() -> UtcNanos>,
-        meter: CellMeter,
-    ) -> Result<Self, WorkerError> {
-        let _ = (bundle, who, sink, now, meter);
-        todo!()
-    }
-
-    /// The worker over `bundle`, storing through `sink`, its gateway's clock moved to `now()`
+    /// The rest as [`RecordedWorker::metered`]: the worker over `bundle`, storing through `sink`,
+    /// its gateway's clock moved to `now()`
     /// before each call.
     ///
     /// # Errors
@@ -125,7 +112,33 @@ impl RecordedWorker {
         bundle: &Bundle,
         who: WorkerFor,
         sink: Box<dyn ArtifactSink>,
+        now: Box<dyn FnMut() -> UtcNanos>,
+    ) -> Result<Self, WorkerError> {
+        let meter = CellMeter::new(
+            SharedMeter::new(),
+            Rc::new(MemoryStore::default()),
+            SourceFor {
+                workspace: who.workspace.clone(),
+                agent: who.agent.clone(),
+                environment: Environment::Paper,
+            },
+            Rc::new(|| UtcNanos::EPOCH),
+        );
+        Self::metered(bundle, who, sink, now, meter)
+    }
+
+    /// As [`RecordedWorker::new`], with the gateway reserving and settling through `meter`, the
+    /// store the research source reads the agent's spend from (DEC-2249 item 3): while `meter` is
+    /// held, every call is refused `meter_unavailable` and nothing is sent.
+    ///
+    /// # Errors
+    /// As [`RecordedWorker::new`].
+    pub fn metered(
+        bundle: &Bundle,
+        who: WorkerFor,
+        sink: Box<dyn ArtifactSink>,
         mut now: Box<dyn FnMut() -> UtcNanos>,
+        meter: CellMeter,
     ) -> Result<Self, WorkerError> {
         let settings = Settings {
             workspace_id: who.workspace.clone(),
@@ -145,7 +158,7 @@ impl RecordedWorker {
             Box::new(SequentialIds::starting_at(base.saturating_add(offset)))
         };
         let meter = Meter::new(
-            MemoryMeter::new(),
+            meter,
             Caps::new(bundle.workspace_cap),
             DeploymentMeter::new(
                 Box::new(MemoryMeter::new()),
