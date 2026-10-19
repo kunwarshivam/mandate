@@ -232,18 +232,29 @@ pub fn found_in(
 ///
 /// # Errors
 /// As [`open_control_stream`], and the journal's error reading the stream.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 fn opened(
-    _journal: &mut dyn ControlJournal,
-    _owner: &Owner,
-    _stream: &StreamId,
-    _clock: &mut dyn FnMut() -> UtcNanos,
-    _report: &mut dyn Write,
+    journal: &mut dyn ControlJournal,
+    owner: &Owner,
+    stream: &StreamId,
+    clock: &mut dyn FnMut() -> UtcNanos,
+    report: &mut dyn Write,
 ) -> Result<Vec<StoredEvent>, ControlError> {
-    todo!()
+    let at = clock();
+    let Submitted { event_id, seq } = open_control_stream(
+        journal,
+        owner,
+        Now {
+            at,
+            secs: at.secs(),
+        },
+    )?;
+    writeln!(
+        report,
+        "opened {} as event {event_id} at seq {seq}",
+        stream.as_str()
+    )
+    .map_err(|e| ControlError::Journal(format!("the report: {e}")))?;
+    journal.rows(stream)
 }
 
 const METHODS: [&str; 3] = ["passkey", "oidc", "email_link"];
