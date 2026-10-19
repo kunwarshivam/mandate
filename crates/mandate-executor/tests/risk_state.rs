@@ -264,7 +264,6 @@ fn only_paused_or_stopped_holds_an_exit_and_nothing_holds_a_kill_switch() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn a_row_the_fold_does_not_read_advances_its_head() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -285,7 +284,6 @@ fn a_row_the_fold_does_not_read_advances_its_head() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn a_seq_gap_makes_the_view_unreadable() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -298,7 +296,6 @@ fn a_seq_gap_makes_the_view_unreadable() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn an_unknown_schema_version_makes_the_view_unreadable() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -316,7 +313,6 @@ fn an_unknown_schema_version_makes_the_view_unreadable() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn an_event_type_outside_the_catalogue_makes_the_view_unreadable() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -328,7 +324,6 @@ fn an_event_type_outside_the_catalogue_makes_the_view_unreadable() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn an_undecodable_row_makes_the_view_unreadable() {
     let mandate = mandate();
     for body in [b"not json".to_vec(), br#"{"payload":{}}"#.to_vec()] {
@@ -342,7 +337,6 @@ fn an_undecodable_row_makes_the_view_unreadable() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn a_refusal_to_decide_makes_the_view_unreadable() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -363,7 +357,6 @@ fn a_refusal_to_decide_makes_the_view_unreadable() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn an_unreadable_view_stays_unreadable_and_appends_nothing() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
@@ -381,7 +374,6 @@ fn an_unreadable_view_stays_unreadable_and_appends_nothing() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn a_tick_across_new_york_midnight_appends_the_risk_day_the_journal_accepts() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);

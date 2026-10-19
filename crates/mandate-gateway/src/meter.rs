@@ -71,6 +71,77 @@ impl MeterRecord {
         }
     }
 
+    /// The record a meter stream's `event_type` draft at `event_id` holds, read back from its §9.19
+    /// `payload` (DEC-2258 item 3): the exact inverse of [`MeterRecord::payload`]. `None` for any
+    /// other event type, or a payload with a member missing, a member §9.19 does not list, or a
+    /// value of the wrong kind or out of its range.
+    ///
+    /// Read leniently, then kept only when its own payload is `payload` exactly, so whatever the
+    /// payload holds that [`MeterRecord::payload`] would not write reads as nothing.
+    pub fn from_journal(event_type: &str, event_id: &str, payload: &Value) -> Option<Self> {
+        let text = |member: &str| payload.get(member).and_then(Value::as_str);
+        let owned = |member: &str| text(member).map(str::to_owned);
+        let digest =
+            |reference: Option<&str>| Digest::from_hex(reference?.strip_prefix("sha256:")?);
+        let record = match event_type {
+            "MeterReserved" => Self::Reserved(Reservation {
+                event_id: event_id.to_owned(),
+                call_id: owned("call_id")?,
+                agent_id: match payload.get("agent_id")? {
+                    Value::Null => None,
+                    Value::Str(agent) => Some(agent.clone()),
+                    _ => return None,
+                },
+                purpose: [
+                    Purpose::Research,
+                    Purpose::LlmSignal,
+                    Purpose::FastSignal,
+                    Purpose::Compiler,
+                ]
+                .into_iter()
+                .find(|purpose| Some(purpose.code()) == text("purpose"))?,
+                model: {
+                    let model = payload.get("model")?;
+                    let member = |name: &str| model.get(name).and_then(Value::as_str);
+                    ModelRef {
+                        model_id: member("model_id")?.to_owned(),
+                        model_version: member("model_version")?.to_owned(),
+                        content_hash: digest(member("content_hash"))?,
+                    }
+                },
+                endpoint: owned("endpoint")?,
+                key_owner: [KeyOwner::Platform, KeyOwner::Customer]
+                    .into_iter()
+                    .find(|owner| Some(owner.code()) == text("key_owner"))?,
+                price_table_ref: digest(text("price_table_ref"))?,
+                max_cost: Usd6::parse(text("max_cost_usd")?).ok()?,
+                risk_day: Date::parse(text("risk_day")?).ok()?,
+            }),
+            "MeterSettled" => Self::Settled(Settlement {
+                event_id: event_id.to_owned(),
+                call_id: owned("call_id")?,
+                reservation: owned("reservation")?,
+                outcome: Outcome::ALL
+                    .into_iter()
+                    .filter(|outcome| !outcome.is_refusal())
+                    .find(|outcome| Some(outcome.code()) == text("outcome"))?,
+                attempts: u32::try_from(payload.get("attempts")?.as_int()?).ok()?,
+                tokens: {
+                    let tokens = payload.get("tokens")?;
+                    let count = |name: &str| tokens.get(name).and_then(Value::as_int);
+                    Usage {
+                        input: count("input")?,
+                        output: count("output")?,
+                        cached: count("cached")?,
+                    }
+                },
+                cost: Usd6::parse(text("cost_usd")?).ok()?,
+            }),
+            _ => return None,
+        };
+        (record.payload() == *payload).then_some(record)
+    }
+
     /// The journal payload of journal spec §9.19.
     pub fn payload(&self) -> Value {
         match self {

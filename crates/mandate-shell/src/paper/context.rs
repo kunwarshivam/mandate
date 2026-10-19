@@ -425,7 +425,10 @@ fn run_context(
         restricted_instruments: BTreeSet::new(),
         decision: Some(DecisionContext {
             builder: Some(builder),
-            gate: Some(advisory_gate_context(template)),
+            gate: Some({
+                let (risk, mode) = (template.risk.clone(), template.agent.mode);
+                advisory_gate_context(template, risk, mode)
+            }),
         }),
         governance: None,
         live_cli_confirm: None,
