@@ -187,6 +187,12 @@ fn main() -> anyhow::Result<()> {
                 &mut io::stdout().lock(),
             )
         }
+        Command::Vault(VaultCommand::Put(args)) => vault::run_put(
+            &args,
+            &mut io::stdin().lock(),
+            now()?.at,
+            &mut io::stdout().lock(),
+        ),
         Command::Vault(VaultCommand::Provision(args)) => {
             vault::run_provision(&args, &mut io::stdout().lock())
         }

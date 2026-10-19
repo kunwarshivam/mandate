@@ -1,0 +1,221 @@
+//! `mandate vault put` (E21-32, DEC-2020, DEC-2630): a platform secret written as the secret-import
+//! identity, its credentials and the secret on stdin, three lines and nothing else, refused before
+//! any vault is reached when stdin is anything else, and never printed. The last case runs against
+//! the OpenBao dev server `cargo xtask ci openbao` names, and checks the refusals first, so it fails
+//! the same way without one.
+
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+
+use mandate_time::UtcNanos;
+use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource};
+use mandate_vault::policy::{Identity, Mounts, PlatformSecret, SecretPath};
+use mandate_vault::source::SecretSource;
+use secrecy::{ExposeSecret, SecretString};
+
+const CANARY: &str = "canary-9d1e7a40-model-key-do-not-print";
+const ROLE: &str = "canary-role-3f0b";
+const SECRET_ID: &str = "canary-secret-id-77c2";
+/// An address no vault listens on: the discard port on the loopback.
+const NOWHERE: &str = "https://127.0.0.1:9";
+
+fn ca() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vault-ca.pem")
+}
+
+/// Runs `mandate vault put <secret>` against `address` with `stdin` piped in.
+fn put(secret: &str, address: &str, ca: &Path, stdin: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mandate"))
+        .args(["vault", "put", secret, "--address", address, "--ca"])
+        .arg(ca)
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the CLI runs");
+    let mut input = child.stdin.take().expect("stdin is piped");
+    drop(input.write_all(stdin.as_bytes()));
+    drop(input);
+    child.wait_with_output().expect("the CLI ends")
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// The command failed naming `code` and printed nothing to stdout, and no line of stdin anywhere.
+fn refused(output: &Output, code: &str, case: &str) {
+    let err = stderr(output);
+    assert!(!output.status.success(), "{case} succeeded: {err}");
+    assert!(err.contains(code), "{case} does not name `{code}`: {err}");
+    assert!(
+        output.stdout.is_empty(),
+        "{case} printed: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    for line in [CANARY, ROLE, SECRET_ID] {
+        assert!(!err.contains(line), "{case} printed {line}: {err}");
+    }
+}
+
+fn three(role: &str, secret_id: &str, value: &str) -> String {
+    format!("{role}\n{secret_id}\n{value}\n")
+}
+
+#[test]
+#[ignore = "pending E21-32"]
+fn three_lines_are_read_and_the_vault_reached() {
+    for stdin in [
+        three(ROLE, SECRET_ID, CANARY),
+        format!("{ROLE}\n{SECRET_ID}\n{CANARY}"),
+    ] {
+        let output = put("model-provider-key", NOWHERE, &ca(), &stdin);
+        refused(&output, "unavailable", "an unreachable vault");
+    }
+}
+
+#[test]
+#[ignore = "pending E21-32"]
+fn stdin_that_is_not_three_lines_is_refused_before_any_vault_is_reached() {
+    for (stdin, case) in [
+        (String::new(), "an empty pipe"),
+        (format!("{ROLE}\n{SECRET_ID}\n"), "two lines"),
+        (
+            format!("{ROLE}\n{SECRET_ID}\n{CANARY}\nmore\n"),
+            "four lines",
+        ),
+        (format!("{ROLE}\n\n{CANARY}\n"), "an empty secret id"),
+        (format!("{ROLE}\n{SECRET_ID}\n\n"), "an empty secret"),
+        (format!("\n{SECRET_ID}\n{CANARY}\n"), "an empty role id"),
+        (
+            format!("{ROLE}\r\n{SECRET_ID}\n{CANARY}\n"),
+            "a carriage return",
+        ),
+        (
+            format!("{ROLE}\n{SECRET_ID}\n{CANARY}\n\n"),
+            "a trailing empty line",
+        ),
+        (
+            format!("{ROLE}\n{SECRET_ID}\n{}\n", "k".repeat(16384)),
+            "too long",
+        ),
+    ] {
+        let output = put("model-provider-key", NOWHERE, &ca(), &stdin);
+        refused(&output, "credential_file", case);
+    }
+}
+
+#[test]
+#[ignore = "pending E21-32"]
+fn a_plain_http_address_or_a_bad_ca_is_refused() {
+    let stdin = three(ROLE, SECRET_ID, CANARY);
+    let output = put("model-provider-key", "http://127.0.0.1:9", &ca(), &stdin);
+    refused(&output, "config", "a plain-HTTP address");
+    let output = put(
+        "email-credential",
+        NOWHERE,
+        Path::new("/nonexistent/ca.pem"),
+        &stdin,
+    );
+    refused(&output, "config", "a missing CA");
+}
+
+#[test]
+fn only_a_platform_secret_is_put() {
+    let output = put(
+        "alpaca-oauth-client-secret",
+        NOWHERE,
+        &ca(),
+        &three(ROLE, SECRET_ID, CANARY),
+    );
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(!stderr(&output).contains(CANARY));
+}
+
+/// The server the environment names, as `.github/scripts/start-openbao.sh` sets it.
+fn server() -> Option<(String, PathBuf, PathBuf)> {
+    let address = std::env::var("MANDATE_OPENBAO_ADDR").ok()?;
+    let ca = std::env::var("MANDATE_OPENBAO_CA").ok()?;
+    let token = std::env::var("MANDATE_OPENBAO_OPERATOR_TOKEN_FILE").ok()?;
+    Some((address, PathBuf::from(ca), PathBuf::from(token)))
+}
+
+/// The login's moment: the lease rule reads it, and nothing here renews, so a fixed one serves.
+fn now() -> UtcNanos {
+    UtcNanos::from_parts(1_800_000_000, 0).unwrap()
+}
+
+/// Provisions with the existing file mode, puts the model provider's key as secret-import, and
+/// reads it back as the model gateway, the one identity that reads it.
+#[test]
+#[ignore = "pending E21-32"]
+fn a_put_secret_is_read_back_by_its_reader_alone() {
+    stdin_that_is_not_three_lines_is_refused_before_any_vault_is_reached();
+    let Some((address, ca, operator)) = server() else {
+        assert!(
+            std::env::var("MANDATE_OPENBAO_REQUIRED").is_err(),
+            "MANDATE_OPENBAO_REQUIRED is set but no OpenBao server is configured"
+        );
+        return;
+    };
+    let out = std::env::temp_dir().join(format!("cli-put-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&out);
+    let provisioned = Command::new(env!("CARGO_BIN_EXE_mandate"))
+        .args(["vault", "provision", "--address", &address, "--ca"])
+        .arg(&ca)
+        .arg("--operator-token-file")
+        .arg(&operator)
+        .arg("--out")
+        .arg(&out)
+        .env_clear()
+        .output()
+        .unwrap();
+    assert!(provisioned.status.success(), "{}", stderr(&provisioned));
+    let file = |name: &str| fs::read_to_string(out.join(name)).unwrap();
+    let key = format!("model-key-{}", std::process::id());
+    let output = put(
+        "model-provider-key",
+        &address,
+        &ca,
+        &three(
+            &file("secret-import.role-id"),
+            &file("secret-import.secret-id"),
+            &key,
+        ),
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let printed = String::from_utf8_lossy(&output.stdout);
+    assert!(!printed.contains(&key) && !stderr(&output).contains(&key));
+    let config = OpenBaoConfig {
+        address,
+        ca_pem: fs::read(&ca).unwrap(),
+        mounts: Mounts::default(),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let read = runtime.block_on(async {
+        let gateway = OpenBaoSource::login(
+            &config,
+            Identity::ModelGateway,
+            &file("model-gateway.role-id"),
+            &SecretString::from(file("model-gateway.secret-id")),
+            now(),
+        )
+        .await
+        .unwrap();
+        gateway
+            .read(&SecretPath::Platform(PlatformSecret::ModelProviderKey))
+            .await
+            .unwrap()
+    });
+    let _ = fs::remove_dir_all(&out);
+    assert_eq!(
+        read.map(|value| value.expose_secret().to_vec()),
+        Some(key.into_bytes())
+    );
+}

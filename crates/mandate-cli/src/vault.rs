@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, anyhow};
 use clap::{Args, Subcommand, ValueEnum};
 use mandate_connections::record::ConnectionId;
+use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::credentials::{check_credential_dir, read_token_file, write_credentials};
 use mandate_vault::openbao::{OpenBaoConfig, provision};
@@ -38,7 +39,37 @@ pub enum VaultCommand {
     /// Set an OpenBao vault up for the cell's connections and write each process's AppRole
     /// credentials, owner-only, into `--out`. The operator's token is read from a file.
     Provision(ProvisionArgs),
+    /// Write a platform secret into an OpenBao vault as the secret-import identity. Stdin holds
+    /// that identity's role id, its secret id, and the secret, one line each; none is ever an
+    /// argument (DEC-2020, DEC-2630).
+    Put(PutArgs),
 }
+
+#[derive(Debug, Args)]
+pub struct PutArgs {
+    /// Which platform secret stdin's last line is.
+    #[arg(value_enum)]
+    pub secret: PutSecret,
+    /// The vault's address, `https://host:port`.
+    #[arg(long)]
+    pub address: String,
+    /// The CA certificate (PEM) the vault's certificate must chain to.
+    #[arg(long)]
+    pub ca: PathBuf,
+}
+
+/// The platform secrets `vault put` writes (DEC-2020): each is written by the secret-import
+/// identity alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PutSecret {
+    #[value(name = "model-provider-key")]
+    ModelProviderKey,
+    #[value(name = "email-credential")]
+    EmailCredential,
+}
+
+/// The most bytes `vault put` reads from stdin: two credentials and a secret are far shorter.
+pub const PUT_MAX: u64 = 16384;
 
 #[derive(Debug, Args)]
 pub struct ProvisionArgs {
@@ -129,6 +160,24 @@ pub fn run_import(
     import_client_secret(&vault, stdin).map_err(refused)?;
     writeln!(out, "the Alpaca OAuth client secret is in the vault")?;
     Ok(())
+}
+
+/// Logs in as the secret-import identity with the role id and secret id on `stdin`'s first two
+/// lines, and writes the third, the secret, at `args.secret`'s path (DEC-2020), printing only
+/// which secret was written. Stdin is exactly three non-empty lines, the last newline optional,
+/// with no carriage return, at most [`PUT_MAX`] bytes; anything else is refused `credential_file`
+/// before the vault is reached. A refusal names its reason code and carries no line of stdin.
+pub fn run_put(
+    args: &PutArgs,
+    stdin: &mut impl Read,
+    now: UtcNanos,
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
+    let _ = (args, stdin, now, out);
+    Err(anyhow!(
+        "{:?}",
+        SourceError::Unimplemented { story: "E21-32" }
+    ))
 }
 
 /// Runs the provisioning and prints, to `out`, the name of each file written and nothing else.
