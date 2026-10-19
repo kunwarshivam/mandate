@@ -1874,9 +1874,9 @@ mod tests {
             "sha256sum --check --strict \"$tools/cosign.sha256\"",
             "base64 --decode \"$key_dir/cosign.key.base64\" > \"$key_dir/cosign.key\"",
             "unset RELEASE_SIGNING_KEY",
-            "unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT ENV CDPATH GITHUB_TOKEN \\",
-            "ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL",
-            "export HOME=\"$key_dir/home\" PATH=\"$tools:/usr/bin:/bin\"",
+            "for var in $(compgen -e); do [ \"$var\" = COSIGN_PASSWORD ] || unset \"$var\"; done",
+            "export HOME=\"$key_dir/home\" PATH=\"$tools:/usr/bin:/bin\" COSIGN_PASSWORD",
+            "exec cosign sign-blob",
         ];
         let mut from = 0;
         for line in ordered {
@@ -1909,6 +1909,64 @@ mod tests {
             .context("no release-signing-check")?;
         assert!(check.contains("    needs: [release-signing]\n"));
         assert!(check.contains("cargo xtask release check-signed dist signed/signatures"));
+        Ok(())
+    }
+
+    /// cosign runs with exactly `COSIGN_PASSWORD`, `HOME` and `PATH` in its environment, whatever
+    /// else the job held, and with the password nowhere in its command line (DEC-2024 item 4,
+    /// `AGENTS.md` rule 7). A stand-in cosign, served to the signer by a `file://` URL and pinned by
+    /// its SHA-256 as the real one is, records the names its process received and its arguments.
+    #[test]
+    fn cosign_sees_only_the_password_home_and_path() -> Result<()> {
+        let script =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
+        let dir = env::temp_dir().join(format!("mandate-xtask-signer-env-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("dist/bin"))?;
+        fs::write(dir.join("dist/bin/a"), "a")?;
+        fs::write(dir.join("dist/bin/b"), "b")?;
+        write_sums(&dir, SIGNER_SUMS)?;
+        let stand_in = dir.join("stand-in-cosign");
+        fs::write(
+            &stand_in,
+            concat!(
+                "#!/bin/sh\n",
+                "tr '\\000' '\\n' < /proc/$$/environ | cut -d= -f1 | LC_ALL=C sort > names\n",
+                "tr '\\000' ' ' < /proc/$$/cmdline > arguments\n",
+            ),
+        )?;
+        let password = "the-password-is-not-an-argument";
+        let output = Command::new("bash")
+            .arg(&script)
+            .current_dir(&dir)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
+            .env("COSIGN_URL", format!("file://{}", stand_in.display()))
+            .env("COSIGN_SHA256", sha256(&stand_in)?)
+            .env("RELEASE_SIGNING_KEY", "c3RhbmQtaW4ga2V5")
+            .env("COSIGN_PASSWORD", password)
+            .env("RUNNER_TEMP", dir.join("runner"))
+            .env("LD_PRELOAD", "planted.so")
+            .env("SIGSTORE_REKOR_URL", "https://planted.invalid")
+            .env("HTTPS_PROXY", "http://planted.invalid")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "the signer stopped: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("names"))?,
+            "COSIGN_PASSWORD\nHOME\nPATH\n"
+        );
+        let arguments = fs::read_to_string(dir.join("arguments"))?;
+        assert!(arguments.contains("sign-blob"), "{arguments}");
+        assert!(!arguments.contains(password), "{arguments}");
+        assert!(
+            !dir.join("runner/release-key").exists(),
+            "the key was left behind"
+        );
         Ok(())
     }
 

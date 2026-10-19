@@ -6,9 +6,10 @@
 # and says which rule failed. It copies those files into a private directory under RUNNER_TEMP,
 # checks the copies against SHA256SUMS and SHA256SUMS against build-a's DIGEST, and signs the
 # copies, so nothing can change between the check and the signature. It installs cosign from
-# COSIGN_URL pinned to COSIGN_SHA256 and signs in a subshell that unsets the loader, shell-startup
-# and runner-token variables and sets its own HOME and PATH, so the password reaches cosign through
-# the environment the job gave it and never on a command line (`AGENTS.md` rule 7). RELEASE_SIGNING_KEY is cosign.key
+# COSIGN_URL pinned to COSIGN_SHA256 and signs in a subshell that unsets every exported variable but
+# COSIGN_PASSWORD, exports only HOME, PATH and the password, and execs cosign, so cosign's
+# environment holds those three names alone and the password is never on a command line
+# (`AGENTS.md` rule 7). RELEASE_SIGNING_KEY is cosign.key
 # as single-line base64, decoded into a 0600 file under RUNNER_TEMP; the key and the copies are
 # deleted on every exit, and neither secret is printed.
 #
@@ -90,10 +91,9 @@ base64 --decode "$key_dir/cosign.key.base64" > "$key_dir/cosign.key"
 unset RELEASE_SIGNING_KEY
 for file in "${names[@]/#/$verified/bin/}" "$verified/SHA256SUMS"; do
   (
-    unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT ENV CDPATH GITHUB_TOKEN \
-      ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
-    export HOME="$key_dir/home" PATH="$tools:/usr/bin:/bin"
-    cosign sign-blob --yes --new-bundle-format=false --use-signing-config=false \
+    for var in $(compgen -e); do [ "$var" = COSIGN_PASSWORD ] || unset "$var"; done
+    export HOME="$key_dir/home" PATH="$tools:/usr/bin:/bin" COSIGN_PASSWORD
+    exec cosign sign-blob --yes --new-bundle-format=false --use-signing-config=false \
       --tlog-upload=false --key "$key_dir/cosign.key" \
       --output-signature "signatures/$(basename "$file").sig" "$file"
   )

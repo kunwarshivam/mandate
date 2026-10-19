@@ -61,6 +61,11 @@ const ALLOWED: &[(&str, &str, &str)] = &[
         "found=$(compgen -e | grep -E -i 'KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|ALPACA|APCA|ROBINHOOD' || true)",
     ),
     (
+        "L1",
+        ".github/scripts/release-sign.sh",
+        "for var in $(compgen -e); do [ \"$var\" = COSIGN_PASSWORD ] || unset \"$var\"; done",
+    ),
+    (
         "L5",
         ".github/workflows/release.yml",
         "images/test-key/cosign.pub",
@@ -1722,6 +1727,30 @@ mod tests {
             Vec::<&str>::new()
         );
         assert_eq!(rules(".github/workflows/ci.yml", line), ["L3"]);
+    }
+
+    /// The release signer's one `compgen -e` line, which clears cosign's environment (DEC-2024
+    /// item 4), is allowed in `release-sign.sh` alone: the same line in any other script, or any
+    /// other `compgen -e` line in that script, is still refused.
+    #[test]
+    fn the_signers_environment_clearing_line_is_allowed_only_there() {
+        let line = "    for var in $(compgen -e); do [ \"$var\" = COSIGN_PASSWORD ] || unset \"$var\"; done";
+        assert_eq!(
+            rules(".github/scripts/release-sign.sh", line),
+            Vec::<&str>::new()
+        );
+        assert_eq!(rules(SCRIPT, line), ["L1"]);
+        assert_eq!(
+            rules(".github/scripts/release-sign.sh", "compgen -e"),
+            ["L1"]
+        );
+        assert_eq!(
+            rules(
+                ".github/scripts/release-sign.sh",
+                "for var in $(compgen -e); do unset \"$var\"; done"
+            ),
+            ["L1"]
+        );
     }
 
     /// Every allowlisted line is still in its file, so a stale entry is caught.
