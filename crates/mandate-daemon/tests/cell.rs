@@ -110,7 +110,6 @@ fn opted() -> OptIn {
 /// Research is asked for only on a paper deployment the process read from the journal; a live one
 /// is refused first, read from the journal or not.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_opt_in_refuses_any_but_a_resolved_paper_deployment() {
     let live = |resolved| CellDeployment {
         environment: Environment::Live,
@@ -126,7 +125,6 @@ fn the_opt_in_refuses_any_but_a_resolved_paper_deployment() {
 
 /// A bundle that does not load refuses the opt-in.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_opt_in_refuses_a_bundle_it_cannot_read() {
     let missing = std::env::temp_dir().join(format!("daemon-{}-no-bundle", std::process::id()));
     assert_eq!(
@@ -139,7 +137,6 @@ fn the_opt_in_refuses_a_bundle_it_cannot_read() {
 
 /// What opted-in research needs and cannot read refuses it: the deployment, or the artifact store.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_research_refuses_what_it_cannot_read() {
     let (root, control, _, _) = deployed("unreadable");
     let nobody = Control::default();
@@ -162,7 +159,6 @@ fn the_research_refuses_what_it_cannot_read() {
 /// revisions off, told the mandate's own description, and its records name the deployed mandate
 /// version and the entry's content.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_opted_in_research_is_the_bundle_s_entry_for_the_deployed_mandate() {
     let (root, control, version, document) = deployed("wired");
     let wired = research(opted(), Box::new(control), &root, now())

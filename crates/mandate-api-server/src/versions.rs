@@ -20,6 +20,8 @@ pub const CREATED: &str = "MandateVersionCreated";
 pub const CONFIRMED: &str = "MandateConfirmed";
 pub const DEPLOYED: &str = "AgentDeployed";
 const STOPPED: &str = "AgentStopped";
+const ESTABLISHED: &str = "ConnectionEstablished";
+const REVOKED: &str = "ConnectionRevoked";
 
 /// The document's members that are not envelope paths (mandate spec §4.1 V-020).
 const SYSTEM_FIELDS: [&str; 2] = ["mandate_schema_version", "source_text_ref"];
@@ -91,14 +93,41 @@ pub fn last_confirmed(control: &[StoredEvent]) -> Option<(&StoredEvent, String)>
 /// The agent's active deployment: its latest `AgentDeployed`, when no `AgentStopped` for it is
 /// later, and the version it names.
 pub fn active<'a>(control: &'a [StoredEvent], agent: &str) -> Option<(&'a StoredEvent, String)> {
-    let row = control.iter().rev().find(|row| {
-        matches!(row.event_type.as_str(), DEPLOYED | STOPPED)
-            && member(row, "agent_id").as_deref() == Some(agent)
-    })?;
+    let row = last_of(control, agent)?;
     if row.event_type != DEPLOYED {
         return None;
     }
     Some((row, member(row, "mandate_version")?))
+}
+
+/// The agent's latest `AgentDeployed` or `AgentStopped`.
+fn last_of<'a>(control: &'a [StoredEvent], agent: &str) -> Option<&'a StoredEvent> {
+    control.iter().rev().find(|row| {
+        matches!(row.event_type.as_str(), DEPLOYED | STOPPED)
+            && member(row, "agent_id").as_deref() == Some(agent)
+    })
+}
+
+/// Whether an `AgentStopped` names `agent`: its id is never deployed again (DEC-1173 item 1).
+pub fn stopped(control: &[StoredEvent], agent: &str) -> bool {
+    last_of(control, agent).is_some_and(|row| row.event_type == STOPPED)
+}
+
+/// Journal spec v0.54 §9.24 rule 201 for a deployment on `connection`: a version-2
+/// `ConnectionEstablished` of it is on the control stream, and its latest establishment or
+/// revocation is an establishment. A deployment is written at version 2 exactly when it holds.
+pub fn established_v2(control: &[StoredEvent], connection: &str) -> bool {
+    let of = |row: &&StoredEvent| member(row, "connection_id").as_deref() == Some(connection);
+    let bound = control
+        .iter()
+        .filter(of)
+        .any(|row| row.event_type == ESTABLISHED && row.schema_version == 2);
+    let latest = control
+        .iter()
+        .rev()
+        .filter(of)
+        .find(|row| matches!(row.event_type.as_str(), ESTABLISHED | REVOKED));
+    bound && latest.is_some_and(|row| row.event_type == ESTABLISHED)
 }
 
 /// The stored document `version` names, parsed, with the mandate it is: `None` when the store

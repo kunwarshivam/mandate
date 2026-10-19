@@ -638,6 +638,12 @@ pub(crate) fn images(root: &Path, dist: &Path, out: &Path, test_sign: bool) -> R
         };
         let bytes = fs::read(&binary).with_context(|| format!("reading {}", binary.display()))?;
         let layout = image::layout(name, arch.oci(), &bytes, signature.as_deref(), &revision);
+        ensure!(
+            !image::carries_cell_research(&layout),
+            "the {name} release image holds /{}, the local cell's recorded research, which only \
+             its interim runtime image carries (DEC-2246)",
+            image::CELL_RESEARCH
+        );
         image::write(&layout, &out.join("images").join(name))?;
         listing.push_str(&format!("sha256:{}  {name}\n", layout.manifest));
     }
