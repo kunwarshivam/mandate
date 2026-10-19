@@ -872,7 +872,9 @@ after U-A1 to U-A5 are recorded.
   process prices an owner's market exit at the floor its instrument-scoped `OwnerExitRequested`
   confirmed, and holds any other exit at the market with one opaque alert (`owner_exit_unpriced`
   or `exit_unpriced`), a gap against rule 13 that [DEC-2033](decisions/DEC-2033.md) item 4
-  records. *Accepted when:* `IntentBody::Order` carries an order type; the core receives, gates
+  records. [DEC-2037](decisions/DEC-2037.md) designs it: a handoff with no limit for an exit, sent
+  at the market where §5.1 allows and by the §5.6 ladder elsewhere. *Accepted when:*
+  `IntentBody::Order` carries an order type; the core receives, gates
   and submits a market exit (trading spec §5.1, §5.5) with the same write-before-acting and
   rule-13 exemptions as a limit exit; the executor process hands every exit and raises neither
   alert; `Purpose::exempt_from_pacing` is checked for `OwnerExit` (owner exits are paced only by
@@ -880,6 +882,15 @@ after U-A1 to U-A5 are recorded.
   `tests/owner_exits.rs`) is re-seeded once the fixture fills, with a held position, gate facts
   and an `Unknown` order in the instrument, and shows no owner exit is refused for conduct,
   eligibility, day-trade budget, buying power or opening-session reasons.
+
+- **E7-30 (Must, M6, immediately after E7-29)** As an owner, I want my confirmed exit to sell outside the
+  regular session when I confirmed the displayed bid, as rule 13 allows, so that a runtime-proposed
+  owner exit is not held to the session the way an unconfirmed one is. Today the handoff carries
+  no confirmation, so the core treats every handed owner exit as unconfirmed
+  ([DEC-2037](decisions/DEC-2037.md) item 6). *Accepted when:* the handoff carries the owner's
+  confirmed bid, bid size and floor from the `OwnerExitRequested`; the core sends such an exit in
+  extended hours as a limit never below the floor, as a confirmed kill switch's close does
+  (trading spec §5.5); and an unconfirmed one still waits for the session.
 
 ### E8 Escalation and approvals
 
@@ -2900,7 +2911,11 @@ enables `live` (ES-23, OPS-5).
   closes both: a version-2 deployment that rule 201 refuses raises `deployment_unconnected` once per
   process, and RB-14 has its page. Also *left*: nothing journals `AgentStopped` yet, so a deployment
   that never ran, or a crash-looped runtime, is never stopped, and its alert repeats on each manager
-  start (DEC-2038 item 3). From
+  start (DEC-2038 item 3). *Slice 5* ([DEC-2039](decisions/DEC-2039.md)) retires an agent no
+  process ran on the owner's Stop: the service claims the agent's stream at head 0, then writes
+  `AgentStopped` with no loss, and a runtime refuses a claimed stream. 5a is journal spec v0.66
+  and rule 246; 5b the CLI's stop; 5b' `mandate-daemon`'s refusal; 5b'' the manager's claimed
+  exit; 5c the workspace API's stop; 5d and 5e a crash-looped runtime's Stop. From
   slice 2's review, minors left under the freeze rule:
   - The manager's egress gate reads any connection failure on port 9153 as filtered, so a dead or
     restarting resolver fails open; a positive control first (TCP 53 on the same address) would
@@ -3256,6 +3271,26 @@ enables `live` (ES-23, OPS-5).
   (`fold_theses`, `expire_theses`, the reservation ceiling's fold), gives no context on a pass when
   any record cannot be folded (DEC-2210 item 4), and a property test over random journaled runs
   shows the folded facts equal an independent accumulator over the same records.
+
+- **E21-60 (Proposed, M8, after E21-59; lane I2; DEC-2214, DEC-2249)** As the founder, I want the
+  runtime process's research source to fold the instruments other agents on the same connection
+  have claimed, from their own agent streams, so that a workspace with more than one agent deployed
+  can research instead of giving every pass no context. *Accepted when:* `mandate-daemon`'s cell
+  source reads every other deployed agent's stream in the environment, folds the instruments each
+  has admitted or pinned into `claimed_by_other_agents` through the same functions the core judges
+  V-006 and admission with, gives no context on a pass when any of those streams or records cannot
+  be read or folded (DEC-2210 item 4), and only then lifts DEC-2214 item 1's rule; a property test
+  over random journaled runs of several agents shows the folded claims equal an independent
+  accumulator over the same records.
+
+- **E21-61 (Proposed, M8, after E21-59; lane G, the model gateway; DEC-2249)** As the founder, I
+  want the cell's model-gateway meter journaled on `meter:{workspace_id}` (journal spec §9.19) and
+  folded back after a restart, so that a restarted runtime counts the day's research reservations
+  and spend instead of failing closed for the rest of the risk day. *Accepted when:* the cell's
+  worker writes `MeterReserved` and `MeterSettled` through the journal before and after each call,
+  rebuilds its meter from that stream at start, and the research source folds the same records
+  through `mandate_gateway::meter::spend`; DEC-2249 item 3's fail-closed rule is then lifted by its
+  own decision; a restart test shows the cap holds across a restart with reservations open.
 
 ## Won't (v1)
 

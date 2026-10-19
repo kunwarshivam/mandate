@@ -99,3 +99,7 @@ output "vpc_id" {
 output "node_tag" {
   value = digitalocean_tag.nodes.name
 }
+
+output "region" {
+  value = digitalocean_vpc.this.region
+}
