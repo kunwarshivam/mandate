@@ -17,6 +17,7 @@ mod cell;
 mod gitops;
 mod image;
 mod infra_preflight;
+mod infra_window;
 mod leak;
 mod mail;
 mod mask;
@@ -908,6 +909,7 @@ fn tofu_checks() -> Result<()> {
     }
     let root = repo_root()?;
     let tofu_dir = root.join(TOFU_DIR);
+    let used = tofu_audit::used_types(&tofu_sources(&tofu_dir)?);
     let work = root.join("target").join("tofu");
     let cache = work.join("plugins");
     fs::create_dir_all(&cache).with_context(|| format!("creating {}", cache.display()))?;
@@ -923,6 +925,7 @@ fn tofu_checks() -> Result<()> {
             &config.to_string_lossy(),
         ],
     )?;
+    let mut covered = BTreeSet::new();
     for dir in tofu_roots(&tofu_dir)? {
         let name = dir
             .strip_prefix(&tofu_dir)
@@ -931,6 +934,15 @@ fn tofu_checks() -> Result<()> {
             .replace('/', "-");
         let data = work.join(&name);
         let chdir = format!("-chdir={}", dir.display());
+        let tofu = |args: &[&str]| {
+            let mut command = Command::new("tofu");
+            command
+                .args(args)
+                .env("TF_DATA_DIR", &data)
+                .env("TF_PLUGIN_CACHE_DIR", &cache)
+                .env("TF_IN_AUTOMATION", "1");
+            command
+        };
         for args in [
             vec![
                 chdir.as_str(),
@@ -943,20 +955,99 @@ fn tofu_checks() -> Result<()> {
             vec![chdir.as_str(), "test"],
         ] {
             eprintln!("    $ tofu {}", args.join(" "));
-            let status = Command::new("tofu")
-                .args(&args)
-                .env("TF_DATA_DIR", &data)
-                .env("TF_PLUGIN_CACHE_DIR", &cache)
-                .env("TF_IN_AUTOMATION", "1")
-                .status()
-                .context("starting `tofu`")?;
+            let status = tofu(&args).status().context("starting `tofu`")?;
             if !status.success() {
                 bail!("`tofu {}` failed with {status}", args.join(" "));
             }
+            if args.get(1) == Some(&"init") && dir.starts_with(tofu_dir.join("modules")) {
+                covered.extend(provider_schemas_mask(&tofu, &chdir, &used)?);
+            }
         }
+    }
+    let unchecked: Vec<String> = used
+        .iter()
+        .filter(|(kind, name)| !(kind == "resource" && name == "terraform_data"))
+        .filter(|used| !covered.contains(*used))
+        .map(|(kind, name)| {
+            format!("{kind} {name}: no module's provider schema was checked for it")
+        })
+        .collect();
+    if !unchecked.is_empty() {
+        bail!("tofu:\n  {}", unchecked.join("\n  "));
     }
     Ok(())
 }
+
+/// The audit's provider check (DEC-2030 item 6): in one initialised module, every
+/// credential-named attribute of a type the tree uses whose provider the module installs is
+/// `sensitive` in that provider's schema ([`tofu_audit::unmasked_attributes`]), so no plan diff
+/// prints one. Returns the types it checked. Roots carry an `s3` backend, which `providers schema`
+/// will not read uninitialised, so the modules, whose providers are the same pinned ones, stand in
+/// for them, and the caller fails any used type no module checked. The placeholder passphrase
+/// only satisfies configuration loading.
+fn provider_schemas_mask(
+    tofu: &dyn Fn(&[&str]) -> Command,
+    chdir: &str,
+    used: &BTreeSet<(String, String)>,
+) -> Result<BTreeSet<(String, String)>> {
+    eprintln!("    $ tofu {chdir} providers schema -json");
+    let out = tofu(&[chdir, "providers", "schema", "-json"])
+        .env(
+            "TF_VAR_state_passphrase",
+            "a-placeholder-the-schema-read-needs-and-encrypts-nothing-with",
+        )
+        .output()
+        .context("starting `tofu`")?;
+    if !out.status.success() {
+        bail!(
+            "`tofu {chdir} providers schema -json` failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    let schema: serde_json::Value =
+        serde_json::from_slice(&out.stdout).context("tofu's provider schema is not JSON")?;
+    let used_here: BTreeSet<(String, String)> = used
+        .iter()
+        .filter(|(_, name)| {
+            name == "terraform_data"
+                || schema
+                    .get("provider_schemas")
+                    .and_then(serde_json::Value::as_object)
+                    .is_some_and(|providers| {
+                        providers.keys().any(|source| {
+                            name.split('_')
+                                .next()
+                                .is_some_and(|prefix| source.ends_with(&format!("/{prefix}")))
+                        })
+                    })
+        })
+        .cloned()
+        .collect();
+    let problems = tofu_audit::unmasked_attributes(&schema, &used_here);
+    if !problems.is_empty() {
+        bail!("tofu:\n  {}", problems.join("\n  "));
+    }
+    Ok(used_here)
+}
+
+/// OpenTofu's functions that read a file from disk: refused in `deploy/tofu/` as whole words,
+/// anywhere, since what they load (a template, a script, a key) would reach OpenTofu and not the
+/// raw scan, and HCL calls a function across a line break or a comment before its `(`
+/// (DEC-2014 item 6). A prose use of the word is reworded.
+const TOFU_FILE_FUNCTIONS: [&str; 12] = [
+    "file",
+    "fileexists",
+    "fileset",
+    "filebase64",
+    "filebase64sha256",
+    "filebase64sha512",
+    "filemd5",
+    "filesha1",
+    "filesha256",
+    "filesha512",
+    "templatefile",
+    "templatestring",
+];
 
 /// The provider sources `deploy/tofu/` may name (DEC-2012 item 4).
 const TOFU_PROVIDER_SOURCES: [&str; 2] = ["digitalocean/digitalocean", "cloudflare/cloudflare"];
@@ -1037,6 +1128,23 @@ fn tofu_forbidden_blocks(files: &[(String, String)]) -> Vec<String> {
             }) {
                 refuse(
                     "names `http` other than in a URL, the data source deploy/tofu never may use",
+                );
+            }
+            if TOFU_FILE_FUNCTIONS
+                .iter()
+                .any(|name| whole_words(&line, name).next().is_some())
+            {
+                refuse(
+                    "names a function that reads a file, as a whole word wherever it appears, \
+                     since a line break or a comment between the name and its `(` still calls it",
+                );
+            }
+            if whole_words(&line, "terraform_remote_state")
+                .next()
+                .is_some()
+            {
+                refuse(
+                    "names `terraform_remote_state`, which reads another state deploy/tofu never may",
                 );
             }
             if whole_words(&line, "source").next().is_some() && !allowed_source_line(&line) {
@@ -1177,20 +1285,23 @@ const INFRA_CLOSE_IF: &str = "      - if: always() && steps.build.outcome == 'su
 /// through cargo: [`INFRA_RUN`]'s and [`INFRA_CLOSE`]'s, which an earlier step of the same job
 /// built from the checkout with `cargo build --locked --package xtask`.
 const INFRA_BINARY_ARGS: [&[&str]; 2] = [&["infra"], &["infra", "close"]];
-/// The one secret [`INFRA_CLOSE`]'s step may read.
-const INFRA_CLOSE_SECRET: &str = "DIGITAL_OCEAN_API_KEY";
+/// The only secrets [`INFRA_CLOSE`]'s step may read: the DigitalOcean token, to delete the run's
+/// Spaces key and close the window, and the founder's CIDRs, which the closed window keeps.
+const INFRA_CLOSE_SECRETS: [&str; 2] = ["DIGITAL_OCEAN_API_KEY", "KUBE_API_ALLOWED_CIDRS"];
 /// The secrets that step reads, each from the environment `infra-<environment>` the founder
 /// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Spaces key is
 /// minted per run, never stored (DEC-2030 item 4). The Cloudflare token goes to OpenTofu as a
 /// variable under a `CF_` name, since `web/scripts/workers.mjs` keeps every `CLOUDFLARE_` name
 /// to `web-deploy.yml`'s deploy step (DEC-1005 item 2); the account id is read from Cloudflare,
-/// never configured (DEC-2030 item 1). Production's Access emails are a secret, since GitHub
-/// prints a variable in a step's environment in the public log (DEC-2030 item 2).
-const INFRA_SECRETS: [&str; 4] = [
+/// never configured (DEC-2030 item 1). Production's Access emails and the founder's CIDRs are
+/// secrets, since GitHub prints a variable in a step's environment in the public log (DEC-2030
+/// items 2 and 6).
+const INFRA_SECRETS: [&str; 5] = [
     "DIGITAL_OCEAN_API_KEY",
     "CF_INFRA_API_TOKEN",
     "TOFU_STATE_PASSPHRASE",
     "ACCESS_ALLOWED_EMAILS",
+    "KUBE_API_ALLOWED_CIDRS",
 ];
 /// The list inputs `infra.yml` hands OpenTofu as JSON, which `infra` leaves out of `tofu`'s
 /// environment when blank or empty, so a root with a default takes it and a root without one
@@ -1280,34 +1391,165 @@ fn infra() -> Result<()> {
     if run.is_empty() || !run.chars().all(|c| c.is_ascii_digit()) {
         bail!("GITHUB_RUN_ID must be the run's number, which names its Spaces key");
     }
+    let sha = env::var(INFRA_SHA_ENV).unwrap_or_default();
+    reviewed_commit(
+        &sha,
+        &env::var("GITHUB_SHA").unwrap_or_default(),
+        &head_commit()?,
+    )?;
     let work = repo_root()?.join("target").join("tofu");
     fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
     let plan_file = work.join(format!("{environment}.tfplan"));
     let commands = infra_commands(&environment, &action, &plan_file.to_string_lossy())?;
+    for name in [infra_preflight::KUBE_CIDRS_ENV, infra_preflight::EMAILS_ENV] {
+        for value in tofu_audit::list_items(&env::var(name).unwrap_or_default()) {
+            mask::add_mask(&value);
+        }
+    }
     let read = |name: &str| env::var(name).ok();
     let preflight = infra_preflight::preflight(&environment, &run, !commands.is_empty(), &read)?;
     eprint!("{}", preflight.checklist.render(&environment));
+    let mut window = None;
     let outcome = if preflight.checklist.complete() {
-        run_tofu(&commands, preflight.key.key(), &plan_file)
+        match opens_window(&environment, &action)
+            .then(|| infra_window::open_window(&infra_window::Curl))
+            .transpose()
+        {
+            Ok(opened) => {
+                window = opened;
+                run_tofu(
+                    &commands,
+                    preflight.key.key(),
+                    &sha,
+                    &plan_file,
+                    window.as_deref(),
+                    &run,
+                )
+            }
+            Err(error) => Err(error),
+        }
     } else {
         Err(anyhow::anyhow!(
             "infra preflight: each MISSING line above is a step in deploy/tofu/README.md; nothing \
              was planned"
         ))
     };
-    if !preflight.key.release()? {
-        bail!(
+    let closed = window.is_some().then(|| {
+        let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
+        let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
+        infra_window::close_window(
+            &infra_window::Curl,
+            &token,
+            &environment,
+            founder.as_deref(),
+        )
+    });
+    let applied = outcome.is_ok();
+    let keys = match preflight.key.release() {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(anyhow::anyhow!(
             "this run's Spaces key was not deleted; `infra close` and the next run of \
              {environment} delete it (DEC-2030 item 4)"
-        );
-    }
-    outcome
+        )),
+        Err(error) => Err(error),
+    };
+    settle(outcome, closed, applied, keys)
 }
 
-/// `cargo xtask infra close` (DEC-2030 item 4): `infra.yml`'s last step, which runs `if:
-/// always()` with only the DigitalOcean token, deletes every Spaces key this environment's runs
-/// minted, so a run killed before its own guard ran leaves none. Like `infra`, it runs only in
-/// that job on `main`.
+/// How a run that may have opened a window ends (the review of #1771, B1 and B2): the window's
+/// close and the Spaces key's deletion are each attempted and reported, whatever came before, and
+/// the first error is returned. A close reports the window closed only when the cluster was read
+/// back admitting exactly the closed addresses, or had no such cluster when none was expected;
+/// `cluster_expected` makes a missing cluster an error, as after a successful apply.
+fn settle(
+    outcome: Result<()>,
+    closed: Option<Result<infra_window::Window>>,
+    cluster_expected: bool,
+    keys: Result<()>,
+) -> Result<()> {
+    let window = match closed {
+        None => Ok(()),
+        Some(Ok(infra_window::Window::Closed | infra_window::Window::AlreadyClosed)) => {
+            eprintln!("    the control plane's window is closed (DEC-2028 item 3)");
+            Ok(())
+        }
+        Some(Ok(infra_window::Window::NoCluster)) if !cluster_expected => {
+            eprintln!("    no cluster exists, so no window is open (DEC-2028 item 3)");
+            Ok(())
+        }
+        Some(Ok(infra_window::Window::NoCluster)) => Err(anyhow::anyhow!(
+            "the apply succeeded but DigitalOcean lists no such cluster, so the window's close \
+             could not be confirmed"
+        )),
+        Some(Err(error)) => Err(error),
+    }
+    .context("the control plane's window may be open; `infra close` and the next run close it");
+    let mut first = None;
+    for result in [outcome, window, keys] {
+        if let Err(error) = result {
+            if first.is_some() {
+                eprintln!("    also: {error:#}");
+            } else {
+                first = Some(error);
+            }
+        }
+    }
+    first.map_or(Ok(()), Err)
+}
+
+/// The dispatch's `sha` input, which the founder approves the run for (the audit's item 5).
+const INFRA_SHA_ENV: &str = "MANDATE_INFRA_SHA";
+
+/// The commit `git` has checked out.
+fn head_commit() -> Result<String> {
+    let out = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .context("starting `git`")?;
+    if !out.status.success() {
+        bail!("`git rev-parse HEAD` failed");
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
+/// Refuses a run unless `sha`, the commit the founder named when dispatching, is a full commit and
+/// is both the run's commit and the one checked out, so an approval binds to a reviewed commit and
+/// never to whatever `main` became while the run waited for it.
+fn reviewed_commit(sha: &str, run_sha: &str, head: &str) -> Result<()> {
+    if sha.len() != 40
+        || !sha
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+    {
+        bail!("{INFRA_SHA_ENV} must be the full 40-character commit you reviewed");
+    }
+    if sha != run_sha || sha != head {
+        bail!(
+            "the dispatch names commit {sha}, but the run is at {run_sha} with {head} checked \
+             out: GitHub fixes a run's commit when it is dispatched, so dispatch again naming \
+             the commit main is at"
+        );
+    }
+    Ok(())
+}
+
+/// The paths a change to which changes what `infra.yml` does: the OpenTofu tree, the workflow, and
+/// everything the secret-holding binary is built from.
+const INFRA_PATHS: [&str; 7] = [
+    TOFU_DIR,
+    INFRA_WORKFLOW,
+    "xtask/",
+    "Cargo.lock",
+    "Cargo.toml",
+    "rust-toolchain.toml",
+    ".cargo/",
+];
+
+/// `cargo xtask infra close` (DEC-2030 item 4, DEC-2028 item 3): `infra.yml`'s last step, which
+/// runs `if: always()` with only the DigitalOcean token and the founder's CIDRs, closes staging's
+/// window first and then deletes every Spaces key this environment's runs minted, each attempted
+/// whatever the other did, so a run killed before its own guard ran leaves neither. Like `infra`,
+/// it runs only in that job on `main`.
 fn infra_close() -> Result<()> {
     let actions = env::var("GITHUB_ACTIONS").unwrap_or_default();
     let reference = env::var("GITHUB_REF").unwrap_or_default();
@@ -1320,26 +1562,106 @@ fn infra_close() -> Result<()> {
         eprintln!("    infra close: DIGITAL_OCEAN_API_KEY is not set, so no key was minted");
         return Ok(());
     }
-    let deleted = infra_preflight::close(&environment, &token)?;
-    eprintln!("    infra close: deleted {deleted} Spaces key(s) this environment's runs minted");
-    Ok(())
+    let closed = opens_window(&environment, "apply").then(|| {
+        let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
+        for value in tofu_audit::list_items(founder.as_deref().unwrap_or_default()) {
+            mask::add_mask(&value);
+        }
+        infra_window::close_window(
+            &infra_window::Curl,
+            &token,
+            &environment,
+            founder.as_deref(),
+        )
+    });
+    let keys = infra_preflight::close(&environment, &token).map(|deleted| {
+        eprintln!(
+            "    infra close: deleted {deleted} Spaces key(s) this environment's runs minted"
+        );
+    });
+    settle(Ok(()), closed, false, keys)
+}
+
+/// Whether `action` on `environment` opens the control plane to its own runner and bootstraps
+/// the cluster (DEC-2028): an `apply` on staging, the one environment lane GO's bootstrap runs in
+/// from CI today.
+fn opens_window(environment: &str, action: &str) -> bool {
+    environment == "staging" && action == "apply"
+}
+
+/// Lane GO's bootstrap after staging's apply (DEC-2018 item 7, DEC-2028): the workload secrets
+/// from OpenTofu's outputs, each wrapped in a [`gitops::Secret`], which masks it, the moment it is
+/// read; a kubeconfig that expires in 900 seconds, at mode 0600 in `$RUNNER_TEMP` and deleted
+/// however the bootstrap ends; and the bootstrap itself, which confirms the context first.
+fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str) -> Result<()> {
+    let output = |name: &str| -> Result<String> {
+        let out = tofu(&[
+            chdir.to_owned(),
+            "output".to_owned(),
+            "-no-color".to_owned(),
+            "-raw".to_owned(),
+            name.to_owned(),
+        ])
+        .output()
+        .context("starting `tofu`")?;
+        if !out.status.success() {
+            bail!("`tofu output {name}` failed");
+        }
+        String::from_utf8(out.stdout)
+            .ok()
+            .with_context(|| format!("`tofu output {name}` is not UTF-8"))
+    };
+    let secrets = gitops::WorkloadSecrets {
+        archive_access_key_id: gitops::Secret::new(output("archive_access_key_id")?),
+        archive_secret_access_key: gitops::Secret::new(output("archive_secret_access_key")?),
+        tunnel_token: gitops::Secret::new(output("tunnel_token")?),
+    };
+    let cluster_id = output("cluster_id")?;
+    let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
+    let temp = env::var("RUNNER_TEMP").context("RUNNER_TEMP is not set")?;
+    let (_, context) = infra_window::cluster_names("staging");
+    let kubeconfig = infra_window::fetch_kubeconfig(
+        &infra_window::Curl,
+        &token,
+        cluster_id.trim(),
+        &context,
+        Path::new(&temp),
+        run,
+    )?;
+    gitops::bootstrap_from_infra(
+        &repo_root()?,
+        gitops::Environment::Staging,
+        kubeconfig.path(),
+        &context,
+        &secrets,
+    )
 }
 
 /// Runs each `tofu` command in turn, with the run's Spaces key in the child's environment alone,
-/// as both of the names the provider and the backend read. A blank or empty
-/// `KUBE_API_ALLOWED_CIDRS` is left out, so staging's root takes its empty default, and so is a
-/// blank `ACCESS_ALLOWED_EMAILS`, which only production's root declares. The public
-/// log gets no `tofu` output (DEC-2014 item 4): each command's output is captured, only a
-/// failure's diagnostics, which OpenTofu redacts for every sensitive value, are printed, and after
-/// `plan` the saved plan's addresses and actions alone.
+/// as both of the names the provider and the backend read, and `sha` as the commit the plan
+/// records. A blank or empty `KUBE_API_ALLOWED_CIDRS` is left out, so staging's root takes its
+/// empty default, and so is a blank `ACCESS_ALLOWED_EMAILS`, which only production's root
+/// declares. The public log gets no `tofu` output (DEC-2014 item 4, the audit's item 1): each command's
+/// output is captured, and only a failure's diagnostics, which OpenTofu redacts for every
+/// sensitive value, are printed. After `init` the log lists what changed since the commit state
+/// last applied; after `plan`, the saved plan's addresses and actions alone.
 fn run_tofu(
     commands: &[Vec<String>],
     key: Option<&infra_preflight::SpacesKey>,
+    sha: &str,
     plan_file: &Path,
+    window: Option<&str>,
+    run: &str,
 ) -> Result<()> {
     let tofu = |args: &[String]| {
         let mut command = Command::new("tofu");
-        command.args(args).env("TF_IN_AUTOMATION", "1");
+        command
+            .args(args)
+            .env("TF_IN_AUTOMATION", "1")
+            .env("TF_VAR_commit_sha", sha);
+        if let Some(window) = window {
+            command.env("TF_VAR_bootstrap_runner_cidr", window);
+        }
         if let Some(key) = key {
             for name in ["SPACES_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID"] {
                 command.env(name, &key.access_key);
@@ -1362,10 +1684,12 @@ fn run_tofu(
             eprintln!("{}", String::from_utf8_lossy(&out.stderr).trim());
             bail!("`tofu {}` failed with {}", args.join(" "), out.status);
         }
+        let chdir = args.first().cloned().unwrap_or_default();
         match args.get(1).map(String::as_str) {
+            Some("init") => changed_since_applied(&tofu, &chdir, sha)?,
             Some("plan") => {
                 let shown = tofu(&[
-                    args.first().cloned().unwrap_or_default(),
+                    chdir,
                     "show".to_owned(),
                     "-json".to_owned(),
                     plan_file.to_string_lossy().into_owned(),
@@ -1382,9 +1706,60 @@ fn run_tofu(
                     eprintln!("      {line}");
                 }
             }
-            Some("apply") => eprintln!("    applied exactly the plan above"),
+            Some("apply") => {
+                eprintln!("    applied exactly the plan above");
+                if window.is_some() {
+                    bootstrap_staging(&tofu, &chdir, run)?;
+                    eprintln!("    the cluster is bootstrapped (lane GO, DEC-2018)");
+                }
+            }
             _ => {}
         }
+    }
+    Ok(())
+}
+
+/// Prints the files under [`INFRA_PATHS`] that changed between the commit this environment's
+/// state last applied and `sha`, so the founder approves a diff they can see. A first run, or a
+/// commit the checkout does not hold, says so instead.
+fn changed_since_applied(
+    tofu: &dyn Fn(&[String]) -> Command,
+    chdir: &str,
+    sha: &str,
+) -> Result<()> {
+    let out = tofu(&[
+        chdir.to_owned(),
+        "output".to_owned(),
+        "-no-color".to_owned(),
+        "-raw".to_owned(),
+        "applied_commit".to_owned(),
+    ])
+    .output()
+    .context("starting `tofu`")?;
+    let applied = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if !out.status.success()
+        || applied.len() != 40
+        || !applied.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        eprintln!("    no applied commit in state yet: this is the environment's first apply");
+        return Ok(());
+    }
+    if applied == sha {
+        eprintln!("    state was last applied at this same commit");
+        return Ok(());
+    }
+    let diff = Command::new("git")
+        .args(["diff", "--name-status", &applied, sha, "--"])
+        .args(INFRA_PATHS)
+        .output()
+        .context("starting `git`")?;
+    if !diff.status.success() {
+        eprintln!("    state was last applied at {applied}, which this checkout does not hold");
+        return Ok(());
+    }
+    eprintln!("    changed since the last apply ({applied}):");
+    for line in String::from_utf8_lossy(&diff.stdout).lines() {
+        eprintln!("      {line}");
     }
     Ok(())
 }
@@ -1546,7 +1921,7 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     ),
     (
         INFRA_WORKFLOW,
-        "TF_VAR_access_allowed_emails: ${{ secrets.ACCESS_ALLOWED_EMAILS }}",
+        "TF_VAR_kube_api_allowed_addresses: ${{ secrets.KUBE_API_ALLOWED_CIDRS }}",
     ),
 ];
 
@@ -1733,6 +2108,10 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
             "          persist-credentials: false",
             "the checkout must keep no credential",
         ),
+        (
+            "          MANDATE_INFRA_SHA: ${{ inputs.sha }}",
+            "the secret step must receive the reviewed commit, which it checks against the checkout",
+        ),
     ] {
         if !has(wanted) {
             fail(why);
@@ -1806,7 +2185,7 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
         let allowed: &[&str] = if running == [at] {
             &INFRA_SECRETS
         } else if closing == [at] {
-            &[INFRA_CLOSE_SECRET]
+            &INFRA_CLOSE_SECRETS
         } else {
             &[]
         };
@@ -1816,8 +2195,9 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
         {
             fail(&format!(
                 "only the step that runs `{INFRA_RUN}` may read a secret, and only {}; the \
-                 closing step reads {INFRA_CLOSE_SECRET} alone",
-                INFRA_SECRETS.join(", ")
+                 closing step reads {} alone",
+                INFRA_SECRETS.join(", "),
+                INFRA_CLOSE_SECRETS.join(" and ")
             ));
         }
     }
@@ -4886,6 +5266,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "DO_NOT_TRACK",
     "EVENT",
     "FAST_RESULT",
+    "FLUX_SHA256",
+    "FLUX_VERSION",
     "FULL_CHECKS_RESULT",
     "FULL_CHECKS_SELECTED",
     "FULL_RESULT",
@@ -4894,6 +5276,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "GITLEAKS_VERSION",
     "HELM_SHA256",
     "HELM_VERSION",
+    "FLUX_SHA256",
+    "FLUX_VERSION",
+    "KUBECTL_SHA256",
+    "KUBECTL_VERSION",
     "IMPECCABLE_NO_TELEMETRY",
     "K3D_SHA256",
     "K3D_VERSION",
@@ -4905,6 +5291,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_MUTANTS_PLANNED",
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
+    "MANDATE_GITOPS_REQUIRED",
     "MANDATE_MUTANT_SHARD",
     "MANDATE_OPENBAO_ADDR",
     "MANDATE_OPENBAO_CA",
@@ -4920,6 +5307,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_S3_URL",
     "MANDATE_INFRA_ACTION",
     "MANDATE_INFRA_ENVIRONMENT",
+    "MANDATE_INFRA_SHA",
     "MANDATE_TOFU_REQUIRED",
     "DIGITALOCEAN_TOKEN",
     "TF_VAR_state_passphrase",
@@ -15149,6 +15537,34 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-2611 (amending DEC-2606): CodeQL's pushes to `main` share one group in which a started
+    /// analysis finishes and a newer push replaces only the one waiting, so the latest commit,
+    /// which holds every earlier one, is always analysed; a pull request's runs cancel the older
+    /// run of their ref; the weekly schedule has a group of its own.
+    #[test]
+    fn codeql_runs_one_analysis_of_main_at_a_time() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/codeql.yml"))?;
+        assert!(
+            workflow.contains(
+                "concurrency:\n  group: codeql-${{ github.event_name == 'schedule' && \
+                 github.run_id || github.ref }}\n  cancel-in-progress: ${{ github.event_name == \
+                 'pull_request' }}\n"
+            ),
+            "pushes to main share codeql-refs/heads/main and are never cancelled once started, a \
+             pull request's runs cancel their older run, and the schedule has its own group \
+             (DEC-2611)"
+        );
+        assert!(
+            workflow.contains("  push:\n    branches: [ \"main\" ]\n"),
+            "every push to main is still analysed (DEC-2606 item 3)"
+        );
+        assert!(
+            workflow.contains("  schedule:\n    - cron: '42 2 * * 1'\n"),
+            "the weekly analysis stays (DEC-2606 item 3)"
+        );
+        Ok(())
+    }
+
     /// DEC-610: a draft runs no `ci` job. `select`, `fast-lint` and the mutation plan are skipped
     /// while the pull request is a draft, the scoped jobs follow `select` (DEC-1190) and the matrix
     /// its plan, `fast` and `full` are skipped too rather than judging skipped jobs, the failure
@@ -16076,6 +16492,29 @@ mod tests {
                 "{text:?}: a backslash is refused"
             );
         }
+        for text in [
+            "x = file(\"secret.pem\")\n",
+            "x = templatefile (\"a.tftpl\", {})\n",
+            "x = FILEBASE64(\"k\")\n",
+            "x = [file\n(\"/etc/hostname\")]\n",
+            "x = [file /* x */ (\"/etc/hostname\")]\n",
+            "x = [file # x\n(\"/etc/hostname\")]\n",
+            "x = [file // x\n(\"/etc/hostname\")]\n",
+            "data \"terraform_remote_state\" \"other\" {}\n",
+            "# the state file stays encrypted\n",
+        ] {
+            assert!(
+                !one("m/a.tf", text).is_empty(),
+                "{text:?}: a file read, however it is split, or another state is refused"
+            );
+        }
+        for text in [
+            "description = \"a profile name\"\n",
+            "# the state stays encrypted\n",
+            "x = filename\n",
+        ] {
+            assert!(one("m/a.tf", text).is_empty(), "{text:?} is allowed");
+        }
         let root = env::temp_dir().join(format!("mandate-tofu-links-{}", std::process::id()));
         if root.exists() {
             fs::remove_dir_all(&root)?;
@@ -16275,6 +16714,220 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-2028 (F2): staging's apply opens the window only after its address is masked, opens
+    /// it in the plan the founder approved, bootstraps only after that plan is applied, wraps every
+    /// workload secret before anything else holds it, and closes the window after `tofu` however
+    /// it ended; `infra close` closes it again. Read from the source, since all of it runs only in
+    /// `infra.yml`'s job.
+    #[test]
+    fn the_window_opens_masked_and_always_closes() {
+        let source = include_str!("main.rs");
+        let body = |head: &str| {
+            source
+                .split(head)
+                .nth(1)
+                .and_then(|rest| rest.split("\n}\n").next())
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let infra = body("\nfn infra() -> Result<()> {");
+        let at = |text: &str, needle: &str| text.find(needle);
+        let open = at(&infra, "infra_window::open_window");
+        let run = at(&infra, "window = opened;\n                run_tofu(");
+        let close = at(&infra, "infra_window::close_window(");
+        assert!(
+            open.is_some() && open < run,
+            "the window is opened, and masked, before tofu runs"
+        );
+        assert!(
+            run.is_some() && run < close,
+            "the window is closed after tofu, however it ended"
+        );
+        assert!(
+            at(&infra, "opens_window(&environment, &action)").is_some(),
+            "only staging's apply opens a window"
+        );
+        let tofu = body("\nfn run_tofu(");
+        assert!(
+            at(
+                &tofu,
+                "command.env(\"TF_VAR_bootstrap_runner_cidr\", window);"
+            )
+            .is_some(),
+            "the window reaches tofu as the variable the doks module validates"
+        );
+        let apply = at(&tofu, "applied exactly the plan above");
+        let bootstrap = at(&tofu, "bootstrap_staging(&tofu, &chdir, run)?;");
+        assert!(
+            apply.is_some() && apply < bootstrap,
+            "the bootstrap follows the applied plan"
+        );
+        let staging = body("\nfn bootstrap_staging(");
+        let wrapped = staging.matches("gitops::Secret::new(output(").count();
+        assert_eq!(wrapped, 3, "each workload secret is wrapped as it is read");
+        let kubeconfig = at(&staging, "infra_window::fetch_kubeconfig(");
+        let last_secret = staging.rfind("gitops::Secret::new(output(");
+        assert!(
+            last_secret < kubeconfig && kubeconfig < at(&staging, "gitops::bootstrap_from_infra("),
+            "the kubeconfig is fetched after the secrets are wrapped and before the bootstrap"
+        );
+        let close_step = body("\nfn infra_close() -> Result<()> {");
+        let masks = at(&close_step, "mask::add_mask(&value);");
+        let closes = at(&close_step, "infra_window::close_window(");
+        assert!(
+            masks.is_some() && masks < closes,
+            "`infra close` masks the CIDRs, then closes"
+        );
+        let keys = at(&close_step, "infra_preflight::close(");
+        assert!(
+            keys.is_some()
+                && closes < keys
+                && !close_step[closes.unwrap_or_default()..].contains(")?;"),
+            "`infra close` closes the window before the keys, and no error skips either"
+        );
+        assert!(super::opens_window("staging", "apply"));
+        for (environment, action) in [
+            ("staging", "plan"),
+            ("staging", "preflight"),
+            ("production", "apply"),
+        ] {
+            assert!(
+                !super::opens_window(environment, action),
+                "{environment} {action} opens nothing"
+            );
+        }
+    }
+
+    /// The review of #1771, B1 and B2: every close is attempted and the first error is returned; a
+    /// window is reported closed only when it was, and a missing cluster after an apply is an
+    /// error.
+    #[test]
+    fn a_run_settles_every_close_and_keeps_the_first_error() {
+        fn fail<T>(text: &str) -> Result<T> {
+            Err(anyhow::anyhow!("{text}"))
+        }
+        let message = |result: Result<()>| result.err().map(|error| format!("{error:#}"));
+        assert!(super::settle(Ok(()), None, true, Ok(())).is_ok());
+        for closed in [
+            super::infra_window::Window::Closed,
+            super::infra_window::Window::AlreadyClosed,
+        ] {
+            assert!(super::settle(Ok(()), Some(Ok(closed)), true, Ok(())).is_ok());
+        }
+        assert!(
+            super::settle(
+                Ok(()),
+                Some(Ok(super::infra_window::Window::NoCluster)),
+                false,
+                Ok(())
+            )
+            .is_ok()
+        );
+        let missing = message(super::settle(
+            Ok(()),
+            Some(Ok(super::infra_window::Window::NoCluster)),
+            true,
+            Ok(()),
+        ));
+        assert!(
+            missing.is_some_and(|text| text.contains("lists no such cluster")),
+            "a missing cluster after an apply is an error"
+        );
+        let open = message(super::settle(
+            Ok(()),
+            Some(fail("still open")),
+            false,
+            Ok(()),
+        ));
+        assert!(
+            open.is_some_and(|text| text.contains("may be open") && text.contains("still open"))
+        );
+        assert_eq!(
+            message(super::settle(Ok(()), None, false, fail("key kept"))).as_deref(),
+            Some("key kept")
+        );
+        assert_eq!(
+            message(super::settle(
+                fail("apply failed"),
+                Some(fail("still open")),
+                false,
+                fail("key kept")
+            ))
+            .as_deref(),
+            Some("apply failed"),
+            "the first error is returned"
+        );
+        let window_first = message(super::settle(
+            Ok(()),
+            Some(fail("still open")),
+            false,
+            fail("key kept"),
+        ));
+        assert!(window_first.is_some_and(|text| text.contains("still open")));
+    }
+
+    /// The review's major (2): `infra` masks every item of the CIDR and email list secrets, each
+    /// CIDR's bare address included, before the preflight or any `tofu` call can print one. Read
+    /// from the source, since `infra` itself runs only in `infra.yml`'s job.
+    #[test]
+    fn infra_masks_the_list_secrets_before_anything_runs() {
+        let source = include_str!("main.rs");
+        let body = source
+            .split("\nfn infra() -> Result<()> {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n}\n").next())
+            .unwrap_or_default();
+        let at = |needle: &str| body.find(needle);
+        let masks =
+            at("for name in [infra_preflight::KUBE_CIDRS_ENV, infra_preflight::EMAILS_ENV]");
+        let items = at("tofu_audit::list_items(");
+        let add = at("mask::add_mask(&value);");
+        let preflight = at("infra_preflight::preflight(");
+        let tofu = at("run_tofu(");
+        assert!(
+            masks.is_some() && items.is_some() && add.is_some(),
+            "infra masks each item of both list secrets"
+        );
+        assert!(
+            masks < items && items < add,
+            "the masks come from tofu_audit::list_items"
+        );
+        assert!(
+            preflight.is_some() && add < preflight,
+            "the masks run before the preflight"
+        );
+        assert!(
+            tofu.is_some() && add < tofu,
+            "the masks run before any tofu call"
+        );
+        assert_eq!(
+            crate::tofu_audit::list_items("[\"203.0.113.7/32\"]"),
+            ["203.0.113.7/32", "203.0.113.7"],
+            "a CIDR's bare address is masked too"
+        );
+    }
+
+    /// The audit's item 5: a run proceeds only at the full commit the founder named, which must be
+    /// both the run's commit and the checkout.
+    #[test]
+    fn infra_runs_only_at_the_reviewed_commit() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let other = "1123456789abcdef0123456789abcdef01234567";
+        assert!(crate::reviewed_commit(sha, sha, sha).is_ok());
+        for (named, run, head) in [
+            ("", sha, sha),
+            ("0123456", sha, sha),
+            ("0123456789ABCDEF0123456789ABCDEF01234567", sha, sha),
+            (sha, other, sha),
+            (sha, sha, other),
+        ] {
+            assert!(
+                crate::reviewed_commit(named, run, head).is_err(),
+                "{named:?} at {run} / {head} is refused"
+            );
+        }
+    }
+
     /// E21-56 (DEC-2014): the committed `infra.yml` passes its guard, and each way of loosening
     /// it is named: another trigger, a job off `main`, another environment, a checkout that keeps
     /// its credential, a second job, another input option, a secret in another step or at the job,
@@ -16365,6 +17018,10 @@ mod tests {
             (
                 "step after",
                 format!("{text}      - run: cargo xtask markers\n"),
+            ),
+            (
+                "no reviewed commit",
+                edited("          MANDATE_INFRA_SHA: ${{ inputs.sha }}\n", ""),
             ),
             (
                 "close not always",

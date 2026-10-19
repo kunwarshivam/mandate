@@ -102,6 +102,17 @@ const HOST_CA_BUNDLES: [&str; 4] = [
     "/etc/ssl/cert.pem",
 ];
 const RUNTIME_DOCKERFILE: &str = "deploy/cell/images/runtime.Dockerfile";
+/// The demo's recorded research bundle (DEC-2210 item 1), and each of its files, which the interim
+/// runtime image carries under `research/` in its context and at
+/// `/usr/local/share/mandate/research` in the image (DEC-2246). No release image carries it.
+const DEMO_RESEARCH: &str = "deploy/cell/demo/research";
+const DEMO_RESEARCH_FILES: [&str; 5] = [
+    "research.json",
+    "bars.json",
+    "news.json",
+    "filings.json",
+    "instruments.json",
+];
 const EXECUTOR_DOCKERFILE: &str = "deploy/cell/images/executor.Dockerfile";
 /// Where the cell keeps what it derives: the kubeconfig, the downloaded operator chart, and the
 /// image build context. Under `target/`, so nothing derived is ever committed.
@@ -644,9 +655,16 @@ fn signin_values(stub: Option<&str>) -> [String; 2] {
 
 /// `mandate.local/<name>:<the first 12 hex digits of the binaries' digest>` ([`combined`]).
 fn local_tag(name: &str, binaries: &[&str]) -> Result<String> {
+    local_tag_with(name, binaries, &[])
+}
+
+/// [`local_tag`] over the binaries and then each of `files`, so a change to a file the image
+/// carries changes its tag too.
+fn local_tag_with(name: &str, binaries: &[&str], files: &[String]) -> Result<String> {
     let digests = binaries
         .iter()
         .map(|binary| sha256(&static_binary(binary)))
+        .chain(files.iter().map(|file| sha256(file)))
         .collect::<Result<Vec<_>>>()?;
     let digest = combined(&digests);
     let short = digest
@@ -682,7 +700,22 @@ fn runtime_image() -> Result<Option<String>> {
     if let ImageSource::Pull(_) = host_image_source()? {
         return Ok(None);
     }
-    local_tag("runtime", &["mandate-daemon"]).map(Some)
+    let files: Vec<String> = demo_research().into_iter().map(|(from, _)| from).collect();
+    local_tag_with("runtime", &["mandate-daemon"], &files).map(Some)
+}
+
+/// The demo's research bundle as the runtime image's context files: each host path, and its name
+/// under `research/`.
+fn demo_research() -> Vec<(String, String)> {
+    DEMO_RESEARCH_FILES
+        .iter()
+        .map(|file| {
+            (
+                format!("{DEMO_RESEARCH}/{file}"),
+                format!("research/{file}"),
+            )
+        })
+        .collect()
 }
 
 /// The cell's `executor` image (DEC-2031): this checkout's `mandate-executord`, whose broker is the
@@ -734,7 +767,12 @@ pub fn up() -> Result<()> {
         build_image(&image, IMAGE_DOCKERFILE, "mandate", &[(&runner, RUNNER)])?;
     }
     if let Some(runtime) = &runtime {
-        build_image(runtime, RUNTIME_DOCKERFILE, "mandate-daemon", &[])?;
+        let research = demo_research();
+        let files: Vec<(&str, &str)> = research
+            .iter()
+            .map(|(from, name)| (from.as_str(), name.as_str()))
+            .collect();
+        build_image(runtime, RUNTIME_DOCKERFILE, "mandate-daemon", &files)?;
     }
     if let Some(executor) = &executor {
         build_image(executor, EXECUTOR_DOCKERFILE, "mandate-executord", &[])?;
@@ -1007,7 +1045,12 @@ fn build_image(image: &str, dockerfile: &str, binary: &str, files: &[(&str, &str
     fs::copy(&built, context.join(binary))
         .with_context(|| format!("copying {built} into the image context"))?;
     for (source, name) in files {
-        fs::copy(source, context.join(name)).with_context(|| {
+        let to = context.join(name);
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("creating {} in the image context", parent.display()))?;
+        }
+        fs::copy(source, to).with_context(|| {
             format!("copying {source} into the image context; the {image} image needs it")
         })?;
     }
@@ -4034,8 +4077,10 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
             name: "the agent runtime, on the deny-all wiring until the post-R0 hook (DEC-1013)",
             skipped: if started_by_built("runtime") {
                 Some(
-                    "the deployment manager starts it, once it reads a deployment's account from \
-                     `AgentDeployed` version 2 (DEC-1171); until then it starts none"
+                    "the deployment manager starts it from a version-2 `AgentDeployed` \
+                     (DEC-1171); the demo's paper deployment stays version 1 until \
+                     `connection record` can run, which waits on the executor's connect check \
+                     (E21-30, lane X)"
                         .to_string(),
                 )
             } else {
@@ -4051,7 +4096,7 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
                 Some(
                     "the executor runs on the fixture paper broker (DEC-2031), but the runtime \
                      proposes no order on the deny-all wiring until the post-R0 hook (DEC-1013), \
-                     and the executor takes no order before slice X1b (E21-30)"
+                     and the executor fills no paper order before slice X1b-3 (E21-30)"
                         .to_string(),
                 )
             } else {
@@ -4549,6 +4594,8 @@ fn sh_in(dir: &str, program: &str, args: &[&str]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     /// The cell judges the vault's status as the client judges `sys/seal-status`: uninitialized,
@@ -4574,6 +4621,36 @@ mod tests {
         assert!(vault_state(&status(true, true, "inmem")).is_err());
         assert!(vault_state(r#"{"sealed": false, "storage_type": "raft"}"#).is_err());
         assert!(vault_state("not json").is_err());
+    }
+
+    /// The runtime image's context carries every file of the demo's research bundle and nothing
+    /// else under `research/`, and its Dockerfile copies them to the one path no release image may
+    /// hold (DEC-2246).
+    #[test]
+    fn the_runtime_image_carries_the_whole_demo_bundle_at_the_cell_s_path() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let on_disk: BTreeSet<String> = fs::read_dir(root.join(DEMO_RESEARCH))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        let carried: BTreeSet<String> = DEMO_RESEARCH_FILES
+            .iter()
+            .map(|file| (*file).to_owned())
+            .collect();
+        assert_eq!(carried, on_disk);
+        assert!(
+            demo_research().iter().all(
+                |(from, name)| from.starts_with(DEMO_RESEARCH) && name.starts_with("research/")
+            )
+        );
+        let dockerfile = fs::read_to_string(root.join(RUNTIME_DOCKERFILE)).unwrap();
+        assert!(
+            dockerfile.contains(&format!(
+                "COPY research/ /{}/\n",
+                crate::image::CELL_RESEARCH
+            )),
+            "{dockerfile}"
+        );
     }
 
     /// One binary's tag is its own digest, as before; two binaries' changes when either changes,
@@ -4872,7 +4949,7 @@ mod tests {
             gaps.len(),
             2,
             "every lane on main, the paper agent and research still wait on the post-R0 hook and \
-             X1b (DEC-2031): {gaps:?}"
+             X1b-3 (DEC-2031): {gaps:?}"
         );
         assert!(gaps.contains(&RESEARCH_GATEWAY), "{gaps:?}");
         let no_stub = demo_parts(
@@ -5006,8 +5083,9 @@ mod tests {
         );
     }
 
-    /// A runtime the built deployment manager starts is not called ready: the manager starts none
-    /// until it reads a deployment's account (DEC-1171), so no runtime pod runs in the cell yet.
+    /// A runtime the built deployment manager starts is not called ready: the manager starts it
+    /// only from a version-2 deployment (DEC-1171), and the demo's paper deployment is version 1
+    /// until its connection is recorded, so no runtime pod runs in the cell yet.
     #[test]
     fn a_runtime_the_built_manager_starts_is_not_called_ready() {
         let runtime = json!({"name": "runtime", "built": true, "started_by": "deploy-manager"});
@@ -5066,8 +5144,8 @@ mod tests {
     }
 
     /// Both images built still run no paper agent and no research: the runtime proposes nothing on
-    /// the deny-all wiring and the executor takes no order before X1b, so neither part is called
-    /// ready, and the paper fill stays a named gap rather than a faked one (DEC-2031).
+    /// the deny-all wiring and the executor fills no paper order before X1b-3, so neither part is
+    /// called ready, and the paper fill stays a named gap rather than a faked one (DEC-2031).
     #[test]
     fn both_images_built_still_call_no_paper_agent_or_research_ready() {
         let list = [process("runtime", true), process("executor", true)];
@@ -5079,7 +5157,7 @@ mod tests {
                 .and_then(|p| p.skipped.clone())
         };
         assert!(
-            skipped("a paper agent").is_some_and(|why| why.contains("X1b")),
+            skipped("a paper agent").is_some_and(|why| why.contains("X1b-3")),
             "{:?}",
             skipped("a paper agent")
         );

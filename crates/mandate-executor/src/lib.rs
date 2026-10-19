@@ -94,6 +94,7 @@ mod payload;
 mod ports;
 mod protection;
 mod reconcile;
+pub mod risk_state;
 mod session;
 mod shape;
 mod state;

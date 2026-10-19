@@ -14,7 +14,7 @@ use serde::Deserialize;
 
 use crate::mask;
 
-const DO_API: &str = "https://api.digitalocean.com/v2";
+pub(crate) const DO_API: &str = "https://api.digitalocean.com/v2";
 const CF_API: &str = "https://api.cloudflare.com/client/v4";
 /// The region of every environment's state bucket (DEC-995 item 2).
 const SPACES_REGION: &str = "nyc3";
@@ -219,7 +219,7 @@ pub(crate) fn environment_items(
     if environment == "production" {
         list.check(
             !no_cidrs(read(KUBE_CIDRS_ENV).as_deref()),
-            "variable KUBE_API_ALLOWED_CIDRS lists at least one CIDR (production only)",
+            "secret KUBE_API_ALLOWED_CIDRS lists at least one CIDR (production only)",
         );
         list.check(
             !no_cidrs(read(EMAILS_ENV).as_deref()),
@@ -315,13 +315,13 @@ pub(crate) fn config_quoted(value: &str) -> Result<String> {
 }
 
 /// One HTTP answer.
-struct Answer {
-    status: u16,
-    body: String,
+pub(crate) struct Answer {
+    pub(crate) status: u16,
+    pub(crate) body: String,
 }
 
 impl Answer {
-    fn ok(&self) -> bool {
+    pub(crate) fn ok(&self) -> bool {
         (200..300).contains(&self.status)
     }
 }
@@ -365,9 +365,14 @@ fn curl(config: &str, retry: bool) -> Result<Answer> {
     })
 }
 
+/// A `GET` to a public endpoint that takes no credential, such as the runner's address echo.
+pub(crate) fn get_public(url: &str) -> Result<Answer> {
+    curl(&format!("url = {}\n", config_quoted(url)?), true)
+}
+
 /// A request to a token-authorised JSON API. A `POST` is sent once, never retried, so a lost
 /// answer never mints a second key.
-fn api(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<Answer> {
+pub(crate) fn api(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<Answer> {
     let mut config = format!(
         "url = {}\nrequest = {}\nheader = {}\nheader = {}\n",
         config_quoted(url)?,
@@ -774,7 +779,7 @@ mod tests {
             assert!(environment_items("staging", &full(cidrs)).complete());
             assert_eq!(
                 missing(&environment_items("production", &full(cidrs))),
-                ["variable KUBE_API_ALLOWED_CIDRS lists at least one CIDR (production only)"],
+                ["secret KUBE_API_ALLOWED_CIDRS lists at least one CIDR (production only)"],
                 "{cidrs:?}"
             );
         }

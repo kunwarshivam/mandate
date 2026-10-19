@@ -31,7 +31,7 @@ use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
 use crate::commands::{
-    Command, Issued, KillScope, Settled, draft, in_workspace, release_warning, same, settle,
+    Command, Issued, KillScope, Settled, draft, in_workspace, release_warning, same, settle_at,
 };
 use crate::http::{App, browser, invalid, problem, problem_body};
 use crate::reads::deployed;
@@ -39,7 +39,7 @@ use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
 use crate::session::Authenticated;
-use crate::stepup::{Action, journaled};
+use crate::stepup::{Action, Judged, journaled};
 
 /// The `Idempotency-Key` request header (§3.4).
 const IDEMPOTENCY_KEY: &str = "idempotency-key";
@@ -250,11 +250,22 @@ pub(crate) async fn appended(
     draft: &[u8],
     now: UtcNanos,
 ) -> Settled {
+    appended_at(app, reader, (id, draft), now, None).await
+}
+
+/// [`appended`], appended at `pinned` when it names a head (`settle_at`).
+pub(crate) async fn appended_at(
+    app: &App,
+    reader: &Reader,
+    (id, draft): (&str, &[u8]),
+    now: UtcNanos,
+    pinned: Option<u64>,
+) -> Settled {
     let stream = format!("ctl:{}", reader.workspace);
     if let Some(settled) = repeated(&reader.control, id, draft) {
         return settled;
     }
-    match settle(app.journal.as_ref(), &stream, id, draft, now).await {
+    match settle_at(app.journal.as_ref(), &stream, id, draft, now, pinned).await {
         Settled::Conflict => app
             .journal
             .rows(&stream)
@@ -647,9 +658,12 @@ async fn stepped(
                 kind: forwarded.kind,
                 digest,
             };
-            app.step_up
-                .verify(evidence, &action, gate.admitted.principal, gate.now)
-                .is_ok()
+            let judged = Judged {
+                tenant: &reader.tenant,
+                control: &reader.control,
+                now: gate.now,
+            };
+            app.step_up.verify(evidence, &action, &judged).is_ok()
         }
         _ => false,
     };

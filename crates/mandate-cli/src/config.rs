@@ -7,6 +7,7 @@
 use mandate_canon::{Digest, Object, Value, parse, to_canonical};
 use mandate_journal::ArtifactStore;
 use mandate_modelhost::Refusal;
+use mandate_research_run::ResearchEntry;
 use mandate_time::UtcNanos;
 
 use crate::control::{
@@ -211,4 +212,54 @@ pub fn register_model(
     ];
     let stored = (content.canonical.as_slice(), content.hash);
     registration(journal, store, owner, key, stored, 1, now)
+}
+
+/// Registers the research agent's model from the recorded research entry in `recording`, the
+/// recorded bundle's `research.json` (DEC-2247 item 1).
+///
+/// It reads the recording's `entry` member with [`ResearchEntry::recorded`], the reader the bundle's
+/// loader uses, and checks that the entry is of `model_id` at `model_version`. It recomputes the
+/// content object and its hash from the entry, with the fixed template, plan, bounds and schema;
+/// no caller supplies a hash. Then it stores the content and commits one
+/// `ConfigSnapshotRegistered` of kind `model_version` with `admits_instruments: true` and no
+/// parameters. It is the only registration that admits instruments, and it changes no envelope
+/// field: the mandate naming the model is still the owner's to confirm (rule 11).
+///
+/// # Errors
+/// [`ControlError::Refused`] with `paper_only`, `model_not_research` for an id without the `llm.`
+/// prefix, `entry_unreadable` for a recording that is not strict JSON or whose entry is missing a
+/// member, or `entry_mismatch` for an entry of another model or version, each before anything is
+/// stored or committed; [`ControlError::Journal`] as `commit` reports.
+pub fn register_research_model(
+    journal: &mut dyn ControlJournal,
+    store: &mut dyn ArtifactStore,
+    owner: &Owner,
+    (model_id, model_version): (&str, &str),
+    recording: &[u8],
+    now: Now,
+) -> Result<Submitted, ControlError> {
+    paper_or_live(owner)?;
+    if !model_id.starts_with("llm.") {
+        return Err(refused("model_not_research"));
+    }
+    let recording = parse(recording).map_err(|_| refused("entry_unreadable"))?;
+    let entry = recording
+        .get("entry")
+        .ok_or_else(|| refused("entry_unreadable"))
+        .and_then(|entry| {
+            ResearchEntry::recorded(entry).map_err(|_| refused("entry_unreadable"))
+        })?;
+    if (entry.model_id.as_str(), entry.model_version.as_str()) != (model_id, model_version) {
+        return Err(refused("entry_mismatch"));
+    }
+    let canonical = to_canonical(&entry.content().canonical());
+    let hash = Digest::of(&canonical);
+    let key = vec![
+        ("admits_instruments", Value::Bool(true)),
+        ("kind", text("model_version")),
+        ("model_id", text(model_id)),
+        ("model_version", text(model_version)),
+        ("params", Value::Array(Vec::new())),
+    ];
+    registration(journal, store, owner, key, (&canonical, hash), 1, now)
 }

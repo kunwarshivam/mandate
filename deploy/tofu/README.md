@@ -41,7 +41,7 @@ never a value.
    | VPC | create, read, update, delete | `modules/network`'s VPC |
    | Firewall | create, read, update, delete | the node firewall |
    | Tag | create, read, delete | the node tag the firewall applies to |
-   | Kubernetes | create, read, update, delete | the cluster and its node pool; read also lists the offered versions |
+   | Kubernetes | create, read, update, delete, access_cluster | the cluster and its node pool; read also lists the offered versions; update closes staging's window; access_cluster fetches the bootstrap's 900-second credentials |
    | Sizes | read | the budget's node price |
    | Regions | read | the cluster's region |
    | Spaces Keys | create, read, delete | each run mints its own Spaces key, makes the state bucket if it is missing, and deletes the key (DEC-2030 item 4; DEC-2605 row 13) |
@@ -110,7 +110,8 @@ needs:
   `["you@example.com"]`: who Access lets through to production's API host, as a JSON list of full
   addresses. It is a secret so the public log never shows it. Staging needs none: its Access
   admits the members of your Cloudflare account (DEC-2030 item 2).
-- **Environment variable, production only:** `KUBE_API_ALLOWED_CIDRS`, for example
+- **Environment secret, production only:** `KUBE_API_ALLOWED_CIDRS`, a secret so the public log
+  never shows your address, for example
   `["203.0.113.7/32"]`: the addresses production's cluster API admits besides a run's own window,
   as a JSON list, each no wider than /24. Staging needs none: each run opens the control plane to
   its own runner for the run (DEC-2028), and with no address the firewall admits nobody. Set it
@@ -120,10 +121,16 @@ No repository-level secret or variable is used, so no other workflow can read th
 
 ### 4. The first run
 
-1. **Actions → infra → Run workflow**, branch `main`, environment `staging`, action `preflight`.
-   Approve the job. Every line should read `[ok]`; each `[MISSING]` line names the step above
-   that is still to do.
-2. Dispatch again with action `plan`. Read the plan:
+Every dispatch takes `sha`: paste the full commit of `main` you read (the repository's commit
+page has a copy button). The run refuses unless it is the commit `main` was at
+when you dispatched, which the run checks out. It lists what changed under `deploy/tofu/`,
+`infra.yml`, `xtask/` and the Rust build inputs since the last apply, so you approve a commit you
+have seen. The log never shows a value: only addresses and actions.
+
+1. **Actions → infra → Run workflow**, branch `main`, environment `staging`, action `preflight`,
+   and `sha`. Approve the job. Every line should read `[ok]`; each `[MISSING]` line names the step
+   above that is still to do.
+2. Dispatch again with action `plan`. Read the plan's list of changes:
    - one VPC, a tag, a firewall and a cluster;
    - the state bucket, imported;
    - a tunnel and its configuration;
@@ -141,10 +148,14 @@ No repository-level secret or variable is used, so no other workflow can read th
 4. **Handing over to lane GO (E21-58):** the outputs GO needs are the root outputs
    `archive_access_key_id`, `archive_secret_access_key` and `tunnel_token` (sensitive, never
    printed), and `archive_bucket`, `archive_endpoint`, `archive_destination_path`,
-   `archive_jurisdiction` and `cloudflare_account_id`. Once the automated bootstrap lands
-   (DEC-2028, lane GO's #1695), `infra.yml`'s apply writes the Secrets `ws-ws1/cloudflared-tunnel`
-   and `ws-ws1/journal-archive-key` itself, through kubectl's stdin, and Flux pulls from then on.
-   Until then, lane GO's `deploy/gitops/BOOTSTRAP.md` is the by-hand route, run from an address in
+   `archive_jurisdiction` and `cloudflare_account_id`. Staging's `apply` bootstraps the cluster
+   itself (DEC-2028): it opens the control plane to the run's own runner in the plan you approve,
+   writes the Secrets `ws-ws1/cloudflared-tunnel` and `ws-ws1/journal-archive-key` through lane
+   GO's code, and closes the window again, reading the cluster back to confirm it. If the close
+   cannot be confirmed the run fails and says the window may be open; the workflow's last step and
+   the next run close it, and a runner that dies before both is DEC-2028 item 3's residual. Flux
+   pulls from then on.
+   Production's bootstrap is lane GO's `deploy/gitops/BOOTSTRAP.md`, run from an address in
    `KUBE_API_ALLOWED_CIDRS`.
 
 ## What this does not guard, said plainly

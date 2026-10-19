@@ -47,12 +47,14 @@ variable "node_size" {
 }
 
 variable "kube_api_allowed_addresses" {
-  type = list(string)
+  type      = list(string)
+  sensitive = true
 }
 
 variable "bootstrap_runner_cidr" {
   description = "The runner window of one bootstrap run (DEC-2028); the doks module validates it."
   type        = string
+  sensitive   = true
   default     = ""
 }
 

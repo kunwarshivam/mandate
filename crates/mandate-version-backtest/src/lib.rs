@@ -314,12 +314,19 @@ pub struct VersionRun {
 /// calendar errors the run wraps. Every error refuses the whole run: no partial report exists.
 pub fn run_version(input: &VersionInput<'_>) -> Result<VersionRun, VersionError> {
     check_inputs(input)?;
+    let first_date = input.bars.first().map(|bar| bar.trade_date);
+    if input.corporate_actions.iter().any(|action| {
+        matches!(action, RecordedAction::Split { .. }) && Some(action.ex_date()) > first_date
+    }) {
+        return Err(VersionError::Unimplemented { story: "E4-4" });
+    }
     let benchmark_config = benchmark_config(input)?;
     let benchmark_input = BacktestInput {
         config: &benchmark_config,
         bars: input.bars,
         coverage_start: input.coverage_start,
         first_bar_volumes: input.first_bar_volumes,
+        corporate_actions: &[],
     };
     mandate_backtest::check_trade_dates(&benchmark_input)?;
     let benchmark = mandate_backtest::walk(&benchmark_input, benchmark_config.strategy)?;
@@ -396,6 +403,7 @@ fn check_inputs(input: &VersionInput<'_>) -> Result<(), VersionError> {
     if let Some(date) = input
         .corporate_actions
         .iter()
+        .filter(|action| matches!(action, RecordedAction::CashDividend { .. }))
         .map(RecordedAction::ex_date)
         .find(|date| first.trade_date <= *date && *date <= last.trade_date)
     {

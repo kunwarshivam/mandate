@@ -19,7 +19,7 @@ use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Sessions};
 use mandate_api_server::status::{Phase, phase, phase_of, reason};
-use mandate_api_server::stepup::{Action, StepUp, Unbound};
+use mandate_api_server::stepup::{Action, Judged, StepUp, Unbound};
 use mandate_api_server::token::{FixedKeys, Issuer};
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_canon::{Digest, Value, parse, to_canonical};
@@ -48,8 +48,7 @@ impl StepUp for Accepting {
         &self,
         _evidence: &StepUpEvidence,
         action: &Action,
-        _principal: PrincipalId,
-        _now: UtcNanos,
+        _judged: &Judged<'_>,
     ) -> Result<(), ProblemCode> {
         self.0
             .lock()

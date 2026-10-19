@@ -374,6 +374,7 @@ pub fn run(
         bars,
         coverage_start,
         first_bar_volumes: &medians,
+        corporate_actions: &[],
     })
 }
 
@@ -393,6 +394,7 @@ pub fn run_with_median(
         bars,
         coverage_start,
         first_bar_volumes: &medians,
+        corporate_actions: &[],
     })
 }
 
@@ -410,6 +412,7 @@ pub fn run_without_median(
         bars,
         coverage_start,
         first_bar_volumes: &NoMedian,
+        corporate_actions: &[],
     })
 }
 

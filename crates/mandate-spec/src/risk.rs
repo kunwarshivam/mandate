@@ -17,7 +17,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
-use mandate_num::{NumError, Price, Qty, Ratio, Rounding, Usd, UsdExact};
+use mandate_num::{
+    NumError, Price, Qty, Ratio, Rounding, ShareIncrement, SplitRatio, Usd, UsdExact,
+};
 use mandate_time::{Date, TimeError, UtcNanos, new_york_date_and_hour, new_york_midnight};
 
 use crate::document::{
@@ -232,6 +234,22 @@ pub enum Input {
     },
     /// The goal completed, so the mandate's `on_complete` applies (§3.1).
     GoalComplete,
+    /// A `CorporateActionApplied` split at its instant (§5.2, trading spec §8.5): Q truncated to
+    /// `increment`, the residual's basis removed, cash in lieu of the residual at the posted price (0
+    /// when none is posted) in E as a receivable, and the mark adjusted by `old ÷ new` (MI-33).
+    Split {
+        ratio: SplitRatio,
+        increment: ShareIncrement,
+        cash_in_lieu_price: Option<Price>,
+    },
+    /// A `CorporateActionApplied` cash dividend: round(Q × `per_share`, 2) is income on the ex-date,
+    /// in E as a receivable until paid (§5.2, trading spec §8.5, MI-33).
+    CashDividend {
+        per_share: Price,
+    },
+    /// `CashInLieuPosted` or `DividendPaid`: a receivable moves to cash, which changes no figure the
+    /// risk state holds (§5.2, MI-33).
+    ReceivablePosted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
