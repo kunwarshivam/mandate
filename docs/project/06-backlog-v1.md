@@ -3137,7 +3137,11 @@ enables `live` (ES-23, OPS-5).
   `env:`-shaped lines inside a `run:` block, `#` lines inside a heredoc, a redirect before a flag
   (`set >x -x`), a shell's `-O` before `-x`, `/proc/self/environ` built from parts or read by a
   language one-liner (`python -c`, `node -e`, `perl -e`), a `secrets:` mapping across several
-  lines, or a duplicate `ALLOWED` line. L9's closed world holds meanwhile.
+  lines, or a duplicate `ALLOWED` line. L5 to L8 do not yet read `curl` option abbreviations
+  (`--verb`), `-w '%{header_json}'`, `~/.curlrc`, `${!var}` indirection, composite actions'
+  steps, `wget -d` or `-S`, `curl | sh`, other `docker` or `podman login -p` forms, or
+  `--oauth2-bearer`, `-b` and `--proxy-user` values. They hold `web-e2e.yml`'s traces upload by
+  step order only. L9's closed world holds meanwhile.
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
   issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
