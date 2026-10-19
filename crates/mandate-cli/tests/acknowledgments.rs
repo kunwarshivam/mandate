@@ -388,7 +388,6 @@ fn an_acknowledgment_naming_no_matching_unspent_request_is_refused_request_inval
 /// acknowledgment, and an earlier acknowledgment of another request, leave a request unspent, so
 /// its acknowledgment commits.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_earlier_acknowledgment_does_not_spend_another_request() {
     let mut fx = Fixture::new();
     let checker = user(CHECKER);
