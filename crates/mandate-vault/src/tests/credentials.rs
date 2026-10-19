@@ -11,7 +11,7 @@ use proptest::prelude::*;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::SourceError;
-use crate::credentials::{read_token_file, write_credentials};
+use crate::credentials::{check_credential_dir, read_token_file, write_credentials};
 use crate::openbao::RoleCredentials;
 use crate::policy::Identity;
 
@@ -324,6 +324,121 @@ fn a_parent_others_may_write_without_the_sticky_bit_is_refused() {
         assert_eq!(dir.exists(), !refused, "a parent of mode {bits:o}");
         set_mode(&parent, 0o700);
     }
+}
+
+/// The names of the files `write_credentials` writes for a provisioning of `c1`, written out by
+/// hand: each process type's and `c1`'s executor's, never its token exchange's, whose secret id is
+/// a grant.
+fn oracle_names_for_c1() -> Vec<String> {
+    [
+        "api",
+        "connection-manager",
+        "runtime",
+        "secret-import",
+        "model-gateway",
+        "email-sender",
+        "executor-c1",
+    ]
+    .iter()
+    .flat_map(|role| [format!("{role}.role-id"), format!("{role}.secret-id")])
+    .collect()
+}
+
+/// An absent `dir` passes and is not made; an owner-only one passes whether it is empty or holds
+/// earlier plain files at the output names (DEC-2022 items 1 and 2).
+#[test]
+#[ignore = "pending E21-32"]
+fn an_absent_or_owner_only_dir_passes_before_any_vault_and_nothing_is_made() {
+    let connections = [c("c1")];
+    let dir = fresh("checked-absent");
+    assert_eq!(check_credential_dir(&dir, &connections), Ok(()));
+    assert!(!dir.exists());
+    let dir = fresh("checked-empty");
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    assert_eq!(check_credential_dir(&dir, &connections), Ok(()));
+    assert!(listing(&dir).is_empty());
+    for name in oracle_names_for_c1() {
+        fs::write(dir.join(name), "earlier").unwrap();
+    }
+    assert_eq!(check_credential_dir(&dir, &connections), Ok(()));
+}
+
+/// Every `dir` or parent `write_credentials` refuses is refused before any vault is reached, and
+/// nothing is made or changed (DEC-2022 items 1 and 2).
+#[test]
+#[ignore = "pending E21-32"]
+fn a_dir_or_parent_the_write_refuses_is_refused_before_any_vault() {
+    let connections = [c("c1")];
+    for bits in [0o755, 0o750, 0o705, 0o500, 0o300] {
+        let dir = fresh("checked-open");
+        fs::create_dir(&dir).unwrap();
+        set_mode(&dir, bits);
+        let checked = check_credential_dir(&dir, &connections);
+        set_mode(&dir, 0o700);
+        assert_eq!(
+            checked,
+            Err(SourceError::CredentialFile),
+            "a dir of mode {bits:o}"
+        );
+        assert!(listing(&dir).is_empty(), "a dir of mode {bits:o}");
+    }
+    let real = fresh("checked-real");
+    fs::create_dir(&real).unwrap();
+    set_mode(&real, 0o700);
+    let linked = fresh("checked-linked");
+    symlink(&real, &linked).unwrap();
+    assert_eq!(
+        check_credential_dir(&linked, &connections),
+        Err(SourceError::CredentialFile)
+    );
+    let file = fresh("checked-file");
+    fs::write(&file, "not a directory").unwrap();
+    assert_eq!(
+        check_credential_dir(&file, &connections),
+        Err(SourceError::CredentialFile)
+    );
+    let parent = fresh("checked-parent");
+    fs::create_dir(&parent).unwrap();
+    set_mode(&parent, 0o777);
+    let checked = check_credential_dir(&parent.join("out"), &connections);
+    set_mode(&parent, 0o700);
+    assert_eq!(checked, Err(SourceError::CredentialFile));
+    assert!(!parent.join("out").exists());
+}
+
+/// A link or a directory planted at any name the write would replace is refused before any vault;
+/// one at a token exchange's name, which is never written, is not (DEC-2022 items 1 and 2).
+#[test]
+#[ignore = "pending E21-32"]
+fn anything_but_a_plain_file_at_a_credential_name_is_refused_before_any_vault() {
+    let connections = [c("c1")];
+    let target = fresh("checked-target");
+    fs::write(&target, "someone-elses-file").unwrap();
+    for name in oracle_names_for_c1() {
+        for plant in ["link", "directory"] {
+            let dir = fresh("checked-planted");
+            fs::create_dir(&dir).unwrap();
+            set_mode(&dir, 0o700);
+            if plant == "link" {
+                symlink(&target, dir.join(&name)).unwrap();
+            } else {
+                fs::create_dir(dir.join(&name)).unwrap();
+            }
+            assert_eq!(
+                check_credential_dir(&dir, &connections),
+                Err(SourceError::CredentialFile),
+                "a {plant} at {name}"
+            );
+        }
+    }
+    let dir = fresh("checked-exchange");
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    symlink(&target, dir.join("exchange-c1.role-id")).unwrap();
+    fs::create_dir(dir.join("exchange-c1.secret-id")).unwrap();
+    assert_eq!(check_credential_dir(&dir, &connections), Ok(()));
+    assert_eq!(fs::read_to_string(&target).unwrap(), "someone-elses-file");
 }
 
 /// A refusal changes no file: every output name is checked before any is written, so an earlier
