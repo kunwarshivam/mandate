@@ -22,6 +22,10 @@
 //! A pod the deployment manager starts runs `mandate-daemon run --probe <socket>` and names its
 //! workspace and agent by variables instead ([`launch`], DEC-1015). Until the connection and the
 //! owner are read from the agent's deployment, such a launch refuses `deployment_unresolved`.
+//!
+//! `--research <bundle-dir>` asks for research over that recorded bundle (DEC-2210 item 5,
+//! DEC-2215), for a paper deployment read from the journal only; anything else refuses the start,
+//! and without it the process runs deny-all ([`cell`]).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -31,6 +35,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mandate_artifacts_fs::FsArtifactStore;
+use mandate_daemon::cell::{self, CellDeployment};
 use mandate_daemon::wake::Sleep;
 use mandate_daemon::{Config, RuntimeProcess, Wake, deployment, fixture, launch};
 use mandate_journal::{Environment, StreamId};
@@ -92,7 +97,8 @@ fn main() -> ExitCode {
                 }
             };
             let deployment = (named.workspace, named.agent);
-            match run(deployment, given, &socket, fixture) {
+            let research = flag("--research").map(PathBuf::from);
+            match run(deployment, given, &socket, fixture, research.as_deref()) {
                 Ok(status) => ExitCode::from(status),
                 Err(code) => {
                     eprintln!("runtime_start_failed: {code}");
@@ -131,6 +137,7 @@ fn run(
     given: Given,
     socket: &Path,
     fixture: bool,
+    research: Option<&Path>,
 ) -> Result<u8, &'static str> {
     let terminate = Arc::new(AtomicBool::new(false));
     watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
@@ -149,6 +156,20 @@ fn run(
         }
         Given::Named { .. } => None,
     };
+    let opted = research
+        .map(|dir| {
+            cell::opt_in(
+                dir,
+                &CellDeployment {
+                    workspace: workspace.clone(),
+                    agent: agent.clone(),
+                    environment: Environment::Paper,
+                    resolved: matches!(given, Given::Resolve { .. }),
+                },
+            )
+        })
+        .transpose()
+        .map_err(|error| error.code())?;
     if fixture {
         let Given::Named { connection, owner } = given else {
             return Err("deployment_unresolved");
@@ -165,15 +186,24 @@ fn run(
     let store = PgStore::connect(&dsn)?;
     let (connection, wiring) = match (given, artifacts) {
         (Given::Named { connection, owner }, _) => (connection, fixture::wiring(&owner)),
-        (Given::Resolve { .. }, Some(artifacts)) => {
+        (Given::Resolve { root }, Some(artifacts)) => {
             let control =
                 StreamId::parse(&format!("ctl:{workspace}")).ok_or("deployment_missing")?;
             let rows = store.rows(&control).ok_or("journal_unavailable")?;
             let found = deployment::resolved(&rows, &agent, Environment::Paper, &artifacts)?;
-            (
-                found.connection,
-                fixture::wiring_for(&found.approvers, &found.author),
-            )
+            let mut wiring = fixture::wiring_for(&found.approvers, &found.author);
+            if let Some(opted) = opted {
+                let wired = cell::research(
+                    opted,
+                    Box::new(PgStore::connect(&dsn)?),
+                    Path::new(&root),
+                    Box::new(host_now),
+                )
+                .map_err(|error| error.code())?;
+                wiring.research = Some(wired.wiring);
+                wiring.refs = wired.refs;
+            }
+            (found.connection, wiring)
         }
         (Given::Resolve { .. }, None) => return Err("artifact_store_unavailable"),
     };
