@@ -527,6 +527,10 @@ mod tests {
     }
 
     fn requested(id: &str, floor: Option<&str>) -> FoldedEvent {
+        requested_for(id, floor, "instrument", "AAPL")
+    }
+
+    fn requested_for(id: &str, floor: Option<&str>, scope: &str, subject: &str) -> FoldedEvent {
         let confirmed = |value: &str| floor.map_or(Value::Null, |_| s(value));
         row(
             id,
@@ -537,10 +541,10 @@ mod tests {
                 ("bid_size", confirmed("100")),
                 ("confirmed", Value::Bool(floor.is_some())),
                 ("floor", floor.map_or(Value::Null, s)),
-                ("scope", s("instrument")),
+                ("scope", s(scope)),
                 ("step_up", Value::Null),
                 ("step_up_status", s("absent")),
-                ("subject", s("AAPL")),
+                ("subject", s(subject)),
                 ("user", s("u1")),
             ],
         )
@@ -574,12 +578,35 @@ mod tests {
         Ok(())
     }
 
+    /// A floor is the owner's only for the instrument the exit sells: an `OwnerExitRequested` of
+    /// another scope or another instrument confirms none for it.
     #[test]
-    fn only_an_owners_exit_may_be_at_the_market() {
-        assert_eq!(
-            ids(&[proposed("i1", "risk_exit", "market", "day")]),
-            Err(Unreadable)
-        );
+    fn a_floor_is_taken_only_from_a_request_for_the_exits_instrument() -> Result<(), Unreadable> {
+        for (scope, subject) in [("agent", "AAPL"), ("instrument", "MSFT"), ("account", "a1")] {
+            let other = [
+                requested_for("r1", Some("142.5"), scope, subject),
+                at_market("r1"),
+            ];
+            assert_eq!(limits(&other)?, [None], "{scope} {subject}");
+        }
+        Ok(())
+    }
+
+    /// Any exit may be at the market (journal spec §9.1 rule 3): it reads, with no limit, so the
+    /// process alerts on it rather than stop; an opening or an increase at the market, or an order
+    /// of another type, does not read.
+    #[test]
+    fn an_exit_at_the_market_reads_with_no_limit() -> Result<(), Unreadable> {
+        for purpose in ["risk_exit", "discretionary_exit"] {
+            let read = proposals(&[proposed("i1", purpose, "market", "day")])?;
+            assert_eq!(read.iter().map(|p| p.limit).collect::<Vec<_>>(), [None]);
+        }
+        for purpose in ["open", "increase"] {
+            assert_eq!(
+                ids(&[proposed("i1", purpose, "market", "day")]),
+                Err(Unreadable)
+            );
+        }
         assert_eq!(
             ids(&[proposed("i1", "owner_exit", "stop", "day")]),
             Err(Unreadable)
@@ -587,5 +614,6 @@ mod tests {
         let mut unreadable = requested("r1", Some("142.5"));
         unreadable.payload = payload(&[("floor", Value::Bool(true))]);
         assert_eq!(ids(&[unreadable, at_market("r1")]), Err(Unreadable));
+        Ok(())
     }
 }
