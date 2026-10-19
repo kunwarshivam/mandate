@@ -1,9 +1,0 @@
-file = "crates/mandate-api-server/tests/process.rs"
-test = "outside_dev_and_ci_an_unsigned_or_wrongly_signed_build_refuses_first"
-reason = """
-The test runs the `mandate-api-server` binary and reads what it prints, so it fails on the answer
-today's binary gives (a settings refusal, or a start in production) rather than at a stub: the
-start-up check it pins is one call to `mandate-release`'s already implemented
-`startup::check_running` at the top of `main`, and a stub in its place would refuse every start
-the other process tests make. E21-35's implementation PR adds the call and deletes this row.
-"""

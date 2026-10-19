@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/connection.schema.json",
+  "description": "GET /connections/{id} (§4.5, DEC-2620): one connection, folded from the control stream alone. References only: no secret-shaped member (API-11). The 1× check, the data profile, the restrictions and the loss carry arrive as optional members (§3.2).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "connection"
+  ],
+  "properties": {
+    "connection": {
+      "$ref": "#/$defs/Connection"
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Connection": {
+      "description": "One connection the control stream names (DEC-2620 items 2 and 3). state is connecting after ConnectionRequested, established after ConnectionEstablished, refused after a connect's ConnectionRefused, revoked after ConnectionRevoked. scopes is null before an establishment. refusal is set exactly when state is refused, revoked_reason only when state is revoked (null for a version-1 revocation, which names none). agents are the agents whose latest AgentDeployed is version 2, names this connection, and is not stopped.",
+      "type": "object",
+      "required": [
+        "connection_id",
+        "broker",
+        "environment",
+        "state",
+        "scopes",
+        "since",
+        "refusal",
+        "revoked_reason",
+        "agents"
+      ],
+      "properties": {
+        "connection_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "broker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "environment": {
+          "enum": [
+            "paper",
+            "live"
+          ]
+        },
+        "state": {
+          "enum": [
+            "connecting",
+            "established",
+            "refused",
+            "revoked"
+          ]
+        },
+        "scopes": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "since": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "refusal": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Refusal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revoked_reason": {
+          "enum": [
+            "owner",
+            "compromised",
+            null
+          ]
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "../common.schema.json#/$defs/Id"
+          }
+        }
+      },
+      "propertyNames": {
+        "not": {
+          "pattern": "([tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[pP][aA][sS][sS][pP][hH][rR][aA][sS][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[aA][pP][iI]_[kK][eE][yY]|[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]|[aA][cC][cC][oO][uU][nN][tT]_[nN][uU][mM][bB][eE][rR]|[fF][iI][nN][gG][eE][rR][pP][rR][iI][nN][tT]|[vV][aA][uU][lL][tT])"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "refused"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "refusal": {
+                "$ref": "#/$defs/Refusal"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "refusal": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "revoked"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "revoked_reason": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "Refusal": {
+      "description": "A connect's ConnectionRefused (journal spec §9.8): the first §8.1 check that failed, null for a teardown no check caused, and its reason.",
+      "type": "object",
+      "required": [
+        "check",
+        "reason"
+      ],
+      "properties": {
+        "check": {
+          "enum": [
+            "scope",
+            "environment",
+            "account",
+            "uniqueness",
+            "contract",
+            null
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[a-z][a-z_]*$"
+        }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}
