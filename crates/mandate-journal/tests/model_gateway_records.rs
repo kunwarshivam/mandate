@@ -485,3 +485,25 @@ fn the_deployment_meter_stream_opens_naming_itself_and_keeps_rule_158() {
         "a workspace meter stream's opening is not the deployment stream's"
     );
 }
+
+/// Journal spec §2 and v0.53 §2: a stream is a workspace's exactly when its second segment is the
+/// workspace's id whole, never by prefix, and the deployment meter stream is no workspace's, even
+/// when its deployment id is the workspace's own segment.
+#[test]
+#[ignore = "pending E21-61"]
+fn the_deployment_meter_stream_is_no_workspace_s_whatever_its_id() {
+    use mandate_journal::workspace_owns;
+    let stream = |id: &str| StreamId::parse(id).unwrap();
+    for (id, owned) in [
+        ("ctl:ws_1", true),
+        ("agent:ws_1:agent_a", true),
+        ("meter:ws_1", true),
+        ("ctl:ws_10", false),
+        ("acct:ws_2:acct_1", false),
+        ("meter:ws_2", false),
+    ] {
+        assert_eq!(workspace_owns("ws_1", &stream(id)), owned, "{id}");
+    }
+    assert!(!workspace_owns("ws_1", &stream("dmeter:ws_1")));
+    assert!(!workspace_owns("dep_01", &stream("dmeter:dep_01")));
+}

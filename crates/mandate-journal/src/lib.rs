@@ -52,6 +52,20 @@ pub use agent::{
     verify_agent_stream, verify_agent_stream_anchored,
 };
 
+/// Whether `stream` is one of workspace `workspace`'s streams: its workspace segment, the second of
+/// every stream id (journal spec §2), equals `workspace` whole, never by prefix (DEC-770 item 1).
+/// The deployment meter stream is the platform operator's and no workspace's, whatever its
+/// deployment id (journal spec v0.53 §2). Every workspace read and every record naming a workspace's
+/// streams asks this one function, so no copy can drift.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn workspace_owns(workspace: &str, stream: &StreamId) -> bool {
+    let _ = (workspace, stream);
+    todo!()
+}
+
 /// Whether the journal closes `event_type` at `schema_version` on `stream`: the catalogue admits it
 /// there and a schema is registered for it, so a draft is judged member by member rather than
 /// refused `unknown_schema`. `mandate-runtime`'s `JournalCatalog` reads its answer for the agent
