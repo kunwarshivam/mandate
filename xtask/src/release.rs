@@ -1419,6 +1419,23 @@ mod tests {
         );
     }
 
+    /// What a release ships, exactly: the CLI, the agent daemon, the simulator the local cell's
+    /// drills run, and the workspace API server, whose image a hosted cell runs as `images.api`,
+    /// each package building the binary of its name but the CLI's `mandate` (DEC-971, DEC-2026).
+    #[test]
+    fn the_release_ships_exactly_these_binaries() {
+        assert_eq!(
+            BINARIES.as_slice(),
+            [
+                ("mandate-cli", "mandate"),
+                ("mandate-agentd", "mandate-agentd"),
+                ("mandate-rh-sim", "mandate-rh-sim"),
+                ("mandate-api-server", "mandate-api-server"),
+            ]
+            .as_slice()
+        );
+    }
+
     /// The release builds every shipped package, locked, for the musl target, and never names a
     /// feature, so the runner's `live` cannot be built here (DEC-529 item 3).
     #[test]

@@ -286,10 +286,12 @@ mod tests {
         format!(
             "ghcr.io/kunwarshivam/mandate/mandate@{}  mandate\n\
              ghcr.io/kunwarshivam/mandate/mandate-agentd@{}  mandate-agentd\n\
-             ghcr.io/kunwarshivam/mandate/mandate-rh-sim@{}  mandate-rh-sim\n",
+             ghcr.io/kunwarshivam/mandate/mandate-rh-sim@{}  mandate-rh-sim\n\
+             ghcr.io/kunwarshivam/mandate/mandate-api-server@{}  mandate-api-server\n",
             digest('a'),
             digest('b'),
-            digest('c')
+            digest('c'),
+            digest('d')
         )
     }
 
@@ -357,10 +359,19 @@ mod tests {
         let images = chart_images(&published())?;
         assert_eq!(
             images,
-            BTreeMap::from([(
-                "mandate".to_owned(),
-                format!("ghcr.io/kunwarshivam/mandate/mandate@{}", digest('a'))
-            )])
+            BTreeMap::from([
+                (
+                    "api".to_owned(),
+                    format!(
+                        "ghcr.io/kunwarshivam/mandate/mandate-api-server@{}",
+                        digest('d')
+                    )
+                ),
+                (
+                    "mandate".to_owned(),
+                    format!("ghcr.io/kunwarshivam/mandate/mandate@{}", digest('a'))
+                ),
+            ])
         );
         assert!(chart_images(&published().replace("mandate@", "mandate:main@")).is_err());
         assert!(chart_images(&published().replace("sha256:", "sha512:")).is_err());
@@ -369,13 +380,36 @@ mod tests {
             chart_images(&published().replace("ghcr.io/kunwarshivam", "ghcr.io/someone")).is_err()
         );
         assert!(chart_images(&published().replace("mandate@", "other/mandate@")).is_err());
-        let without: String = published()
-            .lines()
-            .filter(|line| !line.ends_with("  mandate"))
-            .map(|line| format!("{line}\n"))
-            .collect();
-        assert!(chart_images(&without).is_err());
+        for binary in ["mandate", "mandate-api-server"] {
+            let without: String = published()
+                .lines()
+                .filter(|line| !line.ends_with(&format!("  {binary}")))
+                .map(|line| format!("{line}\n"))
+                .collect();
+            assert!(chart_images(&without).is_err(), "{binary}");
+        }
         Ok(())
+    }
+
+    /// Every binary the chart runs from a release is one the release builds, signs and publishes,
+    /// so a hosted cell can pin each of its processes to a signed digest; the API server's image
+    /// is `images.api` (DEC-2026).
+    #[test]
+    fn every_charted_binary_is_released() {
+        let released: Vec<&str> = crate::release::BINARIES
+            .iter()
+            .map(|(_, binary)| *binary)
+            .collect();
+        for (binary, key) in CHART_IMAGE_FOR_BINARY {
+            assert!(
+                released.contains(&binary),
+                "{binary} ({key}) is not released"
+            );
+        }
+        assert!(
+            CHART_IMAGE_FOR_BINARY.contains(&("mandate-api-server", "api")),
+            "the API server's image is not charted"
+        );
     }
 
     #[test]
