@@ -18,7 +18,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::kill::{flatten_closes, floor_of, is_flatten, mode_holds};
+use crate::kill::{confirmed_bid, flatten_closes, floor_of, is_flatten, mode_holds};
 use crate::listing::query_unknown;
 use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
@@ -289,8 +289,9 @@ fn current_quote<'b>(
 /// marketable where no market order may go — in extended hours, in the closing auction window, or
 /// in a presumed halt (§4.4: the latest quote stale or not sane) — and whose purpose may trade
 /// there: a risk exit, a protective order or a flatten in any of them, and an owner exit in the
-/// regular session. A discretionary exit is paced (§9.6), an instrument with no tier has no
-/// ladder, and an exit priced above a fresh sane bid is passive: each keeps its own limit. An exit
+/// regular session, or in any of them once `confirmed` (DEC-2040 item 3). A discretionary exit is
+/// paced (§9.6), an instrument with no tier has no ladder, and an exit priced above a fresh sane
+/// bid is passive: each keeps its own limit. An exit
 /// with no limit is never passive, always has a tier ([`tier_of`]), and in the regular session is
 /// laddered too when the fresh quote shows no bid to sell at the market into, or when the gate's
 /// decision on it read no binding snapshot, so nothing checked a market order's caps (DEC-2037
@@ -298,7 +299,7 @@ fn current_quote<'b>(
 pub(crate) fn alone(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
-    purpose: Purpose,
+    (purpose, confirmed): (Purpose, bool),
     limit: Option<Price>,
     binding: bool,
 ) -> bool {
@@ -306,7 +307,7 @@ pub(crate) fn alone(
     let current = current_quote(batch, instrument);
     let may = purpose.exempt_from_pacing()
         || purpose == Purpose::OwnerExit
-            && venue(batch.ports, instrument, batch.at()) != Venue::Extended;
+            && (confirmed || venue(batch.ports, instrument, batch.at()) != Venue::Extended);
     let needed = match venue(batch.ports, instrument, batch.at()) {
         Venue::Extended | Venue::Closing => true,
         Venue::Regular => {
@@ -331,7 +332,8 @@ pub(crate) fn alone(
 /// sequence, which is placed as its new OCO's take-profit at that limit (§5.4) and needs nothing
 /// to price from. An unsequenced exit with no limit goes at the market where §5.1 allows it and
 /// the gate's decision on it is `binding`, so its participation caps, marketable-limit rule and
-/// collar were checked; it is laddered elsewhere (DEC-2037 item 4).
+/// collar were checked; it is laddered elsewhere (DEC-2037 item 4). One with an owner's confirmed
+/// floor never goes at the market, so it never fills below the floor (DEC-2040 item 6).
 pub(crate) fn exit_limit(
     batch: &Batch<'_, '_>,
     intent: &IntentId,
@@ -349,11 +351,26 @@ pub(crate) fn exit_limit(
         !batch.view.exiting.contains_key(instrument) && !rests(&batch.view, instrument);
     match limit {
         Some(own)
-            if passive || unsequenced && !alone(batch, instrument, purpose, limit, binding) =>
+            if passive
+                || unsequenced
+                    && !alone(
+                        batch,
+                        instrument,
+                        (
+                            purpose,
+                            confirmed_bid(&batch.view, intent, batch.at()).is_some(),
+                        ),
+                        limit,
+                        binding,
+                    ) =>
         {
             return ExitPrice::Own(own);
         }
-        None if binding && unsequenced && market_allowed(batch, instrument) => {
+        None if binding
+            && unsequenced
+            && market_allowed(batch, instrument)
+            && floor_of(&batch.view, intent).is_none() =>
+        {
             return ExitPrice::Market;
         }
         _ => {}
@@ -361,7 +378,7 @@ pub(crate) fn exit_limit(
     let tier = tier_of(batch, instrument, intent);
     match exit_price(
         tier,
-        &observed(batch, instrument),
+        &observed_for(batch, intent, instrument),
         0,
         batch.at(),
         floor_of(&batch.view, intent),
@@ -385,7 +402,7 @@ pub(crate) fn reference_price(
     purpose: Purpose,
 ) -> Option<Price> {
     let tier = tier_of(batch, instrument, intent);
-    let observations = observed(batch, instrument);
+    let observations = observed_for(batch, intent, instrument);
     let floor = floor_of(&batch.view, intent);
     match exit_price(tier, &observations, 0, batch.at(), floor, purpose, None) {
         ExitPrice::Laddered(rung) => Some(ticked(
@@ -636,7 +653,7 @@ fn next_rung(
     let own = limit.or_else(|| last_rung_limit(batch, intent, rung));
     let step = rung.saturating_add(1);
     let tier = tier_of(batch, instrument, intent);
-    let observations = observed(batch, instrument);
+    let observations = observed_for(batch, intent, instrument);
     let floor = floor_of(&batch.view, intent);
     let rung = tier.map(|tier| ladder_price(tier, &observations, step, batch.at(), floor));
     let (price, at_floor) = match rung {
@@ -663,7 +680,15 @@ fn next_rung(
         stop_price: None,
         bracket: None,
         oco: None,
-        extended_hours: extended_hours(batch.ports, instrument, batch.at(), purpose),
+        extended_hours: extended_hours(
+            batch.ports,
+            instrument,
+            batch.at(),
+            (
+                purpose,
+                confirmed_bid(&batch.view, intent, batch.at()).is_some(),
+            ),
+        ),
         purpose,
     };
     let extra = vec![
@@ -684,6 +709,33 @@ fn next_rung(
 fn last_rung_limit(batch: &Batch<'_, '_>, intent: &IntentId, rung: u32) -> Option<Price> {
     let id = ClientOrderId::for_intent(intent).ok()?.rung(rung).ok()?;
     batch.view.details.get(&id)?.request.as_ref()?.limit_price
+}
+
+/// What an intent's exit prices from: outside the regular session, an exit the owner confirmed
+/// prices from the bid they confirmed, not from a quote they never saw (§5.5, DEC-2040 item 3);
+/// every other exit, and a confirmed one in the regular session, from [`observed`].
+fn observed_for(
+    batch: &Batch<'_, '_>,
+    intent: &IntentId,
+    instrument: &InstrumentId,
+) -> Vec<MarketObservation> {
+    let outside = matches!(
+        venue(batch.ports, instrument, batch.at()),
+        Venue::Extended | Venue::Closed
+    );
+    match confirmed_bid(&batch.view, intent, batch.at()).filter(|_| outside) {
+        Some(bid) => vec![MarketObservation {
+            instrument: instrument.clone(),
+            bid: Some(bid),
+            bid_size: None,
+            ask: None,
+            last_trade: None,
+            mark: None,
+            sane: true,
+            observed_at: batch.at(),
+        }],
+        None => observed(batch, instrument),
+    }
 }
 
 /// What §5.6 prices `instrument` from, oldest to newest by when each was observed: the last sane
@@ -15500,6 +15552,7 @@ mod remainder_pins {
                     market: false,
                     tif: crate::types::TimeInForce::Day,
                     flatten: false,
+                    owner_confirmed_bid: None,
                 },
                 ports,
             )

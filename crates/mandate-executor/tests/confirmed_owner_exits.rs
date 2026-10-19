@@ -141,7 +141,6 @@ fn member<'a>(ran: &'a Ran, event_type: &str, name: &str) -> Option<&'a Value> {
 /// 154.23, from the confirmed bid and not the feed's 150. The confirmation is journaled
 /// immediately after the intent, as rule 248 requires.
 #[test]
-#[ignore = "pending E7-30"]
 fn a_confirmed_owner_exit_before_the_open_sells_in_extended_hours_from_the_confirmed_bid() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -206,7 +205,6 @@ fn a_confirmed_owner_exit_before_the_open_sells_in_extended_hours_from_the_confi
 
 /// A rung the floor clamps rests at the floor: 151 × 0.995 = 150.245 is below the floor of 150.8.
 #[test]
-#[ignore = "pending E7-30"]
 fn the_floor_binds_a_confirmed_owner_exit_before_the_open() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -264,7 +262,6 @@ fn an_unconfirmed_owner_exit_before_the_open_waits_for_the_session() {
 /// on a fresh quote at 150 the exit is not sent at the market but as a limit, priced by the ladder
 /// from the market (150 × 0.995 = 149.25) and clamped at the floor of 150.35.
 #[test]
-#[ignore = "pending E7-30"]
 fn a_confirmed_owner_exit_in_the_regular_session_never_sells_below_its_floor() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -295,7 +292,6 @@ fn a_confirmed_owner_exit_in_the_regular_session_never_sells_below_its_floor() {
 /// across a restart, sells at the open from the confirmed bid, extended-hours, while its
 /// confirmation is still inside its five minutes (DEC-2040 item 7).
 #[test]
-#[ignore = "pending E7-30"]
 fn a_restart_keeps_the_confirmation_of_an_exit_held_overnight() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -339,7 +335,6 @@ fn a_restart_keeps_the_confirmation_of_an_exit_held_overnight() {
 /// and nothing goes extended-hours; handed one second before, it sells extended-hours from the
 /// confirmed bid. Either way the confirmation is journaled as it was handed.
 #[test]
-#[ignore = "pending E7-30"]
 fn a_confirmation_at_its_expiry_has_expired() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -389,7 +384,6 @@ fn a_confirmation_at_its_expiry_has_expired() {
 /// unconfirmed path: a regular-session limit, priced from the feed's last sane bid,
 /// 150 × (1 − 0.01) = 148.50, and clamped at the floor of 150.35, which still binds.
 #[test]
-#[ignore = "pending E7-30"]
 fn a_rung_after_the_confirmation_expires_takes_the_unconfirmed_path() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -471,7 +465,6 @@ fn refused(input: Input) -> ExecutorError {
 /// DEC-2040 item 1: a confirmation on any purpose but an owner exit, a bid size that is not
 /// positive, or a limit below the floor is non-canonical, refused before anything is journaled.
 #[test]
-#[ignore = "pending E7-30"]
 fn a_confirmation_that_does_not_fit_its_exit_is_non_canonical() {
     let field = |name: &str| ExecutorError::NonCanonicalPayload {
         field: name.to_owned(),
