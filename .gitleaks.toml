@@ -181,3 +181,13 @@ condition = "AND"
 paths = ['''^schemas/workspace-api/examples/commands\.step-up-challenge(?:\.valid|\.invalid)?\.json$''']
 regexTarget = "match"
 regexes = ['''^webauthn_challenge": "(?:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJ(?:A=?|B)|q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWe\+A|q83vEjRWeJCrze8SNFZ4kA)"$''']
+
+# Cargo's build output at the workspace root. CI restores `target/` from its cache before
+# `cargo xtask ci full`, and on a push to `main` the scan is `gitleaks dir .`, which walks it: a
+# dependency's compiled test vectors there (p256's private-key example, in its `.rmeta`) are
+# reported though no source holds them. Only the root `target/` is allowed, never a `target`
+# directory elsewhere or a name that merely starts with it; `cargo xtask ci supply-chain` plants
+# both beside the allowed one.
+[[allowlists]]
+description = "Cargo's build output at the workspace root"
+paths = ['''^target/''']
