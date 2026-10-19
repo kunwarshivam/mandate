@@ -2953,8 +2953,10 @@ enables `live` (ES-23, OPS-5).
   E21-8's last slice). **Release key** (DEC-2024; DEC-2605 rows 8 and 9, no hardware key): its
   public half is in `RELEASE_KEYS` (`crates/mandate-release/release-keys/cosign.pub`), and the
   `release-signing` job signs each binary and `SHA256SUMS` with it on a dispatch from `main`
-  the founder approves ([runbook](../runbooks/release-signing-key.md)). Staging promotion waits
-  on H1.
+  the founder approves ([runbook](../runbooks/release-signing-key.md)); the same run then
+  publishes a hosted cell's images, each with its binary's release signature, as
+  `signed-<commit>` (DEC-2026), and pointing the hosted overlays at them is E21-58's. Staging
+  promotion waits on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
