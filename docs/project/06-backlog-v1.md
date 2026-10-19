@@ -3142,7 +3142,9 @@ enables `live` (ES-23, OPS-5).
   steps, `wget -d` or `-S`, `curl | sh`, other `docker` or `podman login -p` forms, or
   `--oauth2-bearer`, `-b` and `--proxy-user` values. They hold `web-e2e.yml`'s traces upload by
   step order only. L9 does not yet read a reusable workflow a secret job calls (`workflow_call`),
-  an `if:` written across lines, or `ACTIONS_ID_TOKEN_REQUEST_*` passed on to a later step. L9's
+  an `if:` written across lines, `ACTIONS_ID_TOKEN_REQUEST_*` passed on to a later step, the
+  values (not the names) a secret step's `env:` sets, or a `checkout` with `repository:` after the
+  secret step. L9's
   closed world holds meanwhile.
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
