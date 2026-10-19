@@ -46,7 +46,8 @@ pub(crate) const SECONDS: i64 = 480;
 /// that lands the connector sets this to `None`. An API that answers without Access fails always.
 const EDGE_PENDING: Option<&str> = Some("#1539");
 
-/// `kubectl get` against the cluster, its arguments after `get`, answering what it printed.
+/// `kubectl` against the cluster, its arguments, answering what it printed: the check runs only
+/// `get` and `logs`.
 pub(crate) type Kubectl<'a> = &'a dyn Fn(&[&str]) -> Result<String>;
 
 /// Where staging's edge is, from its root's outputs. The account is a sensitive output, masked
@@ -65,7 +66,9 @@ fn listed(
     what: &str,
     args: &[&str],
 ) -> Option<Vec<Value>> {
-    let items = kubectl(args)
+    let mut get = vec!["get"];
+    get.extend(args);
+    let items = kubectl(&get)
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
         .and_then(|listing| listing.get("items").and_then(Value::as_array).cloned());
@@ -213,6 +216,9 @@ fn why(pod: &Value) -> String {
         .find(|reason| !reason.is_empty() && *reason != "Completed");
         if let Some(reason) = reason {
             words.push(word(reason));
+            if let Some(code) = container["state"]["terminated"]["exitCode"].as_i64() {
+                words.push(format!("exit {code}"));
+            }
             break;
         }
     }
@@ -225,6 +231,40 @@ fn why(pod: &Value) -> String {
     } else {
         said.join(": ")
     }
+}
+
+/// What a failing Job's last log lines say, as fixed class words alone: its lines may echo a
+/// connection string or SQL, so none of them is printed, only which of these it matched.
+const LOG_CLASSES: [(&str, &str); 10] = [
+    ("password authentication failed", "auth-failed"),
+    ("connection refused", "connection-refused"),
+    ("timeout expired", "timeout"),
+    ("timed out", "timeout"),
+    ("could not translate host name", "dns"),
+    ("name or service not known", "dns"),
+    ("does not exist", "missing-object"),
+    ("permission denied", "permission-denied"),
+    ("ssl", "tls"),
+    ("a migration is never edited", "migration-edited"),
+];
+
+/// The classes `logs` matches, in [`LOG_CLASSES`]' order, each once; a line that says it failed
+/// but matches none is `unclassified`.
+fn log_classes(logs: &str) -> Vec<&'static str> {
+    let lower = logs.to_lowercase();
+    let mut found: Vec<&'static str> = Vec::new();
+    for (needle, class) in LOG_CLASSES {
+        if lower.contains(needle) && !found.contains(&class) {
+            found.push(class);
+        }
+    }
+    let failed = lower
+        .lines()
+        .any(|line| line.contains("error") || line.contains("fatal"));
+    if found.is_empty() && failed {
+        found.push("unclassified");
+    }
+    found
 }
 
 /// Every Job of the platform's and the workspaces' is Complete; one that is not says whether it
@@ -245,14 +285,23 @@ fn jobs(list: &mut Checklist, kubectl: Kubectl<'_>, pods: &[Value]) {
             list.check(true, what);
             continue;
         }
-        let mut detail = match condition("Failed") {
-            Some(failed) => format!("Failed: {}", word(text(failed, &["reason"]))),
-            None => format!(
-                "active {}, failed {}",
-                job["status"]["active"].as_u64().unwrap_or_default(),
-                job["status"]["failed"].as_u64().unwrap_or_default()
-            ),
-        };
+        let mut detail = format!(
+            "active {}, failed {}",
+            job["status"]["active"].as_u64().unwrap_or_default(),
+            job["status"]["failed"].as_u64().unwrap_or_default()
+        );
+        for held in job["status"]["conditions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|c| text(c, &["status"]) == "True")
+        {
+            detail.push_str(&format!(
+                "; {}: {}",
+                word(text(held, &["type"])),
+                word(text(held, &["reason"]))
+            ));
+        }
         let mut seen: Vec<String> = Vec::new();
         for pod in pods.iter().filter(|pod| {
             text(pod, &["metadata", "namespace"]) == text(job, &["metadata", "namespace"])
@@ -266,6 +315,19 @@ fn jobs(list: &mut Checklist, kubectl: Kubectl<'_>, pods: &[Value]) {
         }
         if !seen.is_empty() {
             detail.push_str(&format!("; pods {}", seen.join(", ")));
+        }
+        let name = format!("job/{}", text(job, &["metadata", "name"]));
+        let logs = kubectl(&[
+            "logs",
+            &name,
+            "--namespace",
+            text(job, &["metadata", "namespace"]),
+            "--tail=20",
+            "--all-containers",
+        ]);
+        let classes = logs.map_or_else(|_| vec!["unreadable"], |text| log_classes(&text));
+        if !classes.is_empty() {
+            detail.push_str(&format!("; logs {}", classes.join(", ")));
         }
         list.check(false, format!("{what} ({detail})"));
     }
@@ -465,6 +527,7 @@ mod tests {
         bindings: Vec<Value>,
         webhooks: Vec<Value>,
         jobs: Vec<Value>,
+        logs: &'static str,
         tunnel: &'static str,
         api: u16,
         unreadable: Option<&'static str>,
@@ -500,6 +563,7 @@ mod tests {
                     })
                     .collect(),
                 jobs: vec![job("migrate", "Complete")],
+                logs: "",
                 webhooks: vec![json!({
                     "metadata": {"name": SIGNATURE_WEBHOOK},
                     "webhooks": [{"failurePolicy": "Fail"}, {"failurePolicy": "Fail"}],
@@ -531,6 +595,15 @@ mod tests {
                 )),
                 "verify only reads: {args:?}"
             );
+            if args.first() == Some(&"logs") {
+                return Ok(self.logs.to_owned());
+            }
+            assert_eq!(
+                args.first(),
+                Some(&"get"),
+                "verify only runs get and logs: {args:?}"
+            );
+            let args = &args[1..];
             let what = args.first().copied().unwrap_or_default();
             if what == "pods" {
                 self.reads.set(self.reads.get() + 1);
@@ -807,24 +880,35 @@ mod tests {
             json!({"metadata": {"name": "migrate", "namespace": "ws-ws1"}, "status": {"active": 1, "failed": 1}}),
         ];
         staging.pods.push(in_job(pulling.clone(), "migrate"));
+        staging.logs =
+            "psql: error: connection to server at \"journal-rw\" failed: timeout expired";
         let text = run(&staging)?;
         assert_eq!(
             missing(&text),
             [
-                "job ws-ws1/migrate is Complete (active 1, failed 1; pods Failed: Error, Pending: ImagePullBackOff)"
+                "job ws-ws1/migrate is Complete (active 1, failed 1; pods Failed: Error: exit 1, Pending: ImagePullBackOff; logs timeout)"
             ],
             "{text}"
         );
         staging.jobs = vec![job("migrate", "Failed")];
+        staging.logs = "psql: error: connection to server failed: FATAL:  password authentication \
+                        failed for user \"mandate_migrator\" postgresql://u:hunter2@db";
         let text = run(&staging)?;
         assert_eq!(
             missing(&text),
             [
-                "job ws-ws1/migrate is Complete (Failed: BackoffLimitExceeded; pods Failed: Error, Pending: ImagePullBackOff)"
+                "job ws-ws1/migrate is Complete (active 1, failed 2; Failed: BackoffLimitExceeded; pods Failed: Error: exit 1, Pending: ImagePullBackOff; logs auth-failed)"
             ],
             "{text}"
         );
-        assert!(!text.contains("secret-ish"), "{text}");
+        for leak in ["secret-ish", "hunter2", "mandate_migrator", "postgresql"] {
+            assert!(!text.contains(leak), "{leak}: {text}");
+        }
+        assert_eq!(
+            log_classes("applied: 0001.sql\nERROR: relation x\n"),
+            ["unclassified"]
+        );
+        assert!(log_classes("already applied: 0001.sql\n").is_empty());
 
         let mut staging = Staging::up();
         staging.pods[3] = pulling;

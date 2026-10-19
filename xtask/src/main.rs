@@ -1765,7 +1765,7 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         let out = gitops::tool("kubectl")
             .args(["--v=0", "--kubeconfig"])
             .arg(kubeconfig.path())
-            .args(["--context", &context, "--request-timeout=30s", "get"])
+            .args(["--context", &context, "--request-timeout=30s"])
             .args(args)
             .output()
             .context("starting kubectl")?;
