@@ -1,0 +1,164 @@
+[
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a session reference",
+    "set": {
+      "/session_ref": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    }
+  },
+  {
+    "label": "a missing principal_id",
+    "remove": [
+      "/principal_id"
+    ]
+  },
+  {
+    "label": "a lowercase principal_id",
+    "set": {
+      "/principal_id": "01jb3k6f0c9r2v7n4m8q1t5w3z"
+    }
+  },
+  {
+    "label": "a principal_id of 25 characters",
+    "set": {
+      "/principal_id": "01JB3K6F0C9R2V7N4M8Q1T5W3"
+    }
+  },
+  {
+    "label": "a principal_id of 27 characters",
+    "set": {
+      "/principal_id": "01JB3K6F0C9R2V7N4M8Q1T5W3ZZ"
+    }
+  },
+  {
+    "label": "a principal_id past the ULID range",
+    "set": {
+      "/principal_id": "81JB3K6F0C9R2V7N4M8Q1T5W3Z"
+    }
+  },
+  {
+    "label": "a principal_id with a letter outside Crockford's",
+    "set": {
+      "/principal_id": "01JB3K6F0C9R2V7N4M8Q1T5W3U"
+    }
+  },
+  {
+    "label": "a missing kind",
+    "remove": [
+      "/kind"
+    ]
+  },
+  {
+    "label": "an unknown kind",
+    "set": {
+      "/kind": "mutant_value"
+    }
+  },
+  {
+    "label": "a missing expires_at",
+    "remove": [
+      "/expires_at"
+    ]
+  },
+  {
+    "label": "an expires_at without nanoseconds",
+    "set": {
+      "/expires_at": "2026-10-19T23:30:00Z"
+    }
+  },
+  {
+    "label": "a full session naming workspaces",
+    "set": {
+      "/workspaces": [
+        {
+          "workspace_id": "ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+          "label": "Paper desk"
+        }
+      ]
+    }
+  },
+  {
+    "label": "a reduction-only session without workspaces",
+    "set": {
+      "/kind": "reduction_only"
+    }
+  },
+  {
+    "label": "a reduction-only session covering none",
+    "set": {
+      "/kind": "reduction_only",
+      "/workspaces": []
+    }
+  },
+  {
+    "label": "a covered workspace with an unknown member",
+    "set": {
+      "/kind": "reduction_only",
+      "/workspaces": [
+        {
+          "workspace_id": "ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+          "label": "Paper desk",
+          "roles": []
+        }
+      ]
+    }
+  },
+  {
+    "label": "a covered workspace without a label",
+    "set": {
+      "/kind": "reduction_only",
+      "/workspaces": [
+        {
+          "workspace_id": "ws_1"
+        }
+      ]
+    }
+  },
+  {
+    "label": "a covered workspace without an id",
+    "set": {
+      "/kind": "reduction_only",
+      "/workspaces": [
+        {
+          "label": null
+        }
+      ]
+    }
+  },
+  {
+    "label": "a malformed covered workspace id",
+    "set": {
+      "/kind": "reduction_only",
+      "/workspaces": [
+        {
+          "workspace_id": "a b",
+          "label": null
+        }
+      ]
+    }
+  },
+  {
+    "label": "a watermark",
+    "set": {
+      "/as_of": [
+        {
+          "stream_id": "ctl:ws_1",
+          "seq": 1,
+          "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "recorded_at": "2026-10-19T15:30:00.000000000Z"
+        }
+      ]
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  }
+]
