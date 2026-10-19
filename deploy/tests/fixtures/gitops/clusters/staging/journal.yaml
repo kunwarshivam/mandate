@@ -1,5 +1,5 @@
 # The staging journal's settings. It archives WAL and base backups to the journal archive bucket,
-# Cloudflare R2 with bucket lock (DEC-2605 row 4), from lane IAC (E21-56); the account here is made up. The key is the Secret
+# Cloudflare R2 with bucket lock (DEC-2605 row 4), from lane IAC (E21-56). The key is the Secret
 # `journal-archive-key` the founder creates at bootstrap, never a value (DEC-2015 item 4,
 # DEC-2018). The archive's clients reach exactly R2's two addresses on 443, which fails closed if
 # they change (DEC-2017 items 1 and 2).
@@ -17,7 +17,6 @@ spec:
       cpu: 500m
       memory: 1Gi
     archive:
-      endpointURL: https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com
       destinationPath: s3://mandate-journal-archive-staging/journal-db
       keyFrom: journal-archive-key
       retention: 30d

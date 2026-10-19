@@ -61,6 +61,14 @@ SIGNER = {
 # resolved 2026-10-18 for the default jurisdiction (DEC-2017 items 1 and 2).
 R2_ENDPOINT = re.compile(r"^https://[0-9a-f]{32}\.r2\.cloudflarestorage\.com$")
 R2_EGRESS = {"cidrs": ["172.64.190.1/32", "172.64.66.1/32"], "port": 443}
+# The ConfigMaps the bootstrap writes, not git (DEC-2017 item 6), each with a stand-in value of the
+# shape the bootstrap writes: the archive's endpoint names the founder's Cloudflare account.
+STAND_IN_ACCOUNT = "0123456789abcdef0123456789abcdef"
+BOOTSTRAP_VALUES = {
+    "journal-archive-endpoint": {
+        "archive": {"endpointURL": f"https://{STAND_IN_ACCOUNT}.r2.cloudflarestorage.com"}
+    },
+}
 # The tiers the stub issuer may run in (DEC-2005), which no hosted environment may take.
 STUB_TIERS = {"dev", "ci"}
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -124,6 +132,10 @@ def release_values(docs: list[dict], release: dict) -> dict:
     values: dict = {}
     for ref in release["spec"].get("valuesFrom", []):
         assert ref["kind"] == "ConfigMap", ref
+        if ref["name"] in BOOTSTRAP_VALUES:
+            assert ref["name"] not in maps, f"{ref['name']} is the bootstrap's, not git's"
+            values = merge(values, BOOTSTRAP_VALUES[ref["name"]])
+            continue
         source = maps.get(ref["name"])
         assert source is not None, f"valuesFrom names a ConfigMap the overlay lacks: {ref['name']}"
         values = merge(values, yaml.safe_load(source["data"][ref.get("valuesKey", "values.yaml")]) or {})
@@ -216,6 +228,24 @@ def sync_read_only(docs: list[dict], overlay: Path) -> list[str]:
             problems.append(f"{name} reconciles {spec.get('path')}")
         if spec.get("sourceRef") != {"kind": "GitRepository", "name": "mandate"}:
             problems.append(f"reconciles from {spec.get('sourceRef')}")
+    return problems
+
+
+def endpoint_from_bootstrap(docs: list[dict]) -> list[str]:
+    """The journal's archive endpoint comes only from the bootstrap's ConfigMap, never from git,
+    which holds no account (DEC-2017 item 6)."""
+    journal = of_kind(docs, "HelmRelease").get("journal") or {"spec": {}}
+    spec = journal["spec"]
+    problems = []
+    refs = [ref for ref in spec.get("valuesFrom", []) if ref.get("name") == "journal-archive-endpoint"]
+    if len(refs) != 1:
+        problems.append("journal: does not read the bootstrap's journal-archive-endpoint once")
+    if any(ref.get("optional") for ref in refs):
+        problems.append("journal: installs without the bootstrap's endpoint, so with none")
+    if "endpointURL" in ((spec.get("values") or {}).get("archive") or {}):
+        problems.append("journal: git sets the archive endpoint")
+    if "journal-archive-endpoint" in of_kind(docs, "ConfigMap"):
+        problems.append("journal-archive-endpoint is in git, so Flux would overwrite the bootstrap's")
     return problems
 
 
@@ -355,6 +385,10 @@ def test_sync_read_only(overlay):
     assert sync_read_only(overlay[1], overlay[4]) == []
 
 
+def test_endpoint_from_bootstrap(overlay):
+    assert endpoint_from_bootstrap(overlay[1]) == []
+
+
 def test_never_pruned(overlay):
     assert never_pruned(overlay[1]) == []
 
@@ -447,12 +481,7 @@ DOC_BUGS = [
         "mandate-journal-db",
         lambda d: d["spec"]["verify"].update(secretRef={"name": "cosign-key"}),
     ),
-    (
-        sources_pinned,
-        "OCIRepository",
-        "mandate-workspace",
-        lambda d: d["metadata"].update(name="mandate-extra"),
-    ),
+    # A namespace the journal needs is missing; the every-namespace rule has the ConfigMap case below.
     (never_pruned, "Namespace", "cnpg-system", lambda d: d["metadata"].update(name="extra")),
     (
         never_pruned,
@@ -475,6 +504,31 @@ DOC_BUGS = [
         lambda d: d["spec"].update(secretRef={"name": "deploy-key"}),
     ),
     (sync_read_only, "Kustomization", "cluster", lambda d: d["spec"].update(path="./deploy/gitops")),
+    (endpoint_from_bootstrap, "HelmRelease", "journal", lambda d: d["spec"].pop("valuesFrom")),
+    (
+        endpoint_from_bootstrap,
+        "HelmRelease",
+        "journal",
+        lambda d: (
+            d["spec"]["values"]
+            .setdefault("archive", {})
+            .update(endpointURL="https://x.r2.cloudflarestorage.com")
+        ),
+    ),
+    (
+        endpoint_from_bootstrap,
+        "HelmRelease",
+        "journal",
+        lambda d: next(r for r in d["spec"]["valuesFrom"] if r["name"] == "journal-archive-endpoint").update(
+            optional=True
+        ),
+    ),
+    (
+        endpoint_from_bootstrap,
+        "Namespace",
+        "ws-ws1",
+        lambda d: d.update(kind="ConfigMap", metadata={"name": "journal-archive-endpoint"}),
+    ),
     (never_pruned, "Namespace", "ws-ws1", lambda d: d["metadata"].pop("annotations")),
     (never_pruned, "HelmRelease", "journal", lambda d: d["metadata"].pop("annotations")),
 ]
@@ -540,3 +594,49 @@ def test_rendered_seeded_bugs_are_caught(overlay):
     cluster = copy.deepcopy(next(d for d in rendered if d["kind"] == "Cluster"))
     cluster["spec"]["imageName"] = "ghcr.io/cloudnative-pg/postgresql:18"
     assert rendered_policy([cluster], environment)
+
+
+# An R2 endpoint naming an account: 32 hex digits before R2's S3 host.
+ACCOUNT_ENDPOINT = re.compile(r"[0-9a-f]{32}\.r2\.cloudflarestorage\.com")
+
+
+def accounts_in_git(files: dict[str, str]) -> list[str]:
+    """No tracked file names a Cloudflare account in an R2 endpoint, but for this file's stand-in
+    (DEC-2017 item 6): the founder's account reaches a cluster only through the bootstrap."""
+    return sorted(
+        f"{path}: {found}"
+        for path, text in files.items()
+        for found in ACCOUNT_ENDPOINT.findall(text)
+        if found != f"{STAND_IN_ACCOUNT}.r2.cloudflarestorage.com"
+    )
+
+
+def tracked_files() -> dict[str, str]:
+    listed = subprocess.run(["git", "ls-files", "-z"], capture_output=True, check=True, cwd=ROOT).stdout
+    files = {}
+    for name in listed.decode().split("\0"):
+        path = ROOT / name
+        if name and path.is_file():
+            files[name] = path.read_bytes().decode("utf-8", errors="replace")
+    return files
+
+
+def test_no_account_in_git():
+    assert accounts_in_git(tracked_files()) == []
+
+
+def test_an_account_in_git_is_caught():
+    account = "fedcba9876543210" * 2
+    endpoint = f"https://{account}.r2.cloudflarestorage.com"
+    assert accounts_in_git({"deploy/gitops/clusters/staging/journal.yaml": f"endpointURL: {endpoint}\n"})
+
+
+def test_an_extra_source_is_caught(tmp_path):
+    """A source beside the pinned ones, every pinned one still present, is refused on its own."""
+    docs = build("staging", FIXTURE, tmp_path)
+    assert sources_pinned(docs) == []
+    extra = copy.deepcopy(of_kind(docs, "OCIRepository")["mandate-workspace"])
+    extra["metadata"]["name"] = "mandate-extra"
+    assert sources_pinned([*docs, extra]) == [
+        "mandate-extra: an OCIRepository the hosted clusters do not run"
+    ]
