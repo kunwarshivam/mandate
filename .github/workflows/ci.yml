@@ -314,6 +314,7 @@ jobs:
       - run: cargo xtask ci test-python
         env:
           MANDATE_CELL_HELM_REQUIRED: "1"
+          MANDATE_GITOPS_REQUIRED: "1"
 
   # DEC-954. The runner on macOS, where the founder runs the CLIs: `cargo xtask ci portable`
   # lints `mandate-paper` and runs its core-dump hardening tests there, so a Linux-only call in it

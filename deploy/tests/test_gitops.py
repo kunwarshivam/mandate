@@ -79,12 +79,14 @@ PRUNE_DISABLED = {"kustomize.toolkit.fluxcd.io/prune": "disabled"}
 # kind as `cargo xtask ci cell` skips them, never by a missing-schema wildcard.
 NO_SCHEMA = "Cluster,ObjectStore,ScheduledBackup"
 
-REQUIRED = os.environ.get("MANDATE_CELL_HELM_REQUIRED")
+# Set in CI's fast-python job, which installs all three tools (DEC-2017 item 3); other jobs that run
+# deploy/tests without flux, such as the cell's, skip this file.
+REQUIRED = os.environ.get("MANDATE_GITOPS_REQUIRED")
 for tool in ("helm", "flux", "kubeconform"):
     if shutil.which(tool) is None:
         if REQUIRED:
-            raise RuntimeError(f"MANDATE_CELL_HELM_REQUIRED is set but {tool} is not installed")
-        pytest.skip(f"{tool} is not installed (deploy/gitops/README.md)", allow_module_level=True)
+            raise RuntimeError(f"MANDATE_GITOPS_REQUIRED is set but {tool} is not installed")
+        pytest.skip(f"{tool} is not installed (.cursor/install.sh)", allow_module_level=True)
 
 
 def build(environment: str, overlay: Path, tmp: Path) -> list[dict]:
@@ -245,9 +247,11 @@ def endpoint_from_bootstrap(docs: list[dict]) -> list[str]:
 
 
 def never_pruned(docs: list[dict]) -> list[str]:
-    """Removing a namespace or the journal from git never deletes the journal's data."""
+    """Removing a namespace or the journal from git never deletes the journal's data: every
+    namespace and the journal's release are unprunable, and the two the journal needs exist."""
     problems = []
-    keep = [("Namespace", "cnpg-system"), ("Namespace", "ws-ws1"), ("HelmRelease", "journal")]
+    namespaces = set(of_kind(docs, "Namespace")) | {"cnpg-system", "ws-ws1"}
+    keep = [("Namespace", name) for name in sorted(namespaces)] + [("HelmRelease", "journal")]
     for kind, name in keep:
         found = of_kind(docs, kind).get(name)
         annotations = (found or {}).get("metadata", {}).get("annotations") or {}
@@ -346,10 +350,9 @@ def rendered_policy(rendered: list[dict], environment: str) -> list[str]:
                     problems.append(f"{where}: tier {value}")
                 if value.strip().lower() == "live":
                     problems.append(f"{where}: {env.get('name')} is live")
-        for key in ("imageName",):
-            image = doc.get("spec", {}).get(key)
-            if image is not None and not PINNED.search(image):
-                problems.append(f"{where}: {key} {image} not pinned by digest")
+        image = doc.get("spec", {}).get("imageName")
+        if image is not None and not PINNED.search(image):
+            problems.append(f"{where}: imageName {image} not pinned by digest")
     return problems
 
 
@@ -420,10 +423,17 @@ def test_rendered_objects_match_the_kubernetes_schemas(overlay, tmp_path):
     assert done.returncode == 0, done.stdout + done.stderr
 
 
+# What deploy/gitops/ may hold: the base, one overlay per hosted environment, and the runbook. A
+# manifest anywhere else would be reconciled by nothing, or checked by nothing.
+GITOPS_ENTRIES = {"base", "clusters", "BOOTSTRAP.md"}
+
+
 def test_every_overlay_is_a_hosted_environment():
     clusters = GITOPS / "clusters"
     found = sorted(p.name for p in clusters.iterdir()) if clusters.is_dir() else []
     assert set(found) <= set(ENVIRONMENTS), found
+    entries = {p.name for p in GITOPS.iterdir()} if GITOPS.is_dir() else set()
+    assert entries <= GITOPS_ENTRIES, sorted(entries - GITOPS_ENTRIES)
 
 
 def seeded(docs: list[dict], kind: str, name: str, change) -> list[dict]:
@@ -450,6 +460,37 @@ DOC_BUGS = [
         lambda d: d["spec"]["ref"].update(digest="sha256:" + "1" * 64),
     ),
     (sources_pinned, "OCIRepository", "plugin-barman-cloud", lambda d: d["spec"].pop("layerSelector")),
+    (
+        sources_pinned,
+        "OCIRepository",
+        "cloudnative-pg",
+        lambda d: d["spec"].update(url="oci://ghcr.io/elsewhere/charts/cloudnative-pg"),
+    ),
+    (
+        sources_pinned,
+        "OCIRepository",
+        "mandate-workspace",
+        lambda d: d["spec"].update(url="oci://ghcr.io/elsewhere/charts/mandate-workspace"),
+    ),
+    (
+        sources_pinned,
+        "OCIRepository",
+        "mandate-journal-db",
+        lambda d: d["spec"]["verify"].update(secretRef={"name": "cosign-key"}),
+    ),
+    (
+        sources_pinned,
+        "OCIRepository",
+        "mandate-workspace",
+        lambda d: d["metadata"].update(name="mandate-extra"),
+    ),
+    (never_pruned, "Namespace", "cnpg-system", lambda d: d["metadata"].update(name="extra")),
+    (
+        never_pruned,
+        "ConfigMap",
+        "workspace-managed-values",
+        lambda d: d.update(kind="Namespace", metadata={"name": "extra"}),
+    ),
     (
         releases_resolve,
         "HelmRelease",
@@ -501,6 +542,8 @@ VALUE_BUGS = [
     ("workspace", {"environment": "live"}),
     ("workspace", {"api": {"issuer": "live"}}),
     ("workspace", {"localImages": True}),
+    ("workspace", {"deploymentTier": None}),
+    ("workspace", {"deploymentTier": "production-eu"}),
     ("workspace", {"images": {"stub-issuer": "mandate.local/stub-issuer:1"}}),
     ("workspace", {"images": {"api": "ghcr.io/kunwarshivam/mandate/mandate:main"}}),
     ("cnpg", {"image": {"tag": "1.30.1"}}),
