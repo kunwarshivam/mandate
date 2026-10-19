@@ -1,5 +1,5 @@
-//! E21-33's property (DEC-1170, DEC-1171): across random sequences of deploys, stops, connection
-//! revocations, kill switches, crashes, readiness flaps, lost nodes and clock jumps, through the
+//! E21-33's property (DEC-1170, DEC-1171): across random sequences of deploys, stops (of read and
+//! never-read deployments), connection revocations and re-establishments, kill switches, crashes, readiness flaps, lost nodes and clock jumps, through the
 //! control stream in a
 //! [`mandate_journal::MemoryJournal`] and the fake orchestrator:
 //!
@@ -27,8 +27,8 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
-    Journal, Manager, Seed, accounts, at, block_on, connection_of, deployed, kill, manager,
-    restart, revoked, stopped,
+    Journal, Manager, Seed, accounts, at, block_on, connection_of, deployed, established_again,
+    kill, manager, restart, revoked_again, stopped,
 };
 use mandate_deploy_manager::Slot;
 use mandate_deploy_manager::fake::Call;
@@ -51,8 +51,10 @@ const WINDOW_STARTS: usize = 7;
 enum Op {
     Deploy(usize),
     Stop(usize),
-    /// The connection of one account is revoked, for good.
+    /// The connection of one account is revoked.
     Revoke(usize),
+    /// A revoked connection is established again: deployments after it run, ones before it do not.
+    Reestablish(usize),
     KillAgent(usize),
     KillConnection(usize),
     KillWorkspace,
@@ -79,6 +81,7 @@ fn op() -> impl Strategy<Value = Op> {
         3 => (0..AGENTS.len()).prop_map(Op::Deploy),
         1 => (0..AGENTS.len()).prop_map(Op::Stop),
         1 => (0..ACCOUNTS.len()).prop_map(Op::Revoke),
+        1 => (0..ACCOUNTS.len()).prop_map(Op::Reestablish),
         1 => (0..AGENTS.len()).prop_map(Op::KillAgent),
         1 => (0..ACCOUNTS.len()).prop_map(Op::KillConnection),
         1 => Just(Op::KillWorkspace),
@@ -101,6 +104,10 @@ struct Oracle {
     deployed: BTreeSet<usize>,
     /// The accounts whose connection is revoked.
     revoked: BTreeSet<&'static str>,
+    /// Per account, how many revocations and establishments the stream holds beyond the first
+    /// establishment, so each is its own event.
+    revocations: BTreeMap<&'static str, u32>,
+    establishments: BTreeMap<&'static str, u32>,
     stopped: BTreeSet<usize>,
     /// Per slot, the second of each kill switch that covered it.
     kills: BTreeMap<Slot, Vec<i64>>,
@@ -169,12 +176,24 @@ fn run_seeded(ops: &[Op], seed: Seed) -> Result<(), TestCaseError> {
                 }
             }
             Op::Revoke(j) => {
-                if oracle.revoked.insert(ACCOUNTS[*j]) {
-                    journal.services(&revoked(&connection_of(ACCOUNTS[*j])), at(now));
+                let account = ACCOUNTS[*j];
+                if oracle.revoked.insert(account) {
+                    let nth = oracle.revocations.entry(account).or_default();
+                    journal.services(&revoked_again(&connection_of(account), *nth), at(now));
+                    *nth += 1;
+                }
+            }
+            Op::Reestablish(j) => {
+                let account = ACCOUNTS[*j];
+                if oracle.revoked.remove(account) {
+                    let nth = oracle.establishments.entry(account).or_insert(1);
+                    let draft = established_again(&connection_of(account), account, *nth);
+                    journal.services(&draft, at(now));
+                    *nth += 1;
                 }
             }
             Op::Stop(i) => {
-                if oracle.deployed.contains(i) && oracle.stopped.insert(*i) {
+                if oracle.journaled.contains(i) && oracle.stopped.insert(*i) {
                     journal.services(&stopped(AGENTS[*i].0, AGENTS[*i].1), at(now));
                 }
             }

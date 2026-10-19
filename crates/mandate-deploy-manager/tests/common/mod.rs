@@ -50,6 +50,8 @@ pub type Shared = Rc<RefCell<MemoryJournal>>;
 pub struct Journal {
     pub inner: Shared,
     pub unavailable: Rc<RefCell<bool>>,
+    /// How many of the manager's next appends fail as unavailable, its reads still answered.
+    pub failing_appends: Rc<RefCell<u32>>,
     /// Control services' drafts committed right after the manager's next append, as a writer
     /// racing it would.
     pub after_append: Rc<RefCell<Vec<Vec<u8>>>>,
@@ -62,6 +64,7 @@ impl Journal {
         let journal = Self {
             inner: Rc::new(RefCell::new(MemoryJournal::new())),
             unavailable: Rc::new(RefCell::new(false)),
+            failing_appends: Rc::new(RefCell::new(0)),
             after_append: Rc::new(RefCell::new(Vec::new())),
             agents: Rc::new(RefCell::new(BTreeMap::new())),
         };
@@ -139,6 +142,12 @@ impl ControlJournal for Journal {
         if *self.unavailable.borrow() {
             return Err(Unavailable);
         }
+        let mut failing = self.failing_appends.borrow_mut();
+        if *failing > 0 {
+            *failing -= 1;
+            return Err(Unavailable);
+        }
+        drop(failing);
         let outcome = append(&self.inner, draft, recorded_at);
         let racing: Vec<Vec<u8>> = self.after_append.borrow_mut().drain(..).collect();
         for other in racing {
@@ -373,8 +382,17 @@ pub fn opened() -> Vec<u8> {
 /// A connection established on the control stream, as control services write it (journal spec
 /// §9.8), naming its account.
 pub fn established(connection: &str, account: &str) -> Vec<u8> {
+    established_again(connection, account, 0)
+}
+
+/// The `nth` establishment of `connection`, each its own event; the first is [`established`].
+pub fn established_again(connection: &str, account: &str, nth: u32) -> Vec<u8> {
+    let seed = match nth {
+        0 => format!("established {connection}"),
+        _ => format!("established {connection} {nth}"),
+    };
     let draft = envelope(
-        &event_id(&format!("established {connection}")),
+        &event_id(&seed),
         "ConnectionEstablished",
         SERVICES,
         "{}",
@@ -455,8 +473,17 @@ fn deployment(seed: &str, agent: &str, account: Option<&str>, nth: &str) -> Vec<
 
 /// A connection's revocation on the control stream, as control services write it (journal spec §9.10).
 pub fn revoked(connection: &str) -> Vec<u8> {
+    revoked_again(connection, 0)
+}
+
+/// The `nth` revocation of `connection`, each its own event; the first is [`revoked`].
+pub fn revoked_again(connection: &str, nth: u32) -> Vec<u8> {
+    let seed = match nth {
+        0 => format!("revoked {connection}"),
+        _ => format!("revoked {connection} {nth}"),
+    };
     envelope(
-        &event_id(&format!("revoked {connection}")),
+        &event_id(&seed),
         "ConnectionRevoked",
         SERVICES,
         "{}",

@@ -151,6 +151,34 @@ fn a_revocation_stops_nothing_but_a_deployment_after_it_starts_nothing() {
 }
 
 #[test]
+fn an_unread_deployment_is_still_reported_when_a_journal_append_fails_in_its_pass() {
+    let journal = Journal::new();
+    let mut m = manager(
+        &journal,
+        accounts(&[("agent_a", "01J8Z2ACCT00000000000000A1")]),
+    );
+    tick(&mut m, 0);
+    journal.services(&deployed_v1("agent_b"), at(1));
+    journal.services(&journal.deployed("agent_a"), at(1));
+    *journal.failing_appends.borrow_mut() = 1;
+    assert_eq!(block_on(m.tick(at(1))), Err(Halt::Journal));
+    for s in 2..6 {
+        tick(&mut m, s);
+    }
+    assert_eq!(
+        m.alerts().0,
+        vec![DEPLOYMENT_UNREAD],
+        "raised once, though the pass that first saw it halted on an append"
+    );
+    assert_eq!(
+        starts(&mut m, &rt("agent_a")),
+        vec![1],
+        "the start is retried, as the same generation"
+    );
+    clean(&mut m);
+}
+
+#[test]
 fn a_version_1_record_of_an_agent_already_running_is_not_reported() {
     let journal = Journal::new();
     let mut m = manager(

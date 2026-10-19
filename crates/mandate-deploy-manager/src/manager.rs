@@ -266,26 +266,24 @@ impl Manager {
         self.slots.get(slot).is_some_and(|state| state.looped)
     }
 
-    /// At most one step per slot, from what the orchestrator lists at `now`, then one operator
-    /// alert for each unread deployment not yet reported. A slot with a live instance is never
-    /// started again and, while desired, never stopped: neither readiness nor a kill switch stops a
-    /// process.
+    /// One operator alert for each unread deployment not yet reported, then at most one step per
+    /// slot, from what the orchestrator lists at `now`. The alerts come first: raising one never
+    /// fails, so a journal append that halts the pass after them cannot lose one that is already
+    /// marked reported. A slot with a live instance is never started again and, while desired,
+    /// never stopped: neither readiness nor a kill switch stops a process.
     pub fn decide(&mut self, observed: &[Instance], now: UtcNanos) -> Vec<Decision> {
-        let slots: Vec<Slot> = self.slots.keys().cloned().collect();
-        let mut decisions: Vec<Decision> = slots
-            .into_iter()
-            .filter_map(|slot| {
-                let desired = self.desired(&slot);
-                let state = self.slots.get_mut(&slot)?;
-                let instances: Vec<&Instance> =
-                    observed.iter().filter(|i| i.slot == slot).collect();
-                step(&slot, state, desired, &instances, now)
-            })
-            .collect();
+        let mut decisions = Vec::new();
         for reported in self.unread.values_mut().filter(|reported| !**reported) {
             *reported = true;
             decisions.push(Decision::Retry(Effect::Alert(DEPLOYMENT_UNREAD)));
         }
+        let slots: Vec<Slot> = self.slots.keys().cloned().collect();
+        decisions.extend(slots.into_iter().filter_map(|slot| {
+            let desired = self.desired(&slot);
+            let state = self.slots.get_mut(&slot)?;
+            let instances: Vec<&Instance> = observed.iter().filter(|i| i.slot == slot).collect();
+            step(&slot, state, desired, &instances, now)
+        }));
         decisions
     }
 }
