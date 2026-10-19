@@ -289,21 +289,21 @@ fn current_quote<'b>(
 /// marketable where no market order may go — in extended hours, in the closing auction window, or
 /// in a presumed halt (§4.4: the latest quote stale or not sane) — and whose purpose may trade
 /// there: a risk exit, a protective order or a flatten in any of them, and an owner exit in the
-/// regular session. A discretionary exit is paced (§9.6), an instrument with no tier has no
+/// regular session, or in any of them once `confirmed` (DEC-2040 item 3). A discretionary exit is paced (§9.6), an instrument with no tier has no
 /// ladder, and an exit priced above a fresh sane bid is passive: each keeps its own limit. An exit
 /// with no limit is never passive, always has a tier ([`tier_of`]), and in the regular session is
 /// laddered too when the fresh quote shows no bid to sell at the market into (DEC-2037 item 4).
 pub(crate) fn alone(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
-    purpose: Purpose,
+    (purpose, confirmed): (Purpose, bool),
     limit: Option<Price>,
 ) -> bool {
     let latest = batch.view.quotes.get(instrument);
     let current = current_quote(batch, instrument);
     let may = purpose.exempt_from_pacing()
         || purpose == Purpose::OwnerExit
-            && venue(batch.ports, instrument, batch.at()) != Venue::Extended;
+            && (confirmed || venue(batch.ports, instrument, batch.at()) != Venue::Extended);
     let needed = match venue(batch.ports, instrument, batch.at()) {
         Venue::Extended | Venue::Closing => true,
         Venue::Regular => {
@@ -343,7 +343,19 @@ pub(crate) fn exit_limit(
     let unsequenced =
         !batch.view.exiting.contains_key(instrument) && !rests(&batch.view, instrument);
     match limit {
-        Some(own) if passive || unsequenced && !alone(batch, instrument, purpose, limit) => {
+        Some(own)
+            if passive
+                || unsequenced
+                    && !alone(
+                        batch,
+                        instrument,
+                        (
+                            purpose,
+                            confirmed_bid(&batch.view, intent, batch.at()).is_some(),
+                        ),
+                        limit,
+                    ) =>
+        {
             return ExitPrice::Own(own);
         }
         None if unsequenced

@@ -432,7 +432,15 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     let bracket = bracket_of(batch, &instrument, purpose, protection)?;
     let lone = !batch.view.exiting.contains_key(&instrument)
         && !rests(&batch.view, &instrument)
-        && alone(batch, &instrument, purpose, limit);
+        && alone(
+            batch,
+            &instrument,
+            (
+                purpose,
+                confirmed_bid(&batch.view, intent, batch.at()).is_some(),
+            ),
+            limit,
+        );
     let limit = match (
         exit_limit(batch, intent, &instrument, purpose, limit),
         limit,
