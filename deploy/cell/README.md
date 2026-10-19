@@ -63,8 +63,10 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
 - `MANDATE_DEPLOYMENT_TIER` on every process comes from the `deploymentTier` value alone:
   `production` unless a values file says otherwise, `ci` in the local cell, `dev` on hosted cell #1
   (DEC-971 item 2, [DEC-2001](../../docs/project/decisions/DEC-2001.md) item 6);
-- the cell's one ingress is a `cloudflared` pod dialing out to Cloudflare's tunnel edge, off in the
+- the cell's one ingress is `cloudflared` dialing out to Cloudflare's tunnel edge, off in the
   local cell: no Service, NodePort, LoadBalancer or Ingress, and the tunnel token a mounted file;
+  where the API runs, it runs as a second container of the API's pod and reaches the API's
+  loopback listener (DEC-2056);
 - no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and
   k3d's differs only by the tunnel.
 - one shared artifact store (mandate documents, backtest reports), the claim `artifacts` at
