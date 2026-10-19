@@ -981,7 +981,8 @@ mod tests {
                 "cd34".repeat(8)
             )),
         };
-        let errors: Vec<String> = secrets.manifests()?.iter().map(failed_write).collect();
+        let writes = secrets.manifests()?;
+        let errors: Vec<String> = writes.iter().map(failed_write).collect();
         assert!(
             errors[0].contains("ws-ws1/journal-archive-key")
                 && errors[0].contains("cannot archive")
@@ -995,9 +996,17 @@ mod tests {
                 && errors[2].contains("journal and the workspace stay uninstalled")
         );
         assert!(!errors[0].contains("uninstalled") && !errors[1].contains("uninstalled"));
+        let endpoint = format!("https://{}.r2.cloudflarestorage.com", "cd34".repeat(8));
+        let values = ["value-1", "value-2", "value-3", endpoint.as_str()];
         for error in &errors {
-            for value in ["value-1", "value-2", "value-3", "cd34"] {
+            for value in values {
                 assert!(!error.contains(value), "{error}");
+                assert!(!error.contains(&image::base64(value.as_bytes())), "{error}");
+            }
+            assert!(!error.contains("cd34"), "{error}");
+            for write in &writes {
+                assert!(!error.contains(&write.manifest), "{error}");
+                assert!(!error.contains("\"data\""), "{error}");
             }
         }
         Ok(())
