@@ -1,0 +1,125 @@
+[
+  {
+    "label": "an empty as_of",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "an unknown connection member",
+    "set": {
+      "/connection/extra": 1
+    }
+  },
+  {
+    "label": "a token member",
+    "set": {
+      "/connection/access_token": "x"
+    }
+  },
+  {
+    "label": "an account number member",
+    "set": {
+      "/connection/account_number": "x"
+    }
+  },
+  {
+    "label": "a vault path member",
+    "set": {
+      "/connection/vault_path": "x"
+    }
+  },
+  {
+    "label": "a fingerprint member",
+    "set": {
+      "/connection/fingerprint": "x"
+    }
+  },
+  {
+    "label": "a missing state",
+    "remove": [
+      "/connection/state"
+    ]
+  },
+  {
+    "label": "a health state",
+    "set": {
+      "/connection/state": "closing_only"
+    }
+  },
+  {
+    "label": "a backtest environment",
+    "set": {
+      "/connection/environment": "backtest"
+    }
+  },
+  {
+    "label": "a missing agents",
+    "remove": [
+      "/connection/agents"
+    ]
+  },
+  {
+    "label": "an established connection with a refusal",
+    "set": {
+      "/connection/refusal": {
+        "check": "scope",
+        "reason": "scope_mismatch"
+      }
+    }
+  },
+  {
+    "label": "a refused connection without a refusal",
+    "set": {
+      "/connection/state": "refused"
+    }
+  },
+  {
+    "label": "an established connection with a revoked reason",
+    "set": {
+      "/connection/revoked_reason": "owner"
+    }
+  },
+  {
+    "label": "an unknown revoked reason",
+    "set": {
+      "/connection/state": "revoked",
+      "/connection/revoked_reason": "expired"
+    }
+  },
+  {
+    "label": "an unknown refusal check",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": "health",
+        "reason": "x"
+      }
+    }
+  },
+  {
+    "label": "a refusal with an extra member",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": null,
+        "reason": "timeout",
+        "detail": "x"
+      }
+    }
+  },
+  {
+    "label": "an empty scope",
+    "set": {
+      "/connection/scopes": [
+        ""
+      ]
+    }
+  }
+]

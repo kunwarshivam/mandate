@@ -1696,6 +1696,7 @@ dependencies = [
  "mandate-identity-testkit",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-num",
  "mandate-passkey",
  "mandate-release",
  "mandate-spec",
@@ -2044,7 +2045,9 @@ dependencies = [
  "mandate-risk",
  "mandate-store",
  "mandate-time",
+ "mandate-vault",
  "proptest",
+ "secrecy",
  "serde_json",
  "sqlx",
  "tokio",
@@ -2291,6 +2294,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-ports"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-builder",
+ "mandate-canon",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-runtime",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-process"
 version = "0.0.0"
 dependencies = [
@@ -2488,6 +2506,7 @@ dependencies = [
  "mandate-marketdata",
  "mandate-modelhost",
  "mandate-num",
+ "mandate-ports",
  "mandate-risk",
  "mandate-robinhood",
  "mandate-runtime",
@@ -2576,6 +2595,7 @@ name = "mandate-store"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-gateway",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-time",
@@ -2641,6 +2661,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "ring",
+ "rustix",
  "rustls",
  "secrecy",
  "serde_json",

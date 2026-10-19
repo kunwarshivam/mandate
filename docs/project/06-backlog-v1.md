@@ -571,11 +571,21 @@ the spec invariants (DP-n) its tests cover.
     daily loss (`resolved_at_rollover`, `new_day_breach`), the lifetime floor, crypto, and the
     owner's acknowledgments and allocation changes.
   - **C:** the wiring in `mandate-shell`'s `adapters.rs`, `paper/gate.rs`, and `paper/context.rs`,
-    which are R0 files. It waits for R0 to close, or for the founder's call.
+    which are R0 files. The founder started it on 2026-10-19 ([DEC-2605](decisions/DEC-2605.md)
+    row 17); [DEC-2307](decisions/DEC-2307.md) limits the R0 edits to thin hooks in those three
+    files, binds C only after B2b to B4, and adds the account stream's own `ClockAdvanced`. The first
+    live order waits for C and the R0 re-pass (row 21).
+  - **Gap (reference cases):** no mandate reference case steps an equity's after-hours or overnight
+    mark; MC-R13 covers pre-market only. Add one when the mandate cases next change.
   - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
     "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
     one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which
     fails closed through staleness.
+  - **Follow-up ([DEC-2305](decisions/DEC-2305.md) item 5, the #1778 review):** the executor's
+    version-2 mark writer, whichever E6-15 or E7 slice builds it, writes `sane: false` for a quote
+    older than the data profile's staleness threshold at `risk_clock`. Version 2 records no quote
+    time, so a replay cannot audit a stale `sane: true`; the obligation is the writer's, and the
+    writer gets a writer-side test of it.
 
   *Accepted when:* every MC-R, MC-T, MC-L, and MC-W case, driven through journaled records, gives the
   harness's snapshot and events. A restart rebuilds the same view. Every fail-closed cause holds
@@ -856,7 +866,10 @@ after U-A1 to U-A5 are recorded.
   [DEC-800](decisions/DEC-800.md) item 14). *Accepted when:* a journal spec change after v0.20
   defines the event that records, with the connection, whether the token may reach the other
   environment, and the disclosure the owner confirmed, with vectors, tests first; and no Alpaca
-  OAuth connect appends `ConnectionEstablished` before that event.
+  OAuth connect appends `ConnectionEstablished` before that event. *Status:* the journal spec change is v0.68
+  ([DEC-2621](decisions/DEC-2621.md)): `ConnectionRequested` version 2 and rule 255, with vectors;
+  the disclosure's wording is [DEC-2622](decisions/DEC-2622.md), Proposed. `mandate-journal`'s
+  registration (tests first) and the start route that writes version 2 (E10-13 slice 2) follow.
 
 - **E7-28 (Should, M6, after E7-26; tooling)** As the founder, I want X1's shell reading to
   parse `case` arm patterns, `[[ … ]]` tests (their `|` and parentheses), single-quoted strings
@@ -3293,7 +3306,7 @@ enables `live` (ES-23, OPS-5).
   over random journaled runs of several agents shows the folded claims equal an independent
   accumulator over the same records.
 
-- **E21-61 (Proposed, M8, after E21-59; lane G, the model gateway; DEC-2249)** As the founder, I
+- **E21-61 (Proposed, M8, after E21-59; lane I2, which holds it while lane G is inactive; DEC-2249, DEC-2257 item 2)** As the founder, I
   want the cell's model-gateway meter journaled on `meter:{workspace_id}` (journal spec §9.19) and
   folded back after a restart, so that a restarted runtime counts the day's research reservations
   and spend instead of failing closed for the rest of the risk day. *Accepted when:* the cell's
@@ -3301,6 +3314,24 @@ enables `live` (ES-23, OPS-5).
   rebuilds its meter from that stream at start, and the research source folds the same records
   through `mandate_gateway::meter::spend`; DEC-2249 item 3's fail-closed rule is then lifted by its
   own decision; a restart test shows the cap holds across a restart with reservations open.
+
+- **E21-62 (Proposed, M8, after E21-61; lane I2, with V2 for the key and GO for egress and images;
+  DEC-997, DEC-2020, DEC-2257)** As the founder, I want the research agent on staging to call
+  OpenRouter through the model-gateway service, so that the demo's research runs on a real pinned
+  model under DEC-997's routing lock and caps. *Accepted when:*
+  - the chart's `model-gateway` process is built: `mandate-gateway` over `HttpsTransport`, the
+    journaled meter and the system clock, serving the runtime's research calls;
+  - it refuses to start live without the journaled meter (DEC-2257 item 2);
+  - it reads `platform/model-provider-key` once at start as `ModelGateway`, and a test shows the
+    key's bytes in no log, record, artifact or error;
+  - it registers an endpoint only after the §4.3 identity probe matches the founder's chosen
+    registry entry, and enforces the workspace, deployment and daily research caps;
+  - the runtime's worker reaches a model only through the service, and keeps the recorded fake when
+    the service is not configured;
+  - `mandate vault import` writes the key from stdin as `SecretImport`, run by staging's infra
+    workflow from the `infra-staging` environment secret;
+  - egress to OpenRouter's host is open for the model-gateway pod alone;
+  - every test and CI job uses recorded responses only.
 
 ## Won't (v1)
 

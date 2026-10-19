@@ -307,6 +307,9 @@ pub enum StreamMessage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Refused {
     pub index: usize,
+    /// The message's `T`, when it could be read, so its reader can tell a missed quote from a
+    /// missed status.
+    pub kind: Option<String>,
     pub reason: WireError,
 }
 
@@ -330,13 +333,23 @@ pub fn read_frame(text: &str) -> Result<Frame, WireError> {
     for (index, item) in items.into_iter().enumerate() {
         match message(item) {
             Ok(message) => frame.messages.push(message),
-            Err(reason) => frame.refused.push(Refused { index, reason }),
+            Err(reason) => frame.refused.push(Refused {
+                index,
+                kind: kind_of(item),
+                reason,
+            }),
         }
     }
     Ok(frame)
 }
 
 type Fields<'a> = BTreeMap<String, &'a RawValue>;
+
+/// A message's `T`, when the message is an object whose `T` is text.
+fn kind_of(raw: &RawValue) -> Option<String> {
+    let f = raw_object(raw, "message").ok()?;
+    text(&f, "T").ok()
+}
 
 fn message(raw: &RawValue) -> Result<StreamMessage, WireError> {
     let f = raw_object(raw, "message")?;
@@ -471,7 +484,7 @@ fn side(
     size_field: &'static str,
     exchange_field: &'static str,
 ) -> Result<Option<QuoteSide>, WireError> {
-    if token(f, price_field)? == "0" {
+    if matches!(token(f, price_field)?.as_str(), "0" | "-0") {
         return Ok(None);
     }
     Ok(Some(QuoteSide {

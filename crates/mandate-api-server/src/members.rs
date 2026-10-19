@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_canon::{Value, encode_ulid};
 use mandate_identity::{
     ControlEntry, LookupFailed, Membership, MembershipFold, MembershipLookup, MembershipQuery,
-    MembershipRecord, OrgId, PrincipalId, Role, Scope, WorkspaceId, control_entry,
+    MembershipRecord, MembershipState, OrgId, PrincipalId, Role, Scope, WorkspaceId, control_entry,
 };
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_journal::StoredEvent;
@@ -132,6 +132,20 @@ impl ControlLookup {
             scope: self.scope(),
         })
         .unwrap_or_default()
+    }
+
+    /// `member`'s own row of the membership index (identity spec §4.5, DEC-2113 item 4): the roles
+    /// in effect at the lookup's instant when its membership of the hosted workspace is `active`,
+    /// and `None` in any other state or none.
+    ///
+    /// # Errors
+    /// [`LookupFailed`] when the control stream's records cannot be read or folded.
+    pub fn own_roles(&self, member: PrincipalId) -> Result<Option<BTreeSet<Role>>, LookupFailed> {
+        let fold = self.fold()?;
+        Ok(
+            (fold.state(member, self.now) == Some(MembershipState::Active))
+                .then(|| fold.effective_roles(member, self.now)),
+        )
     }
 
     /// The hosted workspace's scope.
