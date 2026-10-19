@@ -3,7 +3,6 @@
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
-use mandate_num::Price;
 use mandate_risk::GatePass;
 
 use crate::batch::{Batch, config_refs};
@@ -17,7 +16,7 @@ use crate::kill::is_flatten;
 use crate::payload::{int, text};
 use crate::protection::{
     ExitPrice, alone, awaits_cancel, begin_exit, crypto_add, exit_limit, fallback, passive_exit,
-    reprotect_unpriced, rests,
+    reference_price, reprotect_unpriced, rests,
 };
 use crate::session::{closed_hold, extended_hours};
 use crate::shape::offers_bracket;
@@ -39,11 +38,18 @@ pub(crate) fn received(
     let IntentBody::Order {
         instrument,
         protection,
+        limit,
+        purpose,
         ..
     } = &handoff.body
     else {
         return flatten_plan();
     };
+    if limit.is_none() && purpose.adds_risk() {
+        return Err(ExecutorError::NonCanonicalPayload {
+            field: "limit_price".to_owned(),
+        });
+    }
     let tif = handoff
         .tif
         .ok_or_else(|| ExecutorError::NonCanonicalPayload {
@@ -210,7 +216,8 @@ fn decide(
             qty: *qty,
             purpose: *purpose,
             protection: *protection,
-            limit: priced(*limit)?,
+            limit: limit.or_else(|| reference_price(batch, intent, instrument, *purpose)),
+            market: limit.is_none(),
             tif: order_tif(batch, instrument),
             flatten: is_flatten(&batch.view, intent),
         },
@@ -221,9 +228,8 @@ fn decide(
     let allowed = decision.verdict == GateVerdict::Allow;
     let closed = closed_hold(batch.ports, instrument, batch.at())
         .filter(|_| allowed && !purpose.adds_risk());
-    let unpriced = *purpose == Purpose::DiscretionaryExit
-        && allowed
-        && exit_limit(batch, intent, instrument, *purpose, priced(*limit)?) == ExitPrice::Held;
+    let unpriced =
+        allowed && exit_limit(batch, intent, instrument, *purpose, *limit) == ExitPrice::Held;
     let decision = match closed {
         Some(reason) => decision.closed(reason),
         None if unpriced => decision.unpriced(),
@@ -334,15 +340,6 @@ pub(crate) fn order_tif(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Tim
     }
 }
 
-/// A body's limit. An exit at the market carries none, which the core does not send until E7-29
-/// (DEC-2037).
-///
-/// # Errors
-/// [`ExecutorError::Unimplemented`] for a body with no limit.
-pub(crate) fn priced(limit: Option<Price>) -> Result<Price, ExecutorError> {
-    limit.ok_or(ExecutorError::Unimplemented { story: "E7-29" })
-}
-
 /// The first submission of an intent: journaled as `OrderSubmitted` naming the id the request
 /// carries, and only then described (journal spec §5.2, `AGENTS.md` rule 5). An exit with nothing
 /// to price from goes at its own limit, journaled and alerted (DEC-160 (12)); a discretionary one
@@ -361,7 +358,6 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     else {
         return Ok(());
     };
-    let limit = priced(limit)?;
     if awaits_cancel(&batch.view, &agent, &instrument, purpose)
         || passive_exit(batch, intent, &instrument, qty, limit)?
     {
@@ -371,16 +367,17 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     let lone = !batch.view.exiting.contains_key(&instrument)
         && !rests(&batch.view, &instrument)
         && alone(batch, &instrument, purpose, limit);
-    let limit = match exit_limit(batch, intent, &instrument, purpose, limit) {
-        ExitPrice::Own(limit) | ExitPrice::Laddered(limit) => limit,
-        ExitPrice::Fallback(limit) => {
+    let limit = match (
+        exit_limit(batch, intent, &instrument, purpose, limit),
+        limit,
+    ) {
+        (ExitPrice::Own(limit) | ExitPrice::Laddered(limit), _) => Some(limit),
+        (ExitPrice::Fallback(limit), _) | (ExitPrice::Held, Some(limit)) => {
             fallback(batch, intent, &instrument, limit)?;
-            limit
+            Some(limit)
         }
-        ExitPrice::Held => {
-            fallback(batch, intent, &instrument, limit)?;
-            limit
-        }
+        (ExitPrice::Market, _) => None,
+        (ExitPrice::Held, None) => return Ok(()),
     };
     let tif = match bracket {
         Some(_) => TimeInForce::Gtc,
@@ -393,9 +390,13 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         instrument,
         side,
         qty,
-        order_type: OrderType::Limit,
+        order_type: if limit.is_some() {
+            OrderType::Limit
+        } else {
+            OrderType::Market
+        },
         tif,
-        limit_price: Some(limit),
+        limit_price: limit,
         stop_price: None,
         bracket,
         oco: None,
@@ -587,10 +588,20 @@ pub(crate) fn intent_received_fields(
         ("agent_id", text(agent.0.clone())),
         ("instrument_id", text(instrument.as_str())),
         ("side", text(side_name(*side))),
-        ("type", text(order_type_name(OrderType::Limit))),
+        (
+            "type",
+            text(order_type_name(if limit.is_some() {
+                OrderType::Limit
+            } else {
+                OrderType::Market
+            })),
+        ),
         ("tif", text(tif_name(proposed_tif))),
         ("qty", text(qty.to_string())),
-        ("limit_price", text(priced(*limit)?.to_string())),
+        (
+            "limit_price",
+            limit.map_or(Value::Null, |limit| text(limit.to_string())),
+        ),
         ("purpose", text(purpose_name(*purpose))),
     ])
 }

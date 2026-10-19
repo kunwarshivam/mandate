@@ -370,7 +370,7 @@ fn intent_received(
         instrument: instrument(payload)?,
         side: side_of(required_text(payload, "side")?)?,
         qty: qty(payload, "qty")?,
-        limit: Some(limit_of(payload)?.ok_or_else(|| refused("limit_price"))?),
+        limit: received_limit(payload)?,
         purpose: purpose_of(required_text(payload, "purpose")?)?,
         protection: prices_of(payload)?,
     };
@@ -498,6 +498,19 @@ fn gate_decided(
     }
     state.held.remove(&id);
     Ok(())
+}
+
+/// An `IntentReceived`'s limit: its `limit_price`, or none for an exit received at the market,
+/// whose `type` is `market` (journal spec §9.5, DEC-2037 item 2). An opening or an increase with
+/// no limit is refused, as the core never receives one (`AGENTS.md` rule 12).
+fn received_limit(payload: &Value) -> Result<Option<Price>, ExecutorError> {
+    let market = optional_text(payload, "type") == Some("market");
+    let opening = purpose_of(required_text(payload, "purpose")?)?.adds_risk();
+    match limit_of(payload)? {
+        Some(limit) if !market => Ok(Some(limit)),
+        None if market && !opening => Ok(None),
+        _ => Err(refused("limit_price")),
+    }
 }
 
 /// The exact request an `OrderSubmitted` names, rebuilt from its payload, so a resubmission after

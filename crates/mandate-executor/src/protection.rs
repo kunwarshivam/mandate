@@ -16,8 +16,7 @@ use crate::fold::single_holder;
 use crate::gate::available;
 use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
-    abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, priced,
-    received,
+    abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
 use crate::kill::{flatten_closes, floor_of, is_flatten, mode_holds};
 use crate::listing::query_unknown;
@@ -203,9 +202,11 @@ pub(crate) enum ExitPrice {
     /// Nothing to price from: the intent's own limit, never below an owner exit's floor,
     /// journaled with an owner alert.
     Fallback(Price),
-    /// Nothing to price from, for a discretionary exit: held, protection resting, until a price
-    /// arrives.
+    /// Nothing to price from, for a discretionary exit or an exit with no limit of its own: held,
+    /// protection resting, until a price arrives (DEC-2037 item 5).
     Held,
+    /// An exit with no limit, unsequenced, where §5.1 lets a market order go (DEC-2037 item 4).
+    Market,
 }
 
 /// §5.6 for one exit, with DEC-160 (12)'s answer where there is nothing to price from (step 4).
@@ -216,16 +217,41 @@ pub(crate) fn exit_price(
     now: RiskClock,
     floor: Option<Price>,
     purpose: Purpose,
-    limit: Price,
+    limit: Option<Price>,
 ) -> ExitPrice {
     let Some(tier) = tier.filter(|_| exits(purpose)) else {
-        return ExitPrice::Own(limit);
+        return limit.map_or(ExitPrice::Held, ExitPrice::Own);
     };
-    match ladder_price(tier, observations, step, now, floor) {
-        Ok(rung) => ExitPrice::Laddered(rung.limit),
-        Err(_) if purpose == Purpose::DiscretionaryExit => ExitPrice::Held,
-        Err(_) => ExitPrice::Fallback(floor.map_or(limit, |floor| limit.max(floor))),
+    match (ladder_price(tier, observations, step, now, floor), limit) {
+        (Ok(rung), _) => ExitPrice::Laddered(rung.limit),
+        (Err(_), Some(limit)) if purpose != Purpose::DiscretionaryExit => {
+            ExitPrice::Fallback(floor.map_or(limit, |floor| limit.max(floor)))
+        }
+        (Err(_), _) => ExitPrice::Held,
     }
+}
+
+/// Whether §5.1 lets an exit go at the market: in the regular session, outside the closing window,
+/// on a fresh, sane latest quote (§4.4: no presumed halt).
+fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
+    venue(batch.ports, instrument, batch.at()) == Venue::Regular
+        && current_quote(batch, instrument).is_some()
+}
+
+/// The latest quote, when it is sane and no older than one exit step.
+fn current_quote<'b>(
+    batch: &'b Batch<'_, '_>,
+    instrument: &InstrumentId,
+) -> Option<&'b MarketObservation> {
+    let fresh = batch
+        .at()
+        .secs()
+        .saturating_sub(batch.ports.config.exit_step_s);
+    batch
+        .view
+        .quotes
+        .get(instrument)
+        .filter(|quote| quote.sane && quote.observed_at.secs() >= fresh)
 }
 
 /// Whether §5.6 ladders an exit with no protection to cancel first (DEC-260 (14)): one that must be
@@ -233,19 +259,16 @@ pub(crate) fn exit_price(
 /// in a presumed halt (§4.4: the latest quote stale or not sane) — and whose purpose may trade
 /// there: a risk exit, a protective order or a flatten in any of them, and an owner exit in the
 /// regular session. A discretionary exit is paced (§9.6), an instrument with no tier has no
-/// ladder, and an exit priced above a fresh sane bid is passive: each keeps its own limit.
+/// ladder, and an exit priced above a fresh sane bid is passive: each keeps its own limit. An exit
+/// with no limit is never passive (DEC-2037 item 4).
 pub(crate) fn alone(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
     purpose: Purpose,
-    limit: Price,
+    limit: Option<Price>,
 ) -> bool {
-    let fresh = batch
-        .at()
-        .secs()
-        .saturating_sub(batch.ports.config.exit_step_s);
     let latest = batch.view.quotes.get(instrument);
-    let current = latest.filter(|quote| quote.sane && quote.observed_at.secs() >= fresh);
+    let current = current_quote(batch, instrument);
     let may = purpose.exempt_from_pacing()
         || purpose == Purpose::OwnerExit
             && venue(batch.ports, instrument, batch.at()) != Venue::Extended;
@@ -258,20 +281,22 @@ pub(crate) fn alone(
         && batch.ports.instruments.exit_tier(instrument).is_some()
         && !current
             .and_then(|quote| quote.bid)
-            .is_some_and(|bid| limit > bid)
+            .zip(limit)
+            .is_some_and(|(bid, limit)| limit > bid)
 }
 
 /// An exit where §5.4's sequence runs, or will once the gate allows it (protection rests), or one
 /// [`alone`] ladders, is priced by §5.6's ladder from the last sane bid and the latest quote,
 /// oldest first; every other order keeps its intent's limit, and so does the exit of a passive
 /// sequence, which is placed as its new OCO's take-profit at that limit (§5.4) and needs nothing
-/// to price from.
+/// to price from. An unsequenced exit with no limit goes at the market where §5.1 allows it, and
+/// is laddered elsewhere (DEC-2037 item 4).
 pub(crate) fn exit_limit(
     batch: &Batch<'_, '_>,
     intent: &IntentId,
     instrument: &InstrumentId,
     purpose: Purpose,
-    limit: Price,
+    limit: Option<Price>,
 ) -> ExitPrice {
     let passive = batch
         .view
@@ -280,8 +305,12 @@ pub(crate) fn exit_limit(
         .is_some_and(|sequence| sequence.passive && &sequence.intent == intent);
     let unsequenced =
         !batch.view.exiting.contains_key(instrument) && !rests(&batch.view, instrument);
-    if passive || unsequenced && !alone(batch, instrument, purpose, limit) {
-        return ExitPrice::Own(limit);
+    match limit {
+        Some(own) if passive || unsequenced && !alone(batch, instrument, purpose, limit) => {
+            return ExitPrice::Own(own);
+        }
+        None if unsequenced && market_allowed(batch, instrument) => return ExitPrice::Market,
+        _ => {}
     }
     let tier = batch.ports.instruments.exit_tier(instrument);
     match exit_price(
@@ -298,6 +327,26 @@ pub(crate) fn exit_limit(
             rung,
         )),
         priced => priced,
+    }
+}
+
+/// The price the gate checks an exit with no limit at: the ladder's first rung from the reference
+/// bid, on its instrument's grid, or `None` with nothing to price from (DEC-2037 item 3).
+pub(crate) fn reference_price(
+    batch: &Batch<'_, '_>,
+    intent: &IntentId,
+    instrument: &InstrumentId,
+    purpose: Purpose,
+) -> Option<Price> {
+    let tier = batch.ports.instruments.exit_tier(instrument);
+    let observations = observed(batch, instrument);
+    let floor = floor_of(&batch.view, intent);
+    match exit_price(tier, &observations, 0, batch.at(), floor, purpose, None) {
+        ExitPrice::Laddered(rung) => Some(ticked(
+            batch.ports.instruments.asset_class(instrument),
+            rung,
+        )),
+        _ => None,
     }
 }
 
@@ -538,7 +587,7 @@ fn next_rung(
     else {
         return Ok(());
     };
-    let limit = priced(limit)?;
+    let own = limit.or_else(|| last_rung_limit(batch, intent, rung));
     let step = rung.saturating_add(1);
     let tier = batch.ports.instruments.exit_tier(instrument);
     let observations = observed(batch, instrument);
@@ -550,8 +599,11 @@ fn next_rung(
             rung.at_floor,
         ),
         _ => {
-            fallback(batch, intent, instrument, limit)?;
-            (limit, false)
+            let Some(own) = own else {
+                return Ok(());
+            };
+            fallback(batch, intent, instrument, own)?;
+            (own, false)
         }
     };
     let request = SubmitOrder {
@@ -579,6 +631,13 @@ fn next_rung(
     }
     batch.broker(BrokerRequest::Submit(request));
     Ok(())
+}
+
+/// The limit the ladder's rung `rung` of `intent` was sent at: what an exit with no limit of its
+/// own falls back to when a later rung has nothing to price from (DEC-2037 item 5).
+fn last_rung_limit(batch: &Batch<'_, '_>, intent: &IntentId, rung: u32) -> Option<Price> {
+    let id = ClientOrderId::for_intent(intent).ok()?.rung(rung).ok()?;
+    batch.view.details.get(&id)?.request.as_ref()?.limit_price
 }
 
 /// What §5.6 prices `instrument` from, oldest to newest by when each was observed: the last sane
@@ -809,7 +868,6 @@ fn begin(
     else {
         return Ok(());
     };
-    let limit = priced(limit)?;
     let fresh = batch
         .at()
         .secs()
@@ -829,7 +887,7 @@ fn begin(
     let kept = resting
         .as_ref()
         .and_then(|protection| protection.prices)
-        .filter(|_| may_rest && bid.is_some_and(|bid| limit > bid));
+        .filter(|_| may_rest && bid.zip(limit).is_some_and(|(bid, limit)| limit > bid));
     if kept.is_some_and(|prices| prices.take_profit.is_none()) {
         return Err(ExecutorError::Unimplemented { story: "E7-4" });
     }
@@ -2247,9 +2305,9 @@ pub(crate) fn passive_exit(
     intent: &IntentId,
     instrument: &InstrumentId,
     qty: Qty,
-    limit: Price,
+    limit: Option<Price>,
 ) -> Result<bool, ExecutorError> {
-    let Some(sequence) = batch.view.exiting.get(instrument).cloned() else {
+    let (Some(sequence), Some(limit)) = (batch.view.exiting.get(instrument).cloned(), limit) else {
         return Ok(false);
     };
     let Some(prices) = sequence
@@ -14087,7 +14145,7 @@ mod ladder_tests {
                     now,
                     Some(floor),
                     Purpose::OwnerExit,
-                    limit
+                    Some(limit)
                 ),
                 exit_price(
                     Some(liquid()?),
@@ -14096,7 +14154,7 @@ mod ladder_tests {
                     now,
                     None,
                     Purpose::OwnerExit,
-                    limit
+                    Some(limit)
                 ),
             ),
             (ExitPrice::Fallback(floor), ExitPrice::Fallback(limit))
@@ -14173,7 +14231,7 @@ mod ladder_tests {
             } else {
                 None
             };
-            let priced = exit_price(tier, &quotes, step, now, floor, purpose, limit);
+            let priced = exit_price(tier, &quotes, step, now, floor, purpose, Some(limit));
             let exit = !purpose.adds_risk() && purpose != Purpose::Protective;
             let priceable = seen_quotes
                 .iter()
@@ -14968,7 +15026,8 @@ mod remainder_pins {
                     qty: Qty::parse(qty)?,
                     purpose,
                     protection: None,
-                    limit: mandate_num::Price::parse("150")?,
+                    limit: Some(mandate_num::Price::parse("150")?),
+                    market: false,
                     tif: crate::types::TimeInForce::Day,
                     flatten: false,
                 },
