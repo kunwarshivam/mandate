@@ -224,12 +224,18 @@ fn the_shared_gate_is_the_real_gate_over_the_mapped_order() {
         evaluate(&proposal("0"), &context()),
         Err(PortError::Gate(GateError::ZeroQuantity))
     ));
-    let decision = evaluate(&proposal("1"), &context()).unwrap();
-    assert_eq!(
-        format!("Ok({decision:?})"),
-        direct(&proposal("1"), &context()),
-        "the port answers as the gate itself"
-    );
+    for qty in ["1", "250"] {
+        let ours = match evaluate(&proposal(qty), &context()) {
+            Ok(decision) => format!("Ok({decision:?})"),
+            Err(PortError::Gate(error)) => format!("Err({error:?})"),
+            Err(other) => panic!("{other}"),
+        };
+        assert_eq!(
+            ours,
+            direct(&proposal(qty), &context()),
+            "the port answers as the gate itself"
+        );
+    }
 }
 
 proptest! {

@@ -2503,6 +2503,7 @@ dependencies = [
  "mandate-marketdata",
  "mandate-modelhost",
  "mandate-num",
+ "mandate-ports",
  "mandate-risk",
  "mandate-robinhood",
  "mandate-runtime",
