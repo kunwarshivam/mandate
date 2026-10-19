@@ -191,13 +191,18 @@ pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
 /// the old primary's rejoin; `cargo xtask ci cell-failover` runs it in a job of its own (DEC-464).
 pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 
-/// The kill-switch drill (OPS-4, E21-34), the admission drill, and the executor drill (E21-30),
-/// which `cargo xtask ci cell-kill-switch` runs on a cell of its own so `ci cell` stays within its
-/// ten minutes (DEC-464, DEC-2602, DEC-2035).
-pub const KILL_SWITCH_DRILLS: [Drill; 3] = [Drill::KillSwitch, Drill::Admission, Drill::Executor];
+/// The kill-switch drill (OPS-4, E21-34) and the admission drill, which `cargo xtask ci
+/// cell-kill-switch` runs on a cell of its own so `ci cell` stays within its ten minutes (DEC-464,
+/// DEC-2602).
+pub const KILL_SWITCH_DRILLS: [Drill; 2] = [Drill::KillSwitch, Drill::Admission];
 
-/// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-kill-switch` runs after the
-/// kill switch's, on that job's cell, so `ci cell` stays within its ten minutes (DEC-464).
+/// The executor drill (E21-30, DEC-2035), which `cargo xtask ci cell-executor` runs on a cell of
+/// its own, so `ci cell-kill-switch` stays within its ten minutes (DEC-464, DEC-2615).
+pub const EXECUTOR_DRILLS: [Drill; 1] = [Drill::Executor];
+
+/// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-executor` runs after the
+/// executor's, on that job's cell, so each cell job stays within its ten minutes (DEC-464,
+/// DEC-2615).
 pub const VAULT_DRILLS: [Drill; 1] = [Drill::Vault];
 
 impl Drill {
@@ -223,6 +228,7 @@ impl Drill {
             .chain(JOURNAL_DRILLS)
             .chain(FAILOVER_DRILLS)
             .chain(KILL_SWITCH_DRILLS)
+            .chain(EXECUTOR_DRILLS)
             .chain(VAULT_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
@@ -325,8 +331,8 @@ pub fn ci() -> Result<()> {
     demo(false)
 }
 
-/// `cargo xtask ci cell-journal`, `ci cell-failover` and `ci cell-kill-switch`: the cell, then
-/// `drills`, plain and seeded (E21-41, DEC-2602). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+/// `cargo xtask ci cell-journal`, `ci cell-failover`, `ci cell-kill-switch` and `ci cell-executor`:
+/// the cell, then `drills`, plain and seeded (E21-41, DEC-2602, DEC-2615). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
 pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
