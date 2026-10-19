@@ -1,0 +1,42 @@
+{
+ "allowlist": {
+  "sources": [
+   "src.newswire",
+   "src.wire_two"
+  ],
+  "version": 3
+ },
+ "caps": {
+  "deployment_usd": "20",
+  "workspace_monthly_usd": "50"
+ },
+ "endpoint": {
+  "cached_per_million": "0.3",
+  "host": "recorded.invalid",
+  "id": "recorded:demo",
+  "input_per_million": "3",
+  "output_per_million": "15",
+  "price_table": "recorded demo price table 1",
+  "region": "us",
+  "reported_provider": "Recorded",
+  "upstream": "recorded"
+ },
+ "entry": {
+  "deadline_ms": 120000,
+  "max_output_tokens": 4096,
+  "model_id": "llm.research_agent",
+  "model_name": "recorded/demo-research",
+  "model_version": "0.1.0",
+  "provider": "recorded",
+  "seed": 7,
+  "snapshot": "recorded-demo-2026-10-19"
+ },
+ "halted_instruments": [],
+ "reply": {
+  "cached_tokens": 0,
+  "input_tokens": 1800,
+  "latency_ms": 0,
+  "output": "{\"theses\":[{\"instrument\":\"SPY\",\"direction\":\"long\",\"conviction\":\"0.6\",\"confidence\":\"0.6\",\"horizon_s\":432000,\"thesis\":\"A week of index fund inflows and steady business activity point to continued demand over the next week.\",\"invalidation\":\"Inflows reverse, or business activity falls.\",\"evidence\":[\"nw-spy-inflows\",\"w2-spy-survey\"]}],\"invalidations\":[]}",
+  "output_tokens": 220
+ }
+}

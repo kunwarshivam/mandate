@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use mandate_executord::launch::{Named, named};
+use mandate_executord::launch::{Named, fixture_permitted, named};
 
 fn flags(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
     let map: BTreeMap<String, String> = pairs
@@ -90,4 +90,20 @@ fn a_manager_launch_with_an_empty_subject_names_no_account() {
         ("MANDATE_SUBJECT", ""),
     ]);
     assert_eq!(named(&none(), &vars), Err("account_missing"));
+}
+
+/// The in-memory journal is refused on a pod the manager started, whatever the process it names,
+/// and allowed anywhere else; without `--fixture` the manager's pod keeps its journal.
+#[test]
+fn the_fixture_journal_is_refused_on_a_managers_pod() {
+    for process in ["executor", "runtime", ""] {
+        assert_eq!(
+            fixture_permitted(true, &manager(process)),
+            Err("fixture_under_manager"),
+            "{process:?}"
+        );
+    }
+    assert_eq!(fixture_permitted(true, &none()), Ok(()));
+    assert_eq!(fixture_permitted(false, &manager("executor")), Ok(()));
+    assert_eq!(fixture_permitted(false, &none()), Ok(()));
 }

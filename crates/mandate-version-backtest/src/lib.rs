@@ -320,6 +320,7 @@ pub fn run_version(input: &VersionInput<'_>) -> Result<VersionRun, VersionError>
         bars: input.bars,
         coverage_start: input.coverage_start,
         first_bar_volumes: input.first_bar_volumes,
+        corporate_actions: &[],
     };
     mandate_backtest::check_trade_dates(&benchmark_input)?;
     let benchmark = mandate_backtest::walk(&benchmark_input, benchmark_config.strategy)?;

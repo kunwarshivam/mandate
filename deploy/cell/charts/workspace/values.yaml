@@ -120,11 +120,15 @@ verify:
 
 # The agent deployment the runtime process runs (DEC-1013): its agent, the connection it trades
 # through, and the owner whose kill switch it acts on. Required once `images.runtime` is named;
-# ids only, never a secret.
+# ids only, never a secret. `research`, when set, is the path of the recorded research bundle in the
+# runtime image, which every runtime pod the deployment manager starts is handed as `--research`;
+# the confirmed envelope still decides whether an agent researches (DEC-2246 item 4). Empty, the
+# runtime runs deny-all.
 runtime:
   agent: ""
   connection: ""
   owner: ""
+  research: ""
 
 # The cell's one ingress: cloudflared dialing out to Cloudflare's tunnel edge, so the cluster
 # exposes no port (DEC-967 item 6). Off in the local cell, which has no tunnel.
