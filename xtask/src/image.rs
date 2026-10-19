@@ -20,6 +20,10 @@ use sha2::{Digest as _, Sha256};
 /// The user every image runs as: not root, and no account in the image, so no shell or login.
 pub(crate) const USER: &str = "65532:65532";
 
+/// Where a release image keeps its binary and, beside it, the binary's signature: the path the
+/// chart's exec probes name and the local cell's interim images use, so one chart runs both.
+pub(crate) const BIN_DIR: &str = "usr/local/bin";
+
 /// Where the images' source lives, for their `org.opencontainers.image.source` label.
 pub(crate) const SOURCE: &str = "https://github.com/kunwarshivam/mandate";
 
@@ -158,9 +162,13 @@ pub(crate) fn layout(
     signature: Option<&[u8]>,
     revision: &str,
 ) -> Layout {
-    let mut tars = vec![tar_one(name, BINARY_MODE, binary)];
+    let mut tars = vec![tar_one(&format!("{BIN_DIR}/{name}"), BINARY_MODE, binary)];
     if let Some(signature) = signature {
-        tars.push(tar_one(&format!("{name}.sig"), SIGNATURE_MODE, signature));
+        tars.push(tar_one(
+            &format!("{BIN_DIR}/{name}.sig"),
+            SIGNATURE_MODE,
+            signature,
+        ));
     }
     let layers: Vec<String> = tars.iter().map(|tar| hex(tar)).collect();
     let labels = json!({
@@ -171,7 +179,7 @@ pub(crate) fn layout(
         "architecture": architecture,
         "os": "linux",
         "config": {
-            "Entrypoint": [format!("/{name}")],
+            "Entrypoint": [format!("/{BIN_DIR}/{name}")],
             "Labels": labels,
             "User": USER,
         },
