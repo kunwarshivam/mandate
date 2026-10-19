@@ -45,10 +45,10 @@ enum Reading {
     RiskInput,
 }
 
-/// The account stream's catalogue (journal spec §9): every event type `mandate-journal`'s private
-/// `catalogue::lookup` admits on an account stream, and how the fold reads each. A table rather
+/// The account stream's catalogue (journal spec §9): every event type `mandate-journal`'s
+/// `stream_event_types` lists for an account stream, and how the fold reads each. A table rather
 /// than a `match`, so no type can fall through to another type's reading.
-const ACCOUNT_STREAM: [(&str, Reading); 50] = [
+const ACCOUNT_STREAM: [(&str, Reading); 51] = [
     ("StreamOpened", Reading::Record),
     ("TradingDayStarted", Reading::Record),
     ("ClockAdvanced", Reading::Tick),
@@ -83,6 +83,7 @@ const ACCOUNT_STREAM: [(&str, Reading); 50] = [
     ("BrokerExchangeRecorded", Reading::Record),
     ("MarkUpdated", Reading::Mark),
     ("ProtectionChanged", Reading::Record),
+    ("OwnerConfirmationReceived", Reading::Record),
     ("BrokerPositionObserved", Reading::Record),
     ("ReconciliationRun", Reading::Record),
     ("CompensatingEvent", Reading::RiskInput),
@@ -397,6 +398,32 @@ impl<'c> AccountRiskFold<'c> {
                 head: *head,
                 mode: snapshot.agent_mode.max(AgentMode::ExitsOnly),
             };
+        }
+    }
+}
+
+/// [`ACCOUNT_STREAM`] reads exactly the types `mandate-journal` admits on an account stream, so a
+/// type the catalogue adds there is never left to fail as `unfolded_event_type`.
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use mandate_journal::{StreamType, stream_event_types};
+
+    use super::{ACCOUNT_STREAM, reading};
+
+    #[test]
+    fn the_fold_reads_every_type_the_journal_admits_on_an_account_stream_and_no_other() {
+        let catalogue: BTreeSet<&str> = stream_event_types(StreamType::Account).collect();
+        let table: BTreeSet<&str> = ACCOUNT_STREAM.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            table.len(),
+            ACCOUNT_STREAM.len(),
+            "the table repeats a type"
+        );
+        assert_eq!(table, catalogue);
+        for event_type in catalogue {
+            assert!(reading(event_type).is_some(), "{event_type} has no reading");
         }
     }
 }
