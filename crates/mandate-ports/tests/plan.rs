@@ -212,6 +212,36 @@ fn an_output_keyed_under_another_instrument_is_refused() {
 }
 
 #[test]
+fn an_output_keyed_under_another_model_is_refused() {
+    let mut inputs = inputs();
+    let news = inputs.outputs.remove(NEWS.0).unwrap();
+    inputs.outputs.insert("quant.other".to_owned(), news);
+    assert_eq!(
+        refused(size(&validated(), &builder(), &inputs)),
+        "a consistently keyed model output"
+    );
+}
+
+#[test]
+fn an_output_of_a_model_the_mandate_does_not_pin_is_refused() {
+    let mut inputs = inputs();
+    let mut news = inputs.outputs.remove(NEWS.0).unwrap();
+    for output in news.values_mut() {
+        output.model_id = "quant.other".to_owned();
+    }
+    inputs.outputs.insert("quant.other".to_owned(), news);
+    let mut builder = builder();
+    builder.model_content_hashes.insert(
+        ("quant.other".to_owned(), NEWS.1.to_owned()),
+        Digest::from_hex(NEWS.2).unwrap(),
+    );
+    assert_eq!(
+        refused(size(&validated(), &builder, &inputs)),
+        "a model output pinned by the validated mandate"
+    );
+}
+
+#[test]
 fn an_output_of_a_version_the_mandate_does_not_pin_is_refused() {
     let mut inputs = inputs();
     let news = inputs.outputs.get_mut(NEWS.0).unwrap();

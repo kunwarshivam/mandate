@@ -15,9 +15,13 @@
 - **Tests:** `crates/mandate-ports/tests/gate.rs`: the proposed order copies only the proposal's
   four fields; the shared gate equals the gate called directly, refusals included, for any
   quantity and over varied passes, modes, account states, eligibility, quotes, participation,
-  positions, protective orders and sides (each input shown caught when the port drops it);
+  positions, protective orders, sides, origins, times in force, extended hours, the session and
+  fractional quantities (each input shown caught when the port drops it), and a non-vacuity test
+  that reaches allow, deny, hold and defer through the port, the fee reservation and the owner's
+  confirmed bid included;
   `crates/mandate-ports/tests/plan.rs`: the reference cases' whole-position exit at the threshold,
-  and the refusal of an output keyed under another instrument, of an unpinned model version, of a
+  and the refusal of an output keyed under another instrument or another model, of an unpinned
+  model or model version, of a
   sell that would require protection, and of another asset class's execution policy;
   `src/plan.rs`'s unit test pins the classification's order-amount match. The shell's own
   adapter tests still pin sizing, classification and the view through its stages.

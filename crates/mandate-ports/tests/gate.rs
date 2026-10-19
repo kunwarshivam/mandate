@@ -323,6 +323,64 @@ fn allowing() -> AdvisoryGateContext {
     context
 }
 
+/// The varied property is not vacuous: over its own base, the port allows an opening, denies one
+/// the account blocks or the fee reservation overspends, holds an exit the agent's pause stops,
+/// and defers an owner exit off hours until the owner's bid is confirmed, each as the gate itself
+/// does.
+#[test]
+fn the_allowing_base_reaches_allow_deny_and_hold_through_the_port() {
+    let mut buy = proposal("5");
+    buy.limit = Price::parse("100").unwrap();
+    let verdict = |context: &AdvisoryGateContext, proposal: &Proposal| {
+        let decision = evaluate(proposal, context).unwrap();
+        assert_eq!(format!("Ok({decision:?})"), direct(proposal, context));
+        decision.verdict
+    };
+    assert_eq!(verdict(&allowing(), &buy), mandate_risk::Verdict::Allow);
+    let mut blocked = allowing();
+    blocked.account.state = mandate_risk::AccountState::Blocked;
+    assert_eq!(verdict(&blocked, &buy), mandate_risk::Verdict::Deny);
+    let mut paused = allowing();
+    paused.agent.mode = mandate_risk::AgentMode::Paused;
+    paused.agent.positions.insert(
+        mandate_risk::AssetId::new(ASSET).unwrap(),
+        Qty::parse("10").unwrap(),
+    );
+    let mut sell = buy.clone();
+    sell.side = Side::Sell;
+    assert_ne!(verdict(&paused, &sell), mandate_risk::Verdict::Allow);
+    assert_ne!(
+        verdict(&paused, &sell),
+        mandate_risk::Verdict::Deny,
+        "an exit is never denied"
+    );
+    let mut costly = allowing();
+    costly.order.fee_reservation = mandate_num::Usd::parse("999999.99").unwrap();
+    assert_eq!(
+        verdict(&costly, &buy),
+        mandate_risk::Verdict::Deny,
+        "the fee reservation reaches the buying-power check"
+    );
+    let mut owner_exit = allowing();
+    owner_exit.now = UtcNanos::parse("2026-09-21T21:30:00.000000000Z").unwrap();
+    owner_exit.order.origin = mandate_risk::Origin::OwnerClose;
+    owner_exit.agent.positions.insert(
+        mandate_risk::AssetId::new(ASSET).unwrap(),
+        Qty::parse("10").unwrap(),
+    );
+    assert_eq!(
+        verdict(&owner_exit, &sell),
+        mandate_risk::Verdict::Defer,
+        "off hours, an owner exit waits for the owner's confirmed bid"
+    );
+    owner_exit.order.owner_confirmed_bid = Some(Price::parse("99.95").unwrap());
+    assert_ne!(
+        verdict(&owner_exit, &sell),
+        mandate_risk::Verdict::Defer,
+        "the confirmed bid reaches the session check"
+    );
+}
+
 /// The gate's inputs other than the order, varied so a port that drops, swaps or fixes one of
 /// them answers differently from the gate itself.
 #[derive(Debug, Clone)]
@@ -337,6 +395,28 @@ struct Varied {
     held: u32,
     protective_open: u32,
     side: Side,
+    origin: mandate_risk::Origin,
+    tif: mandate_risk::TimeInForce,
+    extended_hours: bool,
+    owner_bid: bool,
+    fee: &'static str,
+    after_hours: bool,
+    fractional: bool,
+}
+
+fn origin() -> impl Strategy<Value = mandate_risk::Origin> {
+    prop_oneof![
+        12 => Just(mandate_risk::Origin::OrderBuilder),
+        1 => Just(mandate_risk::Origin::GoalCompletion),
+        1 => Just(mandate_risk::Origin::RemovedInstrument),
+        1 => Just(mandate_risk::Origin::RiskEngine),
+        1 => Just(mandate_risk::Origin::TrimToTarget),
+        1 => Just(mandate_risk::Origin::StopWatchdog),
+        1 => Just(mandate_risk::Origin::AutomatedKillSwitch),
+        1 => Just(mandate_risk::Origin::OwnerClose),
+        1 => Just(mandate_risk::Origin::OwnerKillSwitch),
+        1 => Just(mandate_risk::Origin::ProtectiveLeg),
+    ]
 }
 
 fn mode() -> impl Strategy<Value = mandate_risk::AgentMode> {
@@ -365,17 +445,30 @@ fn varied() -> impl Strategy<Value = Varied> {
             prop::bool::weighted(0.8),
         ),
         (
-            any::<bool>(),
-            prop_oneof![Just(0_u32), Just(49_995)],
+            prop::bool::weighted(0.2),
+            prop_oneof![4 => Just(0_u32), 1 => Just(49_995)],
             0_u32..12,
             0_u32..6,
             prop_oneof![Just(Side::Buy), Just(Side::Sell)],
         ),
+        (
+            origin(),
+            prop_oneof![
+                Just(mandate_risk::TimeInForce::Day),
+                Just(mandate_risk::TimeInForce::Gtc),
+            ],
+            prop::bool::weighted(0.2),
+            prop::bool::weighted(0.2),
+            prop_oneof![Just("0"), Just("0.05"), Just("999999.99")],
+        ),
+        (prop::bool::weighted(0.3), prop::bool::weighted(0.3)),
     )
         .prop_map(
             |(
                 (pass, risk_mode, account_state, agent_mode, eligible),
                 (collar_breaking_bid, participation_today, held, protective_open, side),
+                (origin, tif, extended_hours, owner_bid, fee),
+                (after_hours, fractional),
             )| Varied {
                 pass,
                 risk_mode,
@@ -387,6 +480,13 @@ fn varied() -> impl Strategy<Value = Varied> {
                 held,
                 protective_open,
                 side,
+                origin,
+                tif,
+                extended_hours,
+                owner_bid,
+                fee,
+                after_hours,
+                fractional,
             },
         )
 }
@@ -394,6 +494,15 @@ fn varied() -> impl Strategy<Value = Varied> {
 fn varied_context(varied: &Varied) -> AdvisoryGateContext {
     let asset = mandate_risk::AssetId::new(ASSET).unwrap();
     let mut context = allowing();
+    context.order.origin = varied.origin;
+    context.order.tif = varied.tif;
+    context.order.extended_hours = varied.extended_hours;
+    context.order.owner_confirmed_bid = varied.owner_bid.then(|| Price::parse("99.95").unwrap());
+    context.order.fee_reservation = mandate_num::Usd::parse(varied.fee).unwrap();
+    if varied.after_hours {
+        context.now = UtcNanos::parse("2026-09-21T21:30:00.000000000Z").unwrap();
+    }
+    context.instrument.fractionable = varied.fractional;
     context.pass = varied.pass;
     context.risk.agent_mode = varied.risk_mode;
     context.account.state = varied.account_state;
@@ -456,12 +565,14 @@ proptest! {
     }
 
     /// The port hands the gate every input as its host gave it: over varied passes, account and
-    /// agent modes, account states, eligibility, quotes, the day's participation, positions, protective
-    /// orders and sides, the shared
-    /// evaluation and the gate called directly agree.
+    /// agent modes, account states, eligibility, quotes, the day's participation, positions,
+    /// protective orders, sides, origins, times in force, extended hours, owner-confirmed bids, fee
+    /// reservations, the session and fractional quantities, the shared evaluation and the gate
+    /// called directly agree.
     #[test]
     fn the_port_answers_as_the_gate_over_every_input(varied in varied(), units in 1_u32..12) {
-        let mut proposal = proposal(&units.to_string());
+        let qty = if varied.fractional { format!("{units}.5") } else { units.to_string() };
+        let mut proposal = proposal(&qty);
         proposal.side = varied.side;
         proposal.limit = Price::parse("100").unwrap();
         let context = varied_context(&varied);
