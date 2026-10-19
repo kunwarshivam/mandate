@@ -15,7 +15,10 @@ use mandate_daemon::source::{CellSource, Rows, SourceFor, envelope};
 use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_research::{LineageState, WorkingUniverse};
-use mandate_runtime::{AgentId, ConnectionId, Deployment, RuntimeState, WorkspaceId};
+use mandate_runtime::{
+    ActorKind, AgentId, ConnectionId, Deployment, EventId, FoldedEvent, RuntimeState, Seq,
+    WorkspaceId, fold,
+};
 use mandate_spec::document::Mandate;
 use mandate_store::Store;
 use mandate_time::UtcNanos;
@@ -27,11 +30,30 @@ const AGENT: &str = "agent-a";
 const AAPL: &str = "7b4a1c2e-1111-4a2b-9c3d-000000000001";
 const MSFT: &str = "7b4a1c2e-2222-4a2b-9c3d-000000000002";
 
-/// A record of `stream`, with `payload` at `payload`.
+/// When every record of a test happens unless it says otherwise: 09:00 in New York on the risk day
+/// the state's clock reads.
+const EVENT_TIME: &str = "2026-10-16T13:00:00.000000000Z";
+
+/// The state's risk clock: 11:00 in New York, the same risk day as [`EVENT_TIME`].
+const RISK_CLOCK: &str = "2026-10-16T15:00:00Z";
+
+/// A record of `stream`, with `payload` at `payload`, at [`EVENT_TIME`].
 fn row(stream: &str, seq: u64, event_type: &str, environment: &str, payload: &str) -> StoredEvent {
+    row_at(stream, seq, event_type, environment, payload, EVENT_TIME)
+}
+
+/// A record of `stream`, with `payload` at `payload`, at `event_time`.
+fn row_at(
+    stream: &str,
+    seq: u64,
+    event_type: &str,
+    environment: &str,
+    payload: &str,
+    event_time: &str,
+) -> StoredEvent {
     let event_id = format!("01J8Z3MC{seq:018}");
     let body = format!(
-        r#"{{"envelope_version":1,"environment":"{environment}","event_id":"{event_id}","stream_id":"{stream}","event_type":"{event_type}","schema_version":1,"event_time":"2026-10-16T13:00:00.000000000Z","clock_source":"system","causation_id":null,"correlation_id":null,"actor":{{"kind":"user","id":"user-owner","version":"1","build":null}},"config_refs":{{}},"payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#
+        r#"{{"envelope_version":1,"environment":"{environment}","event_id":"{event_id}","stream_id":"{stream}","event_type":"{event_type}","schema_version":1,"event_time":"{event_time}","clock_source":"system","causation_id":null,"correlation_id":null,"actor":{{"kind":"user","id":"user-owner","version":"1","build":null}},"config_refs":{{}},"payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#
     );
     StoredEvent {
         stream_id: stream.into(),
@@ -77,10 +99,19 @@ impl Journal {
     }
 
     fn agent(&self, event_type: &str, payload: &str) {
+        self.agent_at(event_type, payload, EVENT_TIME);
+    }
+
+    fn agent_at(&self, event_type: &str, payload: &str, event_time: &str) {
         let seq = u64::try_from(self.agent.borrow().len()).unwrap() + 1;
-        self.agent
-            .borrow_mut()
-            .push(row("agent:ws1:agent-a", seq, event_type, "paper", payload));
+        self.agent.borrow_mut().push(row_at(
+            "agent:ws1:agent-a",
+            seq,
+            event_type,
+            "paper",
+            payload,
+            event_time,
+        ));
     }
 
     fn deployed(&self, agent: &str, version: &str, environment: &str) {
@@ -129,12 +160,34 @@ fn store(documents: &mut BTreeMap<Digest, Vec<u8>>, document: &Json) -> String {
     reference.to_string()
 }
 
-fn state() -> RuntimeState {
+/// A state with no risk clock yet: no tick or reconciliation folded.
+fn unclocked() -> RuntimeState {
     RuntimeState::new(Deployment {
         agent: AgentId(AGENT.into()),
         connection: ConnectionId("conn-1".into()),
         workspace: WorkspaceId("ws1".into()),
     })
+}
+
+/// A state whose risk clock reads [`RISK_CLOCK`], from a clean reconciliation of the account.
+fn state() -> RuntimeState {
+    let mut state = unclocked();
+    let secs = UtcNanos::parse_rfc3339(RISK_CLOCK).unwrap().secs();
+    let reconciled = FoldedEvent {
+        stream: "acct:ws1:acct-1".to_owned(),
+        seq: Seq(1),
+        event_id: EventId("01J8Z3MR000000000000000099".to_owned()),
+        event_type: "ReconciliationRun".to_owned(),
+        causation_id: None,
+        actor: ActorKind::System,
+        payload: parse(format!(r#"{{"result":"clean","risk_clock":{secs}}}"#).as_bytes()).unwrap(),
+    };
+    fold(&mut state, &reconciled).unwrap();
+    assert!(
+        state.risk_clock().is_some(),
+        "the reconciliation sets the risk clock"
+    );
+    state
 }
 
 fn who() -> SourceFor {
@@ -394,4 +447,38 @@ fn spend_sums_the_recorded_costs_and_refuses_one_it_cannot_read() {
         r#"{"cost_usd":"a lot","reservation":null}"#,
     );
     assert!(source.parts(&state()).is_none());
+}
+
+/// Today's spend is the risk day's (DEC-2214 items 2 and 3): a cost recorded on an earlier New York
+/// day does not count, and without a risk clock there is no today, so no context.
+#[test]
+#[ignore = "pending E21-54"]
+fn spend_counts_only_the_risk_day_s_recorded_costs() {
+    let (journal, source) = deployed(&bundle(), &researching());
+    journal.agent_at(
+        "ModelInvocationRecorded",
+        r#"{"cost_usd":"0.25","reservation":null}"#,
+        "2026-10-16T03:59:59.000000000Z",
+    );
+    journal.agent_at(
+        "ModelInvocationRecorded",
+        r#"{"cost_usd":"0.5","reservation":null}"#,
+        "2026-10-16T04:00:00.000000000Z",
+    );
+    journal.agent_at(
+        "ModelInvocationRecorded",
+        r#"{"cost_usd":"2","reservation":null}"#,
+        "2026-10-17T04:00:00.000000000Z",
+    );
+    let facts = source.parts(&state()).unwrap().facts;
+    assert_eq!(
+        facts.research_spend_usd_today,
+        Usd::parse("0.5").unwrap(),
+        "23:59:59 the evening before is yesterday's, midnight in New York is today's, and the next \
+         midnight is tomorrow's"
+    );
+    assert!(
+        source.parts(&unclocked()).is_none(),
+        "no risk clock, no today"
+    );
 }
