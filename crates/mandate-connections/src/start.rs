@@ -9,10 +9,13 @@ use secrecy::SecretString;
 
 use crate::ConnectError;
 use crate::hosts::is_unreserved;
+use crate::record::ConnectionId;
 
-/// The registered redirect URI (connections spec §5.2, DEC-820's domain). It is fixed because
-/// a registered URI cannot carry a workspace id; the workspace travels in the `state` binding.
-pub const REDIRECT_URI: &str = "https://api.owlhead.ai/v1/oauth/alpaca/callback";
+/// The callback's path, fixed outside the workspace prefix because a registered redirect URI
+/// cannot carry a workspace id; the workspace travels in the `state` binding (workspace API §4.5).
+pub const CALLBACK_PATH: &str = "/v1/oauth/alpaca/callback";
+/// Production's redirect URI, on the workspace API's domain (DEC-820 item 1).
+const PRODUCTION_REDIRECT_URI: &str = "https://api.owlhead.ai/v1/oauth/alpaca/callback";
 /// Alpaca's authorization page.
 pub const AUTHORIZE_URL: &str = "https://app.alpaca.markets/oauth/authorize";
 /// The scopes requested, space-separated as Alpaca expects (connections spec §5.3).
@@ -30,11 +33,14 @@ pub enum Environment {
     Live,
 }
 
-/// Who started the connect, and for which environment. Bound to the `state` server-side.
+/// Who started the connect, for which pending connection, and for which environment. Bound to the
+/// `state` server-side, so the callback writes the code under that connection's vault entry
+/// ([DEC-2623](../../../docs/project/decisions/DEC-2623.md) item 3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
     pub workspace_id: String,
     pub user_id: String,
+    pub connection_id: ConnectionId,
     pub environment: Environment,
 }
 
@@ -52,6 +58,44 @@ impl fmt::Debug for PkceVerifier {
 /// the API process (infrastructure §5.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientId(pub String);
+
+/// The deployment's registered redirect URI: an `https` origin, or `http` on a loopback host for
+/// the cell's fixture provider, with exactly [`CALLBACK_PATH`] and no query, fragment, or user
+/// information (DEC-2623 item 2). Each deployment registers its own with the broker (connections
+/// spec §13 question 5), and the exchange sends the same one (RFC 6749 §4.1.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedirectUri(String);
+
+impl RedirectUri {
+    /// Production's, `https://api.owlhead.ai/v1/oauth/alpaca/callback`.
+    pub fn production() -> Self {
+        Self(PRODUCTION_REDIRECT_URI.to_owned())
+    }
+
+    /// Accepts `text` only in the form the type states.
+    ///
+    /// # Errors
+    /// [`ConnectError::RedirectUriInvalid`] for any other text.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn parse(_text: &str) -> Result<Self, ConnectError> {
+        todo!()
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The platform's OAuth client as one deployment registered it: its client id and redirect URI.
+/// Neither is a secret; the client secret never reaches the API process (infrastructure §5.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthClient {
+    pub client_id: ClientId,
+    pub redirect_uri: RedirectUri,
+}
 
 /// The URL the browser is sent to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,13 +125,13 @@ pub struct PendingStates {
 
 impl PendingStates {
     /// Issues `state` for `binding` and returns the authorization URL: `response_type=code`,
-    /// the client id, [`REDIRECT_URI`], the `state`, the PKCE challenge (`S256`),
+    /// the client's id and redirect URI, the `state`, the PKCE challenge (`S256`),
     /// [`REQUESTED_SCOPES`], and `env` set to the binding's environment. Only a paper binding
     /// is accepted (DEC-821 item 3; DEC-441 item 21). A `state` already issued and not yet
     /// redeemed is refused, and the binding and verifier issued with it are kept unchanged.
     pub fn begin(
         &mut self,
-        client_id: &ClientId,
+        client: &OAuthClient,
         binding: Binding,
         state: &str,
         verifier: PkceVerifier,
@@ -102,8 +146,8 @@ impl PendingStates {
         }
         let parameters = [
             ("response_type", "code"),
-            ("client_id", client_id.0.as_str()),
-            ("redirect_uri", REDIRECT_URI),
+            ("client_id", client.client_id.0.as_str()),
+            ("redirect_uri", client.redirect_uri.as_str()),
             ("state", state),
             ("code_challenge", challenge),
             ("code_challenge_method", "S256"),
@@ -126,6 +170,26 @@ impl PendingStates {
             "{AUTHORIZE_URL}?{}",
             query.join("&")
         )))
+    }
+
+    /// Drops every `state` expired at `now`, so a `state` never redeemed does not stay held
+    /// (DEC-2623 item 4). One not yet expired is kept unchanged.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn prune(&mut self, _now: UtcNanos) {
+        todo!()
+    }
+
+    /// How many `state` values are held.
+    pub fn len(&self) -> usize {
+        self.issued.len()
+    }
+
+    /// Whether no `state` is held.
+    pub fn is_empty(&self) -> bool {
+        self.issued.is_empty()
     }
 
     /// Redeems `state` once, returning the binding and the verifier issued with it. Unknown,
