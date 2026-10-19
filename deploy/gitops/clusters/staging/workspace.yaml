@@ -1,5 +1,9 @@
 # The staging workspace's settings: paper only (DEC-967 item 15), on top of the managed cluster's
-# values and then images.yaml, whose images and tier promotion sets (DEC-2016).
+# values and then images.yaml, whose images and tier promotion sets (DEC-2016). The API server's
+# settings take effect once promotion names images.api. Each placeholder (the all-zero ULID and
+# `placeholder.invalid`, which the chart's schema admits) waits on the founder's choice of
+# staging's identity provider and web app origin; deploy/tests/test_gitops.py refuses every one, so
+# this file cannot merge until each is replaced.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -9,3 +13,10 @@ spec:
   values:
     workspace: ws1
     environment: paper
+    api:
+      org: "00000000000000000000000000"
+      workspace: "00000000000000000000000000"
+      issuer: https://placeholder.invalid
+      audience: placeholder
+      jwksUrl: https://placeholder.invalid/jwks.json
+      appOrigin: https://placeholder.invalid
