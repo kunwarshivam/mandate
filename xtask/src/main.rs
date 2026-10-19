@@ -15032,7 +15032,7 @@ mod tests {
     /// while the pull request is a draft, the scoped jobs follow `select` (DEC-1190) and the matrix
     /// its plan, `fast` and `full` are skipped too rather than judging skipped jobs, the failure
     /// report runs only on a dispatch on main, marking a pull request ready starts its run, and a
-    /// newer push still cancels the older run of the same ref.
+    /// newer push still cancels the older run of a pull request, while a started run on `main` finishes.
     #[test]
     fn ci_runs_nothing_on_a_draft() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -15046,11 +15046,11 @@ mod tests {
             workflow.contains(
                 "concurrency:\n  group: ci-${{ github.event_name == 'workflow_dispatch' && \
                  !inputs.post_merge && github.run_id || github.ref }}\n  cancel-in-progress: \
-                 true\n"
+                 ${{ github.ref != 'refs/heads/main' }}\n"
             ),
-            "a newer run of the same ref cancels the older one, post-merge runs on main share \
-             one group, and any other dispatched run, the nightly's included, has a group of its \
-             own, so it is never cancelled (DEC-2610)"
+            "a newer run of a pull request cancels the older one, post-merge runs on main share \
+             one group in which a started run finishes, and any other dispatched run, the \
+             nightly's included, has a group of its own, so it is never cancelled (DEC-2610)"
         );
         assert!(
             workflow.contains("  push:\n    branches: [main]\n"),
