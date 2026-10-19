@@ -91,7 +91,7 @@ commands:
                         write the workload secrets alone (the founder's terminal only)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
-  cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
+  cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|admission|standby-down|archive]...
                         run the cell's drills; --seeded plants each drill's bug and fails if a
                         drill still holds
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is

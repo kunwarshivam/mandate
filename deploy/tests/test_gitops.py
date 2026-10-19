@@ -471,7 +471,7 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
             "!request.userInfo.username.startsWith('system:serviceaccount:') "
             "&& !(has(object.metadata.ownerReferences) "
             "&& object.metadata.ownerReferences.exists(r, r.kind == 'CronJob'))",
-            ["CREATE"],
+            ["CREATE", "UPDATE"],
         ),
     }
     for name, (spec, resource, group, label, allowed, operations) in expected.items():
@@ -488,20 +488,17 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
         conditions = {
             c.get("name"): squash(c.get("expression", "").split()) for c in spec.get("matchConditions", [])
         }
-        if conditions.get("labelled-control") != label:
+        newly = "request.operation == 'CREATE' || !(" + label.replace("object.", "oldObject.") + ")"
+        if set(conditions) != {"labelled-control", "newly-control"} or conditions["labelled-control"] != label:
             problems.append(f"{name}: matches {conditions.get('labelled-control')!r}, not the control label")
+        elif conditions["newly-control"] != newly:
+            problems.append(f"{name}: matches {conditions['newly-control']!r}, not only a newly control label")
         validations = [squash(v.get("expression", "").split()) for v in spec.get("validations", [])]
         if validations != [allowed]:
             problems.append(f"{name}: allows {validations}")
         binding = (bindings.get(name) or {}).get("spec", {})
         if binding != {"policyName": name, "validationActions": ["Deny"]}:
             problems.append(f"{name}: bound {binding}, not denying")
-    newly = "request.operation == 'CREATE' || !(" + CONTROL_LABEL.format("oldObject.metadata.labels") + ")"
-    conditions = {
-        c.get("name"): " ".join(c.get("expression", "").split()) for c in pods.get("matchConditions", [])
-    }
-    if set(conditions) != {"labelled-control", "newly-control"} or conditions.get("newly-control") != newly:
-        problems.append(f"mandate-control-pods: conditions {sorted(conditions)}")
     return problems
 
 
@@ -737,7 +734,19 @@ DOC_BUGS = [
         kill_switch_exemption,
         "ValidatingAdmissionPolicy",
         "mandate-control-jobs",
-        lambda d: d["spec"]["matchConstraints"]["resourceRules"][0].update(operations=["CREATE", "UPDATE"]),
+        lambda d: d["spec"]["matchConstraints"]["resourceRules"][0].update(operations=["CREATE"]),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"]["matchConditions"].pop(),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"]["matchConditions"][1].update(expression="true"),
     ),
     (
         kill_switch_exemption,

@@ -227,7 +227,9 @@ impl Drill {
                 "the stream lost across the restart: a stream id the restart did not keep"
             }
             Self::KillSwitch => "the connection-scope kill switch never committed",
-            Self::Admission => "the Job policy's clause refusing a Job a CronJob owns removed",
+            Self::Admission => {
+                "the Job policy matches creation only, so a service account can relabel its suspended Job's pods"
+            }
             Self::StandbyDown => {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
             }
@@ -247,7 +249,7 @@ impl Drill {
             Self::Egress => "reached the live trading host",
             Self::Restart => "export_stream_empty",
             Self::KillSwitch => "no kill_switch of scope connection",
-            Self::Admission => "admitted a Job a CronJob owns",
+            Self::Admission => "admitted the control label on a suspended Job",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
         }
