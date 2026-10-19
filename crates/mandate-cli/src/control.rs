@@ -369,6 +369,42 @@ pub(crate) fn open_control_stream(
     )
 }
 
+/// The canonical bytes of the owner's claim on `agent`'s stream: that stream's `StreamOpened`,
+/// written as the owner (journal spec v0.66 §9.1, rule 246; DEC-2039), its id derived at head 0
+/// (DEC-290). Returns the stream, the id and the bytes.
+///
+/// # Errors
+/// As [`draft`].
+pub(crate) fn claim_draft(
+    owner: &Owner,
+    agent: &str,
+    now: Now,
+) -> Result<(StreamId, String, Vec<u8>), ControlError> {
+    let stream = agent_stream(owner, agent)?;
+    let payload = object(vec![
+        ("agent_id", text(agent)),
+        ("stream_type", text("agent")),
+        ("workspace_id", text(&owner.workspace)),
+    ])?;
+    let event_id = derive(&stream, "StreamOpened", &payload, false, 0)?;
+    let shape = Shape {
+        schema_version: 1,
+        artifact_refs: Vec::new(),
+        config_refs: Vec::new(),
+    };
+    let bytes = draft(
+        Writer::Owner,
+        owner,
+        &stream,
+        &event_id,
+        "StreamOpened",
+        shape,
+        payload,
+        now,
+    )?;
+    Ok((stream, event_id, bytes))
+}
+
 /// A schema version as the canonical integer the envelope carries.
 ///
 /// # Errors

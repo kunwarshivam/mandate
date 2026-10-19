@@ -11,13 +11,15 @@
 use std::io::Write;
 
 use clap::Args;
+use mandate_journal::ArtifactSource;
 use mandate_num::{Price, Qty};
 
 use crate::agent::{self, Command, Confirmed, RELEASE_WARNING, Restriction, Status};
 use crate::control::{ControlError, ControlJournal, Ids, Now, Owner, Submitted};
 use crate::inbox::InstantIds;
 use crate::postgres::{JournalArgs, PgControlJournal};
-use crate::register::OwnerArgs;
+use crate::register::{OwnerArgs, open};
+use crate::retire;
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
@@ -174,8 +176,13 @@ impl ExitArgs {
 /// committing nothing, for an exit whose confirmed bid, bid size or floor is not a positive
 /// fixed-point decimal or whose floor is above its bid. A well-formed confirmation is normalized to
 /// its canonical text before the code binds it (DEC-2507 item 1).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the journal, store, ids and owner every gesture takes, and the command's four inputs"
+)]
 pub fn answer(
     journal: &mut dyn ControlJournal,
+    store: &dyn ArtifactSource,
     ids: &mut dyn Ids,
     owner: &Owner,
     agent: &str,
@@ -207,8 +214,12 @@ pub fn answer(
         }
         return Ok(lines);
     };
-    let Submitted { event_id, seq } =
-        agent::command(journal, ids, owner, agent, command, typed, now)?;
+    let Submitted { event_id, seq } = match command {
+        Command::Stop { release } => {
+            retire::stop(journal, store, ids, owner, agent, *release, typed, now)?
+        }
+        other => agent::command(journal, ids, owner, agent, other, typed, now)?,
+    };
     let named = match command {
         Command::Exit { instrument, .. } => format!("owner_exit {agent} {instrument}"),
         Command::Resume => format!("resume {agent}"),
@@ -303,9 +314,18 @@ fn run(
     report: &mut impl Write,
 ) -> anyhow::Result<()> {
     let owner = flags.owner()?;
-    let mut journal = PgControlJournal::open(target)?;
+    let (mut journal, store) = open(target)?;
     let mut ids = InstantIds::new(&owner, now);
-    let lines = answer(&mut journal, &mut ids, &owner, agent, command, typed, now)?;
+    let lines = answer(
+        &mut journal,
+        &store,
+        &mut ids,
+        &owner,
+        agent,
+        command,
+        typed,
+        now,
+    )?;
     for line in lines {
         writeln!(report, "{line}")?;
     }
