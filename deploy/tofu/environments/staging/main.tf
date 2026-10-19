@@ -51,7 +51,7 @@ module "cell" {
   environment                = local.environment
   region                     = local.region
   state_region               = local.state_region
-  vpc_ip_range               = "10.110.0.0/20"
+  vpc_ip_range               = "10.111.0.0/20"
   kubernetes_version         = "1.35.9-do.1"
   node_size                  = "s-2vcpu-4gb"
   kube_api_allowed_addresses = var.kube_api_allowed_addresses

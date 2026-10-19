@@ -1,5 +1,5 @@
-//! E8-3's `clap` follow-up (DEC-279 item 10; DEC-2507): `mandate agent status`, `resume`, `stop`
-//! and `exit`. Each command's lines are driven over the M7 tests' in-memory journal, and the
+//! E8-3's `clap` follow-up (DEC-279 item 10; DEC-2507, DEC-2512): `mandate agent status`,
+//! `resume`, `stop`, `exit`, `acknowledge` and `request-ack`. Each command's lines are driven over the M7 tests' in-memory journal, and the
 //! refusals need no database. Without `--code`, a resume or Stop shows its code and commits
 //! nothing, and a release shows its warning first. A wrong code refuses both, with nothing
 //! committed. An exit is never refused: it commits at once, carrying step-up evidence only with the
@@ -15,10 +15,17 @@ use mandate_canon::Value;
 use mandate_cli::agent::{Command as Owned, Confirmed, RELEASE_WARNING, Restriction, Status, code};
 use mandate_cli::brake::AgentCommand;
 use mandate_cli::control::ControlError;
-use mandate_cli::owner::{Typed, answer, run_exit, run_resume, run_status, run_stop, status_lines};
+use mandate_cli::owner::{
+    Typed, answer, run_acknowledge, run_exit, run_request_ack, run_resume, run_status, run_stop,
+    status_lines,
+};
 use mandate_cli::{Cli, Command};
 
 const INSTRUMENT: &str = "SPY";
+/// The account stream's `RiskLimitTriggered` an acknowledgment names.
+const EVENT: &str = "01JBTG00001000000000000000";
+/// An `OwnerAcknowledgmentRequested` an acknowledgment names.
+const REQUEST: &str = "01JBRQ00001000000000000000";
 const BID: [&str; 6] = [
     "--confirm-bid",
     "501.2",
@@ -185,6 +192,113 @@ fn the_binary_offers_status_resume_stop_and_exit() {
     }
     let both = ["exit", AGENT, INSTRUMENT, "--show-code", "--code", "c0de"];
     assert!(parsed(&both).is_err(), "a code or --show-code, not both");
+}
+
+fn acknowledge(request: Option<&str>) -> Owned {
+    Owned::Acknowledge {
+        event: EVENT.to_owned(),
+        request: request.map(str::to_owned),
+    }
+}
+
+fn request_ack() -> Owned {
+    Owned::RequestAcknowledgment {
+        event: EVENT.to_owned(),
+    }
+}
+
+/// DEC-2512: `acknowledge` and `request-ack` name the agent and the triggered event, take an
+/// optional code as `resume` does, and only `acknowledge` names a `--request`.
+#[test]
+fn the_binary_offers_acknowledge_and_request_ack() {
+    for (args, command, typed) in [
+        (
+            vec!["acknowledge", AGENT, EVENT],
+            acknowledge(None),
+            Typed::Show,
+        ),
+        (
+            vec![
+                "acknowledge",
+                AGENT,
+                EVENT,
+                "--request",
+                REQUEST,
+                "--code",
+                "c0de",
+            ],
+            acknowledge(Some(REQUEST)),
+            Typed::Commit(Some("c0de")),
+        ),
+    ] {
+        let Ok(AgentCommand::Acknowledge(given)) = parsed(&args) else {
+            panic!("{args:?}")
+        };
+        assert_eq!(given.agent, AGENT);
+        assert_eq!(
+            (given.command(), given.typed()),
+            (command, typed),
+            "{args:?}"
+        );
+    }
+    for (args, typed) in [
+        (vec!["request-ack", AGENT, EVENT], Typed::Show),
+        (
+            vec!["request-ack", AGENT, EVENT, "--code", "c0de"],
+            Typed::Commit(Some("c0de")),
+        ),
+    ] {
+        let Ok(AgentCommand::RequestAck(given)) = parsed(&args) else {
+            panic!("{args:?}")
+        };
+        assert_eq!(given.agent, AGENT);
+        assert_eq!(
+            (given.command(), given.typed()),
+            (request_ack(), typed),
+            "{args:?}"
+        );
+    }
+    assert!(
+        parsed(&["acknowledge", AGENT]).is_err(),
+        "it names the event"
+    );
+    assert!(
+        parsed(&["request-ack", AGENT, EVENT, "--request", REQUEST]).is_err(),
+        "only an acknowledgment names a request"
+    );
+}
+
+/// DEC-2512: without a code an acknowledgment and a request print the code `agent::code` gives and
+/// commit nothing; with it each commits one event, which the line names.
+#[test]
+fn an_acknowledgment_or_request_shows_its_code_then_commits_with_it() {
+    let (mut fx, mut ids) = (Fixture::new(), FixedIds::default());
+    let commands = [
+        (
+            acknowledge(None),
+            "OwnerAcknowledged",
+            format!("acknowledge {AGENT} {EVENT}"),
+        ),
+        (
+            request_ack(),
+            "OwnerAcknowledgmentRequested",
+            format!("request-ack {AGENT} {EVENT}"),
+        ),
+    ];
+    for (n, (command, event_type, named)) in commands.into_iter().enumerate() {
+        let right = code_now(&fx, &command);
+        let shown = answered(&mut fx, &mut ids, &command, Typed::Show, n);
+        assert_eq!(shown, [format!("code {right}")], "{command:?}");
+        assert_eq!(controls(&fx).len(), n, "showing a code commits nothing");
+        let lines = answered(&mut fx, &mut ids, &command, Typed::Commit(Some(&right)), n);
+        assert_eq!(lines, [committed_line(&fx, &named)]);
+        let events = controls(&fx);
+        assert_eq!(events.len(), n + 1, "one event per command");
+        assert_eq!(
+            member_text(events.last().unwrap(), "event_type"),
+            Some(event_type)
+        );
+    }
 }
 
 /// DEC-2507 item 1: without a code a resume and a Stop print the code `agent::code` gives and
@@ -526,6 +640,9 @@ fn every_command_refuses_without_a_database() {
             vec!["resume", AGENT, "--code", "c0de"],
             vec!["stop", AGENT, "--release"],
             vec!["exit", AGENT, INSTRUMENT],
+            vec!["acknowledge", AGENT, EVENT, "--code", "c0de"],
+            vec!["acknowledge", AGENT, EVENT, "--request", REQUEST],
+            vec!["request-ack", AGENT, EVENT, "--code", "c0de"],
         ] {
             let command = parsed_as(&args, owner, &dsn, &store_text)
                 .unwrap_or_else(|e| panic!("{args:?}: {e}"));
@@ -535,6 +652,8 @@ fn every_command_refuses_without_a_database() {
                 AgentCommand::Resume(a) => run_resume(a, now, &mut out),
                 AgentCommand::Stop(a) => run_stop(a, now, &mut out),
                 AgentCommand::Exit(a) => run_exit(a, now, &mut out),
+                AgentCommand::Acknowledge(a) => run_acknowledge(a, now, &mut out),
+                AgentCommand::RequestAck(a) => run_request_ack(a, now, &mut out),
                 other => panic!("{args:?} parsed as {other:?}"),
             };
             let why = ran.map_or_else(|e| format!("{e:#}"), |()| "not refused".to_owned());

@@ -160,7 +160,6 @@ fn settled(id: &str, cost: &str) -> MeterRecord {
 /// its maximum, a settled one at its cost; another agent's and another day's count for nothing.
 /// The records are written through the store, as the gateway writes them, and read back as written.
 #[test]
-#[ignore = "pending E21-59"]
 fn the_spend_counts_open_reservations_at_most_and_settled_ones_at_cost() {
     let (store, stream, clock) = (SharedMeter::new(), Stream::default(), Clock::at(NOW));
     let mut meter = cell_meter(&store, &stream, &clock);
@@ -194,7 +193,6 @@ fn the_spend_counts_open_reservations_at_most_and_settled_ones_at_cost() {
 /// 03:59:59Z the next morning, the day's last second in New York; from the next risk day it is
 /// free. A store that holds the call's reservation is not held.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_reserved_call_today_the_store_does_not_hold_holds_it_until_the_next_risk_day() {
     let (store, stream, clock) = (SharedMeter::new(), Stream::default(), Clock::at(NOW));
     stream.call(r#""R1""#, "2026-10-16T14:00:00.000000000Z");
@@ -233,7 +231,6 @@ fn a_reserved_call_today_the_store_does_not_hold_holds_it_until_the_next_risk_da
 /// A reserved call on an earlier risk day, and a call no reservation backed, hold nothing: the
 /// store writes, reads back, and counts what it is given.
 #[test]
-#[ignore = "pending E21-59"]
 fn an_earlier_day_s_reserved_call_and_an_unreserved_call_hold_nothing() {
     let (store, stream, clock) = (SharedMeter::new(), Stream::default(), Clock::at(NOW));
     stream.call(r#""R0""#, "2026-10-16T03:59:59.000000000Z");
@@ -249,7 +246,6 @@ fn an_earlier_day_s_reserved_call_and_an_unreserved_call_hold_nothing() {
 /// A call record whose reservation is neither a string nor `null`, or is missing, or whose time
 /// cannot be read, holds the store, as does an agent stream that cannot be read: fail closed.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_call_record_or_a_stream_it_cannot_read_holds_the_store() {
     for (reservation, event_time) in [
         ("7", "2026-10-16T14:00:00.000000000Z"),
