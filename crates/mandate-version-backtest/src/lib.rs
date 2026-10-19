@@ -55,8 +55,8 @@ use mandate_canon::Digest;
 use mandate_domain::{AgentMode, AssetId, AutonomyDecision, CapabilityProfile, MarketSession};
 use mandate_executor::{ProtectionPrices, equity_bracket_prices, protective_shape};
 use mandate_num::{
-    Adverse, Fraction, MarkPrice, NumError, Price, Qty, Rounding, Signed, SizeFraction, SplitRatio,
-    TickRule, Unit, Usd,
+    Adverse, Fraction, MarkPrice, NumError, Price, Qty, Rounding, ShareIncrement, Signed,
+    SignedQty, SizeFraction, SplitRatio, TickRule, Unit, Usd,
 };
 use mandate_risk::{
     AccountFill, DayTrade, DayTradeInput, DayTradeRegime, Decision, EtpClass, Exchange,
@@ -109,9 +109,6 @@ pub enum VersionError {
     FlattenWithoutSell,
     #[error("the committed trading calendar could not be read")]
     CalendarUnavailable,
-    /// A step its story has not built yet (DEC-77): the stub's own report.
-    #[error("not implemented until {story}")]
-    Unimplemented { story: &'static str },
     #[error("a liquidity figure could not be computed: {0}")]
     Liquidity(&'static str),
     #[error(transparent)]
@@ -157,7 +154,6 @@ impl VersionError {
             Self::BarOutsideRegularSession(_) => "bar_outside_regular_session",
             Self::FlattenWithoutSell => "flatten_without_sell",
             Self::CalendarUnavailable => "calendar_unavailable",
-            Self::Unimplemented { .. } => "unimplemented",
             Self::Liquidity(code) | Self::Gate(code) => code,
             Self::Backtest(e) => e.code(),
             Self::Builder(e) => e.code(),
@@ -384,7 +380,6 @@ fn research_agent(mandate: &ValidatedMandate) -> bool {
     !mandate.mandate().universe.pinned
 }
 
-/// DEC-1000 items 3, 6 and 8, before anything is simulated: every refusal names the input.
 /// The run's splits as the accounting fold takes them, on the instrument's ledger id and share
 /// increment (DEC-2245 item 2); `check_inputs` has refused every dividend in range.
 fn ledger_splits(input: &VersionInput<'_>) -> Vec<CorporateAction> {
@@ -421,6 +416,7 @@ fn new_york_eight_pm(day: Date) -> Result<UtcNanos, VersionError> {
     )?)
 }
 
+/// DEC-1000 items 3, 6 and 8, before anything is simulated: every refusal names the input.
 fn check_inputs(input: &VersionInput<'_>) -> Result<(), VersionError> {
     let instrument = input.instrument;
     if instrument.instrument.asset_class != AssetClass::UsEquity {
@@ -777,10 +773,40 @@ impl<'a, 'c> Run<'a, 'c> {
                     cash_in_lieu_price: split.cash_in_lieu_price,
                 },
             )?;
+            self.rescale_history(split.ratio, split.increment)?;
             if let Some(protection) = self.protection.take() {
                 self.canceled(&protection, index)?;
                 self.carry_protection(&protection, split.ratio, split.ex_date, at)?;
             }
+        }
+        Ok(())
+    }
+
+    /// The market the run has seen, in post-split terms, so the ex-date's decision and gate read
+    /// what the bars now show: the last close and every closed period of the liquidity window,
+    /// each price by old ÷ new rounded down onto the tick, which can only lower a buy's limit or
+    /// raise a sell's chance to fill, and each volume by new ÷ old truncated to the share grid
+    /// (DEC-2245 item 2).
+    fn rescale_history(
+        &mut self,
+        ratio: SplitRatio,
+        increment: ShareIncrement,
+    ) -> Result<(), VersionError> {
+        let tick = self.input.instrument.tick;
+        let price = |close: Price| ratio.price(close, tick, Adverse::Up);
+        let volume = |volume: Qty| -> Result<Qty, NumError> {
+            Ok(ratio
+                .split(SignedQty::from(volume), increment)?
+                .after()
+                .abs())
+        };
+        if let Some(last) = self.last_close.as_mut() {
+            last.close = price(last.close)?;
+            last.volume = volume(last.volume)?;
+        }
+        for period in &mut self.periods {
+            period.close = price(period.close)?;
+            period.volume = volume(period.volume)?;
         }
         Ok(())
     }
@@ -802,7 +828,10 @@ impl<'a, 'c> Run<'a, 'c> {
         let carry = |price: Price, adverse: Adverse| {
             ratio
                 .price(price, tick, adverse)
-                .map_err(|_| VersionError::ProtectionNotAdjustable(ex_date))
+                .map_err(|error| match error {
+                    NumError::NotPositive => VersionError::ProtectionNotAdjustable(ex_date),
+                    other => VersionError::Num(other),
+                })
         };
         let kind = match protection.order.kind {
             OrderKind::Oco { limit, stop } => OrderKind::Oco {
