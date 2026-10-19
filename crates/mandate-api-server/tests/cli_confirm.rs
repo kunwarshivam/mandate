@@ -486,7 +486,7 @@ fn check_3_another_digest_principal_workspace_or_org_is_a_mismatch() {
     }
 }
 
-/// Check 4: `now` is within `[issued_at, expires_at)`, the half-open life
+/// Check 4 as DEC-2105 item 1 reads it: `now` is within `[issued_at, expires_at)`, the half-open life
 /// `ChallengeRecord::is_current_at` and the store keep, and `authenticated_at` is `issued_at`.
 #[test]
 #[ignore = "pending E9-4"]
@@ -577,7 +577,7 @@ fn check_7_a_principal_the_subject_link_no_longer_names_is_missing() {
     assert_eq!(w.grant(&w.confirmed()), Err(ProblemCode::StepUpMissing));
 }
 
-/// Check 8: `confirmed_at` is a whole second, and the whole of it lies in the challenge's
+/// Check 8 as DEC-2105 item 2 reads it: `confirmed_at` is a whole second, and the whole of it lies in the challenge's
 /// half-open life: no earlier than `issued_at`'s second, and ending by `expires_at`.
 #[test]
 #[ignore = "pending E9-4"]
