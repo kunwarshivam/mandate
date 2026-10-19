@@ -374,6 +374,20 @@ impl Sessions {
         })
     }
 
+    /// When the session `cookie` names ends if nothing touches it (DEC-2113 item 2): the earlier of
+    /// its absolute lifetime and, for a full session, the idle timeout from its last admitted
+    /// request or granted refresh, in whole seconds as its other lifetimes are. It changes nothing.
+    ///
+    /// # Errors
+    /// [`Unauthenticated`] for a cookie that names no session live at `now` by its current secret.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn expires_at(&self, _cookie: &str, _now: UtcNanos) -> Result<UtcNanos, Unauthenticated> {
+        todo!()
+    }
+
     /// How many sessions are held, for the tests' independent count.
     pub fn len(&self) -> usize {
         self.store().entries.len()
