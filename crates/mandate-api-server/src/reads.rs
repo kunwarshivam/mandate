@@ -11,6 +11,7 @@
 
 use mandate_canon::Value;
 use mandate_journal::StoredEvent;
+use mandate_num::{Qty, SignedQty};
 
 /// How many resolved approvals the inbox lists, most recently requested first (DEC-979 item 5).
 pub const RESOLVED_LISTED: usize = 100;
@@ -421,11 +422,44 @@ fn set(members: &mut [(&'static str, Value)], name: &str, value: Value) {
 /// them, buys adding and sells subtracting, in instrument order, leaving out an instrument that
 /// nets to zero. `cost_basis`, `risk_mark` and `protection` are `null` (DEC-2111 item 5). `None`
 /// when a fill of its own cannot be read, so no position is served from part of its fills.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn agent_positions(account: &[StoredEvent], agent_id: &str) -> Option<Vec<Value>> {
-    let _ = (account, agent_id);
-    todo!()
+    let owned: std::collections::BTreeSet<String> = agent_orders(account, agent_id)
+        .iter()
+        .filter_map(|order| order.get("client_order_id").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect();
+    let mut net: std::collections::BTreeMap<String, SignedQty> = std::collections::BTreeMap::new();
+    for row in account {
+        if !matches!(row.event_type.as_str(), "FillApplied" | "LateFillApplied") {
+            continue;
+        }
+        let event = envelope(row)?;
+        let owner = text(&event, "payload.client_order_id");
+        if !owner.is_some_and(|id| owned.contains(id)) {
+            continue;
+        }
+        let instrument = text(&event, "payload.instrument_id")?;
+        let qty = SignedQty::from(Qty::parse(text(&event, "payload.qty_gross")?).ok()?);
+        let signed = match text(&event, "payload.side")? {
+            "buy" => qty,
+            "sell" => qty.negated(),
+            _ => return None,
+        };
+        let held = net.entry(instrument.to_owned()).or_insert(SignedQty::ZERO);
+        *held = held.checked_add(signed).ok()?;
+    }
+    Some(
+        net.into_iter()
+            .filter(|(_, qty)| *qty != SignedQty::ZERO)
+            .filter_map(|(instrument, qty)| {
+                object(vec![
+                    ("instrument_id", Value::Str(instrument)),
+                    ("filled_qty", Value::Str(qty.to_string())),
+                    ("cost_basis", Value::Null),
+                    ("risk_mark", Value::Null),
+                    ("protection", Value::Null),
+                ])
+            })
+            .collect(),
+    )
 }

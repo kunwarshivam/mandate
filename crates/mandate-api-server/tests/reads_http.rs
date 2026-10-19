@@ -848,7 +848,6 @@ fn an_agents_orders_are_its_own_on_its_documents_account() {
 }
 
 #[test]
-#[ignore = "pending E11-9"]
 fn an_agents_positions_are_its_own_fills_beside_the_accounts_holdings() {
     let (bytes, version) = document();
     let f = fixture_with(stored(bytes));

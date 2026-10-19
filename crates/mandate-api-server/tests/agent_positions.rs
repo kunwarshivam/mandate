@@ -79,7 +79,6 @@ fn position(instrument: &str, qty: &str) -> Value {
 }
 
 #[test]
-#[ignore = "pending E11-9"]
 fn positions_net_the_agents_own_fills_per_instrument_in_instrument_order() {
     let mut a = Account::default();
     a.push("StreamOpened", None, "{}");
@@ -117,7 +116,6 @@ fn positions_net_the_agents_own_fills_per_instrument_in_instrument_order() {
 }
 
 #[test]
-#[ignore = "pending E11-9"]
 fn an_own_fill_that_cannot_be_read_serves_no_position() {
     for (side, qty) in [("short", "1"), ("buy", "1.50"), ("buy", "x")] {
         let mut a = Account::default();
@@ -223,7 +221,6 @@ fn runner() -> TestRunner {
 }
 
 #[test]
-#[ignore = "pending E11-9"]
 fn the_fold_matches_an_independent_sum_and_catches_seeded_bugs() {
     let fills = proptest::collection::vec(
         (any::<bool>(), any::<bool>(), any::<bool>(), 1_u8..20),
