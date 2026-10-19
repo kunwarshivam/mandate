@@ -39,7 +39,7 @@ commands:
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
                         postgres | openbao | objectstore | stub-release | mutants |
                         schema-mutants | cell | cell-demo | cell-journal | cell-failover |
-                        cell-kill-switch | cell-executor | sweep; or
+                        cell-kill-switch | cell-executor | cell-vault | sweep; or
                         one part of test: test-nextest | test-doc | test-rh-sim | test-python.
                         Tests, pending tests,
                         doctests, the rehearsal, Postgres, OpenBao and object-store runs and
@@ -178,6 +178,7 @@ const PR_JOBS: &[&str] = &[
     "cell-failover",
     "cell-kill-switch",
     "cell-executor",
+    "cell-vault",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -445,10 +446,8 @@ fn ci(job: &str) -> Result<()> {
         "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
         "cell-kill-switch" => cell::ci_drills(job, &cell::KILL_SWITCH_DRILLS),
-        "cell-executor" => cell::ci_drills(
-            job,
-            &[&cell::EXECUTOR_DRILLS[..], &cell::VAULT_DRILLS[..]].concat(),
-        ),
+        "cell-executor" => cell::ci_drills(job, &cell::EXECUTOR_DRILLS),
+        "cell-vault" => cell::ci_drills(job, &cell::VAULT_DRILLS),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -16405,7 +16404,7 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 14] = [
+    const SELECT_GATES: [(&str, &str); 15] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
@@ -16420,6 +16419,7 @@ mod tests {
         ("cell-failover", "cell"),
         ("cell-kill-switch", "cell"),
         ("cell-executor", "cell"),
+        ("cell-vault", "cell"),
     ];
 
     /// DEC-1190 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
@@ -18575,13 +18575,13 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            20,
+            21,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
              `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
              `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), `cell-executor` \
-             (DEC-2615), and `hosted-k3d` \
+             (DEC-2615), `cell-vault` (DEC-2616), and `hosted-k3d` \
              (E21-51)"
         );
         for checkout in checkouts {
