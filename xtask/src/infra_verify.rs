@@ -29,11 +29,9 @@ const FLUX_KINDS: [(&str, &str); 4] = [
     ("HelmRelease", "helmreleases.helm.toolkit.fluxcd.io"),
 ];
 /// The vault's chart, as its pods' `app.kubernetes.io/name` label names it (DEC-2051). Its pod is
-/// ready only once unsealed, which needs the founder's one-time `bao operator init` first, so until
-/// it is ready its line waits on that rather than failing; this check cannot tell a vault never
-/// initialized from one that fails to unseal, which only the vault's own status can.
+/// ready only once unsealed; staging's apply initializes it just before this check (DEC-2052), so a
+/// vault still not ready is a failure like any other.
 const VAULT_CHART: &str = "mandate-vault-server";
-const VAULT_PENDING: &str = "founder init";
 /// The kill-switch admission policies' bindings (DEC-2045, DEC-2046).
 const BINDINGS: [&str; 2] = ["mandate-control-pods", "mandate-control-jobs"];
 /// The signature webhooks' configuration, as `admission.yaml`'s patch names it (DEC-2016 item 1).
@@ -48,7 +46,8 @@ pub(crate) const SECONDS: i64 = 480;
 /// that lands the connector sets this to `None`. An API that answers without Access fails always.
 const EDGE_PENDING: Option<&str> = Some("#1539");
 
-/// `kubectl get` against the cluster, its arguments after `get`, answering what it printed.
+/// `kubectl` against the cluster, its arguments, answering what it printed: the check runs only
+/// `get` and `logs`.
 pub(crate) type Kubectl<'a> = &'a dyn Fn(&[&str]) -> Result<String>;
 
 /// Where staging's edge is, from its root's outputs. The account is a sensitive output, masked
@@ -67,7 +66,9 @@ fn listed(
     what: &str,
     args: &[&str],
 ) -> Option<Vec<Value>> {
-    let items = kubectl(args)
+    let mut get = vec!["get"];
+    get.extend(args);
+    let items = kubectl(&get)
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
         .and_then(|listing| listing.get("items").and_then(Value::as_array).cloned());
@@ -142,12 +143,8 @@ fn pods(list: &mut Checklist, kubectl: Kubectl<'_>) {
     let Some(items) = listed(list, kubectl, "pods", &["pods", "-A", "-o", "json"]) else {
         return;
     };
-    let ours = |pod: &&Value| {
-        let namespace = text(pod, &["metadata", "namespace"]);
-        PLATFORM_NAMESPACES.contains(&namespace) || namespace.starts_with("ws-")
-    };
-    for pod in items.iter().filter(ours) {
-        if text(pod, &["status", "phase"]) == "Succeeded" {
+    for pod in items.iter().filter(|pod| ours(pod)) {
+        if text(pod, &["status", "phase"]) == "Succeeded" || !job_of(pod).is_empty() {
             continue;
         }
         let containers = pod["status"]["containerStatuses"].as_array();
@@ -155,12 +152,14 @@ fn pods(list: &mut Checklist, kubectl: Kubectl<'_>) {
             && containers.is_some_and(|all| {
                 !all.is_empty() && all.iter().all(|c| c["ready"].as_bool() == Some(true))
             });
-        let what = format!("pod {} is Running and Ready", where_is(pod));
+        let mut what = format!("pod {} is Running and Ready", where_is(pod));
         if text(pod, &["metadata", "labels", "app.kubernetes.io/name"]) == VAULT_CHART {
-            list.check_or_pending(up, VAULT_PENDING, format!("{what}, so unsealed"));
-        } else {
-            list.check(up, what);
+            what.push_str(", so unsealed");
         }
+        if !up {
+            what.push_str(&format!(" ({})", why(pod)));
+        }
+        list.check(up, what);
     }
     for namespace in PLATFORM_NAMESPACES {
         if !items
@@ -169,6 +168,168 @@ fn pods(list: &mut Checklist, kubectl: Kubectl<'_>) {
         {
             list.check(false, format!("{namespace} runs a pod"));
         }
+    }
+    jobs(list, kubectl, &items);
+}
+
+/// Whether an object is in a namespace the check reads: the platform's or a workspace's.
+fn ours(object: &Value) -> bool {
+    let namespace = text(object, &["metadata", "namespace"]);
+    PLATFORM_NAMESPACES.contains(&namespace) || namespace.starts_with("ws-")
+}
+
+/// The Job that owns a pod, or `""`: a Job's pods are judged by the Job, since one that retried
+/// leaves its failed pods behind.
+fn job_of(pod: &Value) -> &str {
+    pod["metadata"]["ownerReferences"]
+        .as_array()
+        .and_then(|owners| owners.iter().find(|o| text(o, &["kind"]) == "Job"))
+        .map_or("", |owner| text(owner, &["name"]))
+}
+
+/// A Kubernetes status word as printed: letters and digits only, so nothing but the word reaches
+/// the log.
+fn word(raw: &str) -> String {
+    raw.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .take(40)
+        .collect()
+}
+
+/// Why a pod is not up, from its status alone: its phase, its own reason, and the first reason a
+/// container is waiting or terminated with. No message and no log, which may hold anything.
+fn why(pod: &Value) -> String {
+    let status = &pod["status"];
+    let mut words = vec![word(text(status, &["phase"]))];
+    words.push(word(text(status, &["reason"])));
+    let containers = ["initContainerStatuses", "containerStatuses"]
+        .iter()
+        .filter_map(|key| status[*key].as_array())
+        .flatten();
+    for container in containers {
+        let reason = [
+            &["state", "waiting", "reason"][..],
+            &["state", "terminated", "reason"],
+        ]
+        .iter()
+        .map(|path| text(container, path))
+        .find(|reason| !reason.is_empty() && *reason != "Completed");
+        if let Some(reason) = reason {
+            words.push(word(reason));
+            if let Some(code) = container["state"]["terminated"]["exitCode"].as_i64() {
+                words.push(format!("exit {code}"));
+            }
+            break;
+        }
+    }
+    let mut said: Vec<String> = words.into_iter().filter(|w| !w.is_empty()).collect();
+    if said == ["Running"] {
+        said.push("not ready".to_owned());
+    }
+    if said.is_empty() {
+        "no status".to_owned()
+    } else {
+        said.join(": ")
+    }
+}
+
+/// What a failing Job's last log lines say, as fixed class words alone: its lines may echo a
+/// connection string or SQL, so none of them is printed, only which of these it matched.
+const LOG_CLASSES: [(&str, &str); 10] = [
+    ("password authentication failed", "auth-failed"),
+    ("connection refused", "connection-refused"),
+    ("timeout expired", "timeout"),
+    ("timed out", "timeout"),
+    ("could not translate host name", "dns"),
+    ("name or service not known", "dns"),
+    ("does not exist", "missing-object"),
+    ("permission denied", "permission-denied"),
+    ("ssl", "tls"),
+    ("a migration is never edited", "migration-edited"),
+];
+
+/// The classes `logs` matches, in [`LOG_CLASSES`]' order, each once; a line that says it failed
+/// but matches none is `unclassified`.
+fn log_classes(logs: &str) -> Vec<&'static str> {
+    let lower = logs.to_lowercase();
+    let mut found: Vec<&'static str> = Vec::new();
+    for (needle, class) in LOG_CLASSES {
+        if lower.contains(needle) && !found.contains(&class) {
+            found.push(class);
+        }
+    }
+    let failed = lower
+        .lines()
+        .any(|line| line.contains("error") || line.contains("fatal"));
+    if found.is_empty() && failed {
+        found.push("unclassified");
+    }
+    found
+}
+
+/// Every Job of the platform's and the workspaces' is Complete; one that is not says whether it
+/// failed, how many pods it has running and failed, and why its pods are not up.
+fn jobs(list: &mut Checklist, kubectl: Kubectl<'_>, pods: &[Value]) {
+    let Some(items) = listed(list, kubectl, "jobs", &["jobs", "-A", "-o", "json"]) else {
+        return;
+    };
+    for job in items.iter().filter(|job| ours(job)) {
+        let condition = |kind: &str| {
+            job["status"]["conditions"].as_array().and_then(|all| {
+                all.iter()
+                    .find(|c| text(c, &["type"]) == kind && text(c, &["status"]) == "True")
+            })
+        };
+        let what = format!("job {} is Complete", where_is(job));
+        if condition("Complete").is_some() {
+            list.check(true, what);
+            continue;
+        }
+        let mut detail = format!(
+            "active {}, failed {}",
+            job["status"]["active"].as_u64().unwrap_or_default(),
+            job["status"]["failed"].as_u64().unwrap_or_default()
+        );
+        for held in job["status"]["conditions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|c| text(c, &["status"]) == "True")
+        {
+            detail.push_str(&format!(
+                "; {}: {}",
+                word(text(held, &["type"])),
+                word(text(held, &["reason"]))
+            ));
+        }
+        let mut seen: Vec<String> = Vec::new();
+        for pod in pods.iter().filter(|pod| {
+            text(pod, &["metadata", "namespace"]) == text(job, &["metadata", "namespace"])
+                && job_of(pod) == text(job, &["metadata", "name"])
+                && text(pod, &["status", "phase"]) != "Succeeded"
+        }) {
+            let reason = why(pod);
+            if !seen.contains(&reason) {
+                seen.push(reason);
+            }
+        }
+        if !seen.is_empty() {
+            detail.push_str(&format!("; pods {}", seen.join(", ")));
+        }
+        let name = format!("job/{}", text(job, &["metadata", "name"]));
+        let logs = kubectl(&[
+            "logs",
+            &name,
+            "--namespace",
+            text(job, &["metadata", "namespace"]),
+            "--tail=20",
+            "--all-containers",
+        ]);
+        let classes = logs.map_or_else(|_| vec!["unreadable"], |text| log_classes(&text));
+        if !classes.is_empty() {
+            detail.push_str(&format!("; logs {}", classes.join(", ")));
+        }
+        list.check(false, format!("{what} ({detail})"));
     }
 }
 
@@ -337,6 +498,22 @@ mod tests {
     /// One way to break an up staging.
     type Fault = fn(&mut Staging);
 
+    fn in_job(mut found: Value, name: &str) -> Value {
+        found["metadata"]["ownerReferences"] = json!([{"kind": "Job", "name": name}]);
+        found
+    }
+
+    fn job(name: &str, condition: &str) -> Value {
+        json!({
+            "metadata": {"name": name, "namespace": "ws-ws1"},
+            "status": {
+                "active": 1,
+                "failed": 2,
+                "conditions": [{"type": condition, "status": "True", "reason": "BackoffLimitExceeded"}],
+            },
+        })
+    }
+
     fn vault(ready: bool) -> Value {
         let mut found = pod("ws-ws1", "vault-0", "Running", &[ready]);
         found["metadata"]["labels"] = json!({"app.kubernetes.io/name": VAULT_CHART});
@@ -349,6 +526,8 @@ mod tests {
         pods: Vec<Value>,
         bindings: Vec<Value>,
         webhooks: Vec<Value>,
+        jobs: Vec<Value>,
+        logs: &'static str,
         tunnel: &'static str,
         api: u16,
         unreadable: Option<&'static str>,
@@ -373,7 +552,7 @@ mod tests {
                     pod("cnpg-system", "cnpg-x", "Running", &[true]),
                     pod("cosign-system", "webhook-x", "Running", &[true]),
                     pod("ws-ws1", "journal-1", "Running", &[true, true]),
-                    pod("ws-ws1", "migrate-x", "Succeeded", &[false]),
+                    in_job(pod("ws-ws1", "migrate-x", "Succeeded", &[false]), "migrate"),
                     vault(true),
                     pod("kube-system", "coredns-x", "Pending", &[false]),
                 ],
@@ -383,6 +562,8 @@ mod tests {
                         json!({"metadata": {"name": name}, "spec": {"policyName": name, "validationActions": ["Deny"]}})
                     })
                     .collect(),
+                jobs: vec![job("migrate", "Complete")],
+                logs: "",
                 webhooks: vec![json!({
                     "metadata": {"name": SIGNATURE_WEBHOOK},
                     "webhooks": [{"failurePolicy": "Fail"}, {"failurePolicy": "Fail"}],
@@ -414,6 +595,15 @@ mod tests {
                 )),
                 "verify only reads: {args:?}"
             );
+            if args.first() == Some(&"logs") {
+                return Ok(self.logs.to_owned());
+            }
+            assert_eq!(
+                args.first(),
+                Some(&"get"),
+                "verify only runs get and logs: {args:?}"
+            );
+            let args = &args[1..];
             let what = args.first().copied().unwrap_or_default();
             if what == "pods" {
                 self.reads.set(self.reads.get() + 1);
@@ -427,6 +617,7 @@ mod tests {
                 "pods" => self.pods.clone(),
                 "validatingadmissionpolicybindings" => self.bindings.clone(),
                 "validatingwebhookconfigurations" => self.webhooks.clone(),
+                "jobs" => self.jobs.clone(),
                 kinds if kinds.contains("fluxcd.io") => self.flux.clone(),
                 other => return Err(anyhow!("unexpected kubectl get {other}")),
             };
@@ -534,11 +725,11 @@ mod tests {
             ),
             (
                 |s| s.pods[3] = pod("ws-ws1", "journal-1", "Running", &[true, false]),
-                "pod ws-ws1/journal-1 is Running and Ready",
+                "pod ws-ws1/journal-1 is Running and Ready (Running: not ready)",
             ),
             (
                 |s| s.pods[1] = pod("cnpg-system", "cnpg-x", "Failed", &[false]),
-                "pod cnpg-system/cnpg-x is Running and Ready",
+                "pod cnpg-system/cnpg-x is Running and Ready (Failed)",
             ),
             (
                 |s| {
@@ -641,10 +832,9 @@ mod tests {
         Ok(())
     }
 
-    /// A sealed vault waits on the founder's one-time init without failing the run; an unsealed
-    /// one is an ordinary line (DEC-2051).
+    /// An unsealed vault holds; a sealed one, after the apply initialized it, fails (DEC-2052).
     #[test]
-    fn a_sealed_vault_waits_on_the_founders_init() -> Result<()> {
+    fn a_sealed_vault_fails() -> Result<()> {
         let staging = Staging::up();
         let text = run(&staging)?;
         assert!(
@@ -654,12 +844,78 @@ mod tests {
         let mut staging = Staging::up();
         staging.pods[5] = vault(false);
         let text = run(&staging)?;
-        assert_eq!(missing(&text), Vec::<&str>::new(), "{text}");
-        assert_eq!(staging.pauses.get(), 0);
+        assert_eq!(
+            missing(&text),
+            ["pod ws-ws1/vault-0 is Running and Ready, so unsealed (Running: not ready)"],
+            "{text}"
+        );
+        Ok(())
+    }
+
+    /// A Job's pods are judged by the Job: a Job that retried and completed holds, its failed pods
+    /// aside; one that is still retrying or failed is MISSING with why its pods are not up. A pod
+    /// that is not up says its phase and container reason, and nothing else (DEC-2050).
+    #[test]
+    fn jobs_are_judged_by_completion_and_failures_say_why() -> Result<()> {
+        let mut staging = Staging::up();
+        let mut pulling = pod("ws-ws1", "migrate-b", "Pending", &[false]);
+        pulling["status"]["containerStatuses"][0]["state"] =
+            json!({"waiting": {"reason": "ImagePullBackOff", "message": "secret-ish detail"}});
+        let mut failed = pod("ws-ws1", "migrate-a", "Failed", &[false]);
+        failed["status"]["containerStatuses"][0]["state"] =
+            json!({"terminated": {"reason": "Error", "exitCode": 1}});
+        staging.pods.push(in_job(failed.clone(), "migrate"));
+        let text = run(&staging)?;
+        assert_eq!(
+            missing(&text),
+            Vec::<&str>::new(),
+            "a completed Job holds: {text}"
+        );
         assert!(
-            text.contains(
-                "[pending founder init] pod ws-ws1/vault-0 is Running and Ready, so unsealed"
-            ),
+            text.contains("[ok]      job ws-ws1/migrate is Complete"),
+            "{text}"
+        );
+
+        staging.jobs = vec![
+            json!({"metadata": {"name": "migrate", "namespace": "ws-ws1"}, "status": {"active": 1, "failed": 1}}),
+        ];
+        staging.pods.push(in_job(pulling.clone(), "migrate"));
+        staging.logs =
+            "psql: error: connection to server at \"journal-rw\" failed: timeout expired";
+        let text = run(&staging)?;
+        assert_eq!(
+            missing(&text),
+            [
+                "job ws-ws1/migrate is Complete (active 1, failed 1; pods Failed: Error: exit 1, Pending: ImagePullBackOff; logs timeout)"
+            ],
+            "{text}"
+        );
+        staging.jobs = vec![job("migrate", "Failed")];
+        staging.logs = "psql: error: connection to server failed: FATAL:  password authentication \
+                        failed for user \"mandate_migrator\" postgresql://u:hunter2@db";
+        let text = run(&staging)?;
+        assert_eq!(
+            missing(&text),
+            [
+                "job ws-ws1/migrate is Complete (active 1, failed 2; Failed: BackoffLimitExceeded; pods Failed: Error: exit 1, Pending: ImagePullBackOff; logs auth-failed)"
+            ],
+            "{text}"
+        );
+        for leak in ["secret-ish", "hunter2", "mandate_migrator", "postgresql"] {
+            assert!(!text.contains(leak), "{leak}: {text}");
+        }
+        assert_eq!(
+            log_classes("applied: 0001.sql\nERROR: relation x\n"),
+            ["unclassified"]
+        );
+        assert!(log_classes("already applied: 0001.sql\n").is_empty());
+
+        let mut staging = Staging::up();
+        staging.pods[3] = pulling;
+        let text = run(&staging)?;
+        assert_eq!(
+            missing(&text),
+            ["pod ws-ws1/migrate-b is Running and Ready (Pending: ImagePullBackOff)"],
             "{text}"
         );
         Ok(())

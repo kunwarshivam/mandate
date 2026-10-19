@@ -74,7 +74,7 @@ const FLUX_IMAGES: [(&str, &str); 3] = [
 ];
 
 /// The namespace every workload secret lives in: the one workspace's (infrastructure §3.2).
-const WORKSPACE_NAMESPACE: &str = "ws-ws1";
+pub(crate) const WORKSPACE_NAMESPACE: &str = "ws-ws1";
 
 /// A Secret the charts name but the cluster cannot make itself: its name and, for each of its
 /// keys, the environment secret that holds the value (DEC-2015 item 4).
@@ -379,7 +379,7 @@ fn secret_manifest(name: &str, values: &[(&str, String)]) -> Result<String> {
 }
 
 /// The Secret staging's vault unseals itself from (DEC-2021 item 3, DEC-2051), and its one entry.
-const SEAL_KEY_SECRET: &str = "vault-seal-key";
+pub(crate) const SEAL_KEY_SECRET: &str = "vault-seal-key";
 const SEAL_KEY_ENTRY: &str = "key";
 /// How the founder makes a seal key OpenBao's static seal reads unambiguously: 64 hex characters,
 /// one AES-256 key.
@@ -387,7 +387,7 @@ const SEAL_KEY_HINT: &str = "expected 64 hex characters (openssl rand -hex 32)";
 
 /// What the bootstrap did with staging's seal key.
 #[derive(Debug, PartialEq, Eq)]
-enum SealKey {
+pub(crate) enum SealKey {
     /// It existed and was left alone: a re-run never rotates it.
     Kept,
     /// The founder typed it and it was created.
@@ -410,7 +410,7 @@ fn seal_key(typed: &str) -> Result<String> {
 
 /// Staging's seal key, created from what the founder types only when `exists` says there is none,
 /// with `create` given the Secret's manifest; an existing key is kept and nothing is read.
-fn ensure_seal_key(
+pub(crate) fn ensure_seal_key(
     exists: impl FnOnce() -> Result<bool>,
     typed: impl FnOnce() -> Result<String>,
     create: impl FnOnce(&str) -> Result<()>,
