@@ -232,7 +232,6 @@ fn each_refusal_is_a_code() {
 /// profile, which sets no ceiling of its own; zero for a mandate with no research envelope; and no
 /// cap at all, so no start, for a document that cannot give one the gateway can hold.
 #[test]
-#[ignore = "pending E21-59"]
 fn the_daily_research_cap_is_the_mandate_s_own_and_fails_closed() {
     let cap = |edit: &dyn Fn(&mut Json)| {
         let mut document: Json = serde_json::from_str(MANDATE).unwrap();

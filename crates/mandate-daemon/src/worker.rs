@@ -136,8 +136,21 @@ impl RecordedWorker {
         bundle: &Bundle,
         who: WorkerFor,
         sink: Box<dyn ArtifactSink>,
+        now: Box<dyn FnMut() -> UtcNanos>,
+        meter: CellMeter,
+    ) -> Result<Self, WorkerError> {
+        let caps = Caps::new(bundle.workspace_cap);
+        Self::built(bundle, who, sink, now, meter, caps)
+    }
+
+    /// The worker whose gateway meters through `meter` under `caps` and the bundle's deployment cap.
+    fn built(
+        bundle: &Bundle,
+        who: WorkerFor,
+        sink: Box<dyn ArtifactSink>,
         mut now: Box<dyn FnMut() -> UtcNanos>,
         meter: CellMeter,
+        caps: Caps,
     ) -> Result<Self, WorkerError> {
         let settings = Settings {
             workspace_id: who.workspace.clone(),
@@ -158,7 +171,7 @@ impl RecordedWorker {
         };
         let meter = Meter::new(
             meter,
-            Caps::new(bundle.workspace_cap),
+            caps,
             DeploymentMeter::new(
                 Box::new(MemoryMeter::new()),
                 bundle.deployment_cap,
@@ -199,10 +212,6 @@ impl RecordedWorker {
     /// # Errors
     /// As [`RecordedWorker::new`], and [`WorkerError::DailyCapAboveWorkspace`] when `daily` is above
     /// the bundle's workspace budget.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn capped(
         bundle: &Bundle,
         who: WorkerFor,
@@ -211,8 +220,10 @@ impl RecordedWorker {
         meter: CellMeter,
         daily: Usd6,
     ) -> Result<Self, WorkerError> {
-        let _ = (bundle, who, sink, now, meter, daily);
-        todo!()
+        let caps = Caps::new(bundle.workspace_cap)
+            .with_research_daily(&who.agent, daily)
+            .map_err(|_| WorkerError::DailyCapAboveWorkspace)?;
+        Self::built(bundle, who, sink, now, meter, caps)
     }
 
     fn start(&mut self, run_id: &str, cut_off: RiskClock, parts: &ResearchParts) {
