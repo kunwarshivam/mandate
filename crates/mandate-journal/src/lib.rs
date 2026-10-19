@@ -62,6 +62,17 @@ pub fn closes(event_type: &str, schema_version: u64, stream: StreamType) -> bool
             || (stream == StreamType::Agent && agent::closes(event_type, schema_version)))
 }
 
+/// Every event type the catalogue admits on `stream` (journal spec §9, with §2's copies), so a fold
+/// over a stream can prove it reads each one. `mandate-executor`'s account risk fold checks its
+/// table against it (E6-15).
+pub fn stream_event_types(stream: StreamType) -> impl Iterator<Item = &'static str> {
+    catalogue::EVENT_TYPES
+        .into_iter()
+        .filter(move |event_type| {
+            catalogue::lookup(event_type).is_some_and(|entry| entry.streams.contains(&stream))
+        })
+}
+
 /// The event types the stream rules read: §9.19's rules 153 and 158, the invalidation's rule 187,
 /// and the run records' rules 173 to 183.
 pub const STREAM_RULE_TYPES: [&str; 11] = [
