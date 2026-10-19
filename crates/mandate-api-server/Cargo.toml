@@ -37,6 +37,7 @@ mandate-authn.workspace = true
 mandate-canon.workspace = true
 mandate-identity.workspace = true
 mandate-identity-seal.workspace = true
+mandate-identity-testkit.workspace = true
 mandate-journal.workspace = true
 mandate-time.workspace = true
 proptest.workspace = true

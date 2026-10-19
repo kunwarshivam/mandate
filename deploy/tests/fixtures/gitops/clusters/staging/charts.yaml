@@ -1,0 +1,61 @@
+# A fixture of the repository's own charts as staging runs them, with made-up digests: OCI artifacts that release.yml's publish-index
+# pushed from `main` (`cargo xtask release publish-charts`), pinned by digest, and used only once
+# Flux has verified the digest's keyless signature from that workflow on `main` (DEC-2015 item 3).
+# Promotion rewrites the digests here and in images.yaml together (DEC-2016).
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: mandate-backup-plugin-tls
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-backup-plugin-tls
+  ref:
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  verify:
+    provider: cosign
+    matchOIDCIdentity:
+      - issuer: ^https://token\.actions\.githubusercontent\.com$
+        subject: ^https://github\.com/kunwarshivam/mandate/\.github/workflows/release\.yml@refs/heads/main$
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: mandate-journal-db
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-journal-db
+  ref:
+    digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  verify:
+    provider: cosign
+    matchOIDCIdentity:
+      - issuer: ^https://token\.actions\.githubusercontent\.com$
+        subject: ^https://github\.com/kunwarshivam/mandate/\.github/workflows/release\.yml@refs/heads/main$
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: mandate-workspace
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-workspace
+  ref:
+    digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  verify:
+    provider: cosign
+    matchOIDCIdentity:
+      - issuer: ^https://token\.actions\.githubusercontent\.com$
+        subject: ^https://github\.com/kunwarshivam/mandate/\.github/workflows/release\.yml@refs/heads/main$

@@ -1,0 +1,16 @@
+# The operator's and its plugin's namespace, and the one workspace's (one release a workspace,
+# infrastructure §3.2), as in the local cell. Flux never prunes them: deleting a namespace would
+# delete the journal's volumes with it, so removing one from git leaves it in place.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnpg-system
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ws-ws1
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled

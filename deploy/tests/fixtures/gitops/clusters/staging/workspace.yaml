@@ -1,0 +1,11 @@
+# The staging workspace's settings: paper only (DEC-967 item 15), on top of the managed cluster's
+# values and then images.yaml, whose images and tier promotion sets (DEC-2016).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: workspace
+  namespace: flux-system
+spec:
+  values:
+    workspace: ws1
+    environment: paper
