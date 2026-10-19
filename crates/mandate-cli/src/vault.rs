@@ -21,12 +21,14 @@ use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::credentials::{check_credential_dir, read_token_file, write_credentials};
-use mandate_vault::openbao::{OpenBaoConfig, provision};
-use mandate_vault::policy::Mounts;
+use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource, provision};
+use mandate_vault::policy::{Identity, Mounts, PlatformSecret, SecretPath};
+use mandate_vault::source::SecretSource;
 use mandate_vault_local::VaultError;
 use mandate_vault_local::import::{import_client_secret, resolve_ids};
 use mandate_vault_local::startup::{Inputs, Role};
 use mandate_vault_local::store::open;
+use secrecy::{ExposeSecret, SecretSlice, SecretString};
 
 /// Where the demo host keeps the vault (DEC-692 item 1).
 pub const DEFAULT_VAULT_DIR: &str = "/var/lib/owlhead/vault";
@@ -173,11 +175,66 @@ pub fn run_put(
     now: UtcNanos,
     out: &mut impl Write,
 ) -> anyhow::Result<()> {
-    let _ = (args, stdin, now, out);
-    Err(anyhow!(
-        "{:?}",
-        SourceError::Unimplemented { story: "E21-32" }
-    ))
+    let refused = |e: SourceError| anyhow!("{e} ({})", e.code());
+    let mut bytes = Vec::new();
+    stdin
+        .take(PUT_MAX.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| refused(SourceError::CredentialFile))?;
+    if u64::try_from(bytes.len()).map_or(true, |read| read > PUT_MAX) {
+        return Err(refused(SourceError::CredentialFile));
+    }
+    let text = SecretString::from(
+        String::from_utf8(bytes).map_err(|_| refused(SourceError::CredentialFile))?,
+    );
+    let body = text.expose_secret();
+    let lines: Vec<&str> = body
+        .strip_suffix('\n')
+        .unwrap_or(body)
+        .split('\n')
+        .collect();
+    let [role_id, secret_id, value] = lines.as_slice() else {
+        return Err(refused(SourceError::CredentialFile));
+    };
+    if [role_id, secret_id, value]
+        .iter()
+        .any(|line| line.is_empty() || line.contains('\r'))
+    {
+        return Err(refused(SourceError::CredentialFile));
+    }
+    let (path, name) = match args.secret {
+        PutSecret::ModelProviderKey => (PlatformSecret::ModelProviderKey, "model provider's key"),
+        PutSecret::EmailCredential => (PlatformSecret::EmailCredential, "email credential"),
+    };
+    let config = OpenBaoConfig {
+        address: args.address.clone(),
+        ca_pem: fs::read(&args.ca).map_err(|_| refused(SourceError::Config))?,
+        mounts: Mounts::default(),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("starting the put's runtime")?;
+    runtime
+        .block_on(async {
+            let source = OpenBaoSource::login(
+                &config,
+                Identity::SecretImport,
+                role_id,
+                &SecretString::from((*secret_id).to_owned()),
+                now,
+            )
+            .await?;
+            source
+                .put(
+                    &SecretPath::Platform(path),
+                    &SecretSlice::from(value.as_bytes().to_vec()),
+                )
+                .await
+        })
+        .map_err(refused)?;
+    writeln!(out, "the {name} is in the vault")?;
+    Ok(())
 }
 
 /// Runs the provisioning and prints, to `out`, the name of each file written and nothing else.

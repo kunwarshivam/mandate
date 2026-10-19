@@ -60,7 +60,6 @@ fn three(role: &str, secret_id: &str, value: &str) -> String {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn three_lines_are_read_and_the_vault_reached() {
     for stdin in [
         three(ROLE, SECRET_ID, CANARY),
@@ -72,7 +71,6 @@ fn three_lines_are_read_and_the_vault_reached() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn stdin_that_is_not_three_lines_is_refused_before_any_vault_is_reached() {
     for (stdin, case) in [
         (String::new(), "an empty pipe"),
@@ -103,7 +101,6 @@ fn stdin_that_is_not_three_lines_is_refused_before_any_vault_is_reached() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_plain_http_address_or_a_bad_ca_is_refused() {
     let stdin = three(ROLE, SECRET_ID, CANARY);
     let output = put("model-provider-key", "http://127.0.0.1:9", &ca(), &stdin);
@@ -143,7 +140,6 @@ fn server() -> Option<(String, PathBuf, PathBuf)> {
 /// connection refusal, and nothing of stdin is printed. The read back by the model gateway runs on
 /// staging, which is no dev server.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_put_with_provisioned_credentials_reaches_the_vault() {
     stdin_that_is_not_three_lines_is_refused_before_any_vault_is_reached();
     let Some((address, ca, operator)) = server() else {
