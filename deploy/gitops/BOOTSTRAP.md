@@ -121,8 +121,9 @@ umask. It refuses a terminal on either end.
 
 Staging's web app signs you in only once your identity-provider subject is linked to the founder's
 principal, and lets you act only once that principal is the workspace's founder
-([DEC-2114](../../docs/project/decisions/DEC-2114.md)). Both happen with no step of yours on the
-cluster:
+([DEC-2114](../../docs/project/decisions/DEC-2114.md)). None of it is a step of yours on the
+cluster. The link is the apply's; the mount and the grant are two edits you make yourself, in this
+order, because granting the founder's membership is your own act, not an agent's:
 
 1. **The link.** Add the `infra-staging` secret `FOUNDER_OIDC_SUBJECT` (your user id in staging's
    Supabase project) and run the staging apply. After the vault is provisioned, it runs the
@@ -141,14 +142,20 @@ cluster:
    extra rollout. If drift detection is ever turned on for the workspace release, it must ignore
    `/spec/template/metadata/annotations/kubectl.kubernetes.io~1restartedAt` on `deployment/api`, or
    Flux reverts the restart.
-2. **The mount.** Once an apply has written the ConfigMap, staging's values set
-   `api.subjectLinks: subject-links`, so the API server reads it.
-3. **The grant.** Once the `mandate` image staging runs has `workspace found --open`, staging's
-   values set `founding.enabled: true`. The workspace chart's `founding` hook then runs on every
-   apply: the first opens the workspace's control stream if it is empty and writes your founding
-   grant; every later one finds it and commits nothing. Two runs racing on an empty stream never
-   open it twice: the one that loses fails closed, committing nothing, and the hook's retry finds
-   the stream opened and founds it (or finds the grant).
+2. **The mount (your edit, after step 1).** Wait for a staging apply that ran with the secret set
+   and logged `founding: linked`, so the ConfigMap holds your link. Then, in
+   `clusters/staging/workspace.yaml`, add `subjectLinks: subject-links` under `api`, and merge it.
+   The API server then reads the link and signs you in. Not before: the mount is not optional, so
+   until an apply has written the ConfigMap, the API's new pod cannot start.
+3. **The grant (your edit, after step 2).** Wait until the `mandate` image staging runs, as
+   promoted in `clusters/staging/images.yaml`, has `workspace found --open`. Then, in the same
+   file, set `founding.enabled: true`, update the comment above `founding` so it no longer says
+   founding is off, and merge it. An older image refuses `--open`, and the release fails. Once it
+   is on, the workspace chart's `founding` hook runs on every apply: the first opens the
+   workspace's control stream if it is empty and writes your founding grant; every later one finds
+   it and commits nothing. Two runs racing on an empty stream never open it twice: the one that
+   loses fails closed, committing nothing, and the hook's retry finds the stream opened and founds
+   it (or finds the grant). Verify's `founding` Job line confirms it.
 
 If the control stream already holds records and no membership, the grant is refused
 `workspace_not_new`: the release fails, and verify's `founding` Job line names only that code. The
