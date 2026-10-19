@@ -107,7 +107,6 @@ fn every_market_intent_base_and_valid_draft_parses() {
 /// might be misread to refuse (an API-key request for live or for another broker, a later
 /// disclosure version), parse.
 #[test]
-#[ignore = "pending E7-27"]
 fn every_connection_request_base_and_valid_draft_parses() {
     let failed = parses("connection_requested");
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -116,7 +115,6 @@ fn every_connection_request_base_and_valid_draft_parses() {
 /// The closed version-2 schema and rule 255, refused at the member named, and version 1 kept
 /// closed at its six members.
 #[test]
-#[ignore = "pending E7-27"]
 fn every_invalid_connection_request_is_refused_with_its_reason_at_its_path() {
     let (count, failed) = refusals("connection_requested");
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -126,7 +124,6 @@ fn every_invalid_connection_request_is_refused_with_its_reason_at_its_path() {
 /// Rule 255's order: `breadth` before `broker`, `broker` before `environment`, and `environment`
 /// before the disclosure's document, each the first clause that fails.
 #[test]
-#[ignore = "pending E7-27"]
 fn rule_255_reports_its_first_failing_clause() {
     let section = section("connection_requested");
     let cases: [(&[(&str, Value)], &str); 4] = [
@@ -183,7 +180,6 @@ fn rule_255_reports_its_first_failing_clause() {
 
 /// The request is closed on the control stream at versions 1 and 2, and nowhere else.
 #[test]
-#[ignore = "pending E7-27"]
 fn the_catalogue_closes_connection_requested_on_the_control_stream_at_both_versions() {
     assert!(closes("ConnectionRequested", 1, StreamType::Control));
     assert!(closes("ConnectionRequested", 2, StreamType::Control));
