@@ -32,7 +32,7 @@ use mandate_executor::tripwire::{
     TripwireAcknowledgment, TripwireEvent as ExecutorTripwireEvent, TripwireFill, TripwireInput,
     TripwireState, TripwireValue as ExecutorTripwireValue, fold as fold_tripwire,
 };
-use mandate_num::{CostBasis, Price, Qty, SignedQty, Usd};
+use mandate_num::{CostBasis, Price, Qty, ShareIncrement, SignedQty, SplitRatio, Usd};
 use mandate_spec::change;
 use mandate_spec::document::{
     ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source, TripwireId,
@@ -283,6 +283,13 @@ const STEP_KEYS: &[(&str, &[&str])] = &[
     ("allocation_change", &["delta_usd"]),
     ("clock", &[]),
     ("universe_changed", &["instrument", "change", "reason"]),
+    (
+        "corporate_action_split",
+        &["new", "old", "fractionable", "cash_in_lieu_price"],
+    ),
+    ("corporate_action_dividend", &["per_share"]),
+    ("cash_in_lieu_posted", &[]),
+    ("dividend_paid", &[]),
     (
         "floor_loosened",
         &[
@@ -1317,6 +1324,31 @@ fn risk_step(step: &Json) -> Result<risk::Step, String> {
             },
         },
         "goal_complete" => Input::GoalComplete,
+        "corporate_action_split" => Input::Split {
+            ratio: num(
+                SplitRatio::new(whole_at(step, "new")?, whole_at(step, "old")?),
+                "ratio",
+            )?,
+            increment: if at(step, "fractionable")?
+                .as_bool()
+                .ok_or("`fractionable` is not a boolean")?
+            {
+                ShareIncrement::Fractional
+            } else {
+                ShareIncrement::Whole
+            },
+            cash_in_lieu_price: match at(step, "cash_in_lieu_price")? {
+                Json::Null => None,
+                _ => Some(num(
+                    Price::parse(str_at(step, "cash_in_lieu_price")?),
+                    "cash_in_lieu_price",
+                )?),
+            },
+        },
+        "corporate_action_dividend" => Input::CashDividend {
+            per_share: num(Price::parse(str_at(step, "per_share")?), "per_share")?,
+        },
+        "cash_in_lieu_posted" | "dividend_paid" => Input::ReceivablePosted,
         other => return Err(format!("`{other}` is not a risk input the harness applies")),
     };
     Ok(risk::Step {
@@ -1325,6 +1357,13 @@ fn risk_step(step: &Json) -> Result<risk::Step, String> {
             .map_err(|e| format!("`session`: {}", e.code()))?,
         input,
     })
+}
+
+/// A split term: a JSON integer, never a string or a fraction.
+fn whole_at(step: &Json, key: &str) -> Result<u64, String> {
+    at(step, key)?
+        .as_u64()
+        .ok_or_else(|| format!("`{key}` is not a whole number"))
 }
 
 fn removal_reason(text: &str) -> Result<RemovalReason, String> {
