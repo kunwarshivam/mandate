@@ -68,9 +68,18 @@ fn split(
     (new, old): (u64, u64),
     cash_in_lieu_price: Option<&str>,
 ) -> CorporateAction {
+    split_on(config, d(EX_DATE), (new, old), cash_in_lieu_price)
+}
+
+fn split_on(
+    config: &RunConfig,
+    ex_date: Date,
+    (new, old): (u64, u64),
+    cash_in_lieu_price: Option<&str>,
+) -> CorporateAction {
     CorporateAction::Split(Split {
         instrument: config.instrument_id.clone(),
-        ex_date: d(EX_DATE),
+        ex_date,
         ratio: SplitRatio::new(new, old).unwrap(),
         increment: ShareIncrement::Whole,
         cash_in_lieu_price: cash_in_lieu_price.map(price),
@@ -116,6 +125,32 @@ fn buy_and_hold_holds_through_a_two_for_one_split_with_flat_equity() {
         held.windows(2).all(|pair| pair[0] == pair[1]),
         "equity is flat through the split: {held:?}"
     );
+}
+
+/// An ex-date on a day with no bars, a weekend or a holiday, applies before the first bar traded
+/// after it, as one on a trading day does: the bars change price on the Monday after a Sunday
+/// ex-date, and on the day after a holiday whose bars the series leaves out.
+#[test]
+fn an_ex_date_without_bars_applies_before_the_next_trading_day() {
+    let config = config();
+    let sunday = split_series("100", "50");
+    let holiday: Vec<SimBar> = DAYS
+        .iter()
+        .filter(|day| **day != EX_DATE)
+        .flat_map(|day| flat_day(day, if d(day) < d(EX_DATE) { "100" } else { "50" }))
+        .collect();
+    for (name, bars, ex_date) in [
+        ("sunday", sunday, d("2026-09-27")),
+        ("holiday", holiday, d(EX_DATE)),
+    ] {
+        let run = run_actions(&config, &bars, &[split_on(&config, ex_date, (2, 1), None)])
+            .unwrap_or_else(|e| panic!("{name}: the run completes: {}", e.code()));
+        let held = held_equities(&run);
+        assert!(
+            held.windows(2).all(|pair| pair[0] == pair[1]),
+            "{name}: equity is flat through the split: {held:?}"
+        );
+    }
 }
 
 /// A 1:3 reverse split of a holding that is not a multiple of 3 leaves a residual, paid in cash at
@@ -183,10 +218,20 @@ fn actions_outside_the_bars_change_nothing() {
     assert_eq!(with.fills.len(), plain.fills.len());
 }
 
+/// `text` in billionths, the finest step a price or an amount here carries.
+fn billionths(text: &str) -> i128 {
+    let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+    let digits = format!("{whole}{fraction:0<9}");
+    digits
+        .parse()
+        .unwrap_or_else(|_| panic!("{text} is a decimal"))
+}
+
 /// Equity is flat through any split of a flat series, whatever the ratio: before the ex-date the
 /// price is k × new, after it k × old, and cash in lieu is posted at the post-split price, so
-/// Q' × k × old + f × k × old = Q × k × new exactly. The oracle is that constant, computed from the
-/// first held close; it shares nothing with the fold.
+/// Q' × k × old + f × k × old = Q × k × new exactly. The oracle is that constant, the starting cash
+/// less what the buys paid plus Q × k × new, summed in integer billionths from the fills; it shares
+/// nothing with the fold.
 #[test]
 fn equity_is_flat_through_any_split_of_a_flat_series() {
     let mut runner = TestRunner::new(ProptestConfig {
@@ -207,6 +252,24 @@ fn equity_is_flat_through_any_split_of_a_flat_series() {
         )
         .map_err(|e| TestCaseError::fail(format!("{new}:{old} at {k}: {}", e.code())))?;
         let held = held_equities(&run);
+        let bought: i128 = run
+            .fills
+            .iter()
+            .map(|fill| {
+                let shares = billionths(&fill.execution.qty_gross.to_string());
+                shares * billionths(&fill.execution.price.to_string()) / 1_000_000_000
+            })
+            .sum();
+        let shares = billionths(&run.report.strategy.filled_qty.to_string());
+        let expected = billionths("100000") - bought + shares * i128::from(k * new);
+        prop_assert_eq!(
+            billionths(&held[0].to_string()),
+            expected,
+            "{}:{} at {}: the first held close",
+            new,
+            old,
+            k
+        );
         prop_assert!(
             held.windows(2).all(|pair| pair[0] == pair[1]),
             "{}:{} at {}: {:?}",
@@ -219,4 +282,51 @@ fn equity_is_flat_through_any_split_of_a_flat_series() {
     }) {
         panic!("equity through a split: {failure}");
     }
+}
+
+fn other_instrument(config: &RunConfig) -> CorporateAction {
+    let mut other = config.clone();
+    other.instrument_id = id("OTHER");
+    split(&other, (2, 1), None)
+}
+
+fn out_of_order(config: &RunConfig) -> [CorporateAction; 2] {
+    [
+        split_on(config, d("2026-10-01"), (2, 1), None),
+        split_on(config, d(EX_DATE), (2, 1), None),
+    ]
+}
+
+/// The walk takes actions in the order given, so it refuses, rather than skip, a slice out of
+/// ex-date order or an action for another instrument than the run's (DEC-2245 item 7).
+#[test]
+fn actions_it_cannot_apply_as_given_refuse_the_run() {
+    let config = config();
+    let bars = split_series("100", "100");
+    assert!(run_actions(&config, &bars, &out_of_order(&config)).is_err());
+    assert!(run_actions(&config, &bars, &[other_instrument(&config)]).is_err());
+}
+
+#[test]
+#[ignore = "pending E4-4"]
+fn actions_out_of_ex_date_order_refuse_with_their_code() {
+    let config = config();
+    let bars = split_series("100", "100");
+    let refused = run_actions(&config, &bars, &out_of_order(&config));
+    assert_eq!(
+        refused.err().map(|e| e.code()),
+        Some("corporate_actions_unordered")
+    );
+}
+
+#[test]
+#[ignore = "pending E4-4"]
+fn an_action_for_another_instrument_refuses_with_its_code() {
+    let config = config();
+    let bars = split_series("100", "100");
+    let refused = run_actions(&config, &bars, &[other_instrument(&config)]);
+    assert_eq!(
+        refused.err().map(|e| e.code()),
+        Some("corporate_action_other_instrument")
+    );
 }
