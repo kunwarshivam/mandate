@@ -170,7 +170,7 @@ pub fn vault_config(mount: &VaultMount) -> Result<OpenBaoConfig, &'static str> {
     Err(Unimplemented)
 }
 
-/// The vault session of `connection`'s executor: `read_token` reads the pod's ServiceAccount token
+/// The vault session of `connection`'s executor: `service_account_token` reads the pod's token
 /// first, and only then does `login` dial the vault as [`Identity::Executor`] of `connection`
 /// with it. Both are the caller's: `mandate-vault`'s reader and Kubernetes login in the process,
 /// scripted ones in a test.
@@ -179,11 +179,11 @@ pub fn vault_config(mount: &VaultMount) -> Result<OpenBaoConfig, &'static str> {
 /// `vault_credentials_unreadable` when the token cannot be read, and `vault_login_failed` when the
 /// vault cannot be reached or refuses it.
 pub fn vault_login<V>(
-    read_token: impl FnOnce() -> Result<SecretString, SourceError>,
+    service_account_token: impl FnOnce() -> Result<SecretString, SourceError>,
     login: impl FnOnce(Identity, SecretString) -> Result<V, SourceError>,
     connection: &ConnectionId,
 ) -> Result<V, &'static str> {
-    let _ = (read_token, login, connection);
+    let _ = (service_account_token, login, connection);
     Err(Unimplemented)
 }
 
