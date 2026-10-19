@@ -148,7 +148,6 @@ fn verdict(ran: &Ran) -> Option<(String, String)> {
 }
 
 #[test]
-#[ignore = "pending E7-29"]
 fn an_exit_at_the_market_is_received_as_a_market_order_with_no_limit() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -178,7 +177,6 @@ fn an_exit_at_the_market_is_received_as_a_market_order_with_no_limit() {
 /// resting, an exit at the market whose gate decision read a binding snapshot goes at the market
 /// (DEC-2037 item 4).
 #[test]
-#[ignore = "pending E7-29"]
 fn an_exit_at_the_market_goes_at_the_market_on_a_fresh_quote_in_the_regular_session() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -218,7 +216,6 @@ fn an_exit_at_the_market_goes_at_the_market_on_a_fresh_quote_in_the_regular_sess
 /// caps, marketable-limit rule or collar, so even on a fresh regular quote the exit goes as a limit
 /// at the ladder's first rung, never at the market.
 #[test]
-#[ignore = "pending E7-29"]
 fn an_exit_at_the_market_whose_gate_read_no_snapshot_goes_by_the_ladder() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -260,7 +257,6 @@ fn an_exit_at_the_market_whose_gate_read_no_snapshot_goes_by_the_ladder() {
 /// checked a market order's caps, so it is resent as a limit at the ladder's first rung; with one,
 /// at the market as before.
 #[test]
-#[ignore = "pending E7-29"]
 fn a_lost_exit_at_the_market_is_resent_at_the_market_only_on_a_binding_recheck() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -318,7 +314,6 @@ fn a_lost_exit_at_the_market_is_resent_at_the_market_only_on_a_binding_recheck()
 /// §5.6: with the latest quote not sane (a presumed halt), a market order is barred and the exit
 /// goes as a limit at the ladder's first rung, priced from the last sane bid.
 #[test]
-#[ignore = "pending E7-29"]
 fn an_exit_at_the_market_on_a_stale_quote_is_priced_by_the_ladder() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -344,7 +339,6 @@ fn an_exit_at_the_market_on_a_stale_quote_is_priced_by_the_ladder() {
 /// §5.1, §5.6: outside the regular session a market order is barred, and a risk exit goes in the
 /// extended session as a limit at the ladder's first rung.
 #[test]
-#[ignore = "pending E7-29"]
 fn a_risk_exit_at_the_market_before_the_open_is_priced_by_the_ladder() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -368,7 +362,6 @@ fn a_risk_exit_at_the_market_before_the_open_is_priced_by_the_ladder() {
 /// §5.4, §5.6: with protection resting, the exit's sequence cancels it first, and the exit then
 /// goes by the ladder, never at the market (DEC-2037 item 4).
 #[test]
-#[ignore = "pending E7-29"]
 fn an_exit_at_the_market_beside_resting_protection_goes_by_the_ladder() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -403,7 +396,6 @@ fn an_exit_at_the_market_beside_resting_protection_goes_by_the_ladder() {
 /// journaled and alerted once, never refused; a tick re-checks it silently, and the first tick
 /// after a fresh quote releases it.
 #[test]
-#[ignore = "pending E7-29"]
 fn an_exit_at_the_market_with_nothing_to_price_from_is_held_then_goes() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -449,7 +441,6 @@ fn an_exit_at_the_market_with_nothing_to_price_from_is_held_then_goes() {
 /// Journal spec §9.5: an exit received at the market folds back as one, so a restart keeps
 /// holding it and a later quote still releases it at the market.
 #[test]
-#[ignore = "pending E7-29"]
 fn an_exit_received_at_the_market_survives_a_restart() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -476,7 +467,6 @@ fn an_exit_received_at_the_market_survives_a_restart() {
 /// Rule 12, DEC-2037 item 1: an opening or an increase with no limit is non-canonical, refused
 /// before anything is journaled or sent.
 #[test]
-#[ignore = "pending E7-29"]
 fn an_opening_or_an_increase_with_no_limit_is_refused_before_anything_is_journaled() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -511,7 +501,6 @@ fn an_opening_or_an_increase_with_no_limit_is_refused_before_anything_is_journal
 /// regular session on a fresh, sane quote with a binding gate decision, never as a limit with no
 /// price.
 #[test]
-#[ignore = "pending E7-29"]
 fn no_exit_at_the_market_is_refused_and_only_a_fresh_regular_quote_sends_it_at_the_market() {
     let (ids, mandates, instruments, config) = (
         TestIds,
