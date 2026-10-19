@@ -14,14 +14,16 @@ use mandate_cli::gestures::VersionCommand;
 use mandate_cli::identity::IdentityCommand;
 use mandate_cli::inbox::ApprovalsCommand;
 use mandate_cli::journal::JournalCommand;
+use mandate_cli::postgres::PgControlJournal;
 use mandate_cli::register::{ConfigCommand, ModelCommand};
 #[cfg(feature = "rh-sim")]
 use mandate_cli::sim_clock::from_env;
+use mandate_cli::step_up::StepUpCommand;
 use mandate_cli::vault::VaultCommand;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
     Cli, Command, artifact, backtest, brake, connection, db, download, evaluation, gestures,
-    identity, inbox, inspect, journal, owner, register, vault, workspace,
+    identity, inbox, inspect, journal, owner, register, step_up, vault, workspace,
 };
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
@@ -191,6 +193,12 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Evaluation(EvaluationCommand::Run(args)) => {
             evaluation::run_command(&args, now()?, &mut io::stdout().lock()).map(drop)
+        }
+        Command::StepUp(StepUpCommand::Confirm(args)) => {
+            let checked = step_up::check(&(&args).into())?;
+            let mut journal = PgControlJournal::open(&args.target)?;
+            let out = &mut io::stdout().lock();
+            step_up::run_confirm(&checked, &mut journal, now()?, out).map(drop)
         }
     }
 }
