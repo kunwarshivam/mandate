@@ -1,9 +1,0 @@
-file = "crates/mandate-spec/tests/risk.rs"
-test = "a_position_past_the_journal_is_refused"
-reason = """
-E6-15's fail-closed guard on `Outcome::breach_time_s` (DEC-2301 item 1). The accessor is
-implemented, and today it answers from the breach times the step recorded by position alone, so a
-position past the end of `journal` answers `None`, an answer of the fold's own rather than a stub's
-report. The guard's implementation, which stores each time with its limit and refuses any
-disagreement with `journal` as `invalid_input`, deletes this file with the test's `#[ignore]` line.
-"""
