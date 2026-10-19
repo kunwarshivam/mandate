@@ -3,14 +3,18 @@
 //! fails closed: a line it refuses stays refused until a person lists it, file and trimmed line
 //! byte for byte, in [`ALLOWED`], in a change a reviewer sees.
 //!
-//! - **L1, environment dumps:** `printenv`, `declare`, `typeset`, `export -p`, a bare `env`,
-//!   `compgen -e` or `-v`, and any `/proc/*/environ`.
-//! - **L2, trace and debug output:** `set` with any flag holding `x` or `-o xtrace`, a shell run
-//!   with `-x`, a shebang with `-x`, `PS4=`, the runner's and `gh`'s debug switches, `TF_LOG`,
+//! - **L1, environment dumps:** `printenv`, `declare`, `typeset`, a bare `export` or `export -p`,
+//!   a bare `set`, a bare `env` (a redirect is not an argument), `compgen -e` or `-v`, and any
+//!   `/proc/*/environ`.
+//! - **L2, trace and debug output:** `set` with any flag holding `x` or `v`, or `-o xtrace` or
+//!   `-o verbose`; a shell run with any of those or `--xtrace`/`--verbose`, its `-c` program read as
+//!   a command of its own; a shebang with `-x` or `-v`; `PS4=`, the runner's and `gh`'s debug switches, `TF_LOG`,
 //!   `RUST_LOG` at `trace`, `helm --debug`, `kubectl` above `--v=5`, `doctl -v` and `cosign -d`.
-//! - **L3, contexts:** `toJSON(` of a whole context, `secrets[`, `secrets: inherit`, and
-//!   `secrets.` anywhere but an `env:` block, so a secret reaches a step only as a variable and is
-//!   never pasted into its script.
+//! - **L3, contexts:** read in every GitHub expression whole (each `${{ … }}` joined across lines,
+//!   and each `if:` value) and without regard to case: `toJSON(` whose argument names a context,
+//!   however nested, `secrets[`, and `secrets.` anywhere but an `env:` block, so a secret reaches a
+//!   step only as a variable and is never pasted into its script; and `secrets: inherit` in any
+//!   case and spacing.
 
 use std::fs;
 use std::path::Path;
@@ -112,6 +116,7 @@ pub(crate) fn findings(sources: &[Source]) -> Vec<Finding> {
     let mut found = Vec::new();
     for source in sources {
         let mut env_block: Option<usize> = None;
+        let mut env_lines: Vec<bool> = Vec::new();
         for (index, raw) in source.text.lines().enumerate() {
             let trimmed = raw.trim();
             let indent = raw.len().saturating_sub(raw.trim_start().len());
@@ -120,20 +125,22 @@ pub(crate) fn findings(sources: &[Source]) -> Vec<Finding> {
             }
             let opens_env = trimmed == "env:" || trimmed == "- env:";
             let inline_env = trimmed.starts_with("env:") || trimmed.starts_with("- env:");
+            env_lines.push(env_block.is_some() || inline_env);
             let mut hits: Vec<(&'static str, &'static str)> = Vec::new();
             if let Some(why) = shebang_trace(trimmed) {
                 hits.push(("L2", why));
             }
             if !trimmed.starts_with('#') {
                 for words in segments(trimmed) {
-                    hits.extend(dump(&words).map(|why| ("L1", why)));
-                    hits.extend(trace(&words).map(|why| ("L2", why)));
+                    let inner = shell_program(&words);
+                    for words in std::iter::once(words).chain(inner) {
+                        hits.extend(dump(&words).map(|why| ("L1", why)));
+                        hits.extend(trace(&words).map(|why| ("L2", why)));
+                    }
                 }
                 hits.extend(line_dump(trimmed).map(|why| ("L1", why)));
                 hits.extend(line_trace(trimmed).map(|why| ("L2", why)));
-                hits.extend(
-                    context(trimmed, env_block.is_some() || inline_env).map(|why| ("L3", why)),
-                );
+                hits.extend(inherits(trimmed).map(|why| ("L3", why)));
             }
             for (rule, why) in hits {
                 if !ALLOWED.contains(&(rule, source.path.as_str(), trimmed)) {
@@ -149,6 +156,21 @@ pub(crate) fn findings(sources: &[Source]) -> Vec<Finding> {
                 env_block = Some(indent);
             }
         }
+        let lines: Vec<&str> = source.text.lines().collect();
+        for (index, expression) in expressions(&source.text) {
+            let in_env = env_lines.get(index).copied().unwrap_or(false);
+            let trimmed = lines.get(index).map(|line| line.trim()).unwrap_or_default();
+            if let Some(why) = expression_rule(&expression, in_env)
+                && !ALLOWED.contains(&("L3", source.path.as_str(), trimmed))
+            {
+                found.push(Finding {
+                    rule: "L3",
+                    path: source.path.clone(),
+                    line: index.saturating_add(1),
+                    why,
+                });
+            }
+        }
     }
     found
 }
@@ -156,7 +178,7 @@ pub(crate) fn findings(sources: &[Source]) -> Vec<Finding> {
 /// The commands of one line: split at `;`, `|`, `&`, `(`, `)` and backticks, then into words, with
 /// a leading YAML key or list dash dropped and wrappers (`sudo`, `exec`, `command`, `nohup`,
 /// `time`) stepped over, so each command's own name comes first. Quotes are dropped, not parsed:
-/// a refused word inside a string is refused too, which errs toward refusing.
+/// a refused word inside a string is refused too.
 fn segments(line: &str) -> Vec<Vec<String>> {
     let mut out = Vec::new();
     for piece in line.split([';', '|', '&', '(', ')', '`']) {
@@ -202,13 +224,28 @@ fn short_flag(word: &str) -> bool {
     word.len() > 1 && word.starts_with('-') && !word.starts_with("--")
 }
 
+/// The words of a command up to its first redirect (`>`, `>>`, `2>&1`, `<`): a redirect and what
+/// follows it are not arguments, so `env > out.txt` is still a bare `env`.
+fn arguments(words: &[String]) -> Vec<&str> {
+    words
+        .get(1..)
+        .unwrap_or_default()
+        .iter()
+        .map(String::as_str)
+        .take_while(|word| !word.contains(['>', '<']))
+        .collect()
+}
+
 /// L1 for one command.
 fn dump(words: &[String]) -> Option<&'static str> {
-    let args = words.get(1..).unwrap_or_default();
+    let args = arguments(words);
     match program(words) {
         "printenv" => Some("`printenv` prints the environment"),
         "declare" | "typeset" => Some("`declare` and `typeset` can print every variable"),
-        "export" if args.iter().any(|a| a == "-p") => Some("`export -p` prints the environment"),
+        "export" if args.is_empty() || args.contains(&"-p") => {
+            Some("a bare `export` or `export -p` prints the environment")
+        }
+        "set" if args.is_empty() => Some("a bare `set` prints every variable"),
         "env" if args.iter().all(|a| a.starts_with('-')) => {
             Some("a bare `env` prints the environment")
         }
@@ -229,24 +266,67 @@ fn line_dump(line: &str) -> Option<&'static str> {
         .then_some("`/proc/*/environ` holds a process's environment")
 }
 
+/// The shells whose `-x`, `-v`, `-o xtrace`, `-o verbose`, `--xtrace` and `--verbose` L2
+/// refuses, and whose `-c` program L1 and L2 read as a command of its own.
+const SHELLS: [&str; 5] = ["bash", "sh", "zsh", "dash", "ksh"];
+
+/// Whether shell or `set` options turn on tracing or verbose echo: a single-dash flag holding `x`
+/// or `v`, `-o xtrace`, `-o verbose`, `--xtrace` or `--verbose`, among the leading options.
+fn traces(args: &[&str], only_leading: bool) -> bool {
+    let mut at = 0;
+    while let Some(arg) = args.get(at) {
+        let named = |name: &str| matches!(name, "xtrace" | "verbose");
+        if *arg == "-o" {
+            if args
+                .get(at.saturating_add(1))
+                .is_some_and(|name| named(name))
+            {
+                return true;
+            }
+            at = at.saturating_add(2);
+            continue;
+        }
+        if arg.strip_prefix("--").is_some_and(named) || named(arg) {
+            return true;
+        }
+        if short_flag(arg) && arg.contains(['x', 'v']) {
+            return true;
+        }
+        if only_leading && !arg.starts_with(['-', '+']) {
+            return false;
+        }
+        at = at.saturating_add(1);
+    }
+    false
+}
+
+/// The program a shell's `-c` runs, as a command of its own, when `words` runs one.
+fn shell_program(words: &[String]) -> Option<Vec<String>> {
+    if !SHELLS.contains(&program(words)) {
+        return None;
+    }
+    let at = words
+        .iter()
+        .skip(1)
+        .position(|word| short_flag(word) && word.contains('c'))?;
+    let inner: Vec<String> = words.get(at.saturating_add(2)..)?.to_vec();
+    (!inner.is_empty()).then_some(inner)
+}
+
 /// L2 for one command.
 fn trace(words: &[String]) -> Option<&'static str> {
-    let args = words.get(1..).unwrap_or_default();
-    let has = |flag: &str| args.iter().any(|a| a == flag);
+    let all = words.get(1..).unwrap_or_default();
+    let args = arguments(words);
+    let has = |flag: &str| args.contains(&flag);
     match program(words) {
-        "set" if args.iter().any(|a| short_flag(a) && a.contains('x')) || has("xtrace") => {
-            Some("`set -x` traces every command with its expanded values")
+        "set" if traces(&args, false) => {
+            Some("`set -x` or `-v` traces every command, `-x` with its expanded values")
         }
-        "bash" | "sh" | "zsh" | "dash" | "ksh"
-            if args
-                .iter()
-                .take_while(|a| a.starts_with('-'))
-                .any(|a| short_flag(a) && a.contains('x')) =>
-        {
-            Some("a shell run with `-x` traces every command with its expanded values")
-        }
+        name if SHELLS.contains(&name) && traces(&args, true) => Some(
+            "a shell run with `-x` or `-v` traces every command, `-x` with its expanded values",
+        ),
         "helm" if has("--debug") => Some("`helm --debug` prints rendered values"),
-        "kubectl" if kubectl_verbosity(args) > 5 => {
+        "kubectl" if kubectl_verbosity(all) > 5 => {
             Some("`kubectl` above `--v=5` prints request headers")
         }
         "doctl" if has("-v") || has("--verbose") => Some("`doctl -v` prints request details"),
@@ -293,13 +373,13 @@ fn line_trace(line: &str) -> Option<&'static str> {
     None
 }
 
-/// L2 for a shebang that runs its shell with `-x`.
+/// L2 for a shebang that runs its shell with `-x` or `-v`.
 fn shebang_trace(line: &str) -> Option<&'static str> {
     let rest = line.strip_prefix("#!")?;
     rest.split_whitespace()
         .skip(1)
-        .any(|word| short_flag(word) && word.contains('x'))
-        .then_some("a shebang with `-x` traces every command with its expanded values")
+        .any(|word| short_flag(word) && word.contains(['x', 'v']))
+        .then_some("a shebang with `-x` or `-v` traces every command")
 }
 
 /// The contexts whose whole value `toJSON(` must never print.
@@ -307,31 +387,109 @@ const CONTEXTS: [&str; 9] = [
     "secrets", "env", "github", "vars", "inputs", "steps", "needs", "matrix", "runner",
 ];
 
-/// L3 for a line, `in_env` when it sits in an `env:` block.
-fn context(line: &str, in_env: bool) -> Option<&'static str> {
-    let compact: String = line.split_whitespace().collect::<Vec<_>>().join(" ");
-    for (at, _) in line.match_indices("toJSON(") {
-        let after = line
-            .get(at.saturating_add("toJSON(".len())..)
-            .unwrap_or_default()
-            .trim_start();
-        if CONTEXTS.iter().any(|name| {
-            after.strip_prefix(name).is_some_and(|rest| {
-                rest.chars()
-                    .next()
-                    .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+/// L3's line rule: `secrets: inherit`, in any case and spacing.
+fn inherits(line: &str) -> Option<&'static str> {
+    let compact: String = line
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    compact
+        .contains("secrets:inherit")
+        .then_some("`secrets: inherit` hands every secret to a called workflow")
+}
+
+/// Every GitHub expression of `text` with the 0-based line it starts on: each `${{ … }}`, joined
+/// across lines, and each `if:` value written without one. GitHub reads expressions without regard
+/// to case, so each is lowercased and its whitespace dropped before L3 reads it.
+fn expressions(text: &str) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = text.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some(value) = trimmed.trim_start_matches("- ").strip_prefix("if:")
+            && !value.contains("${{")
+        {
+            out.push((index, compact(value)));
+        }
+    }
+    let mut starts: Vec<usize> = Vec::new();
+    let mut offset = 0;
+    for line in &lines {
+        starts.push(offset);
+        offset = offset.saturating_add(line.len()).saturating_add(1);
+    }
+    let line_of = |at: usize| {
+        starts
+            .partition_point(|start| *start <= at)
+            .saturating_sub(1)
+    };
+    let mut rest = 0;
+    while let Some(open) = text.get(rest..).and_then(|tail| tail.find("${{")) {
+        let begin = rest.saturating_add(open);
+        let body_at = begin.saturating_add(3);
+        let end = text
+            .get(body_at..)
+            .and_then(|tail| tail.find("}}"))
+            .map_or(text.len(), |close| body_at.saturating_add(close));
+        let start_line = line_of(begin);
+        let commented = lines
+            .get(start_line)
+            .is_some_and(|line| line.trim_start().starts_with('#'));
+        if !commented {
+            out.push((
+                start_line,
+                compact(text.get(body_at..end).unwrap_or_default()),
+            ));
+        }
+        rest = end.saturating_add(2).min(text.len());
+        if end >= text.len() {
+            break;
+        }
+    }
+    out
+}
+
+/// An expression lowercased, with its whitespace dropped.
+fn compact(expression: &str) -> String {
+    expression
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect()
+}
+
+/// L3 for one [`expressions`] entry, `in_env` when its line sits in an `env:` block: `toJSON(`
+/// whose argument names a whole context anywhere in it, however nested, `secrets[`, and
+/// `secrets.` outside an `env:` block.
+fn expression_rule(expression: &str, in_env: bool) -> Option<&'static str> {
+    if let Some(at) = expression.find("tojson(") {
+        let argument = expression.get(at..).unwrap_or_default();
+        let names_context = CONTEXTS.iter().any(|name| {
+            argument.match_indices(name).any(|(found, _)| {
+                let before = argument
+                    .get(..found)
+                    .and_then(|head| head.chars().next_back());
+                let after = argument
+                    .get(found.saturating_add(name.len())..)
+                    .and_then(|tail| tail.chars().next());
+                let word = |c: Option<char>| {
+                    c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                };
+                !word(before) && !word(after) && before != Some('\'')
             })
-        }) {
+        });
+        if names_context {
             return Some("`toJSON(` of a context prints every value in it");
         }
     }
-    if line.contains("secrets[") {
+    if expression.contains("secrets[") {
         return Some("`secrets[` reads a secret by a computed name");
     }
-    if compact.contains("secrets: inherit") {
-        return Some("`secrets: inherit` hands every secret to a called workflow");
-    }
-    if line.contains("secrets.") && !in_env {
+    if expression.contains("secrets.") && !in_env {
         return Some("a secret is read only in an `env:` block, never pasted into a step");
     }
     None
@@ -492,6 +650,81 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    /// The bypasses the #1724 review found, each a probe that once passed (the `gitleaks_plants`
+    /// pattern): every one is refused now, by the rule it slipped past.
+    const BYPASSES: &[(&str, &str)] = &[
+        (
+            "L3",
+            "      - env:\n          X: ${{ toJSON(\n            secrets) }}\n",
+        ),
+        ("L3", "        run: echo '${{ toJSON((secrets)) }}'\n"),
+        (
+            "L3",
+            "        run: echo '${{ toJSON(fromJSON(format('{0}', secrets))) }}'\n",
+        ),
+        ("L3", "        run: echo '${{ TOJSON(secrets) }}'\n"),
+        ("L3", "        run: echo '${{ tojson(github) }}'\n"),
+        ("L3", "        run: deploy --token ${{ Secrets.TOKEN }}\n"),
+        (
+            "L3",
+            "        run: deploy --token ${{\n          secrets.TOKEN }}\n",
+        ),
+        ("L3", "        if: ${{ SECRETS.TOKEN != '' }}\n"),
+        ("L3", "    secrets : inherit\n"),
+        ("L3", "    SECRETS: INHERIT\n"),
+        ("L1", "        run: env > out.txt\n"),
+        ("L1", "        run: env >> \"$GITHUB_STEP_SUMMARY\"\n"),
+        ("L1", "        run: env 2>&1\n"),
+        ("L1", "        run: export\n"),
+        ("L1", "        run: set\n"),
+        ("L1", "        run: set > vars.txt\n"),
+        ("L1", "        run: bash -c 'printenv'\n"),
+        ("L2", "        run: bash -c 'set -x; make'\n"),
+        ("L2", "        run: sh -c \"set -o xtrace\"\n"),
+        ("L2", "        run: bash -o xtrace build.sh\n"),
+        ("L2", "        run: bash --xtrace build.sh\n"),
+        ("L2", "        run: set -v\n"),
+        ("L2", "        run: set -o verbose\n"),
+        ("L2", "        run: bash -v build.sh\n"),
+        ("L2", "#!/bin/bash -v\n"),
+    ];
+
+    #[test]
+    fn every_bypass_the_review_found_is_refused() {
+        for (rule, text) in BYPASSES {
+            assert!(
+                rules(WORKFLOW, text).contains(rule),
+                "{rule} refuses {text:?}: {:?}",
+                one(WORKFLOW, text)
+            );
+        }
+        for text in [
+            "        run: set -e\n",
+            "        run: set +x\n",
+            "        run: bash -c 'make build'\n",
+            "        run: export X=1\n",
+            "        run: bash -e build.sh\n",
+            "        run: env -i PATH=/usr/bin make > build.log\n",
+            "        if: github.ref == 'refs/heads/main'\n",
+            "      - env:\n          X: ${{\n            secrets.TOKEN }}\n",
+        ] {
+            assert_eq!(one(WORKFLOW, text), Vec::new(), "{text:?}");
+        }
+    }
+
+    /// An allowlist entry is bound to its file: the reviewed `merge.yml` line, written in any
+    /// other workflow, is refused.
+    #[test]
+    fn an_allowed_line_is_allowed_only_in_its_file() {
+        let line =
+            "          RUN_PRS: ${{ toJSON(github.event.workflow_run.pull_requests.*.number) }}\n";
+        assert_eq!(
+            rules(".github/workflows/merge.yml", line),
+            Vec::<&str>::new()
+        );
+        assert_eq!(rules(".github/workflows/ci.yml", line), ["L3"]);
     }
 
     /// Every allowlisted line is still in its file, so a stale entry is caught.
