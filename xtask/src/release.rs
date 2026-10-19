@@ -2020,7 +2020,7 @@ mod tests {
     /// another, even beside a planted `unset` that would keep it (DEC-2024 item 4). Every run is
     /// handed what a signing needs, a stand-in cosign, a key and a password, and the control, with
     /// nothing planted, signs all three files; each planted run stops with its own refusal on
-    /// stderr, never runs cosign and never reaches `RUNNER_TEMP`.
+    /// stderr, never runs cosign and never reaches `RUNNER_TEMP` (DEC-2049 item 1).
     #[test]
     fn the_signer_refuses_exported_functions() -> Result<()> {
         let script =
