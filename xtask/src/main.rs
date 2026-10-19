@@ -15596,7 +15596,8 @@ mod tests {
     /// which holds every earlier one, is always analysed; a pull request's runs cancel the older
     /// run of their ref; the weekly schedule has a group of its own.
     #[test]
-    fn codeql_runs_one_analysis_of_main_at_a_time() -> Result<()> {
+    fn codeql_runs_one_analysis_of_main_at_a_time_and_skips_documentation_pull_requests()
+    -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/codeql.yml"))?;
         assert!(
             workflow.contains(
@@ -15609,8 +15610,22 @@ mod tests {
              (DEC-2611)"
         );
         assert!(
-            workflow.contains("  push:\n    branches: [ \"main\" ]\n"),
-            "every push to main is still analysed (DEC-2606 item 3)"
+            workflow.contains("  push:\n    branches: [ \"main\" ]\n  pull_request:\n"),
+            "every push to main is still analysed, whatever it changes (DEC-2606 item 3, DEC-2613)"
+        );
+        assert!(
+            workflow.contains(
+                "  pull_request:\n    branches: [ \"main\" ]\n    types: [opened, synchronize, \
+                 reopened, ready_for_review]\n    paths-ignore:\n      - \"docs/**\"\n      - \
+                 \"**/*.md\"\n"
+            ),
+            "a pull request is analysed unless every path it changes is documentation (DEC-2613)"
+        );
+        assert_eq!(
+            workflow.matches("paths-ignore:").count(),
+            1,
+            "only the pull request trigger skips documentation; push and the schedule never do \
+             (DEC-2613)"
         );
         assert!(
             workflow.contains("  schedule:\n    - cron: '42 2 * * 1'\n"),
