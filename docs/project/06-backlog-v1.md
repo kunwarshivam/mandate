@@ -3133,6 +3133,11 @@ enables `live` (ES-23, OPS-5).
   *Status:* done. The tests (#1565), the cell wiring (#1572), the stub (#1591), xtask's release
   check and profile guard (#1620), and the release build's refusal of rustflags, compiler, wrapper
   and profile overrides from its environment or any cargo configuration it reads (DEC-2027).
+  *Follow-up (DEC-2032 item 3, the leak-guard's second review):* L1 to L3 do not yet read
+  `env:`-shaped lines inside a `run:` block, `#` lines inside a heredoc, a redirect before a flag
+  (`set >x -x`), a shell's `-O` before `-x`, `/proc/self/environ` built from parts or read by a
+  language one-liner (`python -c`, `node -e`, `perl -e`), a `secrets:` mapping across several
+  lines, or a duplicate `ALLOWED` line. L9's closed world holds meanwhile.
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
   issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
@@ -3209,6 +3214,15 @@ enables `live` (ES-23, OPS-5).
   select` (DEC-1190); and the founder's one bootstrap, from an address the cluster's API firewall
   admits, installs Flux and creates the workload secrets (the tunnel token and the archive key)
   from lane IAC's outputs, never committed and never by an agent, until E21-32's vault holds them.
+
+- **E21-59 (Proposed, M8, after E21-54's step 3; lane I2; DEC-2214)** As the founder, I want the
+  runtime process's research source to fold an agent's theses, lineages, working universe and
+  research reservations from its agent stream, so that the cell's research keeps running after its
+  first proposal instead of pausing. *Accepted when:* `mandate-daemon`'s cell source folds those
+  facts from the agent stream's own records through the same functions the core judges with
+  (`fold_theses`, `expire_theses`, the reservation ceiling's fold), gives no context on a pass when
+  any record cannot be folded (DEC-2210 item 4), and a property test over random journaled runs
+  shows the folded facts equal an independent accumulator over the same records.
 
 ## Won't (v1)
 

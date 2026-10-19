@@ -15,6 +15,16 @@ provider "cloudflare" {
 locals {
   environment = "production"
   region      = "nyc3"
+  account_id  = data.cloudflare_accounts.visible.result[0].id
+}
+
+data "cloudflare_accounts" "visible" {
+  lifecycle {
+    postcondition {
+      condition     = length(self.result) == 1
+      error_message = "CF_INFRA_API_TOKEN must see exactly one Cloudflare account, whose id this plan uses."
+    }
+  }
 }
 
 import {
@@ -40,7 +50,7 @@ module "cell" {
 module "cloudflare" {
   source                = "../../modules/cloudflare"
   name                  = "mandate-${local.environment}"
-  account_id            = var.cloudflare_account_id
+  account_id            = local.account_id
   zone_name             = "owlhead.ai"
   api_hostname          = "api.owlhead.ai"
   api_origin            = var.api_origin
@@ -83,7 +93,7 @@ output "archive_jurisdiction" {
 }
 
 output "cloudflare_account_id" {
-  value = var.cloudflare_account_id
+  value = local.account_id
 }
 
 output "tunnel_id" {

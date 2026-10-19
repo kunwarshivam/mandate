@@ -2,13 +2,17 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.19 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.20 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.20:** §5.7: within each run, a kill switch's unconfirmed cancel is sent again at the
+  `Unknown` lookup cadence, by the risk clock, up to that pair's cap per run, each re-send journaled
+  first, with an operator alert when the last window passes unconfirmed, so a lost answer cannot
+  leave the order working ([DEC-2302](../project/decisions/DEC-2302.md) item 7). A tightening under DEC-176.
 - **v0.19:** §5.7: a pending cancel ends only by the broker's answer to it. A working status
   keeps a `PendingCancel` order whose cancel is unconfirmed in `PendingCancel`. A refusal takes the
   "cancel rejected" edge, except for a kill switch's cancel. `Expired` and `Rejected` end a pending
@@ -726,8 +730,23 @@ PartiallyFilled); fills during either pending state update filled quantity witho
     which stays `PendingCancel`.
   - Within one run, a kill switch's order stays `PendingCancel` until the broker reports a
     terminal status. This holds whatever happens to the cancel's answer: a 429 or 5xx, an answer in doubt, no reply, or a lookup unanswered or answered 404.
-    Such an order never returns to `PriorState` and is never dropped. The bounded in-run retry of
-    that cancel is DEC-2302 item 7's.
+    Such an order never returns to `PriorState` and is never dropped.
+  - **Within each run, a kill switch's unconfirmed cancel is retried.** Once
+    `unknown_absent_window_s` has passed by the risk clock since the journal last asked it, the
+    cancel is asked again, at most `unknown_absent_lookups` times in each run. The pair that paces
+    lookups of an `Unknown` order paces these re-sends too. An order an ignored ask left `Accepted`
+    or `PartiallyFilled` with the cancel unconfirmed is retried the same way.
+    - Each re-send journals `OrderStateChanged` (`PendingCancel`, `cancel_requested`) before it is
+      sent. A run counts the re-sends journaled since its start, so every run has its own budget.
+      The switch's own ask is not a re-send, and the start's re-send is not journaled, so a run
+      that began with the cancel outstanding sends it at most `unknown_absent_lookups` + 1 times.
+    - When the window after the run's last re-send passes with the cancel still unconfirmed, an
+      operator alert sounds under an opaque key, at most once per run; a run that ends on that tick
+      raises none, and the next start sends the cancel again.
+    - After that nothing more is sent within the run, the order stays `PendingCancel`, and the next
+      start sends the cancel again with a new budget.
+    - No other cancel is retried this way: protection keeps §5.4's own bound, and an `Unknown`
+      order is queried, never cancelled blind ([DEC-2302](../project/decisions/DEC-2302.md) item 7).
   - A terminal status ends the order, the reservation is released, and its cancel is never sent
     again.
   - On every start, each `PendingCancel` order whose cancel is unconfirmed has its cancel sent

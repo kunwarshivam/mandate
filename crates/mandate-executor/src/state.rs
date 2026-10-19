@@ -133,6 +133,11 @@ pub struct ExecutorState {
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
     pub(crate) now: Option<RiskClock>,
+    /// The latest tick before the one now handed, a running field `step.rs` writes and the fold
+    /// never does: the retry's alert sounds on the tick its last window first expires, once
+    /// (DEC-2302 item 7). A tick handed again while its batch's append is unresolved keeps the
+    /// earlier tick it was first judged against, so its alert is not lost.
+    pub(crate) previous_now: Option<RiskClock>,
     /// The broker's capability profile protection reads (DEC-838 item 5): set by the shell from
     /// `connector.profile()` at every start ([`ExecutorState::with_profile`]), and otherwise the
     /// transitional Alpaca table. `None` only if that table failed to build, which protection
@@ -190,11 +195,13 @@ pub(crate) struct OrderDetail {
     /// broker's to refuse. A resubmission after a confirmed absence is a new attempt, with a new
     /// detail, which an exit waits on afresh (#174 ruling 5863046153, DEC-160 (18)).
     pub(crate) cancel_overdue: bool,
-    /// How many times the journal asked the order's cancel (`cancel_requested`), and when last:
-    /// a kill switch's in-run re-sends count against `unknown_absent_lookups` from these, so the
-    /// cap survives a replay (DEC-2302 item 7).
-    pub(crate) cancel_asks: u32,
+    /// The account-stream position of each record that asked the order's cancel
+    /// (`cancel_requested`), when it last asked, and that last record's id: a run counts a kill
+    /// switch's re-sends against `unknown_absent_lookups` from the asks after its start, so each run
+    /// has its own budget (DEC-2302 item 7).
+    pub(crate) cancel_asked_seqs: Vec<Seq>,
     pub(crate) cancel_asked_at: Option<RiskClock>,
+    pub(crate) cancel_asked_event: Option<EventId>,
     /// The broker's own cumulative filled quantity for the order, from the `filled_qty` its
     /// latest report carried: a bracket entry's filled quantity before its fills are ingested
     /// (§5.4's "the filled quantity", DEC-346 item 3).
@@ -339,6 +346,7 @@ impl ExecutorState {
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
             now: None,
+            previous_now: None,
             profile: transitional_alpaca().ok(),
         }
     }

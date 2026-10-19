@@ -16,6 +16,7 @@ use serde::Deserialize;
 mod cell;
 mod gitops;
 mod image;
+mod leak;
 mod mail;
 mod mask;
 mod mutant_costs;
@@ -54,6 +55,7 @@ commands:
   deps [--used-by]      check every direct dependency against docs/dependencies.md, or list
                         each cargo dependency with the crates that use it
   decisions             check that no two decision files take one DEC number
+  leak-guard            check workflows and scripts for what could leak a secret (DEC-2032)
   live-feature          check that only the runner may build `live`, and CI only compiles it or
                         tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
@@ -292,6 +294,7 @@ fn run() -> Result<()> {
         ["deps"] => deps(),
         ["deps", "--used-by"] => deps_used_by(),
         ["decisions"] => decision_numbers(Path::new(".")),
+        ["leak-guard"] => leak::guard_in(&root),
         ["live-feature"] => live_feature_in(Path::new(".")),
         ["mail-guard"] => mail::guard_in(Path::new(".")),
         ["refcases"] => refcases(false),
@@ -717,28 +720,24 @@ fn openbao() -> Result<()> {
         );
         return Ok(());
     }
-    if selection()?.among(&OPENBAO_TESTED).is_empty() {
-        eprintln!("    openbao: mandate-vault is not affected (DEC-1190)");
+    let packages = selection()?.among(&OPENBAO_TESTED);
+    if packages.is_empty() {
+        eprintln!("    openbao: neither mandate-vault nor mandate-cli is affected (DEC-1190)");
         return Ok(());
     }
-    let args = [
-        "nextest",
-        "run",
-        "--package",
-        "mandate-vault",
-        "--lib",
-        "--filterset",
-        "test(/^tests::openbao_server::/)",
-        "--locked",
-    ];
-    eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));
-    let status = Command::new("cargo")
-        .args(args)
-        .env(OPENBAO_REQUIRED, "1")
-        .status()
-        .context("starting `cargo nextest`")?;
-    if !status.success() {
-        bail!("the OpenBao conformance suite failed with {status}");
+    for package in packages {
+        let mut args = vec!["nextest", "run", "--package", package];
+        args.extend_from_slice(openbao_tests(package));
+        args.push("--locked");
+        eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));
+        let status = Command::new("cargo")
+            .args(&args)
+            .env(OPENBAO_REQUIRED, "1")
+            .status()
+            .context("starting `cargo nextest`")?;
+        if !status.success() {
+            bail!("{package}'s OpenBao tests failed with {status}");
+        }
     }
     Ok(())
 }
@@ -1168,15 +1167,35 @@ const INFRA_WORKFLOW: &str = ".github/workflows/infra.yml";
 const INFRA_RUN: &str = "cargo xtask infra";
 /// The secrets that step reads, each from the environment `infra-<environment>` the founder
 /// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Cloudflare token
-/// and account go to OpenTofu as variables under `CF_` names, since `web/scripts/workers.mjs`
-/// keeps every `CLOUDFLARE_` name to `web-deploy.yml`'s deploy step (DEC-1005 item 2).
-const INFRA_SECRETS: [&str; 5] = [
+/// goes to OpenTofu as a variable under a `CF_` name, since `web/scripts/workers.mjs` keeps every
+/// `CLOUDFLARE_` name to `web-deploy.yml`'s deploy step (DEC-1005 item 2); the account id is read
+/// from Cloudflare, never configured (DEC-2030 item 1). Production's Access emails are a secret,
+/// since GitHub prints a variable in a step's environment in the public log (DEC-2030 item 2).
+const INFRA_SECRETS: [&str; 6] = [
     "DIGITAL_OCEAN_API_KEY",
     "SPACES_ACCESS_KEY_ID",
     "SPACES_SECRET_ACCESS_KEY",
     "CF_INFRA_API_TOKEN",
     "TOFU_STATE_PASSPHRASE",
+    "ACCESS_ALLOWED_EMAILS",
 ];
+/// The list inputs `infra.yml` hands OpenTofu as JSON, which `infra` leaves out of `tofu`'s
+/// environment when blank or empty, so a root with a default takes it and a root without one
+/// fails on the missing variable by name, never on `""`, which is no list (DEC-2030 item 3).
+const INFRA_LIST_INPUTS: [&str; 2] = [
+    "TF_VAR_kube_api_allowed_addresses",
+    "TF_VAR_access_allowed_emails",
+];
+
+/// Whether `value`, a JSON list as `infra.yml` hands it on, names nothing: unset, blank, or an
+/// empty list.
+fn names_nothing(value: Option<&str>) -> bool {
+    value.is_none_or(|value| {
+        value
+            .chars()
+            .all(|c| c.is_whitespace() || c == '[' || c == ']')
+    })
+}
 /// The environment variables `infra.yml` hands `cargo xtask infra`: which environment and
 /// whether to apply, from the dispatch's choice inputs.
 const INFRA_ENVIRONMENT_ENV: &str = "MANDATE_INFRA_ENVIRONMENT";
@@ -1248,6 +1267,11 @@ fn infra() -> Result<()> {
     let tofu = |args: &[String]| {
         let mut command = Command::new("tofu");
         command.args(args).env("TF_IN_AUTOMATION", "1");
+        for name in INFRA_LIST_INPUTS {
+            if names_nothing(env::var(name).ok().as_deref()) {
+                command.env_remove(name);
+            }
+        }
         command
     };
     for args in infra_commands(&environment, &action, &plan_file.to_string_lossy())? {
@@ -1451,6 +1475,10 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
         INFRA_WORKFLOW,
         "TF_VAR_cloudflare_api_token: ${{ secrets.CF_INFRA_API_TOKEN }}",
     ),
+    (
+        INFRA_WORKFLOW,
+        "TF_VAR_access_allowed_emails: ${{ secrets.ACCESS_ALLOWED_EMAILS }}",
+    ),
 ];
 
 /// The only workflow lines that may hold a backslash, exactly, after trimming (DEC-2014 item 7):
@@ -1477,6 +1505,11 @@ const BACKSLASH_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         ".github/workflows/merge.yml",
         r##"prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \"##,
+    ),
+    (".github/workflows/merge.yml", r##"printf '%s\n' "$out""##),
+    (
+        ".github/workflows/merge.yml",
+        r##"if printf '%s\n' "$out" | grep -q '^merged as '; then"##,
     ),
     (
         ".github/workflows/web-e2e.yml",
@@ -1786,9 +1819,17 @@ const BINARY_REFERENCE: &str = "bin:";
 /// them the selection holds.
 const PG_TESTED: [&str; 3] = ["mandate-journal-pg", "mandate-cli", "mandate-dispatcher"];
 
-/// The package whose tests need the OpenBao dev server (E21-32, DEC-977): `cargo xtask ci openbao`
-/// runs its suite when the selection holds it.
-const OPENBAO_TESTED: [&str; 1] = ["mandate-vault"];
+/// The packages whose tests need the OpenBao dev server (E21-32, DEC-977, DEC-2022): `cargo xtask
+/// ci openbao` runs each one's server tests when the selection holds it.
+const OPENBAO_TESTED: [&str; 2] = ["mandate-vault", "mandate-cli"];
+
+/// Which of `package`'s tests need the OpenBao dev server, as nextest arguments.
+fn openbao_tests(package: &str) -> &'static [&'static str] {
+    match package {
+        "mandate-cli" => &["--test", "vault_provision"],
+        _ => &["--lib", "--filterset", "test(/^tests::openbao_server::/)"],
+    }
+}
 
 /// Whether `path` is `entry`, lies under it when `entry` names a directory (ends in `/`), or
 /// starts with it when `entry` ends in `*`.
@@ -2311,6 +2352,7 @@ fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()
     live_feature_in(root)?;
     infra_workflow_in(root)?;
     mail::guard_in(root)?;
+    leak::guard_in(root)?;
     workspace_checks()
 }
 
@@ -4794,7 +4836,6 @@ const READ_ENV_NAMES: &[&str] = &[
     "AWS_SECRET_ACCESS_KEY",
     "TF_VAR_state_passphrase",
     "TF_VAR_kube_api_allowed_addresses",
-    "TF_VAR_cloudflare_account_id",
     "TF_VAR_cloudflare_api_token",
     "TF_VAR_access_allowed_emails",
     "MANDATE_SCHEMA_SHARD",
@@ -15023,7 +15064,7 @@ mod tests {
     /// while the pull request is a draft, the scoped jobs follow `select` (DEC-1190) and the matrix
     /// its plan, `fast` and `full` are skipped too rather than judging skipped jobs, the failure
     /// report runs only on a dispatch on main, marking a pull request ready starts its run, and a
-    /// newer push still cancels the older run of the same ref.
+    /// newer push still cancels the older run of a pull request, while a started run on `main` finishes.
     #[test]
     fn ci_runs_nothing_on_a_draft() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -15035,13 +15076,24 @@ mod tests {
         );
         assert!(
             workflow.contains(
-                "concurrency:\n  group: ci-${{ github.ref }}\n  cancel-in-progress: true\n"
+                "concurrency:\n  group: ci-${{ github.event_name == 'workflow_dispatch' && \
+                 !inputs.post_merge && github.run_id || github.ref }}\n  cancel-in-progress: \
+                 ${{ github.ref != 'refs/heads/main' }}\n"
             ),
-            "a newer run of the same ref cancels the older one"
+            "a newer run of a pull request cancels the older one, post-merge runs on main share \
+             one group in which a started run finishes, and any other dispatched run, the \
+             nightly's included, has a group of its own, so it is never cancelled (DEC-2610)"
         );
-        let report = "if: ${{ always() && github.event_name == 'workflow_dispatch' && \
-                      github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || \
-                      needs.full.result == 'failure') }}";
+        assert!(
+            workflow.contains("  push:\n    branches: [main]\n"),
+            "every push to main runs CI after the merge, and a push to any other branch does not \
+             (DEC-2610)"
+        );
+        let report = "if: ${{ always() && (github.event_name == 'workflow_dispatch' || \
+                      github.event_name == 'push') && github.ref == 'refs/heads/main' && \
+                      (needs.fast.result == 'failure' || needs.full.result == 'failure') }}";
+        const AGGREGATE_GUARD: &str = "if: ${{ ((github.event_name == 'pull_request' && always()) \
+             || !cancelled()) && !github.event.pull_request.draft }}";
         for (job, guard) in [
             ("select", "if: ${{ !github.event.pull_request.draft }}"),
             ("fast-lint", "if: ${{ !github.event.pull_request.draft }}"),
@@ -15050,20 +15102,14 @@ mod tests {
             ("fast-python", "needs: select"),
             ("fast-portable", "needs: select"),
             ("fast-rh-sim-live", "needs: select"),
-            (
-                "fast",
-                "if: ${{ always() && !github.event.pull_request.draft }}",
-            ),
+            ("fast", AGGREGATE_GUARD),
             ("full-checks", "needs: select"),
             ("schema-mutants", "needs: select"),
             (
                 "mutants-plan",
                 "if: ${{ !github.event.pull_request.draft }}",
             ),
-            (
-                "full",
-                "if: ${{ always() && !github.event.pull_request.draft }}",
-            ),
+            ("full", AGGREGATE_GUARD),
             ("mutants", "needs: mutants-plan"),
             ("report-main", report),
         ] {
@@ -15076,7 +15122,7 @@ mod tests {
         }
         let guards = [
             "if: ${{ !github.event.pull_request.draft }}",
-            "if: ${{ always() && !github.event.pull_request.draft }}",
+            AGGREGATE_GUARD,
             "needs: mutants-plan",
             "needs: [mutants-plan, mutants]",
             "needs: select",
@@ -15799,6 +15845,21 @@ mod tests {
             for opaque in ["${GITHUB_SHA}", "${RUN_URL}"] {
                 assert!(issue.contains(opaque), "`{job}`'s issue names {opaque}");
             }
+            let title = issue
+                .split_once("-f title=\"")
+                .and_then(|(_, rest)| rest.split_once('"'))
+                .map(|(title, _)| title)
+                .with_context(|| format!("`{job}`'s issue has a title"))?;
+            let open = format!(
+                "if gh api --paginate \"repos/${{GITHUB_REPOSITORY}}/issues?state=open&per_page=100\" --jq '.[].title' | grep -Fqx \"{title}\"; then"
+            );
+            let at = |line: &str| lines.iter().position(|l| l == line);
+            let (check, create) = (at(&open), at(issue));
+            assert!(
+                check.is_some_and(|check| create.is_some_and(|create| check < create))
+                    && check.and_then(|check| lines.get(check + 2)) == Some(&"exit 0".to_owned()),
+                "`{job}` opens no second issue for a commit an open issue already reports"
+            );
             assert!(
                 !lines
                     .iter()
@@ -16048,6 +16109,28 @@ mod tests {
             "a line reviewed for web-deploy.yml is not allowed in ci.yml"
         );
         Ok(())
+    }
+
+    /// DEC-2030 item 3: a blank or empty list input is left out of `tofu`'s environment, so
+    /// staging's root takes its empty default rather than failing on `""`; a named list is kept.
+    #[test]
+    fn empty_list_inputs_are_left_out() {
+        for value in [None, Some(""), Some("  "), Some("[]"), Some(" [ ] ")] {
+            assert!(crate::names_nothing(value), "{value:?} names nothing");
+        }
+        for value in ["[\"203.0.113.7/32\"]", "[\"you@example.com\"]"] {
+            assert!(
+                !crate::names_nothing(Some(value)),
+                "{value} names something"
+            );
+        }
+        assert_eq!(
+            crate::INFRA_LIST_INPUTS,
+            [
+                "TF_VAR_kube_api_allowed_addresses",
+                "TF_VAR_access_allowed_emails"
+            ]
+        );
     }
 
     /// E21-56 (DEC-2014): `plan` inits and saves a plan; `apply` applies that same saved plan,
@@ -17608,6 +17691,71 @@ jq -r "$filter" "$src"
 "##;
 
     const APPROVED_HEAD: &str = "1111111111111111111111111111111111111111";
+
+    /// DEC-2610: a merge `merge.yml` makes pushes with its own token, which starts no workflow, so
+    /// it dispatches `ci` on `main` once after any merge, and only then, with the one right that
+    /// takes.
+    #[test]
+    fn the_merge_workflow_runs_ci_on_main_after_a_merge_it_made() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/merge.yml"))?;
+        let job = |name: &str| -> Result<Vec<String>> {
+            Ok(workflow_job(&workflow, name)
+                .with_context(|| format!("merge.yml has a `{name}` job"))?
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- ").to_owned())
+                .collect())
+        };
+        let merge = job("merge")?;
+        assert!(
+            merge
+                .iter()
+                .any(|l| l == "echo \"merged=true\" >> \"$GITHUB_OUTPUT\"")
+        );
+        assert!(
+            merge
+                .iter()
+                .any(|l| l == "if printf '%s\\n' \"$out\" | grep -q '^merged as '; then"),
+            "only a run that merged says so"
+        );
+        assert!(
+            !merge
+                .iter()
+                .filter(|l| !l.starts_with('#'))
+                .any(|l| l.contains("actions:") || l.contains("dispatches")),
+            "the merging job holds no `actions` right and dispatches nothing"
+        );
+        let dispatch = job("ci-on-main")?;
+        for line in [
+            "needs: merge",
+            "if: ${{ always() && needs.merge.outputs.merged == 'true' }}",
+            "actions: write",
+            "run: gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches\" \
+             -f ref=main -f \"inputs[post_merge]=true\"",
+        ] {
+            assert!(
+                dispatch.iter().any(|l| l == line),
+                "`ci-on-main` has `{line}`"
+            );
+        }
+        let rights: Vec<&String> = dispatch
+            .iter()
+            .skip_while(|l| *l != "permissions:")
+            .skip(1)
+            .take_while(|l| l.ends_with(": write") || l.ends_with(": read"))
+            .collect();
+        assert_eq!(
+            rights,
+            ["actions: write"],
+            "`actions: write` and nothing else"
+        );
+        assert!(
+            !dispatch
+                .iter()
+                .any(|l| l.contains("checkout") || l.contains("secrets.")),
+            "the dispatch job runs no code and reads no secret"
+        );
+        Ok(())
+    }
 
     #[test]
     fn merge_workflow_supplies_the_authorized_coordinator_identities() -> Result<()> {
