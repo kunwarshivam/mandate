@@ -9,7 +9,7 @@ use std::path::Path;
 use mandate_journal::Environment;
 use mandate_time::UtcNanos;
 
-use crate::recorded::BundleError;
+use crate::recorded::{Bundle, BundleError};
 use crate::runtime::{Refs, ResearchWiring};
 use crate::source::Rows;
 use crate::worker::WorkerError;
@@ -44,17 +44,24 @@ pub enum CellError {
     Worker(WorkerError),
 }
 
-impl fmt::Display for CellError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Unimplemented => "research_unimplemented",
+impl CellError {
+    /// The code the binary stops the start with.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Unimplemented => "unimplemented",
             Self::NotPaper => "research_needs_paper",
             Self::Unresolved => "research_needs_resolved_deployment",
             Self::ArtifactsUnavailable => "artifact_store_unavailable",
             Self::Bundle(_) => "research_bundle_unreadable",
             Self::Mandate(code) => code,
             Self::Worker(_) => "research_worker_unbuilt",
-        })
+        }
+    }
+}
+
+impl fmt::Display for CellError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
     }
 }
 
@@ -66,17 +73,37 @@ pub struct CellResearch {
     pub refs: Box<dyn Refs>,
 }
 
-/// The research for `deployment`, or `None` when `asked` names no bundle.
+/// Research asked for over a recorded bundle, for a resolved paper deployment: made only by
+/// [`opt_in`], so no research is built for any other deployment.
+pub struct OptIn {
+    bundle: Bundle,
+    deployment: CellDeployment,
+}
+
+/// The opt-in for research over the recorded bundle at `dir`, for `deployment`. It reads no journal
+/// and no artifact store, so a refused opt-in stops the start before the process connects to either.
 ///
 /// # Errors
-/// [`CellError`] when research is asked for and anything it needs is missing.
+/// [`CellError::NotPaper`] or [`CellError::Unresolved`] for any but a resolved paper deployment, and
+/// [`CellError::Bundle`] when the bundle does not load.
+pub fn opt_in(dir: &Path, deployment: &CellDeployment) -> Result<OptIn, CellError> {
+    let _ = (dir, deployment);
+    Err(CellError::Unimplemented)
+}
+
+/// The research `opted` asks for, reading the streams through `rows` and the mandate documents and
+/// artifacts from the store at `artifacts`.
+///
+/// # Errors
+/// [`CellError`] when the artifact store, the deployment, its mandate document, or the worker cannot
+/// be had.
 pub fn research(
-    asked: Option<&Path>,
-    deployment: &CellDeployment,
+    opted: OptIn,
     rows: Box<dyn Rows>,
     artifacts: &Path,
     now: Box<dyn FnMut() -> UtcNanos>,
-) -> Result<Option<CellResearch>, CellError> {
-    let _ = (asked, deployment, rows, artifacts, now);
+) -> Result<CellResearch, CellError> {
+    let OptIn { bundle, deployment } = opted;
+    let _ = (bundle, deployment, rows, artifacts, now);
     Err(CellError::Unimplemented)
 }
