@@ -108,6 +108,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || event_type == SNAPSHOT
                 || event_type == ACCOUNT_STATE
                 || RISK_STATE.contains(&event_type)
+                || crate::risk_limits::ACCOUNT.contains(&event_type)
                 || EXECUTOR.contains(&event_type)
         }
         StreamType::Scheduler | StreamType::Notice | StreamType::Meter => false,
@@ -132,6 +133,7 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::gateway::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::invalidation::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::runs::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::risk_limits::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
             _ => schema(event_type, schema_version),
@@ -191,6 +193,7 @@ pub(crate) fn payload(
     crate::backtest_records::rules(event_type, &payload, config_refs, actor)?;
     crate::notices::rules(event_type, &payload, causation_id)?;
     crate::membership::rules(event_type, &payload, actor, event_time)?;
+    crate::risk_limits::rules(event_type, &payload, causation_id)?;
     let p = Payload(&payload);
     match event_type {
         "MandateVersionCreated" => {
@@ -724,6 +727,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("MandateVersionCreated", 1) => Some(&MANDATE_VERSION_CREATED),
         ("MandateConfirmed", 1) => Some(&MANDATE_CONFIRMED),
         ("AgentDeployed", 1) => Some(&AGENT_DEPLOYED),
+        ("AgentDeployed", 2) => Some(&AGENT_DEPLOYED_V2),
         ("AgentStopped", 1) => Some(&AGENT_STOPPED),
         ("OwnerCommandRefused", 1) => Some(&OWNER_COMMAND_REFUSED),
         (SNAPSHOT, 1) => Some(&ACCOUNT_SNAPSHOT_RECORDED),
@@ -1232,6 +1236,16 @@ static AGENT_DEPLOYED: Ty = Ty::Record(&[
     ("agent_id", Ty::Ident),
     ("mandate_version", Ty::DigestRef),
     ("record_ref", Ty::DigestRef),
+]);
+
+/// Journal spec v0.54 §9.24 (DEC-1171): version 1's members, then the connection of the stored
+/// document `mandate_version` names, so the deployment manager reads a deployment's account from
+/// the control stream alone. Rule 22 applies unchanged; rule 200 is the mapping's, never `append`'s.
+static AGENT_DEPLOYED_V2: Ty = Ty::Record(&[
+    ("agent_id", Ty::Ident),
+    ("mandate_version", Ty::DigestRef),
+    ("record_ref", Ty::DigestRef),
+    ("connection_id", Ty::Ident),
 ]);
 
 static AGENT_STOPPED: Ty = Ty::Record(&[

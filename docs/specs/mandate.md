@@ -183,7 +183,9 @@ builder, versioning, change classification, and the records kept.
   adds the restriction `tripwire` (§5.9). It alerts with opaque text and lifts only by the owner's
   acknowledgment with step-up (by a user other than the requester under `independent_approval_required`),
   which re-arms it with nothing counted (§5.8, §6.1, MI-3, MI-31); an acknowledgment refused for that
-  is journaled with the new reason `not_independent` (§6.1, journal spec rule 28). Adding or
+  is journaled with the new reason `not_independent`, and one whose trigger or request does not
+  hold with `trigger_unknown`, `trigger_superseded`, or `request_invalid` (§6.1, journal spec rule 28,
+  [journal spec §9.28](journal.md#928-the-owners-acknowledgment-and-its-request-dec-2509)). Adding or
   tightening one is risk-reducing and applies at once; removing or loosening one is risk-increasing,
   and no version lifts a fired one (§9.2). V-044 bounds the thresholds (§4.1); the platform may
   propose tripwires (§7). It only tightens, so no existing reference case changes; the MC-W cases
@@ -843,7 +845,8 @@ Applies to `exits_only` and `flatten_and_pause` rungs, daily loss, the lifetime 
 - **Latched limits:** `drawdown_exits_only`, `drawdown_flatten`, `daily_loss` (until its lift),
   `lifetime_floor`, and every fired tripwire (§6.7), which lifts only by the owner's acknowledgment of it
   with step-up (§6.1) and, with `independent_approval_required`, by a user other than the requester, as
-  for the drawdown ladder below; it touches neither H, C, nor L.
+  for the drawdown ladder below; it touches neither H, C, nor L. Where a user other than the
+  requester must acknowledge, the request is its own record ([journal spec §9.28](journal.md#928-the-owners-acknowledgment-and-its-request-dec-2509)).
 - **Acknowledging the drawdown ladder** (owner, step-up; with `independent_approval_required`, by
   a user other than the requester):
   - is rejected with `flatten_in_progress` while a flatten has not finished (the agent is not
@@ -918,7 +921,8 @@ stream with `causation_id` and judges it there; nothing the owner's client check
 | Hold new openings ([DEC-191](../project/04-decision-log.md#decisions)) | None | — | Always applies: the agent goes to `exits_only` and every exit keeps running. The owner or a client with the `hold` scope may issue it (journal spec §9.11) |
 | Lift a hold | Required | When the runtime processes it | Refused. Only the owner lifts, never a client. A lift lifts only the hold, never a pause or a latched limit (MI-3) |
 | Stop (DEC-136) | Required | When the runtime processes it | Refused |
-| Acknowledge (§5.8, §6.7, trading spec §11) | Required | When the runtime processes it | Refused |
+| Acknowledge (§5.8, §6.7, trading spec §11) | Required | When the runtime processes it | Refused. Where a user other than the requester must acknowledge, it names a request, whose own step-up is judged too ([journal spec §9.28](journal.md#928-the-owners-acknowledgment-and-its-request-dec-2509)) |
+| Request an acknowledgment (§6.7, [journal spec §9.28](journal.md#928-the-owners-acknowledgment-and-its-request-dec-2509)) | Required | The request's own `submitted_at`, judged when the executor processes the acknowledgment that names it | The acknowledgment is refused (`request_invalid`) |
 | Owner exit | Required | When the owner committed it | Refused **as an owner exit**: it loses only the owner-exit privilege (selling equities outside the regular session at the confirmed bid, DEC-58, DEC-66). The exit is still routed, and never dropped: in the regular session, or at once for crypto; an equity sale outside the session waits for it unless the owner commits it again with a freshly confirmed bid and fresh step-up |
 | Kill switch, any scope | Only for its privileges beyond the stop | When the owner committed it | **Never refused** (DEC-158 option (c)): it stops the agent and flattens as an automated flatten does, equities waiting for the regular session (trading spec §5.5). With valid step-up and a confirmed bid it also sells equities outside the regular session as an owner exit does |
 | Approve (§6.4) | Required, one assertion per approval | The response's effective time | Refused |
@@ -927,12 +931,12 @@ stream with `causation_id` and judges it there; nothing the owner's client check
 - **Valid step-up.** Evidence is `{assertion, authenticated_at, method}`. It is valid at a moment
   *t* when 0 ≤ *t* − `authenticated_at` ≤ 300 s (evidence authenticated after *t* is stale, so
   clock skew fails closed); its assertion id appears on no earlier `ApprovalResponseSubmitted`,
-  `OwnerCommandIssued`, or `OwnerAcknowledged` in the workspace's control stream, whatever that
-  event's outcome; and its method is allowed for the environment. Missing or malformed evidence
+  `OwnerCommandIssued`, `OwnerAcknowledgmentRequested`, or `OwnerAcknowledged` in the workspace's
+  control stream, whatever that event's outcome; and its method is allowed for the environment. Missing or malformed evidence
   counts as missing. A refusal is journaled with `step_up_missing`, `step_up_stale`,
-  `step_up_reused`, or `step_up_method`, and an acknowledgment that lifts a fired tripwire may also be
-  refused with `not_independent` under `independent_approval_required` (§5.8, §6.7; never a resume or
-  Stop, journal spec rule 28): a refused approval as its `ApprovalResponded`, and a
+  `step_up_reused`, or `step_up_method`, and an acknowledgment may also be refused with `trigger_unknown` or
+  `trigger_superseded`, and, under `independent_approval_required`, with `not_independent` or
+  `request_invalid` (§5.8, §6.7, [journal spec §9.28](journal.md#928-the-owners-acknowledgment-and-its-request-dec-2509); never a resume or Stop, journal spec rule 28): a refused approval as its `ApprovalResponded`, and a
   refused resume, Stop, or acknowledgment as `OwnerCommandRefused` on the stream of whichever owner
   judged it (the agent runtime for resume and Stop, the executor for an acknowledgment), naming the
   control-stream event as `causation_id` (journal spec §9, [DEC-280](../project/04-decision-log.md#decisions)).
@@ -1376,7 +1380,9 @@ the user who requested the lift. The requirement is the stricter of the policy w
 requested, which the acknowledgment carries, and the overlay when the executor processes it, as §4.3
 and §6.4 check 7 read it. Under it the acknowledgment names both users, and one that names the
 requester as the acknowledging user, or omits either name, is refused with `not_independent` (rule 3:
-a missing name never counts as a second user). With the requirement on and only one user in the
+a missing name never counts as a second user). The request and the acknowledgment are the journal's
+`OwnerAcknowledgmentRequested` and `OwnerAcknowledged` ([journal spec §9.28](journal.md#928-the-owners-acknowledgment-and-its-request-dec-2509)), which also says how an unknown or
+superseded trigger and a spent request are refused ([DEC-2509](../project/decisions/DEC-2509.md)). With the requirement on and only one user in the
 workspace, a fired tripwire could not be lifted until a second user exists, as for the drawdown ladder,
 so V-047 refuses such a mandate at validation. What stays reachable is a workspace that falls to one
 user, or turns the requirement on, after its version was confirmed

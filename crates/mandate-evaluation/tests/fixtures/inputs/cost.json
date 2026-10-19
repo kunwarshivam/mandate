@@ -1,0 +1,4 @@
+{"slippage_per_leg_bps": "3", "reference_notional": "10000", "increment": "whole", "fees": {
+  "equities": {"sec_rate": "0.00003", "taf_per_share": "0.0002", "taf_cap": "9.79", "taf_cap_basis": "per_execution", "cat_per_share": "0.00001", "fee_rounding": "daily_total"},
+  "crypto": {"maker_bps": "15", "taker_bps": "25"},
+  "calendar": {"valid_from": "2026-09-01", "valid_to": "2026-12-31", "trading_holidays": ["2026-11-26", "2026-12-25"], "settlement_holidays": ["2026-10-12", "2026-11-11"]}}}

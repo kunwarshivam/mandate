@@ -1695,9 +1695,11 @@ dependencies = [
  "mandate-identity-seal",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-passkey",
  "mandate-release",
  "mandate-spec",
  "mandate-time",
+ "proptest",
  "reqwest",
  "ring",
  "rustix",
@@ -1822,6 +1824,8 @@ dependencies = [
  "mandate-approval",
  "mandate-artifacts-fs",
  "mandate-canon",
+ "mandate-connections",
+ "mandate-evaluation",
  "mandate-identity",
  "mandate-journal",
  "mandate-journal-cold",
@@ -1831,6 +1835,7 @@ dependencies = [
  "mandate-num",
  "mandate-spec",
  "mandate-time",
+ "mandate-vault",
  "mandate-vault-local",
  "proptest",
  "secrecy",
@@ -2017,6 +2022,28 @@ dependencies = [
  "proptest",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "mandate-executord"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-alpaca",
+ "mandate-canon",
+ "mandate-connections",
+ "mandate-domain",
+ "mandate-executor",
+ "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-num",
+ "mandate-process",
+ "mandate-store",
+ "mandate-time",
+ "proptest",
+ "serde_json",
+ "sqlx",
+ "tokio",
 ]
 
 [[package]]

@@ -687,7 +687,7 @@ def test_api_contained():
         ),
     ):
         assert api_contained(mutate(linked, "api", "Deployment", seed)), seed
-    for refused in ("api.org=", "api.workspace=", "api.jwksUrl=http://issuer.example/jwks", "api.tier=live"):
+    for refused in ("api.org=", "api.workspace=", "api.jwksUrl=http://issuer.example/jwks"):
         args = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", refused]
         assert helm(CHART, *args).returncode != 0, refused
 
@@ -819,10 +819,11 @@ def test_deploy_manager_contained():
         assert spec["restartPolicy"] == "Never" and spec["automountServiceAccountToken"] is False
         assert "serviceAccountName" not in spec
         probes = [container[k]["exec"]["command"] for k in ("livenessProbe", "readinessProbe")]
-        assert probes == [
-            ["/usr/local/bin/mandate-daemon", "probe", "livez", "--probe", "/tmp/process.sock"],
-            ["/usr/local/bin/mandate-daemon", "probe", "readyz", "--probe", "/tmp/process.sock"],
-        ], probes
+        listed = next(p for p in PROCESSES if p["name"] == pod["metadata"]["name"])
+        words = listed.get("probe") or [
+            "/usr/local/bin/mandate-daemon", "probe", "{probe}", "--probe", "/tmp/process.sock"
+        ]
+        assert probes == [[x.replace("{probe}", k) for x in words] for k in ("livez", "readyz")], probes
     only_runtime = render_all("--set", "images.executor=")
     assert [w["metadata"]["name"] for w in managed_pods(only_runtime)] == ["runtime"]
     assert deploy_manager_contained(only_runtime) == []
@@ -1221,12 +1222,11 @@ def test_stub_sidecar():
         ["-f", str(CELL / "values" / "managed.yaml"), "--set", f"images.stub-issuer={STUB}"],
         [
             "-f",
-            str(CELL / "values" / "k3d.yaml"),
-            *every_image(),
+            str(CELL / "values" / "k3s.yaml"),
+            "-f",
+            str(CELL.parent / "hosted" / "values" / "cell1.yaml"),
             "--set",
             f"images.stub-issuer={STUB}",
-            "--set",
-            "api.tier=staging",
         ],
         [
             "-f",
@@ -1235,7 +1235,16 @@ def test_stub_sidecar():
             "--set",
             f"images.stub-issuer={STUB}",
             "--set",
-            "api.tier=production",
+            "deploymentTier=staging",
+        ],
+        [
+            "-f",
+            str(CELL / "values" / "k3d.yaml"),
+            *every_image(),
+            "--set",
+            f"images.stub-issuer={STUB}",
+            "--set",
+            "deploymentTier=production",
         ],
         [
             "-f",
@@ -1324,6 +1333,49 @@ def test_environment_is_paper_or_backtest():
     assert render("--set", "environment=backtest")
     for refused in ("live", "production", ""):
         assert helm(CHART, "--set", f"environment={refused}").returncode != 0, refused
+
+
+def tiers(docs: list[dict]) -> set[str]:
+    """MANDATE_DEPLOYMENT_TIER of every process container (each one that sets HOME, as every
+    process container does): the start-up check reads it (DEC-971 item 2)."""
+    found = set()
+    for w in workloads(docs):
+        for c in pod_spec(w)["containers"]:
+            names = [e["name"] for e in c.get("env", [])]
+            assert len(names) == len(set(names)), f"{w['metadata']['name']} sets an env var twice: {names}"
+            env = {e["name"]: e.get("value") for e in c.get("env", [])}
+            if "HOME" in env and w["metadata"]["name"] != "cloudflared":
+                found.add(env.get("MANDATE_DEPLOYMENT_TIER", "unset"))
+    return found
+
+
+def test_deployment_tier_is_set_from_values():
+    hosted = CELL.parent / "hosted" / "values" / "cell1.yaml"
+    api = ["--set", f"images.api={PLACEHOLDER.format('api')}"]
+    images = every_image()
+    at = next(i for i in range(len(images)) if images[i : i + 2] == api)
+    manager_workspace = ["--set", "api.workspace=01KDEM0000000000000000000W"]
+    without_api = images[:at] + images[at + 2 :] + manager_workspace
+    assert tiers(render(*without_api)) == {"production"}, "unset is production"
+    assert tiers(render_all()) == {"ci"}, (
+        "the local cell, its API server too, runs its own unsigned build as ci"
+    )
+    k3s = ("-f", str(CELL / "values" / "k3s.yaml"))
+    assert tiers(render(*k3s, "-f", str(hosted), *without_api)) == {"dev"}, "cell #1 is dev (DEC-2001)"
+    api_block = [
+        "api.org=01KDEM0000000000000000000R",
+        "api.workspace=01KDEM0000000000000000000W",
+        "api.issuer=https://issuer.example",
+        "api.audience=authenticated",
+        "api.jwksUrl=https://issuer.example/jwks",
+        "api.appOrigin=https://app.example",
+    ]
+    with_api = [arg for s in api_block for arg in ("--set", s)]
+    assert tiers(render(*k3s, "-f", str(hosted), *images, *with_api)) == {"dev"}, (
+        "cell #1's API server takes the one tier too"
+    )
+    for refused in ("live", "prod", ""):
+        assert helm(CHART, "--set", f"deploymentTier={refused}").returncode != 0, refused
 
 
 def test_images_are_pinned():

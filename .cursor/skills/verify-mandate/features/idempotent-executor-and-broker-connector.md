@@ -54,6 +54,12 @@ implementation PR turns the pending tests green without editing them (DEC-77).
 - **Tests:** `crates/mandate-executor/tests/binding_gate.rs`, `crates/mandate-executor/tests/connection_checked.rs` (the executor folds its own `ConnectionChecked` as a record, DEC-969),
   `crates/mandate-executor/tests/hand.rs`,
   `crates/mandate-executor/tests/properties.rs`, `crates/mandate-executor/tests/fault.rs`,
+  `crates/mandate-executor/tests/cancel_recovery.rs` (a kill switch's cancel the broker never
+  confirmed sent again at every start, working reports, fills and refusals keeping it
+  `PendingCancel`, every terminal report ending it; DEC-2302),
+  `crates/mandate-executor/tests/cancel_retry.rs` (a kill switch's lost cancel re-sent within the
+  run every `unknown_absent_window_s`, at most `unknown_absent_lookups` times, journaled first,
+  alerted at the cap, the count replayed; no other cancel retried; DEC-2302 item 7),
   `crates/mandate-executor/tests/refcases.rs`, `crates/mandate-executor/tests/common/mod.rs`,
   `crates/mandate-executor/tests/common/golden.rs`,
   `crates/mandate-executor/tests/golden-journal.json`;

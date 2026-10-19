@@ -36,7 +36,9 @@ pub mod fixture;
 pub mod launch;
 pub mod recorded;
 pub mod runtime;
+pub mod source;
 pub mod wake;
+pub mod worker;
 
 pub use runtime::{
     Alert, ArtifactSink, Config, Refs, ResearchParts, ResearchSource, ResearchWiring,
