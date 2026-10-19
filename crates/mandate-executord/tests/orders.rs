@@ -333,7 +333,7 @@ fn a_stepped_up_owner_exit_at_the_market_is_handed_its_confirmation() -> Result<
         AGENT,
         OWNER,
         "142.5",
-        "2026-09-22T15:59:00.000000000Z",
+        "2026-09-21T14:59:00.000000000Z",
     )?;
     propose_owner_market_exit(&journal, AGENT, EXIT, OWNER)?;
     let broker = Paper::new(&journal);
@@ -357,7 +357,7 @@ fn a_stepped_up_owner_exit_at_the_market_is_handed_its_confirmation() -> Result<
         "received as proposed"
     );
     let confirmed = journal.payloads("OwnerConfirmationReceived");
-    let expires_at = UtcNanos::parse("2026-09-22T16:04:00.000000000Z")?.secs();
+    let expires_at = UtcNanos::parse("2026-09-21T15:04:00.000000000Z")?.secs();
     assert_eq!(
         confirmed
             .iter()

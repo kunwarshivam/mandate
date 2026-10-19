@@ -98,7 +98,7 @@ fn check(exits: &[Exit]) -> Result<(), Error> {
                     AGENT,
                     &request,
                     &floor.to_string(),
-                    "2026-09-22T15:59:00.000000000Z",
+                    "2026-09-21T14:59:00.000000000Z",
                 )?;
                 propose_owner_market_exit(&journal, AGENT, &intent, &request)?;
                 limits.push(Value::Null);

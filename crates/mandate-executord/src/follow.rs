@@ -225,18 +225,30 @@ pub struct Proposal {
 /// `KillSwitchActivated`, or a later `AgentModeChanged` to any mode but `normal`, follows is left
 /// out: the agent stopped wanting it before the executor took it, and leaving it out adds no risk
 /// (`AGENTS.md` rule 3; DEC-2033 item 2). An owner's exit at the market is priced at the floor the
-/// owner confirmed, since the core takes only limit orders from a handoff (DEC-2033 item 4).
+/// owner confirmed, since the core takes only limit orders from a handoff (DEC-2033 item 4). One
+/// `OwnerExitRequested` confirms one exit: a later proposal that follows from the same request is
+/// handed its floor as its limit and no confirmation, so it waits for the regular session.
 ///
 /// # Errors
 /// [`Unreadable`] for an `IntentProposed` whose members do not read, or that is an opening or an
 /// increase at the market, which the journal never holds (journal spec §9.1 rule 3).
 pub fn proposals(rows: &[FoldedEvent]) -> Result<Vec<Proposal>, Unreadable> {
     let mut proposed: Vec<Proposal> = Vec::new();
+    let mut handed: Vec<EventId> = Vec::new();
     for row in rows {
         let text = |member: &str| row.payload.get(member).and_then(Value::as_str);
         let stops = match row.event_type.as_str() {
             "IntentProposed" => {
-                proposed.push(proposal(rows, row)?);
+                let mut order = proposal(rows, row)?;
+                if let Some(confirmation) = order.confirmation.take() {
+                    if handed.contains(&confirmation.copied_from) {
+                        order.limit = Some(confirmation.floor);
+                    } else {
+                        handed.push(confirmation.copied_from.clone());
+                        order.confirmation = Some(confirmation);
+                    }
+                }
+                proposed.push(order);
                 false
             }
             "KillSwitchActivated" => true,
@@ -253,6 +265,18 @@ pub fn proposals(rows: &[FoldedEvent]) -> Result<Vec<Proposal>, Unreadable> {
 /// How long a confirmation lasts after the step-up that gave it: mandate spec §6.1's step-up
 /// freshness window (DEC-2040 item 7).
 const CONFIRMATION_S: i64 = 300;
+
+/// `handed`, expiring no later than [`CONFIRMATION_S`] after `now`, the clock of the batch that
+/// hands it: a step-up instant later than that batch cannot stretch the window past DEC-2040 item
+/// 7.
+#[must_use]
+pub fn bounded(handed: HandedConfirmation, now: UtcNanos) -> HandedConfirmation {
+    let latest = RiskClock::from_secs(now.secs().saturating_add(CONFIRMATION_S));
+    HandedConfirmation {
+        expires_at: handed.expires_at.min(latest),
+        ..handed
+    }
+}
 
 /// What the owner confirmed for an exit at the market, as `(limit, confirmation)`: the
 /// `OwnerExitRequested` the proposal follows from on its causation chain, for the exit's own
@@ -679,6 +703,56 @@ mod tests {
             ids(&[broken, at_market("r1")]),
             Err(Unreadable),
             "a valid step-up whose instant does not read"
+        );
+        Ok(())
+    }
+
+    /// DEC-2040 item 7: a confirmation expires no later than 300 s after the batch that hands it,
+    /// whatever instant the step-up names; an earlier step-up keeps its own, earlier expiry.
+    #[test]
+    fn a_confirmation_never_outlasts_the_batch_that_hands_it() -> Result<(), Unreadable> {
+        let at = |text: &str| UtcNanos::parse(text).map_err(|_| Unreadable);
+        let future = stepped_up("r1", "142.5", "2026-10-19T22:00:00.000000000Z");
+        let read = proposals(&[future, at_market("r1")])?;
+        let handed = read
+            .into_iter()
+            .find_map(|proposal| proposal.confirmation)
+            .ok_or(Unreadable)?;
+        let now = at("2026-10-19T21:00:00.700000000Z")?;
+        assert_eq!(
+            bounded(handed.clone(), now).expires_at,
+            RiskClock::from_secs(at("2026-10-19T21:05:00.000000000Z")?.secs()),
+            "a step-up an hour after the batch"
+        );
+        let later = at("2026-10-19T22:30:00.000000000Z")?;
+        assert_eq!(
+            bounded(handed.clone(), later).expires_at,
+            handed.expires_at,
+            "a step-up before the batch keeps its own expiry"
+        );
+        Ok(())
+    }
+
+    /// One `OwnerExitRequested` confirms one exit: a second proposal from the same request takes
+    /// its floor as its limit and no confirmation.
+    #[test]
+    fn one_request_confirms_one_exit() -> Result<(), Unreadable> {
+        let mut second = at_market("r1");
+        second.event_id = EventId("i2".to_owned());
+        let rows = [
+            stepped_up("r1", "142.5", "2026-10-19T21:00:00.500000000Z"),
+            at_market("r1"),
+            second,
+        ];
+        assert_eq!(
+            proposals(&rows)?
+                .iter()
+                .map(|proposal| (
+                    proposal.limit.map(|limit| limit.to_string()),
+                    proposal.confirmation.is_some()
+                ))
+                .collect::<Vec<_>>(),
+            [(None, true), (Some("142.5".to_owned()), false)]
         );
         Ok(())
     }
