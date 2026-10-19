@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::{Value, parse};
 use mandate_executor::{
-    AccountScope, AgentId, EventId, FoldedEvent, Initiator, MandateVersion, OwnerConfirmation,
-    Purpose, Seq, TimeInForce,
+    AccountScope, AgentId, EventId, FoldedEvent, HandedConfirmation, Initiator, MandateVersion,
+    OwnerConfirmation, Purpose, Seq, TimeInForce,
 };
 use mandate_journal::{Environment, StoredEvent};
 use mandate_num::{Price, Qty};
@@ -213,6 +213,10 @@ pub struct Proposal {
     pub limit: Option<Price>,
     pub tif: TimeInForce,
     pub purpose: Purpose,
+    /// The owner's confirmation an owner's exit at the market is handed with: the bid, bid size and
+    /// floor of the `OwnerExitRequested` it follows from, when that request confirmed them with
+    /// valid step-up, expiring 300 s after the step-up (DEC-2040 items 1, 4 and 7).
+    pub confirmation: Option<HandedConfirmation>,
 }
 
 /// The orders one agent's stream proposes, in stream order. An opening or an increase that a later
@@ -313,12 +317,15 @@ fn proposal(rows: &[FoldedEvent], row: &FoldedEvent) -> Result<Proposal, Unreada
         limit,
         tif,
         purpose,
+        confirmation: None,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use mandate_canon::{Key, Object};
+    use mandate_executor::RiskClock;
+    use mandate_time::UtcNanos;
 
     use super::*;
 
@@ -563,6 +570,79 @@ mod tests {
                 ("user", s("u1")),
             ],
         )
+    }
+
+    /// A request of `AAPL` whose bid the owner confirmed with valid step-up at `authenticated_at`.
+    fn stepped_up(id: &str, floor: &str, authenticated_at: &str) -> FoldedEvent {
+        let mut request = requested(id, Some(floor));
+        request.payload = payload(&[
+            ("bid", s("150")),
+            ("bid_size", s("100")),
+            ("confirmed", Value::Bool(true)),
+            ("floor", s(floor)),
+            ("scope", s("instrument")),
+            (
+                "step_up",
+                payload(&[
+                    ("assertion_id", s("a1")),
+                    ("authenticated_at", s(authenticated_at)),
+                    ("method", s("passkey")),
+                ]),
+            ),
+            ("step_up_status", s("valid")),
+            ("subject", s("AAPL")),
+            ("user", s("u1")),
+        ]);
+        request
+    }
+
+    /// DEC-2040 items 1, 4 and 7: an owner's exit at the market whose request confirmed the bid
+    /// with valid step-up is handed as proposed, with no limit, and with the confirmation, which
+    /// expires 300 s after the step-up, on the whole second. One confirmed without valid step-up
+    /// keeps its floor as its limit and carries no confirmation (mandate spec §6.1).
+    #[test]
+    fn a_stepped_up_owner_exit_at_the_market_is_handed_its_confirmation() -> Result<(), Unreadable>
+    {
+        let rows = [
+            stepped_up("r1", "142.5", "2026-10-19T21:00:00.500000000Z"),
+            at_market("r1"),
+        ];
+        let read = proposals(&rows)?;
+        let expires_at = UtcNanos::parse("2026-10-19T21:05:00.000000000Z")
+            .map_err(|_| Unreadable)?
+            .secs();
+        assert_eq!(
+            read.iter()
+                .map(|proposal| (proposal.limit, proposal.confirmation.clone()))
+                .collect::<Vec<_>>(),
+            [(
+                None,
+                Some(HandedConfirmation {
+                    bid: Price::parse("150").map_err(|_| Unreadable)?,
+                    bid_size: Qty::parse("100").map_err(|_| Unreadable)?,
+                    floor: Price::parse("142.5").map_err(|_| Unreadable)?,
+                    expires_at: RiskClock::from_secs(expires_at),
+                    copied_from: EventId("r1".to_owned()),
+                })
+            )]
+        );
+        let absent = proposals(&[requested("r1", Some("142.5")), at_market("r1")])?;
+        assert_eq!(
+            absent
+                .iter()
+                .map(|proposal| (proposal.limit, proposal.confirmation.is_some()))
+                .collect::<Vec<_>>(),
+            [(Some(Price::parse("142.5").map_err(|_| Unreadable)?), false)],
+            "without valid step-up: the floor as its limit, no confirmation"
+        );
+        let mut broken = stepped_up("r1", "142.5", "not a time");
+        broken.event_id = EventId("r1".to_owned());
+        assert_eq!(
+            ids(&[broken, at_market("r1")]),
+            Err(Unreadable),
+            "a valid step-up whose instant does not read"
+        );
+        Ok(())
     }
 
     fn at_market(cause: &str) -> FoldedEvent {
