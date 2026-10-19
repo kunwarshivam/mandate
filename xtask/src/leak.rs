@@ -105,7 +105,8 @@ const ALLOWED: &[(&str, &str, &str)] = &[
 ///
 /// Each also names the `env:` its step may set, exactly; nothing else, so no `PATH`,
 /// `LD_PRELOAD`, `NODE_OPTIONS` or `BASH_ENV` reaches the secret step. `infra close`'s names
-/// include `TF_VAR_kube_api_allowed_addresses`, which IAC's #1771 adds.
+/// include `TF_VAR_kube_api_allowed_addresses`, and `infra`'s `MANDATE_INFRA_SHA`, which IAC's
+/// #1771 adds, as [`SECRET_JOB_ENV`] does its kubectl and flux pins.
 const SECRET_RUNS: &[SecretRun] = &[
     (
         ".github/workflows/infra.yml",
@@ -113,6 +114,7 @@ const SECRET_RUNS: &[SecretRun] = &[
         &[
             "MANDATE_INFRA_ENVIRONMENT",
             "MANDATE_INFRA_ACTION",
+            "MANDATE_INFRA_SHA",
             "DIGITALOCEAN_TOKEN",
             "TF_VAR_state_passphrase",
             "TF_VAR_cloudflare_api_token",
@@ -180,7 +182,14 @@ type SecretRun = (&'static str, &'static str, &'static [&'static str]);
 const SECRET_JOB_ENV: &[(&str, &[&str])] = &[
     (
         ".github/workflows/infra.yml",
-        &["TOFU_VERSION", "TOFU_SHA256"],
+        &[
+            "TOFU_VERSION",
+            "TOFU_SHA256",
+            "KUBECTL_VERSION",
+            "KUBECTL_SHA256",
+            "FLUX_VERSION",
+            "FLUX_SHA256",
+        ],
     ),
     (".github/workflows/r2-lockcheck.yml", &["CARGO_TERM_COLOR"]),
     (
