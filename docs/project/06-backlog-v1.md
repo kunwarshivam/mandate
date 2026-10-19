@@ -571,7 +571,12 @@ the spec invariants (DP-n) its tests cover.
     daily loss (`resolved_at_rollover`, `new_day_breach`), the lifetime floor, crypto, and the
     owner's acknowledgments and allocation changes.
   - **C:** the wiring in `mandate-shell`'s `adapters.rs`, `paper/gate.rs`, and `paper/context.rs`,
-    which are R0 files. It waits for R0 to close, or for the founder's call.
+    which are R0 files. The founder started it on 2026-10-19 ([DEC-2605](decisions/DEC-2605.md)
+    row 17); [DEC-2307](decisions/DEC-2307.md) limits the R0 edits to thin hooks in those three
+    files, binds C only after B2b to B4, and adds the account stream's own `ClockAdvanced`. The first
+    live order waits for C and the R0 re-pass (row 21).
+  - **Gap (reference cases):** no mandate reference case steps an equity's after-hours or overnight
+    mark; MC-R13 covers pre-market only. Add one when the mandate cases next change.
   - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
     "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
     one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which

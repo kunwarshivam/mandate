@@ -513,17 +513,33 @@ fn open_case<'c>(
     AccountRiskFold::open(ACCOUNT, 1, AGENT, mandate, &opening, calendar, tripwires).unwrap()
 }
 
-/// A version-2 `MarkUpdated` in §9.30's member order, its `price` the bid.
-fn mark(seq: u64, clock: &str, bid: &str, sane: bool, session: &str) -> StoredEvent {
+/// A version-2 `MarkUpdated` for `instrument` in §9.30's member order, its `price` the bid.
+fn mark(
+    seq: u64,
+    instrument: &str,
+    clock: &str,
+    bid: &str,
+    sane: bool,
+    session: &str,
+) -> StoredEvent {
     row(
         seq,
         "MarkUpdated",
         2,
         &format!(
-            r#"{{"instrument_id":"AAPL","price":"{bid}","source":"quote","feed":"iex","bid":"{bid}",
-            "sane":{sane},"session":"{session}","risk_clock":"{clock}"}}"#
+            r#"{{"instrument_id":"{instrument}","price":"{bid}","source":"quote","feed":"iex",
+            "bid":"{bid}","sane":{sane},"session":"{session}","risk_clock":"{clock}"}}"#
         ),
     )
+}
+
+/// The instrument a case's marks quote: the reference cases name none, so BTC/USD for crypto and
+/// AAPL for an equity.
+fn instrument(case: &Json) -> &'static str {
+    match case["initial"]["asset_class"].as_str().unwrap() {
+        "crypto" => "BTC/USD",
+        _ => "AAPL",
+    }
 }
 
 /// The §9.27 records, whose members a step's journal states.
@@ -614,12 +630,13 @@ fn check_records(appends: &[RiskAppend], seq: u64, journal: &Json) {
 
 /// Folds a case's steps as account-stream rows from seq 2, a `mark` as a version-2 `MarkUpdated`
 /// and a `clock` or `risk_day_started` as a tick, and checks each against its `expect`.
-fn walk(fold: &mut AccountRiskFold<'_>, steps: &[Json]) {
+fn walk(fold: &mut AccountRiskFold<'_>, instrument: &str, steps: &[Json]) {
     for (seq, step) in (2..).zip(steps) {
         let text = |key: &str| step[key].as_str().unwrap();
         let row = match text("event") {
             "mark" => mark(
                 seq,
+                instrument,
                 text("at"),
                 text("bid"),
                 step["sane"].as_bool().unwrap(),
@@ -710,7 +727,14 @@ fn a_version_1_mark_is_no_verdict_and_moves_nothing() {
 fn a_mark_after_version_2_is_an_unknown_schema_version() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);
-    let mut later = mark(2, "2026-09-22T14:30:01.000000000Z", "1", true, "regular");
+    let mut later = mark(
+        2,
+        "AAPL",
+        "2026-09-22T14:30:01.000000000Z",
+        "1",
+        true,
+        "regular",
+    );
     later.schema_version = 3;
     assert_eq!(fold.fold(&later).unwrap(), vec![]);
     assert_eq!(
@@ -729,30 +753,20 @@ fn mc_r20_crypto_marks_and_ticks_fold_as_the_reference_case() {
     let mut fold = open_case(&case, &mandate, &Crypto);
     let steps = case["steps"].as_array().unwrap();
     check_snapshot(fold.view(), 1, &steps[0]["expect"]);
-    walk(&mut fold, &steps[1..]);
+    walk(&mut fold, instrument(&case), &steps[1..]);
 }
 
-/// MC-R13's opening holds 100 at 100 on 10000: a sane regular mark at 103 makes E 10000 + 100 × 3,
-/// and a sane after-hours mark at 80 leaves it, since only a regular-session mark updates an
-/// equity's E (§5.2). It comes 30 regular seconds after the last sane mark, so nothing is stale.
+/// MC-R13's first three steps: two sane regular-session marks at 100, then a sane pre-market mark
+/// at 80 the next morning, which leaves the equity's E at 10000 since only a regular-session mark
+/// updates it (§5.2). Its later steps, the not-sane mark and the staleness tick, journal
+/// `InstrumentRestrictionChanged`, which B2b-2 writes. The case has no after-hours or overnight
+/// mark, a gap the E6-15 backlog entry records.
 #[test]
 #[ignore = "pending E6-15"]
-fn an_equitys_sane_after_hours_mark_leaves_its_equity() {
+fn mc_r13_session_marks_leave_an_equitys_equity_as_the_reference_case() {
     let case = case("MC-R13");
     let (mandate, calendar) = (case_mandate(&case), nyse());
     let mut fold = open_case(&case, &mandate, &calendar);
-    for (seq, clock, bid, session) in [
-        (2, "2026-09-21T19:59:30.000000000Z", "103", "regular"),
-        (3, "2026-09-21T20:00:30.000000000Z", "80", "after_hours"),
-    ] {
-        let appends = fold.fold(&mark(seq, clock, bid, true, session)).unwrap();
-        assert_eq!(appends, vec![], "{session}");
-        let RiskView::Readable { snapshot, head } = fold.view() else {
-            panic!("seq {seq} is readable: {:?}", fold.view());
-        };
-        assert_eq!(*head, seq);
-        assert_eq!(snapshot.agent_equity.to_string(), "10300", "{session}");
-        assert_eq!(snapshot.high_water_mark.to_string(), "10300", "{session}");
-        assert!(snapshot.instrument_restrictions.is_empty(), "{session}");
-    }
+    let steps = case["steps"].as_array().unwrap();
+    walk(&mut fold, instrument(&case), &steps[..3]);
 }
