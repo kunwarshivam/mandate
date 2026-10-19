@@ -119,17 +119,68 @@ pub async fn events(
 
 /// `GET /v1/workspaces/{ws}/journal/events/{event_id}` (§4.8.1): the event when its stream is one
 /// of the workspace's, else the one `not_found`.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub async fn one_event(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Response {
-    let _ = (app, headers, path);
-    todo!()
+    let Ok(Path((workspace, event_id))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let (admitted, now) = match session(&app, &headers, Request::Other) {
+        Ok(admitted) => admitted,
+        Err(refusal) => return refusal.response(),
+    };
+    let reader = match authorized(
+        &app,
+        &admitted,
+        now,
+        &workspace,
+        Permission::ReadRecords,
+        Unreadable::Read,
+    )
+    .await
+    {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let row = match app.journal.event(&event_id).await {
+        Ok(row) => row,
+        Err(_) => return Refused::JournalUnavailable.response(),
+    };
+    let Some((row, stream)) = row.and_then(|row| {
+        StreamId::parse(&row.stream_id)
+            .filter(|id| owned(&reader.workspace, id))
+            .map(|stream| (row, stream))
+    }) else {
+        return Refused::NotFound.response();
+    };
+    let rows = match app.journal.rows(stream.as_str()).await {
+        Ok(rows) => rows,
+        Err(_) => return Refused::JournalUnavailable.response(),
+    };
+    let envelope = mandate_canon::parse(&row.body).ok();
+    let stored = |name: &str| {
+        envelope
+            .as_ref()
+            .and_then(|envelope| envelope.get(name))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let mut members = vec![
+        ("stream_id", string(&row.stream_id)),
+        ("artifact_refs", stored("artifact_refs")),
+        ("config_refs", stored("config_refs")),
+    ];
+    members.extend(fields(&row));
+    let served = vec![
+        ("event", object(members)),
+        (
+            "as_of",
+            Value::Array(watermark(&rows).into_iter().collect()),
+        ),
+    ];
+    enveloped(StatusCode::OK, now, served)
 }
 
 /// Whether `stream` is one of the workspace's: its workspace segment, the second of every stream
@@ -176,7 +227,12 @@ fn bounded(
 
 /// One served event (§4.8.1): its `seq`, ids, `recorded_at`, bare hashes, and body as base64.
 fn event(row: &StoredEvent) -> Value {
-    object(vec![
+    object(fields(row))
+}
+
+/// The members every served event carries.
+fn fields(row: &StoredEvent) -> Vec<(&'static str, Value)> {
+    vec![
         ("seq", int(row.seq)),
         ("event_id", string(&row.event_id)),
         ("event_type", string(&row.event_type)),
@@ -184,7 +240,7 @@ fn event(row: &StoredEvent) -> Value {
         ("prev_hash", string(&row.prev_hash.to_string())),
         ("hash", string(&row.hash.to_string())),
         ("body", string(&base64(&row.body))),
-    ])
+    ]
 }
 
 /// `bytes` as RFC 4648 §4 standard base64, with padding.

@@ -534,7 +534,6 @@ const ARTIFACTS: &str =
 const CONFIG: &str = r#"{"mandate_version":"sha256:2222222222222222222222222222222222222222222222222222222222222222"}"#;
 
 #[test]
-#[ignore = "pending E12-6"]
 fn one_event_is_served_with_its_stream_and_its_refs_as_stored() {
     let f = fixture();
     let agent = format!("agent:{WORKSPACE}:agt_a");
@@ -590,7 +589,6 @@ fn one_event_is_served_with_its_stream_and_its_refs_as_stored() {
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn an_event_outside_the_workspaces_streams_is_the_same_not_found() {
     let f = fixture();
     let ours = chain(&ctl(WORKSPACE), 1).remove(0);
@@ -625,7 +623,6 @@ fn an_event_outside_the_workspaces_streams_is_the_same_not_found() {
 }
 
 #[test]
-#[ignore = "pending E12-6"]
 fn only_the_records_roles_read_one_event_whatever_the_id() {
     let f = fixture();
     let ours = chain(&ctl(WORKSPACE), 1).remove(0);
