@@ -131,12 +131,71 @@ fn flux(list: &mut Checklist, kubectl: Kubectl<'_>) {
             list.check(false, format!("Flux has {article} {kind}"));
         }
         for object in of_kind {
-            list.check(
-                is_ready(object),
-                format!("{kind} {} is Ready", where_is(object)),
-            );
+            let what = format!("{kind} {} is Ready", where_is(object));
+            if is_ready(object) {
+                list.check(true, what);
+            } else {
+                list.check(false, format!("{what} ({})", flux_why(object)));
+            }
         }
     }
+}
+
+/// What a Flux object's condition messages say, as fixed class words alone: a message may quote a
+/// value, an image or a path, so none is printed, only which of these it matched.
+const FLUX_CLASSES: [(&str, &str); 16] = [
+    ("dependency", "dependency"),
+    ("context deadline exceeded", "timeout"),
+    ("timed out", "timeout"),
+    ("schema", "values-schema"),
+    ("admission webhook", "admission-denied"),
+    ("denied the request", "admission-denied"),
+    ("signature", "signature"),
+    ("verification failed", "signature"),
+    ("hooks failed", "hook-failed"),
+    ("failed pre-", "hook-failed"),
+    ("failed post-", "hook-failed"),
+    ("immutable", "immutable-field"),
+    ("not found", "missing-object"),
+    ("forbidden", "forbidden"),
+    ("unauthorized", "auth-failed"),
+    ("retries exhausted", "retries-exhausted"),
+];
+
+/// Why a Flux object is not Ready: its Ready condition's status and reason word, a Stalled
+/// condition's reason, and the classes their messages match; a message that matches none is
+/// `unclassified`.
+fn flux_why(object: &Value) -> String {
+    let conditions = object["status"]["conditions"].as_array();
+    let find =
+        |kind: &str| conditions.and_then(|all| all.iter().find(|c| text(c, &["type"]) == kind));
+    let Some(ready) = find("Ready") else {
+        return "no Ready condition".to_owned();
+    };
+    let mut said = word(text(ready, &["status"]));
+    let reason = word(text(ready, &["reason"]));
+    if !reason.is_empty() {
+        said.push_str(&format!(": {reason}"));
+    }
+    let mut messages = vec![text(ready, &["message"])];
+    if let Some(stalled) = find("Stalled").filter(|c| text(c, &["status"]) == "True") {
+        said.push_str(&format!("; Stalled: {}", word(text(stalled, &["reason"]))));
+        messages.push(text(stalled, &["message"]));
+    }
+    let lower = messages.join("\n").to_lowercase();
+    let mut found: Vec<&str> = Vec::new();
+    for (needle, class) in FLUX_CLASSES {
+        if lower.contains(needle) && !found.contains(&class) {
+            found.push(class);
+        }
+    }
+    if found.is_empty() && !lower.trim().is_empty() {
+        found.push("unclassified");
+    }
+    if !found.is_empty() {
+        said.push_str(&format!("; message {}", found.join(", ")));
+    }
+    said
 }
 
 /// Every pod of the platform and the workspaces, but a finished Job's, Running with every
@@ -730,6 +789,71 @@ mod tests {
         Ok(list.render_titled("infra verify (staging)"))
     }
 
+    fn failing(kind: &str, name: &str, conditions: Value) -> Value {
+        json!({
+            "kind": kind,
+            "metadata": {"name": name, "namespace": "flux-system"},
+            "status": {"conditions": conditions},
+        })
+    }
+
+    /// A Flux object that is not Ready says why in its condition's reason word and the fixed
+    /// classes its message matches, never the message itself, which may quote values or images.
+    #[test]
+    fn a_flux_object_that_is_not_ready_says_why_without_its_message() -> Result<()> {
+        let cases = [
+            (
+                json!([{"type": "Ready", "status": "False", "reason": "DependencyNotReady",
+                    "message": "dependency 'flux-system/journal' is not ready"}]),
+                "(False: DependencyNotReady; message dependency)",
+            ),
+            (
+                json!([
+                    {"type": "Ready", "status": "False", "reason": "UpgradeFailed",
+                        "message": "Helm upgrade failed for release ws-ws1/workspace: context deadline exceeded"},
+                    {"type": "Stalled", "status": "True", "reason": "RetriesExceeded",
+                        "message": "upgrade retries exhausted"},
+                ]),
+                "(False: UpgradeFailed; Stalled: RetriesExceeded; message timeout, retries-exhausted)",
+            ),
+            (
+                json!([{"type": "Ready", "status": "False", "reason": "InstallFailed",
+                    "message": "admission webhook \"policy.sigstore.dev\" denied the request: validation failed: no matching signatures: ghcr.io/kunwarshivam/mandate/secret-token-xyz"}]),
+                "(False: InstallFailed; message admission-denied, signature)",
+            ),
+            (
+                json!([{"type": "Ready", "status": "False", "reason": "InstallFailed",
+                    "message": "values don't meet the specifications of the schema(s): api.org: Does not match pattern"}]),
+                "(False: InstallFailed; message values-schema)",
+            ),
+            (
+                json!([{"type": "Ready", "status": "False", "reason": "Progressing",
+                    "message": "something new and odd: hunter2"}]),
+                "(False: Progressing; message unclassified)",
+            ),
+            (json!([]), "(no Ready condition)"),
+        ];
+        for (conditions, why) in cases {
+            let mut staging = Staging::up();
+            staging.flux[3] = failing("HelmRelease", "workspace", conditions);
+            let text = run(&staging)?;
+            assert_eq!(
+                missing(&text),
+                [format!("HelmRelease flux-system/workspace is Ready {why}").as_str()],
+                "{text}"
+            );
+            for secret in [
+                "secret-token-xyz",
+                "hunter2",
+                "api.org",
+                "'flux-system/journal'",
+            ] {
+                assert!(!text.contains(secret), "{secret} leaked: {text}");
+            }
+        }
+        Ok(())
+    }
+
     fn missing(text: &str) -> Vec<&str> {
         text.lines()
             .filter_map(|line| line.trim_start().strip_prefix("[MISSING] "))
@@ -782,7 +906,7 @@ mod tests {
         let faults: [(Fault, &str); 9] = [
             (
                 |s| s.flux[3] = ready("HelmRelease", "flux-system", "workspace", false),
-                "HelmRelease flux-system/workspace is Ready",
+                "HelmRelease flux-system/workspace is Ready (False)",
             ),
             (
                 |s| {
