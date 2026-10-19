@@ -1532,7 +1532,9 @@ fn vault_drill_problems(logs: &str) -> Vec<String> {
 /// The drill's script, run by the vault's own image: it puts a fake value at each path tried,
 /// as the operator, then logs in as each role from the files `mandate vault provision` wrote and
 /// prints one line per read, and one per policy of the cell's that holds `*` or `+`. Seeded, it
-/// first rewrites the runtime's policy to read every connection's token through `+`.
+/// first rewrites the runtime's policy to read every connection's token through `+`. Each read is
+/// `bao read` of the KV v2 data path, not `bao kv get`, whose preflight on the mount fails without
+/// `permission denied` for a role granted nothing under it, as the runtime is.
 fn vault_drill_script(seeded: bool) -> String {
     let mut reads = String::new();
     for (role, path, _) in VAULT_DRILL_READS {
@@ -1561,7 +1563,7 @@ fn vault_drill_script(seeded: bool) -> String {
          {puts}{plant}\
          check() {{\n\
            t=$(bao write -field=token auth/approle/login role_id=@/work/private/creds/$1.role-id secret_id=@/work/private/creds/$1.secret-id)\n\
-           if out=$(BAO_TOKEN=\"$t\" bao kv get -mount=mandate -field=value \"$2\" 2>&1 >/dev/null); then echo \"$1 $2 allowed\"\n\
+           if out=$(BAO_TOKEN=\"$t\" bao read -field=data \"mandate/data/$2\" 2>&1 >/dev/null); then echo \"$1 $2 allowed\"\n\
            elif echo \"$out\" | grep -q 'permission denied'; then echo \"$1 $2 denied\"\n\
            else echo \"$1 $2 error\"; fi\n\
          }}\n\
@@ -4892,6 +4894,12 @@ mod tests {
         );
         assert_eq!(vault_drill_problems(&errored).len(), 1);
         assert!(vault_drill_script(true).contains("mandate-runtime"));
+        let script = vault_drill_script(false);
+        assert!(
+            script.contains("bao read -field=data \"mandate/data/$2\"")
+                && !script.contains("kv get"),
+            "reads skip kv get's mount preflight: {script}"
+        );
         assert!(!vault_drill_script(false).contains("policy write"));
     }
 
