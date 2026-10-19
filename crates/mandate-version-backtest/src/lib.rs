@@ -738,7 +738,7 @@ impl<'a, 'c> Run<'a, 'c> {
     }
 
     /// Every corporate action whose ex-date this bar reaches, at 20:00 New York time on the
-    /// previous bar's trade date (DEC-2245 items 2 and 3, DEC-2252): the ledger and the risk state
+    /// previous bar's trade date (DEC-2245 items 2 and 3, DEC-2253): the ledger and the risk state
     /// take it. At a split the resting protection is canceled and re-placed in the same step on the
     /// post-split position, and the market the run has seen is rescaled. At a dividend the last
     /// close is lowered by the dividend; its pay date moves the receivable to cash in the ledger,
@@ -809,7 +809,7 @@ impl<'a, 'c> Run<'a, 'c> {
     }
 
     /// The last close less a dividend of `per_share`, rounded down onto the tick, so the ex-date's
-    /// decision quotes the ex-dividend market (DEC-2252 item 2).
+    /// decision quotes the ex-dividend market (DEC-2253 item 2).
     fn lower_last_close(&mut self, per_share: Price) -> Result<(), VersionError> {
         let tick = self.input.instrument.tick;
         if let Some(last) = self.last_close.as_mut() {
