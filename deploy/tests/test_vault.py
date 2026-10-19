@@ -424,8 +424,11 @@ def test_kubernetes_auth_reaches_only_the_api_server():
         assert reached_only_by_its_processes(bad, KUBE_API), mutate
     unknown = helm("-f", str(STAGING), "--set", "kubeApi.enabled=true")
     assert unknown.returncode != 0 and "Kubernetes API" in unknown.stderr
-    for wide in ('{"enabled":true,"cidrs":["0.0.0.0/0"],"ports":[443]}', '{"enabled":true,"cidrs":["10.0.0.0/8"],"ports":[443]}'):
-        assert helm("-f", str(STAGING), "--set-json", f"kubeApi={wide}").returncode != 0, wide
+    for cidrs in (["fd00::1/32"], ["10.245.0.1/32", "fd00::1/32"], ["10.0.0.0/8"], ["0.0.0.0/0"], ["10.245.0.1"]):
+        api = json.dumps({"enabled": True, "cidrs": cidrs, "ports": [443]})
+        assert helm("-f", str(STAGING), "--set-json", f"kubeApi={api}").returncode != 0, cidrs
+        skipped = helm("-f", str(STAGING), "--skip-schema-validation", "--set-json", f"kubeApi={api}")
+        assert skipped.returncode != 0 and "Kubernetes API" in skipped.stderr, cidrs
 
 
 def test_reached_only_by_its_processes_catches_a_wider_policy():
