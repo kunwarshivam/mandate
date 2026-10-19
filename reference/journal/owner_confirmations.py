@@ -1,12 +1,12 @@
-"""Journal spec v0.66 rules 246 and 247's reference vectors (DEC-2039): §9.5's
+"""Journal spec v0.67 rules 247 and 248's reference vectors (DEC-2040): §9.5's
 `OwnerConfirmationReceived`, the owner's confirmed bid journaled beside the `IntentReceived` of an
 owner's exit.
 
-Rule 246 lives in `control.py`, beside §9.5's other account-stream records, so one validator judges
-every closed schema. Rule 247 is a batch rule and lives here. This module builds the
+Rule 247 lives in `control.py`, beside §9.5's other account-stream records, so one validator judges
+every closed schema. Rule 248 is a batch rule and lives here. This module builds the
 `owner_confirmations` section: the base intent and its confirmation, an invalid draft for each
-clause of rule 246 and for the closed schema, valid drafts a rule might be misread to refuse, and
-batches for each clause of rule 247. Its own oracles read the members directly, without the
+clause of rule 247 and for the closed schema, valid drafts a rule might be misread to refuse, and
+batches for each clause of rule 248. Its own oracles read the members directly, without the
 validator, and every seeded bug is shown caught.
 """
 
@@ -33,7 +33,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.66 §9.5 rules 246 and 247 (DEC-2039)"
+SPEC = "docs/specs/journal.md v0.67 §9.5 rules 247 and 248 (DEC-2040)"
 ACCOUNT = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
 AT = "2026-10-19T21:30:00.250000000Z"
 RISK_CLOCK = "2026-10-19T21:30:01.000000000Z"
@@ -45,8 +45,8 @@ INTENT_DRAFT = "intent"
 CONFIRMATION = "confirmation"
 EVENT_IDS = {INTENT_DRAFT: "01JAB1N0A000000000000000E1", CONFIRMATION: "01JAB1N0A000000000000000E2"}
 PRICES = ("bid", "bid_size", "floor")
-RULE_246 = "rule 246"
 RULE_247 = "rule 247"
+RULE_248 = "rule 248"
 
 
 def envelope(name: str, event_type: str, payload: dict) -> dict:
@@ -98,23 +98,23 @@ def base_drafts() -> dict[str, dict]:
 
 
 def invalid_drafts() -> list[dict]:
-    """Each draft breaks rule 246 or the closed schema once, at the member it names."""
+    """Each draft breaks rule 247 or the closed schema once, at the member it names."""
 
     def bad(name, clause, changes, reason, path):
         return control_invalid(name, clause, CONFIRMATION, changes, reason, path)
 
     out = [
-        bad(f"zero_{member}", f"{RULE_246}: `{member}` is positive", [change(f"payload.{member}", "0")], "schema", f"payload.{member}")
+        bad(f"zero_{member}", f"{RULE_247}: `{member}` is positive", [change(f"payload.{member}", "0")], "schema", f"payload.{member}")
         for member in PRICES
     ]
     out += [
-        bad(f"negative_{member}", f"{RULE_246}: `{member}` is positive", [change(f"payload.{member}", "-1")], "schema", f"payload.{member}")
+        bad(f"negative_{member}", f"{RULE_247}: `{member}` is positive", [change(f"payload.{member}", "-1")], "schema", f"payload.{member}")
         for member in PRICES
     ]
     out += [
         bad(
             "zero_bid_and_floor",
-            f"{RULE_246}: reported at the first that fails, `bid` before `floor`",
+            f"{RULE_247}: reported at the first that fails, `bid` before `floor`",
             [change("payload.bid", "0"), change("payload.floor", "0")],
             "schema",
             "payload.bid",
@@ -127,19 +127,19 @@ def invalid_drafts() -> list[dict]:
 
 
 def valid_drafts() -> list[dict]:
-    """What rule 246 might be misread to refuse."""
+    """What rule 247 might be misread to refuse."""
     return [
-        control_valid("floor_above_bid", f"{RULE_246}: the floor is the owner's, not bound to the bid", CONFIRMATION, [change("payload.floor", "160")]),
-        control_valid("tiny_prices", f"{RULE_246}: positive, however small", CONFIRMATION, [change(f"payload.{m}", "0.0001") for m in PRICES]),
+        control_valid("floor_above_bid", f"{RULE_247}: the floor is the owner's, not bound to the bid", CONFIRMATION, [change("payload.floor", "160")]),
+        control_valid("tiny_prices", f"{RULE_247}: positive, however small", CONFIRMATION, [change(f"payload.{m}", "0.0001") for m in PRICES]),
         control_valid("the_intent", "§9.5: the owner's exit at the market it confirms", INTENT_DRAFT, []),
     ]
 
 
-# --------------------------------------------------------------------------- rule 247
+# --------------------------------------------------------------------------- rule 248
 
 
 def batch_failure(drafts: list[dict], skip: frozenset[str] = frozenset()) -> dict | None:
-    """Each draft's own rules in draft order, then rule 247 on each confirmation in batch order:
+    """Each draft's own rules in draft order, then rule 248 on each confirmation in batch order:
     the record immediately before it is an `IntentReceived` (`event_type`), of the same intent
     (`payload.intent_id`), whose purpose is `owner_exit` (its `payload.purpose`), and whose limit is
     null or not below the floor (its `payload.limit_price`)."""
@@ -152,23 +152,23 @@ def batch_failure(drafts: list[dict], skip: frozenset[str] = frozenset()) -> dic
             continue
         p = draft["payload"]
         earlier = [d for d in drafts[:i] if d["event_type"] == "IntentReceived"]
-        if "batch.247.adjacent" in skip:
+        if "batch.248.adjacent" in skip:
             before = earlier[-1] if earlier else None
         else:
             before = drafts[i - 1] if i > 0 and drafts[i - 1]["event_type"] == "IntentReceived" else None
         if before is None:
-            if "batch.247.present" in skip:
+            if "batch.248.present" in skip:
                 continue
             return {"index": i, "reason": "schema", "path": "event_type"}
         q = before["payload"]
         at = drafts.index(before)
-        if q["intent_id"] != p["intent_id"] and "batch.247.intent" not in skip:
+        if q["intent_id"] != p["intent_id"] and "batch.248.intent" not in skip:
             return {"index": i, "reason": "schema", "path": "payload.intent_id"}
-        if q["purpose"] != "owner_exit" and "batch.247.purpose" not in skip:
+        if q["purpose"] != "owner_exit" and "batch.248.purpose" not in skip:
             return {"index": at, "reason": "schema", "path": "payload.purpose"}
         limit = q["limit_price"]
-        if limit is not None and "batch.247.limit" not in skip:
-            below = Decimal(limit) <= Decimal(p["floor"]) if "boundary.batch_247_equal" in skip else Decimal(limit) < Decimal(p["floor"])
+        if limit is not None and "batch.248.limit" not in skip:
+            below = Decimal(limit) <= Decimal(p["floor"]) if "boundary.batch_248_equal" in skip else Decimal(limit) < Decimal(p["floor"])
             if below:
                 return {"index": at, "reason": "schema", "path": "payload.limit_price"}
     return None
@@ -201,18 +201,18 @@ def batch_cases() -> list[dict]:
     second = with_id(confirmation, "01JAB1N0A000000000000000E4", [])
     risk_exit = with_id(intent, intent["event_id"], [change("payload.purpose", "risk_exit")])
     return [
-        case("the_intent_then_its_confirmation", f"{RULE_247}: one batch, the intent first", [intent, confirmation], ok),
-        case("a_limit_at_the_floor", f"{RULE_247}: a limit not below the floor", [limited(FLOOR), confirmation], ok),
-        case("a_limit_above_the_floor", f"{RULE_247}: a limit above the floor", [limited("151"), confirmation], ok),
-        case("an_unconfirmed_owner_exit", f"{RULE_247}: an owner exit needs no confirmation", [intent], ok),
-        case("then_another_intent", f"{RULE_247}: a later intent needs none", [intent, confirmation, other], ok),
-        case("alone", f"{RULE_247}: the intent is in the batch", [confirmation], at(0, "event_type")),
-        case("before_its_intent", f"{RULE_247}: the intent is immediately before it", [confirmation, intent], at(0, "event_type")),
-        case("twice", f"{RULE_247}: one confirmation per intent", [intent, confirmation, second], at(2, "event_type")),
-        case("after_another_intent", f"{RULE_247}: immediately after its own intent", [intent, other, confirmation], at(2, "payload.intent_id")),
-        case("of_another_intent", f"{RULE_247}: the same intent", [other, confirmation], at(1, "payload.intent_id")),
-        case("of_a_risk_exit", f"{RULE_247}: only an owner's exit is confirmed", [risk_exit, confirmation], at(0, "payload.purpose")),
-        case("a_limit_below_the_floor", f"{RULE_247}: never a limit below the floor", [limited("149.99"), confirmation], at(0, "payload.limit_price")),
+        case("the_intent_then_its_confirmation", f"{RULE_248}: one batch, the intent first", [intent, confirmation], ok),
+        case("a_limit_at_the_floor", f"{RULE_248}: a limit not below the floor", [limited(FLOOR), confirmation], ok),
+        case("a_limit_above_the_floor", f"{RULE_248}: a limit above the floor", [limited("151"), confirmation], ok),
+        case("an_unconfirmed_owner_exit", f"{RULE_248}: an owner exit needs no confirmation", [intent], ok),
+        case("then_another_intent", f"{RULE_248}: a later intent needs none", [intent, confirmation, other], ok),
+        case("alone", f"{RULE_248}: the intent is in the batch", [confirmation], at(0, "event_type")),
+        case("before_its_intent", f"{RULE_248}: the intent is immediately before it", [confirmation, intent], at(0, "event_type")),
+        case("twice", f"{RULE_248}: one confirmation per intent", [intent, confirmation, second], at(2, "event_type")),
+        case("after_another_intent", f"{RULE_248}: immediately after its own intent", [intent, other, confirmation], at(2, "payload.intent_id")),
+        case("of_another_intent", f"{RULE_248}: the same intent", [other, confirmation], at(1, "payload.intent_id")),
+        case("of_a_risk_exit", f"{RULE_248}: only an owner's exit is confirmed", [risk_exit, confirmation], at(0, "payload.purpose")),
+        case("a_limit_below_the_floor", f"{RULE_248}: never a limit below the floor", [limited("149.99"), confirmation], at(0, "payload.limit_price")),
         case("a_bad_confirmation", "each draft's own rules first", [intent, with_id(confirmation, confirmation["event_id"], [change("payload.floor", "0")])], at(1, "payload.floor")),
     ]
 
@@ -237,8 +237,8 @@ def found(check: str, message: str) -> str:
     return f"{check}: {message}"
 
 
-def oracle_246(draft: dict) -> str | None:
-    """Rule 246 from the members alone: the first price that is not positive, or None."""
+def oracle_247(draft: dict) -> str | None:
+    """Rule 247 from the members alone: the first price that is not positive, or None."""
     if draft["event_type"] != "OwnerConfirmationReceived":
         return None
     for member in PRICES:
@@ -248,8 +248,8 @@ def oracle_246(draft: dict) -> str | None:
     return None
 
 
-def oracle_247(drafts: list[dict]) -> tuple[int, str] | None:
-    """Rule 247 as a walk: the last record seen, and what each confirmation finds there."""
+def oracle_248(drafts: list[dict]) -> tuple[int, str] | None:
+    """Rule 248 as a walk: the last record seen, and what each confirmation finds there."""
     last: tuple[int, dict] | None = None
     for i, draft in enumerate(drafts):
         if draft["event_type"] == "OwnerConfirmationReceived":
@@ -288,44 +288,44 @@ def check_section(section: dict) -> list[str]:
         got = violations(draft)
         if not reported(got, case["expect"]):
             problems.append(found("invalid_drafts", f"{case['name']}: expected {case['expect']}, got {got}"))
-        if case["clause"].startswith(RULE_246) and oracle_246(draft) != case["expect"]["path"]:
-            problems.append(found("invalid_drafts.oracle", f"{case['name']}: the oracle disagrees on rule 246"))
+        if case["clause"].startswith(RULE_247) and oracle_247(draft) != case["expect"]["path"]:
+            problems.append(found("invalid_drafts.oracle", f"{case['name']}: the oracle disagrees on rule 247"))
     for case in section["valid_drafts"]:
         draft = draft_for(section, case)
         got = violations(draft)
         if got:
             problems.append(found("valid_drafts", f"{case['name']}: expected Valid, got {got}"))
-        if oracle_246(draft) is not None:
-            problems.append(found("valid_drafts.oracle", f"{case['name']}: the oracle refuses it by rule 246"))
+        if oracle_247(draft) is not None:
+            problems.append(found("valid_drafts.oracle", f"{case['name']}: the oracle refuses it by rule 247"))
     for case in section["batches"]:
         got = batch_failure(case["drafts"])
         want = None if case["expect"]["outcome"] == "Valid" else {k: case["expect"][k] for k in ("index", "reason", "path")}
         if got != want:
             problems.append(found("batches.rule", f"{case['name']}: expected {want}, got {got}"))
-        if case["clause"].startswith(RULE_247):
+        if case["clause"].startswith(RULE_248):
             expected = None if want is None else (want["index"], want["path"])
-            if oracle_247(case["drafts"]) != expected:
-                problems.append(found("batches.oracle", f"{case['name']}: the oracle disagrees on rule 247"))
+            if oracle_248(case["drafts"]) != expected:
+                problems.append(found("batches.oracle", f"{case['name']}: the oracle disagrees on rule 248"))
     return problems
 
 
 # --------------------------------------------------------------------------- seeded bugs
 
 VALIDATOR_MUTANTS = (
-    "rule.246",
-    "rule.246.bid",
-    "rule.246.bid_size",
-    "rule.246.floor",
-    "boundary.rule_246_zero",
-    "order.rule_246_floor_first",
+    "rule.247",
+    "rule.247.bid",
+    "rule.247.bid_size",
+    "rule.247.floor",
+    "boundary.rule_247_zero",
+    "order.rule_247_floor_first",
 )
 BATCH_MUTANTS = (
-    "batch.247.present",
-    "batch.247.adjacent",
-    "batch.247.intent",
-    "batch.247.purpose",
-    "batch.247.limit",
-    "boundary.batch_247_equal",
+    "batch.248.present",
+    "batch.248.adjacent",
+    "batch.248.intent",
+    "batch.248.purpose",
+    "batch.248.limit",
+    "boundary.batch_248_equal",
 )
 
 
@@ -373,9 +373,9 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(lambda s: case(s, "batches", "twice")["expect"].update(index=1)),
         ),
         (
-            "a rule-247 batch is relabelled to the draft rules",
+            "a rule-248 batch is relabelled to the draft rules",
             "batches.oracle",
-            mutated(lambda s: case(s, "batches", "a_bad_confirmation").update(clause=f"{RULE_247}: relabelled")),
+            mutated(lambda s: case(s, "batches", "a_bad_confirmation").update(clause=f"{RULE_248}: relabelled")),
         ),
     ]
 

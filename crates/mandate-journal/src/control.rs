@@ -24,8 +24,8 @@
 //! `risk_clock` last; `OrderRequestRecorded`, the companion a version-2 submission names; and
 //! `ProtectionChanged` closed whole. The version-1 schemas of the three stay registered (§8): a
 //! stream that holds version-1 records keeps replaying and appending them. Journal spec v0.65
-//! adds rule 245 on `IntentReceived` at either version (DEC-2037), and v0.66 the owner's
-//! confirmation `OwnerConfirmationReceived` with rule 246 and the batch rule 247 (DEC-2039).
+//! adds rule 245 on `IntentReceived` at either version (DEC-2037), and v0.67 the owner's
+//! confirmation `OwnerConfirmationReceived` with rule 247 and the batch rule 248 (DEC-2040).
 
 use mandate_canon::Value;
 use mandate_domain::ThesisRefusal;
@@ -65,7 +65,7 @@ const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 /// `OrderRequestRecorded` and `ProtectionChanged` close at version 1; `IntentReceived`,
 /// `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1, and so does
 /// `OrderStateChanged` (journal spec §9.16, DEC-869). `OwnerConfirmationReceived` closes at
-/// version 1 (DEC-2039).
+/// version 1 (DEC-2040).
 const EXECUTOR: [&str; 10] = [
     "IntentReceived",
     "GateDecided",
@@ -81,8 +81,8 @@ const EXECUTOR: [&str; 10] = [
 
 const ACCOUNT_STATE: &str = "AccountStateObserved";
 
-/// The owner's confirmed bid journaled beside an owner exit's `IntentReceived` (§9.5, DEC-2039):
-/// rule 246 on its own members and the batch rule 247 on the intent before it.
+/// The owner's confirmed bid journaled beside an owner exit's `IntentReceived` (§9.5, DEC-2040):
+/// rule 247 on its own members and the batch rule 248 on the intent before it.
 const CONFIRMATION: &str = "OwnerConfirmationReceived";
 
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
@@ -444,7 +444,7 @@ fn intent_received_rules(p: Payload<'_>) -> Result<(), Invalid> {
     )
 }
 
-/// Rule 246 (DEC-2039 item 2): the confirmed bid, bid size, and floor are each positive, reported
+/// Rule 247 (DEC-2040 item 2): the confirmed bid, bid size, and floor are each positive, reported
 /// at the first that is not.
 fn confirmation_rules(p: Payload<'_>) -> Result<(), Invalid> {
     for member in ["bid", "bid_size", "floor"] {
@@ -785,7 +785,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
 /// `OrderRequestRecorded` and names it as its `causation_id`; an `OrderRequestRecorded` no
 /// `OrderSubmitted` in the batch names is its own refusal. Checked draft by draft first (each
 /// draft's own rules, in [`payload`]), then on the submissions in batch order, then the orphans.
-/// A version-1 `OrderSubmitted` carries no rule here: it precedes the companion. Then rule 247
+/// A version-1 `OrderSubmitted` carries no rule here: it precedes the companion. Then rule 248
 /// on each `OwnerConfirmationReceived` in batch order ([`confirmed_intent`]). Batches of any other
 /// stream pass.
 pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
@@ -832,7 +832,7 @@ pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     Ok(())
 }
 
-/// Rule 247 for the confirmation at `at` (DEC-2039 item 2): the record immediately before it is
+/// Rule 248 for the confirmation at `at` (DEC-2040 item 2): the record immediately before it is
 /// an `IntentReceived` (else the confirmation's `event_type`) of the same intent (its
 /// `payload.intent_id`), whose purpose is `owner_exit` (the intent's `payload.purpose`) and whose
 /// limit is null or not below the floor (the intent's `payload.limit_price`).
@@ -1076,7 +1076,7 @@ static ORDER_SUBMITTED_V2: Ty = Ty::Record(&[
 /// §9.5's companion at `schema_version` 1: the executor-only members the fold rebuilds the exact
 /// request and the order's owner from (DEC-446 item 2). Every member is present (§4.2); rules 39
 /// and 40 say which are null.
-/// §9.5's `OwnerConfirmationReceived` (DEC-2039 item 2).
+/// §9.5's `OwnerConfirmationReceived` (DEC-2040 item 2).
 static OWNER_CONFIRMATION_RECEIVED: Ty = Ty::Record(&[
     ("intent_id", Ty::Ulid),
     ("bid", Ty::Decimal),
