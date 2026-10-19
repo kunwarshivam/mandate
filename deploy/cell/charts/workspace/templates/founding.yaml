@@ -1,0 +1,42 @@
+{{- /*
+The founding grant (DEC-2114): with `founding.enabled`, the `control` process's one-off Job runs
+`mandate workspace found --open` for `founding.member` on the workspace `api.workspace` names. It
+is a post-install and post-upgrade hook, made again before each run, so it runs after the
+migration and the release's own policies on every apply, and the last run is kept for verify.
+Re-running it for the same member commits nothing, so every upgrade may run it; a refusal fails the
+hook, and the release, loudly. It carries no identity-provider subject: the founder's sign-in link
+is the `subject-links` ConfigMap, which the infra apply writes as a digest.
+*/ -}}
+{{- define "mandate.founding" -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: founding
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 180
+  template:
+    {{- $args := list "workspace" "found" "--open" "--workspace" .root.Values.api.workspace "--member" .root.Values.founding.member "--method" "oidc" "--journal" "$(MANDATE_JOURNAL_DSN)" "--store" "/work/store" }}
+    {{- $mounts := "- {name: work, mountPath: /work}" }}
+    {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" "founding" "args" $args "mounts" $mounts) }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container) | nindent 4 }}
+{{- end -}}
+{{- $root := . }}
+{{- if .Values.founding.enabled }}
+{{- if not .Values.api.workspace }}{{ fail "founding.enabled needs api.workspace, the workspace to found" }}{{ end }}
+{{- if not .Values.founding.member }}{{ fail "founding.enabled needs founding.member, the founder's principal" }}{{ end }}
+{{- $control := list }}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "run") | fromJsonArray) }}
+{{- if eq .name "control" }}{{ $control = append $control . }}{{ end }}
+{{- end }}
+{{- if not $control }}{{ fail "founding.enabled needs the control process, so images.mandate" }}{{ end }}
+{{- range $control }}
+---
+{{ include "mandate.emit" (include "mandate.founding" (dict "root" $root "p" .)) }}
+{{- end }}
+{{- end }}
