@@ -8,6 +8,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use mandate_canon::{Digest, Key, Object, Value, parse};
+use mandate_daemon::recorded::Bundle;
+use mandate_daemon::worker::{RecordedWorker, WorkerFor};
 use mandate_daemon::{
     Alert, ArtifactSink, Config, Refs, ResearchParts, ResearchSource, ResearchWiring,
     ResearchWorker, RuntimeProcess, Wiring, fixture,
@@ -1067,4 +1069,90 @@ fn an_answer_whose_batch_goes_into_doubt_is_retried_never_handed_twice() {
     }
     assert_eq!(count(&rig, "RunEnded"), 1, "{:?}", kinds(&rig));
     assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// The references a run over the recorded bundle carries: the mandate version, and the bundle's
+/// research entry as the model version its records name.
+struct BundleRefs(Digest);
+impl Refs for BundleRefs {
+    fn refs(&self, _: &EventDraft) -> Option<(u64, Object)> {
+        let mut refs = Object::new();
+        refs.insert(
+            Key::new("mandate_version").ok()?,
+            Value::Str(format!(
+                "sha256:{}",
+                Digest::of(b"the mandate version").to_hex()
+            )),
+        );
+        refs.insert(
+            Key::new("model_version").ok()?,
+            Value::Str(format!("sha256:{}", self.0.to_hex())),
+        );
+        Some((1, refs))
+    }
+}
+
+/// DEC-2210 item 3 and `AGENTS.md` rule 4: the cell's worker, wired into the process, takes a run
+/// through the recorded fake to its judgment, and nothing the model said reaches the order path. The
+/// run journals its call and the model's thesis as a proposal, and no stream holds an order event.
+#[test]
+fn the_recorded_worker_s_answers_never_reach_the_order_path() {
+    let rig = Rig::default();
+    reconciled(&rig);
+    established(&rig);
+    let bundle = Bundle::load(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/research"
+    )))
+    .unwrap();
+    let pin = bundle.entry.content().model_ref();
+    let mut entry = config_entry();
+    entry.pin = pin.clone();
+    let clock = Rc::new(Cell::new(NOW));
+    let read = Rc::clone(&clock);
+    let who = WorkerFor {
+        workspace: WORKSPACE.to_owned(),
+        agent: AGENT.to_owned(),
+        description: entry.description.clone(),
+    };
+    let worker = RecordedWorker::new(
+        &bundle,
+        who,
+        Box::new(Shelf::default()),
+        Box::new(move || at(read.get())),
+    )
+    .unwrap();
+    let research = ResearchWiring {
+        config: entry,
+        source: Box::new(Open::default()),
+        worker: Box::new(worker),
+        artifacts: Box::new(Shelf::default()),
+    };
+    let mut process = RuntimeProcess::start(
+        rig.clone(),
+        wiring_with(Some(research), Box::new(BundleRefs(pin.content_hash))),
+        &config(),
+        at(NOW),
+    );
+    for second in 60..70 {
+        tick(&rig, NOW + second);
+        clock.set(NOW + second);
+        process.step(at(NOW + second));
+    }
+    assert_eq!(
+        count(&rig, "ModelInvocationRecorded"),
+        1,
+        "{:?}",
+        kinds(&rig)
+    );
+    assert_eq!(count(&rig, "ThesisProposed"), 1, "{:?}", kinds(&rig));
+    for stream in [AGENT_STREAM, ACCOUNT_STREAM, CONTROL] {
+        let rows = rig.journal.rows(&StreamId::parse(stream).unwrap()).unwrap();
+        let orders: Vec<_> = rows
+            .iter()
+            .map(|row| row.event_type.as_str())
+            .filter(|kind| kind.starts_with("Order"))
+            .collect();
+        assert!(orders.is_empty(), "{stream}: {orders:?}");
+    }
 }

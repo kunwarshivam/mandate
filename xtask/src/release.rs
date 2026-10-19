@@ -638,6 +638,12 @@ pub(crate) fn images(root: &Path, dist: &Path, out: &Path, test_sign: bool) -> R
         };
         let bytes = fs::read(&binary).with_context(|| format!("reading {}", binary.display()))?;
         let layout = image::layout(name, arch.oci(), &bytes, signature.as_deref(), &revision);
+        ensure!(
+            !image::carries_cell_research(&layout),
+            "the {name} release image holds /{}, the local cell's recorded research, which only \
+             its interim runtime image carries (DEC-2246)",
+            image::CELL_RESEARCH
+        );
         image::write(&layout, &out.join("images").join(name))?;
         listing.push_str(&format!("sha256:{}  {name}\n", layout.manifest));
     }
@@ -1227,6 +1233,8 @@ pub(crate) fn compare(a: &Path, b: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::symlink;
+
     use super::*;
     use crate::repo_root;
 
@@ -1891,12 +1899,13 @@ mod tests {
     }
 
     /// One case of [`the_signer_signs_only_what_sha256sums_lists`]: its name, the files in
-    /// `dist/bin` with their text, the name `SHA256SUMS` lists, and what the signer prints as it
-    /// stops.
+    /// `dist/bin` with their text (`->target` makes a symlink), the text of `SHA256SUMS`, and what
+    /// the signer prints as it stops.
     type SignerCase<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a str, &'a str);
 
-    /// `release-sign.sh` signs only a `dist/bin` that holds exactly the names `SHA256SUMS` lists:
-    /// a planted extra file, a subdirectory, a missing binary or a malformed line stops it before
+    /// `release-sign.sh` signs only a `dist/bin` that holds exactly the names `SHA256SUMS` lists,
+    /// as regular files: a planted extra file or dotfile, a subdirectory, a symlink, a missing
+    /// binary, a duplicate line, or a line with a space or a carriage return stops it before
     /// the key is decoded or cosign is fetched, so the key job is no signing oracle. The control,
     /// an exact `dist`, passes that check and stops only at the wrong digest it is handed.
     #[test]
@@ -1905,26 +1914,61 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
         let root =
             env::temp_dir().join(format!("mandate-xtask-release-sign-{}", std::process::id()));
-        let hex_a = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
-        let cases: [SignerCase<'_>; 6] = [
-            ("exact", &[("a", "a")], "a", "FAILED"),
-            ("extra", &[("a", "a"), ("b", "b")], "a", "nothing is signed"),
-            ("missing", &[], "a", "nothing is signed"),
+        let line = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb  a\n";
+        let cases: [SignerCase<'_>; 11] = [
+            ("exact", &[("a", "a")], line, "FAILED"),
+            (
+                "extra",
+                &[("a", "a"), ("b", "b")],
+                line,
+                "nothing is signed",
+            ),
+            ("missing", &[], line, "nothing is signed"),
             (
                 "nested",
                 &[("a", "a"), ("sub/c", "c")],
-                "a",
+                line,
+                "not a regular file",
+            ),
+            (
+                "symlink",
+                &[("a", "->../SHA256SUMS")],
+                line,
+                "not a regular file",
+            ),
+            (
+                "dotfile",
+                &[("a", "a"), (".hidden", "h")],
+                line,
                 "nothing is signed",
+            ),
+            (
+                "duplicate",
+                &[("a", "a")],
+                &line.repeat(2),
+                "nothing is signed",
+            ),
+            (
+                "crlf",
+                &[("a", "a")],
+                &line.replace('\n', "\r\n"),
+                "is not '<sha256>  <name>'",
+            ),
+            (
+                "space",
+                &[("a b", "a")],
+                &line.replace("  a", "  a b"),
+                "is not '<sha256>  <name>'",
             ),
             (
                 "malformed",
                 &[("a", "a")],
-                "a extra",
+                &line.replace("  a", "  a extra"),
                 "is not '<sha256>  <name>'",
             ),
             ("empty", &[], "", "is not '<sha256>  <name>'"),
         ];
-        for (name, files, listed, expected) in cases {
+        for (name, files, sums, expected) in cases {
             let dir = root.join(name);
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(dir.join("dist/bin"))?;
@@ -1933,13 +1977,11 @@ mod tests {
                 if let Some(parent) = file.parent() {
                     fs::create_dir_all(parent)?;
                 }
-                fs::write(file, text)?;
+                match text.strip_prefix("->") {
+                    Some(target) => symlink(target, &file)?,
+                    None => fs::write(file, text)?,
+                }
             }
-            let sums = if listed.is_empty() {
-                String::new()
-            } else {
-                format!("{hex_a}  {listed}\n")
-            };
             fs::write(dir.join("dist/SHA256SUMS"), sums)?;
             let output = Command::new("bash")
                 .arg(&script)
@@ -1973,6 +2015,35 @@ mod tests {
             Arch::Amd64 => "ubuntu-24.04",
             Arch::Arm64 => "ubuntu-24.04-arm",
         }
+    }
+
+    /// Pull requests cancel their own stale runs; pushes to `main` share one group that cancels
+    /// nothing, so a burst of merges releases once, at its tip; a manual dispatch, which can wait
+    /// on the founder's approval, has its own group so it never holds the pushes' releases
+    /// (DEC-2025).
+    #[test]
+    fn main_releases_once_per_burst_and_a_dispatch_never_holds_it() -> Result<()> {
+        let text = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/release.yml"),
+        )?;
+        let block = concat!(
+            "\nconcurrency:\n",
+            "  group: release-${{ github.event_name == 'pull_request' && github.ref || ",
+            "github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.ref) || ",
+            "github.ref }}\n",
+            "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
+        );
+        assert!(
+            text.contains(block),
+            "release.yml's concurrency is not DEC-2025's"
+        );
+        assert_eq!(
+            text.matches("concurrency:").count(),
+            1,
+            "a job sets its own concurrency"
+        );
+        assert!(!text.contains("github.sha }}\n  cancel-in-progress"));
+        Ok(())
     }
 
     /// Every arch is built twice, on two runners of its own arch, and compared; nothing is built

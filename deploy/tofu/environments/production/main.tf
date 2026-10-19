@@ -2,17 +2,29 @@
 # API host behind the tunnel and Access. The Spaces subscription is per account but is counted
 # here as well, so neither environment undercounts. api.owlhead.ai is DEC-822's host: an apply
 # refuses to create its record while the founder's hand-made record still exists, which the
-# runbook says to remove first. The providers read their credentials from the environment
-# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, CLOUDFLARE_API_TOKEN),
-# which only infra.yml's jobs under infra-production receive.
+# runbook says to remove first. DigitalOcean's provider reads its credentials from the environment
+# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
+# token as a variable; only infra.yml's job under infra-production receives either.
 
 provider "digitalocean" {}
 
-provider "cloudflare" {}
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
+}
 
 locals {
   environment = "production"
   region      = "nyc3"
+  account_id  = sensitive(data.cloudflare_accounts.visible.result[0].id)
+}
+
+data "cloudflare_accounts" "visible" {
+  lifecycle {
+    postcondition {
+      condition     = length(self.result) == 1
+      error_message = "CF_INFRA_API_TOKEN must see exactly one Cloudflare account, whose id this plan uses."
+    }
+  }
 }
 
 import {
@@ -29,6 +41,7 @@ module "cell" {
   kubernetes_version         = "1.35.1-do.0"
   node_size                  = "s-2vcpu-4gb"
   kube_api_allowed_addresses = var.kube_api_allowed_addresses
+  bootstrap_runner_cidr      = var.bootstrap_runner_cidr
   spaces_monthly_usd         = 5
   block_storage_gb           = 20
   cap_usd                    = 65
@@ -37,12 +50,20 @@ module "cell" {
 module "cloudflare" {
   source                = "../../modules/cloudflare"
   name                  = "mandate-${local.environment}"
-  account_id            = var.cloudflare_account_id
+  account_id            = local.account_id
   zone_name             = "owlhead.ai"
   api_hostname          = "api.owlhead.ai"
   api_origin            = var.api_origin
   access_allowed_emails = var.access_allowed_emails
   archive_bucket        = "mandate-journal-archive-${local.environment}"
+}
+
+resource "terraform_data" "applied_commit" {
+  input = var.commit_sha
+}
+
+output "applied_commit" {
+  value = terraform_data.applied_commit.output
 }
 
 output "cluster_id" {
@@ -58,11 +79,22 @@ output "archive_bucket" {
 }
 
 output "archive_endpoint" {
-  value = module.cloudflare.archive_endpoint
+  value     = module.cloudflare.archive_endpoint
+  sensitive = true
 }
 
 output "archive_destination_path" {
   value = "s3://${module.cloudflare.archive_bucket}/journal-db"
+}
+
+output "archive_access_key_id" {
+  value     = module.cloudflare.archive_access_key_id
+  sensitive = true
+}
+
+output "archive_secret_access_key" {
+  value     = module.cloudflare.archive_secret_access_key
+  sensitive = true
 }
 
 output "archive_jurisdiction" {
@@ -70,7 +102,8 @@ output "archive_jurisdiction" {
 }
 
 output "cloudflare_account_id" {
-  value = var.cloudflare_account_id
+  value     = local.account_id
+  sensitive = true
 }
 
 output "tunnel_id" {

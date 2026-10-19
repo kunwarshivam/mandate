@@ -96,7 +96,6 @@ fn refused() -> Outcome {
 /// to the bound address alone, with exactly DEC-820's footer, and accepted under the fixture's id,
 /// which names no address.
 #[test]
-#[ignore = "pending E8-11"]
 fn the_founder_is_mailed_at_the_bound_address_alone() {
     let (mut provider, mut random) = (provider(bound()), Counter(0));
     let to = handle(FOUNDER_ID, PushChannel::Email);
@@ -130,7 +129,6 @@ fn the_founder_is_mailed_at_the_bound_address_alone() {
 /// is refused `recipient_not_permitted` before any connection. The transport is not called: its
 /// scripted failure is still the first answer the founder's next send gets.
 #[test]
-#[ignore = "pending E8-11"]
 fn every_other_recipient_is_refused_before_the_transport() {
     let address = answer("address", FounderAddress::parse(FOUNDER));
     let transport = answer(
@@ -174,7 +172,6 @@ fn every_other_recipient_is_refused_before_the_transport() {
 /// DEC-2508 item 5, the #1615 review: the brief is not mailed, even to the founder. It is refused
 /// `recipient_not_permitted`, which spec §5.2 never retries and which marks no address.
 #[test]
-#[ignore = "pending E8-11"]
 fn the_brief_is_refused_before_the_transport() {
     let (mut provider, mut random) = (provider(bound()), Counter(0));
     let to = handle(FOUNDER_ID, PushChannel::Email);
@@ -188,7 +185,6 @@ fn the_brief_is_refused_before_the_transport() {
 /// DEC-2510 item 2: the adapter sends only on the email channel; a handle for any other channel,
 /// the founder's included, is refused before the transport.
 #[test]
-#[ignore = "pending E8-11"]
 fn another_channel_is_refused_before_the_transport() {
     let (mut provider, mut random) = (provider(bound()), Counter(0));
     for channel in PushChannel::ALL
@@ -208,7 +204,6 @@ fn another_channel_is_refused_before_the_transport() {
 /// DEC-2510 item 3, spec §5.2: each closed transport failure has its outcome, and none captures a
 /// message; the send after them is taken as the first.
 #[test]
-#[ignore = "pending E8-11"]
 fn each_transport_failure_has_its_outcome() {
     let cases = [
         (
@@ -275,7 +270,6 @@ fn each_transport_failure_has_its_outcome() {
 
 /// NT-1: nothing a captured message holds is trading data.
 #[test]
-#[ignore = "pending E8-11"]
 fn every_captured_message_passes_the_canary_scan() {
     let (mut provider, mut random) = (provider(bound()), Counter(40));
     let to = handle(FOUNDER_ID, PushChannel::Email);

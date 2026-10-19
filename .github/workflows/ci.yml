@@ -34,16 +34,35 @@ name: ci
 # push to it. `fast` and `full` are skipped too, not failed, and `merge-approved.sh` accepts only a
 # run in which both actually ran and passed, so a skipped run on a draft never counts as green.
 # `workflow_dispatch` has no pull request, so it always runs.
+# DEC-2610: every push to `main` runs it too, after the merge, since merges no longer wait for
+# CI. A run on `main`'s tip has no diff base, so it selects everything, as the nightly's dispatch
+# does, and `report-main` opens an issue when it fails. `main`'s runs share one concurrency group:
+# a run that has started finishes, and a burst of merges queues only its latest, which tests every
+# one of them. A merge `merge.yml`
+# makes with its own token starts no push run, so `merge.yml` dispatches this workflow then.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      post_merge:
+        description: "A post-merge run on main, sent by merge.yml (DEC-2610)"
+        type: boolean
+        default: false
 
 permissions: {}
 
+# A pull request's runs share one group per ref, so a newer push cancels the older run. The
+# post-merge runs on `main`, a push's and the ones `merge.yml` dispatches with `post_merge`, share
+# one group too, but a newer one never cancels the run in progress: it waits, and replaces any run
+# still waiting, so every burst of merges gets a verdict and only its latest waits. Any other
+# dispatched run, the nightly's included, has a group of its own, so it is never cancelled and
+# cancels nothing (DEC-2610).
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'workflow_dispatch' && !inputs.post_merge && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -352,7 +371,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
-    if: ${{ always() && !github.event.pull_request.draft }}
+    # On a pull request it runs even when the run is cancelled, so a cancelled head fails rather
+    # than reading skipped, which a required check counts as passing. Elsewhere a cancelled run
+    # skips it, so the run ends at once and releases `main`'s group (DEC-2610 item 3).
+    if: ${{ ((github.event_name == 'pull_request' && always()) || !cancelled()) && !github.event.pull_request.draft }}
     needs: [select, fast-lint, fast-test, fast-pending, fast-python, fast-portable, fast-rh-sim-live]
     # DEC-871, DEC-1190. The required `fast` verdict: `select` and `fast-lint` must succeed, and
     # each scoped part must have succeeded where `select` selected it and been skipped where it did
@@ -887,7 +909,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
-    if: ${{ always() && !github.event.pull_request.draft }}
+    # As `fast`: it runs on a cancelled pull request run, and a cancelled run elsewhere skips it.
+    if: ${{ ((github.event_name == 'pull_request' && always()) || !cancelled()) && !github.event.pull_request.draft }}
     needs: [select, full-checks, mutants-plan, mutants, schema-mutants]
     # DEC-538. A plan of zero mutants launches no shard, so `mutants` is skipped, and that skip
     # passes only beside a plan that succeeded and reported zero. A failed or cancelled plan, a
@@ -920,12 +943,13 @@ jobs:
             *) test "$MUTANTS_RESULT" = success ;;
           esac
 
-  # DEC-1190 item 5. The nightly dispatches this workflow on main, where `select` has no diff base
-  # and selects everything; when that run fails, this opens an issue naming only the run and the
-  # verdicts, never a log line. A run cancelled by a newer dispatch reports nothing, nor does a
-  # dispatch on any other branch.
+  # DEC-1190 item 5, DEC-2610. The nightly dispatches this workflow on main, and every push to main
+  # (and every merge `merge.yml` makes) runs it there too, where `select` has no diff base and
+  # selects everything; when that run fails, this opens an issue naming only the event, the run and
+  # the verdicts, never a log line. A run cancelled by a newer one reports nothing, nor does a run
+  # on any other branch.
   report-main:
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || needs.full.result == 'failure') }}
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || needs.full.result == 'failure') }}
     needs: [fast, full]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -939,4 +963,8 @@ jobs:
           FULL_RESULT: ${{ needs.full.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="nightly: ci on main failed at ${GITHUB_SHA}" -f body="The nightly ci run on main failed (fast ${FAST_RESULT}, full ${FULL_RESULT}): ${RUN_URL} (DEC-1190)"
+          if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" --jq '.[].title' | grep -Fqx "ci on main failed at ${GITHUB_SHA}"; then
+            echo "An open issue already reports ci on main failing at ${GITHUB_SHA}"
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="ci on main failed at ${GITHUB_SHA}" -f body="The ${GITHUB_EVENT_NAME} ci run on main failed (fast ${FAST_RESULT}, full ${FULL_RESULT}): ${RUN_URL} (DEC-1190, DEC-2610)"

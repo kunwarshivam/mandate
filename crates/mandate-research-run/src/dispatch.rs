@@ -17,10 +17,10 @@ use mandate_canon::{Key, Object, Value, to_canonical};
 
 use crate::agentic::{Code, LoopBounds, Tool, ToolCall, ToolCallId, ToolClass, ToolOutcome};
 use crate::error::ResearchRunError;
-use crate::item::{Bar, Symbol};
+use crate::item::{Bar, ItemKind, NewsItem, Symbol};
 use crate::plan::Scope;
 use crate::ports::Readers;
-use crate::retrieve::{RetrievedItem, text};
+use crate::retrieve::{RetrievedItem, TextRead, cut, digest, int, reserved, text, window_start};
 
 /// What a dispatch reads within: the run's frozen scope, its pinned bounds, and the result bytes the
 /// run has left (`max_run_result_bytes` less every earlier read's result).
@@ -181,14 +181,103 @@ fn read(call: &ToolCall, scope: &Scope, readers: Readers<'_>) -> Result<Answer, 
     }
 }
 
+/// The most bytes of headline and summary one `news.search` item carries (§6.10).
+const NEWS_ITEM_BYTES: usize = 2_000;
+
 /// `news.search` (§6.10, DEC-2213).
 fn news_search(
     call: &ToolCall,
     scope: &Scope,
     readers: Readers<'_>,
 ) -> Result<Answer, ResearchRunError> {
-    let _ = (call, scope, readers);
-    Err(ResearchRunError::Unimplemented { story: "E19-13" })
+    let Ok(arguments) = mandate_canon::parse(call.arguments.as_bytes()) else {
+        return Ok(Answer::Failed);
+    };
+
+    let parsed = (|| {
+        let symbols = symbols(arguments.get("symbols")?, 5)?;
+        let window_h = bounded(arguments.get("window_h")?, 1, 168)?;
+        let terms = terms(arguments.get("terms")?)?;
+        let limit = bounded(arguments.get("limit")?, 1, 20)?;
+        Some((symbols, window_h, terms, limit))
+    })();
+    let Some((symbols, window_h, terms, limit)) = parsed else {
+        return Ok(Answer::Failed);
+    };
+    if outside(&symbols, scope) {
+        return Ok(Answer::Refused(Code::OutOfUniverse));
+    }
+    let read = TextRead {
+        scope,
+        symbols: &symbols,
+        window_start: window_start(scope.cut_off, window_h.saturating_mul(3_600))?,
+        max_items: limit,
+        kind: ItemKind::News,
+    };
+    let Ok(answered) = readers.news.search(&read.query(&symbols), &terms) else {
+        return Ok(Answer::Failed);
+    };
+    let mut seen = BTreeSet::new();
+    let mut kept: Vec<NewsItem> = answered
+        .into_iter()
+        .filter(|item| {
+            read.refusal(
+                item.knowledge_at,
+                &item.source,
+                item.licensed,
+                &item.symbols,
+            )
+            .is_none()
+                && !reserved(&item.item_id)
+                && seen.insert(item.item_id.clone())
+        })
+        .collect();
+    kept.sort_by(|a, b| {
+        b.knowledge_at
+            .cmp(&a.knowledge_at)
+            .then_with(|| a.item_id.cmp(&b.item_id))
+    });
+    kept.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+    let mut trimmed = false;
+    for item in &mut kept {
+        if item.headline.len().saturating_add(item.summary.len()) > NEWS_ITEM_BYTES {
+            let headline = cut(&item.headline, NEWS_ITEM_BYTES).to_owned();
+            let left = NEWS_ITEM_BYTES.saturating_sub(headline.len());
+            item.summary = cut(&item.summary, left).to_owned();
+            item.headline = headline;
+            trimmed = true;
+        }
+    }
+    Ok(Answer::Read(Read {
+        items: kept.into_iter().map(RetrievedItem::News).collect(),
+        trimmed,
+        untrusted: true,
+    }))
+}
+
+fn symbols(value: &Value, most: usize) -> Option<BTreeSet<Symbol>> {
+    let listed = value.as_array()?;
+    if listed.is_empty() || listed.len() > most {
+        return None;
+    }
+    listed.iter().map(symbol).collect()
+}
+
+/// §6.10's terms: at most five, each 1 to 32 bytes of ASCII letters, digits, spaces, hyphens, and
+/// periods (DEC-2213 item 1).
+fn terms(value: &Value) -> Option<Vec<String>> {
+    let listed = value.as_array()?;
+    if listed.len() > 5 {
+        return None;
+    }
+    listed
+        .iter()
+        .map(|term| {
+            let term = term.as_str()?;
+            let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '.');
+            ((1..=32).contains(&term.len()) && term.chars().all(allowed)).then(|| term.to_owned())
+        })
+        .collect()
 }
 
 fn outside(symbols: &BTreeSet<Symbol>, scope: &Scope) -> bool {
@@ -258,7 +347,17 @@ fn render(items: &[RetrievedItem], truncated: bool) -> Result<Vec<u8>, ResearchR
                     ("volume", text(&bar.volume.to_string())),
                 ],
             ),
-            RetrievedItem::News(_) | RetrievedItem::Filing(_) | RetrievedItem::Instrument(_) => {
+            RetrievedItem::News(news) => (
+                "untrusted",
+                vec![
+                    ("published_at", text(&news.published_at.to_string())),
+                    ("headline", text(&news.headline)),
+                    ("summary", text(&news.summary)),
+                    ("content_hash", digest(&news.content_hash)),
+                    ("length_bytes", int(item.length_bytes())?),
+                ],
+            ),
+            RetrievedItem::Filing(_) | RetrievedItem::Instrument(_) => {
                 return Err(ResearchRunError::LoopOrder {
                     what: "an item no dispatched read returns",
                 });

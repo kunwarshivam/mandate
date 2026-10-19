@@ -6,7 +6,7 @@ use std::future::Future;
 use mandate_journal::{AppendOutcome, StoredEvent};
 use mandate_time::UtcNanos;
 
-use crate::control::{Resolver, fact};
+use crate::control::fact;
 use crate::manager::{Decision, Manager};
 use crate::orchestrator::{Alerts, Effect, Orchestrator, Unavailable};
 
@@ -36,10 +36,6 @@ pub enum Halt {
     Journal,
     /// The orchestrator could not list its instances: nothing was decided.
     Orchestrator,
-    /// The store behind the resolver could not answer a deployment: the pass still folded every
-    /// other row and acted on it, kill switches included, and the next pass reads the deployment
-    /// again.
-    Resolver,
     /// The journal refused a record as invalid: a defect, never retried blind.
     Refused { event_type: &'static str },
     /// The control stream has no `StreamOpened` yet, so no record can name its environment.
@@ -47,25 +43,23 @@ pub enum Halt {
 }
 
 /// The manager with its ports.
-pub struct Deployer<J, O, A, R> {
+pub struct Deployer<J, O, A> {
     pub manager: Manager,
     identity: Identity,
     journal: J,
     orchestrator: O,
     alerts: A,
-    resolver: R,
     read_through: u64,
 }
 
-impl<J: ControlJournal, O: Orchestrator, A: Alerts, R: Resolver> Deployer<J, O, A, R> {
-    pub fn new(identity: Identity, journal: J, orchestrator: O, alerts: A, resolver: R) -> Self {
+impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
+    pub fn new(identity: Identity, journal: J, orchestrator: O, alerts: A) -> Self {
         Self {
             manager: Manager::new(),
             identity,
             journal,
             orchestrator,
             alerts,
-            resolver,
             read_through: 0,
         }
     }
@@ -83,8 +77,8 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts, R: Resolver> Deployer<J, O, 
     }
 
     /// The ports back, as a manager that stops hands them to its successor.
-    pub fn into_ports(self) -> (J, O, A, R) {
-        (self.journal, self.orchestrator, self.alerts, self.resolver)
+    pub fn into_ports(self) -> (J, O, A) {
+        (self.journal, self.orchestrator, self.alerts)
     }
 
     /// One pass at `now`. A record that does not commit stops the pass before its effect; an
@@ -93,7 +87,7 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts, R: Resolver> Deployer<J, O, 
     /// # Errors
     /// [`Halt`], after which nothing unjournaled has been done.
     pub async fn tick(&mut self, now: UtcNanos) -> Result<(), Halt> {
-        let mut deferred = self.refresh().await?;
+        self.refresh().await?;
         let environment = self
             .manager
             .environment()
@@ -126,7 +120,7 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts, R: Resolver> Deployer<J, O, 
                     self.manager.fold(&record.fact(now));
                     if let Effect::Start { slot, generation } = record.effect() {
                         self.manager.issued(&slot, generation);
-                        deferred |= self.refresh().await?;
+                        self.refresh().await?;
                         if !self.manager.desired(&slot) {
                             continue;
                         }
@@ -136,37 +130,23 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts, R: Resolver> Deployer<J, O, 
             };
             self.perform(effect).await;
         }
-        if deferred {
-            return Err(Halt::Resolver);
-        }
         Ok(())
     }
 
-    /// Folds every control-stream row not yet folded, and answers whether a deployment was
-    /// deferred. A deployment the resolver cannot read now is skipped and the read position stays
-    /// before it, so the next pass reads it and every row after it again; every fold is idempotent,
-    /// and a row after it that needs it (its stop) folds again in order then.
-    async fn refresh(&mut self) -> Result<bool, Halt> {
+    /// Folds every control-stream row not yet folded, in order, from the journal alone.
+    async fn refresh(&mut self) -> Result<(), Halt> {
         let rows = self
             .journal
             .rows_after(self.read_through)
             .await
             .map_err(|Unavailable| Halt::Journal)?;
-        let mut deferred = false;
         for row in &rows {
-            match fact(row, &self.resolver) {
-                Ok(read) => {
-                    if let Some(fact) = read {
-                        self.manager.fold(&fact);
-                    }
-                    if !deferred {
-                        self.read_through = self.read_through.max(row.seq);
-                    }
-                }
-                Err(Unavailable) => deferred = true,
+            if let Some(fact) = fact(row) {
+                self.manager.fold(&fact);
             }
+            self.read_through = self.read_through.max(row.seq);
         }
-        Ok(deferred)
+        Ok(())
     }
 
     async fn perform(&mut self, effect: Effect) {

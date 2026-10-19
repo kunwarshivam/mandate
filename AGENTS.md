@@ -220,9 +220,10 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   guard and mutants on the diff of safety-critical crates run as always. `Cargo.lock`, any
   `Cargo.toml`, `rust-toolchain.toml`, `xtask/`, `.github/`, `.cargo/`, `deny.toml`,
   `clippy.toml`, an unknown path, and a run with no diff base select everything. `fast` and
-  `full` stay the required checks, and accept a skip only where `select` asked for it. The
-  nightly dispatches `ci` on main, which selects everything, and sweeps a seventh of every
-  safety-critical crate's mutants each night.
+  `full` stay the required checks, and accept a skip only where `select` asked for it. Every
+  push to main runs `ci` there after the merge (DEC-2610), and the nightly dispatches it on main;
+  both select everything and open an issue when they fail. The nightly also sweeps a seventh of
+  every safety-critical crate's mutants each night.
 - **New crates** get an entry in `xtask/layers.toml` in the same change; safety-critical crates also
   get a CODEOWNERS line and start `src/lib.rs` with the lint header `cargo xtask layers` checks.
 - **New dependencies** need a row in `docs/dependencies.md` in the same change (none by default).
