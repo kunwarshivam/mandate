@@ -1,5 +1,7 @@
-# Production (DEC-2011 item 1), small: one DOKS cluster of two nodes in nyc3, its buckets, and the
-# API host behind the tunnel and Access. The Spaces subscription is per account but is counted
+# Production (DEC-2011 item 1), small: one DOKS cluster of two nodes in sfo2, its buckets, and the
+# API host behind the tunnel and Access. The founder put all of the infrastructure in the US West
+# (DEC-2047): the cluster and its VPC run in sfo2 and the archive in R2's wnam; the state bucket
+# moves from nyc3 in a later change. The Spaces subscription is per account but is counted
 # here as well, so neither environment undercounts. api.owlhead.ai is DEC-822's host: an apply
 # refuses to create its record while the founder's hand-made record still exists, which the
 # runbook says to remove first. DigitalOcean's provider reads its credentials from the environment
@@ -13,8 +15,9 @@ provider "cloudflare" {
 }
 
 locals {
-  environment = "production"
-  region      = "nyc3"
+  environment  = "production"
+  region       = "sfo2"
+  state_region = "nyc3"
   account_id = sensitive(one(distinct([
     for account in data.cloudflare_accounts.visible.result : account.id
     if account.id != null && account.id != ""
@@ -43,14 +46,14 @@ data "cloudflare_accounts" "visible" {
 import {
   for_each = var.adopt_state_bucket ? toset(["state"]) : toset([])
   to       = module.cell.module.spaces.digitalocean_spaces_bucket.state
-  id       = "${local.region},mandate-tofu-state-${local.environment}"
+  id       = "${local.state_region},mandate-tofu-state-${local.environment}"
 }
 
 module "cell" {
   source                     = "../../modules/cell"
   environment                = local.environment
   region                     = local.region
-  state_region               = local.region
+  state_region               = local.state_region
   vpc_ip_range               = "10.120.0.0/20"
   kubernetes_version         = "1.35.9-do.1"
   node_size                  = "s-2vcpu-4gb"
@@ -69,7 +72,7 @@ module "cloudflare" {
   api_hostname          = "api.owlhead.ai"
   api_origin            = var.api_origin
   access_allowed_emails = var.access_allowed_emails
-  archive_bucket        = "mandate-journal-archive-${local.environment}"
+  archive_bucket        = "mandate-journal-archive-west-${local.environment}"
 }
 
 resource "terraform_data" "applied_commit" {
