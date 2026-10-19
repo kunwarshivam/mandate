@@ -68659,3 +68659,172 @@ risk_marks:
     sane: true
     session: regular
     bid: '187.42'
+  staleness:
+  - name: equity_v1_after_sane
+    clause: 'DEC-2305 item 3: v1 marks after a sane v2 mark never restart the count; stale at the limit, not before'
+    asset_class: us_equity
+    mark_max_age_s: 60
+    opened_at: '2026-10-19T14:29:00.000000000Z'
+    steps:
+    - draft:
+        base_draft: mark_v2
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-19T14:30:00.000000000Z'
+      expect:
+        stale_mark: false
+        mode: normal
+        openings: allowed
+        exits: allowed
+    - draft:
+        base_draft: mark_v1
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-19T14:30:30.000000000Z'
+      expect:
+        stale_mark: false
+        mode: normal
+        openings: allowed
+        exits: allowed
+    - draft:
+        base_draft: mark_v1
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-19T14:30:59.000000000Z'
+      expect:
+        stale_mark: false
+        mode: normal
+        openings: allowed
+        exits: allowed
+    - draft:
+        base_draft: mark_v1
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-19T14:31:00.000000000Z'
+      expect:
+        stale_mark: true
+        mode: normal
+        openings: held
+        exits: allowed
+    - draft:
+        base_draft: mark_v1
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-19T14:31:30.000000000Z'
+      expect:
+        stale_mark: true
+        mode: normal
+        openings: held
+        exits: allowed
+    - draft:
+        base_draft: mark_v2
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-19T14:31:40.000000000Z'
+      expect:
+        stale_mark: false
+        mode: normal
+        openings: allowed
+        exits: allowed
+  - name: equity_only_v1_across_the_close
+    clause: 'DEC-2305 item 3: only v1 marks since opening; an equity''s age counts regular-session seconds only'
+    asset_class: us_equity
+    mark_max_age_s: 120
+    opened_at: '2026-10-19T19:59:00.000000000Z'
+    steps:
+    - draft:
+        base_draft: mark_v1
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-19T19:59:30.000000000Z'
+      expect:
+        stale_mark: false
+        mode: normal
+        openings: allowed
+        exits: allowed
+    - draft:
+        base_draft: mark_v1
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-19T20:30:00.000000000Z'
+        - path: payload.price
+          value: '187.10'
+      expect:
+        stale_mark: false
+        mode: normal
+        openings: allowed
+        exits: allowed
+    - draft:
+        base_draft: mark_v1
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-20T13:30:00.000000000Z'
+      expect:
+        stale_mark: false
+        mode: normal
+        openings: allowed
+        exits: allowed
+    - draft:
+        base_draft: mark_v1
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-20T13:30:59.000000000Z'
+      expect:
+        stale_mark: false
+        mode: normal
+        openings: allowed
+        exits: allowed
+    - draft:
+        base_draft: mark_v1
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-20T13:31:00.000000000Z'
+      expect:
+        stale_mark: true
+        mode: normal
+        openings: held
+        exits: allowed
+  - name: crypto_only_v1
+    clause: 'DEC-2305 item 3: crypto''s age counts all time, a weekend included'
+    asset_class: crypto
+    mark_max_age_s: 60
+    opened_at: '2026-10-24T00:00:00.000000000Z'
+    steps:
+    - draft:
+        base_draft: mark_v1
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-24T00:00:59.000000000Z'
+        - path: payload.instrument_id
+          value: BTC-USD
+      expect:
+        stale_mark: false
+        mode: normal
+        openings: allowed
+        exits: allowed
+    - draft:
+        base_draft: mark_v1
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-24T00:01:00.000000000Z'
+        - path: payload.instrument_id
+          value: BTC-USD
+      expect:
+        stale_mark: true
+        mode: normal
+        openings: held
+        exits: allowed
+    - draft:
+        base_draft: mark_v2
+        changes:
+        - path: payload.risk_clock
+          value: '2026-10-24T00:01:30.000000000Z'
+        - path: payload.instrument_id
+          value: BTC-USD
+        - path: payload.session
+          value: crypto
+      expect:
+        stale_mark: false
+        mode: normal
+        openings: allowed
+        exits: allowed

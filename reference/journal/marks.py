@@ -5,7 +5,8 @@ The schemas and rule 244 live in `control.py`, beside §9.5's other account-stre
 validator judges every closed schema. This module builds the `risk_marks` section: a version-2 and
 a version-1 base draft, an invalid draft for every member type, each missing or extra member, and
 each clause of rule 244, valid drafts for the marks rule 244 might be misread to refuse and for
-every session, and the risk fold's reading of each base and valid draft (DEC-2305 item 3). Its own
+every session, the risk fold's reading of each base and valid draft (DEC-2305 item 3), and staleness
+sequences in which only version-1 marks follow a held instrument's last sane mark. Its own
 oracle reads the drafts' members directly, without the validator, and every seeded bug is shown
 caught.
 """
@@ -13,7 +14,9 @@ caught.
 from __future__ import annotations
 
 import copy
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 from common import change, delete, digest_strings
 from control import (
@@ -206,6 +209,139 @@ def readings(section: dict) -> list[dict]:
     return [{"draft": name, **reading_of(draft)} for name, draft in named]
 
 
+# --------------------------------------------------------------------------- staleness under v1 marks
+
+# DEC-2305 item 3 over a sequence: a held instrument whose only marks after its last sane mark are
+# version 1 reaches `stale_mark` once its age reaches `mark_max_age_s` (mandate spec §5.2: age >=
+# limit, counted in regular-session seconds for an equity, all time for crypto, and credited before
+# the input is applied). Once stale, openings and increases in it are denied `stale_mark`; exits,
+# protective orders, and kill switches are never held by it, and the agent's mode does not change
+# (`AGENTS.md` rule 13; §5.2: a stale mark never triggers a flatten). The expectations below are
+# written by hand from those sentences; `fold_staleness` is the reference reading they check.
+NY = ZoneInfo("America/New_York")
+OPENINGS = ("open", "increase")
+EXITS = ("discretionary_exit", "risk_exit", "owner_exit", "protective", "kill_switch")
+FRESH = {"stale_mark": False, "mode": "normal", "openings": "allowed", "exits": "allowed"}
+STALE = {"stale_mark": True, "mode": "normal", "openings": "held", "exits": "allowed"}
+
+
+def step(base: str, risk_clock: str, expect: dict, *changes) -> dict:
+    return {
+        "draft": {"base_draft": base, "changes": [change("payload.risk_clock", risk_clock), *changes]},
+        "expect": dict(expect),
+    }
+
+
+def crypto(*changes) -> tuple:
+    return (change("payload.instrument_id", "BTC-USD"), *changes)
+
+
+def staleness_sequences() -> list[dict]:
+    return [
+        {
+            "name": "equity_v1_after_sane",
+            "clause": "DEC-2305 item 3: v1 marks after a sane v2 mark never restart the count; stale at the limit, not before",
+            "asset_class": "us_equity",
+            "mark_max_age_s": 60,
+            "opened_at": "2026-10-19T14:29:00.000000000Z",
+            "steps": [
+                step(V2, "2026-10-19T14:30:00.000000000Z", FRESH),
+                step(V1, "2026-10-19T14:30:30.000000000Z", FRESH),
+                step(V1, "2026-10-19T14:30:59.000000000Z", FRESH),
+                step(V1, "2026-10-19T14:31:00.000000000Z", STALE),
+                step(V1, "2026-10-19T14:31:30.000000000Z", STALE),
+                step(V2, "2026-10-19T14:31:40.000000000Z", FRESH),
+            ],
+        },
+        {
+            "name": "equity_only_v1_across_the_close",
+            "clause": "DEC-2305 item 3: only v1 marks since opening; an equity's age counts regular-session seconds only",
+            "asset_class": "us_equity",
+            "mark_max_age_s": 120,
+            "opened_at": "2026-10-19T19:59:00.000000000Z",
+            "steps": [
+                step(V1, "2026-10-19T19:59:30.000000000Z", FRESH),
+                step(V1, "2026-10-19T20:30:00.000000000Z", FRESH, change("payload.price", "187.10")),
+                step(V1, "2026-10-20T13:30:00.000000000Z", FRESH),
+                step(V1, "2026-10-20T13:30:59.000000000Z", FRESH),
+                step(V1, "2026-10-20T13:31:00.000000000Z", STALE),
+            ],
+        },
+        {
+            "name": "crypto_only_v1",
+            "clause": "DEC-2305 item 3: crypto's age counts all time, a weekend included",
+            "asset_class": "crypto",
+            "mark_max_age_s": 60,
+            "opened_at": "2026-10-24T00:00:00.000000000Z",
+            "steps": [
+                step(V1, "2026-10-24T00:00:59.000000000Z", FRESH, *crypto()),
+                step(V1, "2026-10-24T00:01:00.000000000Z", STALE, *crypto()),
+                step(V2, "2026-10-24T00:01:30.000000000Z", FRESH, *crypto(change("payload.session", "crypto"))),
+            ],
+        },
+    ]
+
+
+def instant(text: str) -> datetime:
+    return datetime.strptime(text[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=UTC)
+
+
+def regular_seconds(t0: datetime, t1: datetime) -> int:
+    """Whole seconds of the regular session (09:30 to 16:00 New York time, weekdays) in [t0, t1)."""
+    total = 0
+    day = t0.astimezone(NY).date()
+    while day <= t1.astimezone(NY).date():
+        if day.weekday() < 5:
+            opens = datetime(day.year, day.month, day.day, 9, 30, tzinfo=NY)
+            closes = datetime(day.year, day.month, day.day, 16, 0, tzinfo=NY)
+            lo, hi = max(opens, t0), min(closes, t1)
+            if hi > lo:
+                total += int((hi - lo).total_seconds())
+        day += timedelta(days=1)
+    return total
+
+
+def order_outcomes(stale: bool, skip: frozenset[str]) -> dict:
+    held_exits = stale and "fold.stale_holds_exits" in skip
+    held_openings = stale and "fold.stale_allows_openings" not in skip
+    return {
+        "mode": "paused" if held_exits else "normal",
+        "openings": "held" if held_openings else "allowed",
+        "exits": "held" if held_exits else "allowed",
+    }
+
+
+def fold_staleness(section: dict, sequence: dict, skip: frozenset[str] = frozenset()) -> list[dict]:
+    """The reference reading of one sequence: the restriction, mode, and order outcomes after each step."""
+    crypto_clock = sequence["asset_class"] == "crypto" or "fold.equity_all_hours" in skip
+    limit = sequence["mark_max_age_s"]
+    age, stale, at = 0, False, instant(sequence["opened_at"])
+    out = []
+    for item in sequence["steps"]:
+        draft = draft_for(section, item["draft"])
+        p = draft["payload"]
+        now = instant(p["risk_clock"])
+        age += int((now - at).total_seconds()) if crypto_clock else regular_seconds(at, now)
+        at = now
+        reached = age > limit if "fold.strict_boundary" in skip else age >= limit
+        if reached:
+            stale = True
+        reading = reading_of(draft)
+        if reading["reading"] == "no_verdict":
+            if "fold.v1_restarts_count" in skip:
+                age = 0
+            if "fold.v1_as_not_sane" in skip:
+                stale = True
+        counted = sequence["asset_class"] == "crypto" or reading.get("session") == "regular"
+        if reading["reading"] == "verdict" and counted:
+            if reading["sane"]:
+                age, stale = 0, False
+            else:
+                stale = True
+        out.append({"stale_mark": stale, **order_outcomes(stale, skip)})
+    return out
+
+
 # --------------------------------------------------------------------------- independent oracle
 
 ORACLE_CHECKS = (
@@ -216,6 +352,8 @@ ORACLE_CHECKS = (
     "valid_drafts",
     "valid_drafts.oracle",
     "readings",
+    "staleness.records",
+    "staleness",
 )
 
 
@@ -287,6 +425,15 @@ def check_section(section: dict) -> list[str]:
     want = [oracle_reading(name, draft) for name, draft in named]
     if section["readings"] != want:
         problems.append(found("readings", f"expected {want}, got {section['readings']}"))
+    for sequence in section["staleness"]:
+        for i, item in enumerate(sequence["steps"]):
+            got = violations(draft_for(section, item["draft"]))
+            if got:
+                problems.append(found("staleness.records", f"{sequence['name']} step {i}: {got}"))
+        expected = [item["expect"] for item in sequence["steps"]]
+        folded = fold_staleness(section, sequence)
+        if folded != expected:
+            problems.append(found("staleness", f"{sequence['name']}: expected {expected}, folded {folded}"))
     return problems
 
 
@@ -304,6 +451,14 @@ VALIDATOR_MUTANTS = (
     "versions.mark_updated_v2",
 )
 READING_MUTANTS = ("reading.v1_as_sane", "reading.always_sane", "reading.bid_when_not_sane")
+FOLD_MUTANTS = (
+    "fold.strict_boundary",
+    "fold.equity_all_hours",
+    "fold.v1_restarts_count",
+    "fold.v1_as_not_sane",
+    "fold.stale_allows_openings",
+    "fold.stale_holds_exits",
+)
 
 
 def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
@@ -341,6 +496,16 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(lambda s: case(s, "valid_drafts", "bid_above_price")["changes"].append(change("payload.bid", None))),
         ),
         (
+            "a staleness step's record is at version 3",
+            "staleness.records",
+            mutated(lambda s: s["staleness"][0]["steps"][0]["draft"]["changes"].append(change("schema_version", 3))),
+        ),
+        (
+            "a staleness step expects the instrument fresh at the limit",
+            "staleness",
+            mutated(lambda s: s["staleness"][0]["steps"][3].update(expect=dict(FRESH))),
+        ),
+        (
             "a reading takes version 1's price as a sane bid",
             "readings",
             mutated(lambda s: s["readings"][1].update(reading="verdict", sane=True, bid="187.42")),
@@ -369,6 +534,11 @@ def run_mutants(section: dict) -> list[str]:
         got = [{"draft": name, **reading_of(draft, skip)} for name, draft in named]
         if got == section["readings"]:
             escaped.append(f"mark reading mutant {mutant}")
+    for mutant in FOLD_MUTANTS:
+        skip = frozenset([mutant])
+        expected = [[item["expect"] for item in q["steps"]] for q in section["staleness"]]
+        if [fold_staleness(section, q, skip) for q in section["staleness"]] == expected:
+            escaped.append(f"mark fold mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
         if not any(c == check for _, c, _ in registered):
@@ -391,4 +561,5 @@ def build_section() -> dict:
         "valid_drafts": valid_drafts(),
     }
     section["readings"] = readings(section)
+    section["staleness"] = staleness_sequences()
     return section

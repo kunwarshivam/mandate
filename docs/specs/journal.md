@@ -5548,7 +5548,7 @@ not hold.
 | `source` | `text` | As version 1 |
 | `feed` | `text` | As version 1 |
 | `bid` | `decimal?` | The quote's bid: a long's risk mark (trading spec §8.2). `null` only for a quote with no bid, which is never sane (rule 244) |
-| `sane` | `boolean` | Whether the quote met every condition trading spec §8.2 sets on a risk mark from a quote: 0 < bid ≤ ask, the spread within the data profile's limit, and the quote fresher than the profile's staleness threshold at `risk_clock` |
+| `sane` | `boolean` | Whether the quote met every condition trading spec §8.2 sets on a risk mark from a quote: 0 < bid ≤ ask, the spread within the data profile's limit, and the quote fresher than the profile's staleness threshold at `risk_clock` (freshness counts, DEC-2305 item 5) |
 | `session` | `overnight` \| `pre_market` \| `regular` \| `after_hours` \| `crypto` | The market session the writer placed the mark in at `risk_clock`, by its trading calendar; `crypto` for a crypto instrument |
 | `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
 
@@ -5571,7 +5571,9 @@ mark has **no verdict**. It is not a risk input: the fold applies nothing from i
 whether the fold settles time at it changes no result (MI-13). It is never read as sane, which
 would update E from a price no check judged and restart the staleness count, loosening §5.2. So E
 is not updated from it, and the instrument's staleness keeps counting from its last sane
-version-2 mark, until `stale_mark` holds openings and increases in that instrument. It is not
+version-2 mark: once its age reaches `mark_max_age_s` (counted in regular-session seconds for an
+equity), `stale_mark` holds openings and increases in that instrument, and never its exits,
+protective orders, or kill switches (`AGENTS.md` rule 13). It is not
 read as unreadable either (DEC-2301 item 3): a version-1 mark is a well-formed record the stream
 holds legitimately, and holding every opening on any stream that holds one would add nothing that
 staleness, per instrument, does not already hold.
@@ -5580,15 +5582,22 @@ staleness, per instrument, does not already hold.
 with the IEX quote's bid as `price` (DEC-943 item 1); the executor writes none and its own fold
 applies nothing from one. Version 2 is written by the executor's mark path from the E6-15 slice
 that builds it, once `mandate-journal` registers it; until then `append` refuses it as
-`unknown_schema`, and version 1 continues.
+`unknown_schema`, and version 1 continues. **A writer never records a false session:** a mark its
+trading calendar places in no session, such as an equity's quote while the market is closed, is
+never mapped to the nearest session. The writer writes no `MarkUpdated` for it, and the
+instrument's staleness keeps counting (DEC-2305 item 6). Version 2's `bid` is a quote's bid, so no
+writer records a last-trade risk mark (trading spec §8.2) until a later version carries one.
 
 **No `JournaledFact`.** It feeds no `ValidationContext`. **Vectors**: `reference/journal`'s
 `risk_marks` section holds a version-2 base draft and a version-1 base draft, both valid; an
 invalid draft for every member type, each missing or extra member, each clause of rule 244, a
 version-1 draft carrying a version-2 member, and version 3; valid drafts for the marks rule 244
 might be misread to refuse (not sane with no bid, a zero bid, or a bid above the price) and for every
-session; and the fold's reading of each base and valid draft: `no_verdict` for version 1, and
-`sane`, `session`, and, when sane, `bid` for version 2. The vectors stay version 3.
+session, with `session: "closed"` refused at `payload.session`; the fold's reading of each base
+and valid draft: `no_verdict` for version 1, and `sane`, `session`, and, when sane, `bid` for
+version 2; and staleness sequences, an equity's and crypto's, in which a held instrument with only
+version-1 marks since its last sane mark, or since it opened, reaches `stale_mark` exactly at
+`mark_max_age_s`, with its openings held and its exits not. The vectors stay version 3.
 
 ## 10. Anchoring
 
