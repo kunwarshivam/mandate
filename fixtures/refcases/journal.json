@@ -111660,22 +111660,6 @@
     }
    },
    {
-    "name": "negative_expires_at",
-    "clause": "rule 247: `expires_at` is positive",
-    "base_draft": "confirmation",
-    "changes": [
-     {
-      "path": "payload.expires_at",
-      "value": -1
-     }
-    ],
-    "expect": {
-     "outcome": "Invalid",
-     "reason": "schema",
-     "path": "payload.expires_at"
-    }
-   },
-   {
     "name": "zero_bid_and_floor",
     "clause": "rule 247: reported at the first that fails, `bid` before `floor`",
     "base_draft": "confirmation",

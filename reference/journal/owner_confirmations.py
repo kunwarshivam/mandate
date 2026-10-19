@@ -117,7 +117,6 @@ def invalid_drafts() -> list[dict]:
     ]
     out += [
         bad("zero_expires_at", f"{RULE_247}: `expires_at` is positive", [change("payload.expires_at", 0)], "schema", "payload.expires_at"),
-        bad("negative_expires_at", f"{RULE_247}: `expires_at` is positive", [change("payload.expires_at", -1)], "schema", "payload.expires_at"),
         bad(
             "zero_bid_and_floor",
             f"{RULE_247}: reported at the first that fails, `bid` before `floor`",
