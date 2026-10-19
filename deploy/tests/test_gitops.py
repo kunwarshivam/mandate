@@ -489,10 +489,15 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
             c.get("name"): squash(c.get("expression", "").split()) for c in spec.get("matchConditions", [])
         }
         newly = "request.operation == 'CREATE' || !(" + label.replace("object.", "oldObject.") + ")"
-        if set(conditions) != {"labelled-control", "newly-control"} or conditions["labelled-control"] != label:
+        if (
+            set(conditions) != {"labelled-control", "newly-control"}
+            or conditions["labelled-control"] != label
+        ):
             problems.append(f"{name}: matches {conditions.get('labelled-control')!r}, not the control label")
         elif conditions["newly-control"] != newly:
-            problems.append(f"{name}: matches {conditions['newly-control']!r}, not only a newly control label")
+            problems.append(
+                f"{name}: matches {conditions['newly-control']!r}, not only a newly control label"
+            )
         validations = [squash(v.get("expression", "").split()) for v in spec.get("validations", [])]
         if validations != [allowed]:
             problems.append(f"{name}: allows {validations}")
@@ -933,15 +938,41 @@ PRODUCTION_FILES = (
 ANY_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 
-def unstaged_digests(production: str, staged: str) -> list[str]:
-    """Each digest production pins that staging's history on main never held."""
-    return sorted(set(ANY_DIGEST.findall(production)) - set(ANY_DIGEST.findall(staged)))
+def pins(charts: str, images: str) -> set[tuple[str, str]]:
+    """What an environment's two files pin, per key: each OCIRepository's name with its digest, and
+    each image key with its reference."""
+    found = set()
+    for doc in yaml.safe_load_all(charts):
+        if doc and doc.get("kind") == "OCIRepository":
+            found.add((doc["metadata"]["name"], str((doc["spec"].get("ref") or {}).get("digest"))))
+    for key, reference in ((yaml.safe_load(images) or {}).get("images") or {}).items():
+        found.add((f"images.{key}", str(reference)))
+    return found
+
+
+def unstaged_pins(production: set[tuple[str, str]], staged: set[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Each pin production holds that staging never held under the same key."""
+    return sorted(production - staged)
 
 
 def git(*args: str) -> str:
     done = subprocess.run(["git", *args], capture_output=True, text=True, check=False, cwd=ROOT)
     assert done.returncode == 0, done.stderr
     return done.stdout
+
+
+def staging_history(base: str) -> set[tuple[str, str]]:
+    """Every pin staging's files held at each commit on main up to `base`."""
+    held = set()
+    for commit in git("rev-list", base, "--", *STAGING_FILES).split():
+        texts = []
+        for path in STAGING_FILES:
+            shown = subprocess.run(
+                ["git", "show", f"{commit}:{path}"], capture_output=True, text=True, check=False, cwd=ROOT
+            )
+            texts.append(shown.stdout if shown.returncode == 0 else "")
+        held |= pins(*texts)
+    return held
 
 
 def test_production_runs_only_what_staging_ran():
@@ -952,13 +983,24 @@ def test_production_runs_only_what_staging_ran():
             raise RuntimeError("MANDATE_GITOPS_REQUIRED is set but origin/main is not fetched")
         pytest.skip("origin/main is not fetched")
     base = git("merge-base", "HEAD", "origin/main").strip()
-    staged = git("log", "-p", "--format=", base, "--", *STAGING_FILES)
-    production = "".join((ROOT / path).read_text() for path in PRODUCTION_FILES)
-    assert unstaged_digests(production, staged) == [], "production gains a digest staging never ran on main"
+    production = pins(*((ROOT / path).read_text() for path in PRODUCTION_FILES))
+    assert production, "production pins nothing"
+    assert unstaged_pins(production, staging_history(base)) == [], (
+        "production pins what staging never ran on main"
+    )
 
 
-def test_a_production_digest_staging_never_ran_is_caught():
-    ran, new = f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"
-    staged = f"+    digest: {ran}\n"
-    assert unstaged_digests(f"    digest: {ran}\n", staged) == []
-    assert unstaged_digests(f"    digest: {ran}\n  mandate: ghcr.io/x@{new}\n", staged) == [new]
+def test_a_production_pin_staging_never_ran_is_caught():
+    ran, other = f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"
+    staged = {("mandate-workspace", ran), ("mandate-journal-db", other), ("images.mandate", f"x@{ran}")}
+    assert unstaged_pins({("mandate-workspace", ran), ("images.mandate", f"x@{ran}")}, staged) == []
+    assert unstaged_pins({("mandate-workspace", other)}, staged) == [("mandate-workspace", other)]
+    assert unstaged_pins({("images.mandate", f"y@{ran}")}, staged) == [("images.mandate", f"y@{ran}")]
+
+
+def test_pins_are_read_per_key():
+    charts = (ROOT / PRODUCTION_FILES[0]).read_text()
+    found = pins(charts, "images:\n  mandate: ghcr.io/x@sha256:" + "a" * 64 + "\n")
+    assert ("images.mandate", "ghcr.io/x@sha256:" + "a" * 64) in found
+    assert {key for key, _ in found} >= {"mandate-workspace", "mandate-journal-db", "images.mandate"}
+    assert all(ANY_DIGEST.fullmatch(digest) for key, digest in found if not key.startswith("images."))
