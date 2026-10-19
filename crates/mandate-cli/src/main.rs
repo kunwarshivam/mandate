@@ -162,6 +162,12 @@ fn main() -> anyhow::Result<()> {
         Command::Agent(AgentCommand::Exit(args)) => {
             owner::run_exit(&args, now()?, &mut io::stdout().lock())
         }
+        Command::Agent(AgentCommand::Acknowledge(args)) => {
+            owner::run_acknowledge(&args, now()?, &mut io::stdout().lock())
+        }
+        Command::Agent(AgentCommand::RequestAck(args)) => {
+            owner::run_request_ack(&args, now()?, &mut io::stdout().lock())
+        }
         Command::Vault(VaultCommand::Import(args)) => {
             let environment: Vec<(String, String)> = std::env::vars_os()
                 .map(|(k, v)| {
