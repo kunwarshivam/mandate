@@ -150,9 +150,9 @@ fn a_dividend_paid_after_the_last_bar_stays_in_equity() {
     );
 }
 
-/// The risk state reads the dividend as income, not as a fall: a 5.00 dividend on 9 shares is
-/// 45 USD, past the tight ladder's 0.4% exit rung on its own, and the run latches nothing and ends
-/// no more restricted than a flat walk.
+/// The risk state reads the dividend as income, not as a fall: a 10.00 dividend on the 6 shares
+/// the run holds is 60 USD, the tight ladder's 0.6% flatten rung on its own, and the run latches
+/// nothing and ends no more restricted than a flat walk.
 #[test]
 #[ignore = "pending E4-4"]
 fn the_risk_state_reads_no_drawdown_from_a_dividend() {
@@ -172,10 +172,10 @@ fn the_risk_state_reads_no_drawdown_from_a_dividend() {
         &tight_ladder(),
         &settings(),
         &xyz(),
-        &ex_bars(EX, 500, 1_000_000),
+        &ex_bars(EX, 1_000, 1_000_000),
         &daily_outputs(&days, "0.5"),
         &[],
-        &[dividend(EX, days[PAY], 500)],
+        &[dividend(EX, days[PAY], 1_000)],
     )
     .unwrap_or_else(|e| panic!("the run completes: {}", e.code()));
     assert!(
