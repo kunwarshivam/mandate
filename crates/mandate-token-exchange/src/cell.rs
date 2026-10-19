@@ -28,7 +28,12 @@ impl Refused {
     }
 }
 
-/// A token URL the cell's tier admits, kept exactly as given.
+/// A token URL the cell's tier admits, kept exactly as given. Only [`parse`] makes one, so no
+/// other text can become the adapter's target:
+///
+/// ```compile_fail
+/// let forged = mandate_token_exchange::cell::CellTokenUrl("https://evil.example/t".to_owned());
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellTokenUrl(String);
 

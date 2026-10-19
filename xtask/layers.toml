@@ -785,7 +785,7 @@ forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mand
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["secrecy"]
+allowed_external = ["reqwest", "rustls", "secrecy", "tokio"]
 allowed_dependents = []
 
 [crates.mandate-api-server]

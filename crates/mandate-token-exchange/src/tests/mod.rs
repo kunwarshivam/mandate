@@ -6,3 +6,5 @@ mod response;
 
 #[cfg(debug_assertions)]
 mod cell;
+#[cfg(debug_assertions)]
+mod http;
