@@ -1,8 +1,0 @@
-file = "crates/mandate-journal/tests/step_up_confirmations.rs"
-test = "the_base_and_every_valid_confirmation_draft_parse"
-reason = """
-DEC-2104 (journal spec v0.62 §9.29): `StepUpConfirmed` is closed on the control stream at schema
-version 1 with rule 242. The journal catalogues no such record yet and refuses it as
-`unknown_event_type`, an answer of the journal's own rather than a stub's report. E9-4 S2's
-registration deletes this file with the test's `#[ignore]` line.
-"""

@@ -127,6 +127,7 @@ fn resume_stop_and_acknowledge_need_the_code() {
         (
             Command::Acknowledge {
                 event: common::runtime_id(42),
+                request: None,
             },
             "OwnerAcknowledged",
             None,
@@ -378,6 +379,7 @@ fn a_code_is_bound_to_every_field_it_confirms() {
     };
     let ack = |n: u64| Command::Acknowledge {
         event: common::runtime_id(n),
+        request: None,
     };
     let base = of(AGENT, &exit_aapl(true), &fx);
     let changed = [
@@ -551,16 +553,6 @@ const ISSUED: [&str; 12] = [
     "warning_shown",
 ];
 
-/// `OwnerAcknowledged`'s members (DEC-279 item 7).
-const ACKNOWLEDGED: [&str; 6] = [
-    "agent",
-    "event",
-    "risk_clock",
-    "step_up",
-    "submitted_at",
-    "user",
-];
-
 /// Step-up evidence's members, when it is not `null` (DEC-155 item 4).
 const STEP_UP: [&str; 3] = ["assertion_id", "authenticated_at", "method"];
 
@@ -598,17 +590,15 @@ fn code_for(fx: &Fixture, agent: &str, cmd: &Command) -> String {
 }
 
 /// The #397 review, minor 1; DEC-290: every payload the CLI commits has exactly its members, so a
-/// member nobody named (the code the owner typed, order content) fails here. Every command and
-/// every kill-switch scope is committed once, with and without step-up evidence, and only a Stop
-/// carries a release choice: `false` without `--release`, and no warning shown.
+/// member nobody named (the code the owner typed, order content) fails here. Every owner command
+/// and every kill-switch scope is committed once, with and without step-up evidence, and only a
+/// Stop carries a release choice: `false` without `--release`, and no warning shown. The
+/// acknowledgment and its request are §9.28's, checked in `tests/acknowledgments.rs`.
 #[test]
 fn every_owner_command_payload_has_exactly_its_members() {
     let mut fx = Fixture::new();
     let mut ids = FixedIds::default();
     let stop = Command::Stop { release: false };
-    let ack = Command::Acknowledge {
-        event: common::runtime_id(42),
-    };
     let mut second = ASKED_AT;
     let mut run = |fx: &mut Fixture, cmd: &Command, coded: bool| {
         let typed = coded.then(|| code_for(fx, AGENT, cmd));
@@ -631,7 +621,6 @@ fn every_owner_command_payload_has_exactly_its_members() {
     run(&mut fx, &stop, true);
     run(&mut fx, &exit_aapl(true), true);
     run(&mut fx, &exit_of("MSFT", None), false);
-    run(&mut fx, &ack, true);
     let agent_code = answer(
         "kill code",
         kill_code(&fx.journal, &owner(), &Scope::Agent(AGENT.to_owned())),
@@ -654,14 +643,13 @@ fn every_owner_command_payload_has_exactly_its_members() {
         );
     }
     let events = control(&fx);
-    assert_eq!(events.len(), 9, "one event per command");
+    assert_eq!(events.len(), 8, "one event per command");
     let mut stepped_up = 0;
     for event in &events {
         let event_type = member_text(event, "event_type").unwrap_or_default();
         let what = member_text(event, "payload.command").unwrap_or(event_type);
         match event_type {
             "OwnerCommandIssued" => closed(event, &ISSUED, what),
-            "OwnerAcknowledged" => closed(event, &ACKNOWLEDGED, what),
             other => panic!("the CLI committed a {other}"),
         }
         if member(event, "payload.step_up") != Some(&Value::Null) {
@@ -678,10 +666,7 @@ fn every_owner_command_payload_has_exactly_its_members() {
             );
         }
     }
-    assert_eq!(
-        stepped_up, 5,
-        "resume, Stop, the exit, the acknowledgment, the agent's kill"
-    );
+    assert_eq!(stepped_up, 4, "resume, Stop, the exit, the agent's kill");
 }
 
 /// DEC-136, the #397 review, minor 2: `stop --release` needs the code like any Stop, records the
@@ -1110,6 +1095,7 @@ fn a_repeated_acknowledgment_reports_the_first() {
     let mut fx = Fixture::new();
     let ack = Command::Acknowledge {
         event: common::runtime_id(42),
+        request: None,
     };
     let typed = code_for(&fx, AGENT, &ack);
     let acknowledge = |fx: &mut Fixture, ids: &mut FixedIds, second: i64| {

@@ -1,5 +1,7 @@
-# Staging (DEC-2011 item 1): one DOKS cluster of two nodes in nyc3, its buckets, and the API host
-# behind the tunnel and Access. DigitalOcean's provider reads its credentials from the environment
+# Staging (DEC-2011 item 1): one DOKS cluster of two nodes in sfo2, its buckets, and the API host
+# behind the tunnel and Access. The founder put all of the infrastructure in the US West (DEC-2047):
+# the cluster and its VPC run in sfo2 and the archive in R2's wnam; the state bucket moves from nyc3
+# in a later change. DigitalOcean's provider reads its credentials from the environment
 # (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
 # token as a variable; only infra.yml's job under infra-staging receives either.
 
@@ -10,8 +12,9 @@ provider "cloudflare" {
 }
 
 locals {
-  environment = "staging"
-  region      = "nyc3"
+  environment  = "staging"
+  region       = "sfo2"
+  state_region = "nyc3"
   account_id = sensitive(one(distinct([
     for account in data.cloudflare_accounts.visible.result : account.id
     if account.id != null && account.id != ""
@@ -40,13 +43,14 @@ data "cloudflare_accounts" "visible" {
 import {
   for_each = var.adopt_state_bucket ? toset(["state"]) : toset([])
   to       = module.cell.module.spaces.digitalocean_spaces_bucket.state
-  id       = "${local.region},mandate-tofu-state-${local.environment}"
+  id       = "${local.state_region},mandate-tofu-state-${local.environment}"
 }
 
 module "cell" {
   source                     = "../../modules/cell"
   environment                = local.environment
   region                     = local.region
+  state_region               = local.state_region
   vpc_ip_range               = "10.110.0.0/20"
   kubernetes_version         = "1.35.9-do.1"
   node_size                  = "s-2vcpu-4gb"
@@ -64,7 +68,7 @@ module "cloudflare" {
   zone_name      = "owlhead.ai"
   api_hostname   = "api-staging.owlhead.ai"
   api_origin     = var.api_origin
-  archive_bucket = "mandate-journal-archive-${local.environment}"
+  archive_bucket = "mandate-journal-archive-west-${local.environment}"
 }
 
 resource "terraform_data" "applied_commit" {
