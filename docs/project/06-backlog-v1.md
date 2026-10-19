@@ -2954,8 +2954,12 @@ enables `live` (ES-23, OPS-5).
   E21-8's last slice). **Release key** (DEC-2024; DEC-2605 rows 8 and 9, no hardware key): its
   public half is in `RELEASE_KEYS` (`crates/mandate-release/release-keys/cosign.pub`), and the
   `release-signing` job signs each binary and `SHA256SUMS` with it on a dispatch from `main`
-  the founder approves ([runbook](../runbooks/release-signing-key.md)). Staging promotion waits
-  on H1.
+  the founder approves ([runbook](../runbooks/release-signing-key.md)); the same run then
+  publishes a hosted cell's images, each with its binary's release signature, as
+  `signed-<commit>` (DEC-2026), and pointing the hosted overlays at them is E21-58's. A release
+  ships `mandate-api-server` beside the CLI, the agent daemon and the simulator, so promotion pins
+  the chart's `images.api` to its signed digest as it does `images.mandate`. Staging
+  promotion waits on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
@@ -3186,7 +3190,12 @@ enables `live` (ES-23, OPS-5).
   (`--verb`), `-w '%{header_json}'`, `~/.curlrc`, `${!var}` indirection, composite actions'
   steps, `wget -d` or `-S`, `curl | sh`, other `docker` or `podman login -p` forms, or
   `--oauth2-bearer`, `-b` and `--proxy-user` values. They hold `web-e2e.yml`'s traces upload by
-  step order only. L9's closed world holds meanwhile.
+  step order only. L9 does not yet read a reusable workflow a secret job calls (`workflow_call`),
+  an `if:` written across lines, `ACTIONS_ID_TOKEN_REQUEST_*` passed on to a later step, the
+  values (not the names) a secret step's `env:` sets, or a `checkout` with `repository:` after the
+  secret step. L10 does not yet read a positional `{:?}` of a command, or an `::add-mask::` built
+  from parts. L9's
+  closed world holds meanwhile.
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
   issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`

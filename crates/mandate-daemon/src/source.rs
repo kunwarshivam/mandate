@@ -11,8 +11,10 @@ use mandate_canon::{Digest, Value, parse};
 use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_research::{
-    AdmissionFacts, AssetClass, AssetId, AutonomyDecision, GroupId, LineageState, MandateEnvelope,
-    PolicyOverlay, ResearchEnvelope, SourceAllowlist, ValidatedMandate, WorkingUniverse,
+    AdmissionChange, AdmissionDecision, AdmissionFacts, AssetClass, AssetId, AutonomyDecision,
+    GroupId, LineageId, LineageState, MandateEnvelope, PolicyOverlay, RefusalReason,
+    ResearchEnvelope, SourceAllowlist, ThesisId, UniverseEntry, ValidatedMandate, WorkingUniverse,
+    expire_theses,
 };
 use mandate_research_run::{InstrumentFact, Symbol};
 use mandate_runtime::{ActiveThesis, JournalCatalog, Preconditions, RiskClock, RuntimeState};
@@ -65,15 +67,6 @@ pub struct SourceFor {
     pub environment: Environment,
 }
 
-/// The records an agent stream may hold whose facts the source cannot fold yet (E21-59): any one of
-/// them gives the pass no context, so research pauses (DEC-2214 item 3).
-const UNFOLDED: [&str; 4] = [
-    "ThesisProposed",
-    "ThesisRevised",
-    "ThesisInvalidated",
-    "UniverseChanged",
-];
-
 /// What an agent stream's own research records fold to (DEC-2249 items 1 and 2): the working
 /// universe, the lineages, and the active theses the next pass is handed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,8 +103,101 @@ pub fn fold_research(
     at: UtcNanos,
     instruments: &[InstrumentFact],
 ) -> Result<ResearchFold, FoldError> {
-    let _ = (agent, at, instruments);
-    Err(FoldError::Unimplemented)
+    let unreadable = |member| FoldError::Unreadable { member };
+    let mut lineages = LineageState::default();
+    let mut entries: BTreeMap<AssetId, UniverseEntry> = BTreeMap::new();
+    for row in agent {
+        let invalidation = row.event_type == "ThesisInvalidated";
+        if !invalidation && !matches!(row.event_type.as_str(), "ThesisProposed" | "ThesisRevised") {
+            continue;
+        }
+        let body = parse(&row.body).map_err(|_| unreadable("payload"))?;
+        let payload = body.get("payload").ok_or(unreadable("payload"))?;
+        let text = |member| {
+            payload
+                .get(member)
+                .and_then(Value::as_str)
+                .ok_or(unreadable(member))
+        };
+        let thesis = ThesisId::new(text("thesis_id")?).map_err(|_| unreadable("thesis_id"))?;
+        if invalidation {
+            for entry in entries.values_mut() {
+                if entry.thesis_id == thesis {
+                    entry.invalidated = true;
+                }
+            }
+            continue;
+        }
+        let lineage = LineageId::new(text("lineage_id")?).map_err(|_| unreadable("lineage_id"))?;
+        let instrument =
+            AssetId::new(text("instrument_id")?).map_err(|_| unreadable("instrument_id"))?;
+        let revision = payload
+            .get("revision")
+            .and_then(Value::as_int)
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or(unreadable("revision"))?;
+        let expires_at =
+            UtcNanos::parse_rfc3339(text("expires_at")?).map_err(|_| unreadable("expires_at"))?;
+        let admitted = match payload.get("admitted") {
+            Some(Value::Bool(admitted)) => *admitted,
+            _ => return Err(unreadable("admitted")),
+        };
+        let decision = match (admitted, payload.get("reason")) {
+            (true, Some(Value::Null)) => AdmissionDecision::Admitted {
+                change: AdmissionChange::Admitted,
+            },
+            (false, Some(Value::Str(code))) => AdmissionDecision::Refused {
+                reason: RefusalReason::parse(code).map_err(|_| unreadable("reason"))?,
+            },
+            _ => return Err(unreadable("reason")),
+        };
+        lineages.replay(&lineage, revision, &instrument, decision);
+        if admitted {
+            entries.insert(
+                instrument.clone(),
+                UniverseEntry {
+                    instrument,
+                    thesis_id: thesis,
+                    lineage_id: lineage,
+                    revision,
+                    expires_at,
+                    invalidated: false,
+                },
+            );
+        }
+    }
+    let entries: Vec<UniverseEntry> = entries.into_values().collect();
+    let expiry = expire_theses(at, &entries, &lineages).map_err(|_| unreadable("expires_at"))?;
+    let WorkingUniverse::Known {
+        instruments: kept, ..
+    } = &expiry.universe
+    else {
+        return Err(unreadable("expires_at"));
+    };
+    let active = entries
+        .iter()
+        .filter(|entry| kept.contains(&entry.instrument))
+        .map(|entry| {
+            let symbol = instruments
+                .iter()
+                .find(|fact| fact.asset_id.as_str() == entry.instrument.as_str())
+                .map(|fact| fact.symbol.clone())
+                .ok_or(unreadable("symbol"))?;
+            Ok(ActiveThesis {
+                thesis_id: entry.thesis_id.as_str().to_owned(),
+                lineage_id: entry.lineage_id.as_str().to_owned(),
+                revision: entry.revision,
+                instrument: entry.instrument.clone(),
+                symbol,
+                expires_at: RiskClock::from_secs(entry.expires_at.secs()),
+            })
+        })
+        .collect::<Result<Vec<_>, FoldError>>()?;
+    Ok(ResearchFold {
+        universe: expiry.universe,
+        lineages,
+        active,
+    })
 }
 
 /// The cell's research source.
@@ -177,17 +263,13 @@ impl CellSource {
     /// Today's research spend: the recorded costs of the unreserved calls the agent stream records
     /// since the risk day of `clock` began, which counts a record the lagging clock has not reached
     /// yet, plus the meter's research spend for that day, which counts every reserved call at what
-    /// the meter holds for it (DEC-2249 item 3). `None` when the stream holds a record the source
-    /// cannot fold, or an unreserved cost or a time it cannot read, on any day, or while the meter
-    /// is held.
+    /// the meter holds for it (DEC-2249 item 3). `None` when the stream holds an unreserved
+    /// cost or a time it cannot read, on any day, or while the meter is held.
     fn spend(&self, agent: &[StoredEvent], clock: RiskClock) -> Option<Usd> {
         let now = UtcNanos::from_parts(clock.secs(), 0).ok()?;
         let day = risk_day(now).ok()?;
         let mut spend = Usd::parse("0").ok()?;
         for row in agent {
-            if UNFOLDED.contains(&row.event_type.as_str()) {
-                return None;
-            }
             if row.event_type != "ModelInvocationRecorded" {
                 continue;
             }
@@ -251,16 +333,30 @@ impl ResearchSource for CellSource {
         if self.others_deployed(&control)? {
             return None;
         }
-        let spend = self.spend(&agent, state.risk_clock()?)?;
+        let clock = state.risk_clock()?;
+        let spend = self.spend(&agent, clock)?;
         let asset = |fact: &InstrumentFact| AssetId::new(fact.asset_id.as_str()).ok();
         let pinned = envelope.universe_pinned;
+        let fold = fold_research(
+            &agent,
+            UtcNanos::from_parts(clock.secs(), 0).ok()?,
+            &self.instruments,
+        )
+        .ok()?;
+        if pinned && (fold.lineages != LineageState::default() || !fold.active.is_empty()) {
+            return None;
+        }
         Some(ResearchParts {
             preconditions: Preconditions::read(&JournalCatalog::JOURNAL),
             mandate: ValidatedMandate::from_validated_envelope(envelope),
             overlay: PolicyOverlay::internal_research_profile(),
-            universe: WorkingUniverse::Known {
-                instruments: BTreeSet::new(),
-                pinned,
+            universe: if pinned {
+                WorkingUniverse::Known {
+                    instruments: BTreeSet::new(),
+                    pinned,
+                }
+            } else {
+                fold.universe
             },
             facts: AdmissionFacts {
                 allowlist: self.allowlist.clone(),
@@ -282,8 +378,8 @@ impl ResearchSource for CellSource {
                 data_universe: Some(self.instruments.iter().map(asset).collect::<Option<_>>()?),
                 research_spend_usd_today: spend,
             },
-            lineages: LineageState::default(),
-            active: Vec::new(),
+            lineages: fold.lineages,
+            active: fold.active,
             last_reservation: None,
             data_symbols: self
                 .instruments
