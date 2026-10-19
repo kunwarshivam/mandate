@@ -193,6 +193,13 @@ fn transport_problems(guard: &Guard, sources: &[(String, String, String)]) -> Ve
     problems
 }
 
+/// Every string literal in `sources` outside the exempt crates that names a mail endpoint: an SMTP
+/// URL, `sendmail`, a mail provider's API host, or a host on a mail submission port.
+fn literal_problems(guard: &Guard, sources: &[(String, String, String)]) -> Vec<String> {
+    let _ = (guard, sources);
+    Vec::new()
+}
+
 /// Whether each token lies inside a macro invocation's delimited arguments (`name!(...)`,
 /// `name![...]`, `name!{...}`), so no macro can be handed the trait to build an impl from. A token
 /// the scan cannot place reads as inside, failing closed.
@@ -479,6 +486,96 @@ mod tests {
             "mandate-mail-smtp",
             "pub type FounderSmtpTransport = lettre::SmtpTransport;",
         )]);
+    }
+
+    #[test]
+    fn an_allowed_type_declared_other_than_once_at_the_top_of_its_file_fails() {
+        let trait_def = "pub trait MailTransport { }\n";
+        for (what, body) in [
+            (
+                "a foreign type imported under the allowed name",
+                "pub struct Recorded;\nuse mandate_gateway::RecordedTransport;\nimpl MailTransport for RecordedTransport { }",
+            ),
+            (
+                "no declaration at all",
+                "impl MailTransport for RecordedTransport { }",
+            ),
+            (
+                "a declaration inside a nested module",
+                "mod shadow { pub struct RecordedTransport; }\nuse shadow::RecordedTransport;\nimpl MailTransport for RecordedTransport { }",
+            ),
+            (
+                "a declaration inside a function",
+                "fn f() { struct RecordedTransport; }\nimpl MailTransport for RecordedTransport { }",
+            ),
+            (
+                "an import naming the allowed type beside its declaration",
+                "pub struct RecordedTransport;\nuse self::RecordedTransport as _;\nuse crate::RecordedTransport;\nimpl MailTransport for RecordedTransport { }",
+            ),
+        ] {
+            let problems = transport_problems(
+                &guard(),
+                &[source("mandate-dispatcher", &format!("{trait_def}{body}"))],
+            );
+            assert!(!problems.is_empty(), "{what} passes");
+        }
+    }
+
+    #[test]
+    fn an_absent_crate_owes_no_declaration() {
+        let only_dispatcher = [source(
+            "mandate-dispatcher",
+            "pub trait MailTransport { }\npub struct RecordedTransport;\nimpl MailTransport for RecordedTransport { }",
+        )];
+        assert_eq!(
+            transport_problems(&guard(), &only_dispatcher),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_mail_endpoint_literal_outside_the_founder_transport_fails() {
+        for literal in [
+            "smtp://mail.example:587",
+            "SMTPS://mail.example",
+            "sendmail",
+            "/usr/sbin/sendmail",
+            "https://api.sendgrid.com/v3/mail/send",
+            "api.mailgun.net",
+            "mail.example:25",
+            "127.0.0.1:465",
+            "mail.example:2525",
+        ] {
+            let src = format!("const X: &str = {literal:?};");
+            assert!(
+                !literal_problems(&guard(), &[elsewhere("mandate-dispatcher", &src)]).is_empty(),
+                "{literal} passes"
+            );
+            assert_eq!(
+                literal_problems(&guard(), &[source("mandate-mail-smtp", &src)]),
+                Vec::<String>::new(),
+                "{literal} in the founder transport"
+            );
+        }
+        for harmless in [
+            "12:25:00",
+            "2026-10-17T12:25:00Z",
+            "port 25",
+            "mail.example:443",
+            "sentmail",
+        ] {
+            let src = format!("const X: &str = {harmless:?};");
+            assert_eq!(
+                literal_problems(&guard(), &[elsewhere("mandate-dispatcher", &src)]),
+                Vec::<String>::new(),
+                "{harmless}"
+            );
+        }
+        let in_xtask = elsewhere("xtask", "const X: &str = \"smtp://mail.example:587\";");
+        assert_eq!(
+            literal_problems(&guard(), &[in_xtask]),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
