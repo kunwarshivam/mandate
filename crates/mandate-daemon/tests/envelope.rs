@@ -105,15 +105,61 @@ fn the_envelope_reads_every_value_the_schema_allows() {
     }
 }
 
+/// Any signal model that admits instruments makes the envelope admit them, not only the first;
+/// with none admitting, a research envelope is still read as written (mandate spec §8.5).
+#[test]
+#[ignore = "pending E21-54"]
+fn the_envelope_admits_instruments_when_any_model_does() {
+    let mut second = researching();
+    let mut model = second["behavior"]["signal_models"][0].clone();
+    second["behavior"]["signal_models"][0]["admits_instruments"] = json!(false);
+    model["id"] = json!("llm.research_agent");
+    second["behavior"]["signal_models"]
+        .as_array_mut()
+        .unwrap()
+        .push(model);
+    let read = envelope(&parse(second.to_string().as_bytes()).unwrap()).unwrap();
+    assert!(read.admits_instruments, "the second model admits");
+
+    let mut none = researching();
+    none["behavior"]["signal_models"][0]["admits_instruments"] = json!(false);
+    let read = envelope(&parse(none.to_string().as_bytes()).unwrap()).unwrap();
+    assert!(!read.admits_instruments);
+    assert_eq!(read.research.map(|r| r.interval_s), Some(3600));
+}
+
+/// A refusal says which member, and is an error like any other.
+#[test]
+fn a_refusal_names_its_member() {
+    let refused = SourceError::Unreadable {
+        member: "universe.pinned",
+    };
+    assert_eq!(
+        refused.to_string(),
+        "the mandate document's `universe.pinned` cannot be read"
+    );
+    let error: &dyn std::error::Error = &refused;
+    assert!(error.source().is_none());
+}
+
 /// A member the envelope cannot read refuses it, naming that member: nothing is defaulted.
 #[test]
 #[ignore = "pending E21-54"]
 fn an_envelope_member_it_cannot_read_refuses_it() {
     type Edit = fn(&mut Json);
-    let cases: [(&str, Edit); 10] = [
+    let cases: [(&str, Edit); 18] = [
         ("universe.pinned", |d| d["universe"]["pinned"] = json!("no")),
         ("universe.max_instruments", |d| {
             d["universe"]["max_instruments"] = json!(4_294_967_296_u64)
+        }),
+        ("universe.max_instruments", |d| {
+            d["universe"]["max_instruments"] = json!(0)
+        }),
+        ("universe.max_instruments", |d| {
+            d["universe"]["max_instruments"] = json!(21)
+        }),
+        ("universe.asset_classes", |d| {
+            d["universe"]["asset_classes"] = json!([])
         }),
         ("universe.asset_classes", |d| {
             d["universe"]["asset_classes"] = json!(["options"])
@@ -130,6 +176,9 @@ fn an_envelope_member_it_cannot_read_refuses_it() {
                 .unwrap()
                 .remove("admits_instruments");
         }),
+        ("behavior.signal_models", |d| {
+            d["behavior"]["signal_models"][0]["admits_instruments"] = json!("yes")
+        }),
         ("behavior.research", |d| {
             d["behavior"].as_object_mut().unwrap().remove("research");
         }),
@@ -138,6 +187,21 @@ fn an_envelope_member_it_cannot_read_refuses_it() {
                 .as_object_mut()
                 .unwrap()
                 .remove("interval_s");
+        }),
+        ("behavior.research.interval_s", |d| {
+            d["behavior"]["research"]["interval_s"] = json!("3600")
+        }),
+        ("behavior.research.interval_s", |d| {
+            d["behavior"]["research"]["interval_s"] = json!(299)
+        }),
+        ("behavior.research.max_revisions_per_lineage", |d| {
+            d["behavior"]["research"]
+                .as_object_mut()
+                .unwrap()
+                .remove("max_revisions_per_lineage");
+        }),
+        ("behavior.research.max_revisions_per_lineage", |d| {
+            d["behavior"]["research"]["max_revisions_per_lineage"] = json!(11)
         }),
         ("behavior.research.cost_cap_usd_per_day", |d| {
             d["behavior"]["research"]["cost_cap_usd_per_day"] = json!("five")
