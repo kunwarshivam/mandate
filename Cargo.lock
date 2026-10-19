@@ -2614,6 +2614,7 @@ dependencies = [
  "mandate-journal",
  "mandate-release",
  "mandate-time",
+ "proptest",
  "ring",
  "serde_json",
  "tokio",
