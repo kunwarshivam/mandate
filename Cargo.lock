@@ -1687,6 +1687,7 @@ name = "mandate-api-server"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "mandate-api",
  "mandate-artifacts-fs",
  "mandate-authn",
@@ -1707,6 +1708,7 @@ dependencies = [
  "ring",
  "rustix",
  "rustls",
+ "secrecy",
  "serde_json",
  "tokio",
 ]

@@ -54,7 +54,6 @@ fn admitted() -> (support_connect::Fixture, Value) {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_start_answers_the_pending_connection_and_its_authorization_url() {
     let (_f, body) = admitted();
     let connection = format!("conn_{}", derived(CONNECTION_OPERATION));
@@ -80,7 +79,6 @@ fn a_start_answers_the_pending_connection_and_its_authorization_url() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_start_commits_connection_requested_version_two_with_the_step_up_it_spent() {
     let (f, _) = admitted();
     let rows = appended(&f);
@@ -115,7 +113,6 @@ fn a_start_commits_connection_requested_version_two_with_the_step_up_it_spent() 
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_state_redeems_once_to_this_connection_this_admin_and_paper() {
     let (f, body) = admitted();
     let (state, _) = drawn(text(&body, &["authorization_url"]));
@@ -139,7 +136,6 @@ fn the_state_redeems_once_to_this_connection_this_admin_and_paper() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn neither_the_state_nor_the_verifier_reaches_the_journal_and_the_verifier_never_leaves() {
     let (f, body) = admitted();
     let (state, verifier) = drawn(text(&body, &["authorization_url"]));
@@ -174,7 +170,6 @@ fn neither_the_state_nor_the_verifier_reaches_the_journal_and_the_verifier_never
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_retry_while_the_state_is_held_answers_the_same_201_and_records_once() {
     let (f, first) = admitted();
     let cookie = signed_in(&f, ALICE);
@@ -185,7 +180,6 @@ fn a_retry_while_the_state_is_held_answers_the_same_201_and_records_once() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_retry_after_the_state_is_redeemed_or_expired_finds_the_key_spent() {
     let (redeemed, body) = admitted();
     let (state, _) = drawn(text(&body, &["authorization_url"]));
@@ -213,7 +207,6 @@ fn a_retry_after_the_state_is_redeemed_or_expired_finds_the_key_spent() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn another_body_under_the_key_conflicts_and_records_nothing() {
     let (f, _) = admitted();
     let cookie = signed_in(&f, ALICE);

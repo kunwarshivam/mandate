@@ -25,7 +25,6 @@ fn admin(f: &Fixture, body: &[u8]) -> (u16, ProblemCode) {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_session_then_the_key_then_the_body_are_checked_first() {
     let f = fixture("paper", true, true);
     let body = to_canonical(&base());
@@ -44,7 +43,6 @@ fn the_session_then_the_key_then_the_body_are_checked_first() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_member_without_the_permission_is_forbidden_and_a_stranger_finds_nothing() {
     let f = fixture("paper", true, true);
     let body = to_canonical(&base());
@@ -62,7 +60,6 @@ fn a_member_without_the_permission_is_forbidden_and_a_stranger_finds_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_live_workspace_is_refused_before_any_step_up() {
     let f = fixture("live", true, true);
     assert_eq!(
@@ -73,7 +70,6 @@ fn a_live_workspace_is_refused_before_any_step_up() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn another_disclosure_version_is_invalid_before_any_step_up() {
     let f = fixture("paper", true, true);
     let body = String::from_utf8(to_canonical(&base()))
@@ -87,7 +83,6 @@ fn another_disclosure_version_is_invalid_before_any_step_up() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_start_without_step_up_is_step_up_required_and_never_reaches_the_port() {
     let f = fixture("paper", true, true);
     assert_eq!(
@@ -98,7 +93,6 @@ fn a_start_without_step_up_is_step_up_required_and_never_reaches_the_port() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn evidence_the_port_refuses_answers_its_code_and_records_nothing() {
     let f = fixture("paper", true, false);
     assert_eq!(
@@ -110,7 +104,6 @@ fn evidence_the_port_refuses_answers_its_code_and_records_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_live_connection_is_refused_after_step_up_and_records_nothing() {
     let f = fixture("paper", true, true);
     assert_eq!(
@@ -126,7 +119,6 @@ fn a_live_connection_is_refused_after_step_up_and_records_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_control_stream_that_cannot_be_read_records_nothing() {
     let f = fixture("paper", true, true);
     f.journal
@@ -143,7 +135,6 @@ fn a_control_stream_that_cannot_be_read_records_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_deployment_that_offers_no_connect_answers_not_found() {
     let f = fixture("paper", false, true);
     assert_eq!(
