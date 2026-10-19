@@ -1,4 +1,4 @@
-//! One exchange per call between the runtime and the model-gateway service (DEC-2264 items 1 to 4):
+//! One exchange per call between the runtime and the model-gateway service (DEC-2265 items 1 to 4):
 //! a frame reads back as itself, a length past its bound is refused before any of the body is read,
 //! a frame cut short or malformed is never answered, a call crosses a real connection whole, a
 //! reply that does not come in time reads as timed out, and neither side writes a frame past its
@@ -100,7 +100,7 @@ fn served_record() -> CallRecord {
     gateway.call(&served_request()).unwrap()
 }
 
-/// DEC-2264 item 1: any body within its bound is written as its big-endian length and then itself,
+/// DEC-2265 item 1: any body within its bound is written as its big-endian length and then itself,
 /// and reads back as itself, taking nothing past its end; one past the bound is written as nothing.
 #[test]
 fn any_body_within_its_bound_reads_back_as_itself() {
@@ -128,7 +128,7 @@ fn any_body_within_its_bound_reads_back_as_itself() {
         .unwrap();
 }
 
-/// DEC-2264 item 2: a length one past its bound, or any longer, is refused having read only the
+/// DEC-2265 item 2: a length one past its bound, or any longer, is refused having read only the
 /// four bytes of the length, so a peer cannot make either side read or hold an oversized body.
 #[test]
 fn a_length_past_the_bound_is_refused_before_a_byte_of_the_body_is_read() {
@@ -152,7 +152,7 @@ fn a_length_past_the_bound_is_refused_before_a_byte_of_the_body_is_read() {
     );
 }
 
-/// DEC-2264 item 2: a request frame cut short anywhere, in its length or its body, reads as
+/// DEC-2265 item 2: a request frame cut short anywhere, in its length or its body, reads as
 /// truncated, and the service neither answers it nor writes a byte back.
 #[test]
 fn a_frame_cut_short_anywhere_is_never_answered() {
@@ -170,7 +170,7 @@ fn a_frame_cut_short_anywhere_is_never_answered() {
     }
 }
 
-/// DEC-2264 items 2 and 5: a whole frame that does not decode to a request, one not JSON, empty,
+/// DEC-2265 items 2 and 5: a whole frame that does not decode to a request, one not JSON, empty,
 /// of another version, or a reply where a request belongs, is never answered and gets no reply.
 #[test]
 fn a_frame_that_does_not_decode_is_never_answered() {
@@ -196,7 +196,7 @@ fn a_frame_that_does_not_decode_is_never_answered() {
     }
 }
 
-/// DEC-2264 items 1, 5 and 6: over a real connection, a request reaches the service as itself and
+/// DEC-2265 items 1, 5 and 6: over a real connection, a request reaches the service as itself and
 /// its record comes back whole, prompt and response included; a refusal comes back as itself.
 #[test]
 fn a_call_crosses_one_connection_and_comes_back_whole() {
@@ -236,7 +236,7 @@ fn a_call_crosses_one_connection_and_comes_back_whole() {
     service.join().unwrap();
 }
 
-/// DEC-2264 item 4: when the service holds a call past the caller's socket timeout, the caller's
+/// DEC-2265 item 4: when the service holds a call past the caller's socket timeout, the caller's
 /// exchange ends as timed out rather than waiting on it.
 #[test]
 fn a_reply_that_does_not_come_in_time_reads_as_timed_out() {
@@ -261,7 +261,7 @@ fn a_reply_that_does_not_come_in_time_reads_as_timed_out() {
     service.join().unwrap();
 }
 
-/// DEC-2264 items 1 and 3: the service never writes a reply past its bound; it writes nothing, so
+/// DEC-2265 items 1 and 3: the service never writes a reply past its bound; it writes nothing, so
 /// the caller reads the call as lost. A request past its own bound is never sent.
 #[test]
 fn neither_side_writes_a_frame_past_its_bound() {

@@ -1,4 +1,4 @@
-//! One exchange per call between the runtime and the model-gateway service (DEC-2264 items 1 to 3):
+//! One exchange per call between the runtime and the model-gateway service (DEC-2265 items 1 to 3):
 //! a 4-byte big-endian length, then that many bytes of the wire form, one request each way. The
 //! framing is generic over `std::io`, so this crate opens no socket; each process hands in its own
 //! connection, with its socket timeouts already set to the call's deadline (item 4).
@@ -19,7 +19,7 @@ pub const MAX_REQUEST_FRAME: u32 = 4 * 1024 * 1024;
 pub const MAX_REPLY_FRAME: u32 = 24 * 1024 * 1024;
 
 /// Why an exchange ended without a whole frame. Its text names only the code, never a byte of the
-/// frame (DEC-2264 item 9).
+/// frame (DEC-2265 item 9).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FrameError {
     #[error("the frame's length passes its bound")]
@@ -77,7 +77,7 @@ pub fn read_frame<R: Read>(input: &mut R, bound: u32) -> Result<Vec<u8>, FrameEr
 ///
 /// # Errors
 /// Any [`FrameError`]. The caller treats every one as a lost reply and never retries the call
-/// under the same `call_id` (DEC-2264 items 3 and 4).
+/// under the same `call_id` (DEC-2265 items 3 and 4).
 pub fn call<S: Read + Write>(stream: &mut S, request: &CallRequest) -> Result<Reply, FrameError> {
     write_frame(stream, &request_bytes(request), MAX_REQUEST_FRAME)?;
     let body = read_frame(stream, MAX_REPLY_FRAME)?;

@@ -1052,6 +1052,55 @@ def test_runtime_research_names_only_the_interim_image_s_bundle():
         assert done.returncode != 0, path
 
 
+# The executor on Alpaca's paper host (DEC-2306 item 1): staging's tier, and the cell's vault.
+VAULT = "https://vault.ws-ws1.svc:8200"
+ALPACA_PAPER = [
+    "--set", "deploymentTier=staging",
+    "--set", "executor.broker=alpaca-paper",
+    "--set", f"executor.vaultAddress={VAULT}",
+]
+PAPER_ARGS = ["--broker", "alpaca-paper", "--vault-address", VAULT, "--vault-dir", "/run/mandate/vault"]
+
+
+def test_the_executor_runs_on_alpaca_paper_where_staging_names_it():
+    """DEC-2306 item 1: `executor.broker=alpaca-paper` hands every executor the paper host, the
+    vault's address and the CA's directory, whether the manager starts it or it is a Deployment,
+    and nothing else changes: the runtime's args, and the manager's containment."""
+    docs = render_all(*ALPACA_PAPER)
+    assert deploy_manager_contained(docs) == []
+    args = {p["metadata"]["name"]: first_container(p)["args"] for p in managed_pods(docs)}
+    assert args == {
+        "executor": ["run", "--probe", "/tmp/process.sock", *PAPER_ARGS],
+        "runtime": ["run", "--probe", "/tmp/process.sock", "--research", RESEARCH],
+    }, args
+    unmanaged = render_all(*ALPACA_PAPER, "--set", f"images.{MANAGER}=")
+    executor = next(
+        w for w in workloads(unmanaged) if w["kind"] == "Deployment" and w["metadata"]["name"] == "executor"
+    )
+    assert first_container(executor)["args"] == ["run", "--probe", "/tmp/process.sock", *PAPER_ARGS]
+
+
+def test_the_paper_broker_needs_staging_and_its_vault():
+    """DEC-2306 item 1: the fixture stays the default and the only broker outside staging; the
+    paper host needs the cell's vault by an https address; any other broker, a live one included,
+    is refused by the schema, so no executor is pointed at a host the decision does not name."""
+    k3d = str(CELL / "values" / "k3d.yaml")
+    base = ["-f", k3d, *every_image()]
+    assert helm(CHART, *base, *ALPACA_PAPER).returncode == 0
+    staging = ALPACA_PAPER[:2]
+    refused = {
+        "outside staging": ALPACA_PAPER[2:],
+        "in production": [*ALPACA_PAPER, "--set", "deploymentTier=production"],
+        "without a vault": [*staging, "--set", "executor.broker=alpaca-paper"],
+        "over http": [*ALPACA_PAPER, "--set", "executor.vaultAddress=http://vault.ws-ws1.svc:8200"],
+        "with a path": [*ALPACA_PAPER, "--set", f"executor.vaultAddress={VAULT}/v1"],
+        "a live broker": [*staging, "--set", "executor.broker=alpaca-live"],
+        "an unnamed broker": [*staging, "--set", "executor.broker=alpaca"],
+    }
+    for why, extra in refused.items():
+        assert helm(CHART, *base, *extra).returncode != 0, why
+
+
 def test_without_the_manager_the_runtime_and_executor_are_deployments():
     docs = render_all("--set", f"images.{MANAGER}=")
     kinds = {w["metadata"]["name"]: w["kind"] for w in workloads(docs)}
