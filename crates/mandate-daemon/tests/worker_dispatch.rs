@@ -381,7 +381,6 @@ fn who() -> WorkerFor {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn an_agentic_bundle_registers_its_pinned_loop() {
     let bundle = agentic_bundle();
     let registry = bundle.registry().unwrap_or_else(|e| panic!("{e:?}"));
@@ -392,7 +391,6 @@ fn an_agentic_bundle_registers_its_pinned_loop() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_worker_takes_the_loop_s_bounds_from_an_agentic_bundle() {
     let shelf = Shelf::default();
     let now = || UtcNanos::from_parts(CUT_OFF + 5, 0).unwrap();
@@ -426,7 +424,6 @@ fn the_worker_takes_the_loop_s_bounds_from_an_agentic_bundle() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_bundle_naming_an_unpinnable_loop_is_refused_before_any_call() {
     let mut bundle = agentic_bundle();
     bundle.entry.agentic = Some(LoopBounds {
