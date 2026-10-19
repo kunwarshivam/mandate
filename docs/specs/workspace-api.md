@@ -1529,12 +1529,11 @@ workspace exists to name before it is authorized (identity spec §4.5, §6.4).
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
+| One's own session | `GET /v1/me/session` | — | On the authentication plane, outside the matrix (identity spec §4.2, §4.5; DEC-816 item 7): reads only the caller's own session record and yields no context. Answers `{principal_id, kind, expires_at}` with `as_of` `[]`: the caller's own principal id, never a session reference, cookie, token, digest, subject, or issuer; `expires_at` is the earlier of the idle and absolute deadlines. A session an outage narrowed is refused `reduction_only`, and no live session gets the one 401. Shape: `read-models/session` ([DEC-2113](../project/decisions/DEC-2113.md)) |
 | List one's own workspace memberships | `GET /v1/me/workspaces` | — | Authorized by the `self` row "List one's own workspace memberships" (identity spec §4.2): a full session of a user principal only. Returns the caller's `active` memberships as `{workspace_id, label, roles}` from the membership index, reading no workspace's data; absent and foreign workspaces look the same. A failed index read is `membership_unavailable` ([DEC-816](../project/decisions/DEC-816.md) item 1). A hosted deployment's index is its control stream's membership fold; `label` is `null` until one is recorded; `as_of` is `[]`. Shape: `read-models/my-workspaces` ([DEC-2113](../project/decisions/DEC-2113.md)) |
 
-Owed to the identity spec's lanes, and listed so the prefix rule above is complete: `GET /v1/me/session`
-(its answer, `{principal_id, kind, expires_at}` with `as_of` `[]`, is `read-models/session`,
-[DEC-2113](../project/decisions/DEC-2113.md)),
-`POST /v1/reduction-sessions/challenges`, and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
+Owed to the identity spec's lanes, and listed so the prefix rule above is complete:
+`POST /v1/reduction-sessions/challenges` and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
 they sit outside the matrix, DEC-816 item 7). Every failure of the last is the one answer, 401 `unauthenticated` (§3.5), with no distinguishing timing, and `GET /v1/oauth/alpaca/callback` (§4.5).
 
 | Operation | Method and path | Event | Notes |
