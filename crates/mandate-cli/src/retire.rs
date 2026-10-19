@@ -97,13 +97,17 @@ pub fn stop(
                 Ok(Retirement::Moved) => {}
             }
         }
+        if let Some(submitted) = retired(journal, owner, agent) {
+            return Ok(submitted);
+        }
     }
     agent::command(journal, ids, owner, agent, &command, typed, now)
 }
 
 /// The `AgentStopped` that retires `agent`, read afresh: before each decision, so a Stop of an
-/// agent already retired writes nothing more, and after a retirement that failed, since its append
-/// may have committed although no answer settled it and a Stop has one effect. A stop is final
+/// agent already retired writes nothing more, and after a retirement that failed or the last
+/// decision, since its append may have committed although no answer settled it, or its answer
+/// reported a moved head, and a Stop has one effect. A stop is final
 /// (§9.21), so any `AgentStopped` naming the agent retires it. `None` when none is stored, or the
 /// control stream cannot be read.
 fn retired(journal: &dyn ControlJournal, owner: &Owner, agent: &str) -> Option<Submitted> {
