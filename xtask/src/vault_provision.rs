@@ -201,31 +201,44 @@ struct Root<'s, 'a> {
     token: Option<String>,
 }
 
+/// What the step says when a root token may be left live, with no token in the text.
+pub(crate) const MAY_BE_LIVE: &str = "the generated root token may be live: revoke it with a token \
+     generated from the recovery keys in vault-recovery/vault-init (DEC-2630)";
+
+/// Revokes `token`, trying once more when `kubectl` itself could not be started, answering whether
+/// the vault revoked it.
+fn revoke_token(steps: &Steps<'_>, token: &str) -> bool {
+    let attempt = || in_vault(steps, &REVOKE, Some(token));
+    match attempt().or_else(|_| attempt()) {
+        Ok((revoked, _)) => revoked,
+        Err(_) => false,
+    }
+}
+
 impl Root<'_, '_> {
     fn revoke(mut self) -> Result<()> {
         let Some(token) = self.token.take() else {
             return Ok(());
         };
-        let (revoked, _) = in_vault(self.steps, &REVOKE, Some(&token))?;
-        ensure!(
-            revoked,
-            "revoking the generated root token failed, so it may be live: revoke it with a token \
-             generated from the recovery keys in {RECOVERY_NAMESPACE}/{RECOVERY_SECRET}"
-        );
+        ensure!(revoke_token(self.steps, &token), "{MAY_BE_LIVE}");
         Ok(())
     }
 }
 
 impl Drop for Root<'_, '_> {
     fn drop(&mut self) {
-        if let Some(token) = self.token.take() {
-            in_vault(self.steps, &REVOKE, Some(&token)).ok();
+        if let Some(token) = self.token.take()
+            && !revoke_token(self.steps, &token)
+        {
+            eprintln!("    vault-provision: {MAY_BE_LIVE}");
         }
     }
 }
 
 /// Makes a root token from the first [`THRESHOLD`] recovery keys, cancelling any attempt an
-/// earlier run left open first, and cancelling this one again when it does not complete.
+/// earlier run left open first, and cancelling this one again when it does not complete. A
+/// completed generation whose token cannot be decoded leaves a root token no one holds; the step
+/// fails saying it may be live.
 fn root<'s, 'a>(steps: &'s Steps<'a>, keys: &[String]) -> Result<Root<'s, 'a>> {
     let cancel = || {
         in_vault(
@@ -267,7 +280,12 @@ fn root<'s, 'a>(steps: &'s Steps<'a>, keys: &[String]) -> Result<Root<'s, 'a>> {
         cancel().ok();
         bail!("the vault's root generation did not complete with {THRESHOLD} recovery keys");
     };
-    let token = decode_root(encoded, otp)?;
+    let Ok(token) = decode_root(encoded, otp) else {
+        cancel().ok();
+        bail!(
+            "the generated root token could not be decoded, so it was not revoked; {MAY_BE_LIVE}"
+        );
+    };
     mask::add_mask(&token);
     Ok(Root {
         steps,
@@ -473,7 +491,7 @@ pub(crate) fn vault_provision(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
     use anyhow::anyhow;
     use serde_json::json;
@@ -502,6 +520,9 @@ mod tests {
         provision_fails: bool,
         apply_fails: bool,
         put_fails: bool,
+        garbled_token: bool,
+        revoke_fails: bool,
+        revoke_spawn_failures: Cell<u32>,
         model_key: &'static str,
         calls: RefCell<Vec<(Vec<String>, Option<String>)>>,
         provisioned_with: RefCell<Vec<String>>,
@@ -530,14 +551,26 @@ mod tests {
                 "exec" if has("sys/generate-root/update") => {
                     let updates = self.calls_with("sys/generate-root/update").len();
                     let complete = updates == THRESHOLD && !self.incomplete;
+                    let encoded = if self.garbled_token {
+                        "AAAA".to_owned()
+                    } else {
+                        encoded_root()
+                    };
                     let data = if complete {
-                        json!({"complete": true, "encoded_token": encoded_root()})
+                        json!({"complete": true, "encoded_token": encoded})
                     } else {
                         json!({"complete": false, "progress": updates})
                     };
                     (true, json!({ "data": data }).to_string())
                 }
-                "exec" if stdin == Some(ROOT) => (true, String::new()),
+                "exec" if stdin == Some(ROOT) => {
+                    let failures = self.revoke_spawn_failures.get();
+                    if failures > 0 {
+                        self.revoke_spawn_failures.set(failures - 1);
+                        return Err(anyhow!("kubectl could not start"));
+                    }
+                    (!self.revoke_fails, String::new())
+                }
                 "apply" => (!self.apply_fails, String::new()),
                 other => return Err(anyhow!("unexpected kubectl {other}: {args:?}")),
             })
@@ -828,5 +861,48 @@ mod tests {
             ]
         );
         assert_eq!(put_command(), ["put", "model-provider-key"]);
+    }
+
+    /// A generation that completes with a token the pad cannot decode fails saying the token may
+    /// be live, and provisions nothing.
+    #[test]
+    fn an_undecodable_root_token_fails_saying_it_may_be_live() {
+        let fake = Fake {
+            garbled_token: true,
+            ..Fake::default()
+        };
+        let error = fake.run(&["c1"]).map(|_| ()).map_err(|e| e.to_string());
+        assert!(
+            error.as_ref().is_err_and(|e| e.contains(MAY_BE_LIVE)),
+            "{error:?}"
+        );
+        assert!(fake.provisioned_with.borrow().is_empty());
+        assert_eq!(fake.calls_with("delete").len(), 2);
+    }
+
+    /// A revoke the vault refuses fails the step saying the token may be live.
+    #[test]
+    fn a_refused_revoke_fails_saying_the_token_may_be_live() {
+        let fake = Fake {
+            revoke_fails: true,
+            ..Fake::default()
+        };
+        let error = fake.run(&["c1"]).map(|_| ()).map_err(|e| e.to_string());
+        assert!(
+            error.as_ref().is_err_and(|e| e.contains(MAY_BE_LIVE)),
+            "{error:?}"
+        );
+    }
+
+    /// A revoke whose `kubectl` could not start is tried once more.
+    #[test]
+    fn a_revoke_whose_kubectl_failed_is_tried_again() -> Result<()> {
+        let fake = Fake {
+            revoke_spawn_failures: Cell::new(1),
+            ..Fake::default()
+        };
+        fake.run(&["c1"])?;
+        assert!(fake.revoked());
+        Ok(())
     }
 }
