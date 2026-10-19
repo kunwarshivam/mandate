@@ -114,7 +114,7 @@ cargo xtask cell down
 cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills, demo --no-web
 cargo xtask ci cell-journal       # and beside it: up, then standby-down and archive, plain and seeded
 cargo xtask ci cell-failover      # and beside it: up, then restart (a failover with the standby), plain and seeded
-cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch, plain and seeded (DEC-2602)
+cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch and vault, plain and seeded (DEC-2602, DEC-2022)
 ```
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
@@ -247,6 +247,7 @@ the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecti
 | `kill-switch` | With every pod of `api`, `deploy-manager`, `exporter`, `model-gateway` and `control-plane` gone (scaled to zero, then back), `mandate agent kill` at agent, connection and workspace scope and `mandate agent pause` commit through one-off `control` Jobs, and the control stream exports, verifies and holds each (OPS-4, E21-34). Each stream owner's `KillSwitchActivated` is reported `skipped` until the runtime and executor run in the cell ([DEC-2000](../../docs/project/decisions/DEC-2000.md) item 6) | The connection-scope kill switch never committed: the check must name `no kill_switch of scope connection` |
 | `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
 | `standby-down` | With the synchronous standby fenced, an append neither commits nor becomes visible on the primary, and its Job ends on its deadline; once the standby is back and streams synchronously, a new append commits and every stream written verifies by journal spec §11 (OPS-2, E21-41) | The cluster's durability set to `preferred`, so the primary commits alone: `committed with the standby fenced` |
+| `vault` | `mandate vault provision` sets the cell's vault up (DEC-2022), then from a pod labelled as the executor each AppRole logs in and reads: a runtime nothing, an executor exactly its own connection's token and not `drill-other`'s, the model gateway its key; and no `mandate-*` policy holds `*` or `+`. It runs in `cell-kill-switch`, after the kill switch's drill | The runtime's policy rewritten to read every connection's token through `+`: the check must name `wildcard in mandate-runtime` |
 | `archive` | A closed WAL segment is reported archived by Postgres, a base backup completes, and Barman's own tools, reading the store with the archive's key, list the backup and fetch the segment back (E21-41) | The archive pointed at another bucket of the same store, which Postgres cannot tell: `not in the archive` |
 
 A seeded run counts as caught only when its report names the planted bug's own symptom
@@ -332,8 +333,9 @@ chart refuses a second key today, so it waits on a chart change that renders Ope
 3. Once `bao status` shows the vault unsealed under the new key id, remove the previous key from
    the values, then the old key from the Secret.
 
-Not yet: provisioning policies and roles in the cell and handing each process its secret id as a
-mounted file, the egress drill's vault probe, and the vault's audit device.
+The `vault` drill provisions the cell's vault and proves each identity's reach (DEC-2022). Not yet:
+each process's secret id as a mounted file (V3, with the executor's wiring, E21-9), and the
+vault's audit device.
 
 ## The Compose file
 

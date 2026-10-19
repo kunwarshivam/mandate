@@ -112640,5 +112640,625 @@
     ]
    }
   ]
+ },
+ "market_intents": {
+  "spec": "docs/specs/journal.md v0.65 §9.5 rule 245 (DEC-2037)",
+  "drafts": {
+   "exit_v2": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAB0N0A000000000000000E1",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "IntentReceived",
+    "schema_version": 2,
+    "event_time": "2026-10-19T14:30:00.250000000Z",
+    "clock_source": "local",
+    "causation_id": "01JAB0N0P000000000000000X1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "payload": {
+     "intent_id": "01JAB0N0P000000000000000X1",
+     "agent_id": "agent_a",
+     "instrument_id": "AAPL",
+     "side": "sell",
+     "type": "market",
+     "tif": "day",
+     "qty": "10",
+     "limit_price": null,
+     "purpose": "risk_exit",
+     "risk_clock": "2026-10-19T14:30:01.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "exit_v1": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAB0N0A000000000000000E2",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "IntentReceived",
+    "schema_version": 1,
+    "event_time": "2026-10-19T14:30:00.250000000Z",
+    "clock_source": "local",
+    "causation_id": "01JAB0N0P000000000000000X1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {
+     "mandate_version": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "payload": {
+     "intent_id": "01JAB0N0P000000000000000X1",
+     "agent_id": "agent_a",
+     "instrument_id": "AAPL",
+     "side": "sell",
+     "type": "market",
+     "tif": "day",
+     "qty": "10",
+     "limit_price": null,
+     "purpose": "risk_exit"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "limit_without_price",
+    "clause": "rule 245: `limit_price` is non-null when `type` is `limit`",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.type",
+      "value": "limit"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit_price"
+    }
+   },
+   {
+    "name": "market_with_price",
+    "clause": "rule 245: `limit_price` is null when `type` is `market`",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.limit_price",
+      "value": "187.40"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit_price"
+    }
+   },
+   {
+    "name": "market_open",
+    "clause": "rule 245: `market` only for an exit: not `open`",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "open"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.type"
+    }
+   },
+   {
+    "name": "market_increase",
+    "clause": "rule 245: `market` only for an exit: not `increase`",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "increase"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.type"
+    }
+   },
+   {
+    "name": "stop_type",
+    "clause": "rule 245: `type` is `limit` or `market`",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.type",
+      "value": "stop"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.type"
+    }
+   },
+   {
+    "name": "market_open_with_price",
+    "clause": "rule 245: reported at the first that fails: `payload.type` before `payload.limit_price`",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "open"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": "187.40"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.type"
+    }
+   },
+   {
+    "name": "limit_open_without_price",
+    "clause": "rule 245: an opening is a limit order with a limit",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "open"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     },
+     {
+      "path": "payload.type",
+      "value": "limit"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit_price"
+    }
+   },
+   {
+    "name": "limit_without_price.v1",
+    "clause": "rule 245: `limit_price` is non-null when `type` is `limit`",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.type",
+      "value": "limit"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit_price"
+    }
+   },
+   {
+    "name": "market_with_price.v1",
+    "clause": "rule 245: `limit_price` is null when `type` is `market`",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.limit_price",
+      "value": "187.40"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit_price"
+    }
+   },
+   {
+    "name": "market_open.v1",
+    "clause": "rule 245: `market` only for an exit: not `open`",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "open"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.type"
+    }
+   },
+   {
+    "name": "market_increase.v1",
+    "clause": "rule 245: `market` only for an exit: not `increase`",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "increase"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.type"
+    }
+   },
+   {
+    "name": "stop_type.v1",
+    "clause": "rule 245: `type` is `limit` or `market`",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.type",
+      "value": "stop"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.type"
+    }
+   },
+   {
+    "name": "market_open_with_price.v1",
+    "clause": "rule 245: reported at the first that fails: `payload.type` before `payload.limit_price`",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "open"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": "187.40"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.type"
+    }
+   },
+   {
+    "name": "limit_open_without_price.v1",
+    "clause": "rule 245: an opening is a limit order with a limit",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "open"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     },
+     {
+      "path": "payload.type",
+      "value": "limit"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.limit_price"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "market_risk_exit",
+    "clause": "rule 245: an exit at the market carries no limit",
+    "base_draft": "exit_v2",
+    "changes": [],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "market_discretionary_exit",
+    "clause": "rule 245: `market` for any exit",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.purpose",
+      "value": "discretionary_exit"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "market_owner_exit",
+    "clause": "rule 245: `market` for any exit",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.purpose",
+      "value": "owner_exit"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "limit_exit",
+    "clause": "rule 245: an exit may carry a limit",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.type",
+      "value": "limit"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": "187.40"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "limit_open",
+    "clause": "rule 245: an opening is a limit order",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "open"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     },
+     {
+      "path": "payload.type",
+      "value": "limit"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": "187.40"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "limit_increase",
+    "clause": "rule 245: an increase is a limit order",
+    "base_draft": "exit_v2",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "increase"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     },
+     {
+      "path": "payload.type",
+      "value": "limit"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": "187.40"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "market_risk_exit.v1",
+    "clause": "rule 245: an exit at the market carries no limit",
+    "base_draft": "exit_v1",
+    "changes": [],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "market_discretionary_exit.v1",
+    "clause": "rule 245: `market` for any exit",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.purpose",
+      "value": "discretionary_exit"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "market_owner_exit.v1",
+    "clause": "rule 245: `market` for any exit",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.purpose",
+      "value": "owner_exit"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "limit_exit.v1",
+    "clause": "rule 245: an exit may carry a limit",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.type",
+      "value": "limit"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": "187.40"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "limit_open.v1",
+    "clause": "rule 245: an opening is a limit order",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "open"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     },
+     {
+      "path": "payload.type",
+      "value": "limit"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": "187.40"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "limit_increase.v1",
+    "clause": "rule 245: an increase is a limit order",
+    "base_draft": "exit_v1",
+    "changes": [
+     {
+      "path": "payload.side",
+      "value": "buy"
+     },
+     {
+      "path": "payload.purpose",
+      "value": "increase"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": null
+     },
+     {
+      "path": "payload.type",
+      "value": "limit"
+     },
+     {
+      "path": "payload.limit_price",
+      "value": "187.40"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
  }
 }
