@@ -136,7 +136,8 @@ again (`dig +short <account>.r2.cloudflarestorage.com`) and change, in one revie
 
 Set the new values in your shell, then run `cargo xtask gitops secrets staging`. It rewrites both
 Secrets and the endpoint's ConfigMap and nothing else, after the same confirmation. A pod reads a Secret only at start, so
-restart the tunnel with `kubectl -n ws-ws1 rollout restart deployment/cloudflared`. The journal
+restart the tunnel with `kubectl -n ws-ws1 rollout restart deployment/cloudflared`, or
+`deployment/api` once the API runs, since the tunnel then runs in the API's pod (DEC-2056). The journal
 picks up the new archive key on its next archive attempt.
 
 ## Upgrading Flux
