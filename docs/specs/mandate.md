@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.7 (schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | v0.8 (corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10, E17 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
@@ -36,6 +36,12 @@ builder, versioning, change classification, and the records kept.
   its fuzz checks it against the decisions §6.2 actually makes. §7 states how the loss answer of
   goal-first onboarding (DEC-182) maps to the three loss fields, and the ladder the drafter proposes
   beneath them. No reference case, decision, or limit changes.
+- **v0.8 ([DEC-2303](../project/decisions/DEC-2303.md), an agent reading under
+  [DEC-176](../project/04-decision-log.md#decisions)):** §5.2 says how the risk state folds the
+  corporate-action inputs it already listed: a split as trading spec §8.5 books it, with its mark
+  rounded toward zero, a cash dividend's receivable from the first counted sane mark after it, and
+  the posting of their receivables as a move to cash. MI-33 states what that means for every limit,
+  and MC-R27 to MC-R32 show it. No existing case, rule, or limit changes.
 - **v0.7 ([DEC-539](../project/decisions/DEC-539.md), the founder's decision of 2026-10-08):** mandate
   schema version 2 renames `protection.crypto_stop_limit_offset` to `protection.stop_limit_offset`,
   one offset for every protective stop-limit the platform places, whatever the asset class. V-008
@@ -323,6 +329,7 @@ changes, acknowledgments, version changes, approval requests and responses, and 
 | MI-30 | An `open` or `increase` order an owner-connected client requested (`requested_by: client`, DEC-141) is never `auto`: it is `ask`, or `deny` when the rules deny, whatever the rules, the default, a delegation, or the admission setting say. Orders the owner or the agent requested are decided exactly as without this rule ([DEC-185](../project/04-decision-log.md#decisions)) |
 | MI-31 | **A tripwire only tightens, and only the owner lifts it** ([DEC-187](../project/04-decision-log.md#decisions)). A tripwire fires at the first evaluation at which its metric, counted over the inputs since it was armed, reaches its threshold, and at no other. Once fired it stays fired through every later input, version, risk day, and restart until the owner acknowledges it with valid step-up (§6.1), and, with `independent_approval_required`, as a user other than the requester (§5.8), which re-arms it with nothing counted. While fired it is a latched limit, so no allocation increase applies (MI-7). While any tripwire is fired, no delegation lifts (MI-28); while one whose action, or whose action in the version in effect, is `exits_only` is fired, the effective mode is at least `exits_only`. With or without `autonomy.tripwires`, every other decision is the same, a tripwire never makes the mode `paused`, and no exit is held or denied by it (MI-1). A version classified risk-reducing or neutral never lifts a fired tripwire, softens what it holds, or makes one fire later (checked against an independent oracle that recounts each metric from the fill log) |
 | MI-32 | **Silence ends autonomy** ([DEC-188](../project/04-decision-log.md#decisions)). From 00:00 America/New_York after `autonomy.review_by` in the version in effect, judged on the risk clock, no `open` or `increase` is `auto`: it is `ask`, or `deny` when the decision without the review date denies, whatever the rules, the default, or a delegation say, and an `ask` keeps its own source. The admission ceiling only tightens (MI-17), so it never yields an `auto` of its own: an `auto` admission setting leaves the rules' `auto` standing, and that is what the review ceiling turns into `ask`. Exits stay built-in AUTO (MI-1). Before that instant, and with no review date, every decision, label, and delegation id is what it would be without this rule. With no risk clock to judge by, nothing is `auto` (checked against an independent oracle that builds the instant from the calendar date) |
+| MI-33 | **A corporate action moves the risk state only by its cash, never by its timing or a rounding** ([DEC-2303](../project/decisions/DEC-2303.md)). A split changes E by exactly cash in lieu + Q' × mark' − Q × mark, mark' being mark × old ÷ new rounded toward zero at 12 places: that is cash in lieu − f × mark' (f the residual removed) less Q_raw × (mark × old ÷ new − mark'), a rounding in [0, Q_raw × 10⁻¹²) with Q_raw = Q × new ÷ old. With no residual E never rises, so the split lifts nothing, clears no breach and restarts no wait: it triggers everything a clock tick at the same instant would, and nothing more than that tick or the rounding's fall reaches. A cash dividend changes nothing at application; its receivable round(Q × d, 2), Q the position at application, joins E with the first counted sane mark after it, in that mark's step. Neither changes E₀, C, N or L. Posting either receivable changes no figure, whatever amount is posted. H follows E as after any input (checked against an independent oracle that recomputes each change from the action and the state before it, carries the dividends due itself, and steps a twin of the state with a clock tick at the split's instant, including at a rung's exact boundary) |
 
 ## 2. Lifecycle
 
@@ -701,6 +708,20 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   the ex-date per trading spec §8.3), `CashInLieuPosted`, `CompensatingEvent`,
   `MandateVersionApplied`, `UniverseChanged` (§2.3), `RiskDayStarted`, copied `ClockAdvanced`, and
   owner acknowledgments.
+- **Corporate actions** ([DEC-2303](../project/decisions/DEC-2303.md)) are folded at application,
+  trading spec §8.5's instant (20:00 New York time on the last trading day before the ex-date). A
+  **split** replaces Q, B and realized by §8.5's rule: Q' and the removed residual basis R, and cash
+  in lieu round(f × p, 2) (0 when no price is posted) added to realized less R. The risk mark becomes
+  mark × old ÷ new rounded toward zero at 12 places, so a split with no residual never raises E.
+  A **cash dividend** is due round(Q × d, 2), Q being the position at application, and changes
+  nothing at application: the last mark is still the cum-dividend close. Its receivable joins
+  realized with the first counted sane mark after application (§5.2's marks), in that mark's step,
+  so E never counts both the dividend and the cum-dividend mark. Cash in lieu and a dividend that has
+  joined E are receivables; `CashInLieuPosted` and `DividendPaid` move them to cash and change no
+  figure the risk state holds, whatever amount the broker posts: cash the risk state never booked,
+  such as cash in lieu after a split that posted no price, stays out of E, and the difference is the
+  reconciliation's. An action is not a quote (§5.6's hard trigger reads quotes only). Every other kind
+  is out of scope (§8.5), never folded.
 - **The risk clock** is the scheduler's `ClockAdvanced` time, in whole seconds and monotone. The
   scheduler ticks every second; the executor evaluates every tick but journals a copied
   `ClockAdvanced` in the account stream only when the evaluation emits an event (or the tick
@@ -1803,7 +1824,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 458 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 464 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1818,7 +1839,7 @@ shared harness, which counts only the families it owns, by case-ID prefix.
 | Schema | MC-S01 to MC-S31 | Structural rejects, including `on_complete`, the 300 s confirmation cap, per-model output age, `max_instruments` bounds, the research object, `autonomy.admission` |
 | Semantic | MC-V01 to MC-V77 | Every V-rule and warning, independent approval in a one-user workspace (V-047) and its risk-reducing exception, the closed platform-default list, loss carry (including a released agent's), the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
 | Policy | MC-P01 to MC-P22 | Nearest-level reporting, each key kind, the retail profile (DEC-98), the internal research profile (DEC-103), paper-only environments, the research keys, platform maximums |
-| Risk state | MC-R01 to MC-R26 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input |
+| Risk state | MC-R01 to MC-R32 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a release's loss carry and a redeploy at the carried L, a universe change as a risk input, a split with and without a residual, at a rung's boundary and with no whole share left, and a cash dividend held until the ex-date's mark, as risk inputs (MI-33) |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |
 | Gate | MC-G01 to MC-G16 | Position cap, order size, group cooldown, orders per day, gross exposure, exits exempt, the working universe (including an empty one, which denies every opening) |
 | Order builder | MC-B01 to MC-B39 | Exit and buy conviction, freshness, clipping, band, trim and its guards and its full-close exemption, the trim after a resting sell and on the venue's quantity grid (DEC-445 item 2), deferral, averaging down, accumulate clips with fees |
