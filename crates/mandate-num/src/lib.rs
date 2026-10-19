@@ -488,6 +488,23 @@ impl SplitRatio {
         })
     }
 
+    /// `price × old ÷ new` on `tick`'s grid, rounded once in the direction `adverse` names, as
+    /// [`Price::on_tick`] reads it: [`Adverse::Down`] rounds up, which keeps a sell stop at least as
+    /// protective as the exact value, and [`Adverse::Up`] rounds down, which keeps a protective
+    /// sell limit at least as fillable (DEC-2245 item 3). `not_positive` when it rounds to zero.
+    pub fn price(self, price: Price, tick: TickRule, adverse: Adverse) -> Result<Price, NumError> {
+        let scaled = price.exact().mul(Exact::integer(self.old))?;
+        let on_places = match adverse {
+            Adverse::Down => scaled.div(Exact::integer(self.new), QTY_SCALE, Rounding::Ceiling)?,
+            Adverse::Up => scaled.div_toward_zero(Exact::integer(self.new), QTY_SCALE)?,
+        };
+        on_places
+            .to_decimal(QTY_SCALE)
+            .and_then(positive)
+            .map(Price)?
+            .on_tick(tick, adverse)
+    }
+
     /// `round(mark × old ÷ new, scale, mode)`: one rounding; `not_positive` if it rounds to zero,
     /// `too_precise` if `scale` exceeds a mark's 12 places.
     pub fn mark(self, mark: MarkPrice, scale: u32, mode: Rounding) -> Result<MarkPrice, NumError> {
