@@ -217,3 +217,25 @@ fn another_body_under_the_key_conflicts_and_records_nothing() {
     );
     assert_eq!(appended(&f).len(), 1);
 }
+
+/// A restart holds no `state`: a fresh store refuses the old one, and a retry finds the key spent,
+/// so a restart fails closed (DEC-2623 item 4).
+#[test]
+#[ignore = "pending E10-13"]
+fn after_a_restart_the_old_state_is_unknown_and_the_key_spent() {
+    let (f, body) = admitted();
+    let (state, _) = drawn(text(&body, &["authorization_url"]));
+    let connect = f.connect.as_ref().expect("offered");
+    *connect.states.lock().expect("unpoisoned") =
+        mandate_connections::start::PendingStates::default();
+    let redeemed = connect
+        .states
+        .lock()
+        .expect("unpoisoned")
+        .redeem(&state, ALICE, at(T0 + 1))
+        .map(|_| ());
+    assert_eq!(redeemed, Err(ConnectError::StateUnknown));
+    let cookie = signed_in(&f, ALICE);
+    let again = start(&f, Some(&cookie), Some(KEY), &to_canonical(&base()));
+    assert_eq!(code(&again), (409, ProblemCode::IdempotencyConflict));
+}
