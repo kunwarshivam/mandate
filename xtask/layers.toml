@@ -631,7 +631,7 @@ allowed_external = ["ring", "secrecy", "thiserror"]
 layer = 8
 safety_critical = true
 pure = false
-allowed_external = ["base64", "reqwest", "ring", "rustls", "secrecy", "serde_json", "thiserror", "tokio"]
+allowed_external = ["base64", "reqwest", "ring", "rustls", "rustix", "secrecy", "serde_json", "thiserror", "tokio"]
 
 [crates.mandate-alpaca]
 layer = 7

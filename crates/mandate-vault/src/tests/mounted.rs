@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use mandate_connections::record::ConnectionId;
+use rustix::fs::{CWD, FileType, Mode, mknodat};
 use secrecy::ExposeSecret;
 
 use crate::SourceError;
-use crate::mounted::{read_mounted, read_mounted_credentials};
+use crate::mounted::{read_checked, read_mounted, read_mounted_credentials};
 use crate::policy::Identity;
 
 static NEXT: AtomicU32 = AtomicU32::new(0);
@@ -66,7 +67,6 @@ fn credentials(dir: &Path, identity: &Identity) -> Result<(String, String), Sour
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_executors_credentials_are_read_through_the_kubelets_links() {
     let dir = Fresh::new("kubelet");
     kubelet(
@@ -83,7 +83,6 @@ fn an_executors_credentials_are_read_through_the_kubelets_links() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn plain_files_owner_only_are_read_too() {
     let dir = Fresh::new("plain");
     write(&dir.0.join("runtime.role-id"), "role-r", 0o600);
@@ -95,7 +94,6 @@ fn plain_files_owner_only_are_read_too() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_ca_is_read_whole_lines_and_all() {
     let dir = Fresh::new("ca");
     let pem = "-----BEGIN CERTIFICATE-----\nAAAA\nBBBB\n-----END CERTIFICATE-----\n";
@@ -106,7 +104,6 @@ fn a_ca_is_read_whole_lines_and_all() {
 /// `..data` pointing at an absolute directory outside the mount is refused, though the file
 /// there is owner-only and well formed.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_data_link_to_an_absolute_path_outside_the_mount_is_refused() {
     let dir = Fresh::new("absolute");
     let outside = Fresh::new("outside");
@@ -118,7 +115,6 @@ fn a_data_link_to_an_absolute_path_outside_the_mount_is_refused() {
 
 /// A name linked by a relative path that climbs out of the mount is refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_link_that_climbs_out_of_the_mount_is_refused() {
     let parent = Fresh::new("parent");
     let dir = parent.0.join("mount");
@@ -130,7 +126,6 @@ fn a_link_that_climbs_out_of_the_mount_is_refused() {
 
 /// The mode is judged on the file the links reach: any group or other bit is refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_reached_file_open_to_group_or_others_is_refused() {
     for mode in [0o440, 0o404, 0o644, 0o401, 0o410] {
         let dir = Fresh::new("mode");
@@ -144,7 +139,6 @@ fn a_reached_file_open_to_group_or_others_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_missing_file_a_directory_or_a_dangling_link_is_refused() {
     let dir = Fresh::new("missing");
     fs::create_dir(dir.0.join("sub")).unwrap();
@@ -160,7 +154,6 @@ fn a_missing_file_a_directory_or_a_dangling_link_is_refused() {
 
 /// A name that is not one plain path component is refused before anything is opened.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_name_that_is_not_one_component_is_refused() {
     let dir = Fresh::new("names");
     let inner = dir.0.join("inner");
@@ -177,7 +170,6 @@ fn a_name_that_is_not_one_component_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_credential_that_is_empty_or_not_one_line_is_refused() {
     for text in ["", "\n", "a\n\n", "a\nb", "a\r\n", "a\rb"] {
         let dir = Fresh::new("lines");
@@ -192,7 +184,6 @@ fn a_credential_that_is_empty_or_not_one_line_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_missing_role_id_refuses_the_credentials() {
     let dir = Fresh::new("half");
     write(&dir.0.join("executor-c1.secret-id"), "secret-1", 0o400);
@@ -203,7 +194,6 @@ fn a_missing_role_id_refuses_the_credentials() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_token_exchange_has_no_mounted_credentials() {
     let dir = Fresh::new("exchange");
     write(&dir.0.join("exchange-c1.role-id"), "role-1", 0o400);
@@ -214,5 +204,104 @@ fn a_token_exchange_has_no_mounted_credentials() {
             &Identity::TokenExchange(ConnectionId::new("c1").unwrap())
         ),
         Err(SourceError::Config)
+    );
+}
+
+fn read_swapped(dir: &Path, name: &str, swap: &dyn Fn(&Path)) -> Result<String, SourceError> {
+    read_checked(dir, name, swap).map(|value| value.expose_secret().to_owned())
+}
+
+fn fifo(path: &Path) {
+    mknodat(CWD, path, FileType::Fifo, Mode::from_raw_mode(0o600), 0).unwrap();
+}
+
+/// Another owner-only file renamed over the checked one before it is opened is refused, by its
+/// inode, though it would pass every other check.
+#[test]
+fn a_file_swapped_in_after_the_check_is_refused() {
+    let dir = Fresh::new("swap-file");
+    write(&dir.0.join("ca.crt"), "checked", 0o400);
+    write(&dir.0.join("other"), "swapped", 0o400);
+    let swap = |reached: &Path| fs::rename(reached.with_file_name("other"), reached).unwrap();
+    assert_eq!(
+        read_swapped(&dir.0, "ca.crt", &swap),
+        Err(SourceError::CredentialFile)
+    );
+}
+
+/// A link swapped in for the checked file is not followed.
+#[test]
+fn a_link_swapped_in_after_the_check_is_refused() {
+    let dir = Fresh::new("swap-link");
+    write(&dir.0.join("ca.crt"), "checked", 0o400);
+    write(&dir.0.join("other"), "swapped", 0o400);
+    let swap = |reached: &Path| {
+        fs::remove_file(reached).unwrap();
+        symlink("other", reached).unwrap();
+    };
+    assert_eq!(
+        read_swapped(&dir.0, "ca.crt", &swap),
+        Err(SourceError::CredentialFile)
+    );
+}
+
+/// A pipe swapped in for the checked file is refused without waiting for a writer.
+#[test]
+fn a_pipe_swapped_in_after_the_check_is_refused_without_blocking() {
+    let dir = Fresh::new("swap-fifo");
+    write(&dir.0.join("ca.crt"), "checked", 0o400);
+    let swap = |reached: &Path| {
+        fs::remove_file(reached).unwrap();
+        fifo(reached);
+    };
+    assert_eq!(
+        read_swapped(&dir.0, "ca.crt", &swap),
+        Err(SourceError::CredentialFile)
+    );
+}
+
+/// An owner-only pipe at the name itself is refused, not read as empty.
+#[test]
+fn a_pipe_at_the_name_is_refused() {
+    let dir = Fresh::new("fifo");
+    fifo(&dir.0.join("ca.crt"));
+    assert_eq!(read(&dir.0, "ca.crt"), Err(SourceError::CredentialFile));
+}
+
+/// A mode widened on the checked file before it is opened is judged on the handle and refused.
+#[test]
+fn a_mode_widened_after_the_check_is_refused() {
+    let dir = Fresh::new("swap-mode");
+    write(&dir.0.join("ca.crt"), "checked", 0o400);
+    let widen = |reached: &Path| {
+        fs::set_permissions(reached, fs::Permissions::from_mode(0o444)).unwrap();
+    };
+    assert_eq!(
+        read_swapped(&dir.0, "ca.crt", &widen),
+        Err(SourceError::CredentialFile)
+    );
+}
+
+#[test]
+fn a_file_that_is_not_utf8_is_refused() {
+    let dir = Fresh::new("utf8");
+    fs::write(dir.0.join("ca.crt"), b"\xff\xfe").unwrap();
+    fs::set_permissions(dir.0.join("ca.crt"), fs::Permissions::from_mode(0o400)).unwrap();
+    assert_eq!(read(&dir.0, "ca.crt"), Err(SourceError::CredentialFile));
+}
+
+/// A link to the very file checked, swapped in for it, is refused though it reaches the same
+/// inode: the open never follows a link at its last step.
+#[test]
+fn a_link_to_the_same_file_swapped_in_after_the_check_is_refused() {
+    let dir = Fresh::new("swap-same");
+    write(&dir.0.join("ca.crt"), "checked", 0o400);
+    let swap = |reached: &Path| {
+        fs::rename(reached, reached.with_file_name("moved")).unwrap();
+        symlink("moved", reached).unwrap();
+    };
+    assert_eq!(
+        read_swapped(&dir.0, "ca.crt", &swap),
+        Err(SourceError::CredentialFile)
     );
 }

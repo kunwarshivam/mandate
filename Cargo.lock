@@ -2661,6 +2661,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "ring",
+ "rustix",
  "rustls",
  "secrecy",
  "serde_json",
