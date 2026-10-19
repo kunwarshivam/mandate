@@ -24341,6 +24341,37 @@ jq -r "$filter" "$src"
         Ok(())
     }
 
+    /// A wrapped command word is judged against its own substitution, however many assignments
+    /// the wrapper takes: `env -i A=1 B=2 "$(dirname "$0")/x.sh"` runs the script beside this
+    /// one, and `env -i A=1 "$(cat cmd)/x.sh" "$(dirname "$0")/y.sh"` does not borrow the later
+    /// word's `dirname` (RS's finding on DEC-851 item 6's position lookup).
+    #[test]
+    fn a_wrapped_command_word_reads_its_own_substitution() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let read = |text: &str| {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            live_feature_problems(&policy, &meta(), &files)
+        };
+        for text in [
+            "env -i A=1 B=2 \"$(dirname \"$0\")/x.sh\"",
+            "env -i A=1 \"$(dirname \"$0\")/x.sh\"",
+            "env A=1 B=2 C=3 \"$(dirname \"$0\")/x.sh\" --flag",
+        ] {
+            assert_eq!(read(text)?, Vec::<String>::new(), "{text}");
+        }
+        for text in [
+            "env -i A=1 \"$(cat cmd.txt)/x.sh\" \"$(dirname \"$0\")/y.sh\"",
+            "env -i A=1 B=2 \"$(cat cmd.txt)/x.sh\" a \"$(dirname \"$0\")/y.sh\"",
+        ] {
+            assert_eq!(read(text)?.len(), 1, "{text}");
+        }
+        Ok(())
+    }
+
     /// A command word that starts with an expansion fails closed (DEC-851 item 6; X1 tests
     /// correction 12b, after #979's review): after its wrappers and keywords, it is refused unless
     /// it is `"$@"`, a sole `$C`/`${C}` or whole array whose definitions are all readable and hold
