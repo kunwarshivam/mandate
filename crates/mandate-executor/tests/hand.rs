@@ -5074,7 +5074,6 @@ fn an_automated_flatten_sells_crypto_at_once() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_owner_exit_outside_the_session_prices_from_the_confirmed_bid() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
