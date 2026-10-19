@@ -65,7 +65,11 @@ DEC-2031). Its probes are processes.json's `probe`, as a Deployment's are (DEC-1
 {{- $ctx := . -}}
 {{- $words := .p.probe | default (list "/usr/local/bin/mandate-daemon" "probe" "{probe}" "--probe" "/tmp/process.sock") -}}
 {{- $probe := dict "livez" (include "mandate.fill" (dict "root" $ctx.root "words" $words "probe" "livez") | fromJsonArray) "readyz" (include "mandate.fill" (dict "root" $ctx.root "words" $words "probe" "readyz") | fromJsonArray) -}}
-{{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" (list "run" "--probe" "/tmp/process.sock") "probe" $probe) }}
+{{- $args := list "run" "--probe" "/tmp/process.sock" -}}
+{{- if and (eq .p.name "runtime") .root.Values.runtime.research -}}
+{{- $args = concat $args (list "--research" .root.Values.runtime.research) -}}
+{{- end -}}
+{{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" $args "probe" $probe) }}
 {{- fromYaml (include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container)) | toJson }}
 {{- end -}}
 {{- define "mandate.deployManagerTemplates" -}}
