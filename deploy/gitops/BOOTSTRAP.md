@@ -79,6 +79,7 @@ cargo xtask gitops bootstrap staging
    3. the admission policy controller;
    4. the journal's two instances;
    5. the workspace with its tunnel.
+   6. in staging only, the vault (below).
 
    Watch it:
 
@@ -86,6 +87,29 @@ cargo xtask gitops bootstrap staging
    flux get all -A
    kubectl -n ws-ws1 get cluster,pods
    ```
+
+## Staging's vault: two steps, once
+
+Staging runs the workspace vault; production does not until you decide how it unseals
+([DEC-2051](../../docs/project/decisions/DEC-2051.md), DEC-2021 item 6). It unseals itself from a
+key only you hold, which no CI job ever sees, so these two steps are yours, from your machine,
+once:
+
+1. **Give it its seal key.** Make one with `openssl rand -hex 32` and keep it with staging's other
+   secrets. Run `cargo xtask gitops bootstrap staging` as above. After Flux, it asks for staging's
+   vault seal key without showing what you type: paste the 64 hex characters. It creates
+   `ws-ws1/vault-seal-key` only if it is not there, so a later bootstrap keeps it and says so.
+   Until it exists, the vault's pod waits to start; nothing else waits on it.
+2. **Initialize it.** Once the pod runs:
+
+   ```sh
+   kubectl -n ws-ws1 exec -it vault-0 -- bao operator init -recovery-shares=3 -recovery-threshold=2
+   ```
+
+   Keep the three recovery keys and the root token offline (DEC-2021 item 4). They are needed only
+   to make a new root token or to rotate the seal, never to unseal: from now on the vault unseals
+   itself on every restart. Staging's verify line for `vault-0` reads `[pending founder init]`
+   until this step, and `[ok]` after it.
 
 ## When the journal does not install
 
@@ -125,6 +149,8 @@ In one pull request, change the pinned version and digests in:
 Merge it, then run `bootstrap` again. Re-applying is idempotent.
 
 ## What this does not do
+
+- It does not write staging's vault seal key from CI, and never replaces one that exists.
 
 - It does not promote images. Staging follows `main` through the promotion pull requests, and
   production through pull requests that copy staging (DEC-2016).

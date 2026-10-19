@@ -396,18 +396,64 @@ enum SealKey {
 
 /// The seal key the founder typed, with one trailing line break dropped, if it is 64 hex
 /// characters; a refusal never repeats what was typed.
-fn seal_key(_typed: &str) -> Result<String> {
-    bail!("pending DEC-2051: the seal key's check is not written yet")
+fn seal_key(typed: &str) -> Result<String> {
+    let key = typed
+        .strip_suffix("\r\n")
+        .or_else(|| typed.strip_suffix('\n'))
+        .unwrap_or(typed);
+    ensure!(
+        key.len() == 64 && key.chars().all(|c| c.is_ascii_hexdigit()),
+        "staging's vault seal key was refused: {SEAL_KEY_HINT}"
+    );
+    Ok(key.to_owned())
 }
 
 /// Staging's seal key, created from what the founder types only when `exists` says there is none,
 /// with `create` given the Secret's manifest; an existing key is kept and nothing is read.
 fn ensure_seal_key(
-    _exists: impl FnOnce() -> Result<bool>,
-    _typed: impl FnOnce() -> Result<String>,
-    _create: impl FnOnce(&str) -> Result<()>,
+    exists: impl FnOnce() -> Result<bool>,
+    typed: impl FnOnce() -> Result<String>,
+    create: impl FnOnce(&str) -> Result<()>,
 ) -> Result<SealKey> {
-    bail!("pending DEC-2051: the bootstrap's seal key is not written yet")
+    if exists()? {
+        return Ok(SealKey::Kept);
+    }
+    let key = seal_key(&typed()?)?;
+    create(&secret_manifest(SEAL_KEY_SECRET, &[(SEAL_KEY_ENTRY, key)])?)?;
+    Ok(SealKey::Created)
+}
+
+/// Restores the terminal's echo when dropped, however the read it guards ends.
+struct Echo;
+
+impl Drop for Echo {
+    fn drop(&mut self) {
+        if let Ok(tty) = fs::File::open("/dev/tty") {
+            tool("stty").arg("echo").stdin(tty).status().ok();
+        }
+    }
+}
+
+/// One line typed at the founder's terminal with its echo off, as `read -rs` reads it: the line
+/// never reaches an argument, a file, the environment or a log.
+fn read_hidden(prompt: &str) -> Result<String> {
+    let tty = || fs::File::open("/dev/tty").context("opening the terminal");
+    eprint!("{prompt}");
+    let silenced = tool("stty")
+        .arg("-echo")
+        .stdin(tty()?)
+        .status()
+        .context("starting stty")?;
+    ensure!(
+        silenced.success(),
+        "the terminal's echo could not be turned off"
+    );
+    let echo = Echo;
+    let mut line = String::new();
+    io::BufReader::new(tty()?).read_line(&mut line)?;
+    drop(echo);
+    eprintln!();
+    Ok(line)
 }
 
 /// Why a run in this environment must not touch a cluster, if it must not: in CI, or with no
@@ -645,7 +691,35 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
         kubeconfig: None,
         context,
     };
-    apply(&cluster, environment, &manifest, &secrets, &sync)
+    apply(&cluster, environment, &manifest, &secrets, &sync)?;
+    if environment == Environment::Staging {
+        let found = || -> Result<bool> {
+            let out = tool("kubectl")
+                .args(["--v=0", "--context", &cluster.context, "get", "secret"])
+                .args([SEAL_KEY_SECRET, "--namespace", WORKSPACE_NAMESPACE])
+                .args(["--ignore-not-found", "-o", "name"])
+                .output()
+                .context("starting kubectl")?;
+            ensure!(
+                out.status.success(),
+                "reading staging's vault seal key failed"
+            );
+            Ok(!out.stdout.trim_ascii().is_empty())
+        };
+        let seal = ensure_seal_key(
+            found,
+            || read_hidden("    gitops: staging's vault seal key, 64 hex characters (not shown): "),
+            |manifest| kubectl(&cluster, &["create", "-f", "-"], Some(manifest)),
+        )?;
+        match seal {
+            SealKey::Kept => eprintln!("    gitops: kept staging's vault seal key (DEC-2051)"),
+            SealKey::Created => eprintln!(
+                "    gitops: created staging's vault seal key; initialize the vault once \
+                 (BOOTSTRAP.md, DEC-2051)"
+            ),
+        }
+    }
+    Ok(())
 }
 
 /// The bootstrap from CI (DEC-2018 item 7): lane IAC's `cargo xtask infra apply` calls this in
@@ -726,11 +800,29 @@ mod tests {
             format!("{TYPED}\n\n"),
             "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=".to_owned(),
         ] {
-            let refused = seal_key(&bad).err().map(|e| format!("{e:#}")).unwrap_or_default();
+            let refused = seal_key(&bad)
+                .err()
+                .map(|e| format!("{e:#}"))
+                .unwrap_or_default();
             assert!(refused.contains(SEAL_KEY_HINT), "{bad:?}: {refused}");
             assert!(bad.len() < 8 || !refused.contains(&bad[..8]), "{refused}");
         }
         Ok(())
+    }
+
+    /// Only the founder's bootstrap at a terminal writes the seal key; the one from CI never
+    /// does, so the key never reaches a CI job (DEC-2021 item 3, DEC-2051).
+    #[test]
+    fn only_the_founders_bootstrap_writes_the_seal_key() {
+        let source = include_str!("gitops.rs");
+        let body = |start: &str| {
+            let from = source.find(start).unwrap_or_default();
+            let to = source[from..].find("\n}\n").map_or(from, |end| from + end);
+            &source[from..to]
+        };
+        assert!(body("pub(crate) fn bootstrap(root").contains("ensure_seal_key("));
+        assert!(!body("pub(crate) fn bootstrap_from_infra(").contains("seal"));
+        assert!(!body("\nfn apply(").contains("seal"));
     }
 
     /// An existing seal key is kept without reading a key; a missing one is created once, from
