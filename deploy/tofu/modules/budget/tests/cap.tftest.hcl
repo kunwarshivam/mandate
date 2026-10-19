@@ -62,5 +62,12 @@ run "refuses_a_size_the_region_does_not_offer" {
     region = "nyc1"
   }
 
+  override_data {
+    target = data.digitalocean_sizes.region
+    values = {
+      sizes = [{ slug = "s-2vcpu-4gb-amd", price_monthly = 28, price_hourly = 0.04167, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc1"], gpu_info = [] }]
+    }
+  }
+
   expect_failures = [terraform_data.cap]
 }

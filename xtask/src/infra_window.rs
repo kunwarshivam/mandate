@@ -36,14 +36,10 @@ const CLOSE_POLL_SECONDS: u64 = 5;
 /// checked.
 const CLOCK_SKEW_SECONDS: i64 = 120;
 
-/// Each environment's cluster region, as its root's `region` local sets it: staging's cluster moved
-/// to nyc1, where nyc3 had no capacity for its nodes (DEC-2044 item 2).
-fn cluster_region(environment: &str) -> &'static str {
-    if environment == "staging" {
-        "nyc1"
-    } else {
-        "nyc3"
-    }
+/// Each environment's cluster region, as its root's `region` local sets it: the founder put all of
+/// the infrastructure in the US West, so both run in sfo2 (DEC-2047).
+fn cluster_region(_environment: &str) -> &'static str {
+    "sfo2"
 }
 
 /// The cluster `infra` opens a window to, by environment: its DOKS name and its kubeconfig context,
@@ -922,7 +918,7 @@ mod tests {
             cluster_names("staging"),
             (
                 "mandate-staging".to_owned(),
-                "do-nyc1-mandate-staging".to_owned()
+                "do-sfo2-mandate-staging".to_owned()
             )
         );
         for (environment, root) in [

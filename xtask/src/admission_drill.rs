@@ -1,4 +1,4 @@
-//! The `admission` drill (E21-58, DEC-2045): the hosted clusters' kill-switch admission
+//! The `admission` drill (E21-58, DEC-2045, DEC-2046): the hosted clusters' kill-switch admission
 //! policies, `deploy/gitops/base/kill-switch-admission.yaml`, applied as they are to the cell's
 //! API server, with a signature webhook that is down and fails closed, skipping exactly the pods
 //! `deploy/gitops/base/admission.yaml`'s post-render patch exempts, as the hosted clusters' does
@@ -7,11 +7,12 @@
 //! In namespaces of their own, labelled as the workspace's is, it checks that the founder's
 //! kill-switch Job is admitted and its pod made, with the webhook down; that every other way to a
 //! pod labelled `mandate.dev/process: control` is refused (a person's pod, a service account's
-//! pod or Job, a service account relabelling its suspended Job, a Deployment's pod, a CronJob's
-//! Job, the label added to a pod later); that an unlabelled pod is refused while the webhook is
-//! down; that a second workspace's namespace is covered by its label alone; and that a finished
-//! kill-switch Job is cleaned up by foreground deletion. It waits on conditions, not clocks, and
-//! leaves the cell as it found it.
+//! pod or Job, a service account relabelling its suspended Job or changing a person's, a
+//! Deployment's pod, any CronJob's Job, the label added to a pod later, and a changed image or an
+//! ephemeral container in the kill switch's pod); that an unlabelled pod is refused while the
+//! webhook is down; that a second workspace's namespace is covered by its label alone; and that a
+//! finished kill-switch Job is cleaned up by foreground deletion. It waits on conditions, not
+//! clocks, and leaves the cell as it found it, whether a step errs or not.
 
 use std::fs;
 use std::io::Write as _;
@@ -29,10 +30,19 @@ const POLICIES: &str = "deploy/gitops/base/kill-switch-admission.yaml";
 /// The file whose post-render patch gives the signature webhooks their exemption.
 const ADMISSION: &str = "deploy/gitops/base/admission.yaml";
 
-/// What the seeded drill changes: the Job policy matches creation only, so a service account can
-/// relabel its suspended Job's pods `control` (the review of #1810, B1).
-const JOB_OPERATIONS: &str = "        operations: [CREATE, UPDATE]\n        resources: [jobs]";
-const JOB_OPERATIONS_SEEDED: &str = "        operations: [CREATE]\n        resources: [jobs]";
+/// What the seeded drill changes: on update, the Job policy fires only when the control label is
+/// new, so a service account can change the pods of a control Job a person made (the review of
+/// #1810's second round, N1).
+const JOB_CHANGED: &str = "    - name: changed-control\n      \
+                           expression: request.operation == 'CREATE' || object.spec != oldObject.spec\n";
+const JOB_CHANGED_SEEDED: &str = "    - name: changed-control\n      expression: >-\n        \
+                                  request.operation == 'CREATE' || !(has(oldObject.spec.template.metadata.labels)\n        \
+                                  && 'mandate.dev/process' in oldObject.spec.template.metadata.labels\n        \
+                                  && oldObject.spec.template.metadata.labels['mandate.dev/process'] == 'control')\n";
+
+/// An image other than [`IMAGE`], that a change to a control pod or Job swaps in.
+const OTHER_IMAGE: &str =
+    "ghcr.io/example/other@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 /// The namespaces the drill makes, each labelled as a workspace's namespace is.
 const NAMESPACES: [&str; 2] = ["admission-drill-1", "admission-drill-2"];
@@ -183,13 +193,72 @@ fn wait_for(check: &mut dyn FnMut() -> Result<bool>, pause: Duration) -> Result<
 }
 
 /// The drill's run against `kubectl`, with `policies` as the admission policies, `selector` as
-/// the webhook's exemption, and `pause` between polls.
+/// the webhook's exemption, and `pause` between polls. What it made is removed whether or not a
+/// step errs.
 pub(crate) fn run(
     kubectl: Kubectl<'_>,
     policies: &str,
     selector: &str,
     pause: Duration,
 ) -> Result<Verdict> {
+    clean_up(kubectl, policies).context("a previous run's leftovers would not go")?;
+    let exercised = exercise(kubectl, policies, selector, pause);
+    let cleaned = clean_up(kubectl, policies);
+    let broken = exercised.map_err(|error| match &cleaned {
+        Ok(()) => error,
+        Err(also) => error.context(format!("and cleaning up after it failed: {also:#}")),
+    })?;
+    cleaned?;
+    Ok(if broken.is_empty() {
+        Verdict::Held
+    } else {
+        Verdict::Broken(broken.join("; "))
+    })
+}
+
+/// Removes the down webhook, the policies and the namespaces, waiting until the namespaces are
+/// gone, as the start of a run does.
+fn clean_up(kubectl: Kubectl<'_>, policies: &str) -> Result<()> {
+    let (gone, text) = kubectl(
+        &[
+            "delete",
+            "validatingwebhookconfiguration",
+            WEBHOOK,
+            "--ignore-not-found",
+        ],
+        None,
+    )?;
+    ensure!(gone, "removing the down webhook failed: {}", text.trim());
+    let (gone, text) = kubectl(&["delete", "-f", "-", "--ignore-not-found"], Some(policies))?;
+    ensure!(
+        gone,
+        "removing the admission policies failed: {}",
+        text.trim()
+    );
+    for namespace in NAMESPACES {
+        let (gone, text) = kubectl(
+            &[
+                "delete",
+                "namespace",
+                namespace,
+                "--ignore-not-found",
+                "--wait=true",
+                "--timeout=180s",
+            ],
+            None,
+        )?;
+        ensure!(gone, "{namespace} is still terminating: {}", text.trim());
+    }
+    Ok(())
+}
+
+/// The drill's scenarios, as what each found broken.
+fn exercise(
+    kubectl: Kubectl<'_>,
+    policies: &str,
+    selector: &str,
+    pause: Duration,
+) -> Result<Vec<String>> {
     let as_who = |who: &[&str], rest: &[&str]| -> Vec<String> {
         who.iter()
             .chain(rest)
@@ -227,22 +296,6 @@ pub(crate) fn run(
     };
     let (main, other) = (NAMESPACES[0], NAMESPACES[1]);
     for namespace in NAMESPACES {
-        let (gone, text) = kubectl(
-            &[
-                "delete",
-                "namespace",
-                namespace,
-                "--ignore-not-found",
-                "--wait=true",
-                "--timeout=180s",
-            ],
-            None,
-        )?;
-        ensure!(
-            gone,
-            "a previous run's {namespace} is still terminating: {}",
-            text.trim()
-        );
         let (made, text) = kubectl(&["create", "namespace", namespace], None)?;
         ensure!(made, "creating {namespace} failed: {}", text.trim());
         let (labelled, text) = kubectl(&["label", "namespace", namespace, INCLUDE], None)?;
@@ -277,7 +330,59 @@ pub(crate) fn run(
         create(&FOUNDER, main, &job("kill-switch", "control", false))?,
         Outcome::Admitted,
     );
-    if !wait_for(&mut || Ok(pods(main, "job-name=kill-switch")? > 0), pause)? {
+    if wait_for(&mut || Ok(pods(main, "job-name=kill-switch")? > 0), pause)? {
+        let (_, listed) = kubectl(
+            &[
+                "get",
+                "pods",
+                "--namespace",
+                main,
+                "--selector",
+                "job-name=kill-switch",
+                "-o",
+                "name",
+            ],
+            None,
+        )?;
+        let made = listed
+            .lines()
+            .find(|line| line.starts_with("pod/"))
+            .context("the kill switch's pod went before it was changed")?;
+        let swapped = format!("c={OTHER_IMAGE}");
+        expect(
+            &mut broken,
+            "a service account's changed image in the kill switch's pod",
+            outcome(call(
+                as_who(
+                    &WORKLOAD,
+                    &["set", "image", made, &swapped, "--namespace", main],
+                ),
+                None,
+            )?),
+            Outcome::RefusedByPolicy,
+        );
+        expect(
+            &mut broken,
+            "a service account's ephemeral container in the kill switch's pod",
+            outcome(call(
+                as_who(
+                    &WORKLOAD,
+                    &[
+                        "debug",
+                        made,
+                        "--image",
+                        OTHER_IMAGE,
+                        "--container",
+                        "debug",
+                        "--namespace",
+                        main,
+                    ],
+                ),
+                None,
+            )?),
+            Outcome::RefusedByPolicy,
+        );
+    } else {
         broken.push("the kill switch's pod was not made with the webhook down".to_owned());
     }
     expect(
@@ -324,6 +429,32 @@ pub(crate) fn run(
     )?) != Outcome::RefusedByPolicy
     {
         broken.push("admitted the control label on a suspended Job".to_owned());
+    }
+    expect(
+        &mut broken,
+        "a person's suspended control Job",
+        create(&FOUNDER, main, &job("held", "control", true))?,
+        Outcome::Admitted,
+    );
+    let swap = r#"{"spec":{"template":{"spec":{"nodeSelector":{"admission-drill":"moved"}}}}}"#;
+    if outcome(call(
+        as_who(
+            &WORKLOAD,
+            &[
+                "patch",
+                "job",
+                "held",
+                "--type=merge",
+                "-p",
+                swap,
+                "--namespace",
+                main,
+            ],
+        ),
+        None,
+    )?) != Outcome::RefusedByPolicy
+    {
+        broken.push("admitted a service account's change to a person's control Job".to_owned());
     }
     let deployment = format!(
         "apiVersion: apps/v1\nkind: Deployment\nmetadata: {{name: fake-control}}\nspec:\n  replicas: 1\n  \
@@ -389,6 +520,18 @@ pub(crate) fn run(
         )?),
         Outcome::RefusedByPolicy,
     );
+    let lookalike = job("lookalike", "control", false).replacen(
+        "metadata: {name: lookalike}",
+        "metadata:\n  name: lookalike\n  ownerReferences: [{apiVersion: example.com/v1, kind: CronJob, \
+         name: lookalike, uid: 00000000-0000-0000-0000-000000000001}]",
+        1,
+    );
+    expect(
+        &mut broken,
+        "a Job another API group's CronJob owns",
+        create(&FOUNDER, main, &lookalike)?,
+        Outcome::RefusedByPolicy,
+    );
     let (removed, text) = kubectl(&["delete", "validatingwebhookconfiguration", WEBHOOK], None)?;
     ensure!(removed, "removing the down webhook failed: {}", text.trim());
     let admitted = wait_for(
@@ -438,28 +581,20 @@ pub(crate) fn run(
         ));
     }
 
-    kubectl(&["delete", "-f", "-", "--ignore-not-found"], Some(policies))?;
-    for namespace in NAMESPACES {
-        kubectl(&["delete", "namespace", namespace, "--wait=false"], None)?;
-    }
-    Ok(if broken.is_empty() {
-        Verdict::Held
-    } else {
-        Verdict::Broken(broken.join("; "))
-    })
+    Ok(broken)
 }
 
-/// The drill in the cell; seeded, the Job policy matches creation only.
+/// The drill in the cell; seeded, the Job policy on update fires only on a newly control label.
 pub(crate) fn drill(seeded: bool) -> Result<Verdict> {
     let policies = fs::read_to_string(POLICIES).with_context(|| format!("reading {POLICIES}"))?;
     let admission =
         fs::read_to_string(ADMISSION).with_context(|| format!("reading {ADMISSION}"))?;
     let selector = exemption_selector(&admission, "      ")?;
     let policies = if seeded {
-        if !policies.contains(JOB_OPERATIONS) {
-            bail!("{POLICIES} no longer holds the Job operations the seeded drill narrows");
+        if !policies.contains(JOB_CHANGED) {
+            bail!("{POLICIES} no longer holds the Job condition the seeded drill narrows");
         }
-        policies.replace(JOB_OPERATIONS, JOB_OPERATIONS_SEEDED)
+        policies.replace(JOB_CHANGED, JOB_CHANGED_SEEDED)
     } else {
         policies
     };
@@ -497,13 +632,14 @@ mod tests {
     #[test]
     fn the_seeded_change_is_in_the_job_policy() -> Result<()> {
         let policies = repo_file(POLICIES)?;
-        assert_eq!(policies.matches(JOB_OPERATIONS).count(), 1);
-        let seeded = policies.replace(JOB_OPERATIONS, JOB_OPERATIONS_SEEDED);
+        assert_eq!(policies.matches(JOB_CHANGED).count(), 1);
+        let seeded = policies.replace(JOB_CHANGED, JOB_CHANGED_SEEDED);
         assert_eq!(
-            seeded.matches("operations: [CREATE, UPDATE]").count(),
+            seeded.matches("object.spec != oldObject.spec").count(),
             1,
-            "the pod policy keeps UPDATE"
+            "the pod policy keeps its spec check"
         );
+        assert!(seeded.contains("resources: [jobs]\n  matchConditions:"));
         Ok(())
     }
 
@@ -528,12 +664,17 @@ mod tests {
     }
 
     /// A cluster that admits as the hosted policies should, or with one of the drill's seeded or
-    /// imagined holes: `relabel` admits a service account's suspended-Job relabel, `deployment`
-    /// admits a labelled Deployment's pod.
+    /// imagined holes: `relabel` admits a service account's suspended-Job relabel, `change` its
+    /// change to a person's control Job, `deployment` a labelled Deployment's pod. `fails` names
+    /// a step that errs, and `deleted` records what the drill removed.
+    #[derive(Default)]
     struct Fake {
         relabel: bool,
+        change: bool,
         deployment: bool,
+        fails: Option<&'static str>,
         webhook: RefCell<bool>,
+        deleted: RefCell<Vec<String>>,
     }
 
     const POLICY: &str = "ValidatingAdmissionPolicy 'mandate-control' denied request";
@@ -550,13 +691,27 @@ mod tests {
                     (false, POLICY.to_owned())
                 })
             };
+            if let Some(step) = self.fails
+                && args.contains(&step)
+            {
+                bail!("the cluster went away during {step}");
+            }
             match args.iter().find(|arg| !arg.starts_with("--")).copied() {
                 Some("apply") if manifest.contains(WEBHOOK) => {
                     self.webhook.replace(true);
                     Ok((true, String::new()))
                 }
-                Some("delete") if args.contains(&"validatingwebhookconfiguration") => {
-                    self.webhook.replace(false);
+                Some("delete") => {
+                    if args.contains(&"validatingwebhookconfiguration") {
+                        self.webhook.replace(false);
+                    }
+                    self.deleted.borrow_mut().push(
+                        args.iter()
+                            .filter(|arg| !arg.starts_with("--"))
+                            .copied()
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                    );
                     Ok((true, String::new()))
                 }
                 Some("create") if manifest.contains("kind: Pod") => {
@@ -568,9 +723,13 @@ mod tests {
                         refuse(true)
                     }
                 }
-                Some("create") if manifest.contains("kind: Job") => refuse(!(control && workload)),
+                Some("create") if manifest.contains("kind: Job") => {
+                    refuse(!(control && (workload || manifest.contains("kind: CronJob"))))
+                }
                 Some("create") if args.contains(&"--from=cronjob/fake-control") => refuse(false),
+                Some("patch") if args.contains(&"held") => refuse(self.change || !workload),
                 Some("patch") => refuse(self.relabel || !workload),
+                Some("set" | "debug") => refuse(false),
                 Some("label") if args.contains(&"mandate.dev/process=control") => refuse(false),
                 Some("get") if args.contains(&"job-name=kill-switch") => {
                     Ok((true, "pod/kill-switch-x\n".to_owned()))
@@ -602,33 +761,63 @@ mod tests {
     }
 
     /// The drill holds against a cluster that admits as the policies should, and names each hole
-    /// it is meant to find: the seeded suspended-Job relabel and an admitted Deployment's pod.
+    /// it is meant to find: the suspended-Job relabel, the seeded change to a person's control
+    /// Job, and an admitted Deployment's pod.
     #[test]
     fn the_drill_holds_only_where_the_policies_hold() -> Result<()> {
-        let good = Fake {
-            relabel: false,
-            deployment: false,
-            webhook: RefCell::new(false),
+        assert_eq!(drill_against(&Fake::default())?, Verdict::Held);
+        for (fake, symptom) in [
+            (
+                Fake {
+                    relabel: true,
+                    ..Fake::default()
+                },
+                "admitted the control label on a suspended Job",
+            ),
+            (
+                Fake {
+                    change: true,
+                    ..Fake::default()
+                },
+                "admitted a service account's change to a person's control Job",
+            ),
+            (
+                Fake {
+                    deployment: true,
+                    ..Fake::default()
+                },
+                "admitted a labelled Deployment's pod",
+            ),
+        ] {
+            assert_eq!(drill_against(&fake)?, Verdict::Broken(symptom.to_owned()));
+        }
+        Ok(())
+    }
+
+    /// A step that errs mid-run still leaves the webhook, the policies and both namespaces
+    /// removed, and the error is what the run reports.
+    #[test]
+    fn a_failed_step_still_cleans_up() -> Result<()> {
+        let fake = Fake {
+            fails: Some("replicasets"),
+            ..Fake::default()
         };
-        assert_eq!(drill_against(&good)?, Verdict::Held);
-        let relabel = Fake {
-            relabel: true,
-            deployment: false,
-            webhook: RefCell::new(false),
-        };
-        assert!(matches!(
-            drill_against(&relabel)?,
-            Verdict::Broken(why) if why == "admitted the control label on a suspended Job"
-        ));
-        let deployment = Fake {
-            relabel: false,
-            deployment: true,
-            webhook: RefCell::new(false),
-        };
-        assert!(matches!(
-            drill_against(&deployment)?,
-            Verdict::Broken(why) if why == "admitted a labelled Deployment's pod"
-        ));
+        let error = drill_against(&fake)
+            .err()
+            .context("the drill ran past a failed step")?;
+        assert!(format!("{error:#}").contains("the cluster went away during replicasets"));
+        let deleted = fake.deleted.borrow();
+        let after = &deleted[deleted.len() - 4..];
+        assert_eq!(
+            after,
+            [
+                format!("delete validatingwebhookconfiguration {WEBHOOK}"),
+                "delete -f -".to_owned(),
+                format!("delete namespace {}", NAMESPACES[0]),
+                format!("delete namespace {}", NAMESPACES[1]),
+            ]
+        );
+        assert!(!*fake.webhook.borrow());
         Ok(())
     }
 }
