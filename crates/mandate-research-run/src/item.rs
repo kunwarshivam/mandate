@@ -47,6 +47,8 @@ impl SourceId {
     pub const BARS: &'static str = "platform.bars";
     /// The instrument snapshot: reference data, which needs no allowlist entry.
     pub const INSTRUMENTS: &'static str = "platform.instruments";
+    /// The platform's quote feed: market data, which needs no allowlist entry (DEC-2255 item 6).
+    pub const QUOTES: &'static str = "platform.quotes";
 
     /// # Errors
     /// [`ResearchRunError::InvalidId`] for an empty, overlong, or non-ASCII-id id.
@@ -88,6 +90,7 @@ pub enum ItemKind {
     News,
     Filing,
     Instrument,
+    Quote,
 }
 
 impl ItemKind {
@@ -97,6 +100,7 @@ impl ItemKind {
             Self::News => "news",
             Self::Filing => "filing",
             Self::Instrument => "instrument",
+            Self::Quote => "quote",
         }
     }
 }
@@ -112,6 +116,18 @@ pub struct Bar {
     pub low: Price,
     pub close: Price,
     pub volume: Qty,
+}
+
+/// The last quote at or before a run's cut-off (DEC-2255 item 4). A side with no order has no
+/// price, since a price is always positive; a size is never negative.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Quote {
+    pub symbol: Symbol,
+    pub knowledge_at: UtcNanos,
+    pub bid: Option<Price>,
+    pub bid_size: Qty,
+    pub ask: Option<Price>,
+    pub ask_size: Qty,
 }
 
 /// One news item from an allowlisted source. `published_at` is displayed only; every filter reads

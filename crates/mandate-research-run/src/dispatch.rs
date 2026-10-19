@@ -196,6 +196,9 @@ fn read(call: &ToolCall, scope: &Scope, readers: Readers<'_>) -> Result<Answer, 
     if call.tool == Tool::FilingsGet {
         return filings_get(call, scope, readers);
     }
+    if call.tool == Tool::MarketQuote {
+        return quotes(call, scope, readers);
+    }
     let Ok(arguments) = mandate_canon::parse(call.arguments.as_bytes()) else {
         return Ok(Answer::Failed);
     };
@@ -517,6 +520,16 @@ fn forms(value: &Value) -> Option<Vec<String>> {
     Some(asked)
 }
 
+/// `market.quote` (§6.10, DEC-2255).
+fn quotes(
+    call: &ToolCall,
+    scope: &Scope,
+    readers: Readers<'_>,
+) -> Result<Answer, ResearchRunError> {
+    let _ = (call, scope, readers);
+    Err(ResearchRunError::Unimplemented { story: "E19-13" })
+}
+
 fn outside(symbols: &BTreeSet<Symbol>, scope: &Scope) -> bool {
     !symbols.is_subset(&scope.data_universe)
 }
@@ -630,7 +643,7 @@ fn render(
                 }
                 ("untrusted", fields)
             }
-            RetrievedItem::Instrument(_) => {
+            RetrievedItem::Instrument(_) | RetrievedItem::Quote(_) => {
                 return Err(ResearchRunError::LoopOrder {
                     what: "an item no dispatched read returns",
                 });
@@ -756,7 +769,8 @@ mod tests {
                 RetrievedItem::Bar(bar) => Some(bar.close),
                 RetrievedItem::News(_)
                 | RetrievedItem::Filing(_)
-                | RetrievedItem::Instrument(_) => None,
+                | RetrievedItem::Instrument(_)
+                | RetrievedItem::Quote(_) => None,
             })
             .collect())
     }
