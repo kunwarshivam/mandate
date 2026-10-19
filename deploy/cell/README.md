@@ -237,6 +237,16 @@ another already pins ([DEC-2036](../../docs/project/decisions/DEC-2036.md)). CI'
 the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecting proxy, set
 `MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle first.
 
+For staging, `cargo xtask cell demo --scenario demo --dry-run --image <ref@sha256:...> --workspace
+<ULID> [--namespace <ns>]` renders the gestures' Job and its inputs' ConfigMap with `helm template`
+alone, from staging's values (`deploy/cell/values/managed.yaml`, then
+`deploy/gitops/clusters/staging/images.yaml`), in `ws-ws1` unless `--namespace` names another, and
+prints them one JSON object a line. It reads no kubeconfig, reaches no cluster and applies nothing.
+The image must be a release pinned by its digest, since staging admits only signed release images,
+and the workspace is the fixed one staging's API hosts. Running the demo against staging is a later
+slice: it needs staging's sign-in (the stub issuer is refused there) and a fresh agent per run in
+that one workspace.
+
 ### The drills
 
 | Drill | What holds | Its seeded bug |

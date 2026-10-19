@@ -117,10 +117,13 @@ commands:
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
                         ready and what waits on its lane, then web/ at 127.0.0.1:4317
   cell demo --scenario demo
-                        the demo's six steps in order on the local cell: each gesture on main run
+                        the demo's steps in order on the local cell: each gesture on main run
                         in the cell, each missing link named by its PR or story (E21-54)
+  cell demo --scenario demo --dry-run --image <ref@sha256:...> --workspace <ULID> [--namespace <ns>]
+                        render the demo's gestures' Job and inputs for staging (ws-ws1 by default)
+                        with helm template and print them; reads no kubeconfig, applies nothing
   cell web-kill-switch <workspace> [agent]
-                        step 6 from web/ against a running cell with sign-in ready: next dev, then
+                        step 7 from web/ against a running cell with sign-in ready: next dev, then
                         Playwright presses one listed agent's kill switch (DEC-2406)
   cell down             delete the local cell
   cell hosted           cell #1's bring-up (deploy/hosted/) against a two-node k3d cluster of
@@ -377,6 +380,9 @@ fn run() -> Result<()> {
         ["cell", "demo"] => cell::demo(true),
         ["cell", "demo", "--no-web"] => cell::demo(false),
         ["cell", "demo", "--scenario", name] => cell::scenario::run(name),
+        ["cell", "demo", "--scenario", name, "--dry-run", target @ ..] => {
+            cell::scenario::dry_run(name, target)
+        }
         ["cell", "web-kill-switch", workspace] => {
             cell::web::report(cell::web::kill_switch_from_web(workspace, None))
         }
