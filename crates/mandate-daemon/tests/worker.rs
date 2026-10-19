@@ -398,7 +398,6 @@ fn a_held_meter_refuses_the_call_and_a_free_one_holds_its_reservation() {
 /// a reserved call only on an earlier risk day (03:59:59Z on the 16th is the 15th in New York),
 /// calls as before, and its reservation lands in the shared store.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_restart_with_no_reserved_call_on_the_risk_day_calls_as_before() {
     let (shelf, store) = (Shelf::default(), SharedMeter::new());
     let rows = AgentRows::with_call_at(
