@@ -5738,14 +5738,16 @@ version-2 mark: once its age reaches `mark_max_age_s`, `stale_mark` holds openin
 in that instrument, and never its exits, protective orders, or kill switches (`AGENTS.md` rule 13).
 A sane version-2 mark restarts the count only in a session §5.2 counts, so an equity's sane
 after-hours mark does not, and a mark that is not sane restricts at once and restarts nothing.
+A version-1 mark is not read as unreadable either (DEC-2301 item 3): a version-1 mark is a
+well-formed record the stream holds legitimately, and holding every opening on any stream that
+holds one would add nothing that staleness, per instrument, does not already hold.
+
 **The calendar.** An equity's age counts the regular-session seconds of the trading calendar
 ([trading spec §2.2](trading-domain.md#22-time-and-calendars), §4.3), which the risk fold's
 `SessionClock` is given by its caller (`mandate_spec::risk`): `mandate-time`'s committed NYSE data,
 `crates/mandate-time/data/us-equities.calendar`, with its weekends, holidays, and early closes, so
 a weekend, a `closed` day, and the hours after an `early_close` count nothing. Crypto's counts all
-time. It is not read as unreadable either (DEC-2301 item 3): a version-1 mark is a well-formed record the stream
-holds legitimately, and holding every opening on any stream that holds one would add nothing that
-staleness, per instrument, does not already hold.
+time.
 
 **Who writes it.** Today the shell's paper path writes `MarkUpdated` at version 1, as the executor,
 with the IEX quote's bid as `price` (DEC-943 item 1); the executor writes none and its own fold
