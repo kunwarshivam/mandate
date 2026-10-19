@@ -11,8 +11,8 @@
 mod common;
 
 use common::{
-    ACCOUNT_STREAM, AGENT, FixedInstruments, FixedMandate, Ran, Shell, TestIds, clock, config,
-    event, instrument, price, qty, quote, stream_opened, text, with_clock,
+    ACCOUNT_STREAM, AGENT, FixedInstruments, FixedMandate, Ran, Shell, TestIds, broker_order,
+    clock, config, event, instrument, price, qty, quote, stream_opened, text, with_clock,
 };
 use mandate_accounting::Side;
 use mandate_canon::Value;
@@ -338,6 +338,7 @@ fn a_confirmation_at_its_expiry_has_expired() {
     let ports = common::ports(&ids, &mandates, &instruments, &config);
     for (expires_at, confirmed) in [(PRE_MARKET, false), (PRE_MARKET + 1, true)] {
         let mut shell = held(&ports, PRE_MARKET - 100);
+        shell.run(Input::Tick(clock(PRE_MARKET)), &ports);
         shell.run(
             Input::Market(quote(AAPL, FEED_BID, "150.2", PRE_MARKET)),
             &ports,
@@ -382,6 +383,7 @@ fn a_rung_after_the_confirmation_expires_takes_the_unconfirmed_path() {
     );
     let ports = common::ports(&ids, &mandates, &instruments, &config);
     let mut shell = held(&ports, PRE_MARKET - 100);
+    shell.run(Input::Tick(clock(PRE_MARKET)), &ports);
     shell.run(
         Input::Market(quote(AAPL, FEED_BID, "150.2", PRE_MARKET)),
         &ports,
@@ -394,6 +396,18 @@ fn a_rung_after_the_confirmation_expires_takes_the_unconfirmed_path() {
         &ports,
     ));
     assert!(first.extended_hours, "before the expiry");
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::Submitted(broker_order(
+            "b-1",
+            Some(first.client_order_id.as_str()),
+            AAPL,
+            Side::Sell,
+            "10",
+            "0",
+            "new",
+        )))),
+        &ports,
+    );
     let expired = shell.run(Input::Tick(clock(PRE_MARKET + 3)), &ports);
     assert!(
         expired.requests.is_empty(),
