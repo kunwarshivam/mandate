@@ -20,7 +20,7 @@ use mandate_executor::{
     AccountRef, AccountScope, AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
     BindingGateSource, BrokerAccount, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest,
     BrokerUnknown, ConnectorError, EventId, ExecutorConfig, ExitTier, IdGen, InstrumentSnapshot,
-    MandateVersion, MandateView, ProtectionPrices, Seq, WorkspaceId, WriterEpoch,
+    MandateVersion, MandateView, ProtectionPrices, Purpose, Seq, WorkspaceId, WriterEpoch,
     equity_bracket_prices,
 };
 use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
@@ -1049,6 +1049,25 @@ impl BindingGateSource for Allowing {
             fee_reservation: Usd::ZERO,
             data_profile: "test".to_owned(),
             feed: "test".to_owned(),
+        })
+    }
+}
+
+/// The binding gate's facts for any AAPL order, an exit's included: [`Allowing`]'s, looked up as
+/// an opening, so the gate runs and records every check on an exit too.
+pub struct ExitFacts;
+
+impl BindingGateSource for ExitFacts {
+    fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        Allowing.input(&BindingGateRequest {
+            agent: request.agent,
+            instrument: request.instrument,
+            side: request.side,
+            qty: request.qty,
+            limit: request.limit,
+            purpose: Purpose::Open,
+            tif: request.tif,
+            protection: request.protection,
         })
     }
 }
