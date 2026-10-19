@@ -243,3 +243,21 @@ fn a_dividend_on_the_first_bars_date_changes_nothing() {
     assert_eq!(with.report.strategy_equity, without.report.strategy_equity);
     assert_eq!(with.orders.len(), without.orders.len());
 }
+
+/// A dividend finer than the tick is rounded down onto it (DEC-2253 item 2): 100 less 0.333 is
+/// 99.667, so the ex-date's opening quotes 99.66, as a run whose bars were at 99.66 all along does,
+/// and not 99.67, which would lift a buy's limit above the market's.
+#[test]
+fn a_sub_tick_dividend_lowers_the_close_onto_the_tick_below() {
+    let days = trading_days(DAYS);
+    let outputs = daily_outputs(&days[EX..], "0.5");
+    let action = RecordedAction::CashDividend {
+        ex_date: days[EX],
+        pay_date: days[PAY],
+        per_share: price("0.333"),
+    };
+    let with = ex_date_row(&ex_bars(EX, 34, 1_000_000), &outputs, &[action]);
+    let control = ex_date_row(&ex_bars(0, 34, 1_000_000), &outputs, &[]);
+    assert_eq!(with.outcome, DecisionOutcome::Submitted, "{with:?}");
+    assert_eq!((with.qty, with.limit), (control.qty, control.limit));
+}
