@@ -796,10 +796,6 @@ impl LineageState {
     /// instrument's holder to this lineage; every other refusal leaves the lineage as it was,
     /// although the lineage becomes known (MC-N19). Returns the lineage after the step, and
     /// whether this step retired it.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn replay(
         &mut self,
         lineage: &LineageId,
@@ -807,32 +803,33 @@ impl LineageState {
         instrument: &AssetId,
         decision: AdmissionDecision,
     ) -> (Lineage, bool) {
-        let _ = (lineage, revision, instrument, decision);
-        todo!()
+        let entry = self.lineages.entry(lineage.clone()).or_default();
+        let retired_now =
+            decision.reason() == Some(RefusalReason::LineageRetired) && !entry.retired;
+        if retired_now {
+            entry.retired = true;
+        }
+        if decision.admitted() {
+            entry.revisions = entry.revisions.max(revision);
+            entry.admitted = entry.admitted.saturating_add(1);
+        }
+        let after = *entry;
+        if decision.admitted() {
+            self.holders.retain(|_, held| held != instrument);
+            self.holders.insert(lineage.clone(), instrument.clone());
+        }
+        (after, retired_now)
     }
 
-    /// §8.6: folds one decision into its lineage. A `lineage_retired` refusal retires a live lineage;
-    /// an admission raises the highest revision, counts the admission, and moves the instrument's
-    /// holder to this lineage. Every other refusal leaves the lineage as it was, although the lineage
-    /// becomes known (MC-N19). Returns the lineage after the step, and whether this step retired it.
+    /// §8.6: folds one decision the fold has just made into its lineage, through
+    /// [`LineageState::replay`], the one implementation of the update.
     fn step(&mut self, thesis: &Thesis, decision: AdmissionDecision) -> (Lineage, bool) {
-        let lineage = self.lineages.entry(thesis.lineage_id.clone()).or_default();
-        let retired_now =
-            decision.reason() == Some(RefusalReason::LineageRetired) && !lineage.retired;
-        if retired_now {
-            lineage.retired = true;
-        }
-        if decision.admitted() {
-            lineage.revisions = lineage.revisions.max(thesis.revision);
-            lineage.admitted = lineage.admitted.saturating_add(1);
-        }
-        let lineage = *lineage;
-        if decision.admitted() {
-            self.holders.retain(|_, held| *held != thesis.instrument_id);
-            self.holders
-                .insert(thesis.lineage_id.clone(), thesis.instrument_id.clone());
-        }
-        (lineage, retired_now)
+        self.replay(
+            &thesis.lineage_id,
+            thesis.revision,
+            &thesis.instrument_id,
+            decision,
+        )
     }
 }
 
