@@ -9,6 +9,7 @@
 //! one role per connection, bound to exactly that ServiceAccount in exactly that namespace, with
 //! the one policy, audience and lifetimes pinned.
 
+use mandate_connections::record::ConnectionId;
 use serde_json::{Value, json};
 
 use crate::SourceError;
@@ -35,6 +36,15 @@ struct Kind<'a> {
     max_ttl: i64,
 }
 
+/// `connection`'s bytes in lowercase hexadecimal.
+fn hex(connection: &ConnectionId) -> String {
+    connection
+        .as_str()
+        .bytes()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// Whether `segment` is one plain path segment: letters, digits, `_` and `-`, and not empty.
 fn is_segment(segment: &str) -> bool {
     !segment.is_empty()
@@ -48,8 +58,7 @@ fn is_segment(segment: &str) -> bool {
 fn checked(layout: &KubernetesLayout) -> Result<&KubernetesLayout, SourceError> {
     let plain = is_segment(&layout.executor_mount)
         && is_segment(&layout.exchange_mount)
-        && is_label(&layout.executor_namespace)
-        && is_label(&layout.exchange_namespace);
+        && is_label(&layout.namespace);
     if plain {
         Ok(layout)
     } else {
@@ -62,14 +71,14 @@ fn kinds<'a>(mounts: &Mounts, layout: &'a KubernetesLayout) -> [Kind<'a>; 2] {
     [
         Kind {
             mount: &layout.executor_mount,
-            namespace: &layout.executor_namespace,
+            namespace: &layout.namespace,
             policy: format!("{}-kubernetes-executor", mounts.kv),
             ttl: LEASE_SECS,
             max_ttl: EXECUTOR_TOKEN_MAX_SECS,
         },
         Kind {
             mount: &layout.exchange_mount,
-            namespace: &layout.exchange_namespace,
+            namespace: &layout.namespace,
             policy: format!("{}-kubernetes-exchange", mounts.kv),
             ttl: GRANT_SECS,
             max_ttl: GRANT_SECS,
@@ -96,11 +105,8 @@ pub struct KubernetesLayout {
 /// every id. The exchange's name is the path segment both kinds' policies reach.
 pub fn service_account_name(identity: &Identity) -> Result<String, SourceError> {
     match identity {
-        Identity::Executor(connection) | Identity::TokenExchange(connection) => Ok(connection
-            .as_str()
-            .bytes()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()),
+        Identity::Executor(connection) => Ok(hex(connection)),
+        Identity::TokenExchange(connection) => Ok(format!("x{}", hex(connection))),
         Identity::Api
         | Identity::ConnectionManager
         | Identity::Runtime
@@ -144,7 +150,7 @@ pub fn kubernetes_policy(
     match identity {
         Identity::Executor(_) => Ok(block(
             "data",
-            &format!("connections/{own}/token"),
+            &format!("connections/x{own}/token"),
             "\"read\"",
         )),
         Identity::TokenExchange(_) => Ok([

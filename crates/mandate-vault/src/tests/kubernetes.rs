@@ -49,7 +49,6 @@ fn a_connections_service_account_is_its_id_in_hex() {
 /// An executor's name has an even number of hex digits and an exchange's is `x` and the same
 /// digits, an odd number of characters, so neither kind's name is ever the other's, for any id.
 #[test]
-#[ignore = "pending E21-32"]
 fn no_executors_name_is_ever_an_exchanges() {
     for id in ["c1", "x", "A", "a-b_C", "0", &"z".repeat(64)] {
         let executor = service_account_name(&Identity::Executor(c(id)));
