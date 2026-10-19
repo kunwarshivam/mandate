@@ -777,7 +777,7 @@ struct Registry {
 
 impl Registry {
     fn sign_in(tools: &Path) -> Result<Self> {
-        let token = env::var("GH_TOKEN").context("GH_TOKEN is not set")?;
+        let token = env::var("GH_TOKEN").ok().context("GH_TOKEN is not set")?;
         let actor = env::var("GITHUB_ACTOR").context("GITHUB_ACTOR is not set")?;
         let secrets = SecretDir::create()?;
         let basic = secrets.0.join("basic");

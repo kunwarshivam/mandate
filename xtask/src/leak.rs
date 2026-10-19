@@ -47,11 +47,40 @@
 //!   review, a discussion, a dispatch); a workflow holding an `environment:` triggers only on
 //!   `workflow_dispatch` or a push to exactly `main`, and each job with one has an `if:` that
 //!   holds `github.ref == 'refs/heads/main'` with no `||`, `!=` or negation.
+//! - **L10, Rust in xtask and `crates/*/examples`:** no `{command:?}`, `{cmd:?}` or `{child:?}`
+//!   (a command's `Debug` form prints its environment), no `dbg!`, no `env::vars()` or
+//!   `env::vars_os()` but on reviewed lines, no `#[derive(Debug)]` on a struct with a token,
+//!   secret, password, passphrase, kubeconfig or credential field, no `env::var(..)` whose error
+//!   is wrapped by `.context(` or `.with_context(` unless its name is a literal naming no secret
+//!   (the error's `NotUnicode` case holds the value), and no `::add-mask::` but in `mask.rs`, through
+//!   `mask::add_mask`. This file is not read: its fixtures and messages name what the rules refuse.
 
 use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
+
+/// The Rust the guard reads (L10), under the repository root: xtask's sources and every crate's
+/// examples, which CI runs with secrets in reach (`r2-lockcheck.yml`).
+const RUST_DIRS: [&str; 2] = ["xtask/src", "crates"];
+
+/// xtask's one writer of `::add-mask::`, which escapes its data (`mask::command_escaped`).
+const MASK: &str = "xtask/src/mask.rs";
+
+/// The guard's own file, whose fixtures and messages name what the rules refuse.
+const SELF: &str = "xtask/src/leak.rs";
+
+/// The words a field or variable name holds when it carries a secret (L10). `key` is a variable
+/// name's word only: a field such as `key_count` is not a secret.
+const SECRET_WORDS: [&str; 7] = [
+    "token",
+    "secret",
+    "password",
+    "passphrase",
+    "kubeconfig",
+    "credential",
+    "key",
+];
 
 /// The directories the guard reads, under the repository root.
 const GUARDED_DIRS: [&str; 2] = [".github/workflows", ".github/scripts"];
@@ -62,6 +91,10 @@ const GUARDED_DIRS: [&str; 2] = [".github/workflows", ".github/scripts"];
 ///   names that look like a credential's (DEC-964).
 /// - `release.yml`'s build jobs upload `images/test-key/cosign.pub`, the public half of an
 ///   ephemeral test key made for the run's drill (E21-35), which signs nothing that ships.
+/// - `main.rs`'s nextest command removes every `PROPTEST_*` variable by name, and `release.rs`'s
+///   refusal reads the environment's names only (DEC-2027); neither reads a value.
+/// - `gitops.rs`'s `WorkloadSecrets` derives `Debug` over fields of its `Secret` type, whose
+///   `Debug` writes `<redacted>`.
 /// - `merge.yml`'s `RUN_PRS` is the JSON list of the pull request numbers a `workflow_run` names,
 ///   which the event holds in public.
 /// - `merge.yml`'s merge job, whose `github.token` may write, writes the fixed `merged=true` as
@@ -78,6 +111,26 @@ const ALLOWED: &[(&str, &str, &str)] = &[
         "L5",
         ".github/workflows/release.yml",
         "images/test-key/cosign.pub",
+    ),
+    (
+        "L10",
+        "xtask/src/main.rs",
+        "for (var, _) in env::vars_os() {",
+    ),
+    (
+        "L10",
+        "xtask/src/release.rs",
+        "env::vars_os().filter_map(|(name, _)| name.into_string().ok()),",
+    ),
+    (
+        "L10",
+        "xtask/src/gitops.rs",
+        "pub(crate) archive_secret_access_key: Secret,",
+    ),
+    (
+        "L10",
+        "xtask/src/gitops.rs",
+        "pub(crate) tunnel_token: Secret,",
     ),
     (
         "L3",
@@ -435,13 +488,290 @@ pub(crate) fn sources(root: &Path) -> Result<Vec<Source>> {
     Ok(found)
 }
 
+/// The Rust files L10 reads under `root`: every `.rs` under `xtask/src`, and under each crate's
+/// `examples`, but [`SELF`].
+pub(crate) fn rust_sources(root: &Path) -> Result<Vec<Source>> {
+    let mut found = Vec::new();
+    let mut pending: Vec<std::path::PathBuf> = RUST_DIRS.iter().map(|dir| root.join(dir)).collect();
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            let shown = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            if path.is_dir() {
+                if !shown.ends_with("/target") {
+                    pending.push(path);
+                }
+                continue;
+            }
+            let wanted = shown.ends_with(".rs")
+                && shown != SELF
+                && (shown.starts_with("xtask/src/") || shown.contains("/examples/"));
+            if wanted {
+                let text = fs::read_to_string(&path)
+                    .with_context(|| format!("reading {}", path.display()))?;
+                found.push(Source { path: shown, text });
+            }
+        }
+    }
+    found.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(found)
+}
+
+/// Every refused line of the Rust `sources` (L10), less the [`ALLOWED`] ones.
+pub(crate) fn rust_findings(sources: &[Source]) -> Vec<Finding> {
+    let mut found = Vec::new();
+    for source in sources {
+        let lines: Vec<&str> = source.text.lines().collect();
+        for (index, raw) in lines.iter().enumerate() {
+            let trimmed = raw.trim();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            let ahead: String = lines
+                .get(index..index.saturating_add(4).min(lines.len()))
+                .unwrap_or_default()
+                .iter()
+                .map(|line| line.trim())
+                .collect::<Vec<_>>()
+                .join("");
+            let mut hits = Vec::new();
+            if ["command", "cmd", "child"].iter().any(|name| {
+                trimmed.contains(&format!("{{{name}:?}}"))
+                    || trimmed.contains(&format!("{{{name}:#?}}"))
+            }) {
+                hits.push("a command's `Debug` form prints its environment");
+            }
+            if trimmed.contains("dbg!") {
+                hits.push("`dbg!` prints its value to the log");
+            }
+            if trimmed.contains("env::vars") {
+                hits.push("`env::vars()` reads every variable, secrets among them");
+            }
+            if trimmed.split("env::{").skip(1).any(|group| {
+                group
+                    .split('}')
+                    .next()
+                    .unwrap_or_default()
+                    .split(',')
+                    .any(|item| {
+                        let name = item.split_whitespace().next().unwrap_or_default();
+                        matches!(name, "var" | "var_os" | "vars" | "vars_os")
+                    })
+            }) {
+                hits.push(
+                    "`env::var` and `env::vars` are called where they are named, never imported, \
+                     so every call is read",
+                );
+            }
+            if trimmed.contains("::add-mask::") && source.path != MASK {
+                hits.push(
+                    "`::add-mask::` is written only by `mask.rs`, through `mask::add_mask`, which \
+                     escapes it",
+                );
+            }
+            hits.extend(env_var_problems(&ahead, trimmed.len()));
+            let derives_debug = (trimmed.starts_with("#[derive(")
+                || trimmed.starts_with("#[cfg_attr("))
+                && ahead
+                    .split(']')
+                    .next()
+                    .is_some_and(|attribute| attribute.contains("Debug"));
+            if derives_debug {
+                for field in secret_fields(&lines, index) {
+                    let text = lines.get(field).map(|line| line.trim()).unwrap_or_default();
+                    if !ALLOWED.contains(&("L10", source.path.as_str(), text)) {
+                        found.push(Finding {
+                            rule: "L10",
+                            path: source.path.clone(),
+                            line: field.saturating_add(1),
+                            why: "a struct with a secret field derives no `Debug`",
+                        });
+                    }
+                }
+            }
+            for why in hits {
+                if !ALLOWED.contains(&("L10", source.path.as_str(), trimmed)) {
+                    found.push(Finding {
+                        rule: "L10",
+                        path: source.path.clone(),
+                        line: index.saturating_add(1),
+                        why,
+                    });
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The ways a result of `env::var` or `env::var_os` may be consumed that never show its error,
+/// whose `NotUnicode` case holds the value itself.
+const QUIET_CONSUMERS: [&str; 7] = [
+    ".ok()",
+    ".map_err(|_|",
+    ".is_ok()",
+    ".is_err()",
+    ".unwrap_or(",
+    ".unwrap_or_default()",
+    ".unwrap_or_else(|_|",
+];
+
+/// Why each `env::var(..)` or `env::var_os(..)` that starts in the first `first` bytes of `text`
+/// (a line and the few after it, joined) could print a secret, if one could (L10). Its argument
+/// is a string literal or a plain identifier or path (`name`, `&name`, `module::NAME`), and nothing
+/// else; and an `env::var` result is consumed by one of [`QUIET_CONSUMERS`] (an `env::var_os`
+/// result is an `Option`, which holds no error), unless its name is a string literal or an
+/// `UPPER_CASE` constant that names none of [`SECRET_WORDS`], whose value is no secret. Any other
+/// consumer (`?`, `.unwrap()`, `.expect(`, `.map_err(`, `.context(`) can print the error, and so
+/// the value.
+fn env_var_problems(text: &str, first: usize) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(found) = text.get(from..).and_then(|tail| tail.find("env::var")) {
+        let at = from.saturating_add(found);
+        from = at.saturating_add("env::var".len());
+        if at >= first {
+            break;
+        }
+        let tail = text.get(from..).unwrap_or_default();
+        if tail.starts_with('s') {
+            continue;
+        }
+        let os = tail.starts_with("_os");
+        let tail = tail.strip_prefix("_os").unwrap_or(tail);
+        let Some(inner) = tail.strip_prefix('(') else {
+            out.push(
+                "`env::var` is called where it is named, never imported or passed as a path, so \
+                 every call is read",
+            );
+            continue;
+        };
+        let mut depth = 1_usize;
+        let Some(close) = inner.char_indices().find_map(|(at, c)| {
+            match c {
+                '(' => depth = depth.saturating_add(1),
+                ')' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            (depth == 0).then_some(at)
+        }) else {
+            out.push("an `env::var` call the guard cannot read to its end");
+            continue;
+        };
+        let name = inner.get(..close).unwrap_or_default().trim();
+        let after = inner
+            .get(close.saturating_add(1)..)
+            .unwrap_or_default()
+            .trim_start();
+        let literal = name.len() >= 2
+            && name.starts_with('"')
+            && name.ends_with('"')
+            && !name
+                .get(1..name.len().saturating_sub(1))
+                .unwrap_or_default()
+                .contains('"');
+        let bare = name.strip_prefix('&').unwrap_or(name);
+        let identifier = !bare.is_empty()
+            && bare.split("::").all(|segment| {
+                !segment.is_empty()
+                    && segment
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            });
+        if !(literal || identifier) {
+            out.push(
+                "an `env::var` name is a string literal or a plain identifier, never an \
+                 expression the guard cannot read",
+            );
+            continue;
+        }
+        let constant = bare.rsplit("::").next().is_some_and(|last| {
+            last.chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        });
+        let names_no_secret = (literal || constant)
+            && !SECRET_WORDS
+                .iter()
+                .any(|word| name.to_ascii_lowercase().contains(word));
+        let quiet = os
+            || QUIET_CONSUMERS
+                .iter()
+                .any(|consumer| after.starts_with(consumer));
+        if !quiet && !names_no_secret {
+            out.push(
+                "an `env::var` error can print a non-Unicode value: read a secret with `.ok()` \
+                 first, or name it by a literal that names no secret",
+            );
+        }
+    }
+    out
+}
+
+/// The 0-based lines of every secret-named field of the struct a `#[derive(..Debug..)]` at
+/// `index` decorates, if it decorates a struct with braces; the attribute may run over several
+/// lines, to its `]`.
+fn secret_fields(lines: &[&str], index: usize) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut at = index;
+    while lines.get(at).is_some_and(|line| !line.contains(']')) {
+        at = at.saturating_add(1);
+    }
+    at = at.saturating_add(1);
+    while lines
+        .get(at)
+        .is_some_and(|line| line.trim().starts_with("#[") || line.trim().starts_with("///"))
+    {
+        at = at.saturating_add(1);
+    }
+    let Some(header) = lines.get(at) else {
+        return out;
+    };
+    if !(header.contains("struct ") && header.trim_end().ends_with('{')) {
+        return out;
+    }
+    let indent = header.len().saturating_sub(header.trim_start().len());
+    for (offset, line) in lines.iter().enumerate().skip(at.saturating_add(1)) {
+        let trimmed = line.trim();
+        if trimmed.starts_with('}') && line.len().saturating_sub(line.trim_start().len()) <= indent
+        {
+            return out;
+        }
+        let name = trimmed
+            .trim_start_matches("pub(crate) ")
+            .trim_start_matches("pub ")
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if trimmed.contains(':')
+            && !trimmed.starts_with("//")
+            && SECRET_WORDS
+                .iter()
+                .filter(|word| **word != "key")
+                .any(|word| name.contains(word))
+        {
+            out.push(offset);
+        }
+    }
+    out
+}
+
 /// Runs the guard over the repository at `root`.
 pub(crate) fn guard_in(root: &Path) -> Result<()> {
     eprintln!(
-        "    leak-guard: checking workflows and scripts for what could leak a secret (DEC-2032)"
+        "    leak-guard: checking workflows, scripts and xtask's Rust for what could leak a secret \
+         (DEC-2032)"
     );
     let sources = sources(root)?;
-    let found = findings(&sources);
+    let mut found = findings(&sources);
+    found.extend(rust_findings(&rust_sources(root)?));
     if found.is_empty() {
         return Ok(());
     }
@@ -3333,7 +3663,7 @@ mod tests {
     #[test]
     fn a_block_scalar_first_key_hides_none_of_its_steps_keys() {
         let path = ".github/workflows/r2-lockcheck.yml";
-        for header in ["|", ">", "|-", ">+"] {
+        for header in ["|", ">", "|-", ">+", "|2", "> # folded"] {
             for (name, sibling) in [
                 ("capital", "        Working-Directory: /tmp\n"),
                 ("shell", "        shell: python {0}\n"),
@@ -3354,6 +3684,14 @@ mod tests {
                 );
             }
         }
+        let later = format!(
+            "{R2_HEAD}      - name: x\n        run: |\n          target/debug/examples/r2_finding\n        Shell: python {{0}}\n        env:\n          R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n"
+        );
+        assert!(
+            whole(path, &later).iter().any(|f| f.rule == "L9"),
+            "a block scalar on a later key: {:?}",
+            whole(path, &later)
+        );
         let quiet = format!(
             "{R2_HEAD}      - name: >\n          x\n        run: target/debug/examples/r2_finding\n        env:\n          R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n"
         );
@@ -3583,6 +3921,142 @@ mod tests {
             1,
         );
         assert!(rules(web, &chained).contains(&"L9"));
+        Ok(())
+    }
+
+    fn rust(text: &str) -> Vec<&'static str> {
+        rust_findings(&[Source {
+            path: "xtask/src/x.rs".to_owned(),
+            text: text.to_owned(),
+        }])
+        .into_iter()
+        .map(|f| f.rule)
+        .collect()
+    }
+
+    /// L10's failing and passing fixtures.
+    #[test]
+    fn rust_refuses_what_prints_a_secret() {
+        for text in [
+            "    eprintln!(\"running {command:?}\");",
+            "    bail!(\"{cmd:?} failed\");",
+            "    let x = dbg!(value);",
+            "    for (name, value) in env::vars() {",
+            "    for (name, _) in std::env::vars_os() {",
+            "    println!(\"::add-mask::{token}\");",
+            "    let token = env::var(\"GH_TOKEN\").context(\"GH_TOKEN is not set\")?;",
+            "    let key = env::var(SIGNING_KEY_ENV).context(\"unset\")?;",
+            "    let value =\n        env::var(var).with_context(|| format!(\"{var} is not set\"))?;",
+            "#[derive(Debug)]\nstruct Login {\n    user: String,\n    password: String,\n}",
+            "#[derive(Clone, Debug)]\n/// A cluster.\npub(crate) struct Cluster {\n    pub(crate) kubeconfig: PathBuf,\n}",
+        ] {
+            assert_eq!(rust(text), ["L10"], "{text:?}");
+        }
+        for (name, text) in L10_REVIEW_PROBES {
+            assert!(rust(text).contains(&"L10"), "{name}: {text:?}");
+        }
+        for text in [
+            "    eprintln!(\"running {}\", args.join(\" \"));",
+            "    let repo = env::var(\"GITHUB_REPOSITORY\").context(\"GITHUB_REPOSITORY is not set\")?;",
+            "    let token = env::var(\"GH_TOKEN\").ok().context(\"GH_TOKEN is not set\")?;",
+            "    let value = env::var(var).ok().with_context(|| format!(\"{var} is not set\"))?;",
+            "    let value = env::var(SWEEP_CLOCK_ENV).with_context(|| \"x\".to_owned())?;",
+            "#[derive(Debug)]\nstruct Paths {\n    root: PathBuf,\n    key_count: usize,\n}",
+            "struct Login {\n    password: String,\n}",
+            "// never dbg!(x)",
+            "    mask::add_mask(&token);",
+            "    let token = env::var(\"GH_TOKEN\").unwrap_or_default();",
+            "    env::var(name).map_err(|_| format!(\"{name} is not set\"))",
+            "    let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();",
+            "    let home = env::var_os(\"HOME\").map(PathBuf::from);",
+            "    let repo = env::var(\"GITHUB_REPOSITORY\")?;",
+            "#[cfg_attr(test, derive(PartialEq))]\nstruct Login {\n    password: String,\n}",
+        ] {
+            assert_eq!(rust(text), Vec::<&str>::new(), "{text:?}");
+        }
+    }
+
+    /// The #1732 review's probes, each a line L10 once let through: a computed `env::var`
+    /// argument; a secret's `env::var` error reaching `?`, `.unwrap()`, `.expect(` or `.map_err(`;
+    /// a second `env::var` on one line; `{:#?}`; an imported `vars` or `var`, or `env::var`
+    /// passed as a path; and a `cfg_attr` or multi-line `derive(Debug)` over a secret field.
+    const L10_REVIEW_PROBES: &[(&str, &str)] = &[
+        ("call", "    let v = env::var(name_of(1)).context(\"x\")?;"),
+        (
+            "format",
+            "    let v = env::var(format!(\"{p}_KEY\")).context(\"x\")?;",
+        ),
+        ("question", "    let token = env::var(\"GH_TOKEN\")?;"),
+        ("unwrap", "    let token = env::var(\"GH_TOKEN\").unwrap();"),
+        (
+            "expect",
+            "    let token = env::var(\"GH_TOKEN\").expect(\"set\");",
+        ),
+        (
+            "map-err",
+            "    let token = env::var(\"GH_TOKEN\").map_err(|e| anyhow!(\"{e}\"))?;",
+        ),
+        ("computed-ident", "    let v = env::var(name)?;"),
+        (
+            "second",
+            "    let (a, b) = (env::var(\"HOME\").ok(), env::var(\"GH_TOKEN\")?);",
+        ),
+        ("pretty", "    eprintln!(\"running {command:#?}\");"),
+        ("import", "use std::env::vars;"),
+        ("import-var", "use std::env::var;"),
+        ("import-var-as", "use std::env::var as v;"),
+        ("import-group", "use std::env::{self, var};"),
+        ("path-let", "    let f = env::var;"),
+        ("path-map", "    let v = names.iter().map(env::var);"),
+        (
+            "cfg-attr",
+            "#[cfg_attr(test, derive(Debug))]\nstruct Login {\n    password: String,\n}",
+        ),
+        (
+            "multi-line",
+            "#[derive(\n    Clone,\n    Debug\n)]\nstruct Login {\n    password: String,\n}",
+        ),
+    ];
+
+    /// The repository's Rust passes; each L10 fixture seeded into each real file is refused there.
+    #[test]
+    fn the_repository_rust_passes_and_every_seeded_line_is_refused() -> Result<()> {
+        let real = rust_sources(&repo_root()?)?;
+        assert!(
+            real.iter().any(|s| s.path == "xtask/src/main.rs")
+                && real.iter().any(|s| s.path.contains("/examples/"))
+                && !real.iter().any(|s| s.path == SELF),
+            "{:?}",
+            real.iter().map(|s| &s.path).collect::<Vec<_>>()
+        );
+        assert_eq!(rust_findings(&real), Vec::new());
+        for seed in [
+            "dbg!(x);",
+            "eprintln!(\"{command:?}\");",
+            "for v in env::vars() {}",
+        ] {
+            for index in 0..real.len() {
+                let seeded: Vec<Source> = real
+                    .iter()
+                    .enumerate()
+                    .map(|(at, source)| Source {
+                        path: source.path.clone(),
+                        text: if at == index {
+                            format!("{}\n{seed}\n", source.text)
+                        } else {
+                            source.text.clone()
+                        },
+                    })
+                    .collect();
+                assert!(
+                    rust_findings(&seeded)
+                        .iter()
+                        .any(|f| f.path == real[index].path),
+                    "{seed} in {}",
+                    real[index].path
+                );
+            }
+        }
         Ok(())
     }
 

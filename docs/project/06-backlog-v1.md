@@ -3190,7 +3190,8 @@ enables `live` (ES-23, OPS-5).
   step order only. L9 does not yet read a reusable workflow a secret job calls (`workflow_call`),
   an `if:` written across lines, `ACTIONS_ID_TOKEN_REQUEST_*` passed on to a later step, the
   values (not the names) a secret step's `env:` sets, or a `checkout` with `repository:` after the
-  secret step. L9's
+  secret step. L10 does not yet read a positional `{:?}` of a command, or an `::add-mask::` built
+  from parts. L9's
   closed world holds meanwhile.
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback

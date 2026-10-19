@@ -190,8 +190,11 @@ pub(crate) struct WorkloadSecrets {
 impl WorkloadSecrets {
     /// The founder's terminal: each value from the shell variable [`WORKLOAD_SECRETS`] names.
     fn from_env() -> Result<Self> {
-        let read =
-            |var: &str| env::var(var).with_context(|| format!("{var} is not set (BOOTSTRAP.md)"));
+        let read = |var: &str| {
+            env::var(var)
+                .ok()
+                .with_context(|| format!("{var} is not set (BOOTSTRAP.md)"))
+        };
         Ok(Self {
             archive_access_key_id: Secret::new(read("JOURNAL_ARCHIVE_ACCESS_KEY_ID")?),
             archive_secret_access_key: Secret::new(read("JOURNAL_ARCHIVE_SECRET_KEY")?),
