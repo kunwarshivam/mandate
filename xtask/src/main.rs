@@ -3073,6 +3073,8 @@ struct Finding {
 /// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone. The
 /// ULID rows prove the API server's process-test exception: a workspace or organization ULID is
 /// allowed in that test file alone, and any other value under the same setting there is reported.
+/// The build-output rows prove the `target/` exception: a key under the workspace root's `target/`
+/// is allowed, and the same key under a crate's own `target` or under `targets/` is reported.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -3124,7 +3126,19 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         "  \"webauthn_challenge\": \"{}\",",
         concat!("zz3vEjRWeJCrze8SNFZ4kKvN7xI0", "VniQq83vEjRWeJA")
     );
+    let built = format!("  \"api-key\": \"{page}\",");
     vec![
+        (
+            "target/debug/deps/planted.rmeta".to_owned(),
+            built.clone(),
+            None,
+        ),
+        (
+            "crates/planted/target/notes.txt".to_owned(),
+            built.clone(),
+            generic,
+        ),
+        ("targets/notes.txt".to_owned(), built, generic),
         (signer.to_owned(), example.clone(), None),
         (signer.to_owned(), near_example, Some("alpaca-key-id")),
         (
