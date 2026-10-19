@@ -81,7 +81,7 @@ pub(crate) struct Checklist {
 }
 
 impl Checklist {
-    fn check(&mut self, holds: bool, what: impl Into<String>) {
+    pub(crate) fn check(&mut self, holds: bool, what: impl Into<String>) {
         let what = what.into();
         self.items.push(if holds {
             Item::Ready(what)
@@ -104,7 +104,12 @@ impl Checklist {
 
     /// The checklist as printed: one line each, missing lines marked so a reader finds them.
     pub(crate) fn render(&self, environment: &str) -> String {
-        let mut out = format!("infra preflight ({environment}):\n");
+        self.render_titled(&format!("infra preflight ({environment})"))
+    }
+
+    /// The checklist under `title`, as [`Checklist::render`] prints the preflight's.
+    pub(crate) fn render_titled(&self, title: &str) -> String {
+        let mut out = format!("{title}:\n");
         for item in &self.items {
             let (mark, what) = match item {
                 Item::Ready(what) => ("[ok]      ", what),

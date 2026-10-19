@@ -18,6 +18,7 @@ mod cell;
 mod gitops;
 mod image;
 mod infra_preflight;
+mod infra_verify;
 mod infra_window;
 mod leak;
 mod mail;
