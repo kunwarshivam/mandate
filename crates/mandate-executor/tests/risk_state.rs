@@ -746,7 +746,6 @@ fn a_mark_after_version_2_is_an_unknown_schema_version() {
 /// MC-R20: sane crypto marks move E at any hour, and the tick at New York midnight starts the risk
 /// day from E (§5.4). Its first step, the risk day at the opening instant, is the opened state.
 #[test]
-#[ignore = "pending E6-15"]
 fn mc_r20_crypto_marks_and_ticks_fold_as_the_reference_case() {
     let case = case("MC-R20");
     let mandate = case_mandate(&case);
@@ -762,7 +761,6 @@ fn mc_r20_crypto_marks_and_ticks_fold_as_the_reference_case() {
 /// `InstrumentRestrictionChanged`, which B2b-2 writes. The case has no after-hours or overnight
 /// mark, a gap the E6-15 backlog entry records.
 #[test]
-#[ignore = "pending E6-15"]
 fn mc_r13_session_marks_leave_an_equitys_equity_as_the_reference_case() {
     let case = case("MC-R13");
     let (mandate, calendar) = (case_mandate(&case), nyse());
