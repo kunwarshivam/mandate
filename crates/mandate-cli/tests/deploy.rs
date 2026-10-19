@@ -3,12 +3,15 @@
 //! record, in journal spec §9.2's shapes, so these tests read no other command's output. Payloads,
 //! records and codes are written out from the vectors and DEC-530; the round trip folds the stream
 //! with the functions DEC-505 item 1 names, since `mandate-cli` may not depend on `mandate-shell`.
+//! Journal spec v0.54 §9.24 (DEC-1171): the deployment is version 2, naming the document's
+//! connection, exactly when rule 201 holds on the control stream, and version 1 otherwise; and an
+//! agent id is deployed once (DEC-1173 item 1).
 
 mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use Do::{As, Confirmed, Corrupt, Created, Deploy, Lose, Seed};
+use Do::{As, Confirmed, Corrupt, Created, Deploy, Lose, Seed, SeedV2};
 use common::{AGENT, CONTROL, FixedIds, Journal, OTHER_AGENT, OWNER, at, owner, stream};
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_cli::control::{ControlError, ControlJournal, Owner, Submitted};
@@ -33,13 +36,18 @@ const STOPPED: &str = r#"{"agent_id":"agent-a","connection_id":"conn_alpaca_pape
 /// Another agent's stop, which leaves `agent-a`'s deployment active.
 const OTHER_STOPPED: &str = r#"{"agent_id":"agent-b","connection_id":"conn_alpaca_paper_01","loss_added":"0","reason":"owner_stop","retired_on":"2026-09-20"}"#;
 const REVOKED: &str = r#"{"connection_id":"conn_alpaca_paper_01"}"#;
+/// The fixture's paper connection established at version 2 with its account (journal spec §9.8).
+const ESTABLISHED: &str = r#"{"account_ref":"01J0ACC0VNT000000000000000","broker":"alpaca","connection_id":"conn_alpaca_paper_01","environment":"paper","margin_attestation":null,"scopes":["data","trading"],"step_up":{"assertion_id":"cli-assertion-0","authenticated_at":"2026-10-08T12:59:00.000000000Z","method":"cli_confirm"},"user":"user-owner"}"#;
+/// The same connection at version 1, which names no account.
+const ESTABLISHED_V1: &str = r#"{"broker":"alpaca","connection_id":"conn_alpaca_paper_01","environment":"paper","scopes":["data","trading"]}"#;
 /// The fixture's top-level members but the two system fields (mandate spec §4.1 V-020).
 const PATHS: &str = "autonomy behavior capital connection_id environment goal name notifications \
                      protection risk universe";
 /// DEC-530 item 9's codes for `agent deploy`.
-const CODES: &str = "agent_active agent_invalid code_mismatch control_stream_invalid \
-                     document_corrupt document_missing instrument_unregistered paper_only \
-                     version_invalid version_superseded version_unconfirmed version_unknown";
+const CODES: &str = "agent_active agent_invalid agent_stopped code_mismatch \
+                     control_stream_invalid document_corrupt document_missing \
+                     instrument_unregistered paper_only version_invalid version_superseded \
+                     version_unconfirmed version_unknown";
 
 fn json(text: &str) -> Value {
     parse(text.as_bytes()).unwrap()
@@ -88,6 +96,8 @@ enum Do<'a> {
     Confirmed(&'a str),
     Deploy(&'a str, &'a str, Option<&'a str>),
     Seed(&'a str, &'a str),
+    /// A version-2 record, as `Seed`, naming a cause as an establishment must.
+    SeedV2(&'a str, &'a str),
     As(Environment),
     /// Remove the stored fixture, or overwrite it with another mandate, `v2`.
     Lose,
@@ -127,15 +137,38 @@ impl World {
 
     /// Appends one event as another control-stream writer would.
     fn seed(&mut self, event_type: &str, payload: &str) {
+        self.seed_at(event_type, payload, 1);
+    }
+
+    fn seed_at(&mut self, event_type: &str, payload: &str, schema_version: u64) {
+        let control = stream(CONTROL);
+        let head = self.journal.head(&control).unwrap().seq;
+        let draft = self.drafted(event_type, payload, schema_version);
+        let (journal, at) = (&mut self.journal, at(NOW).at);
+        let epoch = journal.take_ownership(&control).unwrap();
+        let outcome = journal.append(&control, head, epoch, at, &[draft.as_slice()]);
+        assert!(matches!(outcome, Ok(AppendOutcome::Committed(_))));
+    }
+
+    /// Another control-stream writer's draft of `event_type`, its event id from the head now.
+    fn drafted(&self, event_type: &str, payload: &str, schema_version: u64) -> Vec<u8> {
         let control = stream(CONTROL);
         let head = self.journal.head(&control).unwrap().seq;
         let draft = SEEDED.replace("@I", &format!("9{head:025}"));
+        let draft = match schema_version {
+            1 => draft,
+            _ => draft
+                .replace(
+                    r#""schema_version":1"#,
+                    &format!(r#""schema_version":{schema_version}"#),
+                )
+                .replace(
+                    r#""causation_id":null"#,
+                    r#""causation_id":"8000000000000000000000000K""#,
+                ),
+        };
         let draft = draft.replace("@T", event_type);
-        let draft = [draft.replace("@P", payload)];
-        let (journal, at) = (&mut self.journal, at(NOW).at);
-        let epoch = journal.take_ownership(&control).unwrap();
-        let outcome = journal.append(&control, head, epoch, at, &[draft[0].as_bytes()]);
-        assert!(matches!(outcome, Ok(AppendOutcome::Committed(_))));
+        draft.replace("@P", payload).into_bytes()
     }
 
     /// A §9.2 version record of `event_type` for the named document, every envelope path entered
@@ -185,6 +218,7 @@ impl World {
                 return deploy(journal, store, ids, &owner, agent, &version, &code, now);
             }
             Seed(event_type, payload) => self.seed(event_type, payload),
+            SeedV2(event_type, payload) => self.seed_at(event_type, payload, 2),
             As(environment) => self.environment = Some(environment),
             Lose => drop(self.store.remove(&fixture)),
             Corrupt => drop(self.store.insert(fixture, canonical(&document("v2")))),
@@ -288,27 +322,122 @@ fn the_spec_fold_reads_the_deployment_as_the_agents_version() {
     );
 }
 
-/// After a stop the agent can be deployed again, and a version confirmed again after another's
-/// confirmation is the latest, so it deploys.
+/// A version confirmed again after another's confirmation is the latest, so it deploys; and once
+/// that agent is stopped, its id is never deployed again (DEC-1173 item 1).
 #[test]
-fn a_stopped_agent_deploys_again_and_a_reconfirmed_version_is_the_latest() {
+fn a_reconfirmed_version_is_the_latest_and_a_stopped_agent_is_never_deployed_again() {
     let mut world = World::confirmed();
-    world.run(Deploy(AGENT, "v1", None)).unwrap();
-    for step in [
-        Created("v2"),
-        Confirmed("v2"),
-        Seed("AgentStopped", STOPPED),
-    ] {
+    for step in [Created("v2"), Confirmed("v2")] {
         world.run(step).unwrap();
     }
     let superseded = world.run(Deploy(AGENT, "v1", None));
     assert_eq!(refused(superseded), "version_superseded");
     world.run(Confirmed("v1")).unwrap();
     let before = world.appends();
-    let again = world.run(Deploy(AGENT, "v1", None)).unwrap();
+    let deployed = world.run(Deploy(AGENT, "v1", None)).unwrap();
     let rows = world.rows();
-    assert_eq!(rows.last().map(|r| &r.event_id), Some(&again.event_id));
+    assert_eq!(rows.last().map(|r| &r.event_id), Some(&deployed.event_id));
     assert_eq!(world.appends(), before + 1, "one new deployment");
+    world.run(Seed("AgentStopped", STOPPED)).unwrap();
+    let before = world.appends();
+    let again = world.run(Deploy(AGENT, "v1", None));
+    assert_eq!(refused(again), "agent_stopped");
+    assert_eq!(world.appends(), before, "a refusal writes nothing");
+}
+
+/// The deployment's version and, at version 2, its connection: what rule 201 decides.
+type DeployedAs = (u64, Option<String>);
+
+fn deployed_as(world: &World) -> DeployedAs {
+    let rows = world.rows();
+    let row = rows.last().unwrap();
+    assert_eq!(row.event_type, "AgentDeployed");
+    let body = parse(&row.body).unwrap();
+    let connection = body
+        .get("payload")
+        .and_then(|p| p.get("connection_id"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    assert!(Draft::parse(&row.body).is_ok(), "the journal admits it");
+    (row.schema_version, connection)
+}
+
+/// Journal spec v0.54 §9.24: version 2, naming the document's connection, exactly when the control
+/// stream holds a version-2 establishment of it whose latest establishment or revocation is an
+/// establishment (rule 201); otherwise version 1, as before, and never refused for it.
+#[test]
+fn a_deployment_names_its_connection_exactly_when_rule_201_holds() {
+    let connection = Some("conn_alpaca_paper_01".to_owned());
+    let reconnected = [
+        SeedV2("ConnectionEstablished", ESTABLISHED),
+        Seed("ConnectionRevoked", REVOKED),
+        SeedV2("ConnectionEstablished", ESTABLISHED),
+    ];
+    let another = ESTABLISHED
+        .replace("conn_alpaca_paper_01", "conn_alpaca_paper_02")
+        .replace("01J0ACC0VNT000000000000000", "01J0ACC0VNT000000000000001");
+    let cases: [(&str, &[Do<'_>], DeployedAs); 5] = [
+        (
+            "another_connection_established",
+            &[SeedV2("ConnectionEstablished", &another)],
+            (1, None),
+        ),
+        ("unrecorded", &[], (1, None)),
+        (
+            "established",
+            &[SeedV2("ConnectionEstablished", ESTABLISHED)],
+            (2, connection.clone()),
+        ),
+        ("reconnected", &reconnected, (2, connection)),
+        (
+            "established_v1",
+            &[Seed("ConnectionEstablished", ESTABLISHED_V1)],
+            (1, None),
+        ),
+    ];
+    for (name, setup, expected) in cases {
+        let mut world = World::new();
+        for step in setup.iter().chain(&[Created("v1"), Confirmed("v1")]) {
+            world.run(*step).unwrap();
+        }
+        world.run(Deploy(AGENT, "v1", None)).unwrap();
+        assert_eq!(deployed_as(&world), expected, "{name}");
+    }
+}
+
+/// A revocation another writer commits after `agent deploy` read the rows, and before it appends,
+/// never lets it append version 2 after the revocation: the version-2 draft is pinned to the head
+/// it was decided at, so it reads the rows again, where V-001 now refuses the revoked connection,
+/// and nothing is appended (#1748 review). A connection revoked before the command ran is the
+/// refusal table's `version_invalid`.
+#[test]
+fn a_revocation_that_lands_before_the_append_is_read_and_the_deployment_refused() {
+    let mut world = World::new();
+    for step in [
+        SeedV2("ConnectionEstablished", ESTABLISHED),
+        Created("v1"),
+        Confirmed("v1"),
+    ] {
+        world.run(step).unwrap();
+    }
+    let revocation = world.drafted("ConnectionRevoked", REVOKED, 1);
+    world.journal.land_before_next.push(revocation);
+    let before = world.appends();
+    let result = world.run(Deploy(AGENT, "v1", None));
+    assert_eq!(refused(result), "version_invalid", "decided again after it");
+    let rows = world.rows();
+    let last = rows.last().map(|r| r.event_type.as_str());
+    assert_eq!(last, Some("ConnectionRevoked"));
+    let deployed = rows
+        .iter()
+        .filter(|r| r.event_type == "AgentDeployed")
+        .count();
+    assert_eq!(deployed, 0, "no deployment after the revocation");
+    assert_eq!(
+        world.appends(),
+        before + 1,
+        "the pinned append, refused as behind, and no other"
+    );
 }
 
 /// Every refusal carries one of DEC-530 item 9's codes, each case its own, and writes nothing: no
@@ -381,7 +510,7 @@ fn every_refusal_has_its_own_code_and_writes_nothing() {
             Deploy(AGENT, "m101", None),
         ),
         (
-            "version_invalid",
+            "agent_stopped",
             &[v1, c1, d1, stop, Created("conn2"), Confirmed("conn2")],
             Deploy(AGENT, "conn2", None),
         ),

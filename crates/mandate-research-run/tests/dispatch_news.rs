@@ -119,7 +119,6 @@ fn wide(n: i64) -> NewsItem {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn news_search_takes_its_scope_from_the_harness_and_its_terms_from_the_model() {
     let fixture = Fixture::default();
     let arguments =
@@ -146,7 +145,6 @@ fn news_search_takes_its_scope_from_the_harness_and_its_terms_from_the_model() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn news_search_filters_every_answer_again() {
     let mut licensed = news("n-licensed", NEWSWIRE, "AAPL", CUT_OFF - 60);
     licensed.licensed = true;
@@ -181,7 +179,6 @@ fn news_search_filters_every_answer_again() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn news_is_newest_first_then_by_id_up_to_the_models_limit() {
     let fixture = with_news(vec![
         news("n-b", NEWSWIRE, "AAPL", CUT_OFF - 60),
@@ -203,7 +200,6 @@ fn news_is_newest_first_then_by_id_up_to_the_models_limit() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn news_results_are_spotlighted_canonical_json_with_no_link() {
     let fixture = with_news(vec![news("n-1", NEWSWIRE, "AAPL", CUT_OFF - 60)]);
     let result = one(&fixture, Tool::NewsSearch, AAPL_NEWS);
@@ -244,7 +240,6 @@ fn news_results_are_spotlighted_canonical_json_with_no_link() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_news_item_is_cut_to_two_thousand_bytes() {
     let mut long = news("n-long", NEWSWIRE, "AAPL", CUT_OFF - 60);
     long.summary = "é".repeat(3_000);
@@ -278,7 +273,6 @@ fn a_news_item_is_cut_to_two_thousand_bytes() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_byte_caps_drop_the_oldest_news_first() {
     let fixture = with_news((0..10).map(wide).collect());
     let bounds = LoopBounds {
@@ -323,7 +317,6 @@ fn the_byte_caps_drop_the_oldest_news_first() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn news_search_arguments_outside_the_pinned_schema_read_nothing() {
     let fixture = Fixture::default();
     let search = |symbols: &str, terms: &str, window: u32, limit: u32| {
@@ -366,7 +359,6 @@ fn news_search_arguments_outside_the_pinned_schema_read_nothing() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_news_search_outside_the_universe_or_unanswered_reads_nothing() {
     let fixture = Fixture::default();
     let tsla = r#"{"limit":5,"symbols":["AAPL","TSLA"],"terms":[],"window_h":24}"#;
@@ -389,7 +381,6 @@ fn a_news_search_outside_the_universe_or_unanswered_reads_nothing() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_reader_that_cannot_match_terms_reads_nothing() {
     struct Bare;
     impl mandate_research_run::NewsReader for Bare {
@@ -494,7 +485,6 @@ fn answers(rows: &[(i64, usize)]) -> Vec<NewsItem> {
 
 /// Random news answers and byte budgets against [`breach`]'s oracle.
 #[test]
-#[ignore = "pending E19-13"]
 fn random_news_reads_hold_the_caps_the_window_and_the_cut_off() {
     let strategy = (
         proptest::collection::btree_map(-90_000_i64..600, 0_usize..2_500, 0..40),
@@ -652,7 +642,6 @@ fn the_news_oracle_catches_seeded_breaches() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_news_reads_are_untrusted_only_when_they_hold_third_party_text() {
     let fixture = with_news(vec![news("n-1", NEWSWIRE, "AAPL", CUT_OFF - 60)]);
     let result = one(&fixture, Tool::NewsSearch, AAPL_NEWS);
