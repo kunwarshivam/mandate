@@ -354,7 +354,6 @@ fn called(worker: &mut RecordedWorker) -> mandate_gateway::CallRecord {
 /// call earlier on the risk day that the meter does not hold, the gateway refuses the call
 /// `meter_unavailable`, reserves nothing, and sends nothing.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_held_meter_refuses_the_call_and_a_free_one_holds_its_reservation() {
     let (shelf, store) = (Shelf::default(), SharedMeter::new());
     let record = called(&mut metered(&shelf, &store, None));
