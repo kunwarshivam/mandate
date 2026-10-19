@@ -1,5 +1,7 @@
-# Staging (DEC-2011 item 1): one DOKS cluster of two nodes in nyc3, its buckets, and the API host
-# behind the tunnel and Access. DigitalOcean's provider reads its credentials from the environment
+# Staging (DEC-2011 item 1): one DOKS cluster of two nodes in nyc1, its buckets, and the API host
+# behind the tunnel and Access. The cluster and its VPC moved from nyc3, which had no capacity for
+# its nodes, to nyc1, also New York, at the same price; the state bucket stays in nyc3, since Spaces
+# does not run in nyc1 (DEC-2044 item 2). DigitalOcean's provider reads its credentials from the environment
 # (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
 # token as a variable; only infra.yml's job under infra-staging receives either.
 
@@ -10,8 +12,9 @@ provider "cloudflare" {
 }
 
 locals {
-  environment = "staging"
-  region      = "nyc3"
+  environment  = "staging"
+  region       = "nyc1"
+  state_region = "nyc3"
   account_id = sensitive(one(distinct([
     for account in data.cloudflare_accounts.visible.result : account.id
     if account.id != null && account.id != ""
@@ -40,13 +43,14 @@ data "cloudflare_accounts" "visible" {
 import {
   for_each = var.adopt_state_bucket ? toset(["state"]) : toset([])
   to       = module.cell.module.spaces.digitalocean_spaces_bucket.state
-  id       = "${local.region},mandate-tofu-state-${local.environment}"
+  id       = "${local.state_region},mandate-tofu-state-${local.environment}"
 }
 
 module "cell" {
   source                     = "../../modules/cell"
   environment                = local.environment
   region                     = local.region
+  state_region               = local.state_region
   vpc_ip_range               = "10.110.0.0/20"
   kubernetes_version         = "1.35.9-do.1"
   node_size                  = "s-2vcpu-4gb"
