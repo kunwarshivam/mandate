@@ -88,14 +88,31 @@ run "refuses_a_wide_control_plane_range" {
   expect_failures = [var.kube_api_allowed_addresses]
 }
 
-run "refuses_an_empty_control_plane_list" {
+run "an_empty_list_admits_nobody" {
   command = plan
 
   variables {
     kube_api_allowed_addresses = []
   }
 
-  expect_failures = [var.kube_api_allowed_addresses]
+  assert {
+    condition     = digitalocean_kubernetes_cluster.this.control_plane_firewall[0].enabled && digitalocean_kubernetes_cluster.this.control_plane_firewall[0].allowed_addresses == tolist(["192.0.2.1/32"])
+    error_message = "With no CIDR and no window the firewall stays on and admits only TEST-NET-1, never everyone."
+  }
+}
+
+run "an_empty_list_admits_the_window_alone" {
+  command = plan
+
+  variables {
+    kube_api_allowed_addresses = []
+    bootstrap_runner_cidr      = "198.51.100.23/32"
+  }
+
+  assert {
+    condition     = digitalocean_kubernetes_cluster.this.control_plane_firewall[0].allowed_addresses == tolist(["198.51.100.23/32"])
+    error_message = "With no founder CIDR the window is the only address admitted."
+  }
 }
 
 run "opens_the_window_to_one_runner_only" {
