@@ -385,6 +385,7 @@ fn gestures(
         &all,
         &format!("executor-in-{id}{suffix}"),
         files,
+        NAMESPACE,
     )?)
 }
 
