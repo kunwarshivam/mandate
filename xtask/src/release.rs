@@ -2071,7 +2071,7 @@ mod tests {
                 .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
                 .env("COSIGN_URL", format!("file://{}", stand_in.display()))
                 .env("COSIGN_SHA256", sha256(&stand_in)?)
-                .env("RELEASE_SIGNING_KEY", "c3RhbmQtaW4ga2V5")
+                .env("RELEASE_SIGNING_KEY", image::base64(b"stand-in key"))
                 .env("COSIGN_PASSWORD", "stand-in password")
                 .env("RUNNER_TEMP", dir.join("runner"))
                 .envs(planted.iter().copied())
