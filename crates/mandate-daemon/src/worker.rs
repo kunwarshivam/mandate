@@ -18,11 +18,14 @@ use mandate_gateway::registry::Locality;
 use mandate_gateway::{CallRecord, Gateway, RateCaps, RequestError, Settings};
 use mandate_journal::{ArtifactRef, ArtifactStore, Environment};
 use mandate_research::{AssetClass as EnvelopeClass, WorkingUniverse};
+use mandate_research_run::agentic::LoopBounds;
 use mandate_research_run::{
-    Allowlist, Answer, CallContext, CallPlan, MemoryThesis, Readers, RecordedKey, Retrieval,
-    RetrievalPlan, RetrievedItem, Scope, SourceId, call, recorded_reply, retrieve,
+    Allowlist, Answer, CallContext, CallPlan, MemoryThesis, Readers, RecordedKey, ResearchRunError,
+    Retrieval, RetrievalPlan, RetrievedItem, Scope, SourceId, call, recorded_reply, retrieve,
 };
-use mandate_runtime::{ResearchInput, ResearchRequest, RetrievedObservation, RiskClock};
+use mandate_runtime::{
+    DispatchRequest, ResearchInput, ResearchRequest, RetrievedObservation, RiskClock,
+};
 use mandate_store::MemoryStore;
 use mandate_time::UtcNanos;
 
@@ -38,6 +41,28 @@ pub enum WorkerError {
     Bundle(BundleError),
     /// The daily research cap is above the workspace's monthly budget (DEC-2254 item 3).
     DailyCapAboveWorkspace,
+}
+
+/// Why a dispatch was answered with nothing (DEC-2260 item 6); the core's run bound then ends the
+/// run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DispatchError {
+    /// The dispatch path is not implemented yet (E19-13, DEC-2260).
+    Unimplemented,
+    /// The worker was not given the loop's bounds (DEC-2260 item 1).
+    NoLoop,
+    /// The worker did not start the run, or it was cancelled (item 2).
+    NotStarted,
+    /// The pass's allowlist is not the version the run froze, or the cut-off is not an instant
+    /// (item 3).
+    ScopeMoved,
+    /// The harness refused the dispatch: an action among the calls, or a result it could not
+    /// write (item 6).
+    Refused(ResearchRunError),
+    /// An item's record could not be captured (item 6).
+    Uncaptured,
+    /// A content was longer than `u32` bytes, or the sink refused a store (items 5 and 6).
+    Unstored,
 }
 
 /// Who the worker reads and calls for.
@@ -98,6 +123,7 @@ pub struct RecordedWorker {
     now: Box<dyn FnMut() -> UtcNanos>,
     runs: BTreeMap<String, Run>,
     ready: Vec<Ready>,
+    bounds: Option<LoopBounds>,
 }
 
 impl RecordedWorker {
@@ -202,6 +228,7 @@ impl RecordedWorker {
             now,
             runs: BTreeMap::new(),
             ready: Vec::new(),
+            bounds: None,
         })
     }
 
@@ -224,6 +251,28 @@ impl RecordedWorker {
             .with_research_daily(&who.agent, daily)
             .map_err(|_| WorkerError::DailyCapAboveWorkspace)?;
         Self::built(bundle, who, sink, now, meter, caps)
+    }
+
+    /// The worker, running a dispatch within `bounds`, the agentic entry's pinned `loop_bounds`
+    /// (DEC-2260 item 1). Without them it runs no dispatch.
+    #[must_use]
+    pub fn with_loop(mut self, bounds: LoopBounds) -> Self {
+        self.bounds = Some(bounds);
+        self
+    }
+
+    /// Runs the core's dispatch of a reply's reads and thinks (DEC-2260): within the run's frozen
+    /// scope and the loop's bounds, over the recorded plane, each result's content and each of its
+    /// items' records stored before `ResearchInput::Dispatched` is kept for the next pass.
+    ///
+    /// # Errors
+    /// [`DispatchError`] when nothing is answered, and why.
+    pub fn dispatch(
+        &mut self,
+        _request: &DispatchRequest,
+        _parts: &ResearchParts,
+    ) -> Result<(), DispatchError> {
+        Err(DispatchError::Unimplemented)
     }
 
     fn start(&mut self, run_id: &str, cut_off: RiskClock, parts: &ResearchParts) {
@@ -396,7 +445,10 @@ impl ResearchWorker for RecordedWorker {
             ResearchRequest::Start { run_id, cut_off } => self.start(run_id, *cut_off, parts),
             ResearchRequest::Call(plan) => self.call(plan),
             ResearchRequest::Cancel { run_id } => self.cancel(run_id),
-            ResearchRequest::Turn(_) | ResearchRequest::Dispatch(_) => {}
+            ResearchRequest::Dispatch(request) => {
+                let _unanswered = self.dispatch(request, parts);
+            }
+            ResearchRequest::Turn(_) => {}
         }
     }
 
