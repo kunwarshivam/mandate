@@ -59,6 +59,7 @@
 /crates/mandate-executord/  @kunwarshivam
 /crates/mandate-gateway-http/ @kunwarshivam
 /crates/mandate-gateway/    @kunwarshivam
+/crates/mandate-gatewayd/   @kunwarshivam
 /crates/mandate-identity-seal/ @kunwarshivam
 /crates/mandate-identity-system/ @kunwarshivam
 /crates/mandate-identity-testkit/ @kunwarshivam

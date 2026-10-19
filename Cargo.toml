@@ -30,6 +30,7 @@ mandate-executor = { path = "crates/mandate-executor", version = "0.0.0" }
 mandate-executord = { path = "crates/mandate-executord", version = "0.0.0" }
 mandate-gateway = { path = "crates/mandate-gateway", version = "0.0.0" }
 mandate-gateway-http = { path = "crates/mandate-gateway-http", version = "0.0.0" }
+mandate-gatewayd = { path = "crates/mandate-gatewayd", version = "0.0.0" }
 mandate-identity = { path = "crates/mandate-identity", version = "0.0.0" }
 mandate-identity-seal = { path = "crates/mandate-identity-seal", version = "0.0.0" }
 mandate-identity-system = { path = "crates/mandate-identity-system", version = "0.0.0" }
