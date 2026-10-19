@@ -29,6 +29,7 @@ pub(crate) struct Guard {
     founder_transport_crate: String,
     trait_file: String,
     transport: Vec<Allowed>,
+    literals: Literals,
     denied: Denied,
 }
 
@@ -39,6 +40,13 @@ struct Allowed {
     #[serde(rename = "type")]
     ty: String,
     file: String,
+}
+
+#[derive(Deserialize)]
+struct Literals {
+    exempt_crates: Vec<String>,
+    substrings: Vec<String>,
+    ports: Vec<u16>,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +101,7 @@ pub(crate) fn guard_in(root: &Path) -> Result<()> {
         .context("parsing Cargo.lock")?;
     let locked: Vec<String> = lock.package.into_iter().map(|p| p.name).collect();
     let mut problems = transport_problems(&guard, &sources);
+    problems.extend(literal_problems(&guard, &sources));
     problems.extend(crate_problems(&guard, &meta, &locked));
     report(problems, "mail-guard")
 }
@@ -111,6 +120,7 @@ fn transport_problems(guard: &Guard, sources: &[(String, String, String)]) -> Ve
     for (krate, path, src) in sources {
         let toks = tokens(src);
         let in_macro = macro_arguments(&toks);
+        let depth = brace_depths(&toks);
         for (i, (tok, line)) in toks.iter().enumerate() {
             let Token::Ident(word) = tok else {
                 continue;
@@ -120,8 +130,15 @@ fn transport_problems(guard: &Guard, sources: &[(String, String, String)]) -> Ve
             let next = at(i + 1);
             for allowed in guard.transport.iter().filter(|a| a.krate == *krate) {
                 let declares = matches!(next, Some(Token::Ident(n)) if *n == allowed.ty);
-                if declares && word == "struct" && *path == allowed.file {
+                let top = depth.get(i).copied() == Some(0);
+                if declares && word == "struct" && *path == allowed.file && top {
                     declared.push((allowed.ty.as_str(), path.as_str()));
+                } else if *word == allowed.ty && *path == allowed.file && in_use(&toks, i) {
+                    problems.push(format!(
+                        "{path}:{line}: `{}` is imported into its own file; it is declared there, \
+                         once, by `struct` at the top level ({GUARD})",
+                        allowed.ty
+                    ));
                 } else if declares
                     && ["struct", "enum", "union", "type", "as"].contains(&word.as_str())
                 {
@@ -181,11 +198,17 @@ fn transport_problems(guard: &Guard, sources: &[(String, String, String)]) -> Ve
             }
         }
     }
-    for allowed in &guard.transport {
+    let present: BTreeSet<&str> = sources.iter().map(|(krate, _, _)| krate.as_str()).collect();
+    for allowed in guard
+        .transport
+        .iter()
+        .filter(|a| present.contains(a.krate.as_str()))
+    {
         let count = declared.iter().filter(|(ty, _)| *ty == allowed.ty).count();
-        if count > 1 {
+        if count != 1 {
             problems.push(format!(
-                "{}: `struct {}` is declared {count} times; once is allowed ({GUARD})",
+                "{}: `struct {}` is declared {count} times at its top level; exactly once is required \
+                 ({GUARD})",
                 allowed.file, allowed.ty
             ));
         }
@@ -196,8 +219,64 @@ fn transport_problems(guard: &Guard, sources: &[(String, String, String)]) -> Ve
 /// Every string literal in `sources` outside the exempt crates that names a mail endpoint: an SMTP
 /// URL, `sendmail`, a mail provider's API host, or a host on a mail submission port.
 fn literal_problems(guard: &Guard, sources: &[(String, String, String)]) -> Vec<String> {
-    let _ = (guard, sources);
-    Vec::new()
+    let rules = &guard.literals;
+    let mut problems = Vec::new();
+    for (krate, path, src) in sources {
+        if rules.exempt_crates.contains(krate) {
+            continue;
+        }
+        for (tok, line) in tokens(src) {
+            let Token::Str(text) = tok else {
+                continue;
+            };
+            let lower = text.to_ascii_lowercase();
+            let named = rules.substrings.iter().find(|s| lower.contains(s.as_str()));
+            let port = submission_port(&lower, &rules.ports);
+            if let Some(why) = named.map(|s| format!("names `{s}`")).or(port) {
+                problems.push(format!(
+                    "{path}:{line}: a string literal in `{krate}` {why}; only `{}` may name a mail \
+                     endpoint ({GUARD})",
+                    guard.founder_transport_crate
+                ));
+            }
+        }
+    }
+    problems
+}
+
+/// Why `text` names a host on a mail submission port, if it does: the whole literal is
+/// `host:port`, the host holds a letter or a dot, and the port is one of `ports`. A clock time
+/// (`12:25`, `12:25:00`) is no host, so it never matches.
+fn submission_port(text: &str, ports: &[u16]) -> Option<String> {
+    let (host, port) = text.trim_end_matches('/').rsplit_once(':')?;
+    let host = host.rsplit_once("://").map_or(host, |(_, h)| h);
+    let hostlike = !host.is_empty()
+        && host.contains(|c: char| c.is_ascii_alphabetic() || c == '.')
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-');
+    let port: u16 = port.parse().ok()?;
+    (hostlike && ports.contains(&port)).then(|| format!("names a host on port {port}"))
+}
+
+/// The brace depth at each token: 0 at a file's top level, so a declaration inside a `mod`, a fn,
+/// or an `impl` never counts as an allowed type's one declaration.
+fn brace_depths(toks: &[(Token, usize)]) -> Vec<usize> {
+    let mut depth = 0usize;
+    toks.iter()
+        .map(|(tok, _)| match tok {
+            Token::Punct('{') => {
+                let here = depth;
+                depth = depth.saturating_add(1);
+                here
+            }
+            Token::Punct('}') => {
+                depth = depth.saturating_sub(1);
+                depth
+            }
+            _ => depth,
+        })
+        .collect()
 }
 
 /// Whether each token lies inside a macro invocation's delimited arguments (`name!(...)`,
