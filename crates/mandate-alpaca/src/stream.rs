@@ -413,36 +413,25 @@ fn message(raw: &RawValue) -> Result<StreamMessage, WireError> {
 /// The channels a `subscription` message lists. A channel it leaves out is empty, and the
 /// corrections and cancel errors it mirrors from trades are not channels of their own.
 fn subscribed(f: &Fields<'_>) -> Result<Channels, WireError> {
-    let mut channels = Channels::default();
-    let keys = [
-        "trades",
-        "quotes",
-        "bars",
-        "updatedBars",
-        "dailyBars",
-        "statuses",
-        "lulds",
-    ];
-    for key in keys {
+    let read = |key: &'static str| -> Result<BTreeSet<InstrumentId>, WireError> {
         let symbols = match f.get(key) {
             Some(_) => texts(f, key)?,
             None => Vec::new(),
         };
-        let set = symbols
+        symbols
             .iter()
             .map(|symbol| symbol_id(symbol, key))
-            .collect::<Result<BTreeSet<_>, _>>()?;
-        match key {
-            "trades" => channels.trades = set,
-            "quotes" => channels.quotes = set,
-            "bars" => channels.bars = set,
-            "updatedBars" => channels.updated_bars = set,
-            "dailyBars" => channels.daily_bars = set,
-            "statuses" => channels.statuses = set,
-            _ => channels.lulds = set,
-        }
-    }
-    Ok(channels)
+            .collect()
+    };
+    Ok(Channels {
+        quotes: read("quotes")?,
+        trades: read("trades")?,
+        bars: read("bars")?,
+        updated_bars: read("updatedBars")?,
+        daily_bars: read("dailyBars")?,
+        statuses: read("statuses")?,
+        lulds: read("lulds")?,
+    })
 }
 
 fn bar(f: &Fields<'_>) -> Result<StreamBar, WireError> {

@@ -147,6 +147,27 @@ fn the_control_messages_are_read() {
 }
 
 #[test]
+fn a_subscription_reads_each_channel_into_its_own_set() {
+    let StreamMessage::Subscribed(channels) = one(
+        r#"{"T":"subscription","trades":["A"],"quotes":["B"],"bars":["C"],"updatedBars":["D"],"dailyBars":["E"],"statuses":["F"],"lulds":["G"]}"#,
+    ) else {
+        panic!("not a subscription");
+    };
+    assert_eq!(
+        channels,
+        Channels {
+            trades: set(&["A"]),
+            quotes: set(&["B"]),
+            bars: set(&["C"]),
+            updated_bars: set(&["D"]),
+            daily_bars: set(&["E"]),
+            statuses: set(&["F"]),
+            lulds: set(&["G"]),
+        }
+    );
+}
+
+#[test]
 fn an_unknown_success_or_a_wildcard_subscription_is_refused() {
     assert!(matches!(
         refusal(r#"{"T":"success","msg":"maybe"}"#),
