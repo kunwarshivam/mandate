@@ -5345,6 +5345,18 @@ const READ_LINES: &[(&str, &str)] = &[
         ".github/workflows/web-deploy.yml",
         "node scripts/workers.mjs size .wrangler/dry-run",
     ),
+    (
+        ".github/workflows/web.yml",
+        "node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "node_modules/.bin/wrangler deploy",
+    ),
     (".github/workflows/ci.yml", "npm ci --ignore-scripts"),
     (
         ".github/workflows/ci.yml",
@@ -5582,9 +5594,10 @@ const READ_IMAGES: &[&str] =
     &["postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f"];
 
 /// The `npx` commands a `web` job may run, by their exact arguments (B7): `web-e2e.yml`'s two
-/// Playwright installs, `web.yml`'s pinned Impeccable detector, and the Worker's dry run and
-/// `web-deploy.yml`'s deploy, both through the `wrangler` the lockfile pins (DEC-731, DEC-1005). `npx` runs any package, so no
-/// other form is read.
+/// Playwright installs and `web.yml`'s pinned Impeccable detector. `npx` runs any package, so no
+/// other form is read. Wrangler is not one: the Worker's dry run and `web-deploy.yml`'s deploy run
+/// `node_modules/.bin/wrangler`, the version `npm ci` installed from the lockfile, as reviewed
+/// lines of [`READ_LINES`] (DEC-731, DEC-1005).
 const READ_NPX: &[&[&str]] = &[
     &[
         "playwright",
@@ -5595,14 +5608,6 @@ const READ_NPX: &[&[&str]] = &[
     ],
     &["playwright", "install-deps", "chromium"],
     &["--yes", "impeccable@4.1.0", "detect", "src/"],
-    &[
-        "wrangler",
-        "deploy",
-        "--dry-run",
-        "--outdir",
-        ".wrangler/dry-run",
-    ],
-    &["wrangler", "deploy"],
 ];
 
 /// The lines of the [`READ_SCRIPTS`] that run an interpreter a person has read and found to run
@@ -17184,7 +17189,7 @@ mod tests {
         let text = fs::read_to_string(repo_root()?.join(INFRA_WORKFLOW))?;
         let web = ci_file(
             ".github/workflows/web-deploy.yml",
-            "jobs:\n  deploy:\n    steps:\n      - run: npx wrangler deploy\n        env:\n          \
+            "jobs:\n  deploy:\n    steps:\n      - run: node_modules/.bin/wrangler deploy\n        env:\n          \
              CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n",
         );
         let check = |infra: &str, others: &[CiFile]| {
