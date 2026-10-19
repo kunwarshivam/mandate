@@ -118,6 +118,13 @@ verify:
   id: ""
   streams: []
 
+# The workspace's founding grant (DEC-2114): with `enabled`, a post-install and post-upgrade hook
+# runs `workspace found --open` for `member`, the founder's principal ULID, on `api.workspace`.
+# Never the founder's identity-provider subject: the sign-in link is the `subject-links` ConfigMap.
+founding:
+  enabled: false
+  member: ""
+
 # The agent deployment the runtime process runs (DEC-1013): its agent, the connection it trades
 # through, and the owner whose kill switch it acts on. Required once `images.runtime` is named;
 # ids only, never a secret. `research`, when set, is the path of the recorded research bundle in the
