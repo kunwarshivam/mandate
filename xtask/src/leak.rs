@@ -38,8 +38,8 @@
 //!   `env::vars_os()` but on reviewed lines, no `#[derive(Debug)]` on a struct with a token,
 //!   secret, password, passphrase, kubeconfig or credential field, no `env::var(..)` whose error
 //!   is wrapped by `.context(` or `.with_context(` unless its name is a literal naming no secret
-//!   (the error's `NotUnicode` case holds the value), and no `::add-mask::` but through
-//!   [`add_mask`]. This file is not read: its fixtures and messages name what the rules refuse.
+//!   (the error's `NotUnicode` case holds the value), and no `::add-mask::` but in `mask.rs`, through
+//!   `mask::add_mask`. This file is not read: its fixtures and messages name what the rules refuse.
 
 use std::fs;
 use std::path::Path;
@@ -49,6 +49,9 @@ use anyhow::{Context, Result, bail};
 /// The Rust the guard reads (L10), under the repository root: xtask's sources and every crate's
 /// examples, which CI runs with secrets in reach (`r2-lockcheck.yml`).
 const RUST_DIRS: [&str; 2] = ["xtask/src", "crates"];
+
+/// xtask's one writer of `::add-mask::`, which escapes its data (`mask::command_escaped`).
+const MASK: &str = "xtask/src/mask.rs";
 
 /// The guard's own file, whose fixtures and messages name what the rules refuse.
 const SELF: &str = "xtask/src/leak.rs";
@@ -80,7 +83,7 @@ const GUARDED_DIRS: [&str; 2] = [".github/workflows", ".github/scripts"];
 /// - `main.rs`'s nextest command removes every `PROPTEST_*` variable by name, and `release.rs`'s
 ///   refusal reads the environment's names only (DEC-2027); neither reads a value.
 /// - `gitops.rs`'s `WorkloadSecrets` derives `Debug` over fields of its `Secret` type, whose
-///   `Debug` writes `<redacted>`; its mask test decodes and compares `add_mask`'s output.
+///   `Debug` writes `<redacted>`.
 /// - `merge.yml`'s `RUN_PRS` is the JSON list of the pull request numbers a `workflow_run` names,
 ///   which the event holds in public.
 const ALLOWED: &[(&str, &str, &str)] = &[
@@ -118,16 +121,6 @@ const ALLOWED: &[(&str, &str, &str)] = &[
         "L10",
         "xtask/src/gitops.rs",
         "pub(crate) tunnel_token: Secret,",
-    ),
-    (
-        "L10",
-        "xtask/src/gitops.rs",
-        "let data = line.strip_prefix(\"::add-mask::\").unwrap_or(\"<no prefix>\");",
-    ),
-    (
-        "L10",
-        "xtask/src/gitops.rs",
-        "\"::add-mask::a%0Db%0Ac%250Ad%25\"",
     ),
     (
         "L3",
@@ -294,9 +287,10 @@ pub(crate) fn rust_findings(sources: &[Source]) -> Vec<Finding> {
             if trimmed.contains("env::vars()") || trimmed.contains("env::vars_os()") {
                 hits.push("`env::vars()` reads every variable, secrets among them");
             }
-            if trimmed.contains("::add-mask::") {
+            if trimmed.contains("::add-mask::") && source.path != MASK {
                 hits.push(
-                    "`::add-mask::` is written only through `leak::add_mask`, which escapes it",
+                    "`::add-mask::` is written only by `mask.rs`, through `mask::add_mask`, which \
+                     escapes it",
                 );
             }
             if trimmed.contains("env::var(") && var_context(&ahead) {
@@ -403,17 +397,6 @@ fn secret_fields(lines: &[&str], index: usize) -> Vec<usize> {
         }
     }
     out
-}
-
-/// The `::add-mask::` workflow command for `value`, escaped as the runner reads it: `%` to `%25`
-/// first, then CR to `%0D` and LF to `%0A`, so no byte of the value can end the command or start
-/// another (DEC-2032, L8). The one way xtask writes it.
-pub(crate) fn add_mask(value: &str) -> String {
-    let escaped = value
-        .replace('%', "%25")
-        .replace('\r', "%0D")
-        .replace('\n', "%0A");
-    format!("::add-mask::{escaped}")
 }
 
 /// Runs the guard over the repository at `root`.
@@ -1783,22 +1766,10 @@ mod tests {
             "#[derive(Debug)]\nstruct Paths {\n    root: PathBuf,\n    key_count: usize,\n}",
             "struct Login {\n    password: String,\n}",
             "// never dbg!(x)",
-            "    let line = leak::add_mask(&token);",
+            "    mask::add_mask(&token);",
         ] {
             assert_eq!(rust(text), Vec::<&str>::new(), "{text:?}");
         }
-    }
-
-    /// `add_mask` escapes `%` first, then CR and LF, so a value cannot end the command early.
-    #[test]
-    fn add_mask_escapes_percent_then_cr_and_lf() {
-        assert_eq!(add_mask("plain"), "::add-mask::plain");
-        assert_eq!(add_mask("a%0Ab"), "::add-mask::a%250Ab");
-        assert_eq!(
-            add_mask("line\r\n::warning::x"),
-            "::add-mask::line%0D%0A::warning::x"
-        );
-        assert!(!add_mask("a\nb\rc").contains(['\n', '\r']));
     }
 
     /// The repository's Rust passes; each L10 fixture seeded into each real file is refused there.

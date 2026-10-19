@@ -17,6 +17,12 @@ mock_provider "digitalocean" {
 }
 
 mock_provider "cloudflare" {
+  mock_data "cloudflare_account_api_token_permission_groups_list" {
+    defaults = {
+      result = [{ id = "c0ffee00c0ffee00c0ffee00c0ffee00", name = "Workers R2 Storage Bucket Item Write", category = "r2", is_selectable = true, scopes = ["com.cloudflare.edge.r2.bucket"] }]
+    }
+  }
+
   mock_data "cloudflare_zone" {
     defaults = {
       zone_id = "0123456789abcdef0123456789abcdef"

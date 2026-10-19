@@ -2,6 +2,10 @@
 //! client secret from stdin into the local vault, as the executor. The secret is never an
 //! argument; the command prints nothing of it.
 //!
+//! `mandate vault provision` (E21-32, DEC-2022 item 2) sets an OpenBao vault up for the cell's
+//! connections and writes each process's AppRole credentials as owner-only files. The operator's
+//! token is read from a file only its owner can read, never from an argument or the environment.
+//!
 //! It runs under `systemd-run` as `owlhead_exec` with both vault keys as credentials
 //! (`deploy/set-secrets.sh`), so it reads `$CREDENTIALS_DIRECTORY`, `$MANDATE_VAULT_DIR`
 //! (default [`DEFAULT_VAULT_DIR`]), and the service users' ids from `/etc/passwd` and
@@ -9,10 +13,11 @@
 
 use std::fs;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, anyhow};
 use clap::{Args, Subcommand, ValueEnum};
+use mandate_vault::SourceError;
 use mandate_vault_local::VaultError;
 use mandate_vault_local::import::{import_client_secret, resolve_ids};
 use mandate_vault_local::startup::{Inputs, Role};
@@ -26,6 +31,28 @@ pub enum VaultCommand {
     /// Read a platform secret from stdin, never from an argument, and store it in the local
     /// vault as the executor. Run it through `deploy/set-secrets.sh`.
     Import(ImportArgs),
+    /// Set an OpenBao vault up for the cell's connections and write each process's AppRole
+    /// credentials, owner-only, into `--out`. The operator's token is read from a file.
+    Provision(ProvisionArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ProvisionArgs {
+    /// The vault's address, `https://host:port`.
+    #[arg(long)]
+    pub address: String,
+    /// The CA certificate (PEM) the vault's certificate must chain to.
+    #[arg(long)]
+    pub ca: PathBuf,
+    /// A file holding the operator's token, readable by its owner alone.
+    #[arg(long)]
+    pub operator_token_file: PathBuf,
+    /// A connection the vault holds credentials for; repeat it for each.
+    #[arg(long = "connection")]
+    pub connections: Vec<String>,
+    /// The directory the credentials are written to, made with mode 0700 when absent.
+    #[arg(long)]
+    pub out: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -98,4 +125,10 @@ pub fn run_import(
     import_client_secret(&vault, stdin).map_err(refused)?;
     writeln!(out, "the Alpaca OAuth client secret is in the vault")?;
     Ok(())
+}
+
+/// Runs the provisioning and prints, to `out`, the name of each file written and nothing else.
+/// A refusal names its reason code; none carries a token, a secret id, or a response body.
+pub fn run_provision(_args: &ProvisionArgs, _out: &mut impl Write) -> anyhow::Result<()> {
+    Err(anyhow!(SourceError::Unimplemented { story: "E21-32" }))
 }

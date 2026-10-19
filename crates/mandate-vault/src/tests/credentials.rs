@@ -2,7 +2,7 @@
 //! tightened, a directory or token open to others refused, against names written out by hand.
 
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -73,7 +73,6 @@ fn listing(dir: &Path) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn each_identitys_two_files_are_written_owner_only() {
     let dir = fresh("out");
     let written = write_credentials(
@@ -111,7 +110,6 @@ fn each_identitys_two_files_are_written_owner_only() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_earlier_file_is_replaced_and_tightened() {
     let dir = fresh("again");
     fs::create_dir(&dir).unwrap();
@@ -125,7 +123,6 @@ fn an_earlier_file_is_replaced_and_tightened() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_directory_open_to_others_or_linked_is_refused_and_nothing_is_written() {
     let one = [credential(Identity::Api, "role-a", "secret-a")];
     for bits in [0o750, 0o705, 0o770, 0o755, 0o500, 0o300] {
@@ -158,7 +155,6 @@ fn a_directory_open_to_others_or_linked_is_refused_and_nothing_is_written() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_owner_only_token_is_read_without_its_newline() {
     for (text, want) in [("tok-1\n", "tok-1"), ("tok-2", "tok-2")] {
         let file = fresh("token");
@@ -171,7 +167,6 @@ fn an_owner_only_token_is_read_without_its_newline() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_token_open_to_others_missing_empty_or_linked_is_refused() {
     let refused = |path: &Path| {
         let read = read_token_file(path).map(|t| t.expose_secret().to_owned());
@@ -205,7 +200,6 @@ fn a_token_open_to_others_missing_empty_or_linked_is_refused() {
 /// A symbolic link planted at an output name is refused, not followed: the link stays, its target
 /// is neither read nor written, and nothing else is written (DEC-2022 item 1).
 #[test]
-#[ignore = "pending E21-32"]
 fn a_link_planted_at_an_output_name_is_refused_and_its_target_untouched() {
     let dir = fresh("planted");
     fs::create_dir(&dir).unwrap();
@@ -228,10 +222,34 @@ fn a_link_planted_at_an_output_name_is_refused_and_its_target_untouched() {
     assert_eq!(listing(&dir), ["api.secret-id"]);
 }
 
+/// A hard link planted at an output name, which the pre-check sees as a plain file, is replaced
+/// rather than written through: the file it shares stays as it was (DEC-2022 item 1).
+#[test]
+fn a_hard_link_planted_at_an_output_name_is_replaced_not_written_through() {
+    let dir = fresh("hard-linked");
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    let shared = fresh("shared-by-hard-link");
+    fs::write(&shared, "someone-elses-file").unwrap();
+    set_mode(&shared, 0o644);
+    let planted = dir.join("api.secret-id");
+    fs::hard_link(&shared, &planted).unwrap();
+    let written = write_credentials(&dir, &[credential(Identity::Api, "role-a", "secret-a")]);
+    assert_eq!(
+        written,
+        Ok(vec!["api.role-id".to_owned(), "api.secret-id".to_owned()])
+    );
+    assert_eq!(fs::read_to_string(&shared).unwrap(), "someone-elses-file");
+    assert_eq!(mode(&shared), 0o644);
+    assert_eq!(fs::read_to_string(&planted).unwrap(), "secret-a");
+    assert_eq!(mode(&planted), 0o600);
+    assert_eq!(fs::symlink_metadata(&planted).unwrap().nlink(), 1);
+    assert_eq!(listing(&dir), ["api.role-id", "api.secret-id"]);
+}
+
 /// A refusal changes no file: every output name is checked before any is written, so an earlier
 /// file stays as it was when a later name cannot be written (DEC-2022 item 1).
 #[test]
-#[ignore = "pending E21-32"]
 fn a_refusal_leaves_every_earlier_file_as_it_was() {
     let dir = fresh("partial");
     fs::create_dir(&dir).unwrap();
@@ -285,7 +303,6 @@ proptest! {
     /// For any set of identities, the files written are exactly two per identity under the
     /// oracle's names, each holding its value and owner-only.
     #[test]
-    #[ignore = "pending E21-32"]
     fn the_files_are_exactly_two_per_identity_under_the_oracles_names(
         identities in proptest::collection::vec(identity(), 0..6),
         value in "[a-z0-9-]{1,24}",

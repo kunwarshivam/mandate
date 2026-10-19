@@ -1,4 +1,4 @@
-# The node firewall admits no public source (DEC-2012 items 4 and 8), checked on the plan against
+# The node firewall admits no public address (DEC-2012 items 4 and 8), checked on the plan against
 # a mocked provider.
 
 mock_provider "digitalocean" {}
@@ -15,9 +15,9 @@ run "firewall_admits_only_the_vpc" {
   assert {
     condition = alltrue(flatten([
       for rule in digitalocean_firewall.nodes.inbound_rule :
-      [for source in rule.source_addresses : source == "10.110.0.0/20"]
+      [for address in rule.source_addresses : address == "10.110.0.0/20"]
     ]))
-    error_message = "An inbound rule admits a source other than the VPC's own range."
+    error_message = "An inbound rule admits an address other than the VPC's own range."
   }
 
   assert {

@@ -1096,7 +1096,6 @@ impl Refs for BundleRefs {
 /// through the recorded fake to its judgment, and nothing the model said reaches the order path. The
 /// run journals its call and the model's thesis as a proposal, and no stream holds an order event.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_recorded_worker_s_answers_never_reach_the_order_path() {
     let rig = Rig::default();
     reconciled(&rig);
