@@ -15,9 +15,9 @@
   `AgentDeployed`; `switches`: an agent stream's `KillSwitchActivated` records with the bid the
   same command's `OwnerExitRequested` confirmed; `proposals`: its `IntentProposed` limit orders,
   less an opening a later switch or mode change follows, DEC-2033 item 2, and an owner's exit at
-  the market at the floor its `OwnerExitRequested` confirmed, item 4), and each exit handed once as
-  the runtime's handoff, ready or not (DEC-2033 item 1), an owner's market exit without a floor
-  raising one `owner_exit_unpriced` alert; `src/paper.rs` (`FixturePaper`, the fixture
+  the market at the floor its instrument-scoped `OwnerExitRequested` confirmed, item 4), and each
+  exit handed once as the runtime's handoff, ready or not (DEC-2033 item 1), an exit at the market
+  with no limit held with one `owner_exit_unpriced` or `exit_unpriced` alert; `src/paper.rs` (`FixturePaper`, the fixture
   paper broker below `mandate-alpaca`'s client, DEC-2007 item 1) and `src/alpaca.rs`
   (`AlpacaBroker`, the client as the process's `Broker`, DEC-2007 item 2), `src/connect.rs`
   (`connect_check`: `StreamOpened` and `ConnectionChecked` for a paper Alpaca connection, DEC-2007

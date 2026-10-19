@@ -9,7 +9,8 @@ use mandate_executor::{
     AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
     BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
     ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff, IntentId,
-    KillScope, MandateView, Ports, ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
+    KillScope, MandateView, Ports, Purpose, ReconcileReason, RiskClock, Seq, WriterEpoch, fold,
+    handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_process::{Action, Input as Lifecycled, Kind, Lifecycle, State};
@@ -429,9 +430,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     }
 
     /// Hands one exit as the handoff the runtime would make in one process (DEC-2033 item 1). An
-    /// owner's exit at the market with no confirmed floor raises one opaque `owner_exit_unpriced`
-    /// alert naming the intent and stops nothing, since the core takes only limit orders from a
-    /// handoff (DEC-2033 item 4).
+    /// exit at the market with no limit raises one opaque alert naming the intent and stops
+    /// nothing, since the core takes only limit orders from a handoff (DEC-2033 item 4):
+    /// `owner_exit_unpriced` for an owner's exit with no confirmed floor, `exit_unpriced` for any
+    /// other exit.
     fn take(
         &mut self,
         now: UtcNanos,
@@ -442,8 +444,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let Some(limit) = proposal.limit else {
             let intent = proposal.intent.0;
             if self.unpriced.insert(intent.clone()) {
+                let key = match proposal.purpose {
+                    Purpose::OwnerExit => "owner_exit_unpriced",
+                    _ => "exit_unpriced",
+                };
                 alerts.push(Alert {
-                    key: "owner_exit_unpriced",
+                    key,
                     subject: Some(intent),
                 });
             }

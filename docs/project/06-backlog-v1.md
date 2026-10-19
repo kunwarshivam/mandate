@@ -855,16 +855,20 @@ after U-A1 to U-A5 are recorded.
   `xtask/src/main.rs` is empty, and `cargo xtask live-feature` still exits 0 on the repository.
   Beside it, the stronger artifact-level check DEC-851 item 6's threat model names: assert from
   `cargo metadata` and the build plan that no CI job resolves the `live` feature.
-- **E7-29 (Must, M6, after E21-30's X1b)** As an owner, I want my exit at the market handed to
-  the executor core as a market order, so that it is never left waiting on a floor I did not
-  confirm. Today the core takes only limit orders from a handoff, so the executor process prices an
-  owner's market exit at the floor confirmed in its `OwnerExitRequested`, and without one raises
-  the opaque `owner_exit_unpriced` alert and hands nothing ([DEC-2033](decisions/DEC-2033.md) item
-  4). *Accepted when:* `IntentBody::Order` carries an order type; the core receives, gates and
-  submits a market owner exit (trading spec §5.1, §5.5) with the same write-before-acting and
-  rule-13 exemptions as a limit exit; the executor process hands every owner exit and raises no
-  `owner_exit_unpriced`; and a property shows no owner exit is refused for conduct, eligibility,
-  day-trade budget, buying power or opening-session reasons.
+- **E7-29 (Must, M6, lane X's next story after E21-30's X1b)** As an owner, I want every exit at
+  the market handed to the executor core as a market order, so that none is held waiting on a
+  floor I did not confirm. Today the core takes only limit orders from a handoff, so the executor
+  process prices an owner's market exit at the floor its instrument-scoped `OwnerExitRequested`
+  confirmed, and holds any other exit at the market with one opaque alert (`owner_exit_unpriced`
+  or `exit_unpriced`), a gap against rule 13 that [DEC-2033](decisions/DEC-2033.md) item 4
+  records. *Accepted when:* `IntentBody::Order` carries an order type; the core receives, gates
+  and submits a market exit (trading spec §5.1, §5.5) with the same write-before-acting and
+  rule-13 exemptions as a limit exit; the executor process hands every exit and raises neither
+  alert; `Purpose::exempt_from_pacing` is checked for `OwnerExit` (owner exits are paced only by
+  participation caps, rule 13); and the owner-exit property (`mandate-executord`'s
+  `tests/owner_exits.rs`) is re-seeded once the fixture fills, with a held position, gate facts
+  and an `Unknown` order in the instrument, and shows no owner exit is refused for conduct,
+  eligibility, day-trade budget, buying power or opening-session reasons.
 
 ### E8 Escalation and approvals
 
