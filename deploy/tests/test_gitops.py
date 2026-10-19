@@ -61,6 +61,13 @@ SIGNER = {
 # resolved 2026-10-18 for the default jurisdiction (DEC-2017 items 1 and 2).
 R2_ENDPOINT = re.compile(r"^https://[0-9a-f]{32}\.r2\.cloudflarestorage\.com$")
 R2_EGRESS = {"cidrs": ["172.64.190.1/32", "172.64.66.1/32"], "port": 443}
+# The ConfigMaps the bootstrap writes, not git (DEC-2017 item 6), each with a stand-in value of the
+# shape the bootstrap writes: the archive's endpoint names the founder's Cloudflare account.
+BOOTSTRAP_VALUES = {
+    "journal-archive-endpoint": {
+        "archive": {"endpointURL": "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com"}
+    },
+}
 # The tiers the stub issuer may run in (DEC-2005), which no hosted environment may take.
 STUB_TIERS = {"dev", "ci"}
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -122,6 +129,10 @@ def release_values(docs: list[dict], release: dict) -> dict:
     values: dict = {}
     for ref in release["spec"].get("valuesFrom", []):
         assert ref["kind"] == "ConfigMap", ref
+        if ref["name"] in BOOTSTRAP_VALUES:
+            assert ref["name"] not in maps, f"{ref['name']} is the bootstrap's, not git's"
+            values = merge(values, BOOTSTRAP_VALUES[ref["name"]])
+            continue
         source = maps.get(ref["name"])
         assert source is not None, f"valuesFrom names a ConfigMap the overlay lacks: {ref['name']}"
         values = merge(values, yaml.safe_load(source["data"][ref.get("valuesKey", "values.yaml")]) or {})
@@ -214,6 +225,22 @@ def sync_read_only(docs: list[dict], overlay: Path) -> list[str]:
             problems.append(f"{name} reconciles {spec.get('path')}")
         if spec.get("sourceRef") != {"kind": "GitRepository", "name": "mandate"}:
             problems.append(f"reconciles from {spec.get('sourceRef')}")
+    return problems
+
+
+def endpoint_from_bootstrap(docs: list[dict]) -> list[str]:
+    """The journal's archive endpoint comes only from the bootstrap's ConfigMap, never from git,
+    which holds no account (DEC-2017 item 6)."""
+    journal = of_kind(docs, "HelmRelease").get("journal") or {"spec": {}}
+    spec = journal["spec"]
+    problems = []
+    names = [ref.get("name") for ref in spec.get("valuesFrom", [])]
+    if "journal-archive-endpoint" not in names:
+        problems.append("journal: does not read the bootstrap's journal-archive-endpoint")
+    if "endpointURL" in ((spec.get("values") or {}).get("archive") or {}):
+        problems.append("journal: git sets the archive endpoint")
+    if "journal-archive-endpoint" in of_kind(docs, "ConfigMap"):
+        problems.append("journal-archive-endpoint is in git, so Flux would overwrite the bootstrap's")
     return problems
 
 
@@ -352,6 +379,10 @@ def test_sync_read_only(overlay):
     assert sync_read_only(overlay[1], overlay[4]) == []
 
 
+def test_endpoint_from_bootstrap(overlay):
+    assert endpoint_from_bootstrap(overlay[1]) == []
+
+
 def test_never_pruned(overlay):
     assert never_pruned(overlay[1]) == []
 
@@ -434,6 +465,23 @@ DOC_BUGS = [
         lambda d: d["spec"].update(secretRef={"name": "deploy-key"}),
     ),
     (sync_read_only, "Kustomization", "cluster", lambda d: d["spec"].update(path="./deploy/gitops")),
+    (endpoint_from_bootstrap, "HelmRelease", "journal", lambda d: d["spec"].pop("valuesFrom")),
+    (
+        endpoint_from_bootstrap,
+        "HelmRelease",
+        "journal",
+        lambda d: (
+            d["spec"]["values"]
+            .setdefault("archive", {})
+            .update(endpointURL="https://x.r2.cloudflarestorage.com")
+        ),
+    ),
+    (
+        endpoint_from_bootstrap,
+        "Namespace",
+        "ws-ws1",
+        lambda d: d.update(kind="ConfigMap", metadata={"name": "journal-archive-endpoint"}),
+    ),
     (never_pruned, "Namespace", "ws-ws1", lambda d: d["metadata"].pop("annotations")),
     (never_pruned, "HelmRelease", "journal", lambda d: d["metadata"].pop("annotations")),
 ]

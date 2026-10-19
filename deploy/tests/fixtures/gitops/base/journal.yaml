@@ -1,7 +1,10 @@
 # The workspace journal's Postgres (deploy/cell/charts/journal-db): a primary and its synchronous
 # standby on separate nodes (E21-41, DEC-1050), archiving WAL and base backups to the
 # environment's R2 bucket. The chart's own values.yaml holds the defaults; the overlay patches
-# in the environment's archive destination, egress and sizes. Flux never prunes it: removing it
+# in the environment's archive destination, egress and sizes. The archive's endpoint names the
+# founder's Cloudflare account, which no file here holds: the bootstrap writes it from OpenTofu's
+# `archive_endpoint` output into the ConfigMap `journal-archive-endpoint` (DEC-2017 item 6), and
+# the release waits until it exists. Flux never prunes it: removing it
 # from git leaves the journal running rather than uninstalling it.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -20,6 +23,10 @@ spec:
   chartRef:
     kind: OCIRepository
     name: mandate-journal-db
+  valuesFrom:
+    - kind: ConfigMap
+      name: journal-archive-endpoint
+      valuesKey: values.yaml
   values:
     instances: 2
     failureDomain: separate
