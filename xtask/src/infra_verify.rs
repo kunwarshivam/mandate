@@ -37,6 +37,11 @@ const SIGNATURE_WEBHOOK: &str = "policy.sigstore.dev";
 /// takes.
 pub(crate) const SECONDS: i64 = 480;
 
+/// The change the edge's lines wait on: until the API pod's tunnel connector lands, an unhealthy
+/// tunnel or an API Access cannot reach is a pending note, not a failure (DEC-2050 item 4). The PR
+/// that lands the connector sets this to `None`. An API that answers without Access fails always.
+const EDGE_PENDING: Option<&str> = Some("#1539");
+
 /// `kubectl get` against the cluster, its arguments after `get`, answering what it printed.
 pub(crate) type Kubectl<'a> = &'a dyn Fn(&[&str]) -> Result<String>;
 
@@ -181,9 +186,22 @@ fn admission(list: &mut Checklist, kubectl: Kubectl<'_>) {
     }
 }
 
+/// A line of the edge's: failing, or pending on `pending` when it names a change.
+fn edge_line(list: &mut Checklist, pending: Option<&'static str>, holds: bool, what: String) {
+    match pending {
+        Some(until) => list.check_or_pending(holds, until, what),
+        None => list.check(holds, what),
+    }
+}
+
 /// The tunnel's health as Cloudflare records it, and the API's answer to a request without
 /// credentials: Access redirects it to its login or refuses it; a success means the API is open.
-fn edge_checks(list: &mut Checklist, http: &dyn Http, edge: &Edge<'_>) {
+fn edge_checks(
+    list: &mut Checklist,
+    http: &dyn Http,
+    edge: &Edge<'_>,
+    pending: Option<&'static str>,
+) {
     let url = format!(
         "{CF_API}/accounts/{}/cfd_tunnel/{}",
         edge.account, edge.tunnel_id
@@ -195,39 +213,56 @@ fn edge_checks(list: &mut Checklist, http: &dyn Http, edge: &Edge<'_>) {
         .and_then(|answer| serde_json::from_str::<Value>(&answer.body).ok())
         .map(|record| text(&record, &["result", "status"]).to_owned());
     match status.as_deref() {
-        Some("healthy") => list.check(true, "the tunnel is healthy"),
+        Some("healthy") => edge_line(list, pending, true, "the tunnel is healthy".to_owned()),
         Some(other) => {
             let said: String = other
                 .chars()
                 .filter(char::is_ascii_alphabetic)
                 .take(16)
                 .collect();
-            list.check(
+            edge_line(
+                list,
+                pending,
                 false,
                 format!("the tunnel is healthy (Cloudflare reports {said})"),
             );
         }
-        None => list.check(false, "the tunnel is healthy (Cloudflare did not answer)"),
+        None => edge_line(
+            list,
+            pending,
+            false,
+            "the tunnel is healthy (Cloudflare did not answer)".to_owned(),
+        ),
     }
     let line = |answer: &str| {
         format!("the API answers only through Access ({answer} without credentials)")
     };
     match http.get_public(&format!("https://{}/", edge.api_hostname)) {
-        Ok(answer) => list.check(
+        Ok(answer) if (200..300).contains(&answer.status) => {
+            list.check(false, line(&answer.status.to_string()));
+        }
+        Ok(answer) => edge_line(
+            list,
+            pending,
             (300..400).contains(&answer.status) || matches!(answer.status, 401 | 403),
             line(&answer.status.to_string()),
         ),
-        Err(_) => list.check(false, line("no answer")),
+        Err(_) => edge_line(list, pending, false, line("no answer")),
     }
 }
 
 /// One reading of staging, as the checklist it prints.
-fn checks(kubectl: Kubectl<'_>, http: &dyn Http, edge: &Edge<'_>) -> Result<Checklist> {
+fn checks(
+    kubectl: Kubectl<'_>,
+    http: &dyn Http,
+    edge: &Edge<'_>,
+    pending: Option<&'static str>,
+) -> Result<Checklist> {
     let mut list = Checklist::default();
     flux(&mut list, kubectl);
     pods(&mut list, kubectl);
     admission(&mut list, kubectl);
-    edge_checks(&mut list, http, edge);
+    edge_checks(&mut list, http, edge, pending);
     Ok(list)
 }
 
@@ -236,7 +271,7 @@ fn checks(kubectl: Kubectl<'_>, http: &dyn Http, edge: &Edge<'_>) -> Result<Chec
 pub(crate) fn verify(kubectl: Kubectl<'_>, http: &dyn Http, edge: &Edge<'_>) -> Result<Checklist> {
     let started = http.now()?;
     loop {
-        let list = checks(kubectl, http, edge)?;
+        let list = checks(kubectl, http, edge, EDGE_PENDING)?;
         if list.complete() || http.now()? - started >= SECONDS {
             return Ok(list);
         }
@@ -463,7 +498,7 @@ mod tests {
     /// Each way staging can be down is its own MISSING line, once the deadline has passed.
     #[test]
     fn each_fault_is_named() -> Result<()> {
-        let faults: [(Fault, &str); 11] = [
+        let faults: [(Fault, &str); 9] = [
             (
                 |s| s.flux[3] = ready("HelmRelease", "flux-system", "workspace", false),
                 "HelmRelease flux-system/workspace is Ready",
@@ -503,16 +538,8 @@ mod tests {
                 "webhook policy.sigstore.dev fails closed",
             ),
             (
-                |s| s.tunnel = "down",
-                "the tunnel is healthy (Cloudflare reports down)",
-            ),
-            (
                 |s| s.api = 200,
                 "the API answers only through Access (200 without credentials)",
-            ),
-            (
-                |s| s.api = 502,
-                "the API answers only through Access (502 without credentials)",
             ),
         ];
         for (fault, line) in faults {
@@ -535,7 +562,7 @@ mod tests {
         assert_eq!(missing(&text), Vec::<&str>::new(), "{text}");
         assert_eq!(staging.pauses.get(), 3);
         let mut staging = Staging::up();
-        staging.tunnel = "down";
+        staging.bindings.clear();
         staging.seconds_per_reading = 60;
         run(&staging)?;
         assert_eq!(
@@ -549,6 +576,43 @@ mod tests {
         assert_eq!(
             missing(&text),
             ["kubectl can read validatingwebhookconfigurations"],
+            "{text}"
+        );
+        Ok(())
+    }
+
+    /// Until the tunnel connector lands, an unhealthy tunnel or an API Access cannot reach is a
+    /// pending note that fails nothing; an API that answers without Access fails all the same; and
+    /// with nothing pending, both are MISSING.
+    #[test]
+    fn the_edge_waits_on_the_connector_but_never_on_an_open_api() -> Result<()> {
+        let mut staging = Staging::up();
+        staging.tunnel = "down";
+        staging.api = 502;
+        let text = run(&staging)?;
+        assert_eq!(missing(&text), Vec::<&str>::new(), "{text}");
+        assert_eq!(staging.pauses.get(), 0);
+        for line in [
+            "[pending #1539] the tunnel is healthy (Cloudflare reports down)",
+            "[pending #1539] the API answers only through Access (502 without credentials)",
+        ] {
+            assert!(text.contains(line), "{line}: {text}");
+        }
+        let list = checks(&|args| staging.kubectl(args), &staging, &edge(), None)?;
+        assert_eq!(
+            missing(&list.render_titled("infra verify (staging)")),
+            [
+                "the tunnel is healthy (Cloudflare reports down)",
+                "the API answers only through Access (502 without credentials)",
+            ]
+        );
+        assert!(!list.complete());
+        let mut staging = Staging::up();
+        staging.api = 200;
+        let text = run(&staging)?;
+        assert_eq!(
+            missing(&text),
+            ["the API answers only through Access (200 without credentials)"],
             "{text}"
         );
         Ok(())

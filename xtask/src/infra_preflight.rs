@@ -72,6 +72,11 @@ pub(crate) enum Item {
     Ready(String),
     Missing(String),
     Reminder(String),
+    /// A line that does not hold yet but waits on the change `until` names, so it does not fail.
+    Pending {
+        until: &'static str,
+        what: String,
+    },
 }
 
 /// The checklist the preflight prints, in the order it was checked.
@@ -87,6 +92,21 @@ impl Checklist {
             Item::Ready(what)
         } else {
             Item::Missing(what)
+        });
+    }
+
+    /// A line that holds, or else waits on `until` without failing the checklist.
+    pub(crate) fn check_or_pending(
+        &mut self,
+        holds: bool,
+        until: &'static str,
+        what: impl Into<String>,
+    ) {
+        let what = what.into();
+        self.items.push(if holds {
+            Item::Ready(what)
+        } else {
+            Item::Pending { until, what }
         });
     }
 
@@ -112,12 +132,13 @@ impl Checklist {
         let mut out = format!("{title}:\n");
         for item in &self.items {
             let (mark, what) = match item {
-                Item::Ready(what) => ("[ok]      ", what),
-                Item::Missing(what) => ("[MISSING] ", what),
-                Item::Reminder(what) => ("[console] ", what),
+                Item::Ready(what) => ("[ok]      ".to_owned(), what),
+                Item::Missing(what) => ("[MISSING] ".to_owned(), what),
+                Item::Reminder(what) => ("[console] ".to_owned(), what),
+                Item::Pending { until, what } => (format!("[pending {until}] "), what),
             };
             out.push_str("  ");
-            out.push_str(mark);
+            out.push_str(&mark);
             out.push_str(what);
             out.push('\n');
         }

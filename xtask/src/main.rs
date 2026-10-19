@@ -1694,6 +1694,7 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     let account = output("cloudflare_account_id")?;
     mask::add_mask(account.trim());
     let (tunnel_id, api_hostname) = (output("tunnel_id")?, output("api_hostname")?);
+    mask::add_mask(tunnel_id.trim());
     let get = |args: &[&str]| -> Result<String> {
         let out = gitops::tool("kubectl")
             .args(["--v=0", "--kubeconfig"])
