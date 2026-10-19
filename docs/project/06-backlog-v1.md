@@ -571,11 +571,21 @@ the spec invariants (DP-n) its tests cover.
     daily loss (`resolved_at_rollover`, `new_day_breach`), the lifetime floor, crypto, and the
     owner's acknowledgments and allocation changes.
   - **C:** the wiring in `mandate-shell`'s `adapters.rs`, `paper/gate.rs`, and `paper/context.rs`,
-    which are R0 files. It waits for R0 to close, or for the founder's call.
+    which are R0 files. The founder started it on 2026-10-19 ([DEC-2605](decisions/DEC-2605.md)
+    row 17); [DEC-2307](decisions/DEC-2307.md) limits the R0 edits to thin hooks in those three
+    files, binds C only after B2b to B4, and adds the account stream's own `ClockAdvanced`. The first
+    live order waits for C and the R0 re-pass (row 21).
+  - **Gap (reference cases):** no mandate reference case steps an equity's after-hours or overnight
+    mark; MC-R13 covers pre-market only. Add one when the mandate cases next change.
   - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
     "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
     one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which
     fails closed through staleness.
+  - **Follow-up ([DEC-2305](decisions/DEC-2305.md) item 5, the #1778 review):** the executor's
+    version-2 mark writer, whichever E6-15 or E7 slice builds it, writes `sane: false` for a quote
+    older than the data profile's staleness threshold at `risk_clock`. Version 2 records no quote
+    time, so a replay cannot audit a stale `sane: true`; the obligation is the writer's, and the
+    writer gets a writer-side test of it.
 
   *Accepted when:* every MC-R, MC-T, MC-L, and MC-W case, driven through journaled records, gives the
   harness's snapshot and events. A restart rebuilds the same view. Every fail-closed cause holds
