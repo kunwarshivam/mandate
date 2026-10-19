@@ -685,6 +685,17 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+# The runtime's production ports (DEC-968 item 6, DEC-2605 row 20): the glue between the runtime's
+# ports and the deterministic crates, shared by the shell and the cell's runtime process, which may
+# not depend on the shell. Pure: every fact comes from its caller, and it reaches no executor,
+# broker, journal store or host.
+[crates.mandate-ports]
+layer = 7
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-paper", "mandate-cli", "mandate-daemon", "mandate-journal-pg"]
+
 [crates.mandate-shell]
 layer = 8
 safety_critical = true
