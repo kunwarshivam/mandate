@@ -1423,8 +1423,10 @@ mod tests {
     }
 
     /// What a release ships, exactly: the CLI, the agent daemon, the simulator the local cell's
-    /// drills run, and the workspace API server, whose image a hosted cell runs as `images.api`,
-    /// each package building the binary of its name but the CLI's `mandate` (DEC-971, DEC-2026).
+    /// drills run, the workspace API server, whose image a hosted cell runs as `images.api`, and
+    /// the three agent processes a hosted cell runs, the deployment manager, the agent runtime and
+    /// the account executor, each package building the binary of its name but the CLI's `mandate`
+    /// (DEC-971, DEC-2026).
     #[test]
     fn the_release_ships_exactly_these_binaries() {
         assert_eq!(
@@ -1434,6 +1436,9 @@ mod tests {
                 ("mandate-agentd", "mandate-agentd"),
                 ("mandate-rh-sim", "mandate-rh-sim"),
                 ("mandate-api-server", "mandate-api-server"),
+                ("mandate-deployd", "mandate-deployd"),
+                ("mandate-daemon", "mandate-daemon"),
+                ("mandate-executord", "mandate-executord"),
             ]
             .as_slice()
         );
