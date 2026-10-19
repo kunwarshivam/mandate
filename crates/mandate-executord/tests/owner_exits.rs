@@ -1,6 +1,6 @@
 //! A property of the exits over random runs (E21-30, DEC-2033 item 5, DEC-2037 item 7,
-//! `AGENTS.md` rule 13): the process hands every exit, an owner's at the market at its confirmed
-//! floor or with no limit, holds no exit at all while the agent is `normal` and no order is
+//! `AGENTS.md` rule 13; DEC-2040): the process hands every exit, an owner's at the market at its
+//! confirmed floor, with no limit, or stepped up with its confirmation journaled at that floor, holds no exit at all while the agent is `normal` and no order is
 //! `Unknown`, and the gate, given its facts, never fails an owner's exit on eligibility, session,
 //! conduct, buying power or the day-trade budget. The oracle reads only what the journal holds and
 //! the alerts the process raised.
@@ -11,8 +11,8 @@ use mandate_canon::Value;
 use mandate_process::State;
 use proptest::prelude::*;
 use support::{
-    AGENT, Error, ExitFacts, NOON, Paper, TwoPercentStop, at, deployed, owner_exit, propose,
-    propose_owner_market_exit, start_wired, wired,
+    AGENT, Error, ExitFacts, NOON, Paper, TwoPercentStop, at, deployed, owner_exit,
+    owner_exit_stepped_up, propose, propose_owner_market_exit, start_wired, wired,
 };
 
 /// The checks that never refuse an owner's exit (`AGENTS.md` rule 13).
@@ -28,6 +28,8 @@ const NEVER_FAIL: [&str; 5] = [
 enum Exit {
     Limit(u32),
     Market(Option<u32>),
+    /// An owner's exit at the market whose bid was confirmed with valid step-up, at this floor.
+    SteppedUp(u32),
     /// A risk or discretionary exit at this limit.
     Other(&'static str, u32),
 }
@@ -37,6 +39,7 @@ fn owner_exits() -> impl Strategy<Value = Vec<Exit>> {
         prop_oneof![
             (100u32..200).prop_map(Exit::Limit),
             proptest::option::of(100u32..200).prop_map(Exit::Market),
+            (100u32..200).prop_map(Exit::SteppedUp),
             (
                 prop_oneof![Just("risk_exit"), Just("discretionary_exit")],
                 100u32..200
@@ -53,6 +56,7 @@ fn check(exits: &[Exit]) -> Result<(), Error> {
     let journal = deployed()?;
     let mut handed = Vec::new();
     let mut limits = Vec::new();
+    let mut floors = Vec::new();
     for (n, exit) in exits.iter().enumerate() {
         let intent = format!("01JOWNEXIT{n:016}");
         match exit {
@@ -87,6 +91,19 @@ fn check(exits: &[Exit]) -> Result<(), Error> {
                 propose_owner_market_exit(&journal, AGENT, &intent, &request)?;
                 limits.push(floor.map_or(Value::Null, Value::Str));
             }
+            Exit::SteppedUp(floor) => {
+                let request = format!("01JOWNREQS{n:016}");
+                owner_exit_stepped_up(
+                    &journal,
+                    AGENT,
+                    &request,
+                    &floor.to_string(),
+                    "2026-09-22T15:59:00.000000000Z",
+                )?;
+                propose_owner_market_exit(&journal, AGENT, &intent, &request)?;
+                limits.push(Value::Null);
+                floors.push(Value::Str(floor.to_string()));
+            }
         }
         handed.push(intent);
     }
@@ -111,6 +128,15 @@ fn check(exits: &[Exit]) -> Result<(), Error> {
         .map(|payload| payload.get("limit_price").cloned().unwrap_or(Value::Null))
         .collect();
     assert_eq!(received, limits, "each at its limit, its floor, or none");
+    let confirmed: Vec<Value> = journal
+        .payloads("OwnerConfirmationReceived")
+        .iter()
+        .map(|payload| payload.get("floor").cloned().unwrap_or(Value::Null))
+        .collect();
+    assert_eq!(
+        confirmed, floors,
+        "a stepped-up exit's confirmation journaled at its floor, and no other"
+    );
     let decisions = journal.payloads("GateDecided");
     assert!(!decisions.is_empty());
     for decision in decisions {

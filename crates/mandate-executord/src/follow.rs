@@ -12,10 +12,11 @@ use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::{Value, parse};
 use mandate_executor::{
     AccountScope, AgentId, EventId, FoldedEvent, HandedConfirmation, Initiator, MandateVersion,
-    OwnerConfirmation, Purpose, Seq, TimeInForce,
+    OwnerConfirmation, Purpose, RiskClock, Seq, TimeInForce,
 };
 use mandate_journal::{Environment, StoredEvent};
 use mandate_num::{Price, Qty};
+use mandate_time::UtcNanos;
 
 /// A row the executor must act on that it could not read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,9 +208,10 @@ pub struct Proposal {
     pub instrument: InstrumentId,
     pub side: Side,
     pub qty: Qty,
-    /// The limit: the proposal's own, or for an owner's exit at the market the floor the owner
-    /// confirmed in the `OwnerExitRequested` it follows from, or none for an exit at the market
-    /// with no confirmed floor (DEC-2033 item 4).
+    /// The limit: the proposal's own; for an owner's exit at the market the floor the owner
+    /// confirmed without valid step-up in the `OwnerExitRequested` it follows from (DEC-2033 item
+    /// 4); none for one confirmed with valid step-up, which carries its confirmation instead, or
+    /// for any other exit at the market (DEC-2040 item 4).
     pub limit: Option<Price>,
     pub tif: TimeInForce,
     pub purpose: Purpose,
@@ -248,19 +250,27 @@ pub fn proposals(rows: &[FoldedEvent]) -> Result<Vec<Proposal>, Unreadable> {
     Ok(proposed)
 }
 
-/// The floor the owner confirmed for an exit at the market: the `OwnerExitRequested` the proposal
-/// follows from on its causation chain, when it confirmed one (journal spec §9.1 rule 12: the floor
-/// is set exactly when the bid was confirmed) for the exit's own `instrument`. A request of another
-/// scope or for another instrument confirms no floor for it.
-fn floor(
+/// How long a confirmation lasts after the step-up that gave it: mandate spec §6.1's step-up
+/// freshness window (DEC-2040 item 7).
+const CONFIRMATION_S: i64 = 300;
+
+/// What the owner confirmed for an exit at the market, as `(limit, confirmation)`: the
+/// `OwnerExitRequested` the proposal follows from on its causation chain, for the exit's own
+/// `instrument` (a request of another scope or instrument confirms nothing for it). With valid
+/// step-up its bid, bid size and floor are handed as the confirmation, expiring
+/// [`CONFIRMATION_S`] after the step-up on the whole second, and the exit goes as proposed with no
+/// limit (DEC-2040 items 1, 4 and 7). Confirmed without valid step-up, the floor is its limit, as
+/// before, and nothing is handed that would let it sell outside the session (mandate spec §6.1,
+/// DEC-2033 item 4). Unconfirmed, it has neither (journal spec §9.1 rule 12).
+fn confirmed(
     rows: &[FoldedEvent],
     proposed: &FoldedEvent,
     instrument: Option<&str>,
-) -> Result<Option<Price>, Unreadable> {
+) -> Result<(Option<Price>, Option<HandedConfirmation>), Unreadable> {
     let mut cause = proposed.causation_id.as_ref();
     for _ in 0..rows.len() {
         let Some(row) = cause.and_then(|id| rows.iter().find(|row| &row.event_id == id)) else {
-            return Ok(None);
+            return Ok((None, None));
         };
         if row.event_type == "OwnerExitRequested" {
             let floor = match row.payload.get("floor") {
@@ -270,23 +280,53 @@ fn floor(
             };
             let text = |member: &str| row.payload.get(member).and_then(Value::as_str);
             let own = text("scope") == Some("instrument") && text("subject") == instrument;
-            return Ok(floor.filter(|_| own));
+            let Some(floor) = floor.filter(|_| own) else {
+                return Ok((None, None));
+            };
+            if text("step_up_status") != Some("valid") {
+                return Ok((Some(floor), None));
+            }
+            let authenticated_at = row
+                .payload
+                .get("step_up")
+                .and_then(|step_up| step_up.get("authenticated_at"))
+                .and_then(Value::as_str)
+                .and_then(|at| UtcNanos::parse(at).ok())
+                .ok_or(Unreadable)?;
+            let price = |member: &str| {
+                text(member)
+                    .and_then(|value| Price::parse(value).ok())
+                    .ok_or(Unreadable)
+            };
+            let handed = HandedConfirmation {
+                bid: price("bid")?,
+                bid_size: text("bid_size")
+                    .and_then(|value| Qty::parse(value).ok())
+                    .ok_or(Unreadable)?,
+                floor,
+                expires_at: RiskClock::from_secs(
+                    authenticated_at.secs().saturating_add(CONFIRMATION_S),
+                ),
+                copied_from: row.event_id.clone(),
+            };
+            return Ok((None, Some(handed)));
         }
         cause = row.causation_id.as_ref();
     }
-    Ok(None)
+    Ok((None, None))
 }
 
 /// An `IntentProposed`'s order (journal spec §9.1): a limit order, an owner's exit at the market at
 /// its confirmed floor, or any other exit at the market with no limit.
 fn proposal(rows: &[FoldedEvent], row: &FoldedEvent) -> Result<Proposal, Unreadable> {
     let text = |member: &str| row.payload.get(member).and_then(Value::as_str);
-    let limit = match (text("type"), text("purpose")) {
-        (Some("limit"), _) => {
-            Some(Price::parse(text("limit_price").ok_or(Unreadable)?).map_err(|_| Unreadable)?)
-        }
-        (Some("market"), Some("owner_exit")) => floor(rows, row, text("instrument_id"))?,
-        (Some("market"), Some("risk_exit" | "discretionary_exit")) => None,
+    let (limit, confirmation) = match (text("type"), text("purpose")) {
+        (Some("limit"), _) => (
+            Some(Price::parse(text("limit_price").ok_or(Unreadable)?).map_err(|_| Unreadable)?),
+            None,
+        ),
+        (Some("market"), Some("owner_exit")) => confirmed(rows, row, text("instrument_id"))?,
+        (Some("market"), Some("risk_exit" | "discretionary_exit")) => (None, None),
         _ => return Err(Unreadable),
     };
     let side = match text("side") {
@@ -317,15 +357,13 @@ fn proposal(rows: &[FoldedEvent], row: &FoldedEvent) -> Result<Proposal, Unreada
         limit,
         tif,
         purpose,
-        confirmation: None,
+        confirmation,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use mandate_canon::{Key, Object};
-    use mandate_executor::RiskClock;
-    use mandate_time::UtcNanos;
 
     use super::*;
 
