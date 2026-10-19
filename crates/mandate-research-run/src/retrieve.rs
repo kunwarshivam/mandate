@@ -4,10 +4,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Int, Key, Object, Value, to_canonical};
+use mandate_num::Price;
 use mandate_time::UtcNanos;
 
 use crate::error::ResearchRunError;
-use crate::item::{Bar, Filing, InstrumentFact, ItemId, ItemKind, NewsItem, SourceId, Symbol};
+use crate::item::{
+    Bar, Filing, InstrumentFact, ItemId, ItemKind, NewsItem, Quote, SourceId, Symbol,
+};
 use crate::plan::{RetrievalPlan, Scope};
 use crate::ports::{Readers, TextQuery};
 
@@ -18,6 +21,7 @@ pub enum RetrievedItem {
     News(NewsItem),
     Filing(Filing),
     Instrument(InstrumentFact),
+    Quote(Quote),
 }
 
 /// Why an item a reader returned is not in the retrieval. Every drop is recorded, so the artifact
@@ -83,6 +87,7 @@ impl RetrievedItem {
     pub fn kind(&self) -> ItemKind {
         match self {
             Self::Bar(_) => ItemKind::Bar,
+            Self::Quote(_) => ItemKind::Quote,
             Self::News(_) => ItemKind::News,
             Self::Filing(_) => ItemKind::Filing,
             Self::Instrument(_) => ItemKind::Instrument,
@@ -101,6 +106,11 @@ impl RetrievedItem {
                 bar.symbol.as_str(),
                 bar.knowledge_at.secs()
             )),
+            Self::Quote(quote) => ItemId::new(&format!(
+                "quote:{}:{}",
+                quote.symbol.as_str(),
+                quote.knowledge_at.secs()
+            )),
             Self::News(item) => Ok(item.item_id.clone()),
             Self::Filing(item) => Ok(item.item_id.clone()),
             Self::Instrument(fact) => {
@@ -117,6 +127,7 @@ impl RetrievedItem {
     pub fn source(&self) -> Result<SourceId, ResearchRunError> {
         match self {
             Self::Bar(_) => SourceId::new(SourceId::BARS),
+            Self::Quote(_) => SourceId::new(SourceId::QUOTES),
             Self::News(item) => Ok(item.source.clone()),
             Self::Filing(item) => Ok(item.source.clone()),
             Self::Instrument(_) => SourceId::new(SourceId::INSTRUMENTS),
@@ -127,6 +138,7 @@ impl RetrievedItem {
     pub fn symbol(&self) -> Option<&Symbol> {
         match self {
             Self::Bar(bar) => Some(&bar.symbol),
+            Self::Quote(quote) => Some(&quote.symbol),
             Self::Filing(item) => Some(&item.symbol),
             Self::Instrument(fact) => Some(&fact.symbol),
             Self::News(item) if item.symbols.len() == 1 => item.symbols.first(),
@@ -139,6 +151,7 @@ impl RetrievedItem {
     pub fn knowledge_at(&self) -> UtcNanos {
         match self {
             Self::Bar(bar) => bar.knowledge_at,
+            Self::Quote(quote) => quote.knowledge_at,
             Self::News(item) => item.knowledge_at,
             Self::Filing(item) => item.knowledge_at,
             Self::Instrument(_) => UtcNanos::EPOCH,
@@ -150,7 +163,7 @@ impl RetrievedItem {
         let length = match self {
             Self::News(item) => item.headline.len().saturating_add(item.summary.len()),
             Self::Filing(item) => item.excerpt.len(),
-            Self::Bar(_) | Self::Instrument(_) => 0,
+            Self::Bar(_) | Self::Quote(_) | Self::Instrument(_) => 0,
         };
         u64::try_from(length).unwrap_or(u64::MAX)
     }
@@ -160,7 +173,7 @@ impl RetrievedItem {
         match self {
             Self::News(item) => Some(item.content_hash),
             Self::Filing(item) => Some(item.content_hash),
-            Self::Bar(_) | Self::Instrument(_) => None,
+            Self::Bar(_) | Self::Quote(_) | Self::Instrument(_) => None,
         }
     }
 
@@ -228,6 +241,19 @@ impl RetrievedItem {
                 ("length_bytes", int(self.length_bytes())?),
                 ("licensed", Value::Bool(item.licensed)),
             ]),
+            Self::Quote(quote) => {
+                let price = |side: Option<Price>| {
+                    side.map_or(Value::Null, |price| text(&price.to_string()))
+                };
+                members.extend([
+                    ("symbol", text(quote.symbol.as_str())),
+                    ("knowledge_at", text(&quote.knowledge_at.to_string())),
+                    ("bid", price(quote.bid)),
+                    ("bid_size", text(&quote.bid_size.to_string())),
+                    ("ask", price(quote.ask)),
+                    ("ask_size", text(&quote.ask_size.to_string())),
+                ]);
+            }
             Self::Instrument(fact) => members.extend([
                 ("asset_id", text(fact.asset_id.as_str())),
                 ("symbol", text(fact.symbol.as_str())),
@@ -294,7 +320,7 @@ const LINK_BYTES: usize = 512;
 const FORM_BYTES: usize = 32;
 
 /// The id prefixes the platform derives its own items' ids under (`RetrievedItem::item_id`).
-const RESERVED_PREFIXES: [&str; 2] = ["bar:", "instrument:"];
+const RESERVED_PREFIXES: [&str; 3] = ["bar:", "instrument:", "quote:"];
 
 pub(crate) fn reserved(id: &ItemId) -> bool {
     RESERVED_PREFIXES

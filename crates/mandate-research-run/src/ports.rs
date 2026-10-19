@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use mandate_time::UtcNanos;
 
-use crate::item::{Bar, Filing, InstrumentFact, ItemId, NewsItem, Symbol};
+use crate::item::{Bar, Filing, InstrumentFact, ItemId, NewsItem, Quote, Symbol};
 
 /// Why a read returned nothing. A failed read is an empty read: the run goes on with what it has,
 /// and the model is never told why (`AGENTS.md` rule 3).
@@ -74,6 +74,17 @@ pub trait BarReader {
         cut_off: UtcNanos,
         limit: u32,
     ) -> Result<Vec<Bar>, ReadError>;
+
+    /// `market.quote`'s read: the last quote for `symbol` at or before `cut_off`, or none (§6.10,
+    /// DEC-2255 item 2). A reader that serves no quotes keeps this default and answers
+    /// [`ReadError::Unavailable`], which reads nothing (rule 3).
+    ///
+    /// # Errors
+    /// [`ReadError`] when the store cannot answer.
+    fn last_quote(&self, symbol: &Symbol, cut_off: UtcNanos) -> Result<Option<Quote>, ReadError> {
+        let _ = (symbol, cut_off);
+        Err(ReadError::Unavailable)
+    }
 }
 
 /// News from allowlisted sources (lane I3, E17-7).
