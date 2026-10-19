@@ -110,7 +110,8 @@ needs:
   `["you@example.com"]`: who Access lets through to production's API host, as a JSON list of full
   addresses. It is a secret so the public log never shows it. Staging needs none: its Access
   admits the members of your Cloudflare account (DEC-2030 item 2).
-- **Environment variable, production only:** `KUBE_API_ALLOWED_CIDRS`, for example
+- **Environment secret, production only:** `KUBE_API_ALLOWED_CIDRS`, a secret so the public log
+  never shows your address, for example
   `["203.0.113.7/32"]`: the addresses production's cluster API admits besides a run's own window,
   as a JSON list, each no wider than /24. Staging needs none: each run opens the control plane to
   its own runner for the run (DEC-2028), and with no address the firewall admits nobody. Set it
@@ -120,10 +121,16 @@ No repository-level secret or variable is used, so no other workflow can read th
 
 ### 4. The first run
 
-1. **Actions → infra → Run workflow**, branch `main`, environment `staging`, action `preflight`.
-   Approve the job. Every line should read `[ok]`; each `[MISSING]` line names the step above
-   that is still to do.
-2. Dispatch again with action `plan`. Read the plan:
+Every dispatch takes `sha`: paste the full commit of `main` you read (the repository's commit
+page has a copy button). The run refuses unless it is the commit `main` was at
+when you dispatched, which the run checks out. It lists what changed under `deploy/tofu/`,
+`infra.yml`, `xtask/` and the Rust build inputs since the last apply, so you approve a commit you
+have seen. The log never shows a value: only addresses and actions.
+
+1. **Actions → infra → Run workflow**, branch `main`, environment `staging`, action `preflight`,
+   and `sha`. Approve the job. Every line should read `[ok]`; each `[MISSING]` line names the step
+   above that is still to do.
+2. Dispatch again with action `plan`. Read the plan's list of changes:
    - one VPC, a tag, a firewall and a cluster;
    - the state bucket, imported;
    - a tunnel and its configuration;

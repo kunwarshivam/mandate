@@ -3259,6 +3259,22 @@ fully on-prem control plane; shared data plane; strategy marketplace.
      `exits_only`) and [connections spec](../specs/connections.md) CN-7 (never adopted as ours).
      Both are protected spec changes.
 
+- **Rotating Barman's minted R2 token** ([DEC-2029](decisions/DEC-2029.md); E21-56's review).
+  The `cloudflare` module mints the journal archive's bucket-scoped token with no `expires_on`, so
+  it lives until the token resource is replaced. Wanted: an expiry, a rotation that mints the next
+  token before the old one lapses and hands it to the cluster through lane GO's bootstrap, and a
+  check that alerts before the expiry. Until then the founder can rotate it by tainting
+  `module.cloudflare.cloudflare_account_token.journal_archive` in a reviewed apply.
+
+- **`infra.yml` hardening left from E21-56's review of #1711** ([DEC-2030](decisions/DEC-2030.md)
+  item 6). Each tightens what already holds:
+  1. `terraform_data.applied_commit` depends on every module, so a partial apply never records its
+     commit, and it changes only on an apply, not on every plan.
+  2. The `MANDATE_INFRA_SHA` guard line is bound to the secret step, not only to the file.
+  3. The `cloudflare` module's `access_allowed_emails` variable is `sensitive` itself, not only
+     through production's root.
+  4. The CIDR masks also cover each IPv6 range's normalised forms (compressed and expanded).
+
 ## Enterprise harness (proposed, DEC-149)
 
 Epic **E18**, from the [harness engineering research](../product/11-harness-engineering.md#7-recommendations)
