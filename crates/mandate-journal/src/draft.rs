@@ -140,6 +140,7 @@ impl Draft {
                     correlation_id: fields.get("correlation_id"),
                     pii_refs: fields.get("pii_refs"),
                     event_time: fields.get("event_time"),
+                    environment: fields.get("environment"),
                 },
             )?
         } else {

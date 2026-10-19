@@ -17,7 +17,7 @@ spec:
       cpu: 500m
       memory: 2Gi
     archive:
-      destinationPath: s3://mandate-journal-archive-production/journal-db
+      destinationPath: s3://mandate-journal-archive-west-production/journal-db
       keyFrom: journal-archive-key
       retention: 30d
       egress:

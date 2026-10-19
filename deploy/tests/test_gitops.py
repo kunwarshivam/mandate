@@ -38,7 +38,12 @@ OWN_CHARTS = {
     "mandate-backup-plugin-tls": "backup-plugin-tls",
     "mandate-journal-db": "journal-db",
     "mandate-workspace": "workspace",
+    "mandate-vault-server": "vault",
 }
+# The charts staging alone runs: the vault, whose production unseal is not decided (DEC-2021 item 6,
+# DEC-2051).
+STAGING_ONLY = {"mandate-vault-server"}
+VAULT_VALUES = ROOT / "deploy" / "cell" / "values" / "vault-staging.yaml"
 OWN_CHART_URL = "oci://ghcr.io/kunwarshivam/mandate/charts/"
 # The upstream charts and the digests whose chart layers are xtask/src/cell.rs's pinned tarballs.
 UPSTREAM_CHARTS = {
@@ -181,9 +186,9 @@ def render(release: dict, values: dict, tmp: Path) -> list[dict]:
     return [d for d in yaml.safe_load_all(done.stdout) if d]
 
 
-def sources_pinned(docs: list[dict]) -> list[str]:
+def sources_pinned(docs: list[dict], environment: str = "staging") -> list[str]:
     """Every chart comes by digest; the repository's own only once release.yml's signature on main
-    verifies; the upstream charts are exactly the pinned ones."""
+    verifies; the upstream charts are exactly the pinned ones; and only staging runs the vault."""
     problems = []
     sources = of_kind(docs, "OCIRepository")
     for name, source in sources.items():
@@ -192,6 +197,8 @@ def sources_pinned(docs: list[dict]) -> list[str]:
             problems.append(f"{name}: not pinned by digest alone: {spec.get('ref')}")
         if spec.get("layerSelector") != CHART_LAYER:
             problems.append(f"{name}: does not select the chart layer")
+        if name in STAGING_ONLY and environment != "staging":
+            problems.append(f"{name}: runs in staging alone (DEC-2051)")
         if name in OWN_CHARTS:
             if spec.get("url") != OWN_CHART_URL + name:
                 problems.append(f"{name}: url {spec.get('url')}")
@@ -205,7 +212,10 @@ def sources_pinned(docs: list[dict]) -> list[str]:
                 problems.append(f"{name}: not the pinned upstream chart")
         else:
             problems.append(f"{name}: an OCIRepository the hosted clusters do not run")
-    for name in set(OWN_CHARTS) | set(UPSTREAM_CHARTS):
+    expected = set(OWN_CHARTS) | set(UPSTREAM_CHARTS)
+    if environment != "staging":
+        expected -= STAGING_ONLY
+    for name in expected:
         if name not in sources:
             problems.append(f"{name}: missing")
     return problems
@@ -266,6 +276,37 @@ def endpoint_from_bootstrap(docs: list[dict]) -> list[str]:
         problems.append("journal: git sets the archive endpoint")
     if "journal-archive-endpoint" in of_kind(docs, "ConfigMap"):
         problems.append("journal-archive-endpoint is in git, so Flux would overwrite the bootstrap's")
+    return problems
+
+
+def vault_release(docs: list[dict], environment: str = "staging") -> list[str]:
+    """Staging installs the vault with vault-staging.yaml unchanged, beside the workspace, never
+    waiting on a vault that stays sealed until the founder initializes it, and never pruned;
+    production installs none (DEC-2051)."""
+    release = of_kind(docs, "HelmRelease").get("vault")
+    if environment != "staging":
+        return [] if release is None else ["vault: runs in staging alone (DEC-2051)"]
+    if release is None:
+        return ["vault: missing"]
+    spec = release["spec"]
+    problems = []
+    if spec.get("chartRef") != {"kind": "OCIRepository", "name": "mandate-vault-server"}:
+        problems.append(f"vault: installs {spec.get('chartRef')}")
+    if (spec.get("targetNamespace"), spec.get("storageNamespace")) != ("ws-ws1", "ws-ws1"):
+        problems.append("vault: not beside the workspace in ws-ws1")
+    for phase in ("install", "upgrade"):
+        if (spec.get(phase) or {}).get("disableWait") is not True:
+            problems.append(f"vault: {phase} waits on a vault the founder has not initialized")
+    if spec.get("values") or spec.get("valuesFrom") != [
+        {"kind": "ConfigMap", "name": "vault-staging-values", "valuesKey": "values.yaml"}
+    ]:
+        problems.append(f"vault: values {spec.get('values')} {spec.get('valuesFrom')}")
+    source = of_kind(docs, "ConfigMap").get("vault-staging-values") or {"data": {}}
+    if yaml.safe_load(source["data"].get("values.yaml", "")) != yaml.safe_load(VAULT_VALUES.read_text()):
+        problems.append("vault: values are not deploy/cell/values/vault-staging.yaml")
+    annotations = release["metadata"].get("annotations") or {}
+    if {k: annotations.get(k) for k in PRUNE_DISABLED} != PRUNE_DISABLED:
+        problems.append("vault: prunable")
     return problems
 
 
@@ -341,7 +382,7 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
     archive = journal.get("archive") or {}
     if not R2_ENDPOINT.match(str(archive.get("endpointURL", ""))):
         problems.append(f"journal: archives to {archive.get('endpointURL')}, not R2's S3 endpoint")
-    if archive.get("destinationPath") != f"s3://mandate-journal-archive-{environment}/journal-db":
+    if archive.get("destinationPath") != f"s3://mandate-journal-archive-west-{environment}/journal-db":
         problems.append(f"journal: archives {environment} under {archive.get('destinationPath')}")
     if archive.get("egress") != R2_EGRESS:
         problems.append(f"journal: archive egress {archive.get('egress')}, not R2's two addresses on 443")
@@ -455,26 +496,30 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
     expected = {
         "mandate-control-pods": (
             pods,
-            "pods",
+            ["pods", "pods/ephemeralcontainers"],
             "",
             CONTROL_LABEL.format("object.metadata.labels"),
             f"request.userInfo.username in {JOB_CONTROLLER} && has(object.metadata.ownerReferences) "
             "&& object.metadata.ownerReferences.exists(r, r.apiVersion == 'batch/v1' && r.kind == 'Job' "
             "&& has(r.controller) && r.controller)",
             ["CREATE", "UPDATE"],
+            "request.operation == 'CREATE' || object.spec != oldObject.spec || !("
+            + CONTROL_LABEL.format("oldObject.metadata.labels")
+            + ")",
         ),
         "mandate-control-jobs": (
             jobs,
-            "jobs",
+            ["jobs"],
             "batch",
             CONTROL_LABEL.format("object.spec.template.metadata.labels"),
             "!request.userInfo.username.startsWith('system:serviceaccount:') "
             "&& !(has(object.metadata.ownerReferences) "
             "&& object.metadata.ownerReferences.exists(r, r.kind == 'CronJob'))",
             ["CREATE", "UPDATE"],
+            "request.operation == 'CREATE' || object.spec != oldObject.spec",
         ),
     }
-    for name, (spec, resource, group, label, allowed, operations) in expected.items():
+    for name, (spec, resources, group, label, allowed, operations, changed) in expected.items():
         constraints = spec.get("matchConstraints", {})
         rules = constraints.get("resourceRules", [])
         if spec.get("failurePolicy") != "Fail":
@@ -482,17 +527,21 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
         if constraints.get("namespaceSelector") != {"matchLabels": ADMISSION_LABEL}:
             problems.append(f"{name}: not every namespace the signature webhooks check")
         if [(r.get("apiGroups"), r.get("resources"), sorted(r.get("operations", []))) for r in rules] != [
-            ([group], [resource], operations)
+            ([group], resources, operations)
         ]:
             problems.append(f"{name}: matches {rules}")
         conditions = {
             c.get("name"): squash(c.get("expression", "").split()) for c in spec.get("matchConditions", [])
         }
-        newly = "request.operation == 'CREATE' || !(" + label.replace("object.", "oldObject.") + ")"
-        if set(conditions) != {"labelled-control", "newly-control"} or conditions["labelled-control"] != label:
+        if (
+            set(conditions) != {"labelled-control", "changed-control"}
+            or conditions["labelled-control"] != label
+        ):
             problems.append(f"{name}: matches {conditions.get('labelled-control')!r}, not the control label")
-        elif conditions["newly-control"] != newly:
-            problems.append(f"{name}: matches {conditions['newly-control']!r}, not only a newly control label")
+        elif conditions["changed-control"] != changed:
+            problems.append(
+                f"{name}: matches {conditions['changed-control']!r}, not every change to a control spec"
+            )
         validations = [squash(v.get("expression", "").split()) for v in spec.get("validations", [])]
         if validations != [allowed]:
             problems.append(f"{name}: allows {validations}")
@@ -504,6 +553,84 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
 
 def test_kill_switch_exemption(overlay):
     assert kill_switch_exemption(overlay[1]) == []
+
+
+# What reaches into a running pod. Exec, attach, port-forward and proxy are CONNECT requests whose
+# admission object is their options, not the pod, so no policy can tell a kill switch's pod from
+# another: RBAC holds them, and nothing the overlays or this repository's charts apply grants them
+# (DEC-2046). The third-party charts (policy-controller, CloudNativePG) are not rendered here, and a
+# role is read by its own rules, so an aggregated ClusterRole's borrowed rules are not seen.
+POD_ACCESS = {
+    "pods/exec",
+    "pods/attach",
+    "pods/portforward",
+    "pods/proxy",
+    "pods/ephemeralcontainers",
+    "pods/*",
+    "*",
+}
+BROAD_ROLES = {"cluster-admin", "admin", "edit"}
+
+
+def pod_access(objects: list[dict]) -> list[str]:
+    """No Role or ClusterRole the overlays or this repository's charts apply reaches into a pod, and no
+    binding hands out a built-in role that does."""
+    problems = []
+    for doc in objects:
+        where = f"{doc.get('kind')} {doc.get('metadata', {}).get('name')}"
+        if doc.get("kind") in ("Role", "ClusterRole"):
+            for rule in doc.get("rules") or []:
+                groups = set(rule.get("apiGroups") or [])
+                reached = POD_ACCESS & set(rule.get("resources") or [])
+                if groups & {"", "*"} and reached:
+                    problems.append(f"{where}: grants {sorted(reached)}")
+        if doc.get("kind") in ("RoleBinding", "ClusterRoleBinding"):
+            role = (doc.get("roleRef") or {}).get("name")
+            if role in BROAD_ROLES:
+                problems.append(f"{where}: binds {role}")
+    return problems
+
+
+def test_nothing_reaches_into_a_pod(overlay):
+    _, docs, _, rendered, _ = overlay
+    assert pod_access(docs + rendered) == []
+
+
+@pytest.mark.parametrize(
+    "added",
+    [
+        {
+            "kind": "Role",
+            "metadata": {"name": "debugger"},
+            "rules": [{"apiGroups": [""], "resources": ["pods", "pods/exec"], "verbs": ["create"]}],
+        },
+        {
+            "kind": "ClusterRole",
+            "metadata": {"name": "everything"},
+            "rules": [{"apiGroups": ["*"], "resources": ["*"], "verbs": ["*"]}],
+        },
+        {
+            "kind": "Role",
+            "metadata": {"name": "debug-container"},
+            "rules": [{"apiGroups": [""], "resources": ["pods/ephemeralcontainers"], "verbs": ["patch"]}],
+        },
+        {
+            "kind": "RoleBinding",
+            "metadata": {"name": "editor"},
+            "roleRef": {"kind": "ClusterRole", "name": "edit"},
+        },
+        {
+            "kind": "Role",
+            "metadata": {"name": "tunnel"},
+            "rules": [
+                {"apiGroups": [""], "resources": ["pods/portforward", "pods/proxy"], "verbs": ["create"]}
+            ],
+        },
+    ],
+)
+def test_access_into_a_pod_is_caught(overlay, added):
+    _, docs, _, rendered, _ = overlay
+    assert pod_access([*docs, *rendered, added])
 
 
 def uncovered_workspaces(docs: list[dict]) -> list[str]:
@@ -557,7 +684,17 @@ def test_each_admission_seeded_bug_is_caught(change, tmp_path):
 
 
 def test_sources_pinned(overlay):
-    assert sources_pinned(overlay[1]) == []
+    assert sources_pinned(overlay[1], overlay[0]) == []
+
+
+def test_vault_release(overlay):
+    assert vault_release(overlay[1], overlay[0]) == []
+
+
+def test_production_running_the_vault_is_caught(tmp_path):
+    docs = build("staging", FIXTURE, tmp_path)
+    assert sources_pinned(docs, "production") == ["mandate-vault-server: runs in staging alone (DEC-2051)"]
+    assert vault_release(docs, "production") == ["vault: runs in staging alone (DEC-2051)"]
 
 
 def test_releases_resolve(overlay):
@@ -639,6 +776,20 @@ def seeded(docs: list[dict], kind: str, name: str, change) -> list[dict]:
 DOC_BUGS = [
     (sources_pinned, "OCIRepository", "mandate-workspace", lambda d: d["spec"].update(ref={"tag": "latest"})),
     (sources_pinned, "OCIRepository", "mandate-journal-db", lambda d: d["spec"].pop("verify")),
+    (sources_pinned, "OCIRepository", "mandate-vault-server", lambda d: d["spec"].pop("verify")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].pop("install")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"]["upgrade"].update(disableWait=False)),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].update(targetNamespace="vault")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["metadata"].pop("annotations")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].update(values={"seal": {"type": "shamir"}})),
+    (
+        vault_release,
+        "ConfigMap",
+        "vault-staging-values",
+        lambda d: d["data"].update(
+            {"values.yaml": d["data"]["values.yaml"].replace("staging-1", "staging-2")}
+        ),
+    ),
     (
         sources_pinned,
         "OCIRepository",
@@ -747,6 +898,32 @@ DOC_BUGS = [
         "ValidatingAdmissionPolicy",
         "mandate-control-jobs",
         lambda d: d["spec"]["matchConditions"][1].update(expression="true"),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"]["matchConditions"][1].update(
+            expression="request.operation == 'CREATE' || !("
+            + CONTROL_LABEL.format("oldObject.spec.template.metadata.labels")
+            + ")"
+        ),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-pods",
+        lambda d: d["spec"]["matchConditions"][1].update(
+            expression=d["spec"]["matchConditions"][1]["expression"].replace(
+                "object.spec != oldObject.spec || ", ""
+            )
+        ),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-pods",
+        lambda d: d["spec"]["matchConstraints"]["resourceRules"][0].update(resources=["pods"]),
     ),
     (
         kill_switch_exemption,
@@ -924,7 +1101,7 @@ def test_an_extra_source_is_caught(tmp_path):
     ]
 
 
-# Production moves only by copying what staging already ran on main (DEC-2016).
+# Production pins, per key, only what staging held on main (DEC-2016 item 5, DEC-2048).
 STAGING_FILES = ("deploy/gitops/clusters/staging/charts.yaml", "deploy/gitops/clusters/staging/images.yaml")
 PRODUCTION_FILES = (
     "deploy/gitops/clusters/production/charts.yaml",
@@ -933,15 +1110,41 @@ PRODUCTION_FILES = (
 ANY_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 
-def unstaged_digests(production: str, staged: str) -> list[str]:
-    """Each digest production pins that staging's history on main never held."""
-    return sorted(set(ANY_DIGEST.findall(production)) - set(ANY_DIGEST.findall(staged)))
+def pins(charts: str, images: str) -> set[tuple[str, str]]:
+    """What an environment's two files pin, per key: each OCIRepository's name with its digest, and
+    each image key with its reference."""
+    found = set()
+    for doc in yaml.safe_load_all(charts):
+        if doc and doc.get("kind") == "OCIRepository":
+            found.add((doc["metadata"]["name"], str((doc["spec"].get("ref") or {}).get("digest"))))
+    for key, reference in ((yaml.safe_load(images) or {}).get("images") or {}).items():
+        found.add((f"images.{key}", str(reference)))
+    return found
+
+
+def unstaged_pins(production: set[tuple[str, str]], staged: set[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Each pin production holds that staging never held under the same key."""
+    return sorted(production - staged)
 
 
 def git(*args: str) -> str:
     done = subprocess.run(["git", *args], capture_output=True, text=True, check=False, cwd=ROOT)
     assert done.returncode == 0, done.stderr
     return done.stdout
+
+
+def staging_history(base: str) -> set[tuple[str, str]]:
+    """Every pin staging's files held at each commit on main up to `base`."""
+    held = set()
+    for commit in git("rev-list", base, "--", *STAGING_FILES).split():
+        texts = []
+        for path in STAGING_FILES:
+            shown = subprocess.run(
+                ["git", "show", f"{commit}:{path}"], capture_output=True, text=True, check=False, cwd=ROOT
+            )
+            texts.append(shown.stdout if shown.returncode == 0 else "")
+        held |= pins(*texts)
+    return held
 
 
 def test_production_runs_only_what_staging_ran():
@@ -952,13 +1155,24 @@ def test_production_runs_only_what_staging_ran():
             raise RuntimeError("MANDATE_GITOPS_REQUIRED is set but origin/main is not fetched")
         pytest.skip("origin/main is not fetched")
     base = git("merge-base", "HEAD", "origin/main").strip()
-    staged = git("log", "-p", "--format=", base, "--", *STAGING_FILES)
-    production = "".join((ROOT / path).read_text() for path in PRODUCTION_FILES)
-    assert unstaged_digests(production, staged) == [], "production gains a digest staging never ran on main"
+    production = pins(*((ROOT / path).read_text() for path in PRODUCTION_FILES))
+    assert production, "production pins nothing"
+    assert unstaged_pins(production, staging_history(base)) == [], (
+        "production pins what staging never ran on main"
+    )
 
 
-def test_a_production_digest_staging_never_ran_is_caught():
-    ran, new = f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"
-    staged = f"+    digest: {ran}\n"
-    assert unstaged_digests(f"    digest: {ran}\n", staged) == []
-    assert unstaged_digests(f"    digest: {ran}\n  mandate: ghcr.io/x@{new}\n", staged) == [new]
+def test_a_production_pin_staging_never_ran_is_caught():
+    ran, other = f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"
+    staged = {("mandate-workspace", ran), ("mandate-journal-db", other), ("images.mandate", f"x@{ran}")}
+    assert unstaged_pins({("mandate-workspace", ran), ("images.mandate", f"x@{ran}")}, staged) == []
+    assert unstaged_pins({("mandate-workspace", other)}, staged) == [("mandate-workspace", other)]
+    assert unstaged_pins({("images.mandate", f"y@{ran}")}, staged) == [("images.mandate", f"y@{ran}")]
+
+
+def test_pins_are_read_per_key():
+    charts = (ROOT / PRODUCTION_FILES[0]).read_text()
+    found = pins(charts, "images:\n  mandate: ghcr.io/x@sha256:" + "a" * 64 + "\n")
+    assert ("images.mandate", "ghcr.io/x@sha256:" + "a" * 64) in found
+    assert {key for key, _ in found} >= {"mandate-workspace", "mandate-journal-db", "images.mandate"}
+    assert all(ANY_DIGEST.fullmatch(digest) for key, digest in found if not key.startswith("images."))

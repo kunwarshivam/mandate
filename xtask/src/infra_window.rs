@@ -36,11 +36,18 @@ const CLOSE_POLL_SECONDS: u64 = 5;
 /// checked.
 const CLOCK_SKEW_SECONDS: i64 = 120;
 
-/// The cluster `infra` opens a window to, by environment: its DOKS name and its kubeconfig context.
+/// Each environment's cluster region, as its root's `region` local sets it: the founder put all of
+/// the infrastructure in the US West, so both run in sfo2 (DEC-2047).
+fn cluster_region(_environment: &str) -> &'static str {
+    "sfo2"
+}
+
+/// The cluster `infra` opens a window to, by environment: its DOKS name and its kubeconfig context,
+/// named as `doctl` names it.
 pub(crate) fn cluster_names(environment: &str) -> (String, String) {
     (
         format!("mandate-{environment}"),
-        format!("do-nyc3-mandate-{environment}"),
+        format!("do-{}-mandate-{environment}", cluster_region(environment)),
     )
 }
 
@@ -904,15 +911,36 @@ mod tests {
         Ok(())
     }
 
-    /// Each environment's cluster and context are the ones lane GO's bootstrap confirms.
+    /// Each environment's cluster and context name the region its root plans the cluster in.
     #[test]
     fn the_cluster_names_match_the_roots() {
         assert_eq!(
             cluster_names("staging"),
             (
                 "mandate-staging".to_owned(),
-                "do-nyc3-mandate-staging".to_owned()
+                "do-sfo2-mandate-staging".to_owned()
             )
         );
+        for (environment, root) in [
+            (
+                "staging",
+                include_str!("../../deploy/tofu/environments/staging/main.tf"),
+            ),
+            (
+                "production",
+                include_str!("../../deploy/tofu/environments/production/main.tf"),
+            ),
+        ] {
+            let region = root
+                .lines()
+                .map(str::trim)
+                .find_map(|line| line.strip_prefix("region"))
+                .and_then(|rest| rest.split('"').nth(1));
+            assert_eq!(
+                region,
+                Some(cluster_region(environment)),
+                "{environment}'s root plans its cluster where the context says"
+            );
+        }
     }
 }

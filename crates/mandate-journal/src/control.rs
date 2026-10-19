@@ -109,6 +109,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || crate::membership::CONTROL.contains(&event_type)
                 || crate::deployment::CONTROL.contains(&event_type)
                 || crate::acknowledgments::RECORDS.contains(&event_type)
+                || crate::confirmations::CONTROL.contains(&event_type)
         }
         StreamType::Agent => event_type == REFUSAL || THESIS.contains(&event_type),
         StreamType::Account => {
@@ -145,6 +146,7 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::runs::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::risk_limits::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::acknowledgments::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::confirmations::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
             _ => schema(event_type, schema_version),
@@ -167,6 +169,7 @@ pub(crate) fn payload(
         correlation_id,
         pii_refs,
         event_time,
+        environment,
     } = envelope;
     if event_type == "OwnerCommandIssued"
         && schema_version == 1
@@ -206,6 +209,7 @@ pub(crate) fn payload(
     crate::membership::rules(event_type, &payload, actor, event_time)?;
     crate::risk_limits::rules(event_type, &payload, causation_id)?;
     crate::acknowledgments::rules(event_type, &payload)?;
+    crate::confirmations::rules(event_type, &payload, environment, actor, event_time)?;
     let p = Payload(&payload);
     match event_type {
         "MandateVersionCreated" => {
@@ -371,6 +375,7 @@ pub(crate) struct Envelope<'a> {
     pub(crate) correlation_id: Option<&'a Value>,
     pub(crate) pii_refs: Option<&'a Value>,
     pub(crate) event_time: Option<&'a Value>,
+    pub(crate) environment: Option<&'a Value>,
 }
 
 /// Subject rules 25, 26 and 28 (`stream_mismatch`), then copy rule 27, on a payload that passed
@@ -443,9 +448,6 @@ const ACCOUNT_ONLY_REASONS: [&str; 4] = [
 /// `ConfigSnapshotRegistered`'s kind for a signal model.
 const MODEL_KIND: &str = "model_version";
 
-/// §9.5's rules 39 and 40 on a well-typed `OrderRequestRecorded` (DEC-446 item 2), the first
-/// offending member in the order the spec reports: 39's pairs at `order_class` then
-/// `take_profit`, 40 at `at_floor`.
 /// Rule 245 at either version (DEC-2037 items 1 and 2): `type` is `limit` or `market`, `market`
 /// only for an exit, and then `limit_price` is non-null exactly for `limit`.
 fn intent_received_rules(p: Payload<'_>) -> Result<(), Invalid> {
@@ -482,6 +484,9 @@ fn confirmation_rules(p: Payload<'_>) -> Result<(), Invalid> {
     )
 }
 
+/// §9.5's rules 39 and 40 on a well-typed `OrderRequestRecorded` (DEC-446 item 2), the first
+/// offending member in the order the spec reports: 39's pairs at `order_class` then
+/// `take_profit`, 40 at `at_floor`.
 fn companion_rules(p: Payload<'_>) -> Result<(), Invalid> {
     let class = !p.is_null("order_class");
     let take_profit = !p.is_null("take_profit");
@@ -1106,9 +1111,6 @@ static ORDER_SUBMITTED_V2: Ty = Ty::Record(&[
     ("risk_clock", Ty::RiskClock),
 ]);
 
-/// §9.5's companion at `schema_version` 1: the executor-only members the fold rebuilds the exact
-/// request and the order's owner from (DEC-446 item 2). Every member is present (§4.2); rules 39
-/// and 40 say which are null.
 /// §9.5's `OwnerConfirmationReceived` (DEC-2040 item 2).
 static OWNER_CONFIRMATION_RECEIVED: Ty = Ty::Record(&[
     ("intent_id", Ty::Ulid),
@@ -1122,6 +1124,9 @@ static OWNER_CONFIRMATION_RECEIVED: Ty = Ty::Record(&[
     ("risk_clock", Ty::RiskClock),
 ]);
 
+/// §9.5's companion at `schema_version` 1: the executor-only members the fold rebuilds the exact
+/// request and the order's owner from (DEC-446 item 2). Every member is present (§4.2); rules 39
+/// and 40 say which are null.
 static ORDER_REQUEST_RECORDED: Ty = Ty::Record(&[
     ("agent_id", Ty::Ident),
     ("intent_id", Ty::Nullable(&Ty::Ulid)),

@@ -598,3 +598,39 @@ fn an_ex_date_without_bars_applies_at_eight_pm_new_york_before_it() {
         assert_eq!(equity(last_before), equity(last_before + 1), "{ex_date}");
     }
 }
+
+/// An odd or reverse split rounds what it rescales: each close by old ÷ new, down onto the cent,
+/// and each volume by new ÷ old, truncated to whole shares. At 3:2 the close of 100 becomes
+/// 66.666…, so 66.66; at 1:3 it becomes 300. The oracle computes the figures by hand and runs
+/// without the split over bars at them all along: the two decide the same ex-date row. At 10,001
+/// shares a day before the split the truncation decides the liquidity floor of 1,000,000 USD:
+/// 15,001.5 shares at 66.66 truncate to 999,966.66 USD and 3,333.67 at 300 to 999,900, both below
+/// it, where a volume rounded up would clear it.
+#[test]
+fn an_opening_after_an_odd_or_reverse_split_reads_the_rounded_market() {
+    let days = trading_days(DAYS);
+    let outputs = daily_outputs(&days[EX..], "0.5");
+    let floor = (DecisionOutcome::GateDeny, Some("below_liquidity_floor"));
+    let submitted = (DecisionOutcome::Submitted, None);
+    for (new, old, after, volume, after_volume, expected) in [
+        (3, 2, 6_666, 1_000_001, 1_500_001, submitted),
+        (3, 2, 6_666, 10_001, 15_001, floor),
+        (1, 3, 30_000, 1_000_001, 333_333, submitted),
+        (1, 3, 30_000, 10_001, 3_333, floor),
+    ] {
+        let split = ex_date_row(
+            &stepped_bars(10_000, volume, after, after_volume),
+            &outputs,
+            &[split_at(new, old, None)],
+        );
+        let control = ex_date_row(
+            &stepped_bars(after, after_volume, after, after_volume),
+            &outputs,
+            &[],
+        );
+        let at = format!("{new}:{old} at {volume} shares a day");
+        assert_eq!(split, control, "{at}");
+        assert_eq!(split.purpose, Some(Purpose::Open), "{at}: {split:?}");
+        assert_eq!((split.outcome, split.reason.as_deref()), expected, "{at}");
+    }
+}
