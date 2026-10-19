@@ -13,7 +13,8 @@
 //! - `run --probe <socket> [--workspace <id> --account <ref>] [--fixture]` runs the process over
 //!   Postgres (`MANDATE_JOURNAL_DSN`) or, with `--fixture`, an in-memory journal. It passes once a
 //!   second, drains on SIGTERM, and exits with its lifecycle's status. A pod the deployment manager
-//!   starts names its workspace and account by variables instead ([`launch`]).
+//!   starts names its workspace and account by variables instead ([`launch`]), and is refused
+//!   `--fixture` (`fixture_under_manager`), here and for `connect-check`.
 //! - `connect-check --workspace <id> --account <ref> --connection <id> --pii-ref <ref> [--fixture]`
 //!   journals the connect check of a paper Alpaca connection and prints `checked <event id>` or
 //!   `check_failed <event id>` ([`connect`]).
@@ -62,6 +63,10 @@ fn main() -> ExitCode {
         Err(std::env::VarError::NotPresent) => None,
     };
     let fixture = args.iter().any(|a| a == "--fixture");
+    if let Err(code) = launch::fixture_permitted(fixture, &var) {
+        eprintln!("{code}");
+        return ExitCode::from(2);
+    }
     match args.first().map(String::as_str) {
         Some("probe") => {
             let (Some(socket), Some(asked)) = (
@@ -165,14 +170,17 @@ fn serve<S: Store>(
     let status = Status::new(process.lifecycle().snapshot());
     probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
     loop {
+        let terminated = terminate.load(Ordering::SeqCst);
+        if terminated {
+            process.drain(host_now());
+        }
         if let State::Exited(stopped) = process.lifecycle().state() {
             status.publish(process.lifecycle().snapshot());
             eprintln!("{}", stopped.code());
             return Ok(stopped.exit_status());
         }
-        if terminate.load(Ordering::SeqCst) {
-            process.drain(host_now());
-            continue;
+        if terminated {
+            return Err("drain_unfinished");
         }
         process.step(host_now());
         status.publish(process.lifecycle().snapshot());

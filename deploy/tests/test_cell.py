@@ -62,6 +62,8 @@ KUBE_API = "192.0.2.200/32"
 MANAGER = "deploy-manager"
 TEMPLATES = "deploy-manager-templates"
 HOOK = "pre-install,pre-upgrade"
+# Where the interim runtime image carries the recorded research bundle (DEC-2246).
+RESEARCH = "/usr/local/share/mandate/research"
 
 if shutil.which("helm") is None:
     if os.environ.get("MANDATE_CELL_HELM_REQUIRED"):
@@ -815,7 +817,8 @@ def test_deploy_manager_contained():
         spec = pod_spec(pod)
         container = first_container(pod)
         assert "command" not in container, container.get("command")
-        assert container["args"] == ["run", "--probe", "/tmp/process.sock"], container["args"]
+        research = ["--research", RESEARCH] if pod["metadata"]["name"] == "runtime" else []
+        assert container["args"] == ["run", "--probe", "/tmp/process.sock", *research], container["args"]
         assert spec["restartPolicy"] == "Never" and spec["automountServiceAccountToken"] is False
         assert "serviceAccountName" not in spec
         probes = [container[k]["exec"]["command"] for k in ("livenessProbe", "readinessProbe")]
@@ -827,6 +830,22 @@ def test_deploy_manager_contained():
     only_runtime = render_all("--set", "images.executor=")
     assert [w["metadata"]["name"] for w in managed_pods(only_runtime)] == ["runtime"]
     assert deploy_manager_contained(only_runtime) == []
+    deny_all = render_all("--set", "runtime.research=")
+    assert deploy_manager_contained(deny_all) == []
+    assert all(
+        first_container(pod)["args"] == ["run", "--probe", "/tmp/process.sock"]
+        for pod in managed_pods(deny_all)
+    )
+
+
+def test_runtime_research_names_only_the_interim_image_s_bundle():
+    """DEC-2246: `runtime.research` is empty or the one path the interim runtime image carries
+    the recorded bundle at; any other path is refused by the schema, so no pod is pointed at a
+    bundle the image does not hold."""
+    k3d = str(CELL / "values" / "k3d.yaml")
+    for path in ["/tmp/research", "relative/research", f"{RESEARCH}/"]:
+        done = helm(CHART, "-f", k3d, *every_image(), "--set", f"runtime.research={path}")
+        assert done.returncode != 0, path
 
 
 def test_without_the_manager_the_runtime_and_executor_are_deployments():
