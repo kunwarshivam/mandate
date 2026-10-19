@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use common::{ASSET_A, arr, obj, s, with, with_all};
 use mandate_canon::Value;
 use mandate_domain::{AgentMode, AssetClass, AssetId, Environment, MarketSession, Side};
-use mandate_num::{Price, Qty, Ratio, Usd};
+use mandate_num::{Price, Qty, Ratio, ShareIncrement, SplitRatio, Usd};
 use mandate_spec::document::ProvenanceMap;
 use mandate_spec::risk::{
     ApplyResult, Confirmation, Input, InstrumentRestriction, Latch, LimitKey, Opening, Outcome,
@@ -33,6 +33,7 @@ use mandate_spec::validate::{ValidatedMandate, ValidationContext};
 use mandate_spec::{DecGrammar, Mandate, SchemaDec, SpecError};
 use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
 use proptest::prelude::*;
+use proptest::test_runner::TestRunner;
 
 fn at(text: &str) -> UtcNanos {
     UtcNanos::parse(text).expect("an instant")
@@ -3425,5 +3426,694 @@ proptest! {
             BTreeSet::from([InstrumentRestriction::RemovedInstrument]),
             "the walk closes on a removal, so the instrument is restricted and nothing else is"
         );
+    }
+}
+
+/// A split applied at `when` (§5.2, trading spec §8.5): `new` shares for every `old`, truncated to
+/// `increment`, with the residual's cash in lieu at `cash_in_lieu_price` when one is posted.
+fn split(
+    when: &str,
+    session: MarketSession,
+    (new, old): (u64, u64),
+    increment: ShareIncrement,
+    cash_in_lieu_price: Option<&str>,
+) -> Step {
+    Step {
+        at: at(when),
+        session,
+        input: Input::Split {
+            ratio: SplitRatio::new(new, old).expect("a split ratio"),
+            increment,
+            cash_in_lieu_price: cash_in_lieu_price.map(price),
+        },
+    }
+}
+
+fn dividend(when: &str, session: MarketSession, per_share: &str) -> Step {
+    Step {
+        at: at(when),
+        session,
+        input: Input::CashDividend {
+            per_share: price(per_share),
+        },
+    }
+}
+
+fn posted(when: &str) -> Step {
+    Step {
+        at: at(when),
+        session: MarketSession::Regular,
+        input: Input::ReceivablePosted,
+    }
+}
+
+/// 20:00 New York time before the ex-date, where trading spec §8.5 applies an action.
+const ACTION_AT: &str = "2026-09-22T00:00:00.000000000Z";
+
+/// A 2:1 split with no residual moves no USD measure, and the next day's marks read the doubled
+/// quantity (MC-R27, MI-33). The split comes while the 0.06 rung is pending on a 7% drawdown, and
+/// it journals exactly what a clock tick at its instant journals, so the split confirms the rung by
+/// time as the tick does and moves nothing itself. Without the split, 100 × 46.4 would be 4640 of
+/// stock, not 9280.
+#[test]
+#[ignore = "pending E4-4"]
+fn a_split_with_no_residual_moves_no_usd_measure_and_journals_what_a_tick_would()
+-> Result<(), String> {
+    let mandate = swing(&[("/risk/max_daily_loss", Some(s("0.5")))])?;
+    let clock = RegularSessionClock::new();
+    let open = patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0");
+    let before = [mark("2026-09-21T14:01:00.000000000Z", "93")];
+    let split_walk = walk(
+        &mandate,
+        &open,
+        &clock,
+        &[
+            before[0].clone(),
+            split(
+                ACTION_AT,
+                MarketSession::AfterHours,
+                (2, 1),
+                ShareIncrement::Whole,
+                None,
+            ),
+            mark("2026-09-22T13:35:00.000000000Z", "46.5"),
+            mark("2026-09-22T13:36:00.000000000Z", "46.4"),
+        ],
+    )?;
+    let tick_walk = walk(
+        &mandate,
+        &open,
+        &clock,
+        &[
+            before[0].clone(),
+            tick(ACTION_AT, MarketSession::AfterHours),
+        ],
+    )?;
+    let at_the_split = step_of(&split_walk, 2)?;
+    let at_the_tick = step_of(&tick_walk, 2)?;
+    assert_eq!(
+        trace(&at_the_split.journal),
+        trace(&at_the_tick.journal),
+        "a split with no residual triggers and lifts only what a tick at its instant would"
+    );
+    assert_eq!(
+        trace(&at_the_tick.journal),
+        vec![
+            "triggered DrawdownRung(1) ExitsOnly",
+            "mode Normal -> ExitsOnly"
+        ],
+        "the tick confirms the pending rung, so the comparison is not between two empty journals"
+    );
+    assert_eq!(at_the_split.snapshot, at_the_tick.snapshot);
+    assert_eq!(at_the_split.snapshot.agent_equity, usd("9300"));
+    assert_eq!(at_the_split.snapshot.high_water_mark, usd("10000"));
+    assert_eq!(at_the_split.snapshot.day_start_equity, usd("10000"));
+    assert_eq!(at_the_split.snapshot.capital_base, usd("10000"));
+    assert_eq!(at_the_split.snapshot.net_contributed, usd("10000"));
+    assert_eq!(
+        step_of(&split_walk, 3)?.snapshot.agent_equity,
+        usd("9300"),
+        "the adjusted mark of 46.5 is the old 93 ÷ 2, so the first mark after it moves nothing"
+    );
+    assert_eq!(
+        step_of(&split_walk, 4)?.snapshot.agent_equity,
+        usd("9280"),
+        "200 shares move E by 20 on a 0.1 fall"
+    );
+    Ok(())
+}
+
+/// A 1:3 reverse split in whole shares removes the residual third of a share's basis, and its cash
+/// in lieu is in E from the split until posted, when nothing moves (MC-R28, MI-33). R =
+/// 10001 × (100 − 99) ÷ 100 = 100.01, cash in lieu = round(⅓ × 300.03, 2) = 100.01, so E stays
+/// 10000. A later bid of 300 reads 33 shares: −10001 + 100.01 + 33 × 300 = −0.99, so E is 9999.01.
+#[test]
+#[ignore = "pending E4-4"]
+fn a_reverse_split_removes_the_residual_and_its_cash_in_lieu_is_in_equity_until_posted()
+-> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100.01", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "100.01"),
+            split(
+                ACTION_AT,
+                MarketSession::AfterHours,
+                (1, 3),
+                ShareIncrement::Whole,
+                Some("300.03"),
+            ),
+            posted("2026-09-22T13:35:00.000000000Z"),
+            mark("2026-09-22T13:36:00.000000000Z", "300"),
+        ],
+    )?;
+    for (number, what) in [(2, "the split"), (3, "the posting")] {
+        let outcome = step_of(&outcomes, number)?;
+        assert_eq!(
+            outcome.snapshot.agent_equity,
+            usd("10000"),
+            "{what}: the cash in lieu equals the residual at the adjusted mark"
+        );
+        assert_eq!(outcome.snapshot.high_water_mark, usd("10000"));
+        assert_eq!(outcome.snapshot.daily_pnl, usd("0"));
+        assert!(
+            trace(&outcome.journal).is_empty(),
+            "{what} journals nothing"
+        );
+    }
+    assert_eq!(step_of(&outcomes, 4)?.snapshot.agent_equity, usd("9999.01"));
+    Ok(())
+}
+
+/// With no cash-in-lieu price posted the residual leaves at 0, so E falls by its value at the
+/// adjusted mark: ⅓ × 300.03 = 100.01, from 10000 to 9899.99, a drawdown of 0.010001 that the ladder
+/// reads as it reads any fall (§5.2, MI-33).
+#[test]
+#[ignore = "pending E4-4"]
+fn a_residual_with_no_posted_price_leaves_equity_by_its_value_at_the_adjusted_mark()
+-> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100.01", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "100.01"),
+            split(
+                ACTION_AT,
+                MarketSession::AfterHours,
+                (1, 3),
+                ShareIncrement::Whole,
+                None,
+            ),
+        ],
+    )?;
+    let after = step_of(&outcomes, 2)?;
+    assert_eq!(after.snapshot.agent_equity, usd("9899.99"));
+    assert_eq!(after.snapshot.drawdown, ratio("0.010001"));
+    assert_eq!(after.snapshot.day_start_equity, usd("10000"));
+    Ok(())
+}
+
+/// A fractionable instrument truncates Q' to 10⁻⁹ of a share, not to a whole share: 100 ÷ 3 is
+/// 33.333333333, whose residual's cash in lieu rounds to 0 at the cent, and E is
+/// 33.333333333 × 300.03 = 10000.99999989999. In whole shares it would be 33 × 300.03 + 100.01.
+#[test]
+#[ignore = "pending E4-4"]
+fn a_fractionable_split_truncates_to_a_billionth_of_a_share() -> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "100.01"),
+            split(
+                ACTION_AT,
+                MarketSession::AfterHours,
+                (1, 3),
+                ShareIncrement::Fractional,
+                Some("300.03"),
+            ),
+            mark("2026-09-22T13:36:00.000000000Z", "300"),
+        ],
+    )?;
+    assert_eq!(
+        step_of(&outcomes, 2)?.snapshot.agent_equity,
+        usd("10000.99999989999")
+    );
+    assert_eq!(
+        step_of(&outcomes, 3)?.snapshot.agent_equity,
+        usd("9999.9999999")
+    );
+    Ok(())
+}
+
+/// The adjusted mark is rounded once, toward zero at 12 places: 100 ÷ 3 is 33.333333333333, so
+/// 300 shares are worth 9999.9999999999, 10⁻¹⁰ less, and the drawdown it leaves rounds to 0 (§5.2,
+/// MI-33).
+#[test]
+#[ignore = "pending E4-4"]
+fn a_split_mark_is_rounded_toward_zero_at_twelve_places() -> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[split(
+            ACTION_AT,
+            MarketSession::AfterHours,
+            (3, 1),
+            ShareIncrement::Whole,
+            None,
+        )],
+    )?;
+    let after = step_of(&outcomes, 1)?;
+    assert_eq!(after.snapshot.agent_equity, usd("9999.9999999999"));
+    assert_eq!(after.snapshot.high_water_mark, usd("10000"));
+    assert_eq!(after.snapshot.drawdown, ratio("0"));
+    Ok(())
+}
+
+/// A 3:2 split at a rung's exact boundary does not clear the breach whose confirmation is counting
+/// (MC-R31, MI-33). 94 is a drawdown of exactly 6%, the `exits_only` rung, which confirms after
+/// 60 s. Rounded half to even, 94 × 2 ÷ 3 would be 62.666666666667 and E 9400.00000000005, clearing
+/// the breach; toward zero it is 62.666666666666, E is 9399.9999999999, and the tick 65 s after the
+/// mark confirms the rung, as the same tick does when a tick takes the split's place.
+#[test]
+#[ignore = "pending E4-4"]
+fn a_split_at_a_rungs_exact_boundary_does_not_clear_the_breach_it_is_confirming()
+-> Result<(), String> {
+    let mandate = swing(&[
+        ("/risk/max_daily_loss", Some(s("0.5"))),
+        ("/risk/scale_lift_after_s", Some(common::i(0))),
+        ("/risk/daily_breach_min_s", Some(common::i(0))),
+    ])?;
+    let clock = RegularSessionClock::new();
+    let open = patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0");
+    let first = mark("2026-09-21T14:01:00.000000000Z", "94");
+    let confirm = tick("2026-09-21T14:02:05.000000000Z", MarketSession::Regular);
+    let split_walk = walk(
+        &mandate,
+        &open,
+        &clock,
+        &[
+            first.clone(),
+            split(
+                "2026-09-21T14:01:30.000000000Z",
+                MarketSession::Regular,
+                (3, 2),
+                ShareIncrement::Whole,
+                None,
+            ),
+            confirm.clone(),
+        ],
+    )?;
+    let tick_walk = walk(
+        &mandate,
+        &open,
+        &clock,
+        &[
+            first,
+            tick("2026-09-21T14:01:30.000000000Z", MarketSession::Regular),
+            confirm,
+        ],
+    )?;
+    let at_the_split = step_of(&split_walk, 2)?;
+    assert_eq!(at_the_split.snapshot.agent_equity, usd("9399.9999999999"));
+    assert!(trace(&at_the_split.journal).is_empty());
+    let confirmed = trace(&step_of(&split_walk, 3)?.journal);
+    assert!(
+        confirmed.contains(&"triggered DrawdownRung(1) ExitsOnly".to_owned()),
+        "the breach held across the split, so the tick confirms the rung: {confirmed:?}"
+    );
+    assert_eq!(confirmed, trace(&step_of(&tick_walk, 3)?.journal));
+    Ok(())
+}
+
+/// A 1:3 reverse split of 2 whole shares leaves none, and with no price posted the position leaves
+/// at 0: E falls by 2 × 100 to 9800. A later posting changes nothing, whatever the broker pays
+/// (MC-R32, MI-33).
+#[test]
+#[ignore = "pending E4-4"]
+fn a_reverse_split_that_leaves_no_share_and_posts_no_price_removes_the_position_at_zero()
+-> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "2", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "100"),
+            split(
+                ACTION_AT,
+                MarketSession::AfterHours,
+                (1, 3),
+                ShareIncrement::Whole,
+                None,
+            ),
+            posted("2026-09-22T13:35:00.000000000Z"),
+            mark("2026-09-22T13:36:00.000000000Z", "300"),
+        ],
+    )?;
+    for number in [2, 3, 4] {
+        assert_eq!(
+            step_of(&outcomes, number)?.snapshot.agent_equity,
+            usd("9800"),
+            "step {number}: no share is left for a mark to move"
+        );
+    }
+    Ok(())
+}
+
+/// A cash dividend changes nothing at application, while the last mark is the cum-dividend close;
+/// round(Q × d, 2) joins E with the ex-date's first mark, in that mark's step, so the mark lower by
+/// the dividend returns E to exactly 10000 with no drawdown, and the payment moves nothing (MC-R29,
+/// MI-33).
+#[test]
+#[ignore = "pending E4-4"]
+fn a_cash_dividend_joins_equity_with_the_ex_dates_first_mark_and_its_payment_moves_nothing()
+-> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "100"),
+            dividend(ACTION_AT, MarketSession::AfterHours, "0.255"),
+            mark("2026-09-22T13:35:00.000000000Z", "99.745"),
+            posted("2026-09-22T13:36:00.000000000Z"),
+        ],
+    )?;
+    for number in [2, 3, 4] {
+        let outcome = step_of(&outcomes, number)?;
+        assert_eq!(
+            outcome.snapshot.agent_equity,
+            usd("10000"),
+            "step {number}: E never holds the dividend and the cum-dividend mark together"
+        );
+        assert_eq!(outcome.snapshot.high_water_mark, usd("10000"));
+        assert_eq!(outcome.snapshot.drawdown, ratio("0"));
+        assert_eq!(outcome.snapshot.day_start_equity, usd("10000"));
+        assert_eq!(outcome.snapshot.capital_base, usd("10000"));
+        assert_eq!(outcome.snapshot.net_contributed, usd("10000"));
+    }
+    assert!(trace(&step_of(&outcomes, 2)?.journal).is_empty());
+    assert!(trace(&step_of(&outcomes, 4)?.journal).is_empty());
+    Ok(())
+}
+
+/// A dividend applied before the ex-date's mark lifts no rung (MC-R30, MI-33). 96.9 is a 3.1%
+/// drawdown, past the 0.03 `scale_sizes` rung. Counted against the cum-dividend mark, 120 of
+/// dividend would make E 9810, below the rung's 0.02 lift level, and lift it for the night. Held
+/// until the ex-date's mark of 95.7, it arrives with it: E is 9570 + 120 = 9690, still 3.1%.
+#[test]
+#[ignore = "pending E4-4"]
+fn a_dividend_applied_before_the_ex_dates_mark_lifts_no_rung() -> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "96.9"),
+            dividend(ACTION_AT, MarketSession::AfterHours, "1.2"),
+            mark("2026-09-22T13:35:00.000000000Z", "95.7"),
+        ],
+    )?;
+    assert_eq!(step_of(&outcomes, 1)?.snapshot.size_factor, ratio("0.5"));
+    for number in [2, 3] {
+        let outcome = step_of(&outcomes, number)?;
+        assert_eq!(
+            outcome.snapshot.size_factor,
+            ratio("0.5"),
+            "step {number}: the rung holds"
+        );
+        assert!(
+            trace(&outcome.journal).is_empty(),
+            "step {number}: nothing lifts or triggers"
+        );
+    }
+    assert_eq!(step_of(&outcomes, 2)?.snapshot.agent_equity, usd("9690"));
+    assert_eq!(step_of(&outcomes, 3)?.snapshot.agent_equity, usd("9690"));
+    Ok(())
+}
+
+/// The dividend is rounded half to even at the cent: one share at 0.125 is 0.12, not 0.13, and at
+/// 0.135 it is 0.14 (§5.2, trading spec §8.5). Each joins E with the next day's mark.
+#[test]
+#[ignore = "pending E4-4"]
+fn a_dividend_is_rounded_half_to_even_at_the_cent() -> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "1", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            dividend(ACTION_AT, MarketSession::AfterHours, "0.125"),
+            mark("2026-09-22T13:35:00.000000000Z", "100"),
+            dividend(
+                "2026-09-23T00:00:00.000000000Z",
+                MarketSession::AfterHours,
+                "0.135",
+            ),
+            mark("2026-09-23T13:35:00.000000000Z", "100"),
+        ],
+    )?;
+    assert_eq!(
+        step_of(&outcomes, 2)?.snapshot.agent_equity,
+        usd("10000.12")
+    );
+    assert_eq!(
+        step_of(&outcomes, 4)?.snapshot.agent_equity,
+        usd("10000.26")
+    );
+    Ok(())
+}
+
+/// An action is not a quote, so it never completes a hard breach's two-quote wait (§5.2, §5.6):
+/// a split 10 s after the first quote at the hard level leaves the breach pending, and only the next
+/// quote at the hard level, at the adjusted price, latches both rungs.
+#[test]
+#[ignore = "pending E4-4"]
+fn a_corporate_action_is_not_a_quote_so_it_never_completes_a_hard_breach() -> Result<(), String> {
+    let mandate = swing(&[
+        ("/risk/max_daily_loss", Some(s("0.5"))),
+        ("/risk/scale_lift_after_s", Some(common::i(0))),
+    ])?;
+    let outcomes = walk(
+        &mandate,
+        &opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "105"),
+            mark("2026-09-21T14:02:00.000000000Z", "94.4"),
+            split(
+                "2026-09-21T14:02:10.000000000Z",
+                MarketSession::Regular,
+                (2, 1),
+                ShareIncrement::Whole,
+                None,
+            ),
+            mark("2026-09-21T14:02:11.000000000Z", "47.1"),
+        ],
+    )?;
+    let at_the_split = step_of(&outcomes, 3)?;
+    assert!(trace(&at_the_split.journal).is_empty());
+    assert_eq!(
+        restrictions(&at_the_split.snapshot),
+        vec![Restriction::HardBreach]
+    );
+    assert!(latched(&at_the_split.snapshot).is_empty());
+    assert_eq!(
+        latched(&step_of(&outcomes, 4)?.snapshot),
+        vec![LimitKey::DrawdownRung(1), LimitKey::DrawdownRung(2)]
+    );
+    Ok(())
+}
+
+/// `round(numerator ÷ denominator, 0, half_even)` for non-negative terms, in `i128`.
+fn half_even(numerator: i128, denominator: i128) -> i128 {
+    let quotient = numerator / denominator;
+    let twice = (numerator % denominator) * 2;
+    if twice > denominator || (twice == denominator && quotient % 2 == 1) {
+        quotient + 1
+    } else {
+        quotient
+    }
+}
+
+/// Dollars held as an `i128` count of 10⁻²¹, the product of a quantity's 9 places and a mark's 12.
+fn usd_at_21(units: i128) -> Usd {
+    const ONE: i128 = 1_000_000_000_000_000_000_000;
+    let sign = if units < 0 { "-" } else { "" };
+    let (whole, fraction) = (units.abs() / ONE, units.abs() % ONE);
+    let text = format!("{sign}{whole}.{fraction:021}");
+    usd(text.trim_end_matches('0').trim_end_matches('.'))
+}
+
+/// One drawn corporate-action walk: Q whole shares bought at `cost` cents, a mark at `bid` cents, a
+/// `new`:`old` split with an optional cash-in-lieu price in cents, a dividend of `mills` thousandths
+/// of a dollar a share, its posting, and a mark near the adjusted price.
+#[derive(Debug, Clone)]
+struct ActionWalk {
+    shares: i128,
+    cost: i128,
+    bid: i128,
+    new: u64,
+    old: u64,
+    fractional: bool,
+    lieu: Option<i128>,
+    mills: i128,
+}
+
+fn action_walk() -> impl Strategy<Value = ActionWalk> {
+    (
+        1_i128..=50,
+        5_000_i128..=15_000,
+        5_000_i128..=15_000,
+        1_u64..=10,
+        1_u64..=10,
+        any::<bool>(),
+        prop::option::of(100_i128..=300_000),
+        1_i128..=5_000,
+    )
+        .prop_map(
+            |(shares, cost, bid, new, old, fractional, lieu, mills)| ActionWalk {
+                shares,
+                cost,
+                bid,
+                new,
+                old,
+                fractional,
+                lieu,
+                mills,
+            },
+        )
+}
+
+/// `amount` hundredths in the canonical form a price parses from: no trailing zeros, no bare point.
+fn cents(amount: i128) -> String {
+    canonical(format!("{}.{:02}", amount / 100, amount % 100))
+}
+
+fn mills_text(amount: i128) -> String {
+    canonical(format!("{}.{:03}", amount / 1_000, amount % 1_000))
+}
+
+fn canonical(text: String) -> String {
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+/// MI-33 against an oracle that shares no code with the crate: every E is recomputed in `i128` at
+/// 10⁻²¹ from the walk alone (Q' truncated, the mark rounded once toward zero at 12 places, cash in
+/// lieu and the dividend rounded half to even at the cent, the dividend joining E only with the next
+/// mark), H is the running maximum of those, E₀, C, N and L never move, and a split with no residual
+/// lifts only what a clock tick at its instant lifts and triggers all it triggers.
+fn corporate_actions_move_the_risk_state_only_by_their_cash(
+    walked: &ActionWalk,
+) -> Result<(), TestCaseError> {
+    const DOLLAR: i128 = 1_000_000_000_000_000_000_000;
+    const CENT: i128 = DOLLAR / 100;
+    let (new, old) = (i128::from(walked.new), i128::from(walked.old));
+    let scaled = walked.shares * new * 1_000_000_000;
+    let after = if walked.fractional {
+        scaled / old
+    } else {
+        scaled / old / 1_000_000_000 * 1_000_000_000
+    };
+    let residual = scaled - after * old;
+    let adjusted_mark = walked.bid * 10_000_000_000 * old / new;
+    let lieu = walked
+        .lieu
+        .map_or(0, |price| half_even(residual * price, old * 1_000_000_000));
+    let paid = half_even(after * walked.mills, 10_000_000_000);
+    let later_bid = (walked.bid * old / new).max(1);
+    let basis = walked.shares * walked.cost * CENT;
+    let equities = [
+        10_000 * DOLLAR - basis + walked.shares * walked.bid * CENT,
+        10_000 * DOLLAR - basis + lieu * CENT + after * adjusted_mark,
+        10_000 * DOLLAR - basis + lieu * CENT + after * adjusted_mark,
+        10_000 * DOLLAR - basis + lieu * CENT + after * adjusted_mark,
+        10_000 * DOLLAR - basis + (lieu + paid) * CENT + after * later_bid * 10_000_000_000,
+    ];
+
+    let mandate = ok(swing(&[("/risk/max_daily_loss", Some(s("0.5")))]))?;
+    let clock = RegularSessionClock::new();
+    let open = patient_opening(
+        "2026-09-21T14:00:00.000000000Z",
+        &walked.shares.to_string(),
+        &cents(walked.cost),
+        "0",
+    );
+    let first = mark("2026-09-21T14:01:00.000000000Z", &cents(walked.bid));
+    let increment = if walked.fractional {
+        ShareIncrement::Fractional
+    } else {
+        ShareIncrement::Whole
+    };
+    let lieu_price = walked.lieu.map(cents);
+    let outcomes = ok(walk(
+        &mandate,
+        &open,
+        &clock,
+        &[
+            first.clone(),
+            split(
+                ACTION_AT,
+                MarketSession::AfterHours,
+                (walked.new, walked.old),
+                increment,
+                lieu_price.as_deref(),
+            ),
+            dividend(
+                "2026-09-22T13:35:00.000000000Z",
+                MarketSession::Regular,
+                &mills_text(walked.mills),
+            ),
+            posted("2026-09-22T13:36:00.000000000Z"),
+            mark("2026-09-22T13:37:00.000000000Z", &cents(later_bid)),
+        ],
+    ))?;
+    let mut high_water = 10_000 * DOLLAR;
+    for (number, (equity, outcome)) in equities.iter().zip(&outcomes).enumerate() {
+        high_water = high_water.max(*equity);
+        prop_assert_eq!(
+            outcome.snapshot.agent_equity,
+            usd_at_21(*equity),
+            "step {}: E is the allocation, the cash, and Q' at the mark",
+            number + 1
+        );
+        prop_assert_eq!(outcome.snapshot.high_water_mark, usd_at_21(high_water));
+        prop_assert_eq!(outcome.snapshot.day_start_equity, usd("10000"));
+        prop_assert_eq!(outcome.snapshot.capital_base, usd("10000"));
+        prop_assert_eq!(outcome.snapshot.net_contributed, usd("10000"));
+        prop_assert_eq!(outcome.snapshot.inherited_loss, usd("0"));
+    }
+    if residual == 0 {
+        let ticked = ok(walk(
+            &mandate,
+            &open,
+            &clock,
+            &[first, tick(ACTION_AT, MarketSession::AfterHours)],
+        ))?;
+        let lines = |outcome: &Outcome, kind: &str| -> Vec<String> {
+            trace(&outcome.journal)
+                .into_iter()
+                .filter(|line| line.starts_with(kind))
+                .collect()
+        };
+        let (split_step, tick_step) = (ok(step_of(&outcomes, 2))?, ok(step_of(&ticked, 2))?);
+        prop_assert_eq!(
+            lines(split_step, "lifted"),
+            lines(tick_step, "lifted"),
+            "a split with no residual lifts only what a tick at its instant would"
+        );
+        let triggered = lines(split_step, "triggered");
+        prop_assert!(
+            lines(tick_step, "triggered")
+                .iter()
+                .all(|line| triggered.contains(line)),
+            "a split with no residual triggers everything a tick at its instant would"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "pending E4-4"]
+fn corporate_actions_move_the_risk_state_only_by_their_cash_against_an_independent_oracle() {
+    let mut runner = TestRunner::new(ProptestConfig {
+        cases: 512,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    });
+    if let Err(failure) = runner.run(&action_walk(), |walked| {
+        corporate_actions_move_the_risk_state_only_by_their_cash(&walked)
+    }) {
+        panic!("MI-33: {failure}");
     }
 }

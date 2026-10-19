@@ -90,6 +90,9 @@ LIMIT_KEY_FORM = re.compile(
 )
 DIGEST_HEX = T("digest")
 DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
+# §9.29 (DEC-2104 item 1): the code the web app shows for a challenge, normalized.
+CONFIRM_CODE = T("confirm_code")
+CONFIRM_CODE_FORM = re.compile(r"^[0-9A-HJKMNP-TV-Z]{8}\Z")
 STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2, "meter": 2}
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
@@ -504,6 +507,16 @@ SCHEMAS[("agent", "ApprovalTimedOut")] = rec(
 SCHEMAS[("agent", "ApprovalCanceled")] = rec(
     ("approval", ULID),
     ("reason", one_of("version_applied", "mode_tightened", "owner_pause", "owner_stop", "kill_switch")),
+)
+# §9.29 v0.62 (DEC-2104): the CLI's record that the owner confirmed one step-up challenge on the
+# host. Only the workspace API reads it.
+SCHEMAS[("ctl", "StepUpConfirmed")] = rec(
+    ("challenge", ULID),
+    ("action_kind", STR),
+    ("action_digest", REF),
+    ("principal", ULID),
+    ("code", CONFIRM_CODE),
+    ("confirmed_at", INT),
 )
 
 # §9.8 (DEC-800): a connection's history. The control stream's three records and the account
@@ -1434,10 +1447,14 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
             return [Violation("types", "schema", path)]
         ok = (value.startswith("pii_") and is_ulid(value[4:])) or "types.pii_ref" in skip
         return [] if ok else [Violation("types", "non_canonical", path)]
-    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key"):
+    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key", "confirm_code"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
-        if ty.kind == "pointer":
+        if ty.kind == "confirm_code":
+            ok = bool(CONFIRM_CODE_FORM.match(value)) or (
+                "types.confirm_code_case" in skip and bool(CONFIRM_CODE_FORM.match(value.upper()))
+            )
+        elif ty.kind == "pointer":
             ok = is_pointer(value)
         elif ty.kind == "stream_id":
             ok = is_stream_id(value)
@@ -1618,6 +1635,11 @@ def risk_limit_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
     return out
 
 
+def rule_holds(name: str, holds: bool, skip: frozenset[str]) -> bool:
+    """Whether rule `name` passes, a skipped rule passing."""
+    return holds or f"rule.{name}" in skip
+
+
 def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
     """The §9.2 consistency rules 17 to 24, §9.3's 29 to 33, and §9.4's 34 to 38, on a well-typed
     payload, each reported once."""
@@ -1628,6 +1650,14 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         if not holds and f"rule.{name}" not in skip:
             out.append(Violation(f"rule.{name}", reason, path))
 
+    if event_type == "StepUpConfirmed":
+        rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
+        rule("242.paper", draft["environment"] == "paper", "schema", "environment")
+        rule("242.time", p["confirmed_at"] == epoch_seconds(draft["event_time"]), "schema", "payload.confirmed_at")
+        if rule_holds("242.user", draft["actor"]["kind"] == "user", skip):
+            rule("242.principal", draft["actor"]["id"] == p["principal"], "schema", "actor.id")
+        else:
+            rule("242.user", False, "schema", "actor.kind")
     if event_type == "MandateVersionCreated":
         paths = [(entry["path"] or "").encode() for entry in p["provenance"]]
         rule("17", ascending(paths), "non_canonical", "payload.provenance")

@@ -107,3 +107,26 @@ run "staging_may_rely_on_the_window_alone" {
     error_message = "Staging plans whole with no founder CIDR: the root refuses nothing, and the cluster's own test shows its firewall then admits nobody."
   }
 }
+
+run "records_the_commit_it_applies" {
+  command = plan
+
+  variables {
+    commit_sha = "0123456789abcdef0123456789abcdef01234567"
+  }
+
+  assert {
+    condition     = terraform_data.applied_commit.input == "0123456789abcdef0123456789abcdef01234567"
+    error_message = "The run records the commit it applies, so the next run can list what changed since."
+  }
+}
+
+run "refuses_a_short_commit" {
+  command = plan
+
+  variables {
+    commit_sha = "0123456"
+  }
+
+  expect_failures = [var.commit_sha]
+}

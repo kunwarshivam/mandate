@@ -1,5 +1,5 @@
-# Every value here comes from the GitHub environment (infra.yml sets TF_VAR_*), never a committed
-# file: the runbook names each one.
+# Every value here comes from the GitHub environment (infra.yml sets TF_VAR_*), never from
+# anything committed: the runbook names each one.
 
 variable "state_passphrase" {
   description = "TOFU_STATE_PASSPHRASE: encrypts this environment's state and plans."
@@ -15,6 +15,7 @@ variable "state_passphrase" {
 variable "kube_api_allowed_addresses" {
   description = "KUBE_API_ALLOWED_CIDRS: the only CIDRs the control plane admits, as a JSON list."
   type        = list(string)
+  sensitive   = true
 
   validation {
     condition     = length(var.kube_api_allowed_addresses) > 0
@@ -48,7 +49,19 @@ variable "api_origin" {
 variable "bootstrap_runner_cidr" {
   description = "Set only by `cargo xtask infra apply` for its own run, then cleared (DEC-2028)."
   type        = string
+  sensitive   = true
   default     = ""
+}
+
+variable "commit_sha" {
+  description = "The commit `cargo xtask infra` plans and applies, which the founder named when dispatching it; state keeps the last one applied, so the next run lists what changed since."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.commit_sha == "" || can(regex("^[0-9a-f]{40}$", var.commit_sha))
+    error_message = "The commit is empty or a full 40-character lower-case hex SHA."
+  }
 }
 
 variable "access_allowed_emails" {

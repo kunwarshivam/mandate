@@ -3133,6 +3133,15 @@ enables `live` (ES-23, OPS-5).
   *Status:* done. The tests (#1565), the cell wiring (#1572), the stub (#1591), xtask's release
   check and profile guard (#1620), and the release build's refusal of rustflags, compiler, wrapper
   and profile overrides from its environment or any cargo configuration it reads (DEC-2027).
+  *Follow-up (DEC-2032 item 3, the leak-guard's second review):* L1 to L3 do not yet read
+  `env:`-shaped lines inside a `run:` block, `#` lines inside a heredoc, a redirect before a flag
+  (`set >x -x`), a shell's `-O` before `-x`, `/proc/self/environ` built from parts or read by a
+  language one-liner (`python -c`, `node -e`, `perl -e`), a `secrets:` mapping across several
+  lines, or a duplicate `ALLOWED` line. L5 to L8 do not yet read `curl` option abbreviations
+  (`--verb`), `-w '%{header_json}'`, `~/.curlrc`, `${!var}` indirection, composite actions'
+  steps, `wget -d` or `-S`, `curl | sh`, other `docker` or `podman login -p` forms, or
+  `--oauth2-bearer`, `-b` and `--proxy-user` values. They hold `web-e2e.yml`'s traces upload by
+  step order only. L9's closed world holds meanwhile.
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
   issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
@@ -3249,6 +3258,22 @@ fully on-prem control plane; shared data plane; strategy marketplace.
      platform did not originate is external activity, which puts the account's agents in
      `exits_only`) and [connections spec](../specs/connections.md) CN-7 (never adopted as ours).
      Both are protected spec changes.
+
+- **Rotating Barman's minted R2 token** ([DEC-2029](decisions/DEC-2029.md); E21-56's review).
+  The `cloudflare` module mints the journal archive's bucket-scoped token with no `expires_on`, so
+  it lives until the token resource is replaced. Wanted: an expiry, a rotation that mints the next
+  token before the old one lapses and hands it to the cluster through lane GO's bootstrap, and a
+  check that alerts before the expiry. Until then the founder can rotate it by tainting
+  `module.cloudflare.cloudflare_account_token.journal_archive` in a reviewed apply.
+
+- **`infra.yml` hardening left from E21-56's review of #1711** ([DEC-2030](decisions/DEC-2030.md)
+  item 6). Each tightens what already holds:
+  1. `terraform_data.applied_commit` depends on every module, so a partial apply never records its
+     commit, and it changes only on an apply, not on every plan.
+  2. The `MANDATE_INFRA_SHA` guard line is bound to the secret step, not only to the file.
+  3. The `cloudflare` module's `access_allowed_emails` variable is `sensitive` itself, not only
+     through production's root.
+  4. The CIDR masks also cover each IPv6 range's normalised forms (compressed and expanded).
 
 ## Enterprise harness (proposed, DEC-149)
 
