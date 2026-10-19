@@ -2658,6 +2658,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-token-exchange"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-connections",
+ "mandate-release",
+ "proptest",
+ "secrecy",
+]
+
+[[package]]
 name = "mandate-vault"
 version = "0.0.0"
 dependencies = [
