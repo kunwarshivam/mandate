@@ -479,9 +479,13 @@ mod tests {
 
         promote(&root, Environment::Production, None)?;
         let production = cluster_dir(&root, Environment::Production);
+        let mut copied = staged.clone();
+        copied.remove("mandate-vault-server");
         assert_eq!(
             read_chart_digests(&read(&production.join("charts.yaml"))?)?,
-            staged
+            copied,
+            "production copies every chart it pins from staging, and never gains the vault, which \
+             staging alone runs (DEC-2051)"
         );
         let production_images = read(&production.join("images.yaml"))?;
         assert!(production_images.contains("\ndeploymentTier: production\n"));

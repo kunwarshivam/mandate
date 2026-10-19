@@ -28,6 +28,12 @@ const FLUX_KINDS: [(&str, &str); 4] = [
     ),
     ("HelmRelease", "helmreleases.helm.toolkit.fluxcd.io"),
 ];
+/// The vault's chart, as its pods' `app.kubernetes.io/name` label names it (DEC-2051). Its pod is
+/// ready only once unsealed, which needs the founder's one-time `bao operator init` first, so until
+/// it is ready its line waits on that rather than failing; this check cannot tell a vault never
+/// initialized from one that fails to unseal, which only the vault's own status can.
+const VAULT_CHART: &str = "mandate-vault-server";
+const VAULT_PENDING: &str = "founder init";
 /// The kill-switch admission policies' bindings (DEC-2045, DEC-2046).
 const BINDINGS: [&str; 2] = ["mandate-control-pods", "mandate-control-jobs"];
 /// The signature webhooks' configuration, as `admission.yaml`'s patch names it (DEC-2016 item 1).
@@ -149,7 +155,12 @@ fn pods(list: &mut Checklist, kubectl: Kubectl<'_>) {
             && containers.is_some_and(|all| {
                 !all.is_empty() && all.iter().all(|c| c["ready"].as_bool() == Some(true))
             });
-        list.check(up, format!("pod {} is Running and Ready", where_is(pod)));
+        let what = format!("pod {} is Running and Ready", where_is(pod));
+        if text(pod, &["metadata", "labels", "app.kubernetes.io/name"]) == VAULT_CHART {
+            list.check_or_pending(up, VAULT_PENDING, format!("{what}, so unsealed"));
+        } else {
+            list.check(up, what);
+        }
     }
     for namespace in PLATFORM_NAMESPACES {
         if !items
@@ -187,7 +198,12 @@ fn admission(list: &mut Checklist, kubectl: Kubectl<'_>) {
 }
 
 /// A line of the edge's: failing, or pending on `pending` when it names a change.
-fn edge_line(list: &mut Checklist, pending: Option<&'static str>, holds: bool, what: String) {
+fn edge_line(
+    list: &mut Checklist,
+    pending: Option<&'static str>,
+    holds: bool,
+    what: impl Into<String>,
+) {
     match pending {
         Some(until) => list.check_or_pending(holds, until, what),
         None => list.check(holds, what),
@@ -321,6 +337,12 @@ mod tests {
     /// One way to break an up staging.
     type Fault = fn(&mut Staging);
 
+    fn vault(ready: bool) -> Value {
+        let mut found = pod("ws-ws1", "vault-0", "Running", &[ready]);
+        found["metadata"]["labels"] = json!({"app.kubernetes.io/name": VAULT_CHART});
+        found
+    }
+
     /// A staging that is up, which each test breaks one way.
     struct Staging {
         flux: Vec<Value>,
@@ -352,6 +374,7 @@ mod tests {
                     pod("cosign-system", "webhook-x", "Running", &[true]),
                     pod("ws-ws1", "journal-1", "Running", &[true, true]),
                     pod("ws-ws1", "migrate-x", "Succeeded", &[false]),
+                    vault(true),
                     pod("kube-system", "coredns-x", "Pending", &[false]),
                 ],
                 bindings: BINDINGS
@@ -613,6 +636,30 @@ mod tests {
         assert_eq!(
             missing(&text),
             ["the API answers only through Access (200 without credentials)"],
+            "{text}"
+        );
+        Ok(())
+    }
+
+    /// A sealed vault waits on the founder's one-time init without failing the run; an unsealed
+    /// one is an ordinary line (DEC-2051).
+    #[test]
+    fn a_sealed_vault_waits_on_the_founders_init() -> Result<()> {
+        let staging = Staging::up();
+        let text = run(&staging)?;
+        assert!(
+            text.contains("[ok]      pod ws-ws1/vault-0 is Running and Ready, so unsealed"),
+            "{text}"
+        );
+        let mut staging = Staging::up();
+        staging.pods[5] = vault(false);
+        let text = run(&staging)?;
+        assert_eq!(missing(&text), Vec::<&str>::new(), "{text}");
+        assert_eq!(staging.pauses.get(), 0);
+        assert!(
+            text.contains(
+                "[pending founder init] pod ws-ws1/vault-0 is Running and Ready, so unsealed"
+            ),
             "{text}"
         );
         Ok(())
