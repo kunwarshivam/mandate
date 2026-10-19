@@ -63,14 +63,6 @@ pub struct PutArgs {
     pub ca: PathBuf,
 }
 
-/// Which of the process's standard streams are terminals, which `vault put` refuses for the
-/// credentials and the secret it reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Terminals {
-    pub stdin: bool,
-    pub stdout: bool,
-}
-
 /// The platform secrets `vault put` writes (DEC-2020): each is written by the secret-import
 /// identity alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -120,7 +112,7 @@ pub struct ProvisionArgs {
 }
 
 /// Which of the process's standard streams are terminals, which `vault provision` refuses for its
-/// token and its Secrets.
+/// token and its Secrets, and `vault put` for the credentials and the secret it reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Terminals {
     pub stdin: bool,
