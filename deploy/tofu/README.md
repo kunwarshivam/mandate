@@ -47,8 +47,10 @@ never a value.
    | Spaces Keys | create, read, delete | each run mints its own Spaces key, makes the state bucket if it is missing, and deletes the key (DEC-2030 item 4; DEC-2605 row 13) |
 
    No droplet, database, load-balancer, domain, project, billing or account scope. The preflight
-   probes the read scopes and Spaces Keys create and delete, and names each one missing; a missing
-   write scope shows up as a 403 that names it in the first apply.
+   probes the read scopes and Spaces Keys create, the run's own mint, and names each one missing.
+   Spaces Keys delete is checked when the run deletes its key, and by the preflight only when an
+   earlier run left a key to delete; a missing delete scope fails the run's last step by name. A
+   missing write scope shows up as a 403 that names it in the first apply.
 2. **No Spaces key and no bucket by hand.** Each run mints `mandate-infra-<env>-<run id>`, makes
    `mandate-tofu-state-<env>` in NYC3 if it is missing, and deletes the key when it ends. The first
    apply adopts the bucket, makes it versioned, and protects it from deletion.

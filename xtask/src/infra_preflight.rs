@@ -62,7 +62,7 @@ const DO_READ_PROBES: &[(&str, &str)] = &[
     ("Kubernetes read", "/kubernetes/clusters?per_page=1"),
     ("VPC read", "/vpcs?per_page=1"),
     ("Firewall read", "/firewalls?per_page=1"),
-    ("Spaces Keys read", "/spaces/keys?per_page=200"),
+    ("Spaces Keys read", "/spaces/keys?per_page=1"),
 ];
 
 /// One line of the checklist: what was checked, and whether it holds. A reminder is a step no API
@@ -147,12 +147,18 @@ impl KeyGuard {
         self.key.as_ref()
     }
 
-    /// Deletes the key now; `true` when there was none or DigitalOcean confirmed the deletion.
+    /// Deletes the key now; `true` when there was none or DigitalOcean confirmed the deletion. The
+    /// key stays in the guard until the deletion is confirmed, so a failed request leaves it to
+    /// [`Drop`] to try again.
     pub(crate) fn release(mut self) -> Result<bool> {
-        match self.key.take() {
-            Some(key) => delete_key(&self.token, &key.access_key),
-            None => Ok(true),
+        let Some(key) = self.key.as_ref() else {
+            return Ok(true);
+        };
+        let deleted = delete_key(&self.token, &key.access_key)?;
+        if deleted {
+            self.key = None;
         }
+        Ok(deleted)
     }
 }
 
@@ -161,7 +167,8 @@ impl Drop for KeyGuard {
         if let Some(key) = self.key.take()
             && !delete_key(&self.token, &key.access_key).unwrap_or(false)
         {
-            eprintln!(
+            let _ = writeln!(
+                std::io::stderr(),
                 "    this run's Spaces key was not deleted; `infra close` and the next run delete it \
                  (DEC-2030 item 4)"
             );
@@ -255,6 +262,43 @@ pub(crate) fn keys_named(listing: &str, prefix: &str) -> Result<Vec<String>> {
         .filter(|key| key.name.starts_with(prefix))
         .map(|key| key.access_key)
         .collect())
+}
+
+/// How many keys one page of a DigitalOcean key listing holds.
+pub(crate) fn listed_count(listing: &str) -> Result<usize> {
+    let listing: serde_json::Value =
+        serde_json::from_str(listing).context("DigitalOcean's key listing is not its JSON")?;
+    Ok(listing
+        .get("keys")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len))
+}
+
+/// The keys one page of the listing may hold, and the most pages read before the listing is
+/// taken as unbounded rather than read forever.
+const KEYS_PER_PAGE: usize = 200;
+const MAX_KEY_PAGES: usize = 50;
+
+/// Every Spaces key whose name carries `prefix`, by access key, read page by page until a page
+/// is short; `None` when DigitalOcean refuses the listing (Spaces Keys read is missing).
+fn keys_with_prefix(token: &str, prefix: &str) -> Result<Option<Vec<String>>> {
+    let mut keys = Vec::new();
+    for page in 1..=MAX_KEY_PAGES {
+        let answer = api(
+            "GET",
+            &format!("{DO_API}/spaces/keys?page={page}&per_page={KEYS_PER_PAGE}"),
+            token,
+            None,
+        )?;
+        if !answer.ok() {
+            return Ok(None);
+        }
+        keys.extend(keys_named(&answer.body, prefix)?);
+        if listed_count(&answer.body)? < KEYS_PER_PAGE {
+            return Ok(Some(keys));
+        }
+    }
+    bail!("DigitalOcean listed more than {MAX_KEY_PAGES} pages of Spaces keys")
 }
 
 /// `value` as a double-quoted curl config string; a line break, which would end the option early,
@@ -370,10 +414,13 @@ pub(crate) fn delete_key(token: &str, access_key: &str) -> Result<bool> {
     .ok())
 }
 
-/// Mints this run's key, full access, since only that grant may create a bucket (DEC-2030 item 4).
-/// The answer is read as untyped JSON, whose errors cannot echo a value, and both halves of the
-/// key are masked in the log before anything else touches them (the audit's item 3).
-fn mint_key(token: &str, name: &str) -> Result<Option<SpacesKey>> {
+/// Mints this run's key, full access, since only that grant may create a bucket (DEC-2030 item 4),
+/// straight into a [`KeyGuard`]. The answer is read as untyped JSON, whose errors cannot echo a
+/// value. The access key id is masked and held by the guard the moment it is read, and the secret
+/// is masked before anything else touches it, so a later error deletes the key and no log line can
+/// show either (DEC-2018 item 7). An answer with no access key id at all leaves nothing to delete
+/// here; `infra close` deletes every key of the environment's prefix.
+fn mint_key(token: &str, name: &str) -> Result<KeyGuard> {
     let body = serde_json::json!({
         "name": name,
         "grants": [{ "bucket": "", "permission": "fullaccess" }],
@@ -381,11 +428,9 @@ fn mint_key(token: &str, name: &str) -> Result<Option<SpacesKey>> {
     .to_string();
     let answer = api("POST", &format!("{DO_API}/spaces/keys"), token, Some(&body))?;
     if !answer.ok() {
-        return Ok(None);
+        return Ok(KeyGuard::none());
     }
-    let Ok(minted) = serde_json::from_str::<serde_json::Value>(&answer.body) else {
-        bail!("DigitalOcean's minted key is not JSON");
-    };
+    let minted = serde_json::from_str::<serde_json::Value>(&answer.body).unwrap_or_default();
     let field = |name: &str| {
         minted
             .get("key")
@@ -393,15 +438,25 @@ fn mint_key(token: &str, name: &str) -> Result<Option<SpacesKey>> {
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
     };
-    let (Some(access_key), Some(secret_key)) = (field("access_key"), field("secret_key")) else {
-        bail!("DigitalOcean's minted key lacks its access key or secret");
+    let Some(access_key) = field("access_key") else {
+        bail!("DigitalOcean's minted key names no access key id; `infra close` deletes it");
     };
     mask::add_mask(&access_key);
+    let mut guard = KeyGuard {
+        token: token.to_owned(),
+        key: Some(SpacesKey {
+            access_key,
+            secret_key: String::new(),
+        }),
+    };
+    let Some(secret_key) = field("secret_key") else {
+        bail!("DigitalOcean's minted key holds no secret; this run's guard deletes it");
+    };
     mask::add_mask(&secret_key);
-    Ok(Some(SpacesKey {
-        access_key,
-        secret_key,
-    }))
+    if let Some(key) = guard.key.as_mut() {
+        key.secret_key = secret_key;
+    }
+    Ok(guard)
 }
 
 /// The DigitalOcean half: the token, its read scopes, last run's keys deleted, this run's key
@@ -422,38 +477,35 @@ fn digitalocean(
     if !accepted {
         return Ok(KeyGuard::none());
     }
-    let mut listing = None;
+    let mut can_list = false;
     for (scope, path) in DO_READ_PROBES {
         let answer = api("GET", &format!("{DO_API}{path}"), token, None)?;
         list.check(
             answer.ok(),
             format!("DIGITAL_OCEAN_API_KEY has scope {scope}"),
         );
-        if *scope == "Spaces Keys read" && answer.ok() {
-            listing = Some(answer.body);
+        if *scope == "Spaces Keys read" {
+            can_list = answer.ok();
         }
     }
     let prefix = key_prefix(environment);
-    if let Some(listing) = listing {
-        let stale = keys_named(&listing, &prefix)?;
-        if !stale.is_empty() {
-            let mut deleted = true;
-            for access_key in &stale {
-                deleted &= delete_key(token, access_key)?;
-            }
-            list.check(
-                deleted,
-                format!(
-                    "DIGITAL_OCEAN_API_KEY has scope Spaces Keys delete (removing an earlier \
-                     run's {prefix}* key)"
-                ),
-            );
+    if can_list
+        && let Some(stale) = keys_with_prefix(token, &prefix)?
+        && !stale.is_empty()
+    {
+        let mut deleted = true;
+        for access_key in &stale {
+            deleted &= delete_key(token, access_key)?;
         }
+        list.check(
+            deleted,
+            format!(
+                "DIGITAL_OCEAN_API_KEY has scope Spaces Keys delete (removing an earlier \
+                 run's {prefix}* key)"
+            ),
+        );
     }
-    let guard = KeyGuard {
-        token: token.to_owned(),
-        key: mint_key(token, &format!("{prefix}{run}"))?,
-    };
+    let guard = mint_key(token, &format!("{prefix}{run}"))?;
     list.check(
         guard.key().is_some(),
         "DIGITAL_OCEAN_API_KEY has scope Spaces Keys create",
@@ -629,17 +681,11 @@ pub(crate) fn close(environment: &str, token: &str) -> Result<usize> {
     if !matches!(environment, "staging" | "production") {
         bail!("the environment must be staging or production, not `{environment}`");
     }
-    let listing = api(
-        "GET",
-        &format!("{DO_API}/spaces/keys?per_page=200"),
-        token,
-        None,
-    )?;
-    ensure!(
-        listing.ok(),
-        "DigitalOcean refused to list Spaces keys (DIGITAL_OCEAN_API_KEY needs Spaces Keys read)"
-    );
-    let keys = keys_named(&listing.body, &key_prefix(environment))?;
+    let Some(keys) = keys_with_prefix(token, &key_prefix(environment))? else {
+        bail!(
+            "DigitalOcean refused to list Spaces keys (DIGITAL_OCEAN_API_KEY needs Spaces Keys read)"
+        );
+    };
     for access_key in &keys {
         ensure!(
             delete_key(token, access_key)?,
@@ -747,6 +793,41 @@ mod tests {
         assert!(environment_items("staging", &without_emails).complete());
     }
 
+    /// The review's blocker (DEC-2018 item 7): `mint_key` masks the access key id before the
+    /// guard holds it and the secret before it is stored, and goes through `crate::mask`, the one
+    /// place a mask command is written. Read from the source, since the mint itself needs
+    /// DigitalOcean.
+    #[test]
+    fn the_minted_key_is_masked_before_anything_holds_it() {
+        let source = include_str!("infra_preflight.rs");
+        let body = source
+            .split("fn mint_key(")
+            .nth(1)
+            .and_then(|rest| rest.split("\n}\n").next())
+            .unwrap_or_default();
+        let at = |needle: &str| body.find(needle);
+        let mask_id = at("mask::add_mask(&access_key);");
+        let guard = at("let mut guard = KeyGuard {");
+        let mask_secret = at("mask::add_mask(&secret_key);");
+        let store = at("key.secret_key = secret_key;");
+        assert!(
+            mask_id.is_some() && mask_id < guard,
+            "the id is masked before the guard holds it"
+        );
+        assert!(
+            guard < mask_secret,
+            "the guard holds the key before the secret can fail"
+        );
+        assert!(
+            mask_secret.is_some() && mask_secret < store,
+            "the secret is masked before it is stored"
+        );
+        assert!(
+            !body.contains("add-mask"),
+            "masks go through crate::mask alone"
+        );
+    }
+
     /// DEC-2030 item 4: a guard with no key deletes nothing and releases cleanly, so an early
     /// return before the mint never calls DigitalOcean.
     #[test]
@@ -795,6 +876,13 @@ mod tests {
             {"name":"x-mandate-infra-staging-1","access_key":"A4","grants":[]}
         ],"links":{},"meta":{"total":4}}"#;
         assert_eq!(keys_named(listing, &key_prefix("staging"))?, ["A1"]);
+        assert_eq!(
+            listed_count(listing)?,
+            4,
+            "a page counts every key, not only the prefix's"
+        );
+        assert_eq!(listed_count(r#"{"keys":[]}"#)?, 0);
+        assert!(listed_count("not json").is_err());
         assert!(keys_named("not json", "p").is_err());
         Ok(())
     }

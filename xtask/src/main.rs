@@ -1272,17 +1272,19 @@ fn tofu_roots(tofu_dir: &Path) -> Result<Vec<PathBuf>> {
 /// The workflow that alone plans and applies the hosted environments (E21-56, DEC-2014).
 const INFRA_WORKFLOW: &str = ".github/workflows/infra.yml";
 /// The one command `infra.yml`'s secret-holding step runs: the binary an earlier step built with
-/// no secret in its environment, so no build script runs beside one (the audit's item 4).
+/// no secret in its environment, so no build script runs beside one.
 const INFRA_RUN: &str = "target/debug/xtask infra";
-/// The command `infra.yml`'s last step runs, `if: always()`, with only the DigitalOcean token:
-/// the same built binary.
+/// The command `infra.yml`'s last step runs, once the build succeeded and however the step before
+/// it ended, with only the DigitalOcean token: the same built binary.
 const INFRA_CLOSE: &str = "target/debug/xtask infra close";
-/// The one secret [`INFRA_CLOSE`]'s step may read.
-const INFRA_CLOSE_SECRET: &str = "DIGITAL_OCEAN_API_KEY";
+/// The condition that last step runs under, exactly.
+const INFRA_CLOSE_IF: &str = "      - if: always() && steps.build.outcome == 'success'";
 /// The only arguments the closed world lets a workflow run the built xtask binary with rather than
 /// through cargo: [`INFRA_RUN`]'s and [`INFRA_CLOSE`]'s, which an earlier step of the same job
 /// built from the checkout with `cargo build --locked --package xtask`.
 const INFRA_BINARY_ARGS: [&[&str]; 2] = [&["infra"], &["infra", "close"]];
+/// The one secret [`INFRA_CLOSE`]'s step may read.
+const INFRA_CLOSE_SECRET: &str = "DIGITAL_OCEAN_API_KEY";
 /// The secrets that step reads, each from the environment `infra-<environment>` the founder
 /// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Spaces key is
 /// minted per run, never stored (DEC-2030 item 4). The Cloudflare token goes to OpenTofu as a
@@ -1999,7 +2001,7 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
             .and_then(|at| steps.get(*at))
             .and_then(|step| step.first())
             .and_then(|index| lines.get(*index))
-            .is_some_and(|line| line.trim_end() == "      - if: always()");
+            .is_some_and(|line| line.trim_end() == INFRA_CLOSE_IF);
     if !closes_always {
         fail(&format!(
             "its job must end with one `if: always()` step that runs `{INFRA_CLOSE}`"
@@ -16596,8 +16598,8 @@ mod tests {
             (
                 "secret in the build step",
                 edited(
-                    "      - run: cargo build --locked --package xtask\n",
-                    "      - run: cargo build --locked --package xtask\n        env:\n          \
+                    "        run: cargo build --locked --package xtask\n",
+                    "        run: cargo build --locked --package xtask\n        env:\n          \
                      T: ${{ secrets.DIGITAL_OCEAN_API_KEY }}\n",
                 ),
             ),
@@ -16622,8 +16624,8 @@ mod tests {
             (
                 "close not always",
                 edited(
+                    "      - if: always() && steps.build.outcome == 'success'\n        run: target/debug/xtask infra close\n",
                     "      - if: always()\n        run: target/debug/xtask infra close\n",
-                    "      - run: target/debug/xtask infra close\n",
                 ),
             ),
             (
@@ -16633,7 +16635,7 @@ mod tests {
             (
                 "secret step twice",
                 edited(
-                    "      - run: cargo build --locked --package xtask\n",
+                    "      - id: build\n        run: cargo build --locked --package xtask\n",
                     secret_step,
                 ),
             ),
