@@ -86,11 +86,17 @@ const TARGET_CC: &str = "gcc";
 /// loopback test double the local cell runs beside the executor (DEC-124), never a broker.
 /// `mandate-api-server` is the workspace API server a hosted cell runs as its chart's `api`
 /// process, so its image must be signed and published like the others (DEC-2026).
-pub(crate) const BINARIES: [(&str, &str); 4] = [
+/// `mandate-deployd`, `mandate-daemon` and `mandate-executord` are the deployment manager, the agent
+/// runtime and the account executor a hosted cell runs, released the same way. The runtime's image
+/// holds no recorded research bundle, which only the local cell's interim image carries (DEC-2246).
+pub(crate) const BINARIES: [(&str, &str); 7] = [
     ("mandate-cli", "mandate"),
     ("mandate-agentd", "mandate-agentd"),
     ("mandate-rh-sim", "mandate-rh-sim"),
     ("mandate-api-server", "mandate-api-server"),
+    ("mandate-deployd", "mandate-deployd"),
+    ("mandate-daemon", "mandate-daemon"),
+    ("mandate-executord", "mandate-executord"),
 ];
 
 /// Where `release build` keeps its own target directory, apart from the workspace's, because its
