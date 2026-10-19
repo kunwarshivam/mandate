@@ -378,6 +378,38 @@ fn secret_manifest(name: &str, values: &[(&str, String)]) -> Result<String> {
     Ok(secret.to_string())
 }
 
+/// The Secret staging's vault unseals itself from (DEC-2021 item 3, DEC-2051), and its one entry.
+const SEAL_KEY_SECRET: &str = "vault-seal-key";
+const SEAL_KEY_ENTRY: &str = "key";
+/// How the founder makes a seal key OpenBao's static seal reads unambiguously: 64 hex characters,
+/// one AES-256 key.
+const SEAL_KEY_HINT: &str = "expected 64 hex characters (openssl rand -hex 32)";
+
+/// What the bootstrap did with staging's seal key.
+#[derive(Debug, PartialEq, Eq)]
+enum SealKey {
+    /// It existed and was left alone: a re-run never rotates it.
+    Kept,
+    /// The founder typed it and it was created.
+    Created,
+}
+
+/// The seal key the founder typed, with one trailing line break dropped, if it is 64 hex
+/// characters; a refusal never repeats what was typed.
+fn seal_key(_typed: &str) -> Result<String> {
+    bail!("pending DEC-2051: the seal key's check is not written yet")
+}
+
+/// Staging's seal key, created from what the founder types only when `exists` says there is none,
+/// with `create` given the Secret's manifest; an existing key is kept and nothing is read.
+fn ensure_seal_key(
+    _exists: impl FnOnce() -> Result<bool>,
+    _typed: impl FnOnce() -> Result<String>,
+    _create: impl FnOnce(&str) -> Result<()>,
+) -> Result<SealKey> {
+    bail!("pending DEC-2051: the bootstrap's seal key is not written yet")
+}
+
 /// Why a run in this environment must not touch a cluster, if it must not: in CI, or with no
 /// terminal to confirm on, as an agent's shell has none (DEC-2015 item 5).
 fn refusal(ci: bool, terminal: bool) -> Option<&'static str> {
@@ -675,6 +707,82 @@ pub(crate) fn bootstrap_from_infra(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TYPED: &str = "0123456789abcdefABCDEF0123456789abcdef0123456789abcdef0123456789";
+
+    /// The seal key is 64 hex characters, one trailing line break aside, and a refusal names the
+    /// form without repeating what was typed (DEC-2051).
+    #[test]
+    fn the_seal_key_is_sixty_four_hex_characters() -> Result<()> {
+        assert_eq!(seal_key(TYPED)?, TYPED);
+        assert_eq!(seal_key(&format!("{TYPED}\n"))?, TYPED);
+        assert_eq!(seal_key(&format!("{TYPED}\r\n"))?, TYPED);
+        for bad in [
+            String::new(),
+            TYPED[..63].to_owned(),
+            format!("{TYPED}0"),
+            format!("{}g", &TYPED[..63]),
+            format!(" {}", &TYPED[1..]),
+            format!("{TYPED}\n\n"),
+            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=".to_owned(),
+        ] {
+            let refused = seal_key(&bad).err().map(|e| format!("{e:#}")).unwrap_or_default();
+            assert!(refused.contains(SEAL_KEY_HINT), "{bad:?}: {refused}");
+            assert!(bad.len() < 8 || !refused.contains(&bad[..8]), "{refused}");
+        }
+        Ok(())
+    }
+
+    /// An existing seal key is kept without reading a key; a missing one is created once, from
+    /// the typed key, as the Secret the vault mounts; a bad key creates nothing.
+    #[test]
+    fn the_seal_key_is_created_only_when_absent() -> Result<()> {
+        let read = std::cell::Cell::new(false);
+        let kept = ensure_seal_key(
+            || Ok(true),
+            || {
+                read.set(true);
+                Ok(TYPED.to_owned())
+            },
+            |_| bail!("an existing seal key is never written"),
+        )?;
+        assert_eq!(kept, SealKey::Kept);
+        assert!(!read.get(), "no key is read when one exists");
+
+        let created = std::cell::RefCell::new(None);
+        let made = ensure_seal_key(
+            || Ok(false),
+            || Ok(format!("{TYPED}\n")),
+            |manifest| {
+                created.replace(Some(manifest.to_owned()));
+                Ok(())
+            },
+        )?;
+        assert_eq!(made, SealKey::Created);
+        let manifest = created.borrow().clone().context("no Secret was created")?;
+        let secret: serde_json::Value = serde_json::from_str(&manifest)?;
+        assert_eq!(secret["metadata"]["name"], SEAL_KEY_SECRET);
+        assert_eq!(secret["metadata"]["namespace"], WORKSPACE_NAMESPACE);
+        assert_eq!(
+            secret["data"],
+            serde_json::json!({SEAL_KEY_ENTRY: image::base64(TYPED.as_bytes())})
+        );
+
+        let wrote = std::cell::Cell::new(false);
+        assert!(
+            ensure_seal_key(
+                || Ok(false),
+                || Ok("too short".to_owned()),
+                |_| {
+                    wrote.set(true);
+                    Ok(())
+                },
+            )
+            .is_err()
+        );
+        assert!(!wrote.get(), "a bad key creates nothing");
+        Ok(())
+    }
 
     /// `kubectl` and `flux` start with an environment of [`TOOL_ENVS`] alone, so no secret, token
     /// or step output `infra.yml` hands the step reaches them, and only they are started.
