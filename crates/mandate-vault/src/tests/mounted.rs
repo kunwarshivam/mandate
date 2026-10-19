@@ -289,3 +289,19 @@ fn a_file_that_is_not_utf8_is_refused() {
     fs::set_permissions(dir.0.join("ca.crt"), fs::Permissions::from_mode(0o400)).unwrap();
     assert_eq!(read(&dir.0, "ca.crt"), Err(SourceError::CredentialFile));
 }
+
+/// A link to the very file checked, swapped in for it, is refused though it reaches the same
+/// inode: the open never follows a link at its last step.
+#[test]
+fn a_link_to_the_same_file_swapped_in_after_the_check_is_refused() {
+    let dir = Fresh::new("swap-same");
+    write(&dir.0.join("ca.crt"), "checked", 0o400);
+    let swap = |reached: &Path| {
+        fs::rename(reached, reached.with_file_name("moved")).unwrap();
+        symlink("moved", reached).unwrap();
+    };
+    assert_eq!(
+        read_swapped(&dir.0, "ca.crt", &swap),
+        Err(SourceError::CredentialFile)
+    );
+}

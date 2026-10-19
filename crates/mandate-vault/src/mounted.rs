@@ -18,6 +18,11 @@ use crate::policy::{Identity, role_name};
 
 /// The permission bits of group and others, none of which a mounted file may carry.
 const OPEN_TO_OTHERS: u32 = 0o077;
+/// How a mounted file is opened: read-only (`O_RDONLY`, no bit of its own), never through a link at
+/// its last step, never waiting on a pipe, and not inherited by a child.
+const OPEN_FLAGS: OFlags = OFlags::NOFOLLOW
+    .union(OFlags::NONBLOCK)
+    .union(OFlags::CLOEXEC);
 
 /// Reads the file `name` of the mounted directory `dir` whole: `name` is one plain path
 /// component, and the file it names, its links followed, is a plain file inside `dir` that no
@@ -53,9 +58,9 @@ pub(crate) fn read_checked(
     }
     let checked = fs::symlink_metadata(&reached).map_err(refused)?;
     between(&reached);
-    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
-    let mut file =
-        File::from(open(&reached, flags, Mode::empty()).map_err(|_| SourceError::CredentialFile)?);
+    let mut file = File::from(
+        open(&reached, OPEN_FLAGS, Mode::empty()).map_err(|_| SourceError::CredentialFile)?,
+    );
     let opened = file.metadata().map_err(refused)?;
     if !opened.is_file()
         || opened.permissions().mode() & OPEN_TO_OTHERS != 0
