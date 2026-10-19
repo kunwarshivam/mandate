@@ -942,7 +942,7 @@ def test_deploy_manager_contained():
         probes = [container[k]["exec"]["command"] for k in ("livenessProbe", "readinessProbe")]
         listed = next(p for p in PROCESSES if p["name"] == pod["metadata"]["name"])
         words = listed.get("probe") or [
-            "/usr/local/bin/mandate-daemon", "probe", "{probe}", "--probe", "/tmp/process.sock"
+            "/mandate-daemon", "probe", "{probe}", "--probe", "/tmp/process.sock"
         ]
         assert probes == [[x.replace("{probe}", k) for x in words] for k in ("livez", "readyz")], probes
     only_runtime = render_all("--set", "images.executor=")
@@ -2040,3 +2040,34 @@ def test_roles_and_compose_seeded_bugs_are_caught():
         compose = copy.deepcopy(COMPOSE)
         change(compose)
         assert compose_matches(compose), change
+
+
+def probe_binaries(docs: list[dict]) -> list[str]:
+    """Every exec probe in the chart, the manager's pod templates included, names its binary at the
+    image's root, where release images put it (`xtask/src/image.rs`, entrypoint `/<name>`) and the
+    cell's images do too, so the same chart runs on both."""
+    problems = []
+    for w in workloads(docs):
+        for c in containers(w):
+            for kind in ("readinessProbe", "livenessProbe", "startupProbe"):
+                command = c.get(kind, {}).get("exec", {}).get("command")
+                if command and not re.fullmatch(r"/mandate-[a-z-]+", command[0]):
+                    problems.append(f"{w['metadata']['name']}/{c['name']} {kind} runs {command[0]}")
+    return problems
+
+
+def test_probes_name_the_binary_at_the_image_root():
+    docs = render_all()
+    assert probe_binaries(docs) == []
+    assert any(
+        c.get("readinessProbe", {}).get("exec") for w in workloads(docs) for c in containers(w)
+    ), "no exec probe rendered, so nothing was checked"
+    moved = mutate(
+        docs,
+        "executor",
+        "Pod",
+        lambda w: first_container(w)["readinessProbe"]["exec"]["command"].__setitem__(
+            0, "/usr/local/bin/mandate-executord"
+        ),
+    )
+    assert probe_binaries(moved)
