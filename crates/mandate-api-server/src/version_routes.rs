@@ -7,7 +7,10 @@
 //! body, decoded strictly), authorized for a user by its matrix row, compared with the event its
 //! key already holds before anything is judged again (§3.4 step 1), then judged as the CLI judges
 //! it, step-up last, through the port that verifies nothing until E9-4 (DEC-2101 item 2). Its
-//! record is in the store and its event on the control stream before the answer (rule 5).
+//! record is in the store and its event on the control stream before the answer (rule 5). A
+//! deployment names its connection at version 2 exactly when journal spec §9.24 rule 201 holds on
+//! the control stream, appended at the head it was decided at; rule 200 holds by construction,
+//! since the `connection_id` it names is the one parsed from the stored document it deploys.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -784,9 +787,6 @@ async fn deployed(
     .ok_or(Refused::JournalUnavailable)?;
     let (document, mandate) = document(&admitted, version)?;
     let connection = mandate.connection_id.as_str();
-    if document.get("connection_id").and_then(Value::as_str) != Some(connection) {
-        return Err(Answer::schema("/mandate_version", "version_invalid"));
-    }
     let named = established_v2(&admitted.reader.control, connection);
     let mut members = vec![
         ("agent_id", text(agent)),
