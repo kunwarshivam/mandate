@@ -72329,6 +72329,16 @@ credentials:
       outcome: Invalid
       reason: non_canonical
       path: payload.credential
+  - name: credential.fifteen_bytes
+    clause: §9.31 `credential_id`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.credential
+      value: AAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.credential
   - name: credential.one_over_a_block
     clause: §9.31 `credential_id`
     base_draft: first_enrolled

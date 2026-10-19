@@ -110,6 +110,7 @@ MEMBER_CASES = (
 )
 CREDENTIAL_SHAPES = (
     ("short", "AAECAwQFBgcICQoLDA0OD"[:21]),
+    ("fifteen_bytes", "A" * 20),
     ("one_over_a_block", "A" * 25),
     ("too_long", "A" * 1366),
     ("padded", "AAECAwQFBgcICQoLDA0ODw="),

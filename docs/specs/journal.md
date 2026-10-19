@@ -5903,8 +5903,8 @@ cool-off has not ended never steps up. Removing a member's last credential retur
 enrolment, which waits its cool-off again.
 
 **Personal data.** Neither record carries `pii_refs`. The credential id is the authenticator's
-random identifier and the public key is an artifact. Neither is one of §6.4's vault-held personal
-data, and both are identity records that §6.4 keeps for the retention period.
+random identifier and the public key is an artifact. Both are handled as identity records under
+§6.4, as `actor.id` is, and kept for the retention period (DEC-2108 item 11).
 `PersonalDataErased` does not touch them, and an append-only record is never rewritten.
 
 **What binds a credential.** A credential names no workspace. The stream it is on binds it to its
