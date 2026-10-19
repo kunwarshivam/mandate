@@ -129,7 +129,6 @@ fn a_split_on_the_first_bars_date_completes_the_run() {
 /// the ex-date equal those at the ex-date's close, the position held at twice the shares and half
 /// the price. Without the split the strategy's would halve its stock and the benchmark's too.
 #[test]
-#[ignore = "pending E4-4"]
 fn both_equities_are_flat_across_a_two_for_one_split() {
     let run = run_split(2, 1, None);
     let days = trading_days(DAYS);
@@ -156,7 +155,6 @@ fn both_equities_are_flat_across_a_two_for_one_split() {
 /// The resting OCO is canceled at the split and re-placed in the same step on twice the shares:
 /// stop 95.01 ÷ 2 = 47.505 up to 47.51, take-profit 110.02 ÷ 2 = 55.01 (DEC-2245 item 3).
 #[test]
-#[ignore = "pending E4-4"]
 fn the_protection_is_re_placed_at_the_split_on_the_new_shares() {
     let run = run_split(2, 1, None);
     let (before, after) = protections(&run);
@@ -182,7 +180,6 @@ fn the_protection_is_re_placed_at_the_split_on_the_new_shares() {
 /// A 1:3 reverse split re-places the protection on the whole shares left, the residual paid in cash
 /// at the posted 300: stop 95.01 × 3 = 285.03 and take-profit 110.02 × 3 = 330.06, both exact.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_reverse_split_re_places_the_protection_on_the_whole_shares() {
     let run = run_split(1, 3, Some(price("300")));
     let (before, after) = protections(&run);
@@ -201,7 +198,6 @@ fn a_reverse_split_re_places_the_protection_on_the_whole_shares() {
 /// ladder that scales at 0.2% of equity, the same flat walk latches nothing with the split as
 /// without it.
 #[test]
-#[ignore = "pending E4-4"]
 fn the_risk_state_reads_no_drawdown_from_a_split() {
     let days = trading_days(DAYS);
     let control = run_with(
@@ -246,7 +242,6 @@ fn the_risk_state_reads_no_drawdown_from_a_split() {
 /// 110.02 × old ÷ new, and the quantity Q × new ÷ old truncated to a whole share. It shares nothing
 /// with `SplitRatio::price` or the fold.
 #[test]
-#[ignore = "pending E4-4"]
 fn re_placed_protection_covers_the_position_and_never_loosens() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 24,
@@ -302,7 +297,6 @@ fn re_placed_protection_covers_the_position_and_never_loosens() {
 /// the re-placed OCO eligible from the old placement, its take-profit at 55.01 would have filled
 /// against a pre-split bar at 100 and ended there, leaving nothing to trigger.
 #[test]
-#[ignore = "pending E4-4"]
 fn the_carried_stop_triggers_on_a_post_split_fall() {
     let days = trading_days(DAYS);
     let mut bars = split_bars(2, 1);
@@ -335,7 +329,6 @@ fn the_carried_stop_triggers_on_a_post_split_fall() {
 /// A stop-limit protection is carried the same way, each price on its protective side: stop
 /// 95.01 ÷ 2 = 47.505 up to 47.51, limit 94.53495 ÷ 2 = 47.267475 down to 47.26.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_stop_limit_protection_is_carried_on_its_protective_sides() {
     let days = trading_days(DAYS);
     let mut document = base("research_equity_pinned");
