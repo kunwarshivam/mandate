@@ -18,6 +18,8 @@ use crate::policy::{Identity, role_name};
 
 /// The permission bits of group and others, none of which a mounted file may carry.
 const OPEN_TO_OTHERS: u32 = 0o077;
+/// The permission bits that let a group or others write a file.
+const WRITABLE_BY_OTHERS: u32 = 0o022;
 /// The most bytes a mounted file may hold: a role id, a secret id or a CA certificate is far
 /// shorter. The buffer is sized from the opened file's length, up to this, so the read never
 /// reallocates and leaves an unwiped copy behind.
@@ -47,6 +49,17 @@ pub(crate) fn read_checked(
     name: &str,
     between: &dyn Fn(&Path),
 ) -> Result<SecretString, SourceError> {
+    read_bounded(dir, name, between, OPEN_TO_OTHERS, MOUNTED_MAX)
+}
+
+/// [`read_checked`] with the mode bits that refuse the file and its most bytes given.
+fn read_bounded(
+    dir: &Path,
+    name: &str,
+    between: &dyn Fn(&Path),
+    refused_bits: u32,
+    max: u64,
+) -> Result<SecretString, SourceError> {
     let refused = |_| SourceError::CredentialFile;
     let mut components = Path::new(name).components();
     let one_component = matches!(
@@ -68,17 +81,15 @@ pub(crate) fn read_checked(
     );
     let opened = file.metadata().map_err(refused)?;
     if !opened.is_file()
-        || opened.permissions().mode() & OPEN_TO_OTHERS != 0
+        || opened.permissions().mode() & refused_bits != 0
         || (opened.dev(), opened.ino()) != (checked.dev(), checked.ino())
     {
         return Err(SourceError::CredentialFile);
     }
-    let expected = opened.len().min(MOUNTED_MAX).saturating_add(1);
+    let expected = opened.len().min(max).saturating_add(1);
     let mut bytes = Vec::with_capacity(usize::try_from(expected).unwrap_or(0));
-    let read = file
-        .take(MOUNTED_MAX.saturating_add(1))
-        .read_to_end(&mut bytes);
-    if read.is_err() || u64::try_from(bytes.len()).map_or(true, |read| read > MOUNTED_MAX) {
+    let read = file.take(max.saturating_add(1)).read_to_end(&mut bytes);
+    if read.is_err() || u64::try_from(bytes.len()).map_or(true, |read| read > max) {
         bytes.zeroize();
         return Err(SourceError::CredentialFile);
     }
@@ -102,8 +113,14 @@ pub const SERVICE_ACCOUNT_TOKEN_DIR: &str = "/run/mandate/vault-token";
 /// one trailing newline, no carriage return, and no longer than [`SERVICE_ACCOUNT_TOKEN_MAX`]
 /// bytes. Anything else is [`SourceError::CredentialFile`].
 pub fn read_service_account_token(dir: &Path) -> Result<SecretString, SourceError> {
-    let _ = dir;
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let token = read_bounded(
+        dir,
+        "token",
+        &|_| {},
+        WRITABLE_BY_OTHERS,
+        SERVICE_ACCOUNT_TOKEN_MAX,
+    )?;
+    one_line(&token)
 }
 
 /// The most bytes a projected ServiceAccount token may hold; a real one is about a kilobyte.

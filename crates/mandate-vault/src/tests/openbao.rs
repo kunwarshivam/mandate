@@ -201,7 +201,6 @@ fn at_start() -> UtcNanos {
 /// Only a connection's executor or token exchange logs in with Kubernetes auth; any other
 /// identity is refused before the vault is reached.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn only_a_connections_processes_log_in_with_kubernetes_auth() {
     for identity in [
         Identity::Api,
@@ -225,7 +224,6 @@ async fn only_a_connections_processes_log_in_with_kubernetes_auth() {
 /// An executor's and an exchange's login reach the vault: one nobody answers for is an outage,
 /// and neither the outage nor its `Debug` shows the token.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn a_kubernetes_login_to_an_unreachable_vault_is_an_outage_that_shows_no_token() {
     for identity in [
         Identity::Executor(ConnectionId::new("c1").unwrap()),
@@ -249,7 +247,6 @@ async fn a_kubernetes_login_to_an_unreachable_vault_is_an_outage_that_shows_no_t
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn each_kind_logs_in_on_its_own_mount_to_its_connections_role() {
     let c1 = ConnectionId::new("c1").unwrap();
     assert_eq!(
@@ -269,7 +266,6 @@ fn each_kind_logs_in_on_its_own_mount_to_its_connections_role() {
 /// A login is the identity's own only when the vault reached its connection's role for its own
 /// ServiceAccount; another role, another account, or an answer missing either is refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_kubernetes_login_is_accepted_only_for_its_own_role_and_account() {
     let executor = Identity::Executor(ConnectionId::new("c1").unwrap());
     let exchange = Identity::TokenExchange(ConnectionId::new("c1").unwrap());

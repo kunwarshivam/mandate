@@ -29,6 +29,7 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use serde_json::{Value, json};
 
 use crate::SourceError;
+use crate::kubernetes::service_account_name;
 use crate::lease::{LEASE_SECS, Lease, lease_times};
 use crate::policy::{
     Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, role_name,
@@ -229,8 +230,20 @@ pub fn kubernetes_login_path(
     identity: &Identity,
     mounts: &Mounts,
 ) -> Result<(String, String), SourceError> {
-    let _ = (identity, mounts);
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let (mount, connection) = match identity {
+        Identity::Executor(connection) => (&mounts.kubernetes_executor, connection),
+        Identity::TokenExchange(connection) => (&mounts.kubernetes_exchange, connection),
+        Identity::Api
+        | Identity::ConnectionManager
+        | Identity::Runtime
+        | Identity::SecretImport
+        | Identity::ModelGateway
+        | Identity::EmailSender => return Err(SourceError::Config),
+    };
+    Ok((
+        format!("auth/{mount}/login"),
+        connection.as_str().to_owned(),
+    ))
 }
 
 /// Whether the vault's answer to a Kubernetes auth login, its `auth` object, is `identity`'s own:
@@ -241,8 +254,14 @@ pub fn kubernetes_login_verdict(
     identity: &Identity,
     auth: Option<&Value>,
 ) -> Result<(), SourceError> {
-    let _ = (identity, auth);
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let role = text(auth, "/metadata/role")?;
+    let account = text(auth, "/metadata/service_account_name")?;
+    let (_, own_role) = kubernetes_login_path(identity, &Mounts::default())?;
+    if role == own_role && account == service_account_name(identity)? {
+        Ok(())
+    } else {
+        Err(SourceError::Denied)
+    }
 }
 
 impl OpenBaoSource {
@@ -277,8 +296,30 @@ impl OpenBaoSource {
         jwt: &SecretString,
         now: UtcNanos,
     ) -> Result<Self, SourceError> {
-        let _ = (config, identity, jwt, now);
-        Err(SourceError::Unimplemented { story: "E21-32" })
+        let (path, role) = kubernetes_login_path(&identity, &config.mounts)?;
+        let http = Http::new(config)?;
+        let status = http
+            .call(Method::GET, "sys/seal-status", None, None)
+            .await?
+            .ok_or(SourceError::Malformed)?;
+        seal_verdict(status.to_string().as_bytes(), ALLOW_DEV_SERVER)?;
+        let body = json!({ "role": role, "jwt": jwt.expose_secret() });
+        let answer = http.call(Method::POST, &path, None, Some(&body)).await?;
+        let auth = answer.as_ref().and_then(|answer| answer.get("auth"));
+        let token = SecretString::from(text(answer.as_ref(), "/auth/client_token")?.to_owned());
+        let ttl = seconds(answer.as_ref(), "/auth/lease_duration")?;
+        let session = Self {
+            identity,
+            http,
+            mounts: config.mounts.clone(),
+            token,
+            token_expires_at: Mutex::new(after(now, ttl)?),
+        };
+        if let Err(refused) = kubernetes_login_verdict(&session.identity, auth) {
+            let _ = session.revoke_token().await;
+            return Err(refused);
+        }
+        Ok(session)
     }
 
     /// The token exchange's session for the grant's connection, spending the grant. A grant

@@ -344,7 +344,6 @@ fn token(dir: &Path) -> Result<String, SourceError> {
 /// A projected token behind the kubelet's links, readable by all as the kubelet writes it, is
 /// read, its trailing newline dropped.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_projected_token_readable_by_all_is_read() {
     let dir = Fresh::new("sa-token");
     kubelet(&dir.0, &[("token", "header.claims.signature\n", 0o644)]);
@@ -353,7 +352,6 @@ fn a_projected_token_readable_by_all_is_read() {
 
 /// A token anyone else may write is refused, whatever its read bits.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_projected_token_others_may_write_is_refused() {
     for mode in [0o646, 0o664, 0o666, 0o662] {
         let dir = Fresh::new("sa-mode");
@@ -363,7 +361,6 @@ fn a_projected_token_others_may_write_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_projected_token_that_is_not_one_line_is_refused() {
     for text in ["", "\n", "h.c.s\nmore", "h.c.s\r\n", "h.c.s\n\n"] {
         let dir = Fresh::new("sa-lines");
@@ -374,7 +371,6 @@ fn a_projected_token_that_is_not_one_line_is_refused() {
 
 /// A token of 16384 bytes is read; one byte more is refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_projected_token_over_its_bound_is_refused() {
     let dir = Fresh::new("sa-bound");
     let longest = "a".repeat(16384);
@@ -387,7 +383,6 @@ fn a_projected_token_over_its_bound_is_refused() {
 
 /// The token is found only inside its directory: a link out, or no token at all, is refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_projected_token_outside_its_directory_or_missing_is_refused() {
     let parent = Fresh::new("sa-parent");
     let dir = parent.0.join("mount");
