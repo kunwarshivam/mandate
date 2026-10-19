@@ -9,5 +9,5 @@ mode and record would never be journaled (`AGENTS.md` rule 13: the kill switch i
 available), or the step confirming the protection's cancel, leaving the position unprotected and
 unsold. Since DEC-506 its clock-10 instants read as the regular session, so E7-30's tests PR ticks it
 to pre-market, where it still fails: DEC-260 (13) sends the owner's flatten as a regular-session
-limit. E7-30's core (DEC-2039 item 3, amending DEC-260 (13)) deletes this file with its `#[ignore]`.
+limit. E7-30's core (DEC-2040 item 3, amending DEC-260 (13)) deletes this file with its `#[ignore]`.
 """

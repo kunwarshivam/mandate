@@ -1,6 +1,6 @@
-//! E7-30, DEC-2039: an owner's exit handed with the owner's confirmed bid. The core journals the
+//! E7-30, DEC-2040: an owner's exit handed with the owner's confirmed bid. The core journals the
 //! confirmation as `OwnerConfirmationReceived` immediately after the intent (journal spec §9.5
-//! rule 247). Outside the regular session it sells the exit as an extended-hours limit, priced from
+//! rule 248). Outside the regular session it sells the exit as an extended-hours limit, priced from
 //! the confirmed bid and never below the floor (trading spec §5.5). In the regular session, on a
 //! fresh quote, it goes at the market (§5.1). An unconfirmed owner exit still waits for the session,
 //! and a confirmation on anything else, or with a limit below its floor, is non-canonical.
@@ -126,7 +126,7 @@ fn member<'a>(ran: &'a Ran, event_type: &str, name: &str) -> Option<&'a Value> {
 
 /// Before the open the confirmed exit goes extended-hours at 155 × 0.995 = 154.225, rounded up to
 /// 154.23, from the confirmed bid and not the feed's 150. The confirmation is journaled
-/// immediately after the intent, as rule 247 requires.
+/// immediately after the intent, as rule 248 requires.
 #[test]
 #[ignore = "pending E7-30"]
 fn a_confirmed_owner_exit_before_the_open_sells_in_extended_hours_from_the_confirmed_bid() {
@@ -157,7 +157,7 @@ fn a_confirmed_owner_exit_before_the_open_sells_in_extended_hours_from_the_confi
     assert_eq!(
         types.get(at + 1),
         Some(&"OwnerConfirmationReceived"),
-        "immediately after its intent (rule 247): {types:?}"
+        "immediately after its intent (rule 248): {types:?}"
     );
     for (name, value) in [
         ("intent_id", INTENT),
@@ -239,11 +239,12 @@ fn an_unconfirmed_owner_exit_before_the_open_waits_for_the_session() {
     assert!(ran.draft("OwnerConfirmationReceived").is_none());
 }
 
-/// In the regular session, on a fresh quote, a confirmed exit at the market goes at the market:
-/// the floor binds only the ladder (§5.1, §5.5; DEC-2039 item 3).
+/// In the regular session the confirmed floor binds too (DEC-2040 item 6, Proposed, its default):
+/// on a fresh quote at 150 the exit is not sent at the market but as a limit, priced by the ladder
+/// from the market (150 × 0.995 = 149.25) and clamped at the floor of 150.35.
 #[test]
 #[ignore = "pending E7-30"]
-fn a_confirmed_owner_exit_in_the_regular_session_goes_at_the_market() {
+fn a_confirmed_owner_exit_in_the_regular_session_never_sells_below_its_floor() {
     let (ids, mandates, instruments, config) = (
         TestIds,
         FixedMandate::covering(&[AAPL]),
@@ -264,7 +265,8 @@ fn a_confirmed_owner_exit_in_the_regular_session_goes_at_the_market() {
     let sent = only_submission(&ran);
     assert_eq!(
         (sent.order_type, sent.limit_price, sent.extended_hours),
-        (OrderType::Market, None, false)
+        (OrderType::Limit, Some(price("150.35")), false),
+        "never at the market, never below the floor"
     );
 }
 
@@ -327,7 +329,7 @@ fn refused(input: Input) -> ExecutorError {
     err
 }
 
-/// DEC-2039 item 1: a confirmation on any purpose but an owner exit, a bid size that is not
+/// DEC-2040 item 1: a confirmation on any purpose but an owner exit, a bid size that is not
 /// positive, or a limit below the floor is non-canonical, refused before anything is journaled.
 #[test]
 #[ignore = "pending E7-30"]
@@ -358,5 +360,25 @@ fn a_confirmation_that_does_not_fit_its_exit_is_non_canonical() {
         )),
         field("limit_price"),
         "a limit one cent below the floor"
+    );
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = common::ports(&ids, &mandates, &instruments, &config);
+    let mut shell = held(&ports, PRE_MARKET - 100);
+    assert!(
+        shell
+            .step(
+                handed(
+                    exit(Purpose::OwnerExit, Some("150.35")),
+                    Some(confirmation("155", "150.35"))
+                ),
+                &ports
+            )
+            .is_ok(),
+        "a limit at the floor fits"
     );
 }
