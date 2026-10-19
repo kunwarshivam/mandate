@@ -50,6 +50,10 @@ UPSTREAM_CHARTS = {
         "oci://ghcr.io/cloudnative-pg/charts/plugin-barman-cloud",
         "sha256:b48511269e2c75603ee2f06f6c5444e8154542103a3c3b9d692344725bac37b7",
     ),
+    "policy-controller": (
+        "oci://ghcr.io/sigstore/helm-charts/policy-controller",
+        "sha256:9ff3ca6ae4a0155de4dd667f8b760e56e1bd5c8233a0321ad870a654ce022f2f",
+    ),
 }
 CHART_LAYER = {"mediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip", "operation": "copy"}
 # The one identity whose keyless signature Flux accepts on the repository's charts: release.yml on main.
@@ -57,6 +61,22 @@ SIGNER = {
     "issuer": r"^https://token\.actions\.githubusercontent\.com$",
     "subject": r"^https://github\.com/kunwarshivam/mandate/\.github/workflows/release\.yml@refs/heads/main$",
 }
+# The admission policy (DEC-2016 item 1): this repository's images, release.yml's identity on main.
+POLICIES = GITOPS / "policies"
+ADMITTED_IMAGES = [{"glob": "ghcr.io/kunwarshivam/mandate/**"}]
+ADMISSION_AUTHORITY = {
+    "keyless": {
+        "url": "https://fulcio.sigstore.dev",
+        "identities": [
+            {
+                "issuer": "https://token.actions.githubusercontent.com",
+                "subjectRegExp": SIGNER["subject"],
+            }
+        ],
+    },
+    "ctlog": {"url": "https://rekor.sigstore.dev"},
+}
+ADMISSION_LABEL = {"policy.sigstore.dev/include": "true"}
 # The journal's archive: R2's S3 endpoint for one account, reached only at R2's two addresses on 443,
 # resolved 2026-10-18 for the default jurisdiction (DEC-2017 items 1 and 2).
 R2_ENDPOINT = re.compile(r"^https://[0-9a-f]{32}\.r2\.cloudflarestorage\.com$")
@@ -219,7 +239,7 @@ def sync_read_only(docs: list[dict], overlay: Path) -> list[str]:
         if "secretRef" in spec:
             problems.append("the git source holds a credential")
     kustomizations = of_kind(docs, "Kustomization")
-    paths = {"cluster": f"./{overlay.relative_to(ROOT)}"}
+    paths = {"cluster": f"./{overlay.relative_to(ROOT)}", "policies": "./deploy/gitops/policies"}
     if set(kustomizations) != set(paths):
         problems.append(f"Kustomizations {sorted(kustomizations)}")
     for name, kustomization in kustomizations.items():
@@ -305,6 +325,16 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
             tag = (tree.get(key) or {}).get("tag")
             if (key == "image" or tag is not None) and not (tag and PINNED.search(tag)):
                 problems.append(f"{name}: {key} not pinned by digest: {tag}")
+    admission = values.get("policy-controller", {})
+    webhook = admission.get("webhook") or {}
+    if webhook.get("failurePolicy") != "Fail":
+        problems.append("policy-controller: an outage of the pod webhooks admits any image")
+    if (webhook.get("configData") or {}).get("no-match-policy") != "allow":
+        problems.append("policy-controller: an image no policy matches is not simply allowed")
+    for key in ("webhook", "leasescleanup"):
+        version = ((admission.get(key) or {}).get("image") or {}).get("version", "")
+        if not DIGEST.match(str(version)):
+            problems.append(f"policy-controller: {key} image not pinned by digest: {version}")
     journal = values.get("journal", {})
     if journal.get("instances") != 2 or journal.get("failureDomain") != "separate":
         problems.append("journal: not two instances on separate nodes")
@@ -373,6 +403,135 @@ def overlay(request, tmp_path_factory):
     return environment, docs, values, rendered, directory
 
 
+def admission_policy(policies: list[dict], docs: list[dict]) -> list[str]:
+    """The one admission policy demands release.yml's signature on main of every image of this
+    repository's, and the workspace's namespace is the one checked."""
+    problems = []
+    found = [d for d in policies if d.get("kind") == "ClusterImagePolicy"]
+    if len(found) != 1:
+        return [f"{len(found)} ClusterImagePolicies"]
+    spec = found[0]["spec"]
+    if spec.get("images") != ADMITTED_IMAGES:
+        problems.append(f"the policy covers {spec.get('images')}")
+    if spec.get("authorities") != [ADMISSION_AUTHORITY]:
+        problems.append(f"the policy trusts {spec.get('authorities')}")
+    labels = (of_kind(docs, "Namespace").get("ws-ws1") or {}).get("metadata", {}).get("labels") or {}
+    if {k: labels.get(k) for k in ADMISSION_LABEL} != ADMISSION_LABEL:
+        problems.append("ws-ws1 is not checked at admission")
+    return problems
+
+
+# The one exemption from the pod webhooks: the kill switch's pods (DEC-2016 item 2).
+CONTROL_EXEMPT = {
+    "matchExpressions": [{"key": "mandate.dev/process", "operator": "NotIn", "values": ["control"]}]
+}
+CONTROL_LABEL = "has({0}) && 'mandate.dev/process' in {0} && {0}['mandate.dev/process'] == 'control'"
+JOB_CONTROLLER = "['system:serviceaccount:kube-system:job-controller', 'system:kube-controller-manager']"
+
+
+def kill_switch_exemption(docs: list[dict]) -> list[str]:
+    """Both pod webhooks skip exactly the control label, and only the Job controller, for a Job no
+    service account made, can put that label on a pod in the workspace's namespace."""
+    problems = []
+    release = of_kind(docs, "HelmRelease").get("policy-controller") or {"spec": {}}
+    patched = {}
+    for renderer in release["spec"].get("postRenderers", []):
+        for patch in (renderer.get("kustomize") or {}).get("patches", []):
+            target = patch.get("target", {})
+            for op in yaml.safe_load(patch.get("patch", "[]")) or []:
+                patched.setdefault((target.get("kind"), target.get("name")), []).append(op)
+    for kind in ("MutatingWebhookConfiguration", "ValidatingWebhookConfiguration"):
+        ops = patched.pop((kind, "policy.sigstore.dev"), [])
+        expected = [{"op": "add", "path": "/webhooks/0/objectSelector", "value": CONTROL_EXEMPT}]
+        if ops != expected:
+            problems.append(f"{kind} policy.sigstore.dev: exempts {ops}, not only the control label")
+    if patched:
+        problems.append(f"policy-controller: other post-render patches {sorted(patched)}")
+    policies = of_kind(docs, "ValidatingAdmissionPolicy")
+    bindings = of_kind(docs, "ValidatingAdmissionPolicyBinding")
+    squash = " ".join
+    pods = (policies.get("mandate-control-pods") or {}).get("spec", {})
+    jobs = (policies.get("mandate-control-jobs") or {}).get("spec", {})
+    expected = {
+        "mandate-control-pods": (
+            pods,
+            "pods",
+            "",
+            CONTROL_LABEL.format("object.metadata.labels"),
+            f"request.userInfo.username in {JOB_CONTROLLER}",
+        ),
+        "mandate-control-jobs": (
+            jobs,
+            "jobs",
+            "batch",
+            CONTROL_LABEL.format("object.spec.template.metadata.labels"),
+            "!request.userInfo.username.startsWith('system:serviceaccount:')",
+        ),
+    }
+    for name, (spec, resource, group, label, allowed) in expected.items():
+        constraints = spec.get("matchConstraints", {})
+        rules = constraints.get("resourceRules", [])
+        if spec.get("failurePolicy") != "Fail":
+            problems.append(f"{name}: does not fail closed")
+        if constraints.get("namespaceSelector") != {"matchLabels": {"kubernetes.io/metadata.name": "ws-ws1"}}:
+            problems.append(f"{name}: not the workspace's namespace")
+        if [(r.get("apiGroups"), r.get("resources"), sorted(r.get("operations", []))) for r in rules] != [
+            ([group], [resource], ["CREATE", "UPDATE"])
+        ]:
+            problems.append(f"{name}: matches {rules}")
+        conditions = {
+            c.get("name"): squash(c.get("expression", "").split()) for c in spec.get("matchConditions", [])
+        }
+        if conditions.get("labelled-control") != label:
+            problems.append(f"{name}: matches {conditions.get('labelled-control')!r}, not the control label")
+        validations = [squash(v.get("expression", "").split()) for v in spec.get("validations", [])]
+        if validations != [allowed]:
+            problems.append(f"{name}: allows {validations}")
+        binding = (bindings.get(name) or {}).get("spec", {})
+        if binding != {"policyName": name, "validationActions": ["Deny"]}:
+            problems.append(f"{name}: bound {binding}, not denying")
+    newly = "request.operation == 'CREATE' || !(" + CONTROL_LABEL.format("oldObject.metadata.labels") + ")"
+    conditions = {
+        c.get("name"): " ".join(c.get("expression", "").split()) for c in pods.get("matchConditions", [])
+    }
+    if set(conditions) != {"labelled-control", "newly-control"} or conditions.get("newly-control") != newly:
+        problems.append(f"mandate-control-pods: conditions {sorted(conditions)}")
+    return problems
+
+
+def test_kill_switch_exemption(overlay):
+    assert kill_switch_exemption(overlay[1]) == []
+
+
+def policies() -> list[dict]:
+    kustomization = yaml.safe_load((POLICIES / "kustomization.yaml").read_text())
+    docs = []
+    for resource in kustomization["resources"]:
+        docs.extend(d for d in yaml.safe_load_all((POLICIES / resource).read_text()) if d)
+    return docs
+
+
+def test_admission_policy(overlay):
+    assert admission_policy(policies(), overlay[1]) == []
+
+
+ADMISSION_BUGS = [
+    lambda p, d: p[0]["spec"].update(images=[{"glob": "ghcr.io/kunwarshivam/mandate/mandate"}]),
+    lambda p, d: p[0]["spec"]["authorities"][0]["keyless"]["identities"][0].update(subjectRegExp=".*"),
+    lambda p, d: p[0]["spec"]["authorities"][0].pop("ctlog"),
+    lambda p, d: next(n for n in d if n["metadata"]["name"] == "ws-ws1")["metadata"].pop("labels"),
+    lambda p, d: p.append(copy.deepcopy(p[0])),
+]
+
+
+@pytest.mark.parametrize("change", ADMISSION_BUGS)
+def test_each_admission_seeded_bug_is_caught(change, tmp_path):
+    docs = build("staging", FIXTURE, tmp_path)
+    bad_policies, bad_docs = copy.deepcopy(policies()), copy.deepcopy(docs)
+    change(bad_policies, bad_docs)
+    assert admission_policy(bad_policies, bad_docs)
+
+
 def test_sources_pinned(overlay):
     assert sources_pinned(overlay[1]) == []
 
@@ -405,7 +564,12 @@ def test_rendered_policy(overlay):
 
 def test_rendered_objects_match_the_kubernetes_schemas(overlay, tmp_path):
     environment, docs, _, rendered, _ = overlay
-    plain = [d for d in docs if d["kind"] in ("Namespace", "ConfigMap")]
+    plain = [
+        d
+        for d in docs
+        if d["kind"]
+        in ("Namespace", "ConfigMap", "ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding")
+    ]
     manifest = tmp_path / f"{environment}.yaml"
     manifest.write_text(yaml.safe_dump_all(plain + rendered))
     done = subprocess.run(
@@ -426,9 +590,10 @@ def test_rendered_objects_match_the_kubernetes_schemas(overlay, tmp_path):
     assert done.returncode == 0, done.stdout + done.stderr
 
 
-# What deploy/gitops/ may hold: the base, one overlay per hosted environment, and the runbook. A
+# What deploy/gitops/ may hold: the base, one overlay per hosted environment, the admission
+# policies, and the runbook. A
 # manifest anywhere else would be reconciled by nothing, or checked by nothing.
-GITOPS_ENTRIES = {"base", "clusters", "BOOTSTRAP.md"}
+GITOPS_ENTRIES = {"base", "clusters", "policies", "BOOTSTRAP.md"}
 
 
 def test_every_overlay_is_a_hosted_environment():
@@ -504,6 +669,67 @@ DOC_BUGS = [
         lambda d: d["spec"].update(secretRef={"name": "deploy-key"}),
     ),
     (sync_read_only, "Kustomization", "cluster", lambda d: d["spec"].update(path="./deploy/gitops")),
+    (kill_switch_exemption, "HelmRelease", "policy-controller", lambda d: d["spec"].pop("postRenderers")),
+    (
+        kill_switch_exemption,
+        "HelmRelease",
+        "policy-controller",
+        lambda d: d["spec"]["postRenderers"][0]["kustomize"]["patches"][0].update(
+            patch=d["spec"]["postRenderers"][0]["kustomize"]["patches"][0]["patch"].replace("NotIn", "In")
+        ),
+    ),
+    (
+        kill_switch_exemption,
+        "HelmRelease",
+        "policy-controller",
+        lambda d: d["spec"]["postRenderers"][0]["kustomize"]["patches"][1].update(
+            patch=d["spec"]["postRenderers"][0]["kustomize"]["patches"][1]["patch"].replace(
+                "[control]", "[control, api]"
+            )
+        ),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-pods",
+        lambda d: d["spec"]["validations"][0].update(expression="true"),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-pods",
+        lambda d: d["spec"]["matchConditions"][0].update(expression="false"),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-pods",
+        lambda d: d["spec"]["matchConditions"].pop(),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"]["matchConstraints"]["resourceRules"][0].update(operations=["UPDATE"]),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"].update(failurePolicy="Ignore"),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicyBinding",
+        "mandate-control-jobs",
+        lambda d: d["spec"].update(validationActions=["Warn"]),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"]["matchConstraints"].update(namespaceSelector={}),
+    ),
     (endpoint_from_bootstrap, "HelmRelease", "journal", lambda d: d["spec"].pop("valuesFrom")),
     (
         endpoint_from_bootstrap,
@@ -548,6 +774,10 @@ VALUE_BUGS = [
     ("workspace", {"environment": "live"}),
     ("workspace", {"api": {"issuer": "live"}}),
     ("workspace", {"localImages": True}),
+    ("policy-controller", {"webhook": {"failurePolicy": "Ignore"}}),
+    ("policy-controller", {"webhook": {"configData": {"no-match-policy": "deny"}}}),
+    ("policy-controller", {"webhook": {"image": {"version": "v0.13.1"}}}),
+    ("policy-controller", {"leasescleanup": {"image": {"version": "latest-dev"}}}),
     ("workspace", {"deploymentTier": None}),
     ("workspace", {"deploymentTier": "production-eu"}),
     ("workspace", {"images": {"stub-issuer": "mandate.local/stub-issuer:1"}}),

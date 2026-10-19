@@ -566,7 +566,10 @@ the spec invariants (DP-n) its tests cover.
   - **B1 to B4:** `mandate_executor::risk_state`, off R0's path. It is a pure fold of the account
     stream's records into the records to append and a gate view, either readable or unreadable.
     An unreadable view holds openings and never exits (DEC-2301 item 3). Its property tests use a
-    latch oracle that derives the latched set from the appended records alone.
+    latch oracle that derives the latched set from the appended records alone. B3's journaled
+    reference-case driver also walks the cases `mandate-spec`'s `breach_time_s` tests do not:
+    daily loss (`resolved_at_rollover`, `new_day_breach`), the lifetime floor, crypto, and the
+    owner's acknowledgments and allocation changes.
   - **C:** the wiring in `mandate-shell`'s `adapters.rs`, `paper/gate.rs`, and `paper/context.rs`,
     which are R0 files. It waits for R0 to close, or for the founder's call.
   - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
