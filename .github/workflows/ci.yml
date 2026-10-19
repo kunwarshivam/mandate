@@ -104,6 +104,7 @@ jobs:
       full_checks: ${{ steps.select.outputs.full_checks }}
       schema_mutants: ${{ steps.select.outputs.schema_mutants }}
       cell: ${{ steps.select.outputs.cell }}
+      cell_web: ${{ steps.select.outputs.cell_web }}
       reasons: ${{ steps.select.outputs.reasons }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -535,6 +536,84 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: cell-demo
+          cache-on-failure: true
+      - run: cargo xtask ci cell-demo
+
+  # E21-54 (DEC-2002, DEC-2609 item 5): the demo's scenario again, with its web gesture required.
+  # `web/`'s tools are installed: `npm ci --ignore-scripts`, so no dependency's install script runs
+  # in a job that runs cargo, and the Chromium headless shell of the Playwright the lockfile pins,
+  # cached per that version as `web-e2e.yml` caches it. MANDATE_DEMO_WEB_REQUIRED
+  # makes a machine without them fail the run, and MANDATE_CELL_REQUIRED an API that cannot be
+  # asked, rather than either reading "not run". It holds no secret. Not required, as `cell-demo`
+  # is not; it starts for the cell jobs' changes and for any change under `web/`. It restores
+  # `cell-demo`'s cache and saves none of its own.
+  cell-demo-web:
+    needs: select
+    if: needs.select.outputs.cell_web == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_CELL_REQUIRED: "1"
+      MANDATE_DEMO_WEB_REQUIRED: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
+      DO_NOT_TRACK: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: web
+      - name: Playwright version
+        id: playwright
+        working-directory: web
+        run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: browsers
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # Chromium's libraries come from Ubuntu's archive. The runner also lists packages.microsoft.com,
+      # which has answered 403 for noble; one failing source fails `apt-get update` and the install.
+      - name: Drop the runner's Microsoft package source
+        run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f
+      - name: Install Chromium
+        if: steps.browsers.outputs.cache-hit != 'true'
+        working-directory: web
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Install Chromium's system libraries
+        if: steps.browsers.outputs.cache-hit == 'true'
+        working-directory: web
+        run: npx playwright install-deps chromium
+      - name: Install k3d, helm and kubeconform (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: cell-demo
+          save-if: false
           cache-on-failure: true
       - run: cargo xtask ci cell-demo
 
