@@ -3,7 +3,9 @@
 # settings take effect once promotion names images.api. Staging signs in through the site's own
 # Supabase project, not a new one (DEC-2057): its issuer and published key set, Supabase's
 # `authenticated` audience, and the one web app's origin. It hosts the demo's fixed workspace and
-# organization (DEC-2010). Every value is public; no Supabase key is here.
+# organization (DEC-2010). Its executors trade on Alpaca's paper host under the vault lease on their
+# connection (DEC-2306 item 1); staging is the one tier the schema lets name it. Every value is
+# public; no Supabase key or broker credential is here.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -13,6 +15,9 @@ spec:
   values:
     workspace: ws1
     environment: paper
+    executor:
+      broker: alpaca-paper
+      vaultAddress: https://vault.ws-ws1.svc:8200
     api:
       org: 01KDEM0000000000000000000R
       workspace: 01KDEM0000000000000000000W
@@ -20,3 +25,9 @@ spec:
       audience: authenticated
       jwksUrl: https://wyyxngmblqqokcvraflx.supabase.co/auth/v1/.well-known/jwks.json
       appOrigin: https://app.owlhead.ai
+    # The founder's principal, an opaque ULID (DEC-2114): staging's apply links the founder's
+    # identity-provider subject to it as a digest in the `subject-links` ConfigMap. Founding is off
+    # until the `mandate` image staging runs has `workspace found --open`.
+    founding:
+      enabled: false
+      member: 01KDEM0000000000000000000F

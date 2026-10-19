@@ -46,7 +46,8 @@ use mandate_research::{
     ValidatedMandate, WorkingUniverse, next_proposal_at,
 };
 use mandate_research_run::agentic::{
-    Code, EndReason, LoopBounds, OutputMode, Tool, ToolCall, ToolCallId, ToolOutcome, TurnPlan,
+    Code, EndReason, LoopBounds, OutputMode, RunKind, Tool, ToolCall, ToolCallId, ToolOutcome,
+    TurnPlan,
 };
 use mandate_research_run::{
     CallPlan, InstrumentFact, ItemId, ItemKind, ModelPin, OutputBounds, RetrievalPlan,
@@ -334,6 +335,8 @@ pub struct DispatchedResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnRequest {
     pub call: CallPlan,
+    /// The run's kind, fixed at its start (§6.9 step 1), which the turn's call names (DEC-2256).
+    pub kind: RunKind,
     pub plan: TurnPlan,
     pub transcript: Vec<TurnRef>,
 }

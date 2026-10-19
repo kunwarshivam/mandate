@@ -115742,22 +115742,6 @@
     }
    },
    {
-    "name": "sign_count.negative",
-    "clause": "§9.31 `sign_count`",
-    "base_draft": "first_enrolled",
-    "changes": [
-     {
-      "path": "payload.sign_count",
-      "value": -1
-     }
-    ],
-    "expect": {
-     "outcome": "Invalid",
-     "reason": "schema",
-     "path": "payload.sign_count"
-    }
-   },
-   {
     "name": "sign_count.past_32_bits",
     "clause": "§9.31 `sign_count`",
     "base_draft": "first_enrolled",

@@ -1,4 +1,4 @@
-//! The wire form of one call between the runtime and the model-gateway service (DEC-2264 item 5):
+//! The wire form of one call between the runtime and the model-gateway service (DEC-2265 item 5):
 //! a [`CallRequest`] one way, and its [`CallRecord`] or [`RequestError`] back, each as canonical
 //! JSON. Decoding is the exact inverse of encoding: anything else reads as a [`WireError`].
 

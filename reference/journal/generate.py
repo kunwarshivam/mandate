@@ -115,6 +115,35 @@ MARKER = (
 # --------------------------------------------------------------------------- self-test on version 3
 
 
+CANONICAL_MAX_INT = (1 << 53) - 1
+
+
+def uncanonical(value, path: str = "") -> list[str]:
+    """Every value journal spec §4's canonical JSON cannot hold: a float, or an integer outside 0 to
+    2^53 - 1. The Rust fixtures parse the whole file, so one such value breaks every test that loads it."""
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return []
+    if isinstance(value, float):
+        return [f"{path or '/'}: the float {value!r} has no canonical JSON"]
+    if isinstance(value, int):
+        if 0 <= value <= CANONICAL_MAX_INT:
+            return []
+        return [f"{path or '/'}: the integer {value} is outside canonical JSON's 0 to 2^53 - 1"]
+    if isinstance(value, dict):
+        return [p for key, item in value.items() for p in uncanonical(item, f"{path}/{key}")]
+    if isinstance(value, list):
+        return [p for i, item in enumerate(value) for p in uncanonical(item, f"{path}/{i}")]
+    return [f"{path or '/'}: a {type(value).__name__} has no canonical JSON"]
+
+
+def canonical_self_test() -> None:
+    """The canonical-JSON check refuses each value it names and admits its bounds."""
+    for bad in (-1, 1 << 53, 0.5, [{"a": -1}]):
+        assert uncanonical({"x": bad}), f"uncanonical admits {bad!r}"
+    for good in (0, CANONICAL_MAX_INT, True, None, "-1", [{"a": 1}]):
+        assert not uncanonical({"x": good}), f"uncanonical refuses {good!r}"
+
+
 def self_test(v3: dict) -> None:
     """The canonicalizer reproduces every version-3 vector before anything it produces is trusted."""
     for entry in v3["chain"]:
@@ -4122,6 +4151,12 @@ def main(argv: list[str] | None = None) -> int:
         credentials_section,
     )
     reread = yaml.safe_load(rendered)
+    canonical_self_test()
+    unrepresentable = uncanonical(reread)
+    for problem in unrepresentable:
+        print(f"FAIL canonical JSON: {problem}", file=sys.stderr)
+    if unrepresentable:
+        return 1
     if (
         check_chain(reread["agent_stream"], v3)
         or check_production_config_refs(reread["production_config_refs"])
