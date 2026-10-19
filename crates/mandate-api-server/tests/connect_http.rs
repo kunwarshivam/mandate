@@ -5,13 +5,16 @@ mod common;
 mod support_connect;
 
 use mandate_api::problem::ProblemCode;
+use std::sync::Mutex;
+
+use common::Scripted;
 use mandate_canon::{Value, parse, to_canonical};
 use mandate_connections::ConnectError;
 use mandate_connections::start::Environment;
 use mandate_identity::StepUpActionKind;
 use support_connect::{
-    ALICE, DRAWS, KEY, T0, appended, at, b64, base, challenge, code, derived, digest, fixture,
-    json, signed_in, start, text, with,
+    ALICE, Counting, DRAWS, KEY, T0, appended, at, b64, base, challenge, code, ctl, derived,
+    digest, fixture, fixture_random, json, signed_in, start, text, with,
 };
 
 /// The authorization URL's query pairs, sorted.
@@ -233,4 +236,81 @@ fn after_a_restart_the_old_state_is_unknown_and_the_key_spent() {
     let cookie = signed_in(&f, ALICE);
     let again = start(&f, Some(&cookie), Some(KEY), &to_canonical(&base()));
     assert_eq!(code(&again), (409, ProblemCode::IdempotencyConflict));
+}
+
+/// The commit is pinned to the head the route read and judged: when the control stream moves
+/// between that read and the append, nothing is committed and no `state` is issued, and the start
+/// answers `journal_unavailable` (DEC-2623 item 6; rule 131 judged at the head it read).
+#[test]
+fn a_head_that_moves_after_the_read_commits_nothing_and_issues_no_state() {
+    let f = fixture("paper", true, true);
+    f.journal.script(&[Scripted::HeadMismatch]);
+    let cookie = signed_in(&f, ALICE);
+    let reply = start(&f, Some(&cookie), Some(KEY), &to_canonical(&base()));
+    assert_eq!(code(&reply), (503, ProblemCode::JournalUnavailable));
+    assert!(appended(&f).is_empty(), "nothing committed");
+    let held = f
+        .connect
+        .as_ref()
+        .expect("offered")
+        .states
+        .lock()
+        .expect("unpoisoned")
+        .len();
+    assert_eq!(held, 0, "no state issued");
+    let appends = f.journal.appends.lock().expect("unpoisoned").clone();
+    assert_eq!(
+        appends
+            .iter()
+            .map(|(stream, head, _)| (stream.clone(), *head))
+            .collect::<Vec<_>>(),
+        vec![(ctl(), 1)],
+        "one attempt, at the head read, never retried at a fresh one"
+    );
+}
+
+/// Two starts under one key that each read the stream before either commit is visible: the
+/// second's append finds the first's identical record. One request never has two `state`s: the
+/// second answers the first's `201`, and only one `state` is held (DEC-2623 items 7 and 8).
+#[test]
+fn a_concurrent_start_under_the_same_key_issues_no_second_state() {
+    let f = fixture_random("paper", true, true, Box::new(Counting(Mutex::new(0))));
+    let cookie = signed_in(&f, ALICE);
+    let body = to_canonical(&base());
+    let first = start(&f, Some(&cookie), Some(KEY), &body);
+    assert_eq!(
+        first.status,
+        201,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let committed = f
+        .journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .get_mut(&ctl())
+        .expect("the control stream")
+        .pop()
+        .expect("the first start's record");
+    assert_eq!(committed.event_type, "ConnectionRequested");
+    f.journal.script(&[Scripted::RaceIdentical]);
+    let second = start(&f, Some(&cookie), Some(KEY), &body);
+    assert_eq!(
+        second.status,
+        201,
+        "{}",
+        String::from_utf8_lossy(&second.body)
+    );
+    assert_eq!(json(&second), json(&first), "the first start's answer");
+    let held = f
+        .connect
+        .as_ref()
+        .expect("offered")
+        .states
+        .lock()
+        .expect("unpoisoned")
+        .len();
+    assert_eq!(held, 1, "one state for one request");
+    assert_eq!(appended(&f).len(), 1, "one record");
 }

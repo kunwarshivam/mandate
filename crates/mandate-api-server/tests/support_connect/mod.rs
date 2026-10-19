@@ -77,6 +77,18 @@ impl Random for Draws {
     }
 }
 
+/// Draws that never run out: each fill is the next byte value, repeated.
+pub struct Counting(pub Mutex<u8>);
+
+impl Random for Counting {
+    fn fill(&self, out: &mut [u8]) -> Result<(), Unauthenticated> {
+        let mut next = self.0.lock().expect("unpoisoned");
+        *next = next.wrapping_add(1);
+        out.fill(*next);
+        Ok(())
+    }
+}
+
 pub struct Fixture {
     pub addr: std::net::SocketAddr,
     pub journal: Arc<MemJournal>,
@@ -95,6 +107,21 @@ pub fn fixture(environment: &str, offered: bool, accepting: bool) -> Fixture {
 
 /// [`fixture`], with the random source starting at [`DRAWS`]'s `first`: past both, it fails.
 pub fn fixture_drawing(environment: &str, offered: bool, accepting: bool, first: usize) -> Fixture {
+    fixture_random(
+        environment,
+        offered,
+        accepting,
+        Box::new(Draws(Mutex::new(first))),
+    )
+}
+
+/// [`fixture`] with `random` as the start's random source.
+pub fn fixture_random(
+    environment: &str,
+    offered: bool,
+    accepting: bool,
+    random: Box<dyn Random>,
+) -> Fixture {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
@@ -125,8 +152,7 @@ pub fn fixture_drawing(environment: &str, offered: bool, accepting: bool, first:
         asked: Mutex::default(),
         accepting,
     });
-    let connect =
-        offered.then(|| Arc::new(Connect::new(client(), Box::new(Draws(Mutex::new(first))))));
+    let connect = offered.then(|| Arc::new(Connect::new(client(), random)));
     let app = App {
         settings: Settings {
             app_origin: APP.to_owned(),
