@@ -103,6 +103,17 @@ pub fn subscribe_frame(channels: &Channels) -> Result<String, WireError> {
 }
 
 impl Channels {
+    /// These channels without the statuses and LULD bands, the two a feed may not carry
+    /// (DEC-1174 item 2): what is sent again after a 410. An instrument then has no status
+    /// channel, which only paper may open without (DEC-2605 row 22).
+    pub fn narrowed(&self) -> Self {
+        Self {
+            statuses: BTreeSet::new(),
+            lulds: BTreeSet::new(),
+            ..self.clone()
+        }
+    }
+
     /// Each channel with the key the vendor names it by, in the subscribe frame's order.
     fn named(&self) -> [(&'static str, &BTreeSet<InstrumentId>); 7] {
         [
@@ -125,6 +136,10 @@ pub enum Disposition {
     Pause,
     /// Too many symbols (405): the overflow is dropped by priority and reported to the owner.
     Overflow,
+    /// A channel the feed does not carry (410): the subscription is narrowed to the channels every
+    /// feed carries ([`Channels::narrowed`]) and sent again, never a reconnect loop that would take
+    /// the quotes down with it (DEC-1174 item 5).
+    Narrow,
     /// Anything else: the connection goes `down` and reconnects with backoff.
     Down,
 }
@@ -142,6 +157,7 @@ impl Fault {
         let disposition = match code {
             402 | 409 => Disposition::Pause,
             405 => Disposition::Overflow,
+            410 => Disposition::Narrow,
             _ => Disposition::Down,
         };
         Self { code, disposition }

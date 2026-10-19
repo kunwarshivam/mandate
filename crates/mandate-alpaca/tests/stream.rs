@@ -188,7 +188,7 @@ fn each_error_code_says_what_the_connection_does() {
         (404, Disposition::Down),
         (406, Disposition::Down),
         (407, Disposition::Down),
-        (410, Disposition::Down),
+        (410, Disposition::Narrow),
         (500, Disposition::Down),
         (599, Disposition::Down),
     ];
@@ -201,6 +201,40 @@ fn each_error_code_says_what_the_connection_does() {
             code: 409,
             disposition: Disposition::Pause
         })
+    );
+}
+
+/// A feed that does not carry a channel answers 410. Going down and reconnecting would only ask
+/// again and take the quotes down with it, so the subscription is narrowed to the channels every
+/// feed carries: the statuses and LULD bands go, and the quotes, trades and bars stay.
+#[test]
+fn a_rejected_subscribe_action_narrows_to_the_channels_every_feed_carries() {
+    let channels = Channels {
+        quotes: set(&["SPY"]),
+        trades: set(&["SPY"]),
+        bars: set(&["SPY"]),
+        updated_bars: set(&["SPY"]),
+        daily_bars: set(&["SPY"]),
+        statuses: set(&["SPY"]),
+        lulds: set(&["SPY"]),
+    };
+    let narrowed = channels.narrowed();
+    assert_eq!(
+        narrowed,
+        Channels {
+            statuses: BTreeSet::new(),
+            lulds: BTreeSet::new(),
+            ..channels.clone()
+        }
+    );
+    assert_eq!(
+        subscribe_frame(&narrowed).unwrap(),
+        r#"{"action":"subscribe","trades":["SPY"],"quotes":["SPY"],"bars":["SPY"],"updatedBars":["SPY"],"dailyBars":["SPY"],"statuses":[],"lulds":[]}"#
+    );
+    assert_eq!(
+        narrowed.narrowed(),
+        narrowed,
+        "narrowing twice changes nothing"
     );
 }
 
