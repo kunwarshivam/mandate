@@ -11,7 +11,7 @@ mock_provider "digitalocean" {
 
   mock_data "digitalocean_sizes" {
     defaults = {
-      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc3"], gpu_info = [] }]
+      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc3", "sfo2"], gpu_info = [] }]
     }
   }
 }
@@ -53,12 +53,12 @@ run "production_plans_under_its_cap" {
   }
 
   assert {
-    condition     = output.archive_bucket == "mandate-journal-archive-production"
+    condition     = output.archive_bucket == "mandate-journal-archive-west-production"
     error_message = "The archive bucket is production's."
   }
 
   assert {
-    condition     = output.archive_destination_path == "s3://mandate-journal-archive-production/journal-db" && output.archive_jurisdiction == "default" && output.cloudflare_account_id == "fedcba9876543210fedcba9876543210"
+    condition     = output.archive_destination_path == "s3://mandate-journal-archive-west-production/journal-db" && output.archive_jurisdiction == "default" && output.cloudflare_account_id == "fedcba9876543210fedcba9876543210"
     error_message = "Lane GO's archive inputs: the destination path, the default jurisdiction and the account id."
   }
 }
@@ -180,4 +180,14 @@ run "production_names_its_access_emails" {
   }
 
   expect_failures = [var.access_allowed_emails]
+}
+
+# DEC-2047: production's cluster and VPC are in the US West, in sfo2, from its first apply.
+run "the_cluster_runs_in_sfo2" {
+  command = plan
+
+  assert {
+    condition     = module.cell.regions == { vpc = "sfo2", cluster = "sfo2", state_bucket = "sfo2" }
+    error_message = "Production's VPC, cluster and state bucket are in sfo2."
+  }
 }

@@ -79,6 +79,7 @@ cargo xtask gitops bootstrap staging
    3. the admission policy controller;
    4. the journal's two instances;
    5. the workspace with its tunnel.
+   6. in staging only, the vault, which the same run then initializes (below).
 
    Watch it:
 
@@ -86,6 +87,30 @@ cargo xtask gitops bootstrap staging
    flux get all -A
    kubectl -n ws-ws1 get cluster,pods
    ```
+
+## Staging's vault
+
+Staging runs the workspace vault; production does not until you decide how it unseals
+([DEC-2051](../../docs/project/decisions/DEC-2051.md), DEC-2021 item 6). You chose to keep its
+recovery keys in the cluster ([DEC-2052](../../docs/project/decisions/DEC-2052.md)), so staging's
+apply sets it up with no step of yours: after the bootstrap it makes the seal key if there is none,
+waits for the vault's pod, and initializes it once, storing the init answer's three recovery keys
+in the Secret `vault-recovery/vault-init`, which no workload can read, and revoking the root token
+it returned, which it never stores, before the run ends. Its log reads only `vault-init: seal key:
+created|exists`, `vault: initialized|already initialized`, `recovery keys: stored` and `root token:
+revoked`. Every later apply finds it done and changes nothing.
+
+The recovery keys are needed only to make a new root token, for provisioning (DEC-2022) or to rotate
+the seal, never to unseal: the vault unseals itself on every restart. To read them, as cluster
+admin:
+
+```sh
+kubectl -n vault-recovery get secret vault-init -o jsonpath='{.data.init\.json}' | base64 -d
+```
+
+Never paste them into an issue, a CI job or a chat. The break-glass bootstrap from your machine
+still asks for a seal key when none exists (`openssl rand -hex 32`, not shown as you type; if you
+stop it there with Ctrl-C, run `stty echo`), and keeps one that does.
 
 ## When the journal does not install
 
@@ -125,6 +150,8 @@ In one pull request, change the pinned version and digests in:
 Merge it, then run `bootstrap` again. Re-applying is idempotent.
 
 ## What this does not do
+
+- It never replaces staging's vault seal key once one exists.
 
 - It does not promote images. Staging follows `main` through the promotion pull requests, and
   production through pull requests that copy staging (DEC-2016).
