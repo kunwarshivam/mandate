@@ -221,7 +221,6 @@ fn another_body_under_the_key_conflicts_and_records_nothing() {
 /// A restart holds no `state`: a fresh store refuses the old one, and a retry finds the key spent,
 /// so a restart fails closed (DEC-2623 item 4).
 #[test]
-#[ignore = "pending E10-13"]
 fn after_a_restart_the_old_state_is_unknown_and_the_key_spent() {
     let (f, body) = admitted();
     let (state, _) = drawn(text(&body, &["authorization_url"]));

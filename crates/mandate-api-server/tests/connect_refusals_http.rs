@@ -161,7 +161,6 @@ fn requested(id: &str, account: &str) -> String {
 /// the connection, or a request or establishment of another connection with the derived account,
 /// is `idempotency_conflict` after step-up, and nothing is recorded (DEC-2623 item 6).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_derived_id_the_control_stream_already_names_conflicts_after_step_up() {
     let connection = format!("conn_{}", derived(CONNECTION_OPERATION));
     let account = derived(ACCOUNT_OPERATION);
@@ -201,7 +200,6 @@ fn a_derived_id_the_control_stream_already_names_conflicts_after_step_up() {
 /// A request of the derived connection closed by its refusal or revocation frees the id, and a
 /// refusal of another connection naming the derived account does not use it: the start commits.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_closed_request_frees_the_id_and_a_refusal_does_not_use_the_account() {
     let connection = format!("conn_{}", derived(CONNECTION_OPERATION));
     let account = derived(ACCOUNT_OPERATION);
@@ -248,7 +246,6 @@ fn a_closed_request_frees_the_id_and_a_refusal_does_not_use_the_account() {
 /// A random source that fails after the commit answers `journal_unavailable`; the request stays
 /// recorded, open until its deadline's teardown closes it (connections spec §5.2 step 6).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_random_source_that_fails_after_the_commit_answers_journal_unavailable() {
     let f = fixture_drawing("paper", true, true, 2);
     assert_eq!(
