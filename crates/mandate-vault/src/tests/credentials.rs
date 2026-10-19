@@ -134,6 +134,7 @@ fn a_directory_open_to_others_or_linked_is_refused_and_nothing_is_written() {
             Err(SourceError::CredentialFile),
             "{bits:o}"
         );
+        set_mode(&dir, 0o700);
         assert!(listing(&dir).is_empty(), "{bits:o}");
     }
     let real = fresh("real");
