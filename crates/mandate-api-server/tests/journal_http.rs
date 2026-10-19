@@ -641,3 +641,23 @@ fn only_the_records_roles_read_one_event_whatever_the_id() {
     let stranger = member(&f, 6, None);
     assert_eq!(one(&f, &stranger, &ours.event_id).status, 404, "API-9");
 }
+
+/// Journal spec v0.53 §2: the deployment meter stream is no workspace's. A member who reads the
+/// workspace's records reads neither its events nor any one of them, even when its deployment id
+/// is the workspace's own segment: both are the one `not_found`, as any id outside the workspace's
+/// streams is.
+#[test]
+fn the_deployment_meter_stream_is_never_served_whatever_its_id() {
+    let f = fixture();
+    let stream = format!("dmeter:{WORKSPACE}");
+    let rows = chain(&stream, 2);
+    let event_id = rows[0].event_id.clone();
+    seed(&f, rows);
+    let cookie = auditor(&f);
+    let page = get(&f, &cookie, &stream, "");
+    assert_eq!(page.status, 404, "the stream's events");
+    assert_eq!(text(&json(&page), &["code"]), "not_found");
+    let event = one(&f, &cookie, &event_id);
+    assert_eq!(event.status, 404, "one of its events");
+    assert_eq!(text(&json(&event), &["code"]), "not_found");
+}

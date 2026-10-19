@@ -1,0 +1,14 @@
+[
+  {
+    "label": "a first passkey, cooling off",
+    "set": {
+      "/cool_off_ends": "2026-10-09T14:30:00.000000000Z"
+    }
+  },
+  {
+    "label": "an Ed25519 key",
+    "set": {
+      "/alg": "eddsa"
+    }
+  }
+]

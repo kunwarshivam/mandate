@@ -337,7 +337,8 @@ fn subject(stream_id: &StreamId, payload: &Value) -> Option<String> {
         | StreamType::Control
         | StreamType::Scheduler
         | StreamType::Notice
-        | StreamType::Meter => None,
+        | StreamType::Meter
+        | StreamType::DeploymentMeter => None,
     }
 }
 

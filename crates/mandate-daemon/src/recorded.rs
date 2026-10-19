@@ -31,12 +31,23 @@ pub enum BundleError {
     },
     /// The gateway's registry refused the entry or its endpoint.
     Unregistered,
+    /// The body of the tests commit's stub (DEC-77).
+    Unimplemented,
 }
 
 /// The model's one recorded reply: the output text the fake replays, its latency, and its usage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedReply {
     pub output: String,
+    pub latency_ms: u64,
+    pub usage: Usage,
+}
+
+/// One scripted tool-call reply of an agentic run's turn (DEC-2266): each call's declared tool
+/// name and canonical arguments, in reply order, its latency, and its usage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptedTurn {
+    pub calls: Vec<(String, String)>,
     pub latency_ms: u64,
     pub usage: Usage,
 }
@@ -103,6 +114,9 @@ pub struct Bundle {
     pub workspace_cap: Usd6,
     pub deployment_cap: Usd6,
     pub reply: RecordedReply,
+    /// The scripted replies of an agentic run's turns before its final one, turn 1 first; empty
+    /// for a bundle with no `turns` (DEC-2266).
+    pub turns: Vec<ScriptedTurn>,
     pub plane: RecordedPlane,
     /// The recorded instruments halted at the bundle's as-of time (DEC-2214 item 1).
     pub halted: BTreeSet<AssetId>,
@@ -130,6 +144,12 @@ impl Bundle {
         let pinned = ResearchEntry::recorded(entry.value).map_err(|error| match error {
             EntryError::Member(member) => entry.malformed(member),
         })?;
+        let turns = research
+            .value
+            .get("turns")
+            .map(|turns| scripted(turns, &pinned))
+            .transpose()?
+            .unwrap_or_default();
         let slug = pinned.identity.model_name.clone();
         let reported_provider = endpoint.text("reported_provider")?;
         let prices = PriceTable::new(
@@ -191,6 +211,7 @@ impl Bundle {
                     cached: reply.int("cached_tokens")?,
                 },
             },
+            turns,
             plane,
             halted,
             allowlist,
@@ -410,6 +431,13 @@ impl Read {
             })
             .collect())
     }
+}
+
+/// `research.json`'s `turns` (DEC-2266): refused whole, `Malformed { member: "turns" }`, unless the
+/// entry names the agentic loop and every turn is one its gateway would accept, so no bundle a
+/// worker is built from scripts a call the entry does not declare.
+fn scripted(_turns: &Value, _entry: &ResearchEntry) -> Result<Vec<ScriptedTurn>, BundleError> {
+    Err(BundleError::Unimplemented)
 }
 
 /// The assets of the instruments `research.json`'s `halted_instruments` names by symbol, each one an
