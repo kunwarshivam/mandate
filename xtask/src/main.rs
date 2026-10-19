@@ -1341,7 +1341,7 @@ const INFRA_CLOSE: &str = "target/debug/xtask infra close";
 const INFRA_CLOSE_IF: &str = "      - if: always() && steps.build.outcome == 'success'";
 /// The only arguments the closed world lets a workflow run the built xtask binary with rather than
 /// through cargo: [`INFRA_RUN`]'s and [`INFRA_CLOSE`]'s, which an earlier step of the same job
-/// built from the checkout with `cargo build --locked --package xtask`.
+/// built from the checkout with `cargo build --locked --package xtask --package mandate-cli`.
 const INFRA_BINARY_ARGS: [&[&str]; 2] = [&["infra"], &["infra", "close"]];
 /// The only secrets [`INFRA_CLOSE`]'s step may read: the DigitalOcean token, to delete the run's
 /// Spaces key and close the window, and the founder's CIDRs, which the closed window keeps.
@@ -1353,13 +1353,15 @@ const INFRA_CLOSE_SECRETS: [&str; 2] = ["DIGITAL_OCEAN_API_KEY", "KUBE_API_ALLOW
 /// to `web-deploy.yml`'s deploy step (DEC-1005 item 2); the account id is read from Cloudflare,
 /// never configured (DEC-2030 item 1). Production's Access emails and the founder's CIDRs are
 /// secrets, since GitHub prints a variable in a step's environment in the public log (DEC-2030
-/// items 2 and 6).
-const INFRA_SECRETS: [&str; 5] = [
+/// items 2 and 6). The model provider's key, staging's alone, goes to the vault on the CLI's
+/// stdin under a `MANDATE_` name, never `TF_VAR_`, so OpenTofu never reads it (DEC-2630).
+const INFRA_SECRETS: [&str; 6] = [
     "DIGITAL_OCEAN_API_KEY",
     "CF_INFRA_API_TOKEN",
     "TOFU_STATE_PASSPHRASE",
     "ACCESS_ALLOWED_EMAILS",
     "KUBE_API_ALLOWED_CIDRS",
+    "OPENROUTER_API_KEY",
 ];
 /// The list inputs `infra.yml` hands OpenTofu as JSON, which `infra` leaves out of `tofu`'s
 /// environment when blank or empty, so a root with a default takes it and a root without one
@@ -1712,7 +1714,16 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     };
     let cluster_id = output("cluster_id")?;
     let connections = vault_provision::staging_connections(&repo_root()?)?;
-    let cli = vault_provision::build_cli(&repo_root()?)?;
+    let cli = repo_root()?.join(vault_provision::CLI);
+    ensure!(
+        cli.is_file(),
+        "{} is not built: infra.yml's build step builds it",
+        vault_provision::CLI
+    );
+    let model_key = env::var("MANDATE_OPENROUTER_API_KEY").unwrap_or_default();
+    if !model_key.is_empty() {
+        mask::add_mask(&model_key);
+    }
     let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
     let temp = env::var("RUNNER_TEMP").context("RUNNER_TEMP is not set")?;
     let (_, context) = infra_window::cluster_names("staging");
@@ -1783,21 +1794,19 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         command
     };
     let listed: Vec<&str> = connections.iter().map(String::as_str).collect();
+    let in_vault_cli = |command: &[String], stdin: &str| {
+        vault_provision::run_cli(&base, &in_cluster, &cli, Path::new(&temp), command, stdin)
+    };
     let words = vault_provision::vault_provision(
         &vault_provision::Steps {
             kubectl: &in_cluster,
-            provision: &|root| {
-                vault_provision::run_cli(
-                    &base,
-                    &in_cluster,
-                    &cli,
-                    Path::new(&temp),
-                    &connections,
-                    root,
-                )
+            provision: &|stdin| {
+                in_vault_cli(&vault_provision::provision_command(&connections), stdin)
             },
+            put: &|stdin| in_vault_cli(&vault_provision::put_command(), stdin),
         },
         &listed,
+        &model_key,
     )?;
     for word in words {
         eprintln!("    vault-provision: {word} (DEC-2630)");
@@ -2122,6 +2131,10 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         INFRA_WORKFLOW,
         "TF_VAR_kube_api_allowed_addresses: ${{ secrets.KUBE_API_ALLOWED_CIDRS }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "MANDATE_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}",
     ),
 ];
 
@@ -5565,6 +5578,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_INFRA_ACTION",
     "MANDATE_INFRA_ENVIRONMENT",
     "MANDATE_INFRA_SHA",
+    "MANDATE_OPENROUTER_API_KEY",
     "MANDATE_TOFU_REQUIRED",
     "DIGITALOCEAN_TOKEN",
     "TF_VAR_state_passphrase",
@@ -17054,9 +17068,13 @@ mod tests {
             "staging's vault is provisioned after its init and before its verify (DEC-2630)"
         );
         assert!(
-            at(&staging, "vault_provision::build_cli(")
-                < at(&staging, "infra_window::fetch_kubeconfig("),
-            "the CLI is built before the control-plane window opens (DEC-2630)"
+            include_str!("../../.github/workflows/infra.yml").contains(
+                "      - id: build\n        run: cargo build --locked --package xtask --package \
+                 mandate-cli --bin xtask --bin mandate\n"
+            ) && staging.contains("repo_root()?.join(vault_provision::CLI)")
+                && super::vault_provision::CLI == "target/debug/mandate",
+            "the CLI staging runs is the one infra.yml's build step builds, with no secret in its \
+             environment (DEC-2630)"
         );
         let source = include_str!("main.rs");
         assert_eq!(
@@ -17369,8 +17387,8 @@ mod tests {
             (
                 "secret in the build step",
                 edited(
-                    "        run: cargo build --locked --package xtask\n",
-                    "        run: cargo build --locked --package xtask\n        env:\n          \
+                    "        run: cargo build --locked --package xtask --package mandate-cli --bin xtask --bin mandate\n",
+                    "        run: cargo build --locked --package xtask --package mandate-cli --bin xtask --bin mandate\n        env:\n          \
                      T: ${{ secrets.DIGITAL_OCEAN_API_KEY }}\n",
                 ),
             ),
@@ -17410,7 +17428,7 @@ mod tests {
             (
                 "secret step twice",
                 edited(
-                    "      - id: build\n        run: cargo build --locked --package xtask\n",
+                    "      - id: build\n        run: cargo build --locked --package xtask --package mandate-cli --bin xtask --bin mandate\n",
                     secret_step,
                 ),
             ),

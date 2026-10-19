@@ -10,7 +10,7 @@
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -46,12 +46,13 @@ const REVOKE: [&str; 3] = [
     "BAO_TOKEN=\"$(cat)\" exec bao token revoke -self",
 ];
 
-/// What the step needs: `kubectl` against staging, and `mandate vault provision` run against the
-/// vault with the token given on its standard input, answering whether it succeeded and the
-/// Secrets it printed.
+/// What the step needs: `kubectl` against staging, and `mandate vault provision` and `mandate vault
+/// put` run against the vault with the given standard input, each answering whether it succeeded
+/// and what it printed: the Secrets, or one status line.
 pub(crate) struct Steps<'a> {
     pub(crate) kubectl: Kubectl<'a>,
     pub(crate) provision: &'a dyn Fn(&str) -> Result<(bool, String)>,
+    pub(crate) put: &'a dyn Fn(&str) -> Result<(bool, String)>,
 }
 
 /// The name of an executor's Secret, as `mandate_vault::kube::secret_name` writes it: the
@@ -293,25 +294,9 @@ pub(crate) fn staging_connections(root: &Path) -> Result<Vec<String>> {
         .collect()
 }
 
-/// Builds the `mandate` CLI the step runs, before the control-plane window opens, answering its
-/// path.
-pub(crate) fn build_cli(root: &Path) -> Result<PathBuf> {
-    let status = Command::new(env!("CARGO"))
-        .current_dir(root)
-        .args([
-            "build",
-            "--release",
-            "--locked",
-            "-p",
-            "mandate-cli",
-            "--bin",
-            "mandate",
-        ])
-        .status()
-        .context("starting cargo")?;
-    ensure!(status.success(), "building the mandate CLI failed");
-    Ok(root.join("target/release/mandate"))
-}
+/// The `mandate` CLI the step runs, relative to the checkout: `infra.yml`'s build step builds it
+/// beside xtask, with no secret in its environment, so no build script ever sees one.
+pub(crate) const CLI: &str = "target/debug/mandate";
 
 /// A `kubectl port-forward` to the vault's pod, stopped when dropped.
 struct Forward(Child);
@@ -323,18 +308,18 @@ impl Drop for Forward {
     }
 }
 
-/// Runs `mandate vault provision --secrets-namespace` at `cli` against the vault through a
-/// `kubectl port-forward` that `kubectl` (a command already naming the cluster) starts, trusting
-/// the CA from the ConfigMap `vault-ca`, with `token` on its standard input, answering whether it
-/// succeeded and the Secrets it printed. Its environment is cleared, and its standard error, which
-/// carries reason codes alone, is shown.
+/// Runs `mandate vault <command>` at `cli` against the vault through a `kubectl port-forward` that
+/// `kubectl` (a command already naming the cluster) starts, with `--address` and `--ca` (the
+/// ConfigMap `vault-ca`'s, which is not secret) added and `stdin` on its standard input, answering
+/// whether it succeeded and what it printed. Its environment is cleared, and its standard error,
+/// which carries reason codes alone, is shown.
 pub(crate) fn run_cli(
     kubectl: &dyn Fn() -> Command,
     read: Kubectl<'_>,
     cli: &Path,
     temp: &Path,
-    connections: &[String],
-    token: &str,
+    command: &[String],
+    stdin: &str,
 ) -> Result<(bool, String)> {
     let (got, ca) = read(
         &[
@@ -374,34 +359,26 @@ pub(crate) fn run_cli(
         .strip_prefix("Forwarding from 127.0.0.1:")
         .and_then(|rest| rest.split_whitespace().next())
         .context("port-forward named no local port")?;
-    let mut command = Command::new(cli);
-    command
+    let mut run = Command::new(cli)
         .env_clear()
-        .args(["vault", "provision", "--address"])
+        .arg("vault")
+        .args(command)
+        .arg("--address")
         .arg(format!("https://127.0.0.1:{port}"))
         .arg("--ca")
         .arg(&ca_file)
-        .args([
-            "--operator-token-stdin",
-            "--secrets-namespace",
-            WORKSPACE_NAMESPACE,
-        ]);
-    for connection in connections {
-        command.args(["--connection", connection]);
-    }
-    let mut run = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .context("starting mandate vault provision")?;
+        .context("starting the mandate CLI")?;
     run.stdin
         .take()
         .context("the CLI's stdin")?
-        .write_all(format!("{token}\n").as_bytes())?;
+        .write_all(stdin.as_bytes())?;
     let out = run
         .wait_with_output()
-        .context("waiting for mandate vault provision")?;
+        .context("waiting for the mandate CLI")?;
     drop(forward);
     Ok((
         out.status.success(),
@@ -409,28 +386,89 @@ pub(crate) fn run_cli(
     ))
 }
 
-/// Provisions staging's vault for `connections` unless every Secret is already there, answering
+/// The arguments of `mandate vault provision` for `connections`, its token on stdin and its
+/// Secrets on stdout.
+pub(crate) fn provision_command(connections: &[String]) -> Vec<String> {
+    let mut command: Vec<String> = [
+        "provision",
+        "--operator-token-stdin",
+        "--secrets-namespace",
+        WORKSPACE_NAMESPACE,
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    for connection in connections {
+        command.extend(["--connection".to_owned(), connection.clone()]);
+    }
+    command
+}
+
+/// The arguments of `mandate vault put model-provider-key`, its credentials and the key on stdin.
+pub(crate) fn put_command() -> Vec<String> {
+    ["put", "model-provider-key"].map(str::to_owned).to_vec()
+}
+
+/// The secret-import identity's credentials from its Secret, its secret id masked as it is read,
+/// as the first two lines `mandate vault put` reads.
+fn secret_import(steps: &Steps<'_>) -> Result<String> {
+    let (read, lines) = (steps.kubectl)(
+        &[
+            "get",
+            "secret",
+            "vault-approle-secret-import",
+            "--namespace",
+            WORKSPACE_NAMESPACE,
+            "-o",
+            "go-template={{index .data \"role-id\" | base64decode}}{{\"\\n\"}}{{index .data \"secret-id\" | base64decode}}",
+        ],
+        None,
+    )?;
+    if let Some((_, secret_id)) = lines.split_once('\n') {
+        mask::add_mask(secret_id);
+    }
+    ensure!(
+        read && lines.lines().count() == 2,
+        "the secret-import identity's credentials could not be read"
+    );
+    Ok(lines)
+}
+
+/// Provisions staging's vault for `connections` unless every Secret is already there, then, when
+/// `model_key` is not empty, writes it as the model provider's key through the secret-import
+/// identity on every run, so a rotation is the secret replaced and the apply run again; answers
 /// the status words to print.
 pub(crate) fn vault_provision(
     steps: &Steps<'_>,
     connections: &[&str],
+    model_key: &str,
 ) -> Result<Vec<&'static str>> {
+    let mut words = Vec::new();
     if provisioned(steps, connections)? {
-        return Ok(vec!["credentials: present"]);
+        words.push("credentials: present");
+    } else {
+        let keys = recovery_keys(steps)?;
+        let root = root(steps, &keys)?;
+        let token = root.token.clone().unwrap_or_default();
+        let (provisioned, list) = (steps.provision)(&format!("{token}\n"))?;
+        ensure!(provisioned, "mandate vault provision failed");
+        let (applied, _) = (steps.kubectl)(&["apply", "-f", "-"], Some(&list))?;
+        ensure!(applied, "applying staging's vault credentials failed");
+        root.revoke()?;
+        words.extend([
+            "root token: generated",
+            "credentials: provisioned",
+            "root token: revoked",
+        ]);
     }
-    let keys = recovery_keys(steps)?;
-    let root = root(steps, &keys)?;
-    let token = root.token.clone().unwrap_or_default();
-    let (provisioned, list) = (steps.provision)(&token)?;
-    ensure!(provisioned, "mandate vault provision failed");
-    let (applied, _) = (steps.kubectl)(&["apply", "-f", "-"], Some(&list))?;
-    ensure!(applied, "applying staging's vault credentials failed");
-    root.revoke()?;
-    Ok(vec![
-        "root token: generated",
-        "credentials: provisioned",
-        "root token: revoked",
-    ])
+    if model_key.is_empty() {
+        words.push("model provider key: not set");
+    } else {
+        let credentials = secret_import(steps)?;
+        let (written, _) = (steps.put)(&format!("{credentials}\n{model_key}\n"))?;
+        ensure!(written, "writing the model provider's key failed");
+        words.push("model provider key: written");
+    }
+    Ok(words)
 }
 
 #[cfg(test)]
@@ -447,6 +485,8 @@ mod tests {
     const OTP: &str = "0123456789abcdefghijklmnop";
     const KEYS: [&str; 3] = ["recovery-a", "recovery-b", "recovery-c"];
     const LIST: &str = r#"{"apiVersion":"v1","kind":"List","items":[{"secret":"id-1"}]}"#;
+    const IMPORT: &str = "import-role\nimport-secret-id";
+    const MODEL_KEY: &str = "model-key-canary";
 
     fn encoded_root() -> String {
         let xored: Vec<u8> = ROOT.bytes().zip(OTP.bytes()).map(|(t, p)| t ^ p).collect();
@@ -461,8 +501,11 @@ mod tests {
         incomplete: bool,
         provision_fails: bool,
         apply_fails: bool,
+        put_fails: bool,
+        model_key: &'static str,
         calls: RefCell<Vec<(Vec<String>, Option<String>)>>,
         provisioned_with: RefCell<Vec<String>>,
+        put_with: RefCell<Vec<String>>,
     }
 
     impl Fake {
@@ -474,6 +517,7 @@ mod tests {
             let has = |word: &str| args.contains(&word);
             Ok(match args.first().copied().unwrap_or_default() {
                 "get" if has("secrets") => (true, self.present.join(" ")),
+                "get" if has("vault-approle-secret-import") => (true, IMPORT.to_owned()),
                 "get" if has(RECOVERY_SECRET) => (
                     !self.unreadable_keys,
                     json!({"recovery_keys_b64": KEYS}).to_string(),
@@ -500,16 +544,22 @@ mod tests {
         }
 
         fn run(&self, connections: &[&str]) -> Result<Vec<&'static str>> {
-            let provision = |token: &str| {
-                self.provisioned_with.borrow_mut().push(token.to_owned());
+            let provision = |stdin: &str| {
+                self.provisioned_with.borrow_mut().push(stdin.to_owned());
                 Ok((!self.provision_fails, LIST.to_owned()))
+            };
+            let put = |stdin: &str| {
+                self.put_with.borrow_mut().push(stdin.to_owned());
+                Ok((!self.put_fails, String::new()))
             };
             vault_provision(
                 &Steps {
                     kubectl: &|args, stdin| self.kubectl(args, stdin),
                     provision: &provision,
+                    put: &put,
                 },
                 connections,
+                self.model_key,
             )
         }
 
@@ -593,7 +643,10 @@ mod tests {
             present: all_present(&["c1"]),
             ..Fake::default()
         };
-        assert_eq!(fake.run(&["c1"])?, ["credentials: present"]);
+        assert_eq!(
+            fake.run(&["c1"])?,
+            ["credentials: present", "model provider key: not set"]
+        );
         assert_eq!(fake.calls.borrow().len(), 1);
         assert!(fake.provisioned_with.borrow().is_empty());
         Ok(())
@@ -615,7 +668,8 @@ mod tests {
             [
                 "root token: generated",
                 "credentials: provisioned",
-                "root token: revoked"
+                "root token: revoked",
+                "model provider key: not set"
             ]
         );
         let updates = fake.calls_with("sys/generate-root/update");
@@ -642,7 +696,7 @@ mod tests {
                 REVOKE[2],
             ]
         );
-        assert_eq!(*fake.provisioned_with.borrow(), [ROOT]);
+        assert_eq!(*fake.provisioned_with.borrow(), [format!("{ROOT}\n")]);
         assert_eq!(fake.calls_with("apply")[0].1.as_deref(), Some(LIST));
         assert!(fake.revoked());
         fake.nothing_secret_in_argv();
@@ -708,5 +762,71 @@ mod tests {
         };
         assert!(fake.run(&["c1"]).is_err());
         assert!(fake.calls_with("exec").is_empty());
+    }
+
+    /// A key set is written through the secret-import identity on every run, its credentials and
+    /// the key on the CLI's stdin alone, whether or not the vault was provisioned this run.
+    #[test]
+    fn a_set_model_key_is_written_on_every_run() -> Result<()> {
+        let fake = Fake {
+            present: all_present(&["c1"]),
+            model_key: MODEL_KEY,
+            ..Fake::default()
+        };
+        assert_eq!(
+            fake.run(&["c1"])?,
+            ["credentials: present", "model provider key: written"]
+        );
+        assert_eq!(
+            *fake.put_with.borrow(),
+            [format!("{IMPORT}\n{MODEL_KEY}\n")]
+        );
+        for (args, _) in fake.calls.borrow().iter() {
+            assert!(!args.iter().any(|arg| arg.contains(MODEL_KEY)), "{args:?}");
+        }
+        let fresh = Fake {
+            model_key: MODEL_KEY,
+            ..Fake::default()
+        };
+        fresh.run(&["c1"])?;
+        assert_eq!(fresh.put_with.borrow().len(), 1);
+        assert!(fresh.revoked());
+        Ok(())
+    }
+
+    #[test]
+    fn an_unset_model_key_is_not_written() -> Result<()> {
+        let fake = Fake::default();
+        fake.run(&["c1"])?;
+        assert!(fake.put_with.borrow().is_empty());
+        assert!(fake.calls_with("vault-approle-secret-import").is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_failed_put_fails_the_step() {
+        let fake = Fake {
+            present: all_present(&[]),
+            model_key: MODEL_KEY,
+            put_fails: true,
+            ..Fake::default()
+        };
+        assert!(fake.run(&[]).is_err());
+    }
+
+    #[test]
+    fn the_commands_are_the_clis() {
+        assert_eq!(
+            provision_command(&["c1".to_owned()]),
+            [
+                "provision",
+                "--operator-token-stdin",
+                "--secrets-namespace",
+                "ws-ws1",
+                "--connection",
+                "c1"
+            ]
+        );
+        assert_eq!(put_command(), ["put", "model-provider-key"]);
     }
 }

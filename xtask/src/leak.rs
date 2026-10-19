@@ -161,7 +161,8 @@ const ALLOWED: &[(&str, &str, &str)] = &[
 /// Each also names the `env:` its step may set, exactly; nothing else, so no `PATH`,
 /// `LD_PRELOAD`, `NODE_OPTIONS` or `BASH_ENV` reaches the secret step. `infra close`'s names
 /// include `TF_VAR_kube_api_allowed_addresses`, and `infra`'s `MANDATE_INFRA_SHA`, which IAC's
-/// #1771 adds, as [`SECRET_JOB_ENV`] does its kubectl and flux pins.
+/// #1771 adds, as [`SECRET_JOB_ENV`] does its kubectl and flux pins; `infra`'s also
+/// `MANDATE_OPENROUTER_API_KEY`, the model provider's key staging's vault imports (DEC-2630).
 const SECRET_RUNS: &[SecretRun] = &[
     (
         ".github/workflows/infra.yml",
@@ -175,6 +176,7 @@ const SECRET_RUNS: &[SecretRun] = &[
             "TF_VAR_cloudflare_api_token",
             "TF_VAR_kube_api_allowed_addresses",
             "TF_VAR_access_allowed_emails",
+            "MANDATE_OPENROUTER_API_KEY",
         ],
     ),
     (
@@ -256,7 +258,7 @@ const PRE_RUNS: &[(&str, &str)] = &[
     ),
     (
         ".github/workflows/infra.yml",
-        "cargo build --locked --package xtask",
+        "cargo build --locked --package xtask --package mandate-cli --bin xtask --bin mandate",
     ),
     (
         ".github/workflows/r2-lockcheck.yml",
