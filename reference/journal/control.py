@@ -556,6 +556,11 @@ SCHEMAS[("ctl", "ConnectionRefused")] = rec(
     ("user", STR),
     ("step_up", STEP_UP),
 )
+# §9.8 v0.68 (DEC-2621): how a version-2 request's credential is obtained, what an OAuth token may
+# also reach (U-A4 open, so only `may_reach`), and the one disclosure document rule 255 names.
+REQUEST_CREDENTIALS = ("oauth", "api_key")
+OTHER_ENVIRONMENT_REACH = ("may_reach",)
+BREADTH_DOCUMENT = "alpaca_oauth_token_breadth"
 # §9.8 v0.32 (DEC-694 item 4, DEC-699): the pending connection a connect starts with.
 SCHEMAS[("ctl", "ConnectionRequested")] = rec(
     ("connection_id", IDENT_T),
@@ -1218,6 +1223,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("ctl", "VerificationRun"): (1, 2),
     ("ctl", "AgentDeployed"): (1, 2),
     ("acct", "MarkUpdated"): (1, 2),
+    ("ctl", "ConnectionRequested"): (1, 2),
 }
 # §9.30 (DEC-2305): `MarkUpdated` version 2 adds the risk mark's bid, its sanity verdict, and its
 # session to version 1's members, with `risk_clock` last; version 1 stays registered.
@@ -1278,6 +1284,21 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("ctl", "VerificationRun", 2): VERIFICATION_RUN_V2,
     # v0.51 §9.24 (DEC-1171): version 1's members, then the stored document's connection.
     ("ctl", "AgentDeployed", 2): rec(*SCHEMAS[("ctl", "AgentDeployed")].fields, ("connection_id", IDENT_T)),
+    # v0.68 §9.8 (DEC-2621): version 1's members, then how the credential is obtained and, for an
+    # OAuth connect, the token's possible breadth and the disclosure the owner confirmed.
+    ("ctl", "ConnectionRequested", 2): rec(
+        *SCHEMAS[("ctl", "ConnectionRequested")].fields,
+        ("credential", one_of(*REQUEST_CREDENTIALS)),
+        (
+            "breadth",
+            opt(
+                rec(
+                    ("other_environment", one_of(*OTHER_ENVIRONMENT_REACH)),
+                    ("disclosure", rec(("document", IDENT_T), ("version", STR))),
+                )
+            ),
+        ),
+    ),
 }
 
 # §9.6 (DEC-460) and v0.42 (DEC-942): the runtime's approval request. Version 2 is version 1 with
@@ -1706,6 +1727,27 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             clauses.reverse()
         wrong = next((m for m, ok in clauses if not ok), None)
         rule("245", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "ConnectionRequested" and draft["schema_version"] == 2:
+        oauth = p["credential"] == "oauth"
+        breadth = p["breadth"]
+        paired = (breadth is not None) == oauth or "rule.255.paired" in skip
+        alpaca = not oauth or p["broker"] == "alpaca" or "rule.255.broker" in skip
+        paper = not oauth or p["environment"] == "paper" or "rule.255.environment" in skip
+        document = (
+            breadth is None
+            or breadth["disclosure"]["document"] == BREADTH_DOCUMENT
+            or "rule.255.document" in skip
+        )
+        clauses = [
+            ("breadth", paired),
+            ("broker", alpaca),
+            ("environment", paper),
+            ("breadth.disclosure.document", document),
+        ]
+        if "order.rule_255_document_first" in skip:
+            clauses.reverse()
+        wrong = next((m for m, ok in clauses if not ok), None)
+        rule("255", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
     if event_type == "OwnerConfirmationReceived":
         prices = ["qty", "bid", "bid_size", "floor", "expires_at"]
         if "order.rule_247_floor_first" in skip:
