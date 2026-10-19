@@ -35,6 +35,7 @@
 pub mod budgets;
 pub mod call;
 pub mod fake;
+pub mod frame;
 pub mod guard;
 pub mod kinds;
 pub mod meter;
