@@ -37,6 +37,9 @@ pub(crate) fn received(
     if batch.view.intents.contains_key(&handoff.intent_id) {
         return Ok(());
     }
+    if handoff.confirmation.is_some() {
+        return Err(ExecutorError::Unimplemented { story: "E7-30" });
+    }
     let IntentBody::Order {
         instrument,
         qty,
