@@ -1474,6 +1474,11 @@ const BACKSLASH_WORKFLOW_LINES: &[(&str, &str)] = &[
         ".github/workflows/merge.yml",
         r##"prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \"##,
     ),
+    (".github/workflows/merge.yml", r##"printf '%s\n' "$out""##),
+    (
+        ".github/workflows/merge.yml",
+        r##"if printf '%s\n' "$out" | grep -q '^merged as '; then"##,
+    ),
     (
         ".github/workflows/web-e2e.yml",
         r##"run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
