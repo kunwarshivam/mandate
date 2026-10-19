@@ -29,6 +29,7 @@
 
 pub mod credentials;
 pub mod error;
+pub mod kube;
 pub mod lease;
 pub mod local;
 pub mod openbao;
