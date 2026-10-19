@@ -26,6 +26,8 @@ pub(crate) const RECOVERY_NAMESPACE: &str = "vault-recovery";
 pub(crate) const RECOVERY_SECRET: &str = "vault-init";
 /// How many times the step reads the vault's pod before it gives up on it running.
 const POD_READS: u32 = 60;
+/// How many times it reads the vault's status, since a pod that runs may not listen yet.
+const STATUS_READS: u32 = 6;
 
 /// What the step needs besides `kubectl`: a new seal key, and a pause between reads of the pod.
 pub(crate) struct Steps<'a> {
@@ -116,11 +118,19 @@ fn running(steps: &Steps<'_>) -> Result<()> {
 /// Whether the vault is initialized, from `bao status`, which exits 2 while sealed but still
 /// answers; an answer it cannot read stops the step rather than initializing blind.
 fn initialized(steps: &Steps<'_>) -> Result<bool> {
-    let (_, answer) = in_vault(steps, &["bao", "status", "-format=json"], None)?;
-    serde_json::from_str::<Value>(&answer)
-        .ok()
-        .and_then(|status| status["initialized"].as_bool())
-        .context("the vault's status could not be read, so it was not initialized")
+    for read in 1..=STATUS_READS {
+        let (_, answer) = in_vault(steps, &["bao", "status", "-format=json"], None)?;
+        if let Some(initialized) = serde_json::from_str::<Value>(&answer)
+            .ok()
+            .and_then(|status| status["initialized"].as_bool())
+        {
+            return Ok(initialized);
+        }
+        if read < STATUS_READS {
+            (steps.pause)();
+        }
+    }
+    bail!("the vault's status could not be read in {STATUS_READS} tries, so it was not initialized")
 }
 
 /// Every string in `value`, each masked before anything can print it.
@@ -208,9 +218,15 @@ fn init(steps: &Steps<'_>) -> Result<()> {
             .and_then(|fields| fields.remove("root_token"))
             .and_then(|token| token.as_str().map(str::to_owned)),
     };
+    let found = root.token.is_some();
     let stored = store(steps, &parsed.to_string());
     let revoked = root.revoke();
     stored?;
+    ensure!(
+        found,
+        "the root token was not found in the vault's init answer, so it may be live: revoke it \
+         with a token generated from the recovery keys in {RECOVERY_NAMESPACE}/{RECOVERY_SECRET}"
+    );
     revoked
 }
 
@@ -282,7 +298,9 @@ mod tests {
         seal_exists: bool,
         initialized: bool,
         reads_until_running: u32,
-        status_garbled: bool,
+        garbled_reads: u32,
+        no_root: bool,
+        status_reads: Cell<u32>,
         store_fails: bool,
         revoke_fails: bool,
         reads: Cell<u32>,
@@ -316,18 +334,26 @@ mod tests {
                 "apply" => (true, String::new()),
                 "create" if input.contains(RECOVERY_SECRET) => (!self.store_fails, String::new()),
                 "create" => (true, String::new()),
-                "exec" if has("status") => (
-                    !self.initialized,
-                    if self.status_garbled {
-                        "Error checking seal status".to_owned()
-                    } else {
-                        json!({"initialized": self.initialized, "sealed": !self.initialized})
-                            .to_string()
-                    },
-                ),
+                "exec" if has("status") => {
+                    self.status_reads.set(self.status_reads.get() + 1);
+                    let garbled = self.status_reads.get() <= self.garbled_reads;
+                    (
+                        !self.initialized,
+                        if garbled {
+                            "Error checking seal status".to_owned()
+                        } else {
+                            json!({"initialized": self.initialized, "sealed": !self.initialized})
+                                .to_string()
+                        },
+                    )
+                }
                 "exec" if has("init") => (
                     true,
-                    json!({"recovery_keys_b64": RECOVERY, "root_token": ROOT}).to_string(),
+                    if self.no_root {
+                        json!({"recovery_keys_b64": RECOVERY}).to_string()
+                    } else {
+                        json!({"recovery_keys_b64": RECOVERY, "root_token": ROOT}).to_string()
+                    },
                 ),
                 "exec" if input == ROOT => (!self.revoke_fails, String::new()),
                 other => return Err(anyhow!("unexpected kubectl {other}: {args:?}")),
@@ -460,6 +486,21 @@ mod tests {
             error.contains("root token") && error.contains("may be live"),
             "{error}"
         );
+
+        let fake = Fake {
+            no_root: true,
+            ..Fake::default()
+        };
+        let error = fake.run().err().context_free()?;
+        assert!(
+            error.contains("root token was not found") && error.contains("may be live"),
+            "{error}"
+        );
+        assert_eq!(
+            fake.calls_with("create").len(),
+            2,
+            "the recovery keys are still stored"
+        );
         Ok(())
     }
 
@@ -475,11 +516,23 @@ mod tests {
         assert!(fake.calls_with("init").is_empty());
 
         let fake = Fake {
-            status_garbled: true,
+            garbled_reads: u32::MAX,
             ..Fake::default()
         };
         assert!(fake.run().is_err());
+        assert_eq!(fake.status_reads.get(), STATUS_READS);
         assert!(fake.calls_with("init").is_empty());
+
+        let fake = Fake {
+            garbled_reads: STATUS_READS - 1,
+            ..Fake::default()
+        };
+        assert_eq!(
+            fake.run()?[1],
+            "vault: initialized",
+            "a vault not yet listening is read again"
+        );
+        assert_eq!(fake.calls_with("init").len(), 1);
         Ok(())
     }
 
