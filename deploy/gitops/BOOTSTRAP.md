@@ -123,9 +123,12 @@ cluster:
    Supabase project) and run the staging apply. After the vault is provisioned, it runs the
    `mandate` binary it built, `identity link`, with your subject on standard input only, and applies
    the one line it writes, `sha256:<digest> <founder ULID>`, as the ConfigMap `subject-links` in
-   `ws-ws1`. Its log reads `founding: linked`, or `founding: skipped: no founder subject is set`
-   without the secret. The subject is masked and never reaches the cluster, a log, or a file left
-   behind. The founder's ULID is `founding.member` in `clusters/staging/workspace.yaml`.
+   `ws-ws1`. Without the secret it applies the ConfigMap empty, so the secret alone decides who is
+   linked. When the link changed and the API server runs, it restarts it, since the API reads the
+   file once at start. Its log reads `founding: linked` or `founding: no founder subject is set:
+   nobody is linked`, then `, unchanged` or `; api restarted`. The subject is masked and never
+   reaches the cluster, a log, or a file left behind. The founder's ULID is `founding.member` in
+   `clusters/staging/workspace.yaml`. Rotating it, or removing the secret, is a rerun.
 2. **The mount.** Once an apply has written the ConfigMap, staging's values set
    `api.subjectLinks: subject-links`, so the API server reads it.
 3. **The grant.** Once the `mandate` image staging runs has `workspace found --open`, staging's

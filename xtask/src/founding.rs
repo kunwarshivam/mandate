@@ -2,7 +2,9 @@
 //! window, staging's apply runs the `mandate` binary the job built with no secret in its
 //! environment, `identity link`, with the founder's identity-provider subject on its standard input
 //! alone, and applies the one-line file it writes, `sha256:<digest> <ULID>`, as the
-//! `subject-links` ConfigMap the API server mounts, through `kubectl`'s standard input. The subject
+//! `subject-links` ConfigMap the API server mounts, through `kubectl`'s standard input, empty when no
+//! subject is set; a changed link restarts the API server, whose `subPath` mount never refreshes
+//! (DEC-2114 item 2). The subject
 //! is masked the moment it is read and is never an argument, an environment variable, a file, a
 //! cluster object, or a log line: only its digest reaches the cluster. The founding grant itself is
 //! the workspace chart's `founding` hook, which carries no subject at all.
@@ -86,22 +88,65 @@ pub(crate) fn link_command(founder: &Founder, links: &Path) -> Vec<String> {
     ]
 }
 
-/// Links `founder`'s `subject` and applies the link as the `subject-links` ConfigMap, answering the
-/// word to print: `skipped` when no subject is set, so a run without the secret changes nothing,
-/// and `linked` once the ConfigMap is applied. The file is written in a fresh directory under the
-/// scratch directory and removed before the apply.
+/// Links `founder`'s `subject` and applies the link as the `subject-links` ConfigMap on every run:
+/// with no subject set the ConfigMap is applied empty, so the secret alone decides who is linked.
+/// The API server mounts the file by `subPath`, which the kubelet never refreshes, so when the
+/// applied content differs from what was there and the `api` Deployment exists, it is restarted.
+/// The ConfigMap's earlier content is read to compare and never printed. Answers what it did, in
+/// fixed words. The link file is written in a fresh directory under the scratch directory and
+/// removed before the apply.
 ///
 /// # Errors
 /// When `mandate identity link` refuses (its reason goes to its own standard error, never here),
-/// when its file cannot be read, or when `kubectl apply` fails.
-pub(crate) fn link_founder(
-    steps: &Steps<'_>,
-    founder: &Founder,
-    subject: &str,
-) -> Result<&'static str> {
-    if subject.is_empty() {
-        return Ok("skipped: no founder subject is set");
+/// when its file cannot be read, or when `kubectl` fails to apply or to restart.
+pub(crate) fn link_founder(steps: &Steps<'_>, founder: &Founder, subject: &str) -> Result<String> {
+    let text = if subject.is_empty() {
+        String::new()
+    } else {
+        linked_text(steps, founder, subject)?
+    };
+    let before = current(steps)?;
+    let (applied, _) = (steps.kubectl)(&["apply", "-f", "-"], Some(&configmap(&text)))?;
+    ensure!(applied, "kubectl apply of the {CONFIGMAP} ConfigMap failed");
+    let what = if subject.is_empty() {
+        "no founder subject is set: nobody is linked"
+    } else {
+        "linked"
+    };
+    if before.as_deref() == Some(text.as_str()) {
+        return Ok(format!("{what}, unchanged"));
     }
+    let (api, _) = (steps.kubectl)(
+        &[
+            "get",
+            "deployment",
+            "api",
+            "--namespace",
+            WORKSPACE_NAMESPACE,
+            "-o",
+            "name",
+        ],
+        None,
+    )?;
+    if !api {
+        return Ok(what.to_owned());
+    }
+    let (restarted, _) = (steps.kubectl)(
+        &[
+            "rollout",
+            "restart",
+            "deployment/api",
+            "--namespace",
+            WORKSPACE_NAMESPACE,
+        ],
+        None,
+    )?;
+    ensure!(restarted, "kubectl could not restart the api Deployment");
+    Ok(format!("{what}; api restarted"))
+}
+
+/// The link file `mandate identity link` writes for `founder` and `subject`, read and removed.
+fn linked_text(steps: &Steps<'_>, founder: &Founder, subject: &str) -> Result<String> {
     let dir = fresh_dir(steps.scratch)?;
     let links = dir.join(CONFIGMAP);
     let linked = (steps.mandate)(&link_command(founder, &links), subject);
@@ -112,9 +157,34 @@ pub(crate) fn link_founder(
     let removed = fs::remove_dir_all(&dir).context("removing the link file's directory");
     let text = text?;
     removed?;
-    let (applied, _) = (steps.kubectl)(&["apply", "-f", "-"], Some(&configmap(&text)))?;
-    ensure!(applied, "kubectl apply of the {CONFIGMAP} ConfigMap failed");
-    Ok("linked")
+    Ok(text)
+}
+
+/// The `subject-links` ConfigMap's content now, or `None` when there is none.
+fn current(steps: &Steps<'_>) -> Result<Option<String>> {
+    let (found, json) = (steps.kubectl)(
+        &[
+            "get",
+            "configmap",
+            CONFIGMAP,
+            "--namespace",
+            WORKSPACE_NAMESPACE,
+            "-o",
+            "json",
+        ],
+        None,
+    )?;
+    if !found {
+        return Ok(None);
+    }
+    let object: serde_json::Value =
+        serde_json::from_str(&json).context("the subject-links ConfigMap is not JSON")?;
+    Ok(Some(
+        object["data"][CONFIGMAP]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
+    ))
 }
 
 /// A directory of its own under `scratch`, emptied first.
@@ -183,12 +253,31 @@ mod tests {
         }
     }
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("xtask-founding-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a scratch directory");
-        dir
+    fn line() -> String {
+        format!("{DIGEST} {}\n", founder().member)
+    }
+
+    /// How the fakes answer: whether `mandate` writes its file, the ConfigMap's earlier content
+    /// (`None`: there is none), whether the api Deployment exists, and whether apply and restart
+    /// succeed.
+    struct World {
+        links_ok: bool,
+        before: Option<String>,
+        api: bool,
+        applies: bool,
+        restarts: bool,
+    }
+
+    impl Default for World {
+        fn default() -> Self {
+            Self {
+                links_ok: true,
+                before: None,
+                api: true,
+                applies: true,
+                restarts: true,
+            }
+        }
     }
 
     /// What the fakes saw: each `mandate` call's arguments and standard input, and each `kubectl`
@@ -199,11 +288,36 @@ mod tests {
         kubectl: Vec<(Vec<String>, Option<String>)>,
     }
 
-    /// Runs the step with fakes: `mandate` writes the link file the CLI would, a digest and the
-    /// member, when `links_ok`; `kubectl` answers `applies`.
-    fn run(subject: &str, links_ok: bool, applies: bool) -> (Result<&'static str>, Seen, PathBuf) {
+    impl Seen {
+        fn verbs(&self) -> Vec<String> {
+            self.kubectl
+                .iter()
+                .map(|(args, _)| args[..2].join(" "))
+                .collect()
+        }
+
+        fn applied(&self) -> Option<serde_json::Value> {
+            self.kubectl
+                .iter()
+                .find(|(args, _)| args[0] == "apply")
+                .and_then(|(_, stdin)| stdin.as_deref())
+                .map(|text| serde_json::from_str(text).expect("JSON"))
+        }
+    }
+
+    static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    fn scratch() -> PathBuf {
+        let n = RUNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("xtask-founding-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        dir
+    }
+
+    fn run(subject: &str, world: &World) -> (Result<String>, Seen, PathBuf) {
         let seen = RefCell::new(Seen::default());
-        let dir = scratch(&format!("{links_ok}-{applies}-{}", subject.len()));
+        let dir = scratch();
         let mandate = |args: &[String], stdin: &str| -> Result<bool> {
             seen.borrow_mut()
                 .mandate
@@ -212,9 +326,9 @@ mod tests {
                 .iter()
                 .position(|a| a == "--links")
                 .and_then(|i| args.get(i + 1));
-            match (links_ok, links) {
+            match (world.links_ok, links) {
                 (true, Some(path)) => {
-                    std::fs::write(path, format!("{DIGEST} {}\n", founder().member))?;
+                    std::fs::write(path, line())?;
                     Ok(true)
                 }
                 (true, None) => bail!("no --links"),
@@ -226,7 +340,19 @@ mod tests {
                 args.iter().map(|a| (*a).to_owned()).collect(),
                 stdin.map(str::to_owned),
             ));
-            Ok((applies, String::new()))
+            Ok(match args[..2] {
+                ["get", "configmap"] => match &world.before {
+                    Some(text) => (
+                        true,
+                        serde_json::json!({"data": {CONFIGMAP: text}}).to_string(),
+                    ),
+                    None => (false, String::new()),
+                },
+                ["get", "deployment"] => (world.api, "deployment.apps/api".to_owned()),
+                ["apply", _] => (world.applies, String::new()),
+                ["rollout", "restart"] => (world.restarts, String::new()),
+                _ => (false, String::new()),
+            })
         };
         let steps = Steps {
             kubectl: &kubectl,
@@ -239,47 +365,115 @@ mod tests {
 
     #[test]
     fn the_subject_reaches_mandate_on_stdin_alone_and_only_its_digest_reaches_the_cluster() {
-        let (got, seen, dir) = run(CANARY, true, true);
-        assert_eq!(got.expect("linked"), "linked");
+        let (got, seen, dir) = run(CANARY, &World::default());
+        assert_eq!(got.expect("linked"), "linked; api restarted");
         assert_eq!(seen.mandate.len(), 1);
         let (args, stdin) = &seen.mandate[0];
         assert_eq!(stdin, CANARY, "the subject is mandate's standard input");
         assert!(!args.iter().any(|a| a.contains(CANARY)), "{args:?}");
         assert_eq!(&args[..6], &link_command(&founder(), Path::new("x"))[..6]);
-        assert_eq!(seen.kubectl.len(), 1);
-        let (kargs, manifest) = &seen.kubectl[0];
-        assert_eq!(kargs, &["apply", "-f", "-"], "no argument carries the link");
-        let manifest = manifest.as_deref().expect("the manifest on stdin");
-        assert!(!manifest.contains(CANARY), "{manifest}");
-        let object: serde_json::Value = serde_json::from_str(manifest).expect("JSON");
-        assert_eq!(object["kind"], "ConfigMap");
-        assert_eq!(object["metadata"]["name"], CONFIGMAP);
-        assert_eq!(object["metadata"]["namespace"], "ws-ws1");
+        for (args, stdin) in &seen.kubectl {
+            assert!(
+                !args
+                    .iter()
+                    .any(|a| a.contains(CANARY) || a.contains(DIGEST)),
+                "{args:?}"
+            );
+            assert!(!stdin.as_deref().unwrap_or_default().contains(CANARY));
+        }
+        let applied = seen.applied().expect("applied");
+        assert_eq!(applied["kind"], "ConfigMap");
+        assert_eq!(applied["metadata"]["name"], CONFIGMAP);
+        assert_eq!(applied["metadata"]["namespace"], "ws-ws1");
+        assert_eq!(applied["data"][CONFIGMAP], line());
         assert_eq!(
-            object["data"][CONFIGMAP],
-            format!("{DIGEST} {}\n", founder().member)
+            seen.verbs(),
+            [
+                "get configmap",
+                "apply -f",
+                "get deployment",
+                "rollout restart"
+            ]
         );
-        let left: Vec<_> = walk(&dir);
-        assert!(left.is_empty(), "the link file is removed: {left:?}");
+        assert!(walk(&dir).is_empty(), "the link file is removed");
     }
 
     #[test]
-    fn no_subject_runs_nothing_and_changes_nothing() {
-        let (got, seen, _) = run("", true, true);
-        assert_eq!(got.expect("skipped"), "skipped: no founder subject is set");
-        assert!(seen.mandate.is_empty() && seen.kubectl.is_empty());
+    fn the_api_restarts_only_when_the_link_changed_and_it_exists() {
+        let same = World {
+            before: Some(line()),
+            ..World::default()
+        };
+        let (got, seen, _) = run(CANARY, &same);
+        assert_eq!(got.expect("unchanged"), "linked, unchanged");
+        assert_eq!(seen.verbs(), ["get configmap", "apply -f"]);
+        let other = World {
+            before: Some("sha256:00 01KDEM0000000000000000000P\n".to_owned()),
+            ..World::default()
+        };
+        let (got, seen, _) = run(CANARY, &other);
+        assert_eq!(got.expect("restarted"), "linked; api restarted");
+        assert!(seen.verbs().contains(&"rollout restart".to_owned()));
+        let no_api = World {
+            api: false,
+            ..World::default()
+        };
+        let (got, seen, _) = run(CANARY, &no_api);
+        assert_eq!(got.expect("linked"), "linked");
+        assert!(!seen.verbs().contains(&"rollout restart".to_owned()));
+        let stuck = World {
+            restarts: false,
+            ..World::default()
+        };
+        assert!(
+            run(CANARY, &stuck).0.is_err(),
+            "a failed restart fails the step"
+        );
+    }
+
+    #[test]
+    fn no_subject_applies_the_links_empty_and_runs_no_mandate() {
+        let (got, seen, _) = run("", &World::default());
+        assert_eq!(
+            got.expect("cleared"),
+            "no founder subject is set: nobody is linked; api restarted"
+        );
+        assert!(seen.mandate.is_empty());
+        assert_eq!(seen.applied().expect("applied")["data"][CONFIGMAP], "");
+        let empty = World {
+            before: Some(String::new()),
+            ..World::default()
+        };
+        let (got, seen, _) = run("", &empty);
+        assert_eq!(
+            got.expect("unchanged"),
+            "no founder subject is set: nobody is linked, unchanged"
+        );
+        assert_eq!(seen.verbs(), ["get configmap", "apply -f"]);
     }
 
     #[test]
     fn a_refused_link_applies_nothing_and_a_failed_apply_fails_the_step() {
-        let (got, seen, dir) = run(CANARY, false, true);
+        let refused = World {
+            links_ok: false,
+            ..World::default()
+        };
+        let (got, seen, dir) = run(CANARY, &refused);
         let error = got.expect_err("refused").to_string();
         assert!(!error.contains(CANARY), "{error}");
-        assert!(seen.kubectl.is_empty(), "nothing applied");
+        assert!(seen.kubectl.is_empty(), "nothing read or applied");
         assert!(walk(&dir).is_empty());
-        let (got, seen, _) = run(CANARY, true, false);
+        let failing = World {
+            applies: false,
+            ..World::default()
+        };
+        let (got, seen, _) = run(CANARY, &failing);
         assert!(got.is_err());
-        assert_eq!(seen.kubectl.len(), 1);
+        assert_eq!(
+            seen.verbs(),
+            ["get configmap", "apply -f"],
+            "no restart after a failed apply"
+        );
     }
 
     #[test]
