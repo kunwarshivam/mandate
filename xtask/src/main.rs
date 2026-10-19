@@ -2055,6 +2055,10 @@ const BACKSLASH_WORKFLOW_LINES: &[(&str, &str)] = &[
         r##"if printf '%s\n' "$out" | grep -q '^merged as '; then"##,
     ),
     (
+        ".github/workflows/ci.yml",
+        r##"run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
+    ),
+    (
         ".github/workflows/web-e2e.yml",
         r##"run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
     ),
@@ -2647,6 +2651,9 @@ struct Selection {
     /// selection holds a crate the cell's images hold ([`cell::IMAGE_PACKAGES`]), which it does
     /// whenever any crate those are built on changed.
     cell: bool,
+    /// Whether `cell-demo-web` runs: the cell jobs do, or a path under `web/` other than its
+    /// Markdown changed, since the job drives `web/` against the cell (DEC-2609 item 5).
+    cell_web: bool,
 }
 
 impl Selection {
@@ -2660,6 +2667,7 @@ impl Selection {
             schema_mutants: true,
             tofu: true,
             cell: true,
+            cell_web: true,
         }
     }
 
@@ -2696,8 +2704,8 @@ impl Selection {
         };
         format!(
             "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {} \
-             (tofu {}); schema-mutants {}; cell {}; lint, the spec guard and mutants run as always \
-             (DEC-1190)",
+             (tofu {}); schema-mutants {}; cell {}; cell-demo-web {}; lint, the spec guard and \
+             mutants run as always (DEC-1190)",
             yes(self.tests()),
             yes(self.python),
             yes(self.runner()),
@@ -2705,6 +2713,7 @@ impl Selection {
             yes(self.tofu),
             yes(self.schema_mutants),
             yes(self.cell),
+            yes(self.cell_web),
         )
     }
 
@@ -2713,7 +2722,7 @@ impl Selection {
     fn outputs(&self) -> String {
         format!(
             "tests={}\npython={}\nportable={}\nrh_sim_live={}\nfull_checks={}\nschema_mutants={}\n\
-             cell={}\nreasons={}\n",
+             cell={}\ncell_web={}\nreasons={}\n",
             self.tests(),
             self.python,
             self.runner(),
@@ -2721,6 +2730,7 @@ impl Selection {
             self.full_checks,
             self.schema_mutants,
             self.cell,
+            self.cell_web,
             self.reasons(),
         )
     }
@@ -2752,6 +2762,7 @@ fn select(
     let mut schema_mutants = false;
     let mut tofu = false;
     let mut cell = false;
+    let mut web_changed = false;
     for path in changed {
         if selects_everything(path) {
             return Selection::everything(graph, format!("{path} changed"));
@@ -2785,6 +2796,7 @@ fn select(
             .any(|entry| path_under(path, entry));
         tofu |= path_under(path, TOFU_DIR) && !docs;
         cell |= CELL_INPUTS.iter().any(|entry| path_under(path, entry));
+        web_changed |= web && !path.ends_with(".md");
     }
     let mut crates = dependents_closure(graph, &seeds);
     loop {
@@ -2817,6 +2829,7 @@ fn select(
         schema_mutants,
         tofu,
         cell,
+        cell_web: cell || web_changed,
     }
 }
 
@@ -5320,6 +5333,23 @@ const READ_LINES: &[(&str, &str)] = &[
         ".github/workflows/web-deploy.yml",
         "node scripts/workers.mjs size .wrangler/dry-run",
     ),
+    (".github/workflows/ci.yml", "npm ci --ignore-scripts"),
+    (
+        ".github/workflows/ci.yml",
+        r##"echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT""##,
+    ),
+    (
+        ".github/workflows/ci.yml",
+        r##"grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "npx playwright install --with-deps --only-shell chromium",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "npx playwright install-deps chromium",
+    ),
 ];
 
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
@@ -5404,6 +5434,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_MUTANTS_PLANNED",
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
+    "MANDATE_DEMO_WEB_REQUIRED",
     "MANDATE_GITOPS_REQUIRED",
     "MANDATE_MUTANT_SHARD",
     "MANDATE_OPENBAO_ADDR",
@@ -16298,7 +16329,7 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 12] = [
+    const SELECT_GATES: [(&str, &str); 13] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
@@ -16308,6 +16339,7 @@ mod tests {
         ("schema-mutants", "schema_mutants"),
         ("cell", "cell"),
         ("cell-demo", "cell"),
+        ("cell-demo-web", "cell_web"),
         ("cell-journal", "cell"),
         ("cell-failover", "cell"),
         ("cell-kill-switch", "cell"),
@@ -17631,7 +17663,7 @@ mod tests {
         let outputs = selected.outputs();
         let lines: Vec<&str> = outputs.lines().collect();
         assert_eq!(
-            lines.get(..7),
+            lines.get(..8),
             Some(
                 [
                     "tests=true",
@@ -17641,18 +17673,40 @@ mod tests {
                     "full_checks=true",
                     "schema_mutants=false",
                     "cell=false",
+                    "cell_web=false",
                 ]
                 .as_slice()
             )
         );
-        let reasons = lines.get(7).copied().unwrap_or_default();
+        let reasons = lines.get(8).copied().unwrap_or_default();
         assert!(
             reasons.starts_with(
                 "reasons=3 crate(s) affected: mandate-executor, mandate-paper, mandate-risk;"
             ),
             "{reasons}"
         );
-        assert_eq!(lines.len(), 8, "{outputs}");
+        assert_eq!(lines.len(), 9, "{outputs}");
+    }
+
+    /// DEC-2609 item 5: `cell-demo-web` starts whenever the cell jobs do, and also for a change
+    /// under `web/` other than its Markdown, which the cell jobs skip; never for the
+    /// documentation alone; always with no base.
+    #[test]
+    fn the_web_demo_runs_for_the_cell_or_for_web() {
+        let graph = sample_graph();
+        let both = |paths: &[&str]| {
+            let changed: Vec<String> = paths.iter().map(|p| (*p).to_owned()).collect();
+            let selected = select(Some(&changed), &graph, &BTreeMap::new());
+            (selected.cell, selected.cell_web)
+        };
+        assert_eq!(both(&["web/src/app/page.tsx"]), (false, true));
+        assert_eq!(both(&["web/package-lock.json"]), (false, true));
+        assert_eq!(both(&["deploy/cell/values.yaml"]), (true, true));
+        assert_eq!(both(&["web/README.md"]), (false, false));
+        assert_eq!(both(&["docs/HLD.md"]), (false, false));
+        assert_eq!(both(&["crates/mandate-num/src/lib.rs"]), (false, false));
+        let everything = select(None, &graph, &BTreeMap::new());
+        assert!(everything.cell && everything.cell_web, "no base runs both");
     }
 
     /// DEC-2609: the cell jobs start for a change to a crate any image package is built on, the
@@ -18430,12 +18484,13 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            18,
+            19,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
-             `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-journal`, `cell-failover`, \
-             `cell-kill-switch` (DEC-2602), and `hosted-k3d` (E21-51)"
+             `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
+             `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), and `hosted-k3d` \
+             (E21-51)"
         );
         for checkout in checkouts {
             assert!(
@@ -20970,7 +21025,7 @@ jq -r "$filter" "$src"
             unreadable(&host_problems(&[flow(&run)])?, &["web-e2e"]);
         }
         let elsewhere = ci_file(
-            ".github/workflows/ci.yml",
+            ".github/workflows/nightly.yml",
             &format!("on: push\njobs:\n  web-e2e:\n    steps:\n      - run: {probe}\n"),
         );
         unreadable(&host_problems(&[elsewhere])?, &["web-e2e"]);
@@ -21500,7 +21555,7 @@ jq -r "$filter" "$src"
             &line.replace("rm -f", "rm -rf"),
         );
         unreadable(&host_problems(&[changed])?, &["web-e2e"]);
-        let elsewhere = flow(".github/workflows/ci.yml", line);
+        let elsewhere = flow(".github/workflows/nightly.yml", line);
         unreadable(&host_problems(&[elsewhere])?, &["web-e2e"]);
         Ok(())
     }
