@@ -343,3 +343,18 @@ pub fn account_positions(account_rows: &[StoredEvent]) -> Vec<Value> {
     }
     latest.into_values().collect()
 }
+
+/// The agent's orders on its account stream (`read-models/orders`, DEC-2111 item 3), in the order
+/// first submitted: each `client_order_id` whose `OrderSubmitted` names, as its `causation_id`, an
+/// `OrderRequestRecorded` for `agent_id` (journal spec §9.5 rule 45). The request is the first
+/// `OrderSubmitted`'s and its companion's; `state` and `filled_qty` are the last
+/// `OrderStateChanged`'s, `null` before any; `updated_at` is the order's last record's
+/// `recorded_at`. An order no companion names is no agent's, and is never listed.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn agent_orders(account: &[StoredEvent], agent_id: &str) -> Vec<Value> {
+    let _ = (account, agent_id);
+    todo!()
+}

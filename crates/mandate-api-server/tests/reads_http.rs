@@ -729,3 +729,121 @@ fn without_a_store_nothing_from_the_document_is_reported() {
         assert_eq!(agent.get(member), Some(&Value::Null), "{member}");
     }
 }
+
+/// `row` with its envelope's `causation_id` set to `cause`, re-encoded and re-hashed.
+fn caused(mut row: StoredEvent, cause: &str) -> StoredEvent {
+    let mut envelope = parse(&row.body).expect("JSON");
+    if let Value::Object(members) = &mut envelope {
+        members.insert(
+            mandate_canon::Key::new("causation_id").expect("a key"),
+            Value::Str(cause.into()),
+        );
+    }
+    row.body = to_canonical(&envelope);
+    row.hash = Digest::of(&row.body);
+    row
+}
+
+/// `agt_a`'s order `o-1` and another agent's `o-2` on `acct_1`, after `seed_documents`'s rows.
+fn seed_orders(f: &Fixture) {
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    let companion = |seq, agent: &str| {
+        row(
+            &acct,
+            seq,
+            "OrderRequestRecorded",
+            &format!(
+                r#"{{"agent_id":"{agent}","intent_id":null,"purpose":"open","extended_hours":false,"stop_price":null,"order_class":null,"take_profit":null,"stop":null,"rung":null,"at_floor":null,"risk_clock":"2026-10-17T10:00:00Z"}}"#
+            ),
+        )
+    };
+    let submitted = |seq, id: &str, cause: &StoredEvent| {
+        let mut row = caused(
+            row(
+                &acct,
+                seq,
+                "OrderSubmitted",
+                &format!(
+                    r#"{{"client_order_id":"{id}","attempt":1,"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","type":"limit","tif":"day","qty":"3","limit_price":"101.5","risk_clock":"2026-10-17T10:00:00Z"}}"#
+                ),
+            ),
+            &cause.event_id,
+        );
+        row.schema_version = 2;
+        row
+    };
+    let mine = companion(3, "agt_a");
+    let theirs = companion(5, "agt_b");
+    let rows = vec![
+        mine.clone(),
+        submitted(4, "o-1", &mine),
+        theirs.clone(),
+        submitted(6, "o-2", &theirs),
+    ];
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .get_mut(&acct)
+        .expect("seeded")
+        .extend(rows);
+}
+
+#[test]
+#[ignore = "pending E11-9"]
+fn an_agents_orders_are_its_own_on_its_documents_account() {
+    let (bytes, version) = document();
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    seed_orders(&f);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Viewer])]));
+    let cookie = signed_in(&f, alice());
+    let reply = get(&f, &ws("/agents/agt_a/orders"), Some(&cookie));
+    assert_eq!(
+        reply.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let served = json(&reply);
+    assert_eq!(text(&served, "agent_id"), "agt_a");
+    assert_eq!(text(&served, "account_ref"), "acct_1");
+    let Some(Value::Array(orders)) = served.get("orders") else {
+        panic!("orders");
+    };
+    let ids: Vec<&str> = orders.iter().map(|o| text(o, "client_order_id")).collect();
+    assert_eq!(
+        ids,
+        ["o-1"],
+        "agt_b's order on the same account is not served"
+    );
+    let Some(Value::Array(as_of)) = served.get("as_of") else {
+        panic!("as_of");
+    };
+    let streams: Vec<&str> = as_of.iter().map(|w| text(w, "stream_id")).collect();
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    assert_eq!(streams, [ctl().as_str(), acct.as_str()]);
+
+    let undocumented = json(&get(&f, &ws("/agents/agt_b/orders"), Some(&cookie)));
+    assert_eq!(
+        undocumented.get("account_ref"),
+        Some(&Value::Null),
+        "no document to name it"
+    );
+    assert_eq!(undocumented.get("orders"), Some(&Value::Array(Vec::new())));
+
+    let absent = get(&f, &ws("/agents/agt_x/orders"), Some(&cookie));
+    assert_eq!(
+        absent.status, 404,
+        "an agent the control stream does not name"
+    );
+
+    f.journal.failing.lock().expect("unpoisoned").insert(acct);
+    let unread = get(&f, &ws("/agents/agt_a/orders"), Some(&cookie));
+    assert_eq!(unread.status, 503);
+    assert_eq!(text(&json(&unread), "code"), "journal_unavailable");
+
+    members(&f, Ok(Vec::new()));
+    let stranger = get(&f, &ws("/agents/agt_a/orders"), Some(&cookie));
+    assert_eq!(stranger.status, 404, "no membership is API-9's 404");
+}

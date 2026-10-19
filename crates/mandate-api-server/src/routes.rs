@@ -409,6 +409,21 @@ async fn all_approvals(
     Ok((views, read.into_iter().map(|(_, rows)| rows).collect()))
 }
 
+/// `GET /v1/workspaces/{ws}/agents/{agent_id}/orders` (§4.7 D3, DEC-2111): `read-models/orders`,
+/// from the account stream of the connection the agent's deployed document names.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub async fn agent_orders_read(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let _ = (app, headers, path);
+    todo!()
+}
+
 /// `GET /v1/workspaces/{ws}/approvals?state=pending|resolved`.
 pub async fn list_approvals(
     State(app): State<Arc<App>>,

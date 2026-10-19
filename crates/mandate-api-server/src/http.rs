@@ -118,6 +118,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             get(routes::one_agent).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/orders",
+            get(routes::agent_orders_read).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/approvals",
             get(routes::list_approvals).fallback(otherwise.clone()),
         )
