@@ -423,6 +423,9 @@ impl Fold {
                 self.complete_goal(journal)?;
                 None
             }
+            Input::Split { .. } | Input::CashDividend { .. } | Input::ReceivablePosted => {
+                return Err(SpecError::Unimplemented);
+            }
         };
         Ok((Read::Nothing, refused))
     }
