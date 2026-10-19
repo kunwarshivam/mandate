@@ -268,17 +268,21 @@ proptest! {
     }
 }
 
-/// The agent stream: one call record at 19:00Z on the cut-off's risk day, its `reservation` the
-/// JSON given, or nothing.
+/// The agent stream: one call record at 19:00Z on the cut-off's risk day, or at `event_time`, its
+/// `reservation` the JSON given, or nothing.
 struct AgentRows(Vec<StoredEvent>);
 
 impl AgentRows {
     fn with_call(reservation: Option<&str>) -> Self {
+        Self::with_call_at(reservation, "2026-10-16T19:00:00.000000000Z")
+    }
+
+    fn with_call_at(reservation: Option<&str>, event_time: &str) -> Self {
         let Some(reservation) = reservation else {
             return Self(Vec::new());
         };
         let body = format!(
-            r#"{{"envelope_version":1,"environment":"paper","event_id":"01J8Z3MA000000000000000001","stream_id":"agent:ws1:agent-a","event_type":"ModelInvocationRecorded","schema_version":1,"event_time":"2026-10-16T19:00:00.000000000Z","clock_source":"system","causation_id":null,"correlation_id":"01RUN","actor":{{"kind":"agent","id":"agent-a","version":"1","build":null}},"config_refs":{{}},"payload":{{"cost_usd":"0.25","reservation":{reservation}}},"artifact_refs":[],"pii_refs":[]}}"#
+            r#"{{"envelope_version":1,"environment":"paper","event_id":"01J8Z3MA000000000000000001","stream_id":"agent:ws1:agent-a","event_type":"ModelInvocationRecorded","schema_version":1,"event_time":"{event_time}","clock_source":"system","causation_id":null,"correlation_id":"01RUN","actor":{{"kind":"agent","id":"agent-a","version":"1","build":null}},"config_refs":{{}},"payload":{{"cost_usd":"0.25","reservation":{reservation}}},"artifact_refs":[],"pii_refs":[]}}"#
         );
         Self(vec![StoredEvent {
             stream_id: "agent:ws1:agent-a".into(),
@@ -287,7 +291,7 @@ impl AgentRows {
             event_type: "ModelInvocationRecorded".into(),
             schema_version: 1,
             environment: "paper".into(),
-            recorded_at: "2026-10-16T19:00:00.000000000Z".into(),
+            recorded_at: event_time.into(),
             prev_hash: Digest::of(b"prev"),
             hash: Digest::of(body.as_bytes()),
             body: body.into_bytes(),
@@ -308,6 +312,11 @@ impl Rows for AgentRows {
 /// A worker whose gateway reserves through a meter over `store`, the agent stream holding one call
 /// record whose reservation is `reservation`, if any, and its clock at the worker's own `now`.
 fn metered(shelf: &Shelf, store: &SharedMeter, reservation: Option<&str>) -> RecordedWorker {
+    metered_over(shelf, store, AgentRows::with_call(reservation))
+}
+
+/// As [`metered`], over the agent stream `rows`.
+fn metered_over(shelf: &Shelf, store: &SharedMeter, rows: AgentRows) -> RecordedWorker {
     let who = WorkerFor {
         workspace: "ws1".to_owned(),
         agent: "agent-a".to_owned(),
@@ -316,7 +325,7 @@ fn metered(shelf: &Shelf, store: &SharedMeter, reservation: Option<&str>) -> Rec
     let clock = || UtcNanos::from_parts(CUT_OFF + 5, 0).unwrap();
     let meter = CellMeter::new(
         store.clone(),
-        Rc::new(AgentRows::with_call(reservation)),
+        Rc::new(rows),
         SourceFor {
             workspace: "ws1".to_owned(),
             agent: "agent-a".to_owned(),
@@ -383,6 +392,29 @@ fn a_held_meter_refuses_the_call_and_a_free_one_holds_its_reservation() {
     assert_eq!(record.reservation, None);
     assert!(store.records().is_empty(), "nothing reserved while held");
     assert_eq!(record.response_ref, None, "nothing was sent");
+}
+
+/// A clean restart is no outage: a worker restarted on an empty meter, its agent stream recording
+/// a reserved call only on an earlier risk day (03:59:59Z on the 16th is the 15th in New York),
+/// calls as before, and its reservation lands in the shared store.
+#[test]
+#[ignore = "pending E21-59"]
+fn a_restart_with_no_reserved_call_on_the_risk_day_calls_as_before() {
+    let (shelf, store) = (Shelf::default(), SharedMeter::new());
+    let rows = AgentRows::with_call_at(
+        Some(r#""01J8Z3MR000000000000000555""#),
+        "2026-10-16T03:59:59.000000000Z",
+    );
+    let record = called(&mut metered_over(&shelf, &store, rows));
+    assert_eq!(record.outcome, CallOutcome::Ok);
+    let reservation = record.reservation.expect("an ok call is reserved");
+    assert!(
+        store
+            .records()
+            .iter()
+            .any(|r| matches!(r, MeterRecord::Reserved(x) if x.event_id == reservation)),
+        "the call's reservation is in the shared store"
+    );
 }
 
 /// An artifact store that answers every put with a reference other than the bytes'.
