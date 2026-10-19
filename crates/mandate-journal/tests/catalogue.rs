@@ -248,6 +248,29 @@ const CLOSED_BY_SECTION_9_14: [&str; 2] = ["AnchorComputed", "SegmentExported"];
 /// `tests/backtest_records.rs` asserts each against its vectors.
 const CLOSED_BY_SECTION_9_18: [&str; 2] = ["BacktestRunRecorded", "EvaluationRunRecorded"];
 
+/// Journal spec v0.58 §9.27's seven risk-limit records (E6-15, DEC-2301), closed on the account
+/// stream only. They keep `unknown_schema` until E6-15's registration, so the generic check skips
+/// them and `the_risk_limit_records_are_closed_on_the_account_stream` pins what they become.
+const CLOSED_BY_SECTION_9_27: [&str; 7] = [
+    "RiskDayStarted",
+    "RiskLimitTriggered",
+    "RiskLimitLifted",
+    "HighWaterMarkReset",
+    "PositionReleased",
+    "InstrumentRestrictionChanged",
+    "GoalCompleted",
+];
+
+/// Journal spec v0.61 §9.28's acknowledgment (E8-3's follow-up, DEC-2509), closed on the control
+/// stream and as the account stream's copy. It keeps `unknown_schema` until the registration, so
+/// the generic check skips it and
+/// `the_acknowledgment_records_are_closed_on_the_control_and_account_streams` pins what it and its
+/// request become.
+const CLOSED_BY_SECTION_9_28: [&str; 1] = ["OwnerAcknowledged"];
+
+/// §9.28's two records, which the registration catalogues on the control and account streams.
+const SECTION_9_28: [&str; 2] = ["OwnerAcknowledgmentRequested", "OwnerAcknowledged"];
+
 /// The account stream's snapshot, which §9.2 closes with rule 24 and its registration routes there
 /// (DEC-402). It is kept apart from the eleven pairs until that registration is implemented.
 const SNAPSHOT_ON_ACCOUNT: (&str, &str) = ("AccountSnapshotRecorded", ACCT);
@@ -345,6 +368,8 @@ fn stream_types_and_required_config_refs_match_the_spec() {
                 && !CLOSED_BY_E12_3.contains(event_type)
                 && !CLOSED_BY_SECTION_9_14.contains(event_type)
                 && !CLOSED_BY_SECTION_9_18.contains(event_type)
+                && !CLOSED_BY_SECTION_9_27.contains(event_type)
+                && !CLOSED_BY_SECTION_9_28.contains(event_type)
             {
                 assert_eq!(with_all.reason, expected, "{event_type} in {kind}");
             }
@@ -1561,6 +1586,65 @@ fn verification_run_has_no_version_3() {
 
 /// §9.13's `VerificationRun`, the one record of these five with a version 2 (journal spec v0.36).
 const VERIFICATION: &str = "VerificationRun";
+
+/// §9.27's records are closed on the account stream at schema version 1: an unlisted member is
+/// refused `schema` there and `wrong_stream` on every other stream, and version 2 has no schema.
+#[test]
+fn the_risk_limit_records_are_closed_on_the_account_stream() {
+    for event_type in CLOSED_BY_SECTION_9_27 {
+        for kind in [ACCT, AGENT, CTL, CLOCK] {
+            let want = match kind {
+                ACCT => (InvalidReason::Schema, "payload.unregistered".to_owned()),
+                _ => (InvalidReason::WrongStream, "event_type".to_owned()),
+            };
+            assert_eq!(
+                refused(event_type, kind, &[MAN]),
+                want,
+                "{event_type} in {kind}"
+            );
+        }
+        let version_2 = edit(
+            &draft(event_type, ACCT, &[MAN]),
+            "schema_version",
+            Some("2"),
+        );
+        let e = Draft::parse(&version_2).unwrap_err();
+        let want = (InvalidReason::UnknownSchema, "payload");
+        assert_eq!((e.reason, e.path.as_str()), want, "{event_type} version 2");
+    }
+}
+
+/// §9.28's request and acknowledgment are catalogued on the control stream and, as the executor's
+/// copies, on the account stream, with no configuration, and closed on both at schema version 1:
+/// an unlisted member is refused `schema` there and `wrong_stream` on every other stream, and
+/// version 2 has no schema.
+#[test]
+#[ignore = "pending E8-3"]
+fn the_acknowledgment_records_are_closed_on_the_control_and_account_streams() {
+    for event_type in SECTION_9_28 {
+        for kind in [ACCT, AGENT, CTL, CLOCK] {
+            let want = match kind {
+                ACCT | CTL => (InvalidReason::Schema, "payload.unregistered".to_owned()),
+                _ => (InvalidReason::WrongStream, "event_type".to_owned()),
+            };
+            assert_eq!(
+                refused(event_type, kind, &[]),
+                want,
+                "{event_type} in {kind}"
+            );
+        }
+        for kind in [ACCT, CTL] {
+            let version_2 = edit(&draft(event_type, kind, &[]), "schema_version", Some("2"));
+            let e = Draft::parse(&version_2).unwrap_err();
+            let want = (InvalidReason::UnknownSchema, "payload");
+            assert_eq!(
+                (e.reason, e.path.as_str()),
+                want,
+                "{event_type} version 2 in {kind}"
+            );
+        }
+    }
+}
 
 /// Each of `event_types` is refused `schema` at an unlisted member on the control stream and
 /// `wrong_stream` on every other, and, but for `VerificationRun`, has no schema at version 2.

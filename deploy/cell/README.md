@@ -159,7 +159,7 @@ upgrades every release in place.
 | The workspace API server, through a port-forward | Lane A1 (E21-31) marks `api` built in `processes.json` |
 | The agent runtime, on the deny-all wiring until the post-R0 hook | `runtime` is built in `processes.json` and `cell up` built its image (DEC-1013); with the deployment manager built, the manager starts it, which it does once it reads a deployment's account from `AgentDeployed` version 2 (DEC-1171) |
 | Sign-in as the demo owner, through the local stub issuer | Lane SI's stub issuer (E21-52) and the server's key-set tier check (E21-53) are both on `main` |
-| A paper agent on rh-sim and recorded Alpaca fixtures | Lane P1 (#1451) marks `runtime` and `executor` built |
+| A paper agent on rh-sim and recorded Alpaca fixtures | `runtime` and `executor` are built (the executor's interim image runs its fixture paper broker, DEC-2031), the runtime proposes orders once the post-R0 hook wires its ports (DEC-1013), and the executor takes them once slice X1b of E21-30 lands; until all three hold the part stays a named gap |
 | The founding membership | Lane ID1's `mandate membership` gesture is in the CLI |
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
 
@@ -214,21 +214,25 @@ ULID made from the run id (`01KDEM<run id>000000000D`), founded for the demo own
 stub issuer's `demo-owner` subject is linked to; before the gestures, the scenario points the API
 and the deployment manager at it (`helm upgrade --reuse-values --set api.workspace=…`) and waits
 for both to roll out, so every step, through the CLI, the API or `web/`, acts on one workspace
-(DEC-2010).
+(DEC-2010). Step 5 registers the run's settings as the rule set, runs
+`mandate-backtest-runner` on its committed demo inputs and records the payload it stores, in the
+same pod, so the closing verify checks the record's report (DEC-2023).
 
-The run's own report is the up-to-date list; on 2026-10-18, after slice 5, it read:
+The run's own report is the up-to-date list; on 2026-10-18, after slice 8, it read:
 
 | Step | Today | Runs | Waits on |
 |---|---|---|---|
-| 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found` for the demo owner; the cell's API refusing a read of the run's workspace with no session (the one 401); the demo owner's sign-in through the stub issuer (204 and its cookie) | MB (E21-31), the membership parser: the API reads memberships through `control_entry`, without which every signed-in read answers `membership_unavailable`; W2: the same in `web/` |
-| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy`, each code shown then typed | MB and W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
+| 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found` for the demo owner; the cell's API refusing a read of the run's workspace with no session (the one 401); the demo owner's sign-in through the stub issuer (204 and its cookie); and the read with that session, whose agents list the demo's agent (200) | W2: the same in `web/` |
+| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy` of `demo-spy`, each code shown then typed | W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
 | 3. Research, through the gateway's recorded fake | skipped | Nothing yet | D1: the runtime started; I2 (E19-2): a deployment's research configured (DEC-2208); AH (E19-13): the agentic loop over its state (#1551, #1561, #1566, #1569 on `main`) |
 | 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
-| 5. A backtest of the same version | skipped | Nothing yet | E2E: run the runner and `mandate backtest record` (#1581) in the gestures' pod; MB: the API read with a session |
-| 6. The kill switch | partial | `agent kill --agent demo-spy` (agent scope), recorded before the closing export and verify | MB and W2: from `web/`; D1 and X: the processes stop on it |
+| 5. A backtest of the same version | partial | `config register --kind rule_set` (the run's settings), `mandate-backtest-runner run` on its committed demo inputs, `backtest record` of the payload it stores, which the closing verify checks, and the owner's signed-in read of it through the API (completed, with the stored report) | W2: web/'s report screen |
+| 6. The kill switch | partial | A second agent, `demo-web`, on its own envelope (QQQ's snapshot registered, its version created and confirmed after step 5's record, then deployed, each code shown then typed); `demo-web`'s kill switch pressed in `web/` after the gestures' Job (lane W2's `kill_switch_from_web`), its command read back with the owner's session from the run's control stream, accepted (its `KillSwitchActivated` waits on a runtime) (not run on a machine without npm, `web/node_modules`, Playwright's Chromium or openssl, unless `MANDATE_DEMO_WEB_REQUIRED` is set, which makes it fail; that switch alone still reads an unreachable API as not run, so a job that must run the gesture sets it with `MANDATE_CELL_REQUIRED`); `agent kill --agent demo-spy` through the CLI (agent scope), recorded before the closing export and verify (web/'s kill switch comes after them, so the read stands in for the verify) | D1 and X: the processes stop on it |
 
 The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
-every opening asked, protection on. CI's `cell-demo` job, which no required check depends on, runs
+every opening asked, protection on. `demo-web`'s is `deploy/cell/demo/web-mandate.json`, the same
+envelope on QQQ (`web-instrument.json`): V-006 refuses a second agent on the account an instrument
+another already pins ([DEC-2036](../../docs/project/decisions/DEC-2036.md)). CI's `cell-demo` job, which no required check depends on, runs
 the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecting proxy, set
 `MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle first.
 
@@ -279,14 +283,16 @@ In `deploy/tests/test_vault.py`:
 - sealed is not ready, and no probe restarts it, since a restart seals it;
 - hardened as the workspace's pods are, its image by digest, and no secret in a value or the
   environment;
-- the workspace chart's vault egress selects exactly its pods and port.
+- the workspace chart's vault egress selects exactly its pods and port, and the processes it admits
+  are exactly those whose egress names the vault;
+- no seal block and no seal key outside staging, and staging's static seal reads its key from a
+  read-only mounted file, never the environment (DEC-2021).
 
 `cargo xtask cell up` installs it, initializes it once with one unseal key, kept with the root
 token in `target/cell/vault-init.json` (mode 0600; this cell holds fake secrets only), unseals it,
 and refuses a vault on any storage but raft. `cell down` discards both.
 
-A hosted cell, staging included, is initialized and unsealed by the founder, by hand (DEC-977 item
-5):
+A production cell is initialized and unsealed by the founder, by hand (DEC-977 item 5):
 
 ```bash
 helm upgrade --install vault deploy/cell/charts/vault -n ws-ws1 -f deploy/cell/values/vault-managed.yaml
@@ -295,9 +301,36 @@ kubectl exec -it -n ws-ws1 vault-0 -- bao operator unseal    # twice, two differ
 ```
 
 The shares and the root token are kept offline, never in the repository, CI, a file the cluster can
-read, or an environment variable. After every restart of `vault-0`, it is unsealed again. The chart
-keeps its TLS pair by Helm's `lookup`, so it is installed by Helm itself (or Flux's
-helm-controller), not rendered by `helm template` (DEC-2019, residuals).
+read, or an environment variable. After every restart of `vault-0`, it is unsealed again.
+
+Staging (paper only) unseals itself (DEC-2605 row 10, [DEC-2021](../../docs/project/decisions/DEC-2021.md)):
+the founder's local `cargo xtask gitops bootstrap staging` creates the Secret `vault-seal-key` (its
+`key` entry, typed or pasted at the founder's terminal and piped to kubectl's stdin; no CI job can
+reach staging's API, DEC-2015 item 4) before the chart's first install, and the chart mounts it as
+a file. Flux installs the release (DEC-2015). Once, after it reports the vault Running:
+
+```bash
+helm upgrade --install vault deploy/cell/charts/vault -n ws-ws1 -f deploy/cell/values/vault-staging.yaml
+kubectl exec -it -n ws-ws1 vault-0 -- bao operator init -recovery-shares=3 -recovery-threshold=2
+```
+
+The recovery keys and the root token are kept offline as the shares are; they are needed only to
+make a root token or rotate the seal, never to unseal. The schema refuses `seal.type: static`
+anywhere but `environment: staging`. The chart keeps its TLS pair by Helm's `lookup`, so it is
+installed by Helm itself (or Flux's helm-controller), not rendered by `helm template` (DEC-2019,
+residuals).
+
+Rotating staging's seal key (DEC-2021 item 5) is a one-off with the founder at the terminal; the
+chart refuses a second key today, so it waits on a chart change that renders OpenBao's
+`previous_key` for one restart (backlog, E21-32 *Left*). Its steps then:
+
+1. Pick a new `keyId` (`staging-2`). Add the new key to `vault-seal-key` beside the old one, through
+   the founder's bootstrap, never in git, a value, or a log.
+2. Set `seal.keyId` to the new name and the old one as the previous key in
+   `deploy/cell/values/vault-staging.yaml`; Flux restarts `vault-0`, which unseals with the old key
+   and re-wraps its root key under the new one.
+3. Once `bao status` shows the vault unsealed under the new key id, remove the previous key from
+   the values, then the old key from the Secret.
 
 Not yet: provisioning policies and roles in the cell and handing each process its secret id as a
 mounted file, the egress drill's vault probe, and the vault's audit device.

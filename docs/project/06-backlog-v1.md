@@ -280,6 +280,10 @@ the spec invariants (DP-n) its tests cover.
   to fail on a seeded bug; zero missed mutants. *Slice 2:* corporate actions through the
   accounting fold, several instruments at once, and one shared mapping from a mandate document to
   the gate's mandate for the backtest and the shell.
+  *The risk state's corporate actions landed* ([DEC-2303](decisions/DEC-2303.md), #1656, #1671,
+  #1672): MC-R27 to MC-R32 pass. *Follow-up:* `dividends_due` is folded but not reported; a spec and
+  code pair adds it to `ref.py`'s risk snapshot and `mandate-spec`'s `Snapshot`, with every
+  `risk_state` case's expectation and the refcases harness reading it.
 - **E4-5 (Must, M5)** As an owner, I want my backtest report kept as a record with a stable shape,
   so that the go-live screen and the web app show exactly the report that was produced
   ([DEC-1001](decisions/DEC-1001.md)). *Accepted when:* the report is canonical JSON at
@@ -855,6 +859,20 @@ after U-A1 to U-A5 are recorded.
   `xtask/src/main.rs` is empty, and `cargo xtask live-feature` still exits 0 on the repository.
   Beside it, the stronger artifact-level check DEC-851 item 6's threat model names: assert from
   `cargo metadata` and the build plan that no CI job resolves the `live` feature.
+- **E7-29 (Must, M6, lane X's next story after E21-30's X1b)** As an owner, I want every exit at
+  the market handed to the executor core as a market order, so that none is held waiting on a
+  floor I did not confirm. Today the core takes only limit orders from a handoff, so the executor
+  process prices an owner's market exit at the floor its instrument-scoped `OwnerExitRequested`
+  confirmed, and holds any other exit at the market with one opaque alert (`owner_exit_unpriced`
+  or `exit_unpriced`), a gap against rule 13 that [DEC-2033](decisions/DEC-2033.md) item 4
+  records. *Accepted when:* `IntentBody::Order` carries an order type; the core receives, gates
+  and submits a market exit (trading spec §5.1, §5.5) with the same write-before-acting and
+  rule-13 exemptions as a limit exit; the executor process hands every exit and raises neither
+  alert; `Purpose::exempt_from_pacing` is checked for `OwnerExit` (owner exits are paced only by
+  participation caps, rule 13); and the owner-exit property (`mandate-executord`'s
+  `tests/owner_exits.rs`) is re-seeded once the fixture fills, with a held position, gate facts
+  and an `Unknown` order in the instrument, and shows no owner exit is refused for conduct,
+  eligibility, day-trade budget, buying power or opening-session reasons.
 
 ### E8 Escalation and approvals
 
@@ -2625,7 +2643,7 @@ items 13 to 20); no story here buys a service or touches live money.
   mid-hand-over shows no protective order canceled by the deploy, every unprotected interval within
   `max_unprotected_s`, the kill switch applied by the new process, and zero duplicates.
 - **E21-8 (Proposed, M6 then M11)** As the founder, I want release builds from `main` that are
-  reproducible, carry an SBOM, and from M11 are signed with my hardware key and checked at start
+  reproducible, carry an SBOM, and from M11 are signed with the release key (DEC-2024) and checked at start
   (ES-14, ES-17, OPS-15). *Accepted when:* two builds of one commit are byte-identical; each process
   journals its build digest; and outside dev and CI an unsigned binary refuses to start.
   *Status:* the reproducible build, its SBOMs, the CI double build and `mandate-release`'s
@@ -2826,9 +2844,13 @@ enables `live` (ES-23, OPS-5).
   #1458): the crate, both backends, one conformance suite, the policies, leases and grants.
   *Slice 2* ([DEC-2019](decisions/DEC-2019.md)): the cell's OpenBao chart, in server mode on raft
   over TLS 1.3, reached only by the processes whose egress names it, initialized and unsealed by
-  `cargo xtask cell up`. *Left:* provisioning the policies and roles in the cell, each process's
-  secret id as a mounted file, and the egress drill's vault probe; the audit device; the metrics
-  and journal parts of the canary scan once either carries a vault operation.
+  `cargo xtask cell up`. *Slice 3a* ([DEC-2021](decisions/DEC-2021.md)): staging unseals itself
+  with the static seal from a mounted, bootstrap-created key (DEC-2605 row 10); the cell and
+  production stay unsealed by hand. *Left:* the chart's `previous_key` for one restart, which
+  staging's seal-key rotation needs (deploy/cell/README.md, "The vault"); provisioning the policies
+  and roles in the cell, each process's secret id as a mounted file, and the egress drill's vault
+  probe; the audit device; the metrics and journal parts of the canary scan once either carries a
+  vault operation.
 - **E21-33 (Proposed, M8; SC; lane D1; journal spec first if needed)** As an owner, I want a
   deployment manager that keeps each deployed agent's processes running and leaves a crash-looping
   agent paused, so that my agent is managed without anyone watching (design §3.4, §11 "Bad
@@ -2847,13 +2869,20 @@ enables `live` (ES-23, OPS-5).
   ServiceAccount and a Role over pods alone, bounded by a ValidatingAdmissionPolicy to pods shaped
   like its templates, its `kube-api` egress and an egress gate that probes a denied destination, the
   runtime's and executor's pod templates, which mount no service-account token, and the
-  `mandate.dev/subject-key` label. *Left:* reading the account from `AgentDeployed`
-  version 2 ([DEC-1171](decisions/DEC-1171.md)), until which the process starts nothing for a
-  deployment; the Compose adapter; the restart drill through `cargo xtask cell drill`; the owner's
-  resume lifting a crash-loop pause once the runtime copies the pause (E21-30); alerts through the
-  cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting exited pods; the
-  CLI and the workspace API writing version 2, and the writers' checks of rules 200 and 201 (a
-  writer writes version 2 exactly when rule 201 holds, and version 1 otherwise, as today). From
+  `mandate.dev/subject-key` label. *Slice 3* ([DEC-1171](decisions/DEC-1171.md),
+  [DEC-1173](decisions/DEC-1173.md)): `AgentDeployed` version 2 registered, rule 201 in §11's
+  `connection_lifecycle_mismatch` and rule 200 in §9.2's mapping; the manager reads a deployment's
+  account from version 2 and its connection's establishment, and the resolver is gone; a stop is
+  final, read or not, and a version-1 deployment raises `deployment_unread`; the CLI and the
+  workspace API write version 2 exactly when rule 201 holds, check rule 200, and never redeploy a
+  stopped agent's id. *Left:* the Compose adapter; the restart drill through `cargo xtask cell
+  drill`; the owner's resume lifting a crash-loop pause once the runtime copies the pause (E21-30);
+  alerts through the cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting
+  exited pods; the demo's runtime, which needs a version-2 deployment and so `connection record`
+  for the demo's paper connection, waiting on the executor's connect check (E21-30, lane X). From
+  #1737's review, minors left under the freeze rule: a version-2 deployment rule 201 refuses (its
+  connection revoked or never established) starts nothing silently, where a once-per-process opaque
+  alert like `deployment_unread` would show it; and RB-14 has no page under `docs/runbooks/`. From
   slice 2's review, minors left under the freeze rule:
   - The manager's egress gate reads any connection failure on port 9153 as filtered, so a dead or
     restarting resolver fails open; a positive control first (TCP 53 on the same address) would
@@ -2862,20 +2891,6 @@ enables `live` (ES-23, OPS-5).
   - The chart test of the gate seeds no 9153 allow in the manager's policy.
   - `PgControl`'s `rows_after` reads the whole control stream on every pass.
   - `pg.rs` has no competing-writer test for the writer epoch taken for each append.
-  Follow-ups from DEC-1171's review (minors, freeze rule), decided in
-  [DEC-1173](decisions/DEC-1173.md) and specified in journal spec v0.56:
-  - m1 (decided, writers to build): an agent id is deployed once, so a writer refuses an agent an
-    `AgentStopped` names; the CLI's `agent_stopped` and the workspace API's refusal land with the
-    writers.
-  - m2 (done in the vectors; the manager to build): a stop is final even for a deployment the
-    manager never read.
-  - m3 (decided; the manager to build): a version-1 deployment is retired before the manager runs
-    its workspace, and the manager raises `deployment_unread` for one it finds.
-  - m4 (done): the oracle's revocation-after-deployment case now fails two seeded bugs, and a
-    vector shows rule 201 refusing an account stream's copy.
-  - m5 (done): the §9 catalogue row names version 2.
-  - m6 (half done): `docs/specs/workspace-api.md` states the version its deployment writes;
-    `docs/design/infrastructure.md` changes with the manager's code.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
@@ -2896,14 +2911,17 @@ enables `live` (ES-23, OPS-5).
   binaries on an empty base, run as non-root with a read-only root filesystem and no shell; each is
   signed with cosign and its digest and signature recorded; a process outside dev and CI refuses to
   start when its signature does not verify, and journals its build digest (`actor.build`) when it
-  does; CI signs with an ephemeral test key, and only the founder's hardware key signs an image for a
-  hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
+  does; CI signs with an ephemeral test key, and only the release key, on the founder's approval
+  (DEC-2024), signs an image for a hosted cell; promotion runs `main` → the local cell's CI drills → staging (once H1 is approved),
   never from a branch; and a test shows an unsigned and a wrongly signed image both refused.
   *Status:* the images, the start-up check in `mandate-agentd`, the CI test-key drill and the
   `main`-only publish to GHCR land with DEC-971; images for amd64 and arm64, each built natively,
   under one signed multi-arch index, with DEC-1060. **After R0:** the CLI runs the check (with
-  E21-8's last slice). **Founder:** the hardware key's public half in `RELEASE_KEYS` (H8), until
-  which nothing starts outside dev and CI (DEC-971 item 7). Staging promotion waits on H1.
+  E21-8's last slice). **Release key** (DEC-2024; DEC-2605 rows 8 and 9, no hardware key): its
+  public half is in `RELEASE_KEYS` (`crates/mandate-release/release-keys/cosign.pub`), and the
+  `release-signing` job signs each binary and `SHA256SUMS` with it on a dispatch from `main`
+  the founder approves ([runbook](../runbooks/release-signing-key.md)). Staging promotion waits
+  on H1.
 - **E21-36 (Proposed, M8, reused by M11; SC; lane K1)** As an operator, I want one Helm chart
   and one Compose file for a workspace deployment, so that the managed cell, a hybrid cluster and a single
   host install the same processes (design §1.2, §3.2, §9; FR-9.2; E13-1). *Accepted when:* both
@@ -3048,7 +3066,7 @@ enables `live` (ES-23, OPS-5).
   founder, I want my agent to place real orders through my Robinhood agentic account from cell #1,
   on the same path every broker uses, so that the first hosted version trades for real (DEC-967
   item 15). *Accepted when:* the cell's Robinhood executor image is the only image built with
-  `live`, signed with the founder's hardware key, and refuses to start unsigned (OPS-15);
+  `live`, signed with the release key (DEC-2024), and refuses to start unsigned (OPS-15);
   `xtask/layers.toml` marks `mandate-daemon` as the one crate besides `mandate-paper` that may
   declare `live`, `cargo xtask live-feature` and its tests allow exactly those two, and CI still
   only compiles `live` (DEC-529 item 3 as item 15 narrows it), with `mandate-paper` untouched; that executor alone has egress to
@@ -3126,6 +3144,15 @@ enables `live` (ES-23, OPS-5).
   *Status:* done. The tests (#1565), the cell wiring (#1572), the stub (#1591), xtask's release
   check and profile guard (#1620), and the release build's refusal of rustflags, compiler, wrapper
   and profile overrides from its environment or any cargo configuration it reads (DEC-2027).
+  *Follow-up (DEC-2032 item 3, the leak-guard's second review):* L1 to L3 do not yet read
+  `env:`-shaped lines inside a `run:` block, `#` lines inside a heredoc, a redirect before a flag
+  (`set >x -x`), a shell's `-O` before `-x`, `/proc/self/environ` built from parts or read by a
+  language one-liner (`python -c`, `node -e`, `perl -e`), a `secrets:` mapping across several
+  lines, or a duplicate `ALLOWED` line. L5 to L8 do not yet read `curl` option abbreviations
+  (`--verb`), `-w '%{header_json}'`, `~/.curlrc`, `${!var}` indirection, composite actions'
+  steps, `wget -d` or `-S`, `curl | sh`, other `docker` or `podman login -p` forms, or
+  `--oauth2-bearer`, `-b` and `--proxy-user` values. They hold `web-e2e.yml`'s traces upload by
+  step order only. L9's closed world holds meanwhile.
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
   issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
@@ -3185,6 +3212,32 @@ enables `live` (ES-23, OPS-5).
   key, environment and secret the founder creates, each with the least permissions the plan
   needs. It stops at a reachable, empty cluster with its buckets, DNS and Access: add-ons and
   applications are lane GO's.
+- **E21-58 (Proposed, M8, staging by 2026-10-26; lane GO; claim #1635; DEC-2015 to DEC-2018; after
+  E21-56's empty DOKS cluster from lane IAC, DEC-2011)** As the founder, I want staging and production
+  on DOKS reconciled by GitOps from `main`, so that what runs is exactly what `main` says and
+  production moves only by a reviewed pull request. *Accepted when:* `deploy/gitops/` holds one
+  overlay per environment (`staging`, `production`), reconciled by Flux read-only from `main`
+  (DEC-2015), that installs, from `deploy/cell/charts/` and `deploy/hosted/values/` unforked, the
+  CloudNativePG operator and its Barman Cloud plugin, the journal's two instances on separate nodes
+  archiving to the journal archive bucket (Cloudflare R2 with bucket lock, DEC-2605 row 4) through
+  an egress rule that fails closed, the workspace chart, and cloudflared for the tunnel; staging
+  tracks the signed image digests `release.yml` publishes from `main` through a bot pull request,
+  and production changes only by a pull request that copies staging's digests; every image of the
+  repository's is signature-checked at admission (E21-35); CI renders every overlay with no
+  credential, checks it with kubeconform, and refuses an overlay that sets the stub tier (`dev` or
+  `ci`, DEC-2005) or `live`, or names an image not pinned by digest, selected by `cargo xtask ci
+  select` (DEC-1190); and the founder's one bootstrap, from an address the cluster's API firewall
+  admits, installs Flux and creates the workload secrets (the tunnel token and the archive key)
+  from lane IAC's outputs, never committed and never by an agent, until E21-32's vault holds them.
+
+- **E21-59 (Proposed, M8, after E21-54's step 3; lane I2; DEC-2214)** As the founder, I want the
+  runtime process's research source to fold an agent's theses, lineages, working universe and
+  research reservations from its agent stream, so that the cell's research keeps running after its
+  first proposal instead of pausing. *Accepted when:* `mandate-daemon`'s cell source folds those
+  facts from the agent stream's own records through the same functions the core judges with
+  (`fold_theses`, `expire_theses`, the reservation ceiling's fold), gives no context on a pass when
+  any record cannot be folded (DEC-2210 item 4), and a property test over random journaled runs
+  shows the folded facts equal an independent accumulator over the same records.
 
 ## Won't (v1)
 
@@ -3216,6 +3269,22 @@ fully on-prem control plane; shared data plane; strategy marketplace.
      platform did not originate is external activity, which puts the account's agents in
      `exits_only`) and [connections spec](../specs/connections.md) CN-7 (never adopted as ours).
      Both are protected spec changes.
+
+- **Rotating Barman's minted R2 token** ([DEC-2029](decisions/DEC-2029.md); E21-56's review).
+  The `cloudflare` module mints the journal archive's bucket-scoped token with no `expires_on`, so
+  it lives until the token resource is replaced. Wanted: an expiry, a rotation that mints the next
+  token before the old one lapses and hands it to the cluster through lane GO's bootstrap, and a
+  check that alerts before the expiry. Until then the founder can rotate it by tainting
+  `module.cloudflare.cloudflare_account_token.journal_archive` in a reviewed apply.
+
+- **`infra.yml` hardening left from E21-56's review of #1711** ([DEC-2030](decisions/DEC-2030.md)
+  item 6). Each tightens what already holds:
+  1. `terraform_data.applied_commit` depends on every module, so a partial apply never records its
+     commit, and it changes only on an apply, not on every plan.
+  2. The `MANDATE_INFRA_SHA` guard line is bound to the secret step, not only to the file.
+  3. The `cloudflare` module's `access_allowed_emails` variable is `sensitive` itself, not only
+     through production's root.
+  4. The CIDR masks also cover each IPv6 range's normalised forms (compressed and expanded).
 
 ## Enterprise harness (proposed, DEC-149)
 

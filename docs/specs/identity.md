@@ -932,6 +932,16 @@ passkey, within the last 300 seconds, for **this** action and no other.
    `step_up_stale`, `step_up_reused`, `step_up_method`, or `step_up_mismatch` for a digest that does
    not match).
 
+**`cli_confirm` for a paper grant made in the web app** ([DEC-2104](../project/decisions/DEC-2104.md),
+DEC-2103 item 7). Steps 1 and 2 are as above. In place of step 3, the web app shows a code made
+from the challenge's bytes, and the owner confirms it on the host with `mandate step-up confirm`,
+which appends `StepUpConfirmed` to the control stream ([journal spec
+§9.29](journal.md#929-the-clis-step-up-confirmation-dec-2104)). In place of step 4, workspace
+services verify the grant's `cli_confirm` evidence against the challenge they hold and that one
+record, in DEC-2104 item 6's order, with the principal checked against the subject link. Step 5
+holds with `method: cli_confirm` and no raw assertion, since none exists, and step 6 is unchanged.
+It is paper only and `approve` only (§7.3).
+
 The runtime and executor still judge evidence at the effective time as mandate §6.1 says (window,
 reuse in the control stream, method per environment). Steps 4 and 5 are the authentication the
 mandate spec says E9-4 provides; they add the action binding and never relax the runtime's checks.

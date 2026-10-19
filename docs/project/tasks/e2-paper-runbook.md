@@ -279,7 +279,7 @@ Nothing is journaled or sent; report the line, and do not work around it.
 | `... Reconcile: the broker and the journal disagree on <id>'s fills (<reason>)` | the own-fill booking found the broker's fills and the journal disagreeing (DEC-955 item 4); nothing written or sent | stop and report the line |
 | `the proposal classified ask, and the tracer acts only on auto` | autonomy does not make the opening `auto` | fix autonomy in a new version |
 | `cancel_unconfirmed` (alone) | watch bound hit, cancel not confirmed | check the paper dashboard now, cancel by hand, report it |
-| CLI codes: `owner_user_invalid`, `workspace_already_open`, `instrument_snapshot_invalid`, `instrument_unregistered`, `version_invalid`, `code_mismatch`, `version_unconfirmed`, `version_superseded`, `agent_active`, `mandate_not_paper`, `config_file_unreadable` | a step 4 gesture refused, nothing written | fix the input; `code_mismatch` = re-show the code; `version_superseded` = a later confirm exists |
+| CLI codes: `owner_user_invalid`, `workspace_already_open`, `instrument_snapshot_invalid`, `instrument_unregistered`, `version_invalid`, `code_mismatch`, `version_unconfirmed`, `version_superseded`, `agent_active`, `agent_stopped` (DEC-1173), `mandate_not_paper`, `config_file_unreadable` | a step 4 gesture refused, nothing written | fix the input; `code_mismatch` = re-show the code; `version_superseded` = a later confirm exists |
 
 ## 10. Could not verify
 

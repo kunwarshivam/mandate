@@ -46,7 +46,6 @@ fn count(haystack: &str, needle: &str) -> usize {
 /// a space, a line break that would start a `Cc` or `Bcc` header, a missing or doubled `@`, and
 /// anything outside printable ASCII are each refused.
 #[test]
-#[ignore = "pending E8-11"]
 fn the_founder_address_is_exactly_one_plain_address() {
     for good in [FOUNDER, "f.o+under@sub.mail.example", "a@b"] {
         answer(good, FounderAddress::parse(good));
@@ -86,7 +85,6 @@ fn the_founder_address_is_exactly_one_plain_address() {
 /// link and the founder's footer, in that order and with no greeting; the link is exactly
 /// `<origin>/n/<notice id>` (NT-4) and appears once.
 #[test]
-#[ignore = "pending E8-11"]
 fn the_mail_is_the_text_the_sentence_the_link_and_the_founders_footer() {
     for (seed, key) in MAILED.into_iter().enumerate() {
         let (notification, mail) = mail(seed as u64, key);
@@ -117,7 +115,6 @@ fn the_mail_is_the_text_the_sentence_the_link_and_the_founders_footer() {
 /// Spec §4.4: the HTML part fetches nothing and styles nothing from elsewhere: no image, source,
 /// stylesheet, script, frame, form, `style` or `url(`, and its only URL is the notice's link.
 #[test]
-#[ignore = "pending E8-11"]
 fn the_html_fetches_nothing() {
     for (seed, key) in MAILED.into_iter().enumerate() {
         let (notification, mail) = mail(seed as u64, key);
@@ -149,7 +146,6 @@ fn the_html_fetches_nothing() {
 /// DEC-2508: the brief is not mailed until its one-click unsubscribe endpoint and counsel's
 /// wording exist.
 #[test]
-#[ignore = "pending E8-11"]
 fn the_brief_is_not_mailed() {
     match founder_mail(&origin(), &notification(7, TextKey::BriefReady)) {
         Err(NotifyError::MailNotPermitted) => {}
@@ -175,7 +171,6 @@ fn headers(wire: &str) -> Vec<(String, String)> {
 /// [`SENDER`]; it has no `Cc`, `Bcc`, `Reply-To`, `List-Unsubscribe` or other recipient header,
 /// every line ends in CRLF, and it carries both parts.
 #[test]
-#[ignore = "pending E8-11"]
 fn the_wire_form_has_one_recipient_and_nothing_else_addressed() {
     let to = answer("address", FounderAddress::parse(FOUNDER));
     for (seed, key) in MAILED.into_iter().enumerate() {
@@ -226,7 +221,6 @@ fn the_wire_form_has_one_recipient_and_nothing_else_addressed() {
 /// NT-1: nothing a captured mail holds is trading data. The wire form of every mailed key, to an
 /// address that is itself a canary-free plain address, holds no canary.
 #[test]
-#[ignore = "pending E8-11"]
 fn every_mail_passes_the_canary_scan() {
     let to = answer("address", FounderAddress::parse(FOUNDER));
     for (seed, key) in MAILED.into_iter().enumerate() {
@@ -261,7 +255,6 @@ fn html_parts(html: &str) -> (Vec<String>, Vec<String>) {
 /// exactly the doctype, `html`, `body`, `p`, `br` and one `a` whose only attribute is the notice's
 /// link, and its text is exactly the four parts, in order.
 #[test]
-#[ignore = "pending E8-11"]
 fn the_html_is_only_allowlisted_tags_around_the_four_parts() {
     for (seed, key) in MAILED.into_iter().enumerate() {
         let (notification, mail) = mail(seed as u64, key);
@@ -297,7 +290,6 @@ fn the_html_is_only_allowlisted_tags_around_the_four_parts() {
 /// canary seeded into a real mail's wire form, in its subject and in its body, is found, and only
 /// that one.
 #[test]
-#[ignore = "pending E8-11"]
 fn the_canary_scan_catches_a_canary_seeded_into_a_mail() {
     let to = answer("address", FounderAddress::parse(FOUNDER));
     let (_, mail) = mail(42, TextKey::AttentionNeeded);

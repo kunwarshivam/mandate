@@ -115,7 +115,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             adoption(state, event)?;
             rung_stepped(state, payload)?;
             rung_ended(state, payload)?;
-            order_state_changed(state, payload, at)
+            order_state_changed(state, event, at)
         }
         "CompensatingEvent" => {
             if let Some(Value::Array(corrected)) = payload.get("corrected_event_ids") {
@@ -820,9 +820,10 @@ fn adoption(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), Execut
 
 fn order_state_changed(
     state: &mut ExecutorState,
-    payload: &Value,
+    event: &FoldedEvent,
     at: RiskClock,
 ) -> Result<(), ExecutorError> {
+    let payload = &event.payload;
     let id = client_order_id(payload)?;
     let next = state_of(required_text(payload, "state")?)?;
     if let Some(old) = optional_text(payload, "replaces") {
@@ -840,6 +841,11 @@ fn order_state_changed(
     }
     if flag(payload, "cancel_overdue") {
         detail.cancel_overdue = true;
+    }
+    if flag(payload, "cancel_requested") {
+        detail.cancel_asked_seqs.push(event.seq);
+        detail.cancel_asked_at = Some(at);
+        detail.cancel_asked_event = Some(event.event_id.clone());
     }
     if flag(payload, "ignored") {
         if flag(payload, "cancel_requested") {

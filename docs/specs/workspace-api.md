@@ -370,9 +370,15 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   and records it. **Validity is judged by the stream owner** at the moment mandate spec §6.1 names;
   the API's check is a convenience, except that it never forwards evidence bound to another action.
 - Until E9-4 ships, the CLI's only method is `cli_confirm`, paper only (mandate spec §6.1). The API
-  refuses every `live` step-up with `live_unavailable`. Whether the API itself may verify
-  `cli_confirm` for a call made in the web app is the founder's (DEC-2103 item 7, Proposed); until
-  decided, the API verifies `passkey` only, and `cli_confirm` stays the CLI's.
+  refuses every `live` step-up with `live_unavailable`. For a call made in the web app the API
+  verifies `passkey`, and `cli_confirm` only for a paper `approve` grant, confirmed in the CLI by
+  the same principal against a challenge this server issued for that action, within its 300 s and
+  once (DEC-2103 item 7, decided by the founder, DEC-2605 row 5); any other `cli_confirm` is
+  `step_up_method`. The web app shows the challenge's code, the first 40 bits of its
+  `webauthn_challenge` as 8 Crockford base-32 characters; the owner confirms it on the host with
+  `mandate step-up confirm`, which appends `StepUpConfirmed` ([journal spec
+  §9.29](journal.md#929-the-clis-step-up-confirmation-dec-2104)); and the API verifies the grant's
+  evidence against that record in [DEC-2104](../project/decisions/DEC-2104.md) item 6's order.
 
 ### 3.7 Roles
 

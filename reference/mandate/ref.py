@@ -35,6 +35,9 @@ def norm(x):
 def r12(x):
     return D(x).quantize(D("1e-12"), rounding=ROUND_HALF_EVEN)
 
+def cents(x):
+    return D(x).quantize(D("0.01"), rounding=ROUND_HALF_EVEN)
+
 def c12(x):
     return D(x).quantize(D("1e-12"), rounding=ROUND_CEILING)
 
@@ -605,6 +608,7 @@ class RiskState:
         self.qty = D(qty)
         self.B = D(qty) * D(avg_cost)
         self.realized = D(0)
+        self.dividends_due = D(0)  # §5.2: dividends applied whose receivable waits for the first counted sane mark
         self.mark = D(avg_cost)
         self.cls = asset_class
         self.lad = r["drawdown_ladder"]
@@ -646,6 +650,23 @@ class RiskState:
 
     def equity(self):
         return self.A + self.realized + self.qty * self.mark - self.B
+
+    def _split(self, new, old, fractionable, cash_in_lieu_price):
+        """Trading spec §8.5's split, as the risk state folds `CorporateActionApplied` (mandate spec
+        §5.2): Q', B' and realized exactly; cash in lieu is a receivable, so it is in E. The mark is
+        rounded toward zero, so a split with no residual never raises E (MI-33)."""
+        q, b = self.qty, self.B
+        q_raw = q * new / old
+        q2 = q_raw.quantize(D("1e-9"), rounding=ROUND_DOWN) if fractionable else q_raw.to_integral_value(rounding=ROUND_DOWN)
+        if q2 == 0:
+            removed = b
+        else:
+            removed = r12(b * (q * new - q2 * old) / (q * new))
+        cash = cents((q_raw - q2) * D(cash_in_lieu_price or 0))
+        self.B = b - removed
+        self.realized += cash - removed
+        self.qty = q2
+        self.mark = (self.mark * old / new).quantize(D("1e-12"), rounding=ROUND_DOWN)
 
     def eff_mode(self):
         return max(self.restrictions.values(), key=lambda x: SEVERITY[x], default="normal")
@@ -743,6 +764,8 @@ class RiskState:
                     self.inst_restrictions.add("stale_mark")
             else:
                 self.mark = D(s["bid"])
+                self.realized += self.dividends_due
+                self.dividends_due = D(0)
                 self.mark_age = 0.0
                 self.inst_restrictions.discard("stale_mark")
         elif kind == "fill":
@@ -778,6 +801,12 @@ class RiskState:
         elif kind == "allocation_change":
             err = self._allocation(D(s["delta_usd"]), ev)
         elif kind == "clock":
+            pass
+        elif kind == "corporate_action_split":
+            self._split(D(s["new"]), D(s["old"]), s["fractionable"], s.get("cash_in_lieu_price"))
+        elif kind == "corporate_action_dividend":
+            self.dividends_due += cents(self.qty * D(s["per_share"]))
+        elif kind in ("cash_in_lieu_posted", "dividend_paid"):
             pass
         elif kind == "universe_changed":
             if s["change"] == "removed":

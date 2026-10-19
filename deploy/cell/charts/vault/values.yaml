@@ -2,6 +2,19 @@
 # first install and kept across upgrades, and the unseal key and the root token are made by
 # `bao operator init`, never by the chart and never a value (DEC-822 item 4, DEC-977 item 5).
 
+# Where this vault runs: `cell` (a local or CI cell), `staging`, or `production`. Only staging may
+# unseal itself (DEC-2605 row 10, DEC-2021); the schema refuses the static seal anywhere else.
+environment: cell
+
+# How the vault unseals. `shamir` (the default): by hand, from key shares the operator holds
+# (DEC-977 item 5). `static`: staging only, from a key in the Secret `keyObject`, which the
+# founder's staging bootstrap creates (DEC-2021) and which is mounted as a
+# file, never an environment variable; `keyId` names that key and is not a secret.
+seal:
+  type: shamir
+  keyId: ""
+  keyObject: vault-seal-key
+
 # The workspace whose processes may reach the vault, by the label every workspace pod carries
 # (`mandate.dev/workspace`) and the egress label of each process whose egress names the vault
 # (`mandate.dev/egress-vault`).

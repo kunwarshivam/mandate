@@ -11,6 +11,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -19,7 +20,8 @@ use sha2::{Digest, Sha256};
 use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS, NAMESPACE,
     NODE, WORKSPACE_CHART, api_image_tag, api_port_forward, helm, http, kubectl, open_session,
-    processes, render, run_id, run_job, signed_in, stub_image_tag, stub_token, tools_missing, up,
+    processes, render, reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag,
+    stub_token, tools_missing, up, web,
 };
 use crate::output;
 
@@ -29,6 +31,11 @@ pub const SCENARIOS: &[&str] = &["demo"];
 /// Both are stored as canonical JSON (journal spec §4), so a version is the SHA-256 of the file.
 pub const MANDATE_FILE: &str = "deploy/cell/demo/mandate.json";
 pub const INSTRUMENT_FILE: &str = "deploy/cell/demo/instrument.json";
+/// [`WEB_AGENT`]'s own envelope and its instrument's snapshot, as canonical JSON: the demo's
+/// envelope on QQQ, since V-006 refuses a second agent on the account an instrument the demo agent
+/// already pins (DEC-2036).
+pub const WEB_MANDATE_FILE: &str = "deploy/cell/demo/web-mandate.json";
+pub const WEB_INSTRUMENT_FILE: &str = "deploy/cell/demo/web-instrument.json";
 const INPUTS: &str = "/in";
 /// The journal and the artifact store every gesture names: the `control` process's DSN, expanded
 /// by Kubernetes from its environment, and the pod's own `/work`, which all its containers share.
@@ -42,6 +49,10 @@ const SEGMENT: &str = "/work/segment.jsonl";
 pub const FOUNDER: &str = DEMO_OWNER;
 /// The demo's agent.
 pub const AGENT: &str = "demo-spy";
+/// A second agent, on its own envelope ([`WEB_MANDATE_FILE`]), deployed for `web/`'s kill switch:
+/// the CLI stops [`AGENT`] inside the Job, and `web/` offers nothing to stop on a stopped agent, so
+/// the browser presses this one's (lane W2's D10).
+pub const WEB_AGENT: &str = "demo-web";
 /// How long the gestures' Job may run: the egress gate, the credentials copy and every gesture,
 /// one after another. Under the 300 s `run_job` polls for, so the Job ends, and the report is
 /// written, before the polling gives up.
@@ -68,7 +79,17 @@ pub struct Step {
 pub enum Part {
     Gesture(Gesture),
     Api(ApiCheck),
+    Web(WebCheck),
     Gap(Gap),
+}
+
+/// A gesture in `web/` against the cell's API, run after the gestures' Job (lane W2's
+/// `kill_switch_from_web`), and the signed-in read that proves it reached the run's control
+/// stream: `GET commands/{id}` must find that command on `ctl:{workspace}`, accepted.
+#[derive(Debug)]
+pub struct WebCheck {
+    pub shows: &'static str,
+    pub agent: &'static str,
 }
 
 /// A link of the story not on `main` yet (DEC-2004): what it would show, what of it is already on
@@ -166,22 +187,15 @@ pub fn by_lane(steps: &[Step]) -> BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>>
     lanes
 }
 
-/// The waits several gaps share: the API's membership read, the agent's runtime started by the
-/// deployment manager, web/ driven against the cell, and the executor in the cell.
-const MB_MEMBERS: Wait = Wait {
-    lane: "MB",
-    story: "E21-31",
+/// The waits several gaps share: the agent's runtime started by the deployment manager, web/
+/// driven against the cell, and the executor in the cell.
+const X_CONNECT: Wait = Wait {
+    lane: "X",
+    story: "E21-30",
     pr: None,
-    lands: "the membership parser: the API reads memberships through `control_entry`; until \
-            then its `until_parser` fails every signed-in read and command closed with \
-            `membership_unavailable` (DEC-978 item 8)",
-};
-const D1_RUNTIME: Wait = Wait {
-    lane: "D1",
-    story: "E21-33",
-    pr: None,
-    lands: "the deployment manager reads a deployment's account from AgentDeployed version 2 and \
-            starts its runtime (DEC-1171, claim #1491); until then it starts none",
+    lands: "the executor's connect check, so `connection record` can record the demo's paper \
+            connection and its deployment is written at version 2, which the manager starts; \
+            until then the deployment is version 1 and starts nothing (DEC-1171)",
 };
 const W2_WEB: Wait = Wait {
     lane: "W2",
@@ -215,26 +229,117 @@ pub struct ApiCheck {
     pub path: String,
     pub status: u16,
     pub ask: Ask,
+    pub body: Body,
 }
 
-/// How an [`ApiCheck`] asks: a `GET` of its path with no session, or the demo owner's sign-in,
-/// a token from the stub issuer traded at `POST /v1/sessions`, which also needs the session cookie.
+/// How an [`ApiCheck`] asks: a `GET` of its path with no session; the demo owner's sign-in, a
+/// token from the stub issuer traded at `POST /v1/sessions`, which also needs the session cookie;
+/// or a `GET` of its path with the session that sign-in opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ask {
     NoSession,
     SignIn,
+    Session,
 }
 
-/// One CLI command in the cell, the text its success prints, and what it shows the demo. A gesture
+/// The phases of a command the journal accepted: `recorded` until a process takes it, then
+/// `taken`, `applied` or `ended`; never `refused` (the workspace API's command status).
+const COMMAND_PHASES: [&str; 4] = ["recorded", "taken", "applied", "ended"];
+
+/// Set where a job must run the web gesture (CT's `cell-demo-web`): there a machine without
+/// `web/`'s tools fails the run, as [`CELL_REQUIRED_ENV`] makes a missing cell fail it.
+pub const WEB_REQUIRED_ENV: &str = "MANDATE_DEMO_WEB_REQUIRED";
+
+/// What the answer's JSON body must hold besides its status: nothing, an `agents` list naming an
+/// agent, string members at JSON pointers, or a command, by id, read from a stream in an accepted
+/// phase.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Body {
+    Any,
+    Lists(&'static str),
+    Members(Vec<(&'static str, String)>),
+    Command { id: String, stream: String },
+}
+
+impl Body {
+    /// Why `body` does not hold what this asks, or `None` when it does.
+    pub fn missing(&self, body: &str) -> Option<String> {
+        let value: Value = match self {
+            Self::Any => return None,
+            Self::Lists(_) | Self::Members(_) | Self::Command { .. } => {
+                match serde_json::from_str(body) {
+                    Ok(value) => value,
+                    Err(_) => return Some("the body is not JSON".into()),
+                }
+            }
+        };
+        match self {
+            Self::Any => None,
+            Self::Lists(agent) => {
+                let listed = value["agents"]
+                    .as_array()
+                    .is_some_and(|a| a.iter().any(|x| x["agent_id"] == *agent));
+                (!listed).then(|| format!("its agents do not list {agent}"))
+            }
+            Self::Members(members) => members.iter().find_map(|(pointer, want)| {
+                let got = value.pointer(pointer).and_then(Value::as_str);
+                (got != Some(want.as_str())).then(|| format!("{pointer} is {got:?}, not {want}"))
+            }),
+            Self::Command { id, stream } => {
+                let phase = value["phase"].as_str().unwrap_or_default();
+                let read_from = value["as_of"]
+                    .as_array()
+                    .is_some_and(|a| a.iter().any(|x| x["stream_id"] == *stream));
+                if value["command_id"] != *id {
+                    Some(format!(
+                        "it reads command {}, not {id}",
+                        value["command_id"]
+                    ))
+                } else if !read_from {
+                    Some(format!("it is not read from {stream}"))
+                } else if !COMMAND_PHASES.contains(&phase) {
+                    Some(format!("its phase is {phase:?}"))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+/// One command in the cell, the text its success prints, and what it shows the demo. A gesture
 /// ran only when its container exited 0 and printed `expect`; a shown code is checked this way
-/// after the Job, and the CLI itself refuses a typed code that differs from the one it shows.
+/// after the Job, and the CLI itself refuses a typed code that differs from the one it shows. A
+/// gesture with a `command` runs that binary of the image instead of its `mandate` entry point.
 #[derive(Debug)]
 pub struct Gesture {
     pub container: String,
     pub shows: &'static str,
+    pub command: Option<&'static str>,
     pub args: Vec<String>,
     pub expect: String,
 }
+
+/// The backtest runner in the cell's `mandate` image (#1581), which step 5 runs beside the CLI
+/// (DEC-2023).
+pub const RUNNER_BIN: &str = "/usr/local/bin/mandate-backtest-runner";
+
+/// The runner's committed demo inputs (DEC-1144 item 3), mounted at [`BACKTEST_IN`].
+pub const BACKTEST_INPUTS: &str = "crates/mandate-backtest-runner/tests/fixtures/demo";
+
+/// Where the pod reads the runner's inputs: a directory of their own, since the runner's
+/// `instrument.json` is not the CLI's instrument snapshot.
+const BACKTEST_IN: &str = "/in/backtest";
+
+/// The demo backtest's id; each run's workspace is fresh, so the id is never another record's.
+pub const BACKTEST_ID: &str = "bt-demo-01";
+
+/// The payload and report the runner stores for the demo version and inputs, the committed golden
+/// store's (DEC-1144 item 8: the demo's payload reference is fixed).
+pub const DEMO_PAYLOAD: &str =
+    "sha256:1ab788b2c066c11d949e53929e1ed0332038f481da4d7d6624e6b2027cfdb240";
+pub const DEMO_REPORT: &str =
+    "sha256:9e672eb266902fc30120100af6bba87f135f0ecfe0a77a00cb4b1d15bcdc4a63";
 
 /// `sha256:` and the hex SHA-256 of `bytes`: an artifact reference (journal spec §4).
 pub fn reference(bytes: &[u8]) -> String {
@@ -263,9 +368,11 @@ fn deploy_code(agent: &str, version: &str) -> String {
     ))
 }
 
-/// The demo's six steps for `workspace`, given the bytes of the demo's mandate.
-pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
+/// The demo's six steps for `workspace`, given the bytes of the demo's mandate and of
+/// [`WEB_AGENT`]'s.
+pub fn plan(workspace: &str, (mandate, web_mandate): (&[u8], &[u8])) -> Vec<Step> {
     let version = reference(mandate);
+    let web_version = reference(web_mandate);
     let user = FOUNDER.to_ascii_lowercase();
     let with = |args: &[&str], extra: &[&str]| -> Vec<String> {
         args.iter().chain(extra).map(|a| a.to_string()).collect()
@@ -281,9 +388,18 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
     let mut index = 0;
     let mut gesture = |shows: &'static str, args: Vec<String>, expect: String| {
         index += 1;
+        let (command, args) = match args.split_first() {
+            Some((first, rest)) if first == RUNNER_BIN => (Some(RUNNER_BIN), rest.to_vec()),
+            _ => (None, args),
+        };
+        let name = match command {
+            Some(_) => format!("runner-{}", args[0]),
+            None => args[..2].join("-"),
+        };
         Part::Gesture(Gesture {
-            container: format!("g{index:02}-{}", args[..2].join("-")),
+            container: format!("g{index:02}-{name}"),
             shows,
+            command,
             args,
             expect,
         })
@@ -291,6 +407,10 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
     let mandate_in = format!("{INPUTS}/mandate.json");
     let instrument_in = format!("{INPUTS}/instrument.json");
     let (confirm, deploy) = (confirm_code(&version), deploy_code(AGENT, &version));
+    let (web_confirm, web_deploy) = (
+        confirm_code(&web_version),
+        deploy_code(WEB_AGENT, &web_version),
+    );
     let steps = vec![
         Step {
             number: 1,
@@ -332,6 +452,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     path: format!("/v1/workspaces/{workspace}/agents"),
                     status: 401,
                     ask: Ask::NoSession,
+                    body: Body::Any,
                 }),
                 Part::Api(ApiCheck {
                     shows: "the demo owner signing in through the stub issuer: POST \
@@ -339,18 +460,20 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     path: "/v1/sessions".into(),
                     status: 204,
                     ask: Ask::SignIn,
+                    body: Body::Any,
                 }),
-                Part::Gap(Gap {
-                    what: "the owner reads the run's workspace through the API with that session",
-                    on_main: "sign-in through the stub issuer (#1591), the API hosting the run's \
-                              workspace founded for the demo owner, and \
-                              `mandate_identity::control_entry`",
-                    waits: vec![MB_MEMBERS],
+                Part::Api(ApiCheck {
+                    shows: "the demo owner, signed in, reading the run's workspace through the \
+                            API: its agents list the demo's agent (200)",
+                    path: format!("/v1/workspaces/{workspace}/agents"),
+                    status: 200,
+                    ask: Ask::Session,
+                    body: Body::Lists(AGENT),
                 }),
                 Part::Gap(Gap {
                     what: "the same sign-in and read in web/",
                     on_main: "web/'s sign-in to a dev cell (#1588) and the stub issuer (#1591)",
-                    waits: vec![MB_MEMBERS, W2_WEB],
+                    waits: vec![W2_WEB],
                 }),
             ],
         },
@@ -404,14 +527,15 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     on_main: "the API's version, confirm and deploy routes (#1552) in the cell \
                               (#1554), web/'s set-up (#1557), its sign-in to a dev cell \
                               (#1588) and the stub issuer (#1591)",
-                    waits: vec![MB_MEMBERS, W2_WEB],
+                    waits: vec![W2_WEB],
                 }),
                 Part::Gap(Gap {
                     what: "the agent's runtime started from AgentDeployed",
-                    on_main: "the deployment manager in the cell (#1582), the runtime's image \
+                    on_main: "the deployment manager in the cell (#1582), starting a runtime \
+                              from a version-2 deployment (DEC-1171, E21-33), the runtime's image \
                               (#1560), and the runtime reading its deployment and mandate from \
                               the manager (#1576, #1577)",
-                    waits: vec![D1_RUNTIME],
+                    waits: vec![X_CONNECT],
                 }),
             ],
         },
@@ -428,7 +552,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                           records (#1561), the loop's pure state (#1566) and the runtime's side \
                           (#1569)",
                 waits: vec![
-                    D1_RUNTIME,
+                    X_CONNECT,
                     wait(
                         "I2",
                         "E19-2",
@@ -456,7 +580,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     on_main: "the runtime and its image (#1521, #1560), on the deny-all wiring \
                               that proposes nothing (DEC-1013 item 2)",
                     waits: vec![
-                        D1_RUNTIME,
+                        X_CONNECT,
                         wait(
                             "P5",
                             "E21-2",
@@ -504,34 +628,123 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
         Step {
             number: 5,
             title: "a backtest of the same mandate version is shown",
-            parts: vec![Part::Gap(Gap {
-                what: "the backtest of this version, its report read through the API and \
-                       shown in web/",
-                on_main: "the runner in the cell's image and `mandate backtest record` (#1581, \
-                          DEC-1144), the API's backtest read (#1555), web/'s report screen \
-                          (#1549), and the owner's session through the stub issuer (#1591)",
-                waits: vec![
-                    wait(
-                        "E2E",
-                        "E21-54",
-                        None,
-                        "this scenario runs the runner, records it in the gestures' pod and \
-                         reads it through the API with the owner's session",
+            parts: vec![
+                gesture(
+                    "the rule set the backtest runs under, registered: the demo run's settings",
+                    owner(&[
+                        "config",
+                        "register",
+                        "--kind",
+                        "rule_set",
+                        &format!("{BACKTEST_IN}/settings.json"),
+                    ]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "the backtest of the confirmed version, run on the demo inputs",
+                    with(
+                        &[
+                            RUNNER_BIN,
+                            "run",
+                            "--inputs",
+                            BACKTEST_IN,
+                            "--store",
+                            STORE,
+                            "--mandate-version",
+                            &version,
+                            "--backtest-id",
+                            BACKTEST_ID,
+                        ],
+                        &[],
                     ),
-                    MB_MEMBERS,
-                ],
-            })],
+                    format!("payload={DEMO_PAYLOAD}"),
+                ),
+                gesture(
+                    "the run, recorded by the backtest runner system after every check",
+                    with(
+                        &[
+                            "backtest",
+                            "record",
+                            "--workspace",
+                            workspace,
+                            "--payload",
+                            DEMO_PAYLOAD,
+                        ],
+                        &target,
+                    ),
+                    format!("report={DEMO_REPORT}"),
+                ),
+                Part::Api(ApiCheck {
+                    shows: "the demo owner, signed in, reading the backtest through the API: \
+                            completed, with the report the run stored (200)",
+                    path: format!("/v1/workspaces/{workspace}/backtests/{BACKTEST_ID}"),
+                    status: 200,
+                    ask: Ask::Session,
+                    body: Body::Members(vec![
+                        ("/backtest/state", "completed".into()),
+                        ("/backtest/report_ref", DEMO_REPORT.into()),
+                        ("/backtest/mandate_version", version.clone()),
+                    ]),
+                }),
+                Part::Gap(Gap {
+                    what: "web/ shows the backtest's report",
+                    on_main: "the API's backtest read (#1555), web/'s report screen (#1549), \
+                              and the owner's session through the stub issuer (#1591)",
+                    waits: vec![W2_WEB],
+                }),
+            ],
         },
         Step {
             number: 6,
             title: "the kill switch from the web app stops the agent",
             parts: vec![
-                Part::Gap(Gap {
-                    what: "the kill switch from web/, recorded through the API",
-                    on_main: "POST /v1/workspaces/{ws}/kill-switch in the cell (#1457, #1554), \
-                              web/'s kill switch sent through the API, its sign-in to a dev cell \
-                              (#1588) and the stub issuer (#1591)",
-                    waits: vec![MB_MEMBERS, W2_WEB],
+                gesture(
+                    "QQQ's instrument snapshot, registered, for a second agent's envelope",
+                    owner(&[
+                        "config",
+                        "register",
+                        "--kind",
+                        "instrument_snapshot",
+                        &format!("{INPUTS}/web-instrument.json"),
+                    ]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "the second agent's envelope, created: the demo's on QQQ",
+                    owner(&["version", "create", &format!("{INPUTS}/web-mandate.json")]),
+                    format!("created {web_version}"),
+                ),
+                gesture(
+                    "its confirmation code, shown (nothing committed)",
+                    owner(&["version", "confirm", &web_version]),
+                    format!("code {web_confirm}"),
+                ),
+                gesture(
+                    "the second envelope, confirmed with the code shown",
+                    owner(&["version", "confirm", &web_version, "--code", &web_confirm]),
+                    "confirmed as event".into(),
+                ),
+                gesture(
+                    "the second agent's code, shown, for web/'s kill switch",
+                    owner(&["agent", "deploy", WEB_AGENT, &web_version]),
+                    format!("code {web_deploy}"),
+                ),
+                gesture(
+                    "the second agent, deployed with the code shown",
+                    owner(&[
+                        "agent",
+                        "deploy",
+                        WEB_AGENT,
+                        &web_version,
+                        "--code",
+                        &web_deploy,
+                    ]),
+                    "deployed as event".into(),
+                ),
+                Part::Web(WebCheck {
+                    shows: "the owner's kill switch for the second agent, pressed in web/ and \
+                            recorded through the API on the run's control stream",
+                    agent: WEB_AGENT,
                 }),
                 gesture(
                     "the owner's kill switch for the agent, through the CLI (agent scope)",
@@ -541,7 +754,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 Part::Gap(Gap {
                     what: "the agent's processes stop on it",
                     on_main: "the runtime reads the kill switch first (#1521, image #1560)",
-                    waits: vec![D1_RUNTIME, X_EXECUTOR],
+                    waits: vec![X_CONNECT, X_EXECUTOR],
                 }),
             ],
         },
@@ -576,14 +789,15 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
         .flat_map(|s| &s.parts)
         .filter_map(|p| match p {
             Part::Gesture(g) => Some(g),
-            Part::Api(_) | Part::Gap(_) => None,
+            Part::Api(_) | Part::Web(_) | Part::Gap(_) => None,
         })
         .collect()
 }
 
 /// The gestures' Job: the chart's own `control` run Job for the first gesture, its container
 /// repeated for each gesture in order as init containers after the chart's own, the last one as
-/// the pod's container, with the demo's files mounted read-only from a ConfigMap at [`INPUTS`].
+/// the pod's container, with the demo's files mounted read-only from a ConfigMap at [`INPUTS`],
+/// each at its path in `files`, which may name a directory (a ConfigMap key cannot).
 /// One pod, so the artifact store `version create` writes is the one `version confirm` and
 /// `agent deploy` read, and the one the closing `journal verify` checks every record's artifact
 /// against.
@@ -606,11 +820,18 @@ pub fn gestures_job(
         .and_then(|c| c.first())
         .cloned()
         .context("the run Job has no container")?;
+    let items: Vec<Value> = files
+        .iter()
+        .map(|(path, _)| json!({"key": key_of(path), "path": path}))
+        .collect();
     let mut containers = Vec::new();
     for gesture in all {
         let mut container = template.clone();
         container["name"] = json!(gesture.container);
         container["args"] = json!(gesture.args);
+        if let Some(command) = gesture.command {
+            container["command"] = json!([command]);
+        }
         container["volumeMounts"]
             .as_array_mut()
             .context("the run container has no mounts")?
@@ -626,10 +847,10 @@ pub fn gestures_job(
     spec["volumes"]
         .as_array_mut()
         .context("the run Job has no volumes")?
-        .push(json!({"name": "in", "configMap": {"name": configmap}}));
+        .push(json!({"name": "in", "configMap": {"name": configmap, "items": items}}));
     let data: serde_json::Map<String, Value> = files
         .iter()
-        .map(|(name, content)| (name.to_string(), json!(content)))
+        .map(|(path, content)| (key_of(path), json!(content)))
         .collect();
     objects.push(json!({
         "apiVersion": "v1",
@@ -638,6 +859,11 @@ pub fn gestures_job(
         "data": data,
     }));
     Ok(objects)
+}
+
+/// The ConfigMap key of the input at `path` under [`INPUTS`]: a key admits no `/`.
+fn key_of(path: &str) -> String {
+    path.replace('/', ".")
 }
 
 /// The lines `container` printed, from a Job's logs as `kubectl logs --prefix` or the per-container
@@ -675,6 +901,29 @@ pub fn exit_codes(pods: &Value) -> BTreeMap<String, i64> {
     codes
 }
 
+/// The runner's five demo inputs under the checkout at `root`, each at its path under
+/// [`BACKTEST_IN`] relative to [`INPUTS`].
+fn backtest_inputs(root: &Path) -> Result<Vec<(String, String)>> {
+    let dir = BACKTEST_IN
+        .strip_prefix(&format!("{INPUTS}/"))
+        .context("the runner's inputs are not under the pod's")?;
+    [
+        "bars.json",
+        "outputs.json",
+        "theses.json",
+        "instrument.json",
+        "settings.json",
+    ]
+    .iter()
+    .map(|name| {
+        let path = root.join(BACKTEST_INPUTS).join(name);
+        let text =
+            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        Ok((format!("{dir}/{name}"), text))
+    })
+    .collect()
+}
+
 /// `cargo xtask cell demo --scenario <name>`.
 pub fn run(name: &str) -> Result<()> {
     if !SCENARIOS.contains(&name) {
@@ -695,7 +944,11 @@ pub fn run(name: &str) -> Result<()> {
     let mandate = fs::read(MANDATE_FILE).with_context(|| format!("reading {MANDATE_FILE}"))?;
     let instrument = fs::read_to_string(INSTRUMENT_FILE)
         .with_context(|| format!("reading {INSTRUMENT_FILE}"))?;
-    let steps = plan(&workspace, &mandate);
+    let web_mandate =
+        fs::read(WEB_MANDATE_FILE).with_context(|| format!("reading {WEB_MANDATE_FILE}"))?;
+    let web_instrument = fs::read_to_string(WEB_INSTRUMENT_FILE)
+        .with_context(|| format!("reading {WEB_INSTRUMENT_FILE}"))?;
+    let steps = plan(&workspace, (&mandate, &web_mandate));
     let all = gestures(&steps);
     let first = all.first().context("the scenario has no gesture")?;
     let rendered = render(
@@ -707,11 +960,20 @@ pub fn run(name: &str) -> Result<()> {
     )?;
     let files = [
         (
-            "mandate.json",
+            "mandate.json".to_string(),
             String::from_utf8(mandate).context("the mandate is not UTF-8")?,
         ),
-        ("instrument.json", instrument),
-    ];
+        ("instrument.json".into(), instrument),
+        (
+            "web-mandate.json".into(),
+            String::from_utf8(web_mandate).context("the second mandate is not UTF-8")?,
+        ),
+        ("web-instrument.json".into(), web_instrument),
+    ]
+    .into_iter()
+    .chain(backtest_inputs(Path::new("."))?)
+    .collect::<Vec<_>>();
+    let files: Vec<(&str, String)> = files.iter().map(|(p, c)| (p.as_str(), c.clone())).collect();
     let objects = gestures_job(rendered, &all, &format!("demo-in-{id}"), &files)?;
     eprintln!("==> the demo, end to end (paper and demo data only; local-cell results)");
     eprintln!("    workspace {workspace}, agent {AGENT}");
@@ -780,6 +1042,22 @@ pub fn run(name: &str) -> Result<()> {
                     eprintln!("    {word:<8} {}: {said}", check.shows);
                     if fails {
                         failed.get_or_insert_with(|| format!("GET {}: {said}", check.path));
+                    }
+                }
+                Part::Web(check) => {
+                    let outcome = if failed.is_some() {
+                        WebOutcome::AfterFailure
+                    } else {
+                        web_outcome(check, &workspace)?
+                    };
+                    let required = Required {
+                        cell: env::var_os(CELL_REQUIRED_ENV).is_some(),
+                        web: env::var_os(WEB_REQUIRED_ENV).is_some(),
+                    };
+                    let (word, said, fails) = web_verdict(&outcome, check, &workspace, required);
+                    eprintln!("    {word:<8} {}: {said}", check.shows);
+                    if fails {
+                        failed.get_or_insert_with(|| format!("web/ {}: {said}", check.agent));
                     }
                 }
                 Part::Gap(gap) => {
@@ -861,7 +1139,7 @@ fn point_api(workspace: &str) -> Result<()> {
         "--wait",
         "--wait-for-jobs",
         "--timeout",
-        "5m",
+        "3m",
     ])?;
     for process in [API_PROCESS, DEPLOY_MANAGER_PROCESS] {
         let deployment = format!("deployment/{process}");
@@ -875,6 +1153,7 @@ fn point_api(workspace: &str) -> Result<()> {
             "name",
         ])?;
         if present.trim().is_empty() {
+            eprintln!("    {process}: not in this cell, no rollout to wait on");
             continue;
         }
         kubectl(&[
@@ -893,7 +1172,9 @@ fn point_api(workspace: &str) -> Result<()> {
 
 /// What the cell's API answers `check` with through the demo's port-forward, its status and
 /// whole reply, or why it cannot be asked. A sign-in first asks the stub issuer for a token; a
-/// stub that gives none reads as an API that could not be asked.
+/// stub that gives none reads as an API that could not be asked. A session check whose sign-in sets no
+/// cookie answers with that sign-in's reply, which the verdict fails as a wrong answer, never as
+/// an API that could not be asked.
 fn api_answer(check: &ApiCheck) -> Result<Result<(u16, String), String>> {
     if let Some(why) = api_unaskable()? {
         return Ok(Err(why));
@@ -902,6 +1183,19 @@ fn api_answer(check: &ApiCheck) -> Result<Result<(u16, String), String>> {
     Ok(answer_of(forwarded, || match check.ask {
         Ask::NoSession => http(API_LOCAL_PORT, "GET", &check.path, &[], ""),
         Ask::SignIn => open_session(&stub_token()?),
+        Ask::Session => {
+            let (status, reply) = open_session(&stub_token()?)?;
+            match session_cookie(&reply) {
+                Some(cookie) => http(
+                    API_LOCAL_PORT,
+                    "GET",
+                    &check.path,
+                    &[("Cookie", &cookie)],
+                    "",
+                ),
+                None => Ok((status, reply)),
+            }
+        }
     }))
 }
 
@@ -936,6 +1230,8 @@ pub fn api_verdict(
                     format!("answered {status} without the session cookie"),
                     true,
                 )
+            } else if let Some(why) = check.body.missing(reply_body(reply)) {
+                ("failed", format!("answered {status}, but {why}"), true)
             } else {
                 ("ran", format!("answered {status}"), false)
             }
@@ -943,6 +1239,110 @@ pub fn api_verdict(
         Ok((status, _)) => ("failed", format!("answered {status}, not {expected}"), true),
         Err(why) if required => ("failed", why.clone(), true),
         Err(why) => ("not run", why.clone(), false),
+    }
+}
+
+/// What became of a [`WebCheck`]: an earlier part failed, so it was not tried; the API could not
+/// be asked; this machine lacks `web/`'s tools; the gesture failed; or it recorded a command,
+/// with the agent and workspace it acted on and the signed-in read of that command.
+#[derive(Debug)]
+pub enum WebOutcome {
+    AfterFailure,
+    Unaskable(String),
+    NoTools(String),
+    Failed(String),
+    Recorded {
+        agent: String,
+        workspace: String,
+        command: String,
+        read: Result<(u16, String), String>,
+    },
+}
+
+/// Runs `check`'s gesture against the cell's API for `workspace`, then reads its command back
+/// with the owner's session.
+fn web_outcome(check: &WebCheck, workspace: &str) -> Result<WebOutcome> {
+    if let Some(why) = api_unaskable()? {
+        return Ok(WebOutcome::Unaskable(why));
+    }
+    if let Some(why) = web::unavailable()? {
+        return Ok(WebOutcome::NoTools(why));
+    }
+    let forwarded = api_port_forward(stub_image_tag()?.is_some());
+    if let Err(why) = forwarded {
+        return Ok(WebOutcome::Unaskable(format!("{why:#}")));
+    }
+    let gesture = match web::kill_switch_from_web(workspace, Some(check.agent)) {
+        Ok(gesture) => gesture,
+        Err(why) => return Ok(WebOutcome::Failed(format!("{why:#}"))),
+    };
+    let read = api_answer(&command_read(workspace, &gesture.command_id))?;
+    Ok(WebOutcome::Recorded {
+        agent: gesture.agent_id,
+        workspace: gesture.workspace,
+        command: gesture.command_id,
+        read,
+    })
+}
+
+/// The signed-in read of `command` in `workspace`: the API finds it on the workspace's control
+/// stream and reads it accepted. Its `KillSwitchActivated` step appears only once a runtime
+/// applies it, which waits on D1 and X, so the read does not require one.
+pub fn command_read(workspace: &str, command: &str) -> ApiCheck {
+    ApiCheck {
+        shows: "the web gesture's command, read back",
+        path: format!("/v1/workspaces/{workspace}/commands/{command}"),
+        status: 200,
+        ask: Ask::Session,
+        body: Body::Command {
+            id: command.to_owned(),
+            stream: format!("ctl:{workspace}"),
+        },
+    }
+}
+
+/// What a run requires: the cell ([`CELL_REQUIRED_ENV`]) and the web gesture
+/// ([`WEB_REQUIRED_ENV`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Required {
+    pub cell: bool,
+    pub web: bool,
+}
+
+/// How a web check reads: `ran` only when the gesture acted on its own agent in `workspace` and
+/// the command reads back from the control stream, accepted; `failed` for a gesture that
+/// failed, acted elsewhere, or reads back wrong, for an API that cannot be asked where the cell
+/// is required, and for a machine without `web/`'s tools where the web gesture is; otherwise
+/// `not run`. Returns the word, what to print after it, and whether the run fails.
+pub fn web_verdict(
+    outcome: &WebOutcome,
+    check: &WebCheck,
+    workspace: &str,
+    required: Required,
+) -> (&'static str, String, bool) {
+    match outcome {
+        WebOutcome::AfterFailure => ("not run", "an earlier part failed".into(), false),
+        WebOutcome::Unaskable(why) if required.cell => ("failed", why.clone(), true),
+        WebOutcome::NoTools(why) if required.web => ("failed", why.clone(), true),
+        WebOutcome::Unaskable(why) | WebOutcome::NoTools(why) => ("not run", why.clone(), false),
+        WebOutcome::Failed(why) => ("failed", why.clone(), true),
+        WebOutcome::Recorded {
+            agent,
+            workspace: acted,
+            command,
+            read,
+        } => {
+            if agent != check.agent || acted != workspace {
+                let said = format!(
+                    "acted on {agent} in {acted}, not {} in {workspace}",
+                    check.agent
+                );
+                return ("failed", said, true);
+            }
+            let (word, said, fails) = api_verdict(read, &command_read(workspace, command), true);
+            let said = format!("command {command}: {said}");
+            (if fails { word } else { "ran" }, said, fails)
+        }
     }
 }
 
@@ -968,6 +1368,15 @@ mod tests {
         fs::read(format!("../{MANDATE_FILE}")).unwrap()
     }
 
+    fn web_mandate() -> Vec<u8> {
+        fs::read(format!("../{WEB_MANDATE_FILE}")).unwrap()
+    }
+
+    /// The plan for `workspace` on the demo's two envelopes.
+    fn planned(workspace: &str) -> Vec<Step> {
+        plan(workspace, (&mandate(), &web_mandate()))
+    }
+
     fn parsed(path: &str) -> Value {
         serde_json::from_slice(&fs::read(format!("../{path}")).unwrap()).unwrap()
     }
@@ -977,7 +1386,12 @@ mod tests {
     /// integers and no string but ASCII, where its compact form is RFC 8785's.
     #[test]
     fn the_demo_files_are_canonical_json() {
-        for path in [MANDATE_FILE, INSTRUMENT_FILE] {
+        for path in [
+            MANDATE_FILE,
+            INSTRUMENT_FILE,
+            WEB_MANDATE_FILE,
+            WEB_INSTRUMENT_FILE,
+        ] {
             let bytes = fs::read(format!("../{path}")).unwrap();
             let again = serde_json::to_vec(&parsed(path)).unwrap();
             assert_eq!(bytes, again, "{path} is not canonical JSON");
@@ -1008,6 +1422,39 @@ mod tests {
         assert_eq!(pinned[0]["symbol"], instrument["symbol"]);
     }
 
+    /// The second agent's envelope is the demo's but for its name, its description and its one
+    /// pinned instrument, which its own snapshot names and which is not the demo agent's, so V-006
+    /// finds it unclaimed on the shared connection (DEC-2036).
+    #[test]
+    fn the_web_envelope_is_the_demo_s_on_another_instrument() {
+        let (mut demo, mut web) = (parsed(MANDATE_FILE), parsed(WEB_MANDATE_FILE));
+        let instrument = parsed(WEB_INSTRUMENT_FILE);
+        let pinned = web["universe"]["pinned_instruments"].clone();
+        assert_eq!(pinned.as_array().map(Vec::len), Some(1));
+        assert_eq!(pinned[0]["asset_id"], instrument["instrument_id"]);
+        assert_eq!(pinned[0]["symbol"], instrument["symbol"]);
+        assert_ne!(
+            pinned[0]["asset_id"],
+            parsed(INSTRUMENT_FILE)["instrument_id"]
+        );
+        assert_eq!(web["name"], WEB_AGENT);
+        assert_eq!(web["connection_id"], demo["connection_id"]);
+        for m in [&mut demo, &mut web] {
+            m["name"] = Value::Null;
+            m["behavior"]["description"] = Value::Null;
+            m["universe"]["pinned_instruments"] = Value::Null;
+        }
+        assert_eq!(web, demo, "every other member is the demo's");
+        let mut snapshot = instrument.clone();
+        let mut spy = parsed(INSTRUMENT_FILE);
+        for s in [&mut snapshot, &mut spy] {
+            for key in ["instrument_id", "symbol", "exchange"] {
+                s[key] = Value::Null;
+            }
+        }
+        assert_eq!(snapshot, spy, "a plain, whole-share listed fund, as SPY is");
+    }
+
     /// DEC-530 item 4's codes for the demo's mandate, as the CLI binary showed them when the
     /// scenario's gestures were run against a local Postgres (and the CLI accepted them typed).
     #[test]
@@ -1022,7 +1469,7 @@ mod tests {
     /// typed code is the one shown; every gesture's container name is unique and a Kubernetes name.
     #[test]
     fn the_plan_runs_the_six_steps_and_types_the_codes_it_shows() {
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         let numbers: Vec<u8> = steps.iter().map(|s| s.number).collect();
         assert_eq!(
             numbers,
@@ -1061,12 +1508,134 @@ mod tests {
         );
     }
 
+    /// The payload the scenario records is the one the runner's own test commits: of the demo's
+    /// version, under [`BACKTEST_ID`], completed, naming [`DEMO_REPORT`].
+    #[test]
+    fn the_demo_payload_is_the_runners_committed_run() {
+        let golden: Value = serde_json::from_str(
+            &fs::read_to_string("../crates/mandate-backtest-runner/tests/fixtures/demo-store.json")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(golden["payload"], DEMO_PAYLOAD);
+        let payload = golden["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["bytes"].as_str().unwrap())
+            .find(|bytes| reference(bytes.as_bytes()) == DEMO_PAYLOAD)
+            .expect("the store holds its payload");
+        let payload: Value = serde_json::from_str(payload).unwrap();
+        assert_eq!(payload["report"], DEMO_REPORT);
+        assert_eq!(payload["result"], "completed");
+        assert_eq!(payload["backtest_id"], BACKTEST_ID);
+        assert_eq!(payload["mandate_version"], reference(&mandate()));
+    }
+
+    /// Step 5 registers a rule set, runs the runner on the confirmed version in the pod's store,
+    /// and records the payload it prints, after the confirmation and before the kill switch; the
+    /// API read and web/'s report wait on the membership parser and web/.
+    #[test]
+    fn step_five_registers_a_rule_set_runs_the_backtest_and_records_it() {
+        let steps = planned("demo5");
+        let all = gestures(&steps);
+        let at = |name: &str| {
+            all.iter()
+                .rposition(|g| g.container.ends_with(name))
+                .unwrap()
+        };
+        let version = reference(&mandate());
+        let (rule_set, runner, record) = (
+            all.iter()
+                .position(|g| g.args.iter().any(|a| a == "rule_set"))
+                .unwrap(),
+            at("runner-run"),
+            at("backtest-record"),
+        );
+        let (confirm, kill) = (
+            all.iter()
+                .rposition(|g| g.args[..3] == ["version", "confirm", version.as_str()])
+                .unwrap(),
+            at("agent-kill"),
+        );
+        assert!(confirm < rule_set && rule_set < runner && runner < record && record < kill);
+        assert!(
+            all[rule_set]
+                .args
+                .windows(2)
+                .any(|w| w == ["--kind", "rule_set"])
+        );
+        let run = all[runner];
+        assert_eq!(run.command, Some(RUNNER_BIN));
+        let version = reference(&mandate());
+        for pair in [
+            ["--inputs", BACKTEST_IN],
+            ["--store", STORE],
+            ["--mandate-version", version.as_str()],
+            ["--backtest-id", BACKTEST_ID],
+        ] {
+            assert!(
+                run.args.windows(2).any(|w| w == pair),
+                "{pair:?} in {:?}",
+                run.args
+            );
+        }
+        assert_eq!(run.expect, format!("payload={DEMO_PAYLOAD}"));
+        assert!(
+            all[record]
+                .args
+                .windows(2)
+                .any(|w| w == ["--payload", DEMO_PAYLOAD])
+        );
+        assert!(
+            !all[record].args.iter().any(|a| a == "--user"),
+            "the runner system records it"
+        );
+        assert_eq!(all[record].expect, format!("report={DEMO_REPORT}"));
+        assert!(all.iter().filter(|g| g.command.is_some()).count() == 1);
+        let lanes: Vec<&str> = steps[4]
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Gap(g) => Some(g.waits.iter().map(|w| w.lane)),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(lanes, ["W2"], "only web/'s report screen is left");
+    }
+
+    /// The runner's five inputs are read from its committed fixtures into their own directory of
+    /// the pod's inputs, the one step 5 passes to `--inputs`.
+    #[test]
+    fn the_runners_inputs_go_to_their_own_directory() {
+        let files = backtest_inputs(Path::new("..")).unwrap();
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "backtest/bars.json",
+                "backtest/outputs.json",
+                "backtest/theses.json",
+                "backtest/instrument.json",
+                "backtest/settings.json"
+            ]
+        );
+        assert_eq!(format!("{INPUTS}/backtest"), BACKTEST_IN);
+        let settings: Value = serde_json::from_str(&files[4].1).unwrap();
+        assert!(
+            settings["gate"].is_object(),
+            "the rule set is the run's settings"
+        );
+    }
+
     /// Every gesture states the workspace it acts on, or its control stream, never the live
-    /// environment, and names the pod's own journal and store; the record is exported last and
-    /// verified against that store, so a record's missing artifact fails the run.
+    /// environment, and names the pod's own journal and store; the backtest runner, which holds no
+    /// journal, names only that store. The record is exported last and verified against that
+    /// store, so a record's missing artifact fails the run.
     #[test]
     fn every_gesture_is_in_the_demo_workspace_and_never_live() {
-        let steps = plan("demo7", &mandate());
+        let steps = planned("demo7");
         let all = gestures(&steps);
         fn value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
             let at = args.iter().position(|a| a == flag);
@@ -1077,12 +1646,20 @@ mod tests {
                 g.args[..2] == ["journal", "export"],
                 g.args[..2] == ["journal", "verify"],
             );
+            let runner = g.command == Some(RUNNER_BIN);
             let scoped = value(&g.args, "--workspace") == Some("demo7")
                 || (export && g.args[2] == "ctl:demo7")
-                || verify;
+                || verify
+                || runner;
             assert!(scoped, "{:?}", g.args);
             assert!(!g.args.iter().any(|a| a == "live"), "{:?}", g.args);
-            if !verify {
+            assert_eq!(
+                runner,
+                value(&g.args, "--journal").is_none() && !verify,
+                "{:?}",
+                g.args
+            );
+            if !verify && !runner {
                 assert_eq!(value(&g.args, "--journal"), Some(JOURNAL), "{:?}", g.args);
             }
             if !export {
@@ -1100,7 +1677,7 @@ mod tests {
     /// agent is deployed and before the record is exported, so the closing verify covers it.
     #[test]
     fn step_six_kills_the_demo_agent_at_agent_scope_before_the_record() {
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         let all = gestures(&steps);
         let at = |head: &[&str]| all.iter().position(|g| g.args[..head.len()] == *head);
         let kill = at(&["agent", "kill"]).expect("step 6 runs `agent kill`");
@@ -1135,37 +1712,288 @@ mod tests {
         );
     }
 
-    /// Step 1 checks the API twice, as main can serve it: a read of the run's own workspace with
-    /// no session must be refused with the one 401, and the demo owner's sign-in must open a
-    /// session (204); the read with that session stays a gap until the API reads memberships
-    /// (lane MB).
+    /// The API checks, in order: step 1's read of the run's own workspace with no session (the one
+    /// 401), the demo owner's sign-in (204), and the read with that session, which must list the
+    /// demo's agent; then step 5's signed-in read of the backtest, completed, with the stored
+    /// report of the confirmed version.
     #[test]
-    fn step_one_checks_the_refusal_and_the_sign_in_and_names_the_signed_in_read() {
+    fn the_api_checks_refuse_sign_in_and_read_the_run_as_its_owner() {
         let ws = workspace_of("0123456789");
-        let steps = plan(&ws, &mandate());
-        let checks: Vec<(u8, &str, u16, Ask)> = steps
+        let steps = planned(&ws);
+        let checks: Vec<(u8, &str, u16, Ask, &Body)> = steps
             .iter()
             .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
             .filter_map(|(n, p)| match p {
-                Part::Api(c) => Some((n, c.path.as_str(), c.status, c.ask)),
+                Part::Api(c) => Some((n, c.path.as_str(), c.status, c.ask, &c.body)),
                 _ => None,
             })
             .collect();
         let read = format!("/v1/workspaces/{ws}/agents");
+        let backtest = format!("/v1/workspaces/{ws}/backtests/{BACKTEST_ID}");
+        let completed = Body::Members(vec![
+            ("/backtest/state", "completed".into()),
+            ("/backtest/report_ref", DEMO_REPORT.into()),
+            ("/backtest/mandate_version", reference(&mandate())),
+        ]);
         assert_eq!(
             checks,
             [
-                (1, read.as_str(), 401, Ask::NoSession),
-                (1, "/v1/sessions", 204, Ask::SignIn)
+                (1, read.as_str(), 401, Ask::NoSession, &Body::Any),
+                (1, "/v1/sessions", 204, Ask::SignIn, &Body::Any),
+                (1, read.as_str(), 200, Ask::Session, &Body::Lists(AGENT)),
+                (5, backtest.as_str(), 200, Ask::Session, &completed),
             ]
         );
-        let waits_on_members = steps[0].parts.iter().any(|p| {
-            matches!(p, Part::Gap(g) if g.what.contains("with that session")
-                && g.waits.iter().any(|w| w.lane == "MB"))
-        });
         assert!(
-            waits_on_members,
-            "the signed-in read is named, waiting on MB"
+            !by_lane(&steps).iter().any(|(lane, _)| *lane == "MB"),
+            "nothing waits on the membership parser now on main"
+        );
+    }
+
+    /// A body check holds only for what it names: the agent among `agents`, and each member at
+    /// its pointer as that exact string.
+    #[test]
+    fn a_body_check_holds_only_for_what_it_names() {
+        let lists = Body::Lists("demo-spy");
+        assert_eq!(
+            lists.missing(r#"{"agents":[{"agent_id":"x"},{"agent_id":"demo-spy"}]}"#),
+            None
+        );
+        for body in [
+            r#"{"agents":[{"agent_id":"demo-web"}]}"#,
+            r#"{"agents":[]}"#,
+            "{}",
+            "<html>",
+        ] {
+            assert!(lists.missing(body).is_some(), "{body}");
+        }
+        let members = Body::Members(vec![("/b/state", "completed".into()), ("/b/r", "x".into())]);
+        assert_eq!(
+            members.missing(r#"{"b":{"state":"completed","r":"x"}}"#),
+            None
+        );
+        for body in [
+            r#"{"b":{"state":"running","r":"x"}}"#,
+            r#"{"b":{"state":"completed","r":"y"}}"#,
+            r#"{"b":{"state":"completed"}}"#,
+            r#"{"b":{"state":"completed","r":1}}"#,
+        ] {
+            assert!(members.missing(body).is_some(), "{body}");
+        }
+        assert_eq!(Body::Any.missing("<html>"), None);
+        let session = check(200, Ask::Session);
+        let wanting = ApiCheck {
+            body: lists,
+            ..session
+        };
+        let reply = |body: &str| Ok((200, format!("HTTP/1.1 200 OK\r\n\r\n{body}")));
+        assert_eq!(
+            api_verdict(
+                &reply(r#"{"agents":[{"agent_id":"demo-spy"}]}"#),
+                &wanting,
+                false
+            )
+            .0,
+            "ran"
+        );
+        let (word, said, fails) = api_verdict(&reply(r#"{"agents":[]}"#), &wanting, false);
+        assert_eq!((word, fails), ("failed", true), "{said}");
+        let refused = "HTTP/1.1 401 Unauthorized\r\n\r\n".to_owned();
+        for answer in [
+            Ok((401, refused)),
+            Ok((204, "HTTP/1.1 204 No Content\r\n\r\n".into())),
+        ] {
+            let (word, said, fails) = api_verdict(&answer, &wanting, false);
+            assert_eq!(
+                (word, fails),
+                ("failed", true),
+                "a sign-in with no cookie is a wrong answer, never not run: {said}"
+            );
+        }
+    }
+
+    /// The second agent has an envelope of its own, deployed only after step 5's backtest is
+    /// recorded: `agent deploy` and `backtest record` each take only the workspace's latest
+    /// confirmed version, so its confirmation comes after the record and its deployment after its
+    /// confirmation. Its snapshot is registered before its version is created, and web/ presses
+    /// that agent's kill switch, never the one the CLI stops (DEC-2036).
+    #[test]
+    fn web_kills_a_second_agent_the_cli_does_not() {
+        let (version, web) = (reference(&mandate()), reference(&web_mandate()));
+        assert_ne!(version, web, "two envelopes, two versions");
+        let steps = planned("demo6");
+        let all = gestures(&steps);
+        let deployed: Vec<[&str; 2]> = all
+            .iter()
+            .filter(|g| g.args[..2] == ["agent", "deploy"])
+            .map(|g| [g.args[2].as_str(), g.args[3].as_str()])
+            .collect();
+        let (v, w) = (version.as_str(), web.as_str());
+        assert_eq!(
+            deployed,
+            [[AGENT, v], [AGENT, v], [WEB_AGENT, w], [WEB_AGENT, w]]
+        );
+        let code = deploy_code(WEB_AGENT, &web);
+        assert_ne!(code, deploy_code(AGENT, &version));
+        assert!(
+            all.iter().any(|g| g.args[2] == WEB_AGENT
+                && g.args.windows(2).any(|w| w == ["--code", code.as_str()]))
+        );
+        let at = |args: &[&str]| {
+            all.iter()
+                .position(|g| g.args.len() >= args.len() && g.args[..args.len()] == *args)
+                .unwrap_or_else(|| panic!("no gesture {args:?}"))
+        };
+        let snapshot = format!("{INPUTS}/web-instrument.json");
+        let register = at(&[
+            "config",
+            "register",
+            "--kind",
+            "instrument_snapshot",
+            &snapshot,
+        ]);
+        let created = at(&["version", "create", &format!("{INPUTS}/web-mandate.json")]);
+        let confirmed = at(&["version", "confirm", w, "--code"]);
+        let deploy = at(&["agent", "deploy", WEB_AGENT, w, "--code"]);
+        let record = at(&["backtest", "record"]);
+        assert!(at(&["agent", "deploy", AGENT, v, "--code"]) < record);
+        assert!(record < register && register < created && created < confirmed);
+        assert!(confirmed < deploy);
+        assert_eq!(all[created].expect, format!("created {web}"));
+        let step_of = |container: &str| {
+            steps
+                .iter()
+                .find(|s| {
+                    s.parts
+                        .iter()
+                        .any(|p| matches!(p, Part::Gesture(g) if g.container == container))
+                })
+                .map(|s| s.number)
+        };
+        assert_eq!(step_of(&all[register].container), Some(6));
+        assert_eq!(step_of(&all[deploy].container), Some(6));
+        let kill = all
+            .iter()
+            .find(|g| g.args[..2] == ["agent", "kill"])
+            .unwrap();
+        assert!(
+            kill.args.windows(2).any(|w| w == ["--agent", AGENT]),
+            "the CLI stops demo-spy"
+        );
+        let web: Vec<(u8, &WebCheck)> = steps
+            .iter()
+            .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
+            .filter_map(|(n, p)| match p {
+                Part::Web(w) => Some((n, w)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(web.len(), 1);
+        assert_eq!(web[0].0, 6, "web/'s kill switch is step 6's");
+        assert_eq!(web[0].1.agent, WEB_AGENT);
+        assert_ne!(WEB_AGENT, AGENT);
+    }
+
+    /// A web check runs only when the gesture acted on its own agent in the run's workspace and
+    /// the command reads back with its kill switch on the control stream; a machine without
+    /// web/'s tools never fails the run, a failed gesture always does.
+    #[test]
+    fn a_web_check_runs_only_on_its_own_recorded_kill_switch() {
+        let check = WebCheck {
+            shows: "s",
+            agent: WEB_AGENT,
+        };
+        let ws = "01KDEM0000000001000000000D";
+        let body = |command: &str, stream: &str, phase: &str| {
+            let read = json!({"command_id": command, "phase": phase, "steps": [],
+                "as_of": [{"stream_id": stream, "seq": 10}]});
+            format!("HTTP/1.1 200 OK\r\n\r\n{read}")
+        };
+        let recorded =
+            |agent: &str, acted: &str, read: Result<(u16, String), String>| WebOutcome::Recorded {
+                agent: agent.into(),
+                workspace: acted.into(),
+                command: "C1".into(),
+                read,
+            };
+        let ctl = format!("ctl:{ws}");
+        for cell in [false, true] {
+            let required = Required { cell, web: false };
+            for phase in COMMAND_PHASES {
+                let ran = recorded(WEB_AGENT, ws, Ok((200, body("C1", &ctl, phase))));
+                assert_eq!(web_verdict(&ran, &check, ws, required).0, "ran", "{phase}");
+            }
+            for wrong in [
+                recorded(AGENT, ws, Ok((200, body("C1", &ctl, "recorded")))),
+                recorded(WEB_AGENT, "other", Ok((200, body("C1", &ctl, "recorded")))),
+                recorded(
+                    WEB_AGENT,
+                    ws,
+                    Ok((200, body("C1", "ctl:other", "recorded"))),
+                ),
+                recorded(WEB_AGENT, ws, Ok((200, body("C1", &ctl, "refused")))),
+                recorded(WEB_AGENT, ws, Ok((200, body("C2", &ctl, "recorded")))),
+                recorded(WEB_AGENT, ws, Ok((404, body("C1", &ctl, "recorded")))),
+                recorded(WEB_AGENT, ws, Err("no answer".into())),
+                WebOutcome::Failed("the run failed".into()),
+            ] {
+                let (word, said, fails) = web_verdict(&wrong, &check, ws, required);
+                assert_eq!((word, fails), ("failed", true), "{said}");
+            }
+            assert_eq!(
+                web_verdict(&WebOutcome::NoTools("no npm".into()), &check, ws, required),
+                ("not run", "no npm".into(), false),
+                "the cell does not require web/'s tools"
+            );
+        }
+        let unaskable = WebOutcome::Unaskable("no kubectl".into());
+        let only = |cell, web| Required { cell, web };
+        assert!(!web_verdict(&unaskable, &check, ws, only(false, false)).2);
+        assert!(web_verdict(&unaskable, &check, ws, only(true, false)).2);
+        assert!(
+            !web_verdict(&unaskable, &check, ws, only(false, true)).2,
+            "the web switch alone does not require the cell"
+        );
+        let no_tools = WebOutcome::NoTools("no npm".into());
+        assert_eq!(
+            web_verdict(&no_tools, &check, ws, only(false, false)),
+            ("not run", "no npm".into(), false)
+        );
+        for cell in [false, true] {
+            assert_eq!(
+                web_verdict(&no_tools, &check, ws, only(cell, true)),
+                ("failed", "no npm".into(), true),
+                "where the web gesture is required, a machine without its tools fails"
+            );
+        }
+        for required in [only(false, false), only(true, true)] {
+            assert_eq!(
+                web_verdict(&WebOutcome::AfterFailure, &check, ws, required),
+                ("not run", "an earlier part failed".into(), false),
+                "the first failure is the run's; this one only reads not run"
+            );
+        }
+        let read = command_read(ws, "C1");
+        assert_eq!(read.path, format!("/v1/workspaces/{ws}/commands/C1"));
+        assert_eq!(read.ask, Ask::Session);
+    }
+
+    /// The session cookie's pair is read from the reply's headers only, by its own name.
+    #[test]
+    fn the_session_cookie_is_read_from_the_headers() {
+        let reply = "HTTP/1.1 204 No Content\r\nSet-Cookie: other=1\r\nset-cookie: \
+                     __Host-mandate_session=v1.abc; Path=/; Secure\r\n\r\n";
+        assert_eq!(
+            session_cookie(reply).as_deref(),
+            Some("__Host-mandate_session=v1.abc")
+        );
+        assert_eq!(
+            session_cookie("HTTP/1.1 204 No Content\r\n\r\nSet-Cookie: __Host-mandate_session=x"),
+            None
+        );
+        assert_eq!(
+            session_cookie("HTTP/1.1 204 No Content\r\nSet-Cookie: other=1\r\n\r\n"),
+            None
         );
     }
 
@@ -1185,7 +2013,7 @@ mod tests {
         }
         assert_ne!(a, b);
         assert_eq!(a, "01KDEM0123456789000000000D");
-        let steps = plan(&a, &mandate());
+        let steps = planned(&a);
         let all = gestures(&steps);
         let owner = super::super::DEMO_OWNER;
         let found = all
@@ -1217,6 +2045,7 @@ mod tests {
             path: "/".into(),
             status,
             ask,
+            body: Body::Any,
         }
     }
 
@@ -1326,7 +2155,7 @@ mod tests {
     #[test]
     fn every_gap_waits_on_a_named_lane_and_its_backlog_story() {
         let backlog = fs::read_to_string("../docs/project/06-backlog-v1.md").unwrap();
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         for step in &steps {
             for part in &step.parts {
                 let Part::Gap(gap) = part else { continue };
@@ -1367,15 +2196,15 @@ mod tests {
         );
     }
 
-    /// Which steps run today: the gestures on `main` make steps 1, 2, 4 and 6 partial, steps 3
-    /// and 5 wait wholly on other lanes, and the record runs whole.
+    /// Which steps run today: the gestures on `main` make steps 1, 2, 4, 5 and 6 partial, step 3
+    /// waits wholly on other lanes, and the record runs whole.
     #[test]
     fn each_step_reads_ready_partial_or_skipped_from_its_parts() {
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         let read: Vec<Readiness> = steps.iter().map(readiness).collect();
         assert_eq!(
             read,
-            [Partial, Partial, Skipped, Partial, Skipped, Partial, Ready]
+            [Partial, Partial, Skipped, Partial, Partial, Partial, Ready]
         );
         let step = |parts: Vec<Part>| Step {
             number: 9,
@@ -1405,7 +2234,7 @@ mod tests {
     /// holds back.
     #[test]
     fn the_summary_lists_every_wait_once_under_its_lane() {
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         let grouped = by_lane(&steps);
         let mut counted = BTreeMap::<&str, usize>::new();
         for step in &steps {
@@ -1452,9 +2281,12 @@ mod tests {
     /// gate first, so no gesture runs before the pod's egress is filtered.
     #[test]
     fn the_job_runs_every_gesture_in_order_after_the_egress_gate() {
-        let steps = plan("demo1", &mandate());
+        let steps = planned("demo1");
         let all = gestures(&steps);
-        let files = [("mandate.json", "{}".to_string())];
+        let files = [
+            ("mandate.json", "{}".to_string()),
+            ("backtest/bars.json", "{}".to_string()),
+        ];
         let objects = gestures_job(rendered(), &all, "demo-in-1", &files).unwrap();
         let spec = &objects[0]["spec"]["template"]["spec"];
         let names: Vec<&str> = spec["initContainers"]
@@ -1485,7 +2317,25 @@ mod tests {
         assert_eq!(objects[1]["metadata"]["labels"], json!({"app": "x"}));
         assert_eq!(
             spec["volumes"][1],
-            json!({"name": "in", "configMap": {"name": "demo-in-1"}})
+            json!({"name": "in", "configMap": {"name": "demo-in-1", "items": [
+                {"key": "mandate.json", "path": "mandate.json"},
+                {"key": "backtest.bars.json", "path": "backtest/bars.json"}
+            ]}})
+        );
+        assert_eq!(
+            objects[1]["data"],
+            json!({"mandate.json": "{}", "backtest.bars.json": "{}"})
+        );
+        let runner = spec["initContainers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"].as_str().unwrap().ends_with("runner-run"))
+            .unwrap();
+        assert_eq!(runner["command"], json!([RUNNER_BIN]));
+        assert!(
+            last.get("command").is_none(),
+            "the CLI keeps the image's entry point"
         );
     }
 

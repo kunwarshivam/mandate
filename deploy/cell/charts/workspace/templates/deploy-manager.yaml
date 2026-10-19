@@ -55,11 +55,12 @@ subjects:
     name: {{ .p.name | quote }}
     namespace: {{ .root.Release.Namespace | quote }}
 {{- end -}}
-{{- /* The pod of process `p` the manager starts, as JSON: the runtime's and, mirroring it, the
-executor's container runs its image's `mandate-daemon` as `run --probe /tmp/process.sock`, which
-reads its workspace and agent from the variables the manager adds and the rest from the journal and
-the artifact store (DEC-1015, DEC-1016). Its probes are processes.json's `probe`, as a Deployment's
-are (DEC-1013), or `mandate-daemon probe` where the process names none. */ -}}
+{{- /* The pod of process `p` the manager starts, as JSON: its container runs its own image's
+entrypoint, the runtime's `mandate-daemon` or the executor's `mandate-executord`, as `run --probe
+/tmp/process.sock`. Each reads its workspace and its agent or account from the variables the manager
+adds, and the rest from the journal and, for the runtime, the artifact store (DEC-1015, DEC-1016,
+DEC-2031). Its probes are processes.json's `probe`, as a Deployment's are (DEC-1013), or
+`mandate-daemon probe` where the process names none. */ -}}
 {{- define "mandate.managedPod" -}}
 {{- $ctx := . -}}
 {{- $words := .p.probe | default (list "/usr/local/bin/mandate-daemon" "probe" "{probe}" "--probe" "/tmp/process.sock") -}}

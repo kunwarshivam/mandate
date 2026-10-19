@@ -11,8 +11,9 @@
 # DEC-1190 scopes the jobs to the diff: `select` runs `cargo xtask ci select`, which takes the
 # changed paths, the crates owning them or naming them in their sources, and every crate built on
 # those, and says which jobs the diff needs. `fast-test`, `fast-pending`, `fast-python`,
-# `fast-portable`, `fast-rh-sim-live`, `full-checks` and `schema-mutants` start only when it says
-# so, and inside them xtask runs only the selected crates' tests. `fast-lint`, the mutation plan
+# `fast-portable`, `fast-rh-sim-live`, `full-checks`, `schema-mutants` and the five cell jobs
+# (DEC-2609: a crate the cell's images hold or are built on, or `deploy/` and the cell's Python
+# pins) start only when it says so, and inside them xtask runs only the selected crates' tests. `fast-lint`, the mutation plan
 # and its shards run on every ready pull request as before. A build input, CI, xtask, any
 # manifest, an unknown path, and a run with no diff base select everything. A skipped job starts
 # no runner; `fast` and `full` still pass or fail, and accept a skip only where `select` asked for
@@ -33,16 +34,35 @@ name: ci
 # push to it. `fast` and `full` are skipped too, not failed, and `merge-approved.sh` accepts only a
 # run in which both actually ran and passed, so a skipped run on a draft never counts as green.
 # `workflow_dispatch` has no pull request, so it always runs.
+# DEC-2610: every push to `main` runs it too, after the merge, since merges no longer wait for
+# CI. A run on `main`'s tip has no diff base, so it selects everything, as the nightly's dispatch
+# does, and `report-main` opens an issue when it fails. `main`'s runs share one concurrency group:
+# a run that has started finishes, and a burst of merges queues only its latest, which tests every
+# one of them. A merge `merge.yml`
+# makes with its own token starts no push run, so `merge.yml` dispatches this workflow then.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      post_merge:
+        description: "A post-merge run on main, sent by merge.yml (DEC-2610)"
+        type: boolean
+        default: false
 
 permissions: {}
 
+# A pull request's runs share one group per ref, so a newer push cancels the older run. The
+# post-merge runs on `main`, a push's and the ones `merge.yml` dispatches with `post_merge`, share
+# one group too, but a newer one never cancels the run in progress: it waits, and replaces any run
+# still waiting, so every burst of merges gets a verdict and only its latest waits. Any other
+# dispatched run, the nightly's included, has a group of its own, so it is never cancelled and
+# cancels nothing (DEC-2610).
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'workflow_dispatch' && !inputs.post_merge && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -60,6 +80,12 @@ env:
   HELM_SHA256: "86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"
   KUBECONFORM_VERSION: "0.8.0"
   KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
+  # The hosted environments' OpenTofu and tflint (E21-56, DEC-2012 item 2), pinned with
+  # .cursor/install.sh and .github/workflows/infra.yml. tflint publishes only zip archives.
+  TOFU_VERSION: "1.13.1"
+  TOFU_SHA256: "378ada19d4bc70c43732004e8159be771b23b9a5afdf059e5f8a2b3fa2c70a69"
+  TFLINT_VERSION: "0.64.0"
+  TFLINT_SHA256: "cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537"
 
 jobs:
   # DEC-1190. The affected-set selection every scoped job follows: one boolean a job, and the
@@ -77,6 +103,7 @@ jobs:
       rh_sim_live: ${{ steps.select.outputs.rh_sim_live }}
       full_checks: ${{ steps.select.outputs.full_checks }}
       schema_mutants: ${{ steps.select.outputs.schema_mutants }}
+      cell: ${{ steps.select.outputs.cell }}
       reasons: ${{ steps.select.outputs.reasons }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -332,7 +359,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
-    if: ${{ always() && !github.event.pull_request.draft }}
+    # On a pull request it runs even when the run is cancelled, so a cancelled head fails rather
+    # than reading skipped, which a required check counts as passing. Elsewhere a cancelled run
+    # skips it, so the run ends at once and releases `main`'s group (DEC-2610 item 3).
+    if: ${{ ((github.event_name == 'pull_request' && always()) || !cancelled()) && !github.event.pull_request.draft }}
     needs: [select, fast-lint, fast-test, fast-pending, fast-python, fast-portable, fast-rh-sim-live]
     # DEC-871, DEC-1190. The required `fast` verdict: `select` and `fast-lint` must succeed, and
     # each scoped part must have succeeded where `select` selected it and been skipped where it did
@@ -382,6 +412,7 @@ jobs:
       MANDATE_S3_ACCESS_KEY_ID: mandate-test
       MANDATE_S3_SECRET_ACCESS_KEY: mandate-test-only
       MANDATE_S3_REQUIRED: "1"
+      MANDATE_TOFU_REQUIRED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -408,6 +439,16 @@ jobs:
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
           tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
+      # `tofu`, the credential-free checks of deploy/tofu/ (E21-56, DEC-2013): fmt, tflint,
+      # validate, and `tofu test` against mocked providers. No step here holds a cloud credential.
+      - name: Install OpenTofu and tflint (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o tofu.tgz "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz"
+          echo "${TOFU_SHA256}  tofu.tgz" | sha256sum --check
+          tar xzf tofu.tgz tofu && sudo install tofu /usr/local/bin/ && rm tofu tofu.tgz
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o tflint.zip "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_amd64.zip"
+          echo "${TFLINT_SHA256}  tflint.zip" | sha256sum --check
+          unzip tflint.zip tflint && sudo install tflint /usr/local/bin/ && rm tflint tflint.zip
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -418,9 +459,11 @@ jobs:
   # the image this change built, runs its drills, runs each again with its bug planted, which
   # each must catch (the journal's drills run in `cell-journal` and `cell-failover`, and the kill
   # switch's in `cell-kill-switch`, below), and ends with `cell demo --no-web`, an upgrade of every release in place. Not yet in `full` (DEC-993 item 10); the chart's invariants are in
-  # `fast-python`.
+  # `fast-python`. It and the four cell jobs below start only when `select` says the diff reaches
+  # the cell (DEC-2609); main's nightly run has no diff base and runs all five.
   cell:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.cell == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -432,19 +475,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - name: Install k3d, helm and kubeconform (checksum-verified)
-        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
           echo "${K3D_SHA256}  k3d" | sha256sum --check
@@ -457,22 +492,20 @@ jobs:
           echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
           tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
         with:
           shared-key: cell
           cache-on-failure: true
       - run: cargo xtask ci cell
-        if: steps.change.outputs.docs_only != 'true'
 
   # E21-54 (DEC-2002): the demo's scenario on the runner's cell. `cargo xtask ci cell-demo` brings
   # up the cell, runs every gesture of the demo's six steps that is on main and names each missing
   # link by its PR or story, then verifies the workspace's control stream. No required check needs
   # it; it keeps the ready steps green.
   cell-demo:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.cell == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -484,19 +517,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - name: Install k3d, helm and kubeconform (checksum-verified)
-        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
           echo "${K3D_SHA256}  k3d" | sha256sum --check
@@ -509,22 +534,20 @@ jobs:
           echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
           tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
         with:
           shared-key: cell-demo
           cache-on-failure: true
       - run: cargo xtask ci cell-demo
-        if: steps.change.outputs.docs_only != 'true'
 
   # E21-41 (DEC-1050 item 7): the journal's own drills on the same cell, in a job of their own so
   # each cell job stays within its ten minutes (DEC-464). `cargo xtask ci cell-journal` brings the
   # cell up and runs the `standby-down` and `archive` drills, plain and seeded. Not required, as
   # `cell` is not (DEC-993 item 10). It restores `cell`'s cache and saves none of its own.
   cell-journal:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.cell == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -536,19 +559,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - name: Install k3d, helm and kubeconform (checksum-verified)
-        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
           echo "${K3D_SHA256}  k3d" | sha256sum --check
@@ -561,22 +576,20 @@ jobs:
           echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
           tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
         with:
           shared-key: cell
           save-if: false
           cache-on-failure: true
       - run: cargo xtask ci cell-journal
-        if: steps.change.outputs.docs_only != 'true'
 
   # E21-41 (DEC-1050 item 7): the restart drill, which with a synchronous standby is a failover and
   # the old primary's rejoin, on its own cell so each cell job stays within ten minutes (DEC-464).
   # Not required, as `cell` is not. It restores `cell`'s cache and saves none of its own.
   cell-failover:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.cell == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -588,19 +601,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - name: Install k3d, helm and kubeconform (checksum-verified)
-        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
           echo "${K3D_SHA256}  k3d" | sha256sum --check
@@ -613,22 +618,20 @@ jobs:
           echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
           tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
         with:
           shared-key: cell
           save-if: false
           cache-on-failure: true
       - run: cargo xtask ci cell-failover
-        if: steps.change.outputs.docs_only != 'true'
 
   # E21-34 (DEC-2602): the kill-switch drill, plain and seeded, on its own cell, so `cell` stays
   # within its ten minutes (DEC-464). Not required, as `cell` is not. It restores `cell`'s cache and
   # saves none of its own.
   cell-kill-switch:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: select
+    if: needs.select.outputs.cell == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -640,19 +643,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify the change (DEC-112)
-        id: change
-        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
-      - name: Documentation-only change
-        if: steps.change.outputs.docs_only == 'true'
-        run: echo "docs-only change; fast-lint ran the documentation checks (DEC-112)"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - name: Install k3d, helm and kubeconform (checksum-verified)
-        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
           echo "${K3D_SHA256}  k3d" | sha256sum --check
@@ -665,16 +660,13 @@ jobs:
           echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
           tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: steps.change.outputs.docs_only != 'true'
         with:
           shared-key: cell
           save-if: false
           cache-on-failure: true
       - run: cargo xtask ci cell-kill-switch
-        if: steps.change.outputs.docs_only != 'true'
 
   # E21-51, DEC-2001 item 11. Cell #1's `cluster` step, the same code the founder runs against the
   # droplets, against a two-node k3d cluster: the namespace and its secrets, the pull secret on the
@@ -716,18 +708,24 @@ jobs:
 
   # DEC-538. Sizes the mutation matrix to the diff: `cargo xtask ci mutants --plan` lists, without
   # building, exactly the mutants the gate would test (its own diff and listing code), and reports
-  # the count and `min(192, count)` shard indices. A diff with no mutants, a documentation-only one
-  # included (DEC-112), launches no shard at all.
+  # the count, `min(192, ceil(count / k))` shard indices and `k`, the mutants a shard carries,
+  # sized per package from the `mutant-costs` history and one without a clean one (DEC-2607). A
+  # diff with no mutants, a documentation-only one included (DEC-112), launches no shard at all.
   mutants-plan:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # DEC-2607 item 3: the plan reads the `mutant-costs` history through the Actions API.
     permissions:
+      actions: read
       contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
     outputs:
       mutants: ${{ steps.plan.outputs.mutants }}
       shards: ${{ steps.plan.outputs.shards }}
       total: ${{ steps.plan.outputs.total }}
+      per_shard: ${{ steps.plan.outputs.per_shard }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -754,13 +752,15 @@ jobs:
         run: |
           if [ "$DOCS_ONLY" = true ]; then
             echo "docs-only change; no mutation shard has source to test (DEC-112)"
-            printf 'mutants=0\nshards=[]\ntotal=0\n' >> "$GITHUB_OUTPUT"
+            printf 'mutants=0\nshards=[]\ntotal=0\nper_shard=1\n' >> "$GITHUB_OUTPUT"
           else
             cargo xtask ci mutants --plan >> "$GITHUB_OUTPUT"
           fi
 
-  # One shard per planned mutant up to DEC-498's 192, so each shard's slice is what it was with 192
-  # (DEC-538). Skipped when the plan counted none; `full` accepts that skip only then.
+  # Up to `k` planned mutants a shard, 192 shards at most (DEC-538, DEC-2607); at `k` of one each
+  # shard's slice is what it was with 192. A shard of more than one stops 480 s after the gate
+  # starts and fails if it has not finished (DEC-2607 item 5). Skipped when the plan counted none;
+  # `full` accepts that skip only then.
   mutants:
     name: mutants (${{ matrix.shard }}/${{ needs.mutants-plan.outputs.total }})
     needs: mutants-plan
@@ -784,6 +784,7 @@ jobs:
     env:
       MANDATE_MUTANT_SHARD: ${{ matrix.shard }}/${{ needs.mutants-plan.outputs.total }}
       MANDATE_MUTANTS_PLANNED: ${{ needs.mutants-plan.outputs.mutants }}
+      MANDATE_MUTANTS_PER_SHARD: ${{ needs.mutants-plan.outputs.per_shard }}
       MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
       MANDATE_PG_REQUIRED: "1"
       MANDATE_OPENBAO_REQUIRED: "1"
@@ -821,6 +822,43 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo xtask ci mutants
+      # DEC-2607 item 1: what this shard cost, kept whatever the gate concluded, for the history.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: mutant-cost-${{ matrix.shard }}
+          path: target/mutant-cost.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # DEC-2607 item 2. Folds this run's shard records into the rolling `mutant-costs` history,
+  # whatever the matrix concluded. It judges nothing, and neither `fast` nor `full` needs it.
+  mutants-costs:
+    needs: [mutants-plan, mutants]
+    if: ${{ always() && needs.mutants-plan.result == 'success' && needs.mutants-plan.outputs.mutants != '0' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: select
+      - run: cargo xtask ci mutants-costs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutant-costs
+          path: target/mutant-costs/mutant-costs.json
+          retention-days: 14
 
   # DEC-688. The workspace API schemas' mutation sweep (`schemas/workspace-api/mutate_schemas.py`)
   # takes about seven minutes unsharded, so it runs here beside `full-checks`, which stays under ten
@@ -859,7 +897,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
-    if: ${{ always() && !github.event.pull_request.draft }}
+    # As `fast`: it runs on a cancelled pull request run, and a cancelled run elsewhere skips it.
+    if: ${{ ((github.event_name == 'pull_request' && always()) || !cancelled()) && !github.event.pull_request.draft }}
     needs: [select, full-checks, mutants-plan, mutants, schema-mutants]
     # DEC-538. A plan of zero mutants launches no shard, so `mutants` is skipped, and that skip
     # passes only beside a plan that succeeded and reported zero. A failed or cancelled plan, a
@@ -892,12 +931,13 @@ jobs:
             *) test "$MUTANTS_RESULT" = success ;;
           esac
 
-  # DEC-1190 item 5. The nightly dispatches this workflow on main, where `select` has no diff base
-  # and selects everything; when that run fails, this opens an issue naming only the run and the
-  # verdicts, never a log line. A run cancelled by a newer dispatch reports nothing, nor does a
-  # dispatch on any other branch.
+  # DEC-1190 item 5, DEC-2610. The nightly dispatches this workflow on main, and every push to main
+  # (and every merge `merge.yml` makes) runs it there too, where `select` has no diff base and
+  # selects everything; when that run fails, this opens an issue naming only the event, the run and
+  # the verdicts, never a log line. A run cancelled by a newer one reports nothing, nor does a run
+  # on any other branch.
   report-main:
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || needs.full.result == 'failure') }}
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || needs.full.result == 'failure') }}
     needs: [fast, full]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -911,4 +951,8 @@ jobs:
           FULL_RESULT: ${{ needs.full.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="nightly: ci on main failed at ${GITHUB_SHA}" -f body="The nightly ci run on main failed (fast ${FAST_RESULT}, full ${FULL_RESULT}): ${RUN_URL} (DEC-1190)"
+          if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" --jq '.[].title' | grep -Fqx "ci on main failed at ${GITHUB_SHA}"; then
+            echo "An open issue already reports ci on main failing at ${GITHUB_SHA}"
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="ci on main failed at ${GITHUB_SHA}" -f body="The ${GITHUB_EVENT_NAME} ci run on main failed (fast ${FAST_RESULT}, full ${FULL_RESULT}): ${RUN_URL} (DEC-1190, DEC-2610)"
