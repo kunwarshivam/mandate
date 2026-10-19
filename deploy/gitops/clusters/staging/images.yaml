@@ -3,4 +3,5 @@
 # gitops promote` (DEC-2016); change it only through a promotion.
 deploymentTier: staging
 images:
-  mandate: ghcr.io/kunwarshivam/mandate/mandate@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  api: ghcr.io/kunwarshivam/mandate/mandate-api-server@sha256:e64c36037963603ceceed2206fb434566ff784f45a295b00a4f313353d1fc0ca
+  mandate: ghcr.io/kunwarshivam/mandate/mandate@sha256:b5645d663d8b9e80d2b4e297148b06989337ac6824bf5ea57592499396dd9b08
