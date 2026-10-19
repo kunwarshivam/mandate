@@ -43,7 +43,7 @@ pub struct RecordedReply {
     pub usage: Usage,
 }
 
-/// One scripted tool-call reply of an agentic run's turn (DEC-2265): each call's declared tool
+/// One scripted tool-call reply of an agentic run's turn (DEC-2266): each call's declared tool
 /// name and canonical arguments, in reply order, its latency, and its usage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptedTurn {
@@ -115,7 +115,7 @@ pub struct Bundle {
     pub deployment_cap: Usd6,
     pub reply: RecordedReply,
     /// The scripted replies of an agentic run's turns before its final one, turn 1 first; empty
-    /// for a bundle with no `turns` (DEC-2265).
+    /// for a bundle with no `turns` (DEC-2266).
     pub turns: Vec<ScriptedTurn>,
     pub plane: RecordedPlane,
     /// The recorded instruments halted at the bundle's as-of time (DEC-2214 item 1).
@@ -433,7 +433,7 @@ impl Read {
     }
 }
 
-/// `research.json`'s `turns` (DEC-2265): refused whole, `Malformed { member: "turns" }`, unless the
+/// `research.json`'s `turns` (DEC-2266): refused whole, `Malformed { member: "turns" }`, unless the
 /// entry names the agentic loop and every turn is one its gateway would accept, so no bundle a
 /// worker is built from scripts a call the entry does not declare.
 fn scripted(_turns: &Value, _entry: &ResearchEntry) -> Result<Vec<ScriptedTurn>, BundleError> {

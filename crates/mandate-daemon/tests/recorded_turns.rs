@@ -1,4 +1,4 @@
-//! An agentic bundle's recorded multi-turn script (DEC-2265; agent harness spec v0.2 §6.9 and
+//! An agentic bundle's recorded multi-turn script (DEC-2266; agent harness spec v0.2 §6.9 and
 //! §6.10; backlog E19-13 slice 3e): `research.json`'s `turns`, the scripted tool-call replies of
 //! a run's turns before its final one, each a reply the entry's gateway would accept. A script the
 //! entry could not serve, or on a bundle with no agentic loop, refuses the load. No scripted call
