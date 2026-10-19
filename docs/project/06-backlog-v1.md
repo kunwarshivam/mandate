@@ -569,6 +569,10 @@ the spec invariants (DP-n) its tests cover.
     latch oracle that derives the latched set from the appended records alone.
   - **C:** the wiring in `mandate-shell`'s `adapters.rs`, `paper/gate.rs`, and `paper/context.rs`,
     which are R0 files. It waits for R0 to close, or for the founder's call.
+  - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
+    "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
+    one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which
+    fails closed through staleness.
 
   *Accepted when:* every MC-R, MC-T, MC-L, and MC-W case, driven through journaled records, gives the
   harness's snapshot and events. A restart rebuilds the same view. Every fail-closed cause holds
@@ -2874,7 +2878,8 @@ enables `live` (ES-23, OPS-5).
   `connection_lifecycle_mismatch` and rule 200 in §9.2's mapping; the manager reads a deployment's
   account from version 2 and its connection's establishment, and the resolver is gone; a stop is
   final, read or not, and a version-1 deployment raises `deployment_unread`; the CLI and the
-  workspace API write version 2 exactly when rule 201 holds, check rule 200, and never redeploy a
+  workspace API write version 2 exactly when rule 201 holds, rule 200 holding by construction (the
+  connection taken from the document, the draft appended at the head read), and never redeploy a
   stopped agent's id. *Left:* the Compose adapter; the restart drill through `cargo xtask cell
   drill`; the owner's resume lifting a crash-loop pause once the runtime copies the pause (E21-30);
   alerts through the cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting
