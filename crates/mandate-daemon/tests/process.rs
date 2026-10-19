@@ -208,6 +208,42 @@ fn a_refused_research_opt_in_stops_the_start() {
     assert!(!path.exists(), "a refused process serves no probe");
 }
 
+/// `--research` with no bundle after it, an empty one, or another flag where the bundle belongs
+/// refuses before the process is ready, rather than running deny-all as if research were not asked
+/// for (DEC-2215 item 2).
+#[test]
+fn research_asked_for_without_a_bundle_refuses() {
+    let path = socket("research-missing");
+    let launch = |tail: &[&str]| {
+        let mut args = vec!["run"];
+        args.extend(DEPLOYMENT);
+        args.push("--probe");
+        let out = Command::new(BIN)
+            .args(&args)
+            .arg(&path)
+            .args(tail)
+            .env_remove("MANDATE_JOURNAL_DSN")
+            .env_remove("MANDATE_ARTIFACTS")
+            .stdin(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        (out.status.code(), String::from_utf8(out.stderr).unwrap())
+    };
+    let refused = (Some(2), "research_bundle_missing\n".to_owned());
+    assert_eq!(launch(&["--research"]), refused);
+    assert_eq!(launch(&["--research", ""]), refused);
+    assert_eq!(launch(&["--research", "--probe"]), refused);
+    assert_eq!(
+        launch(&["--research", BUNDLE]),
+        (
+            Some(2),
+            "runtime_start_failed: research_needs_resolved_deployment\n".to_owned()
+        )
+    );
+    assert!(!path.exists(), "a refused process serves no probe");
+}
+
 /// A launch that leaves its connection and owner to be resolved reads them from the journal and
 /// the artifact store `MANDATE_ARTIFACTS` names (DEC-1016). A root that is not a store, a store with
 /// no journal, a fixture run with nothing to read them from, and a launch naming only one of the two
