@@ -71,6 +71,19 @@ impl MeterRecord {
         }
     }
 
+    /// The record a meter stream's `event_type` draft at `event_id` holds, read back from its §9.19
+    /// `payload` (DEC-2258 item 3): the exact inverse of [`MeterRecord::payload`]. `None` for any
+    /// other event type, or a payload with a member missing, a member §9.19 does not list, or a
+    /// value of the wrong kind or out of its range.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn from_journal(event_type: &str, event_id: &str, payload: &Value) -> Option<Self> {
+        let _ = (event_type, event_id, payload);
+        todo!()
+    }
+
     /// The journal payload of journal spec §9.19.
     pub fn payload(&self) -> Value {
         match self {
