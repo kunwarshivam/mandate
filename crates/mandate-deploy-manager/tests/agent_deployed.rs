@@ -12,14 +12,15 @@
 //! nothing running must journal a `deployed` start for exactly the vector's processes. Before
 //! DEC-1171's code change the manager asked a resolver for every deployment, so no vector stream
 //! could start anything without one. Every version-1 deployment of an agent not stopped raises one
-//! opaque operator alert (DEC-1173 item 3), and nothing else does.
+//! opaque operator alert (DEC-1173 item 3), and so does every version-2 one the vector runs nothing
+//! for, of an agent not stopped (DEC-2038); nothing else raises either.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_deploy_manager::control::fact;
-use mandate_deploy_manager::orchestrator::DEPLOYMENT_UNREAD;
+use mandate_deploy_manager::orchestrator::{DEPLOYMENT_UNCONNECTED, DEPLOYMENT_UNREAD};
 use mandate_deploy_manager::{Cause, Decision, Effect, Manager, Process, Record};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
@@ -75,9 +76,17 @@ fn rows(case: &Value) -> Vec<StoredEvent> {
         .collect()
 }
 
-/// What the first pass over the folded stream asks for: the slots it journals a `deployed` start
-/// for, by process, and how many unread-deployment alerts it raises.
-fn first_pass(case: &Value) -> (BTreeSet<String>, BTreeSet<String>, usize) {
+/// What the first pass over the folded stream asks for.
+struct Pass {
+    runtimes: BTreeSet<String>,
+    executors: BTreeSet<String>,
+    unread: usize,
+    unconnected: usize,
+}
+
+/// The first pass over the folded stream: the slots it journals a `deployed` start for, by
+/// process, and how many alerts of each kind it raises.
+fn first_pass(case: &Value) -> Pass {
     let mut manager = Manager::new();
     for row in rows(case) {
         if let Some(fact) = fact(&row) {
@@ -85,7 +94,8 @@ fn first_pass(case: &Value) -> (BTreeSet<String>, BTreeSet<String>, usize) {
         }
     }
     let now = UtcNanos::parse(AT).unwrap();
-    let (mut runtimes, mut executors, mut unread) = (BTreeSet::new(), BTreeSet::new(), 0);
+    let (mut runtimes, mut executors) = (BTreeSet::new(), BTreeSet::new());
+    let (mut unread, mut unconnected) = (0, 0);
     for decision in manager.decide(&[], now) {
         match decision {
             Decision::Journal(Record::Start {
@@ -101,13 +111,40 @@ fn first_pass(case: &Value) -> (BTreeSet<String>, BTreeSet<String>, usize) {
                 assert!(started.insert(slot.subject), "one start per slot");
             }
             Decision::Retry(Effect::Alert(alert)) if alert == DEPLOYMENT_UNREAD => unread += 1,
+            Decision::Retry(Effect::Alert(alert)) if alert == DEPLOYMENT_UNCONNECTED => {
+                unconnected += 1;
+            }
             other => panic!(
                 "{}: a first pass asks only for starts: {other:?}",
                 text(case, "name")
             ),
         }
     }
-    (runtimes, executors, unread)
+    Pass {
+        runtimes,
+        executors,
+        unread,
+        unconnected,
+    }
+}
+
+/// The agents a version-2 deployment names that no `AgentStopped` names and the vector runs no
+/// runtime for: the deployments rule 201 refuses, which the manager must report.
+fn unconnected_v2(case: &Value, running: &BTreeSet<String>) -> usize {
+    let records = list(case, "records");
+    let stopped: BTreeSet<&str> = records
+        .iter()
+        .filter(|r| text(r, "event_type") == "AgentStopped")
+        .map(|r| text(r.get("payload").unwrap(), "agent_id"))
+        .collect();
+    let refused: BTreeSet<&str> = records
+        .iter()
+        .filter(|r| text(r, "event_type") == "AgentDeployed")
+        .filter(|r| r.get("schema_version").and_then(Value::as_int) == Some(2))
+        .map(|r| text(r.get("payload").unwrap(), "agent_id"))
+        .filter(|agent| !stopped.contains(agent) && !running.contains(*agent))
+        .collect();
+    refused.len()
 }
 
 /// The version-1 deployments of agents that no `AgentStopped` names and no later version-2
@@ -134,10 +171,15 @@ fn every_agent_deployed_stream_starts_exactly_the_processes_its_vector_lists() {
     let section = section();
     let cases = list(&section, "streams");
     let mut failed = Vec::new();
-    let mut alerted = 0;
+    let (mut alerted, mut refused) = (0, 0);
     for case in cases {
         let want = case.get("processes").unwrap();
-        let (runtimes, executors, unread) = first_pass(case);
+        let Pass {
+            runtimes,
+            executors,
+            unread,
+            unconnected,
+        } = first_pass(case);
         let expected = (texts(want, "runtimes"), texts(want, "executors"));
         if (runtimes.clone(), executors.clone()) != expected {
             failed.push(format!(
@@ -154,12 +196,20 @@ fn every_agent_deployed_stream_starts_exactly_the_processes_its_vector_lists() {
                 text(case, "name")
             ));
         }
+        let unconnected_expected = unconnected_v2(case, &runtimes);
+        if unconnected != unconnected_expected {
+            failed.push(format!(
+                "{}: {unconnected} unconnected-deployment alerts, expected {unconnected_expected}",
+                text(case, "name")
+            ));
+        }
         alerted += unread;
+        refused += unconnected;
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
     assert!(
-        cases.len() >= 17 && alerted >= 2,
-        "{} streams and {alerted} unread alerts; never fewer",
+        cases.len() >= 17 && alerted >= 2 && refused >= 2,
+        "{} streams, {alerted} unread and {refused} unconnected alerts; never fewer",
         cases.len()
     );
 }

@@ -121,6 +121,46 @@ impl std::fmt::Debug for Secret {
     }
 }
 
+/// The ConfigMap the journal's HelmRelease reads its archive endpoint from (DEC-2017 item 6): the
+/// endpoint names the founder's Cloudflare account, so git never holds it.
+const ARCHIVE_ENDPOINT_CONFIGMAP: &str = "journal-archive-endpoint";
+
+/// The namespace Flux's HelmReleases, and so that ConfigMap, live in.
+const FLUX_NAMESPACE: &str = "flux-system";
+
+/// Whether `endpoint` is R2's S3 endpoint for one account in the default jurisdiction, exactly:
+/// `https://<32 lowercase hex>.r2.cloudflarestorage.com`.
+fn is_r2_endpoint(endpoint: &str) -> bool {
+    endpoint
+        .strip_prefix("https://")
+        .and_then(|rest| rest.strip_suffix(".r2.cloudflarestorage.com"))
+        .is_some_and(|account| {
+            account.len() == 32
+                && account
+                    .bytes()
+                    .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        })
+}
+
+/// The ConfigMap holding the journal's archive endpoint and nothing else, never a credential.
+fn endpoint_manifest(endpoint: &str) -> Result<String> {
+    ensure!(
+        is_r2_endpoint(endpoint),
+        "the archive endpoint is not https://<account>.r2.cloudflarestorage.com (DEC-2017 item 6)"
+    );
+    let config_map = serde_json::json!({
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": ARCHIVE_ENDPOINT_CONFIGMAP,
+            "namespace": FLUX_NAMESPACE,
+            "labels": {"app.kubernetes.io/managed-by": "mandate-gitops-bootstrap"},
+        },
+        "data": {"values.yaml": format!("archive:\n  endpointURL: {endpoint}\n")},
+    });
+    Ok(config_map.to_string())
+}
+
 /// The workload secrets' values, held in memory only and never printed.
 #[derive(Debug)]
 pub(crate) struct WorkloadSecrets {
@@ -130,6 +170,9 @@ pub(crate) struct WorkloadSecrets {
     pub(crate) archive_secret_access_key: Secret,
     /// The tunnel's token.
     pub(crate) tunnel_token: Secret,
+    /// The archive's R2 endpoint, `https://<account>.r2.cloudflarestorage.com`: not a credential,
+    /// but it names the founder's account, so it is masked and kept out of git (DEC-2017 item 6).
+    pub(crate) archive_endpoint: Secret,
 }
 
 impl WorkloadSecrets {
@@ -141,11 +184,13 @@ impl WorkloadSecrets {
             archive_access_key_id: Secret::new(read("JOURNAL_ARCHIVE_ACCESS_KEY_ID")?),
             archive_secret_access_key: Secret::new(read("JOURNAL_ARCHIVE_SECRET_KEY")?),
             tunnel_token: Secret::new(read("CLOUDFLARED_TUNNEL_TOKEN")?),
+            archive_endpoint: Secret::new(read("JOURNAL_ARCHIVE_ENDPOINT")?),
         })
     }
 
-    /// Each Secret's manifest, in [`WORKLOAD_SECRETS`]' order.
-    fn manifests(&self) -> Result<Vec<(&'static str, String)>> {
+    /// Each Secret's manifest, in [`WORKLOAD_SECRETS`]' order, then the archive endpoint's
+    /// ConfigMap, each with what it is, for the log.
+    fn manifests(&self) -> Result<Vec<(String, String)>> {
         let mut manifests = Vec::new();
         for secret in WORKLOAD_SECRETS {
             let mut values = Vec::new();
@@ -158,8 +203,15 @@ impl WorkloadSecrets {
                 };
                 values.push((*key, value.expose().to_owned()));
             }
-            manifests.push((secret.name, secret_manifest(secret.name, &values)?));
+            manifests.push((
+                format!("the Secret {WORKSPACE_NAMESPACE}/{}", secret.name),
+                secret_manifest(secret.name, &values)?,
+            ));
         }
+        manifests.push((
+            format!("the ConfigMap {FLUX_NAMESPACE}/{ARCHIVE_ENDPOINT_CONFIGMAP}"),
+            endpoint_manifest(self.archive_endpoint.expose())?,
+        ));
         Ok(manifests)
     }
 }
@@ -421,7 +473,7 @@ fn kubectl(cluster: &Cluster<'_>, args: &[&str], stdin: Option<&str>) -> Result<
 
 /// Writes `manifests`, after the workspace namespace, which Flux would otherwise create only on
 /// its first reconcile.
-fn write_secrets(cluster: &Cluster<'_>, manifests: &[(&str, String)]) -> Result<()> {
+fn write_secrets(cluster: &Cluster<'_>, manifests: &[(String, String)]) -> Result<()> {
     let namespace = serde_json::json!({
         "apiVersion": "v1",
         "kind": "Namespace",
@@ -432,13 +484,19 @@ fn write_secrets(cluster: &Cluster<'_>, manifests: &[(&str, String)]) -> Result<
         &["apply", "--server-side", "-f", "-"],
         Some(&namespace.to_string()),
     )?;
-    for (name, manifest) in manifests {
+    for (what, manifest) in manifests {
         kubectl(
             cluster,
             &["apply", "--server-side", "-f", "-"],
             Some(manifest),
-        )?;
-        eprintln!("    gitops: wrote the Secret {WORKSPACE_NAMESPACE}/{name}");
+        )
+        .with_context(|| {
+            format!(
+                "writing {what} failed: the journal and the workspace stay uninstalled until it \
+                 exists; fix the cause and run the bootstrap again (BOOTSTRAP.md)"
+            )
+        })?;
+        eprintln!("    gitops: wrote {what}");
     }
     Ok(())
 }
@@ -490,7 +548,7 @@ fn apply(
     cluster: &Cluster<'_>,
     environment: Environment,
     manifest: &str,
-    secrets: &[(&str, String)],
+    secrets: &[(String, String)],
     sync: &str,
 ) -> Result<()> {
     kubectl(
@@ -838,6 +896,7 @@ mod tests {
             archive_access_key_id: Secret::new("id".to_owned()),
             archive_secret_access_key: Secret::new("secret".to_owned()),
             tunnel_token: Secret::new("token".to_owned()),
+            archive_endpoint: Secret::new("endpoint".to_owned()),
         };
         let refused = bootstrap_from_infra(
             Path::new("/nonexistent"),
@@ -852,30 +911,74 @@ mod tests {
     /// The secrets' `Debug` never shows a value, and each value lands in its chart's key.
     #[test]
     fn the_secrets_are_redacted_and_land_in_their_keys() -> Result<()> {
+        let endpoint = format!("https://{}.r2.cloudflarestorage.com", "ab12".repeat(8));
         let secrets = WorkloadSecrets {
             archive_access_key_id: Secret::new("key-id-1".to_owned()),
             archive_secret_access_key: Secret::new("secret-2".to_owned()),
             tunnel_token: Secret::new("token-3".to_owned()),
+            archive_endpoint: Secret::new(endpoint.clone()),
         };
         let shown = format!("{secrets:?}");
-        for value in ["key-id-1", "secret-2", "token-3"] {
+        for value in ["key-id-1", "secret-2", "token-3", "ab12ab12"] {
             assert!(!shown.contains(value), "{shown}");
         }
         let manifests = secrets.manifests()?;
-        let data = |name: &str| -> Result<serde_json::Value> {
-            let (_, text) = manifests
-                .iter()
-                .find(|(n, _)| *n == name)
-                .context("missing")?;
-            Ok(serde_json::from_str::<serde_json::Value>(text)?["data"].clone())
-        };
-        let archive = data("journal-archive-key")?;
-        assert_eq!(archive["ACCESS_KEY_ID"], image::base64(b"key-id-1"));
-        assert_eq!(archive["ACCESS_SECRET_KEY"], image::base64(b"secret-2"));
+        let whats: Vec<&str> = manifests.iter().map(|(what, _)| what.as_str()).collect();
         assert_eq!(
-            data("cloudflared-tunnel")?["token"],
-            image::base64(b"token-3")
+            whats,
+            [
+                "the Secret ws-ws1/journal-archive-key",
+                "the Secret ws-ws1/cloudflared-tunnel",
+                "the ConfigMap flux-system/journal-archive-endpoint",
+            ]
         );
+        let doc = |index: usize| -> Result<serde_json::Value> {
+            Ok(serde_json::from_str(&manifests[index].1)?)
+        };
+        assert_eq!(doc(0)?["data"]["ACCESS_KEY_ID"], image::base64(b"key-id-1"));
+        assert_eq!(
+            doc(0)?["data"]["ACCESS_SECRET_KEY"],
+            image::base64(b"secret-2")
+        );
+        assert_eq!(doc(1)?["data"]["token"], image::base64(b"token-3"));
+        let config_map = doc(2)?;
+        assert_eq!(config_map["kind"], "ConfigMap");
+        assert_eq!(config_map["metadata"]["namespace"], "flux-system");
+        assert_eq!(
+            config_map["data"],
+            serde_json::json!({"values.yaml": format!("archive:\n  endpointURL: {endpoint}\n")})
+        );
+        Ok(())
+    }
+
+    /// Only R2's endpoint for one account is written, and the endpoint never appears in a refusal.
+    #[test]
+    fn only_an_r2_account_endpoint_is_written() -> Result<()> {
+        let account = "0123456789abcdef".repeat(2);
+        assert!(is_r2_endpoint(&format!(
+            "https://{account}.r2.cloudflarestorage.com"
+        )));
+        for bad in [
+            format!("http://{account}.r2.cloudflarestorage.com"),
+            format!("https://{account}.eu.r2.cloudflarestorage.com"),
+            format!("https://{}.r2.cloudflarestorage.com", &account[1..]),
+            format!(
+                "https://{}.r2.cloudflarestorage.com",
+                account.to_uppercase()
+            ),
+            format!("https://{account}.r2.cloudflarestorage.com/"),
+            format!("https://{account}.r2.cloudflarestorage.com\nkind: Secret"),
+            "https://nyc3.digitaloceanspaces.com".to_owned(),
+            String::new(),
+        ] {
+            assert!(!is_r2_endpoint(&bad), "{bad}");
+            let refused = endpoint_manifest(&bad)
+                .err()
+                .map(|error| format!("{error:#}"))
+                .unwrap_or_default();
+            assert!(refused.contains("DEC-2017"), "{bad}");
+            assert!(bad.is_empty() || !refused.contains(&bad), "{refused}");
+        }
         Ok(())
     }
 

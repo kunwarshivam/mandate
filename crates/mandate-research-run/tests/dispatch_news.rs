@@ -653,3 +653,31 @@ fn the_news_reads_are_untrusted_only_when_they_hold_third_party_text() {
     );
     assert!(!refused.untrusted, "a refusal holds no text");
 }
+
+/// A search with no `terms` member reads nothing, at once. It runs first among the news tests'
+/// cheap checks, so a mutant that refuses every term set fails fast rather than near a timeout.
+#[test]
+fn a_news_search_with_no_terms_member_reads_nothing() {
+    let fixture = Fixture::default();
+    let result = one(
+        &fixture,
+        Tool::NewsSearch,
+        r#"{"limit":5,"symbols":["AAPL"],"window_h":24}"#,
+    );
+    assert_eq!(verdict(&result), FAILED);
+    assert_eq!(
+        fixture.calls.get(),
+        0,
+        "nothing is read without the pinned arguments"
+    );
+    let empty = one(
+        &fixture,
+        Tool::NewsSearch,
+        r#"{"limit":5,"symbols":["AAPL"],"terms":[],"window_h":24}"#,
+    );
+    assert_eq!(
+        verdict(&empty),
+        OK,
+        "an empty terms list is §6.10's 0 to 5 terms (DEC-2213 item 1)"
+    );
+}

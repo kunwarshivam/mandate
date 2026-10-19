@@ -723,6 +723,7 @@ are authoritative; a few come from metrics.
 | Broker API errors, rate limits, or outage | Connector metrics | SEV-2 | RB-13 |
 | Crash loop; agent left paused | Deployment manager | SEV-2 | RB-14 |
 | A version-1 deployment the manager cannot run (`deployment_unread`) | Deployment manager ([DEC-1173](../project/decisions/DEC-1173.md)) | SEV-3 | RB-14 |
+| A version-2 deployment rule 201 refuses, which the manager cannot run (`deployment_unconnected`) | Deployment manager ([DEC-2038](../project/decisions/DEC-2038.md)) | SEV-3 | RB-14 |
 | Approval not delivered | Approval service | SEV-2 (07) | RB-15 |
 | Backup failed; drill overdue or failed | Backup job metrics; the drill events E21-25 defines | SEV-2 | RB-16 |
 
@@ -761,7 +762,7 @@ are authoritative; a few come from metrics.
 | RB-11 | Clock out of tolerance |
 | RB-12 | Vault outage; credential rotation; connection revoked |
 | RB-13 | Broker API outage or degradation |
-| RB-14 | Crash loop |
+| RB-14 | Crash loop, and deployments the manager cannot run ([RB-14](../runbooks/RB-14-crash-loop.md)) |
 | RB-15 | Approvals not delivered |
 | RB-16 | Backup failure and the restore procedure (§6.3) |
 | RB-17 | Region evacuation |
