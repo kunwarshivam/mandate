@@ -37,6 +37,11 @@ pub struct Checked {
 /// Runs the connect check of `connection` for the account in `scope` at `now`, reading the account
 /// through `broker` and naming it by `pii_ref`.
 ///
+/// The check journals the `paper` environment because the only broker this binary reaches is the
+/// in-process fixture (DEC-2007 item 1). The change that wires a host transport binds that value
+/// to the transport's paper host, so the record can never claim `paper` for another host
+/// (`AGENTS.md` rule 8).
+///
 /// # Errors
 /// A stable code: `connection_id_invalid`, `pii_ref_invalid` for a reference that is not `pii_` and
 /// a ULID (journal spec §6.4), `stream_unavailable` when the account

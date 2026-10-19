@@ -1824,6 +1824,7 @@ dependencies = [
  "mandate-approval",
  "mandate-artifacts-fs",
  "mandate-canon",
+ "mandate-connections",
  "mandate-evaluation",
  "mandate-identity",
  "mandate-journal",
@@ -2034,11 +2035,14 @@ dependencies = [
  "mandate-domain",
  "mandate-executor",
  "mandate-journal",
+ "mandate-journal-pg",
  "mandate-num",
  "mandate-process",
  "mandate-store",
  "mandate-time",
  "proptest",
+ "serde_json",
+ "sqlx",
  "tokio",
 ]
 

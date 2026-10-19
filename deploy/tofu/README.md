@@ -85,8 +85,9 @@ wait until staging is up.
    which you accepted for the automation (DEC-2029). Keep it in the environment alone. Once the
    preflight lands (DEC-2029 item 4), each run checks the token's permissions first and names
    any that are missing.
-2. **The account id, `CF_ACCOUNT_ID`.** From the account's overview page (32 hex characters). It is
-   not a secret, so it is a variable.
+2. **No account id to copy.** The plan reads it from the one account `CF_INFRA_API_TOKEN` can
+   see, and fails if the token sees more than one (DEC-2030 item 1), so scope the token to the
+   account that holds `owlhead.ai`.
 3. **Barman's R2 token is not yours to make.** OpenTofu mints it, scoped to the archive bucket with
    Object Read and Write only, and hands it on as sensitive outputs (DEC-2029).
 4. **Before production only:** `api.owlhead.ai` already has DEC-822's hand-made record. The
@@ -112,14 +113,13 @@ needs:
   | `SPACES_SECRET_ACCESS_KEY` | §1.2, that environment's secret |
   | `CF_INFRA_API_TOKEN` | §2.1 |
   | `TOFU_STATE_PASSPHRASE` | at least 32 random characters, for example `openssl rand -base64 48`. It is stretched with PBKDF2-SHA-512 at 600,000 iterations into an AES-GCM key. **Keep a copy in your password manager.** Without it the state cannot be read, and every later plan fails. Use a different one per environment |
+  | `ACCESS_ALLOWED_EMAILS` | **production only**: who Access lets through to production's API host, as a JSON list of full addresses, for example `["you@example.com"]`. A secret, so the public log never shows it. Staging's Access admits the members of your Cloudflare account instead, so staging needs none (DEC-2030 item 2) |
 
-- **Environment variables:**
+- **Environment variable:**
 
   | Name | Example | What |
   |---|---|---|
-  | `CF_ACCOUNT_ID` | `0123456789abcdef0123456789abcdef` | §2.2 |
-  | `KUBE_API_ALLOWED_CIDRS` | `["203.0.113.7/32"]` | the only addresses the cluster's API admits, as a JSON list, each no wider than /24; your own address for kubectl |
-  | `ACCESS_ALLOWED_EMAILS` | `["you@example.com"]` | who Access lets through to the API host, as a JSON list of full addresses |
+  | `KUBE_API_ALLOWED_CIDRS` | `["203.0.113.7/32"]` | the addresses the cluster's API admits, as a JSON list, each no wider than /24; your own address for kubectl. Required in production. Staging may leave it unset: with no address and no run's window its firewall admits nobody (DEC-2030 item 3) |
 
 No repository-level secret or variable is used, so no other workflow can read these.
 

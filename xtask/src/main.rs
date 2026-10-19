@@ -1164,15 +1164,35 @@ const INFRA_WORKFLOW: &str = ".github/workflows/infra.yml";
 const INFRA_RUN: &str = "cargo xtask infra";
 /// The secrets that step reads, each from the environment `infra-<environment>` the founder
 /// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Cloudflare token
-/// and account go to OpenTofu as variables under `CF_` names, since `web/scripts/workers.mjs`
-/// keeps every `CLOUDFLARE_` name to `web-deploy.yml`'s deploy step (DEC-1005 item 2).
-const INFRA_SECRETS: [&str; 5] = [
+/// goes to OpenTofu as a variable under a `CF_` name, since `web/scripts/workers.mjs` keeps every
+/// `CLOUDFLARE_` name to `web-deploy.yml`'s deploy step (DEC-1005 item 2); the account id is read
+/// from Cloudflare, never configured (DEC-2030 item 1). Production's Access emails are a secret,
+/// since GitHub prints a variable in a step's environment in the public log (DEC-2030 item 2).
+const INFRA_SECRETS: [&str; 6] = [
     "DIGITAL_OCEAN_API_KEY",
     "SPACES_ACCESS_KEY_ID",
     "SPACES_SECRET_ACCESS_KEY",
     "CF_INFRA_API_TOKEN",
     "TOFU_STATE_PASSPHRASE",
+    "ACCESS_ALLOWED_EMAILS",
 ];
+/// The list inputs `infra.yml` hands OpenTofu as JSON, which `infra` leaves out of `tofu`'s
+/// environment when blank or empty, so a root with a default takes it and a root without one
+/// fails on the missing variable by name, never on `""`, which is no list (DEC-2030 item 3).
+const INFRA_LIST_INPUTS: [&str; 2] = [
+    "TF_VAR_kube_api_allowed_addresses",
+    "TF_VAR_access_allowed_emails",
+];
+
+/// Whether `value`, a JSON list as `infra.yml` hands it on, names nothing: unset, blank, or an
+/// empty list.
+fn names_nothing(value: Option<&str>) -> bool {
+    value.is_none_or(|value| {
+        value
+            .chars()
+            .all(|c| c.is_whitespace() || c == '[' || c == ']')
+    })
+}
 /// The environment variables `infra.yml` hands `cargo xtask infra`: which environment and
 /// whether to apply, from the dispatch's choice inputs.
 const INFRA_ENVIRONMENT_ENV: &str = "MANDATE_INFRA_ENVIRONMENT";
@@ -1244,6 +1264,11 @@ fn infra() -> Result<()> {
     let tofu = |args: &[String]| {
         let mut command = Command::new("tofu");
         command.args(args).env("TF_IN_AUTOMATION", "1");
+        for name in INFRA_LIST_INPUTS {
+            if names_nothing(env::var(name).ok().as_deref()) {
+                command.env_remove(name);
+            }
+        }
         command
     };
     for args in infra_commands(&environment, &action, &plan_file.to_string_lossy())? {
@@ -1446,6 +1471,10 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         INFRA_WORKFLOW,
         "TF_VAR_cloudflare_api_token: ${{ secrets.CF_INFRA_API_TOKEN }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "TF_VAR_access_allowed_emails: ${{ secrets.ACCESS_ALLOWED_EMAILS }}",
     ),
 ];
 
@@ -4803,7 +4832,6 @@ const READ_ENV_NAMES: &[&str] = &[
     "AWS_SECRET_ACCESS_KEY",
     "TF_VAR_state_passphrase",
     "TF_VAR_kube_api_allowed_addresses",
-    "TF_VAR_cloudflare_account_id",
     "TF_VAR_cloudflare_api_token",
     "TF_VAR_access_allowed_emails",
     "MANDATE_SCHEMA_SHARD",
@@ -16081,6 +16109,28 @@ mod tests {
             "a line reviewed for web-deploy.yml is not allowed in ci.yml"
         );
         Ok(())
+    }
+
+    /// DEC-2030 item 3: a blank or empty list input is left out of `tofu`'s environment, so
+    /// staging's root takes its empty default rather than failing on `""`; a named list is kept.
+    #[test]
+    fn empty_list_inputs_are_left_out() {
+        for value in [None, Some(""), Some("  "), Some("[]"), Some(" [ ] ")] {
+            assert!(crate::names_nothing(value), "{value:?} names nothing");
+        }
+        for value in ["[\"203.0.113.7/32\"]", "[\"you@example.com\"]"] {
+            assert!(
+                !crate::names_nothing(Some(value)),
+                "{value} names something"
+            );
+        }
+        assert_eq!(
+            crate::INFRA_LIST_INPUTS,
+            [
+                "TF_VAR_kube_api_allowed_addresses",
+                "TF_VAR_access_allowed_emails"
+            ]
+        );
     }
 
     /// E21-56 (DEC-2014): `plan` inits and saves a plan; `apply` applies that same saved plan,

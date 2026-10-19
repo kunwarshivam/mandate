@@ -247,6 +247,85 @@ fn a_hard_link_planted_at_an_output_name_is_replaced_not_written_through() {
     assert_eq!(listing(&dir), ["api.role-id", "api.secret-id"]);
 }
 
+/// A temporary file a crashed write left at an output's name is removed by the next write; one
+/// that is not a plain file, and files only like it, are left as they are (DEC-2022 item 1).
+#[test]
+fn a_crashed_writes_temporary_file_is_removed_by_the_next_write() {
+    let dir = fresh("crashed");
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    fs::write(dir.join(".api.secret-id.4242.0.tmp"), "secret-left").unwrap();
+    fs::create_dir(dir.join(".api.secret-id.held.tmp")).unwrap();
+    fs::write(dir.join(".api.secret-id.keep"), "kept").unwrap();
+    fs::write(dir.join("notes.tmp"), "kept").unwrap();
+    let written = write_credentials(&dir, &[credential(Identity::Api, "role-a", "secret-a")]);
+    assert!(written.is_ok(), "{written:?}");
+    assert_eq!(
+        listing(&dir),
+        [
+            ".api.secret-id.held.tmp",
+            ".api.secret-id.keep",
+            "api.role-id",
+            "api.secret-id",
+            "notes.tmp"
+        ]
+    );
+}
+
+/// A temporary name something else holds is passed over for the next; when every attempt's name
+/// is held, the write is refused (DEC-2022 item 1).
+#[test]
+fn a_held_temporary_name_is_passed_over_until_none_is_left() {
+    let held = |dir: &Path, attempts: u32| {
+        fs::create_dir(dir).unwrap();
+        set_mode(dir, 0o700);
+        for attempt in 0..attempts {
+            let name = format!(".api.secret-id.{}.{attempt}.tmp", std::process::id());
+            fs::create_dir(dir.join(name)).unwrap();
+        }
+    };
+    let one = [credential(Identity::Api, "role-a", "secret-a")];
+    let dir = fresh("held-one");
+    held(&dir, 1);
+    assert!(write_credentials(&dir, &one).is_ok());
+    assert_eq!(
+        fs::read_to_string(dir.join("api.secret-id")).unwrap(),
+        "secret-a"
+    );
+    let dir = fresh("held-all");
+    held(&dir, 8);
+    assert_eq!(
+        write_credentials(&dir, &one),
+        Err(SourceError::CredentialFile)
+    );
+    assert!(!dir.join("api.secret-id").exists());
+}
+
+/// A `dir` whose parent others may write without the sticky bit is refused, since they could
+/// rename it away; a sticky parent, as the temporary directory is, or an owner-only one is not
+/// (DEC-2022 item 1).
+#[test]
+fn a_parent_others_may_write_without_the_sticky_bit_is_refused() {
+    let one = [credential(Identity::Api, "role-a", "secret-a")];
+    for (bits, refused) in [
+        (0o777, true),
+        (0o775, true),
+        (0o757, true),
+        (0o1777, false),
+        (0o755, false),
+        (0o700, false),
+    ] {
+        let parent = fresh("parent");
+        fs::create_dir(&parent).unwrap();
+        set_mode(&parent, bits);
+        let dir = parent.join("out");
+        let written = write_credentials(&dir, &one);
+        assert_eq!(written.is_err(), refused, "a parent of mode {bits:o}");
+        assert_eq!(dir.exists(), !refused, "a parent of mode {bits:o}");
+        set_mode(&parent, 0o700);
+    }
+}
+
 /// A refusal changes no file: every output name is checked before any is written, so an earlier
 /// file stays as it was when a later name cannot be written (DEC-2022 item 1).
 #[test]
