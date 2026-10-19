@@ -117,7 +117,6 @@ const ERRORS: [KeyError; 5] = [
 /// DEC-2020 item 3: the key is read once, then served for every call to its upstream from memory,
 /// and for no other upstream.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_key_is_read_once_and_served_for_its_upstream_alone() {
     let vault = FakeVault::with_key(CANARY.as_bytes());
     let key = held(&vault).unwrap();
@@ -137,7 +136,6 @@ fn the_key_is_read_once_and_served_for_its_upstream_alone() {
 /// DEC-2020 item 5: only a session as the model gateway reads the key; any other identity is
 /// refused before the vault is asked.
 #[test]
-#[ignore = "pending E21-62"]
 fn only_the_model_gateway_s_session_reads_the_key() {
     for identity in [
         Identity::Runtime,
@@ -158,7 +156,6 @@ fn only_the_model_gateway_s_session_reads_the_key() {
 /// DEC-2020 item 3: a vault that cannot give the key stops the start, each case with its own code:
 /// no key, the policy's refusal, and an outage of any kind, never a refusal mistaken for one.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_vault_that_cannot_give_the_key_stops_the_start_with_its_code() {
     let cases = [
         (Ok(None), KeyError::Missing),
@@ -189,7 +186,6 @@ fn a_vault_that_cannot_give_the_key_stops_the_start_with_its_code() {
 /// The key goes into a request header: a stored value is held only when it is non-empty printable
 /// ASCII, so a newline can never smuggle a second header and a stray byte never reaches the wire.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_stored_value_a_header_cannot_carry_is_refused() {
     let values = proptest::collection::vec(any::<u8>(), 0..48);
     TestRunner::new(Config {
@@ -227,7 +223,6 @@ fn a_stored_value_a_header_cannot_carry_is_refused() {
 /// E21-62: the key's bytes appear in no `Debug` of the held key or of what it hands out, and in no
 /// error's text, `Debug` or code, whichever way the read went.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_key_appears_in_no_debug_error_or_code() {
     let key = held(&FakeVault::with_key(CANARY.as_bytes())).unwrap();
     assert_eq!(

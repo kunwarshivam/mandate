@@ -37,7 +37,6 @@ fn journaled(workspace: &str) -> JournalMeter<MemoryStore> {
 
 /// DEC-2257 item 2: both meters reading back starts the service, the journaled one as well as any.
 #[test]
-#[ignore = "pending E21-62"]
 fn both_meters_reading_back_starts_the_service() {
     assert_eq!(
         meters_ready(&journaled("ws_1"), &MemoryMeter::new()),
@@ -52,7 +51,6 @@ fn both_meters_reading_back_starts_the_service() {
 /// DEC-2257 item 2: a meter that cannot be read stops the start, and the code names which one, the
 /// workspace's when neither reads.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_meter_that_cannot_be_read_stops_the_start_and_is_named() {
     assert_eq!(
         meters_ready(&Unreadable, &MemoryMeter::new()),

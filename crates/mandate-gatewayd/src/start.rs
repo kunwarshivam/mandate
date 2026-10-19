@@ -16,13 +16,11 @@ pub enum StartError {
 
 impl StartError {
     /// The code the process exits with.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn code(self) -> &'static str {
-        let _ = self;
-        todo!()
+        match self {
+            Self::WorkspaceMeter => "workspace_meter_unavailable",
+            Self::DeploymentMeter => "deployment_meter_unavailable",
+        }
     }
 }
 
@@ -30,14 +28,11 @@ impl StartError {
 ///
 /// # Errors
 /// [`StartError`] naming the first meter that does not read.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn meters_ready(
     workspace: &dyn MeterStore,
     deployment: &dyn MeterStore,
 ) -> Result<(), StartError> {
-    let _ = (workspace, deployment);
-    todo!()
+    workspace.read().map_err(|_| StartError::WorkspaceMeter)?;
+    deployment.read().map_err(|_| StartError::DeploymentMeter)?;
+    Ok(())
 }
