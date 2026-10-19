@@ -102,6 +102,7 @@ const HOST_CA_BUNDLES: [&str; 4] = [
     "/etc/ssl/cert.pem",
 ];
 const RUNTIME_DOCKERFILE: &str = "deploy/cell/images/runtime.Dockerfile";
+const EXECUTOR_DOCKERFILE: &str = "deploy/cell/images/executor.Dockerfile";
 /// Where the cell keeps what it derives: the kubeconfig, the downloaded operator chart, and the
 /// image build context. Under `target/`, so nothing derived is ever committed.
 const STATE: &str = "target/cell";
@@ -516,12 +517,13 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 5] = [
+const BUILT_PACKAGES: [&str; 6] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
     "mandate-daemon",
     "mandate-deployd",
+    "mandate-executord",
 ];
 
 /// The stub issuer's package, which [`build_binary`] adds once [`stub_ready`].
@@ -530,12 +532,13 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 6] = [
+pub const IMAGE_PACKAGES: [&str; 7] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
     BUILT_PACKAGES[3],
     BUILT_PACKAGES[4],
+    BUILT_PACKAGES[5],
     STUB_PACKAGE,
 ];
 
@@ -682,6 +685,15 @@ fn runtime_image() -> Result<Option<String>> {
     local_tag("runtime", &["mandate-daemon"]).map(Some)
 }
 
+/// The cell's `executor` image (DEC-2031): this checkout's `mandate-executord`, whose broker is the
+/// in-process fixture. `None` where the `mandate` image is pulled, as for the runtime.
+fn executor_image() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag("executor", &["mandate-executord"]).map(Some)
+}
+
 /// The `images.*` settings for the images this cell runs, so `up` and every render agree.
 fn image_sets() -> Result<Vec<String>> {
     let mut sets = vec![
@@ -696,10 +708,13 @@ fn image_sets() -> Result<Vec<String>> {
     if let Some(runtime) = runtime_image()? {
         sets.push(format!("images.runtime={runtime}"));
     }
+    if let Some(executor) = executor_image()? {
+        sets.push(format!("images.executor={executor}"));
+    }
     Ok(sets)
 }
 
-/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime` and `deploy-manager` images from
+/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor` and `deploy-manager` images from
 /// this checkout (never with the `live` feature), bring up the k3d cluster if it is not up, install
 /// the CloudNativePG operator, the journal's Postgres and the workspace chart, and wait until every
 /// pod is ready and the migration Job has finished.
@@ -712,6 +727,7 @@ pub fn up() -> Result<()> {
     let api = api_image_tag()?;
     let manager = deploy_manager_image_tag()?;
     let runtime = runtime_image()?;
+    let executor = executor_image()?;
     let stub = stub_image_tag()?;
     if source == ImageSource::Build {
         let runner = static_binary(RUNNER);
@@ -719,6 +735,9 @@ pub fn up() -> Result<()> {
     }
     if let Some(runtime) = &runtime {
         build_image(runtime, RUNTIME_DOCKERFILE, "mandate-daemon", &[])?;
+    }
+    if let Some(executor) = &executor {
+        build_image(executor, EXECUTOR_DOCKERFILE, "mandate-executord", &[])?;
     }
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
@@ -742,6 +761,7 @@ pub fn up() -> Result<()> {
         built,
         api.as_ref(),
         runtime.as_ref(),
+        executor.as_ref(),
         stub.as_ref(),
         manager.as_ref(),
     ]
@@ -918,7 +938,8 @@ const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
-/// (DEC-1013) and the deployment manager's `mandate-deployd` (DEC-1172) linked statically, so their images need no base (DEC-993 item 9), with no feature at
+/// (DEC-1013), the deployment manager's `mandate-deployd` (DEC-1172) and the executor's
+/// `mandate-executord` (DEC-2031) linked statically, so their images need no base (DEC-993 item 9), with no feature at
 /// all: never `live`; with them the stub issuer once [`stub_ready`], which the dev profile's debug
 /// assertions are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes
 /// (DEC-464): it keeps overflow checks, and the cell's journals are small.
@@ -4026,15 +4047,24 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
         },
         DemoPart {
             name: "a paper agent on rh-sim and recorded Alpaca fixtures, no credential",
-            skipped: lane(
-                built("runtime") && built("executor"),
-                "the runtime and executor images are not on main yet (lane P1, #1451)",
-            ),
+            skipped: if built("runtime") && built("executor") {
+                Some(
+                    "the executor runs on the fixture paper broker (DEC-2031), but the runtime \
+                     proposes no order on the deny-all wiring until the post-R0 hook (DEC-1013), \
+                     and the executor takes no order before slice X1b (E21-30)"
+                        .to_string(),
+                )
+            } else {
+                lane(
+                    false,
+                    "the runtime and executor images are not on main yet (lane P1, #1451)",
+                )
+            },
         },
         DemoPart {
             name: RESEARCH_GATEWAY,
             skipped: lane(
-                built("runtime") && built("executor"),
+                false,
                 "the research loop runs in the runtime once the post-R0 hook wires its ports; until \
                  then the cell's runtime runs the deny-all wiring (DEC-1013)",
             ),
@@ -4137,7 +4167,7 @@ pub fn demo(web: bool) -> Result<()> {
             wanted.trim()
         );
     }
-    let run = web_run(signin_ready);
+    let run = web_run(signin_ready, DEMO_WORKSPACE);
     eprintln!(
         "==> web/ at {} (Ctrl-C stops it; the cell keeps running)",
         run.url
@@ -4833,7 +4863,18 @@ mod tests {
             "Commands:\n  membership  Grant the founding membership\n",
             true,
         );
-        assert!(parts.iter().all(|p| p.skipped.is_none()), "{parts:?}");
+        let gaps: Vec<&str> = parts
+            .iter()
+            .filter(|p| p.skipped.is_some())
+            .map(|p| p.name)
+            .collect();
+        assert_eq!(
+            gaps.len(),
+            2,
+            "every lane on main, the paper agent and research still wait on the post-R0 hook and \
+             X1b (DEC-2031): {gaps:?}"
+        );
+        assert!(gaps.contains(&RESEARCH_GATEWAY), "{gaps:?}");
         let no_stub = demo_parts(
             &later,
             "Commands:\n  membership  Grant the founding membership\n",
@@ -4844,7 +4885,12 @@ mod tests {
             .filter(|p| p.skipped.is_some())
             .map(|p| p.name)
             .collect();
-        assert_eq!(waiting, [SIGNIN_PART], "only sign-in waits on the stub");
+        assert_eq!(
+            waiting.len(),
+            3,
+            "beside those two gaps, only sign-in waits on the stub: {waiting:?}"
+        );
+        assert!(waiting.contains(&SIGNIN_PART), "{waiting:?}");
     }
 
     #[test]
@@ -5017,6 +5063,27 @@ mod tests {
             "the k3d cell's deployment"
         );
         Ok(())
+    }
+
+    /// Both images built still run no paper agent and no research: the runtime proposes nothing on
+    /// the deny-all wiring and the executor takes no order before X1b, so neither part is called
+    /// ready, and the paper fill stays a named gap rather than a faked one (DEC-2031).
+    #[test]
+    fn both_images_built_still_call_no_paper_agent_or_research_ready() {
+        let list = [process("runtime", true), process("executor", true)];
+        let parts = demo_parts(&list, "", false);
+        let skipped = |name: &str| {
+            parts
+                .iter()
+                .find(|p| p.name.starts_with(name))
+                .and_then(|p| p.skipped.clone())
+        };
+        assert!(
+            skipped("a paper agent").is_some_and(|why| why.contains("X1b")),
+            "{:?}",
+            skipped("a paper agent")
+        );
+        assert!(skipped(RESEARCH_GATEWAY).is_some());
     }
 
     #[test]
@@ -5295,7 +5362,7 @@ mod tests {
         assert!(
             parts
                 .iter()
-                .any(|p| p.name.starts_with("a paper agent") && p.skipped.is_none()),
+                .any(|p| p.name.starts_with("the agent runtime") && p.skipped.is_none()),
             "parts that need no API image stay ready"
         );
     }

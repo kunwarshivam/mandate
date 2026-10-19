@@ -3215,6 +3215,15 @@ enables `live` (ES-23, OPS-5).
   admits, installs Flux and creates the workload secrets (the tunnel token and the archive key)
   from lane IAC's outputs, never committed and never by an agent, until E21-32's vault holds them.
 
+- **E21-59 (Proposed, M8, after E21-54's step 3; lane I2; DEC-2214)** As the founder, I want the
+  runtime process's research source to fold an agent's theses, lineages, working universe and
+  research reservations from its agent stream, so that the cell's research keeps running after its
+  first proposal instead of pausing. *Accepted when:* `mandate-daemon`'s cell source folds those
+  facts from the agent stream's own records through the same functions the core judges with
+  (`fold_theses`, `expire_theses`, the reservation ceiling's fold), gives no context on a pass when
+  any record cannot be folded (DEC-2210 item 4), and a property test over random journaled runs
+  shows the folded facts equal an independent accumulator over the same records.
+
 ## Won't (v1)
 
 Live retail trading before counsel signs off; users outside the US; options; Interactive Brokers and Coinbase connectors; native mobile apps; WebAssembly plug-ins; SAML and SCIM;

@@ -179,6 +179,9 @@ fn main() -> anyhow::Result<()> {
                 &mut io::stdout().lock(),
             )
         }
+        Command::Vault(VaultCommand::Provision(args)) => {
+            vault::run_provision(&args, &mut io::stdout().lock())
+        }
         Command::Db(DbCommand::Migrate(args)) => {
             db::migrate(&args, &mut io::stdout().lock())?;
             Ok(())
