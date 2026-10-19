@@ -1409,10 +1409,15 @@ mod tests {
     fn the_gestures_write_the_store_the_api_reads() {
         let helpers =
             fs::read_to_string("../deploy/cell/charts/workspace/templates/_helpers.tpl").unwrap();
-        assert!(
-            helpers.contains(&format!(
-                r#"{{{{- define "mandate.artifactsPath" -}}}}{STORE}{{{{- end -}}}}"#
-            )),
+        let path = helpers
+            .lines()
+            .find(|line| line.contains(r#"define "mandate.artifactsPath""#))
+            .and_then(|line| line.split("}}").nth(1))
+            .and_then(|rest| rest.split("{{").next())
+            .map(str::trim);
+        assert_eq!(
+            path,
+            Some(STORE),
             "{STORE} is not the chart's artifact store path"
         );
         assert!(
