@@ -348,30 +348,50 @@ fn planned(
 }
 
 /// What the control stream holds of the derived connection and account (rule 131, opening).
+/// A connection row without the members journal spec §9 gives it (every one a `connection_id`,
+/// a request its `account_ref`) leaves both unanswerable: the start is refused, never folded past.
 fn facts(control: &[StoredEvent], connection: &str, account: &str) -> StartFacts {
+    const UNANSWERABLE: StartFacts = StartFacts {
+        id: IdFold::CannotAnswer,
+        account_ref: AccountRefFold::CannotAnswer,
+    };
     let mut id = IdFold::Free;
     let mut account_ref = AccountRefFold::Unused;
     for row in control {
-        let Ok(event) = parse(&row.body) else {
+        let kind = row.event_type.as_str();
+        if !matches!(
+            kind,
+            "ConnectionRequested"
+                | "ConnectionEstablished"
+                | "ConnectionRefused"
+                | "ConnectionRevoked"
+        ) {
             continue;
-        };
+        }
+        let event = parse(&row.body).ok();
         let member = |name: &str| {
             event
-                .get("payload")
+                .as_ref()
+                .and_then(|e| e.get("payload"))
                 .and_then(|p| p.get(name))
                 .and_then(Value::as_str)
         };
-        if matches!(
-            row.event_type.as_str(),
-            "ConnectionRequested" | "ConnectionEstablished"
-        ) && member("account_ref") == Some(account)
+        let Some(named) = member("connection_id") else {
+            return UNANSWERABLE;
+        };
+        let requested_account = member("account_ref");
+        if kind == "ConnectionRequested" && requested_account.is_none() {
+            return UNANSWERABLE;
+        }
+        if matches!(kind, "ConnectionRequested" | "ConnectionEstablished")
+            && requested_account == Some(account)
         {
             account_ref = AccountRefFold::Used;
         }
-        if member("connection_id") != Some(connection) {
+        if named != connection {
             continue;
         }
-        id = match (row.event_type.as_str(), id) {
+        id = match (kind, id) {
             ("ConnectionRequested", IdFold::Free) => IdFold::RequestOpen,
             ("ConnectionEstablished", _) => IdFold::Established,
             ("ConnectionRefused" | "ConnectionRevoked", IdFold::RequestOpen) => IdFold::Free,

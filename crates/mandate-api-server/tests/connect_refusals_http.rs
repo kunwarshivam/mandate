@@ -81,7 +81,6 @@ fn a_live_workspace_is_refused_before_any_step_up() {
 /// The role is checked before the workspace's environment: a viewer of a live workspace is
 /// forbidden, not told the workspace is live (§4.5).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_viewer_of_a_live_workspace_is_forbidden_before_live_unavailable() {
     let f = fixture("live", true, true);
     let viewer = signed_in(&f, BOB);
@@ -97,7 +96,6 @@ fn a_viewer_of_a_live_workspace_is_forbidden_before_live_unavailable() {
 
 /// The workspace's environment is checked before the disclosure (§4.5).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_live_workspace_is_live_unavailable_before_the_disclosure_is_read() {
     let f = fixture("live", true, true);
     let body = String::from_utf8(to_canonical(&base()))
@@ -241,7 +239,6 @@ fn a_derived_id_the_control_stream_already_names_conflicts_after_step_up() {
 /// its `account_ref`, journal spec §9) leaves the start unanswerable: after step-up, as §4.5
 /// places the fold, it is `journal_unavailable` and nothing is recorded.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_connection_row_the_fold_cannot_read_is_unavailable_after_step_up() {
     let rows = [
         (
