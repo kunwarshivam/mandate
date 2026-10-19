@@ -19,7 +19,7 @@ use crate::agentic::{Code, LoopBounds, Tool, ToolCall, ToolCallId, ToolClass, To
 use crate::error::ResearchRunError;
 use crate::item::{Bar, ItemId, ItemKind, NewsItem, Symbol};
 use crate::plan::Scope;
-use crate::ports::{NewsText, Readers};
+use crate::ports::{FilingEntry, NewsText, Readers};
 use crate::retrieve::{RetrievedItem, TextRead, cut, digest, int, reserved, text, window_start};
 
 /// What a dispatch reads within: the run's frozen scope, its pinned bounds, and the result bytes the
@@ -124,6 +124,9 @@ struct Read {
     /// `news.get`'s stored text, shown in place of its one item's summary; the item observed stays
     /// the news item's own record (DEC-2213 item 6).
     stored: Option<String>,
+    /// `filings.search`'s stored lengths, one per item in `items`' order, shown beside each filing
+    /// and never observed (DEC-2250 item 5).
+    stored_bytes: Vec<u64>,
 }
 
 impl Read {
@@ -134,7 +137,7 @@ impl Read {
         let mut truncated = self.trimmed;
         loop {
             let shown = self.items.get(..kept).unwrap_or_default();
-            let content = render(shown, truncated, self.stored.as_deref())?;
+            let content = render(shown, truncated, self.stored.as_deref(), &self.stored_bytes)?;
             if content.len() <= budget || kept == 0 {
                 let mut items = self.items;
                 items.truncate(kept);
@@ -262,6 +265,7 @@ fn news_search(
         trimmed,
         untrusted: true,
         stored: None,
+        stored_bytes: Vec::new(),
     }))
 }
 
@@ -331,6 +335,7 @@ fn news_get(
         stored: Some(shown.to_owned()),
         items: vec![RetrievedItem::News(item)],
         untrusted: true,
+        stored_bytes: Vec::new(),
     }))
 }
 
@@ -340,8 +345,105 @@ fn filings_search(
     scope: &Scope,
     readers: Readers<'_>,
 ) -> Result<Answer, ResearchRunError> {
-    let _ = (call, scope, readers);
-    Err(ResearchRunError::Unimplemented { story: "E19-13" })
+    let Ok(arguments) = mandate_canon::parse(call.arguments.as_bytes()) else {
+        return Ok(Answer::Failed);
+    };
+    let parsed = (|| {
+        let symbols = symbols(arguments.get("symbols")?, 5)?;
+        let forms = forms(arguments.get("forms")?)?;
+        let window_d = bounded(arguments.get("window_d")?, 1, 90)?;
+        let terms = terms(arguments.get("terms")?)?;
+        let limit = bounded(arguments.get("limit")?, 1, 10)?;
+        Some((symbols, forms, window_d, terms, limit))
+    })();
+    let Some((symbols, forms, window_d, terms, limit)) = parsed else {
+        return Ok(Answer::Failed);
+    };
+    if outside(&symbols, scope) {
+        return Ok(Answer::Refused(Code::OutOfUniverse));
+    }
+    let read = TextRead {
+        scope,
+        symbols: &symbols,
+        window_start: window_start(scope.cut_off, window_d.saturating_mul(86_400))?,
+        max_items: limit,
+        kind: ItemKind::Filing,
+    };
+    let Ok(answered) = readers
+        .filings
+        .search(&read.query(&symbols), &forms, &terms)
+    else {
+        return Ok(Answer::Failed);
+    };
+    let mut seen = BTreeSet::new();
+    let mut kept: Vec<FilingEntry> = answered
+        .into_iter()
+        .filter(|entry| {
+            let filing = &entry.filing;
+            read.refusal(
+                filing.knowledge_at,
+                &filing.source,
+                filing.licensed,
+                &BTreeSet::from([filing.symbol.clone()]),
+            )
+            .is_none()
+                && forms.contains(&filing.form)
+                && !reserved(&filing.item_id)
+                && seen.insert(filing.item_id.clone())
+        })
+        .collect();
+    kept.sort_by(|a, b| {
+        b.filing
+            .knowledge_at
+            .cmp(&a.filing.knowledge_at)
+            .then_with(|| a.filing.item_id.cmp(&b.filing.item_id))
+    });
+    kept.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+    let mut trimmed = false;
+    for entry in &mut kept {
+        if entry.filing.excerpt.len() > FILING_EXCERPT_BYTES {
+            entry.filing.excerpt = cut(&entry.filing.excerpt, FILING_EXCERPT_BYTES).to_owned();
+            trimmed = true;
+        }
+    }
+    Ok(Answer::Read(Read {
+        stored_bytes: kept.iter().map(|entry| entry.stored_bytes).collect(),
+        items: kept
+            .into_iter()
+            .map(|entry| RetrievedItem::Filing(entry.filing))
+            .collect(),
+        trimmed,
+        untrusted: true,
+        stored: None,
+    }))
+}
+
+/// The forms `filings.search` may name, in their order (DEC-2250 item 1).
+const FILING_FORMS: [&str; 6] = ["10-K", "10-K/A", "10-Q", "10-Q/A", "8-K", "8-K/A"];
+
+/// The most bytes of excerpt one `filings.search` entry carries (§6.10).
+const FILING_EXCERPT_BYTES: usize = 4_000;
+
+/// §6.10's forms: at most five, each once and from [`FILING_FORMS`]; the forms the reader is asked
+/// for, in the list's order, and the whole list when none is named (DEC-2250 items 1 and 2).
+fn forms(value: &Value) -> Option<Vec<String>> {
+    let listed = value.as_array()?;
+    if listed.len() > 5 {
+        return None;
+    }
+    let mut named = BTreeSet::new();
+    for form in listed {
+        let form = form.as_str()?;
+        if !FILING_FORMS.contains(&form) || !named.insert(form) {
+            return None;
+        }
+    }
+    let asked = FILING_FORMS
+        .iter()
+        .filter(|form| named.is_empty() || named.contains(*form))
+        .map(|form| (*form).to_owned())
+        .collect();
+    Some(asked)
 }
 
 fn outside(symbols: &BTreeSet<Symbol>, scope: &Scope) -> bool {
@@ -376,6 +478,7 @@ fn bars(arguments: &Value, scope: &Scope, readers: Readers<'_>) -> Answer {
         trimmed: false,
         untrusted: false,
         stored: None,
+        stored_bytes: Vec::new(),
     })
 }
 
@@ -400,9 +503,10 @@ fn render(
     items: &[RetrievedItem],
     truncated: bool,
     stored: Option<&str>,
+    stored_bytes: &[u64],
 ) -> Result<Vec<u8>, ResearchRunError> {
     let mut shown = Vec::with_capacity(items.len());
-    for item in items {
+    for (index, item) in items.iter().enumerate() {
         let (section, fields) = match item {
             RetrievedItem::Bar(bar) => (
                 "untrusted",
@@ -429,7 +533,23 @@ fn render(
                     ("length_bytes", int(item.length_bytes())?),
                 ],
             ),
-            RetrievedItem::Filing(_) | RetrievedItem::Instrument(_) => {
+            RetrievedItem::Filing(filing) => {
+                let length = stored_bytes.get(index).ok_or(ResearchRunError::LoopOrder {
+                    what: "a filing shown without its stored length",
+                })?;
+                (
+                    "untrusted",
+                    vec![
+                        ("form", text(&filing.form)),
+                        ("filed_at", text(&filing.filed_at.to_string())),
+                        ("excerpt", text(&filing.excerpt)),
+                        ("content_hash", digest(&filing.content_hash)),
+                        ("length_bytes", int(item.length_bytes())?),
+                        ("stored_bytes", int(*length)?),
+                    ],
+                )
+            }
+            RetrievedItem::Instrument(_) => {
                 return Err(ResearchRunError::LoopOrder {
                     what: "an item no dispatched read returns",
                 });
