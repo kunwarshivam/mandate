@@ -213,7 +213,6 @@ fn expected(calls: &[ToolCall]) -> (Vec<Vec<u8>>, Vec<DispatchedResult>) {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_dispatch_stores_every_content_and_record_before_its_answer() {
     let shelf = Shelf::default();
     let (mut worker, before) = started(&shelf);
@@ -245,7 +244,6 @@ fn a_dispatch_stores_every_content_and_record_before_its_answer() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_core_s_dispatch_request_is_run_when_handed() {
     let handed_shelf = Shelf::default();
     let (mut handed, _) = started(&handed_shelf);
@@ -278,7 +276,6 @@ fn unanswered(
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn without_the_loop_s_bounds_nothing_is_run() {
     let shelf = Shelf::default();
     let mut worker = bare(&shelf);
@@ -297,7 +294,6 @@ fn without_the_loop_s_bounds_nothing_is_run() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_run_not_started_or_cancelled_is_not_run() {
     let shelf = Shelf::default();
     let mut fresh = bare(&shelf).with_loop(LoopBounds::v0_2());
@@ -317,7 +313,6 @@ fn a_run_not_started_or_cancelled_is_not_run() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_moved_allowlist_reads_nothing() {
     let shelf = Shelf::default();
     let (mut worker, before) = started(&shelf);
@@ -331,7 +326,6 @@ fn a_moved_allowlist_reads_nothing() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn an_action_among_the_calls_is_refused_whole() {
     let shelf = Shelf::default();
     let (mut worker, before) = started(&shelf);
@@ -353,7 +347,6 @@ fn an_action_among_the_calls_is_refused_whole() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_refused_store_answers_nothing() {
     let shelf = Shelf::default();
     let (mut worker, _) = started(&shelf);
