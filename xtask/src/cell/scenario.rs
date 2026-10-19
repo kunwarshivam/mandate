@@ -21,7 +21,7 @@ use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS, NAMESPACE,
     NODE, WORKSPACE_CHART, api_image_tag, api_port_forward, helm, http, kubectl, open_session,
     processes, render, reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag,
-    stub_token, tools_missing, up,
+    stub_token, tools_missing, up, web,
 };
 use crate::output;
 
@@ -44,6 +44,10 @@ const SEGMENT: &str = "/work/segment.jsonl";
 pub const FOUNDER: &str = DEMO_OWNER;
 /// The demo's agent.
 pub const AGENT: &str = "demo-spy";
+/// A second agent under the same confirmed version, deployed for `web/`'s kill switch: the CLI
+/// stops [`AGENT`] inside the Job, and `web/` offers nothing to stop on a stopped agent, so the
+/// browser presses this one's (lane W2's D10).
+pub const WEB_AGENT: &str = "demo-web";
 /// How long the gestures' Job may run: the egress gate, the credentials copy and every gesture,
 /// one after another. Under the 300 s `run_job` polls for, so the Job ends, and the report is
 /// written, before the polling gives up.
@@ -70,7 +74,17 @@ pub struct Step {
 pub enum Part {
     Gesture(Gesture),
     Api(ApiCheck),
+    Web(WebCheck),
     Gap(Gap),
+}
+
+/// A gesture in `web/` against the cell's API, run after the gestures' Job (lane W2's
+/// `kill_switch_from_web`), and the signed-in read that proves it reached the run's control
+/// stream: `GET commands/{id}` must find that command on `ctl:{workspace}`, accepted.
+#[derive(Debug)]
+pub struct WebCheck {
+    pub shows: &'static str,
+    pub agent: &'static str,
 }
 
 /// A link of the story not on `main` yet (DEC-2004): what it would show, what of it is already on
@@ -222,13 +236,23 @@ pub enum Ask {
     Session,
 }
 
+/// The phases of a command the journal accepted: `recorded` until a process takes it, then
+/// `taken`, `applied` or `ended`; never `refused` (the workspace API's command status).
+const COMMAND_PHASES: [&str; 4] = ["recorded", "taken", "applied", "ended"];
+
+/// Set where a job must run the web gesture (CT's `cell-demo-web`): there a machine without
+/// `web/`'s tools fails the run, as [`CELL_REQUIRED_ENV`] makes a missing cell fail it.
+pub const WEB_REQUIRED_ENV: &str = "MANDATE_DEMO_WEB_REQUIRED";
+
 /// What the answer's JSON body must hold besides its status: nothing, an `agents` list naming an
-/// agent, or string members at JSON pointers.
+/// agent, string members at JSON pointers, or a command, by id, read from a stream in an accepted
+/// phase.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Body {
     Any,
     Lists(&'static str),
     Members(Vec<(&'static str, String)>),
+    Command { id: String, stream: String },
 }
 
 impl Body {
@@ -236,10 +260,12 @@ impl Body {
     pub fn missing(&self, body: &str) -> Option<String> {
         let value: Value = match self {
             Self::Any => return None,
-            Self::Lists(_) | Self::Members(_) => match serde_json::from_str(body) {
-                Ok(value) => value,
-                Err(_) => return Some("the body is not JSON".into()),
-            },
+            Self::Lists(_) | Self::Members(_) | Self::Command { .. } => {
+                match serde_json::from_str(body) {
+                    Ok(value) => value,
+                    Err(_) => return Some("the body is not JSON".into()),
+                }
+            }
         };
         match self {
             Self::Any => None,
@@ -253,6 +279,24 @@ impl Body {
                 let got = value.pointer(pointer).and_then(Value::as_str);
                 (got != Some(want.as_str())).then(|| format!("{pointer} is {got:?}, not {want}"))
             }),
+            Self::Command { id, stream } => {
+                let phase = value["phase"].as_str().unwrap_or_default();
+                let read_from = value["as_of"]
+                    .as_array()
+                    .is_some_and(|a| a.iter().any(|x| x["stream_id"] == *stream));
+                if value["command_id"] != *id {
+                    Some(format!(
+                        "it reads command {}, not {id}",
+                        value["command_id"]
+                    ))
+                } else if !read_from {
+                    Some(format!("it is not read from {stream}"))
+                } else if !COMMAND_PHASES.contains(&phase) {
+                    Some(format!("its phase is {phase:?}"))
+                } else {
+                    None
+                }
+            }
         }
     }
 }
@@ -355,6 +399,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
     let mandate_in = format!("{INPUTS}/mandate.json");
     let instrument_in = format!("{INPUTS}/instrument.json");
     let (confirm, deploy) = (confirm_code(&version), deploy_code(AGENT, &version));
+    let web_deploy = deploy_code(WEB_AGENT, &version);
     let steps = vec![
         Step {
             number: 1,
@@ -464,6 +509,23 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 gesture(
                     "the agent, deployed with the code shown",
                     owner(&["agent", "deploy", AGENT, &version, "--code", &deploy]),
+                    "deployed as event".into(),
+                ),
+                gesture(
+                    "a second agent's code, shown, for web/'s kill switch in step 6",
+                    owner(&["agent", "deploy", WEB_AGENT, &version]),
+                    format!("code {web_deploy}"),
+                ),
+                gesture(
+                    "the second agent, deployed with the code shown",
+                    owner(&[
+                        "agent",
+                        "deploy",
+                        WEB_AGENT,
+                        &version,
+                        "--code",
+                        &web_deploy,
+                    ]),
                     "deployed as event".into(),
                 ),
                 Part::Gap(Gap {
@@ -641,12 +703,10 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
             number: 6,
             title: "the kill switch from the web app stops the agent",
             parts: vec![
-                Part::Gap(Gap {
-                    what: "the kill switch from web/, recorded through the API",
-                    on_main: "POST /v1/workspaces/{ws}/kill-switch in the cell (#1457, #1554), \
-                              web/'s kill switch sent through the API, its sign-in to a dev cell \
-                              (#1588) and the stub issuer (#1591)",
-                    waits: vec![W2_WEB],
+                Part::Web(WebCheck {
+                    shows: "the owner's kill switch for the second agent, pressed in web/ and \
+                            recorded through the API on the run's control stream",
+                    agent: WEB_AGENT,
                 }),
                 gesture(
                     "the owner's kill switch for the agent, through the CLI (agent scope)",
@@ -691,7 +751,7 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
         .flat_map(|s| &s.parts)
         .filter_map(|p| match p {
             Part::Gesture(g) => Some(g),
-            Part::Api(_) | Part::Gap(_) => None,
+            Part::Api(_) | Part::Web(_) | Part::Gap(_) => None,
         })
         .collect()
 }
@@ -937,6 +997,22 @@ pub fn run(name: &str) -> Result<()> {
                         failed.get_or_insert_with(|| format!("GET {}: {said}", check.path));
                     }
                 }
+                Part::Web(check) => {
+                    let outcome = if failed.is_some() {
+                        WebOutcome::AfterFailure
+                    } else {
+                        web_outcome(check, &workspace)?
+                    };
+                    let required = Required {
+                        cell: env::var_os(CELL_REQUIRED_ENV).is_some(),
+                        web: env::var_os(WEB_REQUIRED_ENV).is_some(),
+                    };
+                    let (word, said, fails) = web_verdict(&outcome, check, &workspace, required);
+                    eprintln!("    {word:<8} {}: {said}", check.shows);
+                    if fails {
+                        failed.get_or_insert_with(|| format!("web/ {}: {said}", check.agent));
+                    }
+                }
                 Part::Gap(gap) => {
                     gaps += 1;
                     eprintln!("    gap      {}", gap.what);
@@ -1116,6 +1192,110 @@ pub fn api_verdict(
         Ok((status, _)) => ("failed", format!("answered {status}, not {expected}"), true),
         Err(why) if required => ("failed", why.clone(), true),
         Err(why) => ("not run", why.clone(), false),
+    }
+}
+
+/// What became of a [`WebCheck`]: an earlier part failed, so it was not tried; the API could not
+/// be asked; this machine lacks `web/`'s tools; the gesture failed; or it recorded a command,
+/// with the agent and workspace it acted on and the signed-in read of that command.
+#[derive(Debug)]
+pub enum WebOutcome {
+    AfterFailure,
+    Unaskable(String),
+    NoTools(String),
+    Failed(String),
+    Recorded {
+        agent: String,
+        workspace: String,
+        command: String,
+        read: Result<(u16, String), String>,
+    },
+}
+
+/// Runs `check`'s gesture against the cell's API for `workspace`, then reads its command back
+/// with the owner's session.
+fn web_outcome(check: &WebCheck, workspace: &str) -> Result<WebOutcome> {
+    if let Some(why) = api_unaskable()? {
+        return Ok(WebOutcome::Unaskable(why));
+    }
+    if let Some(why) = web::unavailable()? {
+        return Ok(WebOutcome::NoTools(why));
+    }
+    let forwarded = api_port_forward(stub_image_tag()?.is_some());
+    if let Err(why) = forwarded {
+        return Ok(WebOutcome::Unaskable(format!("{why:#}")));
+    }
+    let gesture = match web::kill_switch_from_web(workspace, Some(check.agent)) {
+        Ok(gesture) => gesture,
+        Err(why) => return Ok(WebOutcome::Failed(format!("{why:#}"))),
+    };
+    let read = api_answer(&command_read(workspace, &gesture.command_id))?;
+    Ok(WebOutcome::Recorded {
+        agent: gesture.agent_id,
+        workspace: gesture.workspace,
+        command: gesture.command_id,
+        read,
+    })
+}
+
+/// The signed-in read of `command` in `workspace`: the API finds it on the workspace's control
+/// stream and reads it accepted. Its `KillSwitchActivated` step appears only once a runtime
+/// applies it, which waits on D1 and X, so the read does not require one.
+pub fn command_read(workspace: &str, command: &str) -> ApiCheck {
+    ApiCheck {
+        shows: "the web gesture's command, read back",
+        path: format!("/v1/workspaces/{workspace}/commands/{command}"),
+        status: 200,
+        ask: Ask::Session,
+        body: Body::Command {
+            id: command.to_owned(),
+            stream: format!("ctl:{workspace}"),
+        },
+    }
+}
+
+/// What a run requires: the cell ([`CELL_REQUIRED_ENV`]) and the web gesture
+/// ([`WEB_REQUIRED_ENV`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Required {
+    pub cell: bool,
+    pub web: bool,
+}
+
+/// How a web check reads: `ran` only when the gesture acted on its own agent in `workspace` and
+/// the command reads back from the control stream, accepted; `failed` for a gesture that
+/// failed, acted elsewhere, or reads back wrong, for an API that cannot be asked where the cell
+/// is required, and for a machine without `web/`'s tools where the web gesture is; otherwise
+/// `not run`. Returns the word, what to print after it, and whether the run fails.
+pub fn web_verdict(
+    outcome: &WebOutcome,
+    check: &WebCheck,
+    workspace: &str,
+    required: Required,
+) -> (&'static str, String, bool) {
+    match outcome {
+        WebOutcome::AfterFailure => ("not run", "an earlier part failed".into(), false),
+        WebOutcome::Unaskable(why) if required.cell => ("failed", why.clone(), true),
+        WebOutcome::NoTools(why) if required.web => ("failed", why.clone(), true),
+        WebOutcome::Unaskable(why) | WebOutcome::NoTools(why) => ("not run", why.clone(), false),
+        WebOutcome::Failed(why) => ("failed", why.clone(), true),
+        WebOutcome::Recorded {
+            agent,
+            workspace: acted,
+            command,
+            read,
+        } => {
+            if agent != check.agent || acted != workspace {
+                let said = format!(
+                    "acted on {agent} in {acted}, not {} in {workspace}",
+                    check.agent
+                );
+                return ("failed", said, true);
+            }
+            let (word, said, fails) = api_verdict(read, &command_read(workspace, command), true);
+            let said = format!("command {command}: {said}");
+            (if fails { word } else { "ran" }, said, fails)
+        }
     }
 }
 
@@ -1533,6 +1713,135 @@ mod tests {
                 "a sign-in with no cookie is a wrong answer, never not run: {said}"
             );
         }
+    }
+
+    /// Step 2 deploys a second agent under the same version, with its own shown and typed code,
+    /// and step 6 has web/ press that agent's kill switch, never the one the CLI stops.
+    #[test]
+    fn web_kills_a_second_agent_the_cli_does_not() {
+        let version = reference(&mandate());
+        let steps = plan("demo6", &mandate());
+        let all = gestures(&steps);
+        let deployed: Vec<[&str; 2]> = all
+            .iter()
+            .filter(|g| g.args[..2] == ["agent", "deploy"])
+            .map(|g| [g.args[2].as_str(), g.args[3].as_str()])
+            .collect();
+        let v = version.as_str();
+        assert_eq!(
+            deployed,
+            [[AGENT, v], [AGENT, v], [WEB_AGENT, v], [WEB_AGENT, v]]
+        );
+        let code = deploy_code(WEB_AGENT, &version);
+        assert_ne!(code, deploy_code(AGENT, &version));
+        assert!(
+            all.iter().any(|g| g.args[2] == WEB_AGENT
+                && g.args.windows(2).any(|w| w == ["--code", code.as_str()]))
+        );
+        let kill = all
+            .iter()
+            .find(|g| g.args[..2] == ["agent", "kill"])
+            .unwrap();
+        assert!(
+            kill.args.windows(2).any(|w| w == ["--agent", AGENT]),
+            "the CLI stops demo-spy"
+        );
+        let web: Vec<(u8, &WebCheck)> = steps
+            .iter()
+            .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
+            .filter_map(|(n, p)| match p {
+                Part::Web(w) => Some((n, w)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(web.len(), 1);
+        assert_eq!(web[0].0, 6, "web/'s kill switch is step 6's");
+        assert_eq!(web[0].1.agent, WEB_AGENT);
+        assert_ne!(WEB_AGENT, AGENT);
+    }
+
+    /// A web check runs only when the gesture acted on its own agent in the run's workspace and
+    /// the command reads back with its kill switch on the control stream; a machine without
+    /// web/'s tools never fails the run, a failed gesture always does.
+    #[test]
+    fn a_web_check_runs_only_on_its_own_recorded_kill_switch() {
+        let check = WebCheck {
+            shows: "s",
+            agent: WEB_AGENT,
+        };
+        let ws = "01KDEM0000000001000000000D";
+        let body = |command: &str, stream: &str, phase: &str| {
+            let read = json!({"command_id": command, "phase": phase, "steps": [],
+                "as_of": [{"stream_id": stream, "seq": 10}]});
+            format!("HTTP/1.1 200 OK\r\n\r\n{read}")
+        };
+        let recorded =
+            |agent: &str, acted: &str, read: Result<(u16, String), String>| WebOutcome::Recorded {
+                agent: agent.into(),
+                workspace: acted.into(),
+                command: "C1".into(),
+                read,
+            };
+        let ctl = format!("ctl:{ws}");
+        for cell in [false, true] {
+            let required = Required { cell, web: false };
+            for phase in COMMAND_PHASES {
+                let ran = recorded(WEB_AGENT, ws, Ok((200, body("C1", &ctl, phase))));
+                assert_eq!(web_verdict(&ran, &check, ws, required).0, "ran", "{phase}");
+            }
+            for wrong in [
+                recorded(AGENT, ws, Ok((200, body("C1", &ctl, "recorded")))),
+                recorded(WEB_AGENT, "other", Ok((200, body("C1", &ctl, "recorded")))),
+                recorded(
+                    WEB_AGENT,
+                    ws,
+                    Ok((200, body("C1", "ctl:other", "recorded"))),
+                ),
+                recorded(WEB_AGENT, ws, Ok((200, body("C1", &ctl, "refused")))),
+                recorded(WEB_AGENT, ws, Ok((200, body("C2", &ctl, "recorded")))),
+                recorded(WEB_AGENT, ws, Ok((404, body("C1", &ctl, "recorded")))),
+                recorded(WEB_AGENT, ws, Err("no answer".into())),
+                WebOutcome::Failed("the run failed".into()),
+            ] {
+                let (word, said, fails) = web_verdict(&wrong, &check, ws, required);
+                assert_eq!((word, fails), ("failed", true), "{said}");
+            }
+            assert_eq!(
+                web_verdict(&WebOutcome::NoTools("no npm".into()), &check, ws, required),
+                ("not run", "no npm".into(), false),
+                "the cell does not require web/'s tools"
+            );
+        }
+        let unaskable = WebOutcome::Unaskable("no kubectl".into());
+        let only = |cell, web| Required { cell, web };
+        assert!(!web_verdict(&unaskable, &check, ws, only(false, false)).2);
+        assert!(web_verdict(&unaskable, &check, ws, only(true, false)).2);
+        assert!(
+            !web_verdict(&unaskable, &check, ws, only(false, true)).2,
+            "the web switch alone does not require the cell"
+        );
+        let no_tools = WebOutcome::NoTools("no npm".into());
+        assert_eq!(
+            web_verdict(&no_tools, &check, ws, only(false, false)),
+            ("not run", "no npm".into(), false)
+        );
+        for cell in [false, true] {
+            assert_eq!(
+                web_verdict(&no_tools, &check, ws, only(cell, true)),
+                ("failed", "no npm".into(), true),
+                "where the web gesture is required, a machine without its tools fails"
+            );
+        }
+        for required in [only(false, false), only(true, true)] {
+            assert_eq!(
+                web_verdict(&WebOutcome::AfterFailure, &check, ws, required),
+                ("not run", "an earlier part failed".into(), false),
+                "the first failure is the run's; this one only reads not run"
+            );
+        }
+        let read = command_read(ws, "C1");
+        assert_eq!(read.path, format!("/v1/workspaces/{ws}/commands/C1"));
+        assert_eq!(read.ask, Ask::Session);
     }
 
     /// The session cookie's pair is read from the reply's headers only, by its own name.
