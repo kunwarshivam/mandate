@@ -131,12 +131,71 @@ fn flux(list: &mut Checklist, kubectl: Kubectl<'_>) {
             list.check(false, format!("Flux has {article} {kind}"));
         }
         for object in of_kind {
-            list.check(
-                is_ready(object),
-                format!("{kind} {} is Ready", where_is(object)),
-            );
+            let what = format!("{kind} {} is Ready", where_is(object));
+            if is_ready(object) {
+                list.check(true, what);
+            } else {
+                list.check(false, format!("{what} ({})", flux_why(object)));
+            }
         }
     }
+}
+
+/// What a Flux object's condition messages say, as fixed class words alone: a message may quote a
+/// value, an image or a path, so none is printed, only which of these it matched.
+const FLUX_CLASSES: [(&str, &str); 16] = [
+    ("dependency", "dependency"),
+    ("context deadline exceeded", "timeout"),
+    ("timed out", "timeout"),
+    ("schema", "values-schema"),
+    ("admission webhook", "admission-denied"),
+    ("denied the request", "admission-denied"),
+    ("signature", "signature"),
+    ("verification failed", "signature"),
+    ("hooks failed", "hook-failed"),
+    ("failed pre-", "hook-failed"),
+    ("failed post-", "hook-failed"),
+    ("immutable", "immutable-field"),
+    ("not found", "missing-object"),
+    ("forbidden", "forbidden"),
+    ("unauthorized", "auth-failed"),
+    ("retries exhausted", "retries-exhausted"),
+];
+
+/// Why a Flux object is not Ready: its Ready condition's status and reason word, a Stalled
+/// condition's reason, and the classes their messages match; a message that matches none is
+/// `unclassified`.
+fn flux_why(object: &Value) -> String {
+    let conditions = object["status"]["conditions"].as_array();
+    let find =
+        |kind: &str| conditions.and_then(|all| all.iter().find(|c| text(c, &["type"]) == kind));
+    let Some(ready) = find("Ready") else {
+        return "no Ready condition".to_owned();
+    };
+    let mut said = word(text(ready, &["status"]));
+    let reason = word(text(ready, &["reason"]));
+    if !reason.is_empty() {
+        said.push_str(&format!(": {reason}"));
+    }
+    let mut messages = vec![text(ready, &["message"])];
+    if let Some(stalled) = find("Stalled").filter(|c| text(c, &["status"]) == "True") {
+        said.push_str(&format!("; Stalled: {}", word(text(stalled, &["reason"]))));
+        messages.push(text(stalled, &["message"]));
+    }
+    let lower = messages.join("\n").to_lowercase();
+    let mut found: Vec<&str> = Vec::new();
+    for (needle, class) in FLUX_CLASSES {
+        if lower.contains(needle) && !found.contains(&class) {
+            found.push(class);
+        }
+    }
+    if found.is_empty() && !lower.trim().is_empty() {
+        found.push("unclassified");
+    }
+    if !found.is_empty() {
+        said.push_str(&format!("; message {}", found.join(", ")));
+    }
+    said
 }
 
 /// Every pod of the platform and the workspaces, but a finished Job's, Running with every
