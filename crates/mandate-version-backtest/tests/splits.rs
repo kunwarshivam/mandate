@@ -368,7 +368,6 @@ fn a_stop_limit_protection_is_carried_on_its_protective_sides() {
 /// Splits out of ex-date order refuse the run, as the benchmark's walk refuses them (DEC-2245 item
 /// 7), rather than skip one.
 #[test]
-#[ignore = "pending E4-4"]
 fn splits_out_of_ex_date_order_refuse_the_run() {
     let days = trading_days(DAYS);
     let earlier = RecordedAction::Split {
