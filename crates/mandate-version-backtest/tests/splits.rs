@@ -434,17 +434,25 @@ fn ex_date_row(
 }
 
 /// The ex-date morning's decision reads the market in post-split terms: its quote, the gate's
-/// prior close and its trailing volume come from the last close rescaled by the split. The oracle is
-/// a run without the split whose bars were at the post-split price and volume all along; for an
-/// opening, which holds nothing before, the two decide the same order to the cent and the share.
-/// At 20,000 shares a day before the split, the conduct cap that 40,000 post-split shares clear
-/// would deny the opening on the pre-split count, so the trailing volume and the 20-day average
-/// are read in post-split shares too.
+/// prior close, its trailing volume and the 20-day window behind the liquidity floor all come from
+/// history rescaled by the split. The oracle is a run without the split whose bars were at the
+/// post-split price and volume all along; for an opening, which holds nothing before, the two
+/// decide the same row. At 15,000 shares a day before the split, 30,000 after it, the opening clears
+/// the conduct cap and the 1,000,000 USD floor only on post-split shares; at 7,000, 14,000 after,
+/// it is below the floor, which a window still at pre-split prices would have it clear.
 #[test]
 fn an_opening_on_the_ex_date_is_priced_and_sized_after_the_split() {
     let days = trading_days(DAYS);
     let outputs = daily_outputs(&days[EX..], "0.5");
-    for volume in [1_000_000, 20_000] {
+    for (volume, outcome, reason) in [
+        (1_000_000, DecisionOutcome::Submitted, None),
+        (15_000, DecisionOutcome::Submitted, None),
+        (
+            7_000,
+            DecisionOutcome::GateDeny,
+            Some("below_liquidity_floor"),
+        ),
+    ] {
         let split = ex_date_row(
             &stepped_bars(10_000, volume, 5_000, 2 * volume),
             &outputs,
@@ -455,9 +463,13 @@ fn an_opening_on_the_ex_date_is_priced_and_sized_after_the_split() {
             &outputs,
             &[],
         );
-        assert_eq!(split.outcome, DecisionOutcome::Submitted, "{split:?}");
-        assert_eq!(split.purpose, Some(Purpose::Open), "{split:?}");
         assert_eq!(split, control, "at {volume} shares a day");
+        assert_eq!(split.purpose, Some(Purpose::Open), "{split:?}");
+        assert_eq!(
+            (split.outcome, split.reason.as_deref()),
+            (outcome, reason),
+            "at {volume} shares a day"
+        );
     }
 }
 
