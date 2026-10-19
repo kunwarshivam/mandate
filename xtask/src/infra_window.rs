@@ -481,6 +481,13 @@ mod tests {
     #[test]
     fn only_a_public_address_opens_a_window() -> Result<()> {
         assert_eq!(runner_cidr("20.42.7.9\n")?, "20.42.7.9/32");
+        for public in ["20.0.7.9", "100.63.1.1", "100.128.0.1", "20.64.0.1"] {
+            assert_eq!(
+                runner_cidr(public)?,
+                format!("{public}/32"),
+                "{public} is public"
+            );
+        }
         for refused in [
             "10.1.2.3",
             "172.16.0.1",
@@ -630,6 +637,20 @@ mod tests {
 
     fn one(cluster: &Value) -> String {
         json!({ "kubernetes_cluster": cluster }).to_string()
+    }
+
+    /// The real HTTP layer reads the real clock and waits between the close's reads.
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test times the real layer's wait against the real clock"
+    )]
+    fn the_real_layer_reads_the_clock_and_waits() -> Result<()> {
+        assert!(Curl.now()? > 1_767_225_600, "after 2026-01-01");
+        let started = std::time::Instant::now();
+        Curl.pause();
+        assert!(started.elapsed() >= Duration::from_secs(CLOSE_POLL_SECONDS));
+        Ok(())
     }
 
     /// The review's B3: the window opens only on the echo's public address, as its `/32`.

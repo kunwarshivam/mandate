@@ -18,6 +18,7 @@
 //! `gitops secrets <environment>` writes the workload secrets alone, to set or rotate them.
 
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::io::{self, BufRead as _, IsTerminal as _, Write as _};
 use std::path::Path;
@@ -211,21 +212,44 @@ fn infra_refusal(run: &Run<'_>) -> Option<&'static str> {
 /// The `flux` the pins in [`FLUX_IMAGES`] belong to.
 const FLUX_VERSION: &str = "2.9.6";
 
-/// Every secret `infra.yml`'s steps hand `cargo xtask infra`, which `kubectl` and `flux` never need
-/// and so never inherit (the review of #1771).
-const INFRA_SECRET_ENVS: [&str; 5] = [
-    "DIGITALOCEAN_TOKEN",
-    "TF_VAR_state_passphrase",
-    "TF_VAR_cloudflare_api_token",
-    "TF_VAR_kube_api_allowed_addresses",
-    "TF_VAR_access_allowed_emails",
+/// The only variables `kubectl` and `flux` inherit (the review of #1771): where to find programs,
+/// their home and kubeconfig, temporary files, locale, and the proxy and TLS settings a runner or
+/// the founder's machine may need. Everything else, every secret `infra.yml` hands the step
+/// included, and any added later, is left out.
+const TOOL_ENVS: [&str; 18] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "KUBECONFIG",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
 ];
 
-/// `program`, `kubectl` or `flux`, without [`INFRA_SECRET_ENVS`] in its environment.
+/// `program`, `kubectl` or `flux`, with an environment of [`TOOL_ENVS`] alone.
 fn tool(program: &str) -> Command {
+    tool_with(program, |name| env::var_os(name))
+}
+
+/// [`tool`] over `read`, the environment it copies from.
+fn tool_with(program: &str, read: impl Fn(&str) -> Option<OsString>) -> Command {
     let mut command = Command::new(program);
-    for name in INFRA_SECRET_ENVS {
-        command.env_remove(name);
+    command.env_clear();
+    for name in TOOL_ENVS {
+        if let Some(value) = read(name) {
+            command.env(name, value);
+        }
     }
     command
 }
@@ -576,14 +600,18 @@ pub(crate) fn bootstrap_from_infra(
 mod tests {
     use super::*;
 
-    /// Every secret `infra.yml` hands a step is kept from `kubectl` and `flux`, and only they are
-    /// started, so a new secret in the workflow fails this test until it is listed.
+    /// `kubectl` and `flux` start with an environment of [`TOOL_ENVS`] alone, so no secret, token
+    /// or step output `infra.yml` hands the step reaches them, and only they are started.
     #[test]
-    fn the_tools_inherit_no_infra_secret() {
+    fn the_tools_inherit_no_infra_secret() -> Result<()> {
         let workflow = include_str!("../../.github/workflows/infra.yml");
         let handed: Vec<&str> = workflow
             .lines()
-            .filter(|line| line.contains("${{ secrets."))
+            .filter(|line| {
+                ["${{ secrets.", "${{ github.token", "${{ steps."]
+                    .iter()
+                    .any(|source| line.contains(source))
+            })
             .filter_map(|line| line.trim().split(':').next())
             .collect();
         assert!(
@@ -592,29 +620,34 @@ mod tests {
         );
         for name in handed {
             assert!(
-                INFRA_SECRET_ENVS.contains(&name),
+                !TOOL_ENVS.contains(&name),
                 "{name} reaches kubectl and flux"
             );
         }
-        let command = tool("kubectl");
-        let removed: Vec<_> = command
-            .get_envs()
-            .filter(|(_, value)| value.is_none())
-            .map(|(name, _)| name.to_string_lossy().into_owned())
+        let fake = |name: &str| {
+            ["PATH", "DIGITALOCEAN_TOKEN", "TF_VAR_state_passphrase"]
+                .contains(&name)
+                .then(|| env::var_os("PATH").unwrap_or_default())
+        };
+        let out = tool_with("env", fake).output()?;
+        assert!(out.status.success(), "`env` runs");
+        let names: Vec<String> = String::from_utf8(out.stdout)?
+            .lines()
+            .filter_map(|line| line.split('=').next())
+            .map(str::to_owned)
             .collect();
-        assert_eq!(removed.len(), INFRA_SECRET_ENVS.len());
-        for name in INFRA_SECRET_ENVS {
-            assert!(
-                removed.iter().any(|removed| removed == name),
-                "{name} is removed"
-            );
-        }
+        assert_eq!(
+            names,
+            ["PATH"],
+            "only listed variables are passed, and nothing inherited"
+        );
         let source = include_str!("gitops.rs");
         assert_eq!(
             source.matches(concat!("Command", "::new(")).count(),
             1,
             "every child gitops starts goes through `tool`"
         );
+        Ok(())
     }
 
     /// An excerpt of `flux install --export` for v2.9.6, its image lines as the CLI prints them.
