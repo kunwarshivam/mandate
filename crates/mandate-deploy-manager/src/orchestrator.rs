@@ -90,6 +90,15 @@ pub const DEPLOYMENT_UNREAD: OperatorAlert = OperatorAlert {
     runbook: "RB-14",
 };
 
+/// A version-2 `AgentDeployed` that rule 201 refuses, of an agent not stopped: its connection was
+/// not established on the control stream, or was revoked, before it, so the manager starts nothing
+/// for it, and a later establishment does not revive it, until the owner stops it and deploys a new
+/// agent id on an established connection (journal spec §9.24 rule 201, DEC-2038).
+pub const DEPLOYMENT_UNCONNECTED: OperatorAlert = OperatorAlert {
+    code: "deployment_unconnected",
+    runbook: "RB-14",
+};
+
 /// Where operator alerts go. Raising one never fails the manager.
 pub trait Alerts {
     fn raise(&mut self, alert: OperatorAlert);
