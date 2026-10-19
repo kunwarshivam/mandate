@@ -63,9 +63,10 @@ R2_ENDPOINT = re.compile(r"^https://[0-9a-f]{32}\.r2\.cloudflarestorage\.com$")
 R2_EGRESS = {"cidrs": ["172.64.190.1/32", "172.64.66.1/32"], "port": 443}
 # The ConfigMaps the bootstrap writes, not git (DEC-2017 item 6), each with a stand-in value of the
 # shape the bootstrap writes: the archive's endpoint names the founder's Cloudflare account.
+STAND_IN_ACCOUNT = "0123456789abcdef0123456789abcdef"
 BOOTSTRAP_VALUES = {
     "journal-archive-endpoint": {
-        "archive": {"endpointURL": "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com"}
+        "archive": {"endpointURL": f"https://{STAND_IN_ACCOUNT}.r2.cloudflarestorage.com"}
     },
 }
 # The tiers the stub issuer may run in (DEC-2005), which no hosted environment may take.
@@ -236,9 +237,11 @@ def endpoint_from_bootstrap(docs: list[dict]) -> list[str]:
     journal = of_kind(docs, "HelmRelease").get("journal") or {"spec": {}}
     spec = journal["spec"]
     problems = []
-    names = [ref.get("name") for ref in spec.get("valuesFrom", [])]
-    if "journal-archive-endpoint" not in names:
-        problems.append("journal: does not read the bootstrap's journal-archive-endpoint")
+    refs = [ref for ref in spec.get("valuesFrom", []) if ref.get("name") == "journal-archive-endpoint"]
+    if len(refs) != 1:
+        problems.append("journal: does not read the bootstrap's journal-archive-endpoint once")
+    if any(ref.get("optional") for ref in refs):
+        problems.append("journal: installs without the bootstrap's endpoint, so with none")
     if "endpointURL" in ((spec.get("values") or {}).get("archive") or {}):
         problems.append("journal: git sets the archive endpoint")
     if "journal-archive-endpoint" in of_kind(docs, "ConfigMap"):
@@ -519,6 +522,14 @@ DOC_BUGS = [
     ),
     (
         endpoint_from_bootstrap,
+        "HelmRelease",
+        "journal",
+        lambda d: next(r for r in d["spec"]["valuesFrom"] if r["name"] == "journal-archive-endpoint").update(
+            optional=True
+        ),
+    ),
+    (
+        endpoint_from_bootstrap,
         "Namespace",
         "ws-ws1",
         lambda d: d.update(kind="ConfigMap", metadata={"name": "journal-archive-endpoint"}),
@@ -588,3 +599,38 @@ def test_rendered_seeded_bugs_are_caught(overlay):
     cluster = copy.deepcopy(next(d for d in rendered if d["kind"] == "Cluster"))
     cluster["spec"]["imageName"] = "ghcr.io/cloudnative-pg/postgresql:18"
     assert rendered_policy([cluster], environment)
+
+
+# An R2 endpoint naming an account: 32 hex digits before R2's S3 host.
+ACCOUNT_ENDPOINT = re.compile(r"[0-9a-f]{32}\.r2\.cloudflarestorage\.com")
+
+
+def accounts_in_git(files: dict[str, str]) -> list[str]:
+    """No tracked file names a Cloudflare account in an R2 endpoint, but for this file's stand-in
+    (DEC-2017 item 6): the founder's account reaches a cluster only through the bootstrap."""
+    return sorted(
+        f"{path}: {found}"
+        for path, text in files.items()
+        for found in ACCOUNT_ENDPOINT.findall(text)
+        if found != f"{STAND_IN_ACCOUNT}.r2.cloudflarestorage.com"
+    )
+
+
+def tracked_files() -> dict[str, str]:
+    listed = subprocess.run(["git", "ls-files", "-z"], capture_output=True, check=True, cwd=ROOT).stdout
+    files = {}
+    for name in listed.decode().split("\0"):
+        path = ROOT / name
+        if name and path.is_file():
+            files[name] = path.read_bytes().decode("utf-8", errors="replace")
+    return files
+
+
+def test_no_account_in_git():
+    assert accounts_in_git(tracked_files()) == []
+
+
+def test_an_account_in_git_is_caught():
+    account = "fedcba9876543210" * 2
+    endpoint = f"https://{account}.r2.cloudflarestorage.com"
+    assert accounts_in_git({"deploy/gitops/clusters/staging/journal.yaml": f"endpointURL: {endpoint}\n"})
