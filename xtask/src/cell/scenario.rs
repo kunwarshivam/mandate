@@ -225,8 +225,14 @@ const X_EXECUTOR: Wait = Wait {
     lane: "X",
     story: "E21-30",
     pr: None,
-    lands: "the executor as its own process in the cell, reading the runtime through the journal \
-            and applying the kill switch first (DEC-2003, claim #1498)",
+    lands: "slice X1b-3: paper fills on the fixture; the executor already takes the \
+            runtime's orders (#1736)",
+};
+const P5_HOOK: Wait = Wait {
+    lane: "P5",
+    story: "E21-2",
+    pr: None,
+    lands: "the runtime's production ports, the post-R0 hook (DEC-968 item 6, DEC-1013)",
 };
 
 fn wait(lane: &'static str, story: &'static str, pr: Option<u32>, lands: &'static str) -> Wait {
@@ -691,15 +697,7 @@ pub fn plan(
                     what: "the runtime sizes the opening and the gate and autonomy rules ask",
                     on_main: "the runtime and its image (#1521, #1560), on the deny-all wiring \
                               that proposes nothing (DEC-1013 item 2)",
-                    waits: vec![
-                        X_CONNECT,
-                        wait(
-                            "P5",
-                            "E21-2",
-                            None,
-                            "the runtime's production ports, the post-R0 hook (DEC-968 item 6)",
-                        ),
-                    ],
+                    waits: vec![X_CONNECT, P5_HOOK],
                 }),
                 gesture(
                     "the owner's inbox, read (empty until the runtime asks)",
@@ -731,9 +729,11 @@ pub fn plan(
                 }),
                 Part::Gap(Gap {
                     what: "the paper fill and the protective stop on a fixture broker",
-                    on_main: "the executor crate beside the runtime and its image (#1521, \
-                              #1560), with the runtime asking nothing yet",
-                    waits: vec![X_EXECUTOR],
+                    on_main: "the executor process (#1596, binary #1694) and its interim image \
+                              in the cell on the fixture paper broker (#1702, DEC-2031), handing \
+                              its agents' orders to the core (#1736), with the runtime proposing \
+                              nothing on the deny-all wiring (DEC-1013)",
+                    waits: vec![X_EXECUTOR, P5_HOOK],
                 }),
             ],
         },
@@ -865,8 +865,11 @@ pub fn plan(
                 ),
                 Part::Gap(Gap {
                     what: "the agent's processes stop on it",
-                    on_main: "the runtime reads the kill switch first (#1521, image #1560)",
-                    waits: vec![X_CONNECT, X_EXECUTOR],
+                    on_main: "the runtime reads the kill switch first (#1521, image #1560), and \
+                              the executor process applies it first (#1596, image #1702); the \
+                              deployment manager starts both from the account's version-2 \
+                              deployment (DEC-1171, DEC-2031)",
+                    waits: vec![X_CONNECT],
                 }),
             ],
         },
@@ -1408,7 +1411,7 @@ fn web_outcome(check: &WebCheck, workspace: &str) -> Result<WebOutcome> {
 
 /// The signed-in read of `command` in `workspace`: the API finds it on the workspace's control
 /// stream and reads it accepted. Its `KillSwitchActivated` step appears only once a runtime
-/// applies it, which waits on D1 and X, so the read does not require one.
+/// applies it, which waits on X's connect check (DEC-1171), so the read does not require one.
 pub fn command_read(workspace: &str, command: &str) -> ApiCheck {
     ApiCheck {
         shows: "the web gesture's command, read back",
@@ -2508,6 +2511,74 @@ mod tests {
             "each lane once, in the order first named"
         );
         assert!(lanes(&step(vec![check()])).is_empty());
+    }
+
+    /// The slices a wait has named that are on `main`, with the PR that landed each: a lane that
+    /// lands one adds its row here, so no wait can go on saying it is still to come.
+    const LANDED_SLICES: &[(&str, u32)] = &[("X1a", 1596), ("X1b", 1736)];
+
+    /// The slices `text` names as still to land: each word that follows `slice `, up to the
+    /// first character that is not a letter, a digit or a hyphen, so `X1b-3` is not `X1b`.
+    fn slices_named(text: &str) -> Vec<&str> {
+        text.match_indices("slice ")
+            .map(|(at, word)| {
+                let rest = &text[at + word.len()..];
+                let end = rest
+                    .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                    .unwrap_or(rest.len());
+                &rest[..end]
+            })
+            .filter(|slice| !slice.is_empty())
+            .collect()
+    }
+
+    #[test]
+    fn slices_named_reads_whole_slice_ids() {
+        assert_eq!(
+            slices_named("slice X1b-3: fills; slice X1b, then slice "),
+            ["X1b-3", "X1b"]
+        );
+    }
+
+    /// No wait says it still lands a slice that is on `main`, or waits on a PR that landed one
+    /// (#1777's review: X1b was named as to come after #1736 landed it), and every landed slice's
+    /// PR is cited in some gap's `on_main`, so what landed is said where the gap stands.
+    #[test]
+    fn no_wait_names_a_slice_already_on_main() {
+        let steps = planned("demo1");
+        let gaps: Vec<&Gap> = steps
+            .iter()
+            .flat_map(|step| &step.parts)
+            .filter_map(|part| match part {
+                Part::Gap(gap) => Some(gap),
+                _ => None,
+            })
+            .collect();
+        for gap in &gaps {
+            for wait in &gap.waits {
+                for slice in slices_named(wait.lands) {
+                    assert!(
+                        !LANDED_SLICES.iter().any(|(landed, _)| *landed == slice),
+                        "{}: {} still lands slice {slice}, which is on main",
+                        gap.what,
+                        wait.named()
+                    );
+                }
+                assert!(
+                    !LANDED_SLICES.iter().any(|(_, pr)| wait.pr == Some(*pr)),
+                    "{}: {} waits on a PR that is on main",
+                    gap.what,
+                    wait.named()
+                );
+            }
+        }
+        for (slice, pr) in LANDED_SLICES {
+            let cited = format!("#{pr}");
+            assert!(
+                gaps.iter().any(|gap| gap.on_main.contains(&cited)),
+                "slice {slice} landed as {cited}, but no gap's on_main cites it"
+            );
+        }
     }
 
     /// The closing summary lists every wait of every gap once, under its own lane, with the step it

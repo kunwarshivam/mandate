@@ -1,0 +1,6 @@
+# The admission policies (DEC-2016 item 4), applied by the `policies` Kustomization
+# (base/admission.yaml) once policy-controller's CRD exists; it retries every minute until then.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - release-signed.yaml

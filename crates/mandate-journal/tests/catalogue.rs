@@ -1619,7 +1619,6 @@ fn the_risk_limit_records_are_closed_on_the_account_stream() {
 /// an unlisted member is refused `schema` there and `wrong_stream` on every other stream, and
 /// version 2 has no schema.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_acknowledgment_records_are_closed_on_the_control_and_account_streams() {
     for event_type in SECTION_9_28 {
         for kind in [ACCT, AGENT, CTL, CLOCK] {

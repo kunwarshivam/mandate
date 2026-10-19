@@ -1615,6 +1615,7 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         archive_access_key_id: gitops::Secret::new(output("archive_access_key_id")?),
         archive_secret_access_key: gitops::Secret::new(output("archive_secret_access_key")?),
         tunnel_token: gitops::Secret::new(output("tunnel_token")?),
+        archive_endpoint: gitops::Secret::new(output("archive_endpoint")?),
     };
     let cluster_id = output("cluster_id")?;
     let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
@@ -16764,7 +16765,10 @@ mod tests {
         );
         let staging = body("\nfn bootstrap_staging(");
         let wrapped = staging.matches("gitops::Secret::new(output(").count();
-        assert_eq!(wrapped, 3, "each workload secret is wrapped as it is read");
+        assert_eq!(
+            wrapped, 4,
+            "each workload secret, and the archive endpoint, is wrapped as it is read"
+        );
         let kubeconfig = at(&staging, "infra_window::fetch_kubeconfig(");
         let last_secret = staging.rfind("gitops::Secret::new(output(");
         assert!(
