@@ -365,6 +365,12 @@
 'MC-R24' = { status = "passing", story = "E6-4" }
 'MC-R25' = { status = "passing", story = "E6-4" }
 'MC-R26' = { status = "passing", story = "E6-4" }
+'MC-R27' = { status = "passing", story = "E4-4" }
+'MC-R28' = { status = "passing", story = "E4-4" }
+'MC-R29' = { status = "passing", story = "E4-4" }
+'MC-R30' = { status = "passing", story = "E4-4" }
+'MC-R31' = { status = "passing", story = "E4-4" }
+'MC-R32' = { status = "passing", story = "E4-4" }
 
 # Family C (stream F, E10-3; DEC-77 item 3, DEC-172).
 'MC-C01' = { status = "passing", story = "E10-3" }

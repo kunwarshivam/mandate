@@ -8,11 +8,12 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::process;
 
+use mandate_connections::record::ConnectionId;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::SourceError;
-use crate::openbao::RoleCredentials;
-use crate::policy::role_name;
+use crate::openbao::{RoleCredentials, secret_id_identities};
+use crate::policy::{Identity, role_name};
 
 /// The suffix of the file that holds an identity's role id, after its role name.
 pub const ROLE_ID_SUFFIX: &str = ".role-id";
@@ -43,6 +44,47 @@ pub fn write_credentials(
     dir: &Path,
     credentials: &[RoleCredentials],
 ) -> Result<Vec<String>, SourceError> {
+    let identities: Vec<Identity> = credentials
+        .iter()
+        .map(|credential| credential.identity.clone())
+        .collect();
+    if !check_for(dir, &identities)? {
+        DirBuilder::new()
+            .mode(0o700)
+            .create(dir)
+            .and_then(|()| fs::set_permissions(dir, Permissions::from_mode(0o700)))
+            .map_err(|_| SourceError::CredentialFile)?;
+    }
+    let mut files = Vec::new();
+    for credential in credentials {
+        let role = role_name(&credential.identity);
+        for (suffix, value) in [
+            (ROLE_ID_SUFFIX, credential.role_id.as_str()),
+            (SECRET_ID_SUFFIX, credential.secret_id.expose_secret()),
+        ] {
+            files.push((format!("{role}{suffix}"), value));
+        }
+    }
+    for (name, value) in &files {
+        write_owner_only(dir, name, value)?;
+    }
+    let mut written: Vec<String> = files.into_iter().map(|(name, _)| name).collect();
+    written.sort();
+    Ok(written)
+}
+
+/// Checks, before any vault is reached, that [`write_credentials`] would accept `dir` for the
+/// credentials [`crate::openbao::provision`] issues for `connections`: the directory holding
+/// `dir`, `dir` itself when it exists, and each output name in it, by the same rules. An absent
+/// `dir` passes and is not made. A refusal here leaves no secret id issued and unwritten.
+pub fn check_credential_dir(dir: &Path, connections: &[ConnectionId]) -> Result<(), SourceError> {
+    check_for(dir, &secret_id_identities(connections)).map(|_| ())
+}
+
+/// Checks `dir` for `identities`' files by [`write_credentials`]'s rules and answers whether `dir`
+/// exists: its parent lets no one else rename it away, an existing `dir` is a directory of mode
+/// 0700, and each output name in it is a plain file or absent.
+fn check_for(dir: &Path, identities: &[Identity]) -> Result<bool, SourceError> {
     let parent = dir
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -57,34 +99,18 @@ pub fn write_credentials(
     match fs::symlink_metadata(dir) {
         Ok(meta) if meta.is_dir() && meta.permissions().mode() & 0o777 == 0o700 => {}
         Ok(_) => return Err(SourceError::CredentialFile),
-        Err(_) => {
-            DirBuilder::new()
-                .mode(0o700)
-                .create(dir)
-                .and_then(|()| fs::set_permissions(dir, Permissions::from_mode(0o700)))
-                .map_err(|_| SourceError::CredentialFile)?;
-        }
+        Err(_) => return Ok(false),
     }
-    let mut files = Vec::new();
-    for credential in credentials {
-        let role = role_name(&credential.identity);
-        for (suffix, value) in [
-            (ROLE_ID_SUFFIX, credential.role_id.as_str()),
-            (SECRET_ID_SUFFIX, credential.secret_id.expose_secret()),
-        ] {
-            let name = format!("{role}{suffix}");
-            if fs::symlink_metadata(dir.join(&name)).is_ok_and(|meta| !meta.is_file()) {
+    for identity in identities {
+        let role = role_name(identity);
+        for suffix in [ROLE_ID_SUFFIX, SECRET_ID_SUFFIX] {
+            let name = dir.join(format!("{role}{suffix}"));
+            if fs::symlink_metadata(name).is_ok_and(|meta| !meta.is_file()) {
                 return Err(SourceError::CredentialFile);
             }
-            files.push((name, value));
         }
     }
-    for (name, value) in &files {
-        write_owner_only(dir, name, value)?;
-    }
-    let mut written: Vec<String> = files.into_iter().map(|(name, _)| name).collect();
-    written.sort();
-    Ok(written)
+    Ok(true)
 }
 
 /// Writes `value` to `dir/name` as a plain file of mode 0600 that replaces whatever is there.

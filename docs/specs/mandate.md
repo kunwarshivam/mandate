@@ -943,7 +943,9 @@ stream with `causation_id` and judges it there; nothing the owner's client check
   An owner exit and a kill switch are never refused as commands, so they have no such record: their
   step-up outcome is `OwnerExitRequested.step_up_status`.
 - **Methods.** v0's only method is `cli_confirm`: the owner re-types a confirmation code the CLI
-  derives locally, with no network, runtime, or model state. It is allowed only in a `paper`
+  derives locally, with no network, runtime, or model state. The confirmation code for a paper
+  grant made in the web app is defined in [DEC-2104](../project/decisions/DEC-2104.md) and
+  [journal spec §9.29](journal.md#929-the-clis-step-up-confirmation-dec-2104). It is allowed only in a `paper`
   environment (DEC-155 item 4), and in `live` only on the founder's own Robinhood connection that
   V-001 admits, for its confirmation, deployment, and each grant
   ([DEC-529](../project/decisions/DEC-529.md) item 3). Once that connection is spent, the agent

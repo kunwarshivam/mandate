@@ -1,0 +1,35 @@
+[
+ {
+  "age_s": 7200,
+  "headline": "Recorded demo item: broad index funds see a week of inflows",
+  "item_id": "nw-spy-inflows",
+  "licensed": false,
+  "link": "https://newswire.example/spy-inflows",
+  "published_age_s": 7320,
+  "source": "src.newswire",
+  "summary": "A recorded item written for the demo: index fund inflows were positive on each day of the week.",
+  "symbols": ["SPY"]
+ },
+ {
+  "age_s": 3600,
+  "headline": "Recorded demo item: survey shows steady business activity",
+  "item_id": "w2-spy-survey",
+  "licensed": false,
+  "link": "https://wiretwo.example/spy-survey",
+  "published_age_s": 3600,
+  "source": "src.wire_two",
+  "summary": "A recorded item written for the demo: a business activity survey held level with the prior month.",
+  "symbols": ["SPY"]
+ },
+ {
+  "age_s": 1800,
+  "headline": "Recorded demo item: an anonymous post predicts a crash",
+  "item_id": "bl-spy-rumor",
+  "licensed": false,
+  "link": "https://blog.example/spy",
+  "published_age_s": 1800,
+  "source": "src.anonymous_blog",
+  "summary": "A recorded item written for the demo, from a source outside the allowlist, which retrieval drops.",
+  "symbols": ["SPY"]
+ }
+]
