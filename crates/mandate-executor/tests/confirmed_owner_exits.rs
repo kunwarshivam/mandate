@@ -1,9 +1,10 @@
 //! E7-30, DEC-2040: an owner's exit handed with the owner's confirmed bid. The core journals the
 //! confirmation as `OwnerConfirmationReceived` immediately after the intent (journal spec §9.5
 //! rule 248). Outside the regular session it sells the exit as an extended-hours limit, priced from
-//! the confirmed bid and never below the floor (trading spec §5.5). In the regular session, on a
-//! fresh quote, it goes at the market (§5.1). An unconfirmed owner exit still waits for the session,
-//! and a confirmation on anything else, or with a limit below its floor, is non-canonical.
+//! the confirmed bid and never below the floor (trading spec §5.5). In the regular session the floor
+//! binds too, so a confirmed exit is never sent at the market (DEC-2040 item 6). An unconfirmed
+//! owner exit still waits for the session, and a confirmation on anything else, or with a limit
+//! below its floor, is non-canonical.
 //!
 //! Every expected price is the ladder's first rung computed here: the liquid tier's `exit_offset`
 //! of 0.5% off the confirmed bid, rounded up to the cent (§2.1, DEC-260 (6)).
@@ -31,12 +32,16 @@ const FEED_BID: &str = "150";
 /// 2026-09-22 08:00 ET, pre-market on the committed calendar; clock-0 instants read as the
 /// regular session (DEC-260 (13), DEC-506).
 const PRE_MARKET: i64 = 1_790_078_400;
-/// 2026-09-22 03:00 ET: no v1 session is open, so an equity exit is held `session_closed` until
-/// the next pre-market open (DEC-260 (13)).
-const OVERNIGHT: i64 = PRE_MARKET - 5 * 3_600;
+/// 2026-09-22 04:00 ET, the pre-market open.
+const PRE_OPEN: i64 = PRE_MARKET - 4 * 3_600;
+/// One minute before the pre-market open: no v1 session is open, so an equity exit is held
+/// `session_closed` until the open (DEC-260 (13)).
+const OVERNIGHT: i64 = PRE_OPEN - 60;
 
-/// A confirmation that lasts well past every instant a case reaches, unless it says otherwise.
-const LATER: i64 = PRE_MARKET + 3_600;
+/// A confirmation's expiry for a case handed between `PRE_MARKET - 100` and `PRE_MARKET`: inside
+/// the five minutes DEC-2040 item 7 gives it from the handing instant, and past every instant
+/// those cases reach, unless one says otherwise.
+const LATER: i64 = PRE_MARKET + 180;
 
 fn confirmation(bid: &str, floor: &str) -> HandedConfirmation {
     expiring(bid, floor, LATER)
@@ -247,9 +252,10 @@ fn an_unconfirmed_owner_exit_before_the_open_waits_for_the_session() {
         &ports,
     );
     let ran = shell.run(handed(exit(Purpose::OwnerExit, None), None), &ports);
+    let sent = only_submission(&ran);
     assert!(
-        ran.submissions().iter().all(|sent| !sent.extended_hours),
-        "an unconfirmed owner exit never trades outside the session"
+        !sent.extended_hours,
+        "an unconfirmed owner exit never trades outside the session: {sent:?}"
     );
     assert!(ran.draft("OwnerConfirmationReceived").is_none());
 }
@@ -272,7 +278,7 @@ fn a_confirmed_owner_exit_in_the_regular_session_never_sells_below_its_floor() {
     let ran = shell.run(
         handed(
             exit(Purpose::OwnerExit, None),
-            Some(confirmation("155", "150.35")),
+            Some(expiring("155", "150.35", 200)),
         ),
         &ports,
     );
@@ -285,8 +291,9 @@ fn a_confirmed_owner_exit_in_the_regular_session_never_sells_below_its_floor() {
     );
 }
 
-/// The fold reads the confirmation back: an exit held overnight, across a restart, sells at the
-/// pre-market open from the confirmed bid, extended-hours.
+/// The fold reads the confirmation back: an exit held in the minute before the pre-market open,
+/// across a restart, sells at the open from the confirmed bid, extended-hours, while its
+/// confirmation is still inside its five minutes (DEC-2040 item 7).
 #[test]
 #[ignore = "pending E7-30"]
 fn a_restart_keeps_the_confirmation_of_an_exit_held_overnight() {
@@ -305,20 +312,20 @@ fn a_restart_keeps_the_confirmation_of_an_exit_held_overnight() {
     let overnight = shell.run(
         handed(
             exit(Purpose::OwnerExit, None),
-            Some(confirmation("155", "150.35")),
+            Some(expiring("155", "150.35", OVERNIGHT + 180)),
         ),
         &ports,
     );
     assert!(
         overnight.submissions().is_empty(),
-        "no session is open overnight"
+        "no session is open before 04:00"
     );
     let (mut restarted, _) = shell.restart(&ports);
     restarted.run(
-        Input::Market(quote(AAPL, FEED_BID, "150.2", PRE_MARKET)),
+        Input::Market(quote(AAPL, FEED_BID, "150.2", PRE_OPEN)),
         &ports,
     );
-    let opened = restarted.run(Input::Tick(clock(PRE_MARKET + 1)), &ports);
+    let opened = restarted.run(Input::Tick(clock(PRE_OPEN + 1)), &ports);
     let sent = only_submission(&opened);
     assert_eq!(
         (sent.limit_price, sent.extended_hours),
@@ -359,16 +366,19 @@ fn a_confirmation_at_its_expiry_has_expired() {
             ran.draft("OwnerConfirmationReceived").is_some(),
             "{expires_at}: journaled as handed"
         );
-        let extended: Vec<_> = ran
-            .submissions()
-            .into_iter()
-            .filter(|sent| sent.extended_hours)
-            .map(|sent| sent.limit_price)
-            .collect();
+        let sent = only_submission(&ran);
         if confirmed {
-            assert_eq!(extended, vec![Some(price("154.23"))], "one second before");
+            assert_eq!(
+                (sent.order_type, sent.limit_price, sent.extended_hours),
+                (OrderType::Limit, Some(price("154.23")), true),
+                "one second before"
+            );
         } else {
-            assert!(extended.is_empty(), "at its expiry: {extended:?}");
+            assert_eq!(
+                (sent.order_type, sent.extended_hours),
+                (OrderType::Limit, false),
+                "at its expiry, the unconfirmed path: {sent:?}"
+            );
         }
     }
 }
