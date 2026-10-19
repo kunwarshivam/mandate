@@ -13,19 +13,24 @@
 
 use std::fs;
 use std::io::{Read, Write};
+use std::iter;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, anyhow};
 use clap::{Args, Subcommand, ValueEnum};
 use mandate_connections::record::ConnectionId;
 use mandate_vault::SourceError;
-use mandate_vault::credentials::{check_credential_dir, read_token_file, write_credentials};
+use mandate_vault::credentials::{
+    check_credential_dir, read_token, read_token_file, write_credentials,
+};
+use mandate_vault::kube::kube_secrets;
 use mandate_vault::openbao::{OpenBaoConfig, provision};
 use mandate_vault::policy::Mounts;
 use mandate_vault_local::VaultError;
 use mandate_vault_local::import::{import_client_secret, resolve_ids};
 use mandate_vault_local::startup::{Inputs, Role};
 use mandate_vault_local::store::open;
+use secrecy::ExposeSecret;
 
 /// Where the demo host keeps the vault (DEC-692 item 1).
 pub const DEFAULT_VAULT_DIR: &str = "/var/lib/owlhead/vault";
@@ -170,15 +175,22 @@ pub fn run_provision(
             ConnectionId::new(id).map_err(|_| anyhow!("a connection id is malformed (connection)"))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    let _ = (stdin, stdout_is_terminal);
-    let (Some(token_file), Some(dir)) = (&args.operator_token_file, &args.out) else {
-        return Err(anyhow!(
-            "{:?}",
-            SourceError::Unimplemented { story: "E21-32" }
-        ));
-    };
-    let operator = read_token_file(token_file).map_err(refused)?;
-    check_credential_dir(dir, &connections).map_err(refused)?;
+    if let Some(namespace) = &args.secrets_namespace {
+        if stdout_is_terminal {
+            return Err(anyhow!(
+                "the Secrets are printed only to a pipe, never a terminal (config)"
+            ));
+        }
+        kube_secrets(namespace, &[]).map_err(refused)?;
+    }
+    let operator = match &args.operator_token_file {
+        Some(path) => read_token_file(path),
+        None => read_token(stdin),
+    }
+    .map_err(refused)?;
+    if let Some(dir) = &args.out {
+        check_credential_dir(dir, &connections).map_err(refused)?;
+    }
     let config = OpenBaoConfig {
         address: args.address.clone(),
         ca_pem: fs::read(&args.ca).map_err(|_| refused(SourceError::Config))?,
@@ -191,8 +203,22 @@ pub fn run_provision(
     let credentials = runtime
         .block_on(provision(&config, &operator, &connections))
         .map_err(refused)?;
-    for name in write_credentials(dir, &credentials).map_err(refused)? {
-        writeln!(out, "{name}")?;
+    match (&args.out, &args.secrets_namespace) {
+        (Some(dir), _) => {
+            for name in write_credentials(dir, &credentials).map_err(refused)? {
+                writeln!(out, "{name}")?;
+            }
+        }
+        (None, Some(namespace)) => {
+            let manifests = kube_secrets(namespace, &credentials).map_err(refused)?;
+            write!(out, "{{\"apiVersion\":\"v1\",\"kind\":\"List\",\"items\":[")?;
+            let separators = iter::once("").chain(iter::repeat(","));
+            for (separator, manifest) in separators.zip(&manifests) {
+                write!(out, "{separator}{}", manifest.manifest.expose_secret())?;
+            }
+            writeln!(out, "]}}")?;
+        }
+        (None, None) => return Err(refused(SourceError::Config)),
     }
     Ok(())
 }

@@ -59,7 +59,6 @@ fn refused(output: &Output, code: &str, case: &str) {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_piped_token_is_read_and_the_vault_reached() {
     let output = provision(
         NOWHERE,
@@ -77,7 +76,6 @@ fn a_piped_token_is_read_and_the_vault_reached() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_piped_token_that_is_not_one_line_is_refused_before_any_vault_is_reached() {
     for (stdin, case) in [
         ("", "an empty pipe"),
@@ -96,7 +94,6 @@ fn a_piped_token_that_is_not_one_line_is_refused_before_any_vault_is_reached() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_namespace_that_is_not_a_label_is_refused_before_any_vault_is_reached() {
     for namespace in ["WS", "a_b", "-a", "a."] {
         let output = provision(
@@ -114,7 +111,6 @@ fn a_namespace_that_is_not_a_label_is_refused_before_any_vault_is_reached() {
 
 /// A terminal never receives the Secrets: the refusal comes before stdin is read.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_terminal_never_receives_the_secrets() {
     let args = ProvisionArgs {
         address: NOWHERE.to_owned(),
@@ -183,7 +179,6 @@ fn server() -> Option<(String, PathBuf, PathBuf)> {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn provisioning_prints_each_identitys_secret_and_nothing_else() {
     a_piped_token_is_read_and_the_vault_reached();
     let Some((address, ca, operator)) = server() else {

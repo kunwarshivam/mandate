@@ -188,6 +188,15 @@ pub const TOKEN_MAX: u64 = 4096;
 /// [`read_token_file`]'s text: the token and at most one trailing newline. Input longer than
 /// [`TOKEN_MAX`] bytes, or not UTF-8, is [`SourceError::CredentialFile`] too.
 pub fn read_token(input: &mut impl Read) -> Result<SecretString, SourceError> {
-    let _ = input;
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let mut bytes = Vec::new();
+    input
+        .take(TOKEN_MAX.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| SourceError::CredentialFile)?;
+    if u64::try_from(bytes.len()).is_ok_and(|read| read <= TOKEN_MAX) {
+        let text = String::from_utf8(bytes).map_err(|_| SourceError::CredentialFile)?;
+        token_from(SecretString::from(text).expose_secret())
+    } else {
+        Err(SourceError::CredentialFile)
+    }
 }
