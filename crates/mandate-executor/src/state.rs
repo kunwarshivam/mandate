@@ -135,7 +135,8 @@ pub struct ExecutorState {
     pub(crate) now: Option<RiskClock>,
     /// The latest tick before the one now handed, a running field `step.rs` writes and the fold
     /// never does: the retry's alert sounds on the tick its last window first expires, once
-    /// (DEC-2302 item 7).
+    /// (DEC-2302 item 7). A tick handed again while its batch's append is unresolved keeps the
+    /// earlier tick it was first judged against, so its alert is not lost.
     pub(crate) previous_now: Option<RiskClock>,
     /// The broker's capability profile protection reads (DEC-838 item 5): set by the shell from
     /// `connector.profile()` at every start ([`ExecutorState::with_profile`]), and otherwise the
