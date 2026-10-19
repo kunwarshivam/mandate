@@ -2911,7 +2911,11 @@ enables `live` (ES-23, OPS-5).
   closes both: a version-2 deployment that rule 201 refuses raises `deployment_unconnected` once per
   process, and RB-14 has its page. Also *left*: nothing journals `AgentStopped` yet, so a deployment
   that never ran, or a crash-looped runtime, is never stopped, and its alert repeats on each manager
-  start (DEC-2038 item 3). From
+  start (DEC-2038 item 3). *Slice 5* ([DEC-2039](decisions/DEC-2039.md)) retires an agent no
+  process ran on the owner's Stop: the service claims the agent's stream at head 0, then writes
+  `AgentStopped` with no loss, and a runtime refuses a claimed stream. 5a is journal spec v0.66
+  and rule 246; 5b the CLI's stop; 5b' `mandate-daemon`'s refusal; 5b'' the manager's claimed
+  exit; 5c the workspace API's stop; 5d and 5e a crash-looped runtime's Stop. From
   slice 2's review, minors left under the freeze rule:
   - The manager's egress gate reads any connection failure on port 9153 as filtered, so a dead or
     restarting resolver fails open; a positive control first (TCP 53 on the same address) would

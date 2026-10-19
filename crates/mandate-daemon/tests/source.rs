@@ -10,8 +10,14 @@ use std::rc::Rc;
 
 use mandate_canon::{Digest, parse};
 use mandate_daemon::ResearchSource;
+use mandate_daemon::meter::CellMeter;
 use mandate_daemon::recorded::Bundle;
 use mandate_daemon::source::{CellSource, Rows, SourceFor, envelope};
+use mandate_gateway::Outcome as CallOutcome;
+use mandate_gateway::kinds::{KeyOwner, Purpose};
+use mandate_gateway::meter::{MeterRecord, MeterStore, Reservation, Settlement, SharedMeter};
+use mandate_gateway::money::{Usage, Usd6};
+use mandate_gateway::registry::ModelRef;
 use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_research::{LineageState, WorkingUniverse};
@@ -21,7 +27,7 @@ use mandate_runtime::{
 };
 use mandate_spec::document::Mandate;
 use mandate_store::Store;
-use mandate_time::UtcNanos;
+use mandate_time::{Date, UtcNanos};
 use serde_json::{Value as Json, json};
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/research");
@@ -521,5 +527,133 @@ fn every_cost_record_is_read_strictly() {
     assert!(
         source.parts(&state()).is_some(),
         "a null reservation and a zero cost are read"
+    );
+}
+
+/// A state whose risk clock reads `text`.
+fn state_at(text: &str) -> RuntimeState {
+    let mut state = unclocked();
+    let secs = UtcNanos::parse_rfc3339(text).unwrap().secs();
+    let reconciled = FoldedEvent {
+        stream: "acct:ws1:acct-1".to_owned(),
+        seq: Seq(1),
+        event_id: EventId("01J8Z3MR000000000000000098".to_owned()),
+        event_type: "ReconciliationRun".to_owned(),
+        causation_id: None,
+        actor: ActorKind::System,
+        payload: parse(format!(r#"{{"result":"clean","risk_clock":{secs}}}"#).as_bytes()).unwrap(),
+    };
+    fold(&mut state, &reconciled).unwrap();
+    state
+}
+
+/// A journal with `document` deployed, and the source over `bundle` counting the agent's spend
+/// from a meter over `records` (DEC-2249 item 3).
+fn metered(bundle: &Bundle, document: &Json, records: &SharedMeter) -> (Journal, CellSource) {
+    let journal = Journal::default();
+    let mut documents = BTreeMap::new();
+    let version = store(&mut documents, document);
+    journal.deployed(AGENT, &version, "paper");
+    let clock = || UtcNanos::parse_rfc3339(RISK_CLOCK).unwrap();
+    let meter = CellMeter::new(
+        records.clone(),
+        Rc::new(journal.clone()),
+        who(),
+        Rc::new(clock),
+    );
+    let source = CellSource::metered(
+        bundle,
+        who(),
+        Rc::new(journal.clone()),
+        Box::new(documents),
+        meter,
+    );
+    (journal, source)
+}
+
+/// A research reservation `id` of the agent on 2026-10-16, at most `max`.
+fn reservation(id: &str, max: &str) -> MeterRecord {
+    MeterRecord::Reserved(Reservation {
+        event_id: id.to_owned(),
+        call_id: format!("call-{id}"),
+        agent_id: Some(AGENT.to_owned()),
+        purpose: Purpose::Research,
+        model: ModelRef {
+            model_id: "llm.research_agent".to_owned(),
+            model_version: "0.1.0".to_owned(),
+            content_hash: Digest::of(b"entry"),
+        },
+        endpoint: "openrouter:anthropic".to_owned(),
+        key_owner: KeyOwner::Platform,
+        price_table_ref: Digest::of(b"prices"),
+        max_cost: Usd6::parse(max).unwrap(),
+        risk_day: Date::new(2026, 10, 16).unwrap(),
+    })
+}
+
+/// DEC-2249 item 3: a call the meter reserved no longer pauses research. It counts at what the
+/// meter holds for it, its settled cost here, beside the unmetered calls' recorded costs, which
+/// still count as before: 0.25 settled plus 0.5 recorded.
+#[test]
+#[ignore = "pending E21-59"]
+fn a_call_the_meter_holds_counts_at_its_settled_cost_and_research_goes_on() {
+    let store = SharedMeter::new();
+    let (journal, source) = metered(&bundle(), &researching(), &store);
+    let mut writer = store.clone();
+    writer.append(reservation("R1", "0.40")).unwrap();
+    writer
+        .append(MeterRecord::Settled(Settlement {
+            event_id: "S1".to_owned(),
+            call_id: "call-R1".to_owned(),
+            reservation: "R1".to_owned(),
+            outcome: CallOutcome::Ok,
+            attempts: 1,
+            tokens: Usage {
+                input: 100,
+                output: 10,
+                cached: 0,
+            },
+            cost: Usd6::parse("0.25").unwrap(),
+        }))
+        .unwrap();
+    journal.agent(
+        "ModelInvocationRecorded",
+        r#"{"cost_usd":"0.25","reservation":"R1"}"#,
+    );
+    journal.agent(
+        "ModelInvocationRecorded",
+        r#"{"cost_usd":"0.5","reservation":null}"#,
+    );
+    let parts = source.parts(&state()).expect("a held call gives context");
+    assert_eq!(
+        parts.facts.research_spend_usd_today,
+        Usd::parse("0.75").unwrap()
+    );
+    assert_eq!(parts.last_reservation, None, "DEC-2249 item 3");
+}
+
+/// After a restart the meter is empty while the agent stream records a reserved call earlier on
+/// the risk day: no context, until the risk clock reaches the next risk day, when the earlier call
+/// is another day's and the day's spend starts again from nothing.
+#[test]
+#[ignore = "pending E21-59"]
+fn a_restarted_source_gives_no_context_until_the_next_risk_day() {
+    let store = SharedMeter::new();
+    let (journal, source) = metered(&bundle(), &researching(), &store);
+    journal.agent(
+        "ModelInvocationRecorded",
+        r#"{"cost_usd":"0.25","reservation":"R9"}"#,
+    );
+    assert!(source.parts(&state()).is_none(), "R9 is not in the meter");
+    assert!(
+        source.parts(&state_at("2026-10-17T03:59:59Z")).is_none(),
+        "the 16th's last second in New York"
+    );
+    let parts = source
+        .parts(&state_at("2026-10-17T04:00:00Z"))
+        .expect("the next risk day");
+    assert_eq!(
+        parts.facts.research_spend_usd_today,
+        Usd::parse("0").unwrap()
     );
 }

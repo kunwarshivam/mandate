@@ -16,7 +16,12 @@ This module builds the `agent_deployed` section:
    processes §9.21's deployment manager runs for that stream, typed by hand;
 5. ranges of those streams for §11's `connection_lifecycle_mismatch`, judged from a connection
    anchor or failing closed without one. Rules 66 to 68 and 131 are `connections.py`'s; here a range
-   judges rule 201 only, and fails closed at every record §11's unanchored run judges.
+   judges rule 201 only, and fails closed at every record §11's unanchored run judges;
+6. pairs of an agent stream and a control stream for the stream rule 246 (v0.66, DEC-2039): a
+   workspace service that takes the owner's Stop claims the agent's stream by opening it as an
+   actor other than `agent`, writes nothing more there, and retires the agent with reason
+   `owner_stop` and no loss; an `AgentStopped` the agent's runtime writes is not judged. They are a
+   list of their own, `stops`, so the readers of `streams` keep their meaning.
 
 Every stream record passes every per-draft rule, every expectation is typed from the rules rather
 than computed by the code under test, and every seeded bug, in the validator, the mapping, the
@@ -43,17 +48,19 @@ from control import (
     ACCOUNT_STREAM_REF,
     AGENT_STREAM,
     EXECUTOR,
+    RUNTIME,
     SERVICES,
     STREAM,
     USER,
     WORKSPACE,
     artifacts,
     check_of,
+    envelope_violations,
     reported,
     violations,
 )
 
-SPEC = "docs/specs/journal.md v0.56 §9.21, §9.24 (DEC-1171, DEC-1173)"
+SPEC = "docs/specs/journal.md v0.66 §9.21, §9.24 (DEC-1171, DEC-1173, DEC-2039)"
 AT = "2026-10-17T16:00:00.000000000Z"
 ARTIFACTS = {name: obj for name, obj in artifacts().items() if name in ("mandate_document", "deployment_record")}
 DOCUMENT = ARTIFACTS["mandate_document"]
@@ -154,6 +161,43 @@ def stopped(event_id: str, agent: str = AGENT) -> dict:
         "loss_added": "0",
     }
     return envelope(event_id, "AgentStopped", payload, config_refs={"mandate_version": VERSION})
+
+
+def started(event_id: str, subject: str = AGENT, process: str = "runtime", generation: int = 1) -> dict:
+    """The deployment manager's `ProcessStartIssued` (§9.21): the first start of a slot, or a restart."""
+    payload = {
+        "process": process,
+        "subject": subject,
+        "generation": generation,
+        "cause": "deployed" if generation == 1 else "restart",
+    }
+    return envelope(event_id, "ProcessStartIssued", payload, actor=dict(SERVICES))
+
+
+def retired(event_id: str, loss: str, reason: str = "owner_stop") -> dict:
+    """The agent's runtime retiring it, with the loss its own risk state reads: rule 246 does not
+    judge a runtime's record."""
+    draft = stopped(event_id)
+    draft["payload"].update(loss_added=loss, reason=reason)
+    draft["actor"] = dict(RUNTIME)
+    return draft
+
+
+EARLIER_RUNTIME = {**RUNTIME, "version": "0.0.9", "build": "sha256:" + "b" * 64}
+
+
+def opened(event_id: str, actor: dict) -> dict:
+    """The agent stream's `StreamOpened` (§9.1): the runtime's, as an `agent` actor, or a claim by
+    any other actor (rule 246)."""
+    payload = {"stream_type": "agent", "workspace_id": WORKSPACE, "agent_id": AGENT}
+    return envelope(event_id, "StreamOpened", payload, stream_id=AGENT_STREAM, actor=dict(actor))
+
+
+def observed(event_id: str, actor: dict = RUNTIME) -> dict:
+    """A record after the agent stream's `StreamOpened`: the runtime ran. Only its envelope is
+    judged here; the agent stream's payloads are `agent_stream`'s."""
+    payload = {"source": "fixture", "observed_at": AT, "payload_ref": None}
+    return envelope(event_id, "ObservationRecorded", payload, stream_id=AGENT_STREAM, actor=dict(actor))
 
 
 DRAFTS = {
@@ -341,6 +385,47 @@ def anchor(prefix: list[dict], skip: frozenset[str] = frozenset()) -> dict | Non
     return state
 
 
+def claimed_agents(agent_stream: list[dict], skip: frozenset[str]) -> set[str]:
+    """The agents whose stream opens with a claim: a `StreamOpened` no `agent` actor wrote, told by
+    the actor's kind alone, never by which process wrote it."""
+    if not agent_stream or agent_stream[0]["event_type"] != "StreamOpened":
+        return set()
+    first = agent_stream[0]
+    claim = first["actor"]["kind"] != "agent"
+    if "stream.246.instance" in skip:
+        claim = first["actor"] != RUNTIME
+    if "stream.246.any_opener" in skip:
+        claim = True
+    return {first["payload"]["agent_id"]} if claim else set()
+
+
+def stop_failure(agent_stream: list[dict], control: list[dict], skip: frozenset[str] = frozenset()) -> dict | None:
+    """Rule 246 over an agent stream and a control stream, each from its start: the first record
+    after a claim on the agent stream, else the first `AgentStopped` no runtime wrote that retires
+    an agent whose stream no claim opened, or names another reason or a loss."""
+    if "stream.246" in skip:
+        return None
+    claims = claimed_agents(agent_stream, skip)
+    if claims and len(agent_stream) > 1 and "stream.246.after" not in skip:
+        return {"stream": "agent", "index": 1, "rule": 246, "path": "actor.kind"}
+    for i, d in enumerate(control):
+        if d["event_type"] != "AgentStopped":
+            continue
+        if d["actor"]["kind"] == "agent" and "stream.246.runtime_judged" not in skip:
+            continue
+        p = d["payload"]
+        claimed = p["agent_id"] in claims
+        if "stream.246.any_agent" in skip:
+            claimed = bool(claims)
+        if not claimed:
+            return {"stream": "control", "index": i, "rule": 246, "path": "payload.agent_id"}
+        if p["reason"] != "owner_stop" and "stream.246.reason" not in skip:
+            return {"stream": "control", "index": i, "rule": 246, "path": "payload.reason"}
+        if normalize_decimal(p["loss_added"]) != "0" and "stream.246.loss" not in skip:
+            return {"stream": "control", "index": i, "rule": 246, "path": "payload.loss_added"}
+    return None
+
+
 def range_failure(drafts: list[dict], start: int, anchored: bool, skip: frozenset[str] = frozenset()) -> dict | None:
     """§11's `connection_lifecycle_mismatch` for rule 201 over records `start` on: from the anchor of
     the records before it, or, with none, failing closed at the first record the unanchored run
@@ -457,6 +542,70 @@ def stream_cases() -> list[dict]:
     ]
 
 
+def stop_cases() -> list[dict]:
+    """Pairs of an agent stream and a control stream for rule 246, each record its own `append`.
+    `expect` is the rule's verdict, typed from the rule: whether the owner's workspace service
+    claimed the agent's stream and retired the agent itself."""
+
+    def ids(n: int, count: int) -> list[str]:
+        return [f"01J9DB{n:02d}{i:02d}".ljust(26, "0") for i in range(count)]
+
+    def case(n, name, clause, agent, control, expect):
+        i = iter(ids(n, 12))
+        return {"name": name, "clause": clause, "agent": agent(i), "control": control(i), "expect": expect}
+
+    ok = {"outcome": "Valid"}
+
+    def at(stream, index, path):
+        return {"outcome": "Invalid", "stream": stream, "index": index, "rule": 246, "path": path}
+
+    def with_payload(draft: dict, **members) -> dict:
+        draft["payload"].update(members)
+        return draft
+
+    def claim(i):
+        return [opened(next(i), USER)]
+
+    def ran(i):
+        return [opened(next(i), RUNTIME), observed(next(i))]
+
+    def retiring(i, *before):
+        return [established(next(i)), deployed(next(i)), *(b(next(i)) for b in before), stopped(next(i))]
+
+    return [
+        case(1, "claimed_and_retired", "rule 246: the service's claim opens the agent's stream",
+             claim, lambda i: retiring(i), ok),
+        case(2, "version_1_claimed", "rule 246: an unread deployment's stream, claimed",
+             claim, lambda i: [deployed(next(i), connection=None), stopped(next(i))], ok),
+        case(3, "refused_by_rule_201", "rule 246: a deployment rule 201 refuses, its stream claimed",
+             claim, lambda i: [deployed(next(i)), stopped(next(i))], ok),
+        case(4, "claimed_by_another_service", "rule 246: a claim is any actor but an `agent`",
+             lambda i: [opened(next(i), SERVICES)], lambda i: retiring(i), ok),
+        case(5, "unclaimed", "rule 246: an empty agent stream is no claim",
+             lambda i: [], lambda i: retiring(i), at("control", 2, "payload.agent_id")),
+        case(6, "runtime_opened", "rule 246: a stream the runtime opened is no claim",
+             lambda i: [opened(next(i), RUNTIME)], lambda i: retiring(i), at("control", 2, "payload.agent_id")),
+        case(7, "runtime_ran", "rule 246: a runtime that ran, started by the manager",
+             ran, lambda i: retiring(i, started), at("control", 3, "payload.agent_id")),
+        case(8, "a_restart_resumes", "rule 246: told by kind, so a later build's restart resumes its stream",
+             lambda i: [opened(next(i), EARLIER_RUNTIME), observed(next(i))],
+             lambda i: [established(next(i)), deployed(next(i)), started(next(i)), started(next(i), generation=2)], ok),
+        case(9, "written_after_the_claim", "rule 246: a claimed stream holds nothing after its claim",
+             lambda i: [opened(next(i), USER), observed(next(i))], lambda i: [], at("agent", 1, "actor.kind")),
+        case(10, "another_agents_stop", "rule 246: the claim is of the stopped agent's own stream",
+             claim, lambda i: [established(next(i)), deployed(next(i)), deployed(next(i), OTHER_AGENT),
+                               stopped(next(i), OTHER_AGENT)], at("control", 3, "payload.agent_id")),
+        case(11, "the_runtime_retires_it", "rule 246: an `AgentStopped` the agent's runtime writes is not judged",
+             ran, lambda i: [established(next(i)), deployed(next(i)), started(next(i)), retired(next(i), "12.5")], ok),
+        case(12, "a_loss", "rule 246: `loss_added` is 0",
+             claim, lambda i: [established(next(i)), deployed(next(i)), with_payload(stopped(next(i)), loss_added="3")],
+             at("control", 2, "payload.loss_added")),
+        case(13, "not_the_owners_stop", "rule 246: the reason is `owner_stop`",
+             claim, lambda i: [established(next(i)), deployed(next(i)), with_payload(stopped(next(i)), reason="goal_complete")],
+             at("control", 2, "payload.reason")),
+    ]
+
+
 def range_cases() -> list[dict]:
     """Ranges of the stream cases, by name: `start` is the first record in the range."""
 
@@ -505,6 +654,8 @@ ORACLE_CHECKS = (
     "streams.processes",
     "ranges.rule",
     "ranges.agree",
+    "stops.records",
+    "stops.rule",
 )
 
 
@@ -573,6 +724,18 @@ def check_section(section: dict, skip: frozenset[str] = frozenset()) -> list[str
         got = range_failure(records, case["start"], case["anchored"], skip)
         if got != expected_failure(case["expect"]):
             problems.append(found("ranges.rule", f"{case['name']}: expected {case['expect']}, got {got}"))
+    for case in section["stops"]:
+        for i, record in enumerate(case["agent"]):
+            got = envelope_violations(record, skip)
+            if got or record["stream_id"] != AGENT_STREAM:
+                problems.append(found("stops.records", f"{case['name']} agent record {i}: {got}"))
+        for i, record in enumerate(case["control"]):
+            got = violations(record, skip)
+            if got:
+                problems.append(found("stops.records", f"{case['name']} control record {i}: {got}"))
+        got = stop_failure(case["agent"], case["control"], skip)
+        if got != expected_failure(case["expect"]):
+            problems.append(found("stops.rule", f"{case['name']}: expected {case['expect']}, got {got}"))
     for name, records in streams.items():
         full = stream_failure(records, skip)
         for start in range(len(records) + 1):
@@ -600,6 +763,7 @@ VALIDATOR_MUTANTS = (
     "map.v2_document_skipped",
     *(f"stream.201{n}" for n in ("", ".v1_judged", ".connection", ".later", ".later_revocation", ".version", ".revoked", ".account_copy")),
     *(f"range.201.{n}" for n in ("anchor_ignored", "unanchored_open", "unanchored_v1_only")),
+    *(f"stream.246{n}" for n in ("", ".instance", ".any_opener", ".after", ".runtime_judged", ".any_agent", ".reason", ".loss")),
     *(
         f"manager.{n}"
         for n in (
@@ -641,6 +805,9 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         ("a stream record is written by a client", "streams.records", mutated(lambda s: case(s, "streams", "stopped")["records"][2].update(actor=dict(clients.CLIENT)))),
         ("a stream case expects the wrong record", "streams.rule", mutated(lambda s: case(s, "streams", "revoked_before")["expect"].update(index=1))),
         ("a version-1 deployment is listed as running", "streams.processes", mutated(lambda s: case(s, "streams", "version_1_deployment").update(processes={"runtimes": [AGENT], "executors": [ACCOUNT]}))),
+        ("a stop's record is written by a client", "stops.records", mutated(lambda s: case(s, "stops", "claimed_and_retired")["control"][2].update(actor=dict(clients.CLIENT)))),
+        ("a claim is written to another agent's stream", "stops.records", mutated(lambda s: case(s, "stops", "claimed_and_retired")["agent"][0].update(stream_id=f"agent:{WORKSPACE}:{OTHER_AGENT}"))),
+        ("a stop of a stream the runtime opened is listed as valid", "stops.rule", mutated(lambda s: case(s, "stops", "runtime_opened").update(expect={"outcome": "Valid"}))),
         ("an unanchored range is listed as passing", "ranges.rule", mutated(lambda s: case(s, "ranges", "unanchored_after_the_establishment").update(expect={"outcome": "Valid"}))),
     ]
 
@@ -681,6 +848,7 @@ def build_section() -> dict:
         "mappings": mapping_cases(),
         "streams": stream_cases(),
         "ranges": range_cases(),
+        "stops": stop_cases(),
     }
 
 

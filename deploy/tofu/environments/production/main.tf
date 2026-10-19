@@ -50,6 +50,7 @@ module "cell" {
   source                     = "../../modules/cell"
   environment                = local.environment
   region                     = local.region
+  state_region               = local.region
   vpc_ip_range               = "10.120.0.0/20"
   kubernetes_version         = "1.35.9-do.1"
   node_size                  = "s-2vcpu-4gb"

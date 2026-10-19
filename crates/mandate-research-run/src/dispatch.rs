@@ -178,6 +178,9 @@ fn read(call: &ToolCall, scope: &Scope, readers: Readers<'_>) -> Result<Answer, 
     if call.tool == Tool::NewsSearch {
         return news_search(call, scope, readers);
     }
+    if call.tool == Tool::FilingsSearch {
+        return filings_search(call, scope, readers);
+    }
     let Ok(arguments) = mandate_canon::parse(call.arguments.as_bytes()) else {
         return Ok(Answer::Failed);
     };
@@ -329,6 +332,16 @@ fn news_get(
         items: vec![RetrievedItem::News(item)],
         untrusted: true,
     }))
+}
+
+/// `filings.search` (§6.10, DEC-2250 items 1 to 5).
+fn filings_search(
+    call: &ToolCall,
+    scope: &Scope,
+    readers: Readers<'_>,
+) -> Result<Answer, ResearchRunError> {
+    let _ = (call, scope, readers);
+    Err(ResearchRunError::Unimplemented { story: "E19-13" })
 }
 
 fn outside(symbols: &BTreeSet<Symbol>, scope: &Scope) -> bool {

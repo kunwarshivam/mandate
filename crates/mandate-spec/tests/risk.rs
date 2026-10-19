@@ -4683,3 +4683,253 @@ fn a_scale_rung_carries_no_breach_time_at_once_or_after_the_reset() -> Result<()
     );
     Ok(())
 }
+
+/// The step that confirms the 0.06 rung 60 s after 98.5 breached it, and the positions of its
+/// `RiskLimitTriggered` and of its `AgentModeApplied`.
+fn confirmed_rung_step() -> Result<(Outcome, usize, usize), String> {
+    let mandate = swing(&[
+        ("/risk/max_daily_loss", Some(s("0.5"))),
+        ("/risk/scale_lift_after_s", Some(common::i(0))),
+    ])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "105"),
+            mark("2026-09-21T14:02:00.000000000Z", "98.5"),
+            mark("2026-09-21T14:03:00.000000000Z", "98.5"),
+        ],
+    )?;
+    let outcome = step_of(&outcomes, 3)?.clone();
+    let trigger = outcome
+        .journal
+        .iter()
+        .position(|event| matches!(event, RiskEvent::RiskLimitTriggered { .. }))
+        .ok_or("the 0.06 rung confirms at step 3")?;
+    let mode = outcome
+        .journal
+        .iter()
+        .position(|event| matches!(event, RiskEvent::AgentModeApplied { .. }))
+        .ok_or("the confirmed rung moves the mode at step 3")?;
+    Ok((outcome, trigger, mode))
+}
+
+/// A journal that no longer matches the breach times the step recorded is refused as
+/// `invalid_input`, never answered: a writer must not put one record's breach time on another.
+fn assert_refused(outcome: &Outcome, event: usize, edit: &str) {
+    match outcome.breach_time_s(event) {
+        Err(error) => assert_eq!(error.code(), "invalid_input", "{edit}: {error}"),
+        Ok(answer) => {
+            panic!("{edit}: answered {answer:?} instead of refusing")
+        }
+    }
+}
+
+/// An event that is not a `RiskLimitTriggered` has no breach time, which is `Ok(None)` and not a
+/// refusal (journal spec §9.27): the writer leaves the member out of every other record.
+#[test]
+fn an_event_that_is_not_a_trigger_has_no_breach_time() -> Result<(), String> {
+    let (outcome, trigger, mode) = confirmed_rung_step()?;
+    assert_eq!(
+        outcome.breach_time_s(mode).map_err(|e| e.to_string())?,
+        None
+    );
+    assert_eq!(
+        outcome.breach_time_s(trigger).map_err(|e| e.to_string())?,
+        Some(60),
+        "the trigger beside it has its 60 s, so the None is the event's and not the step's"
+    );
+    Ok(())
+}
+
+/// A trigger replaced by another event after the step leaves its recorded time with nothing to
+/// belong to: refused (`journal` is a public field a caller can edit).
+#[test]
+fn a_trigger_replaced_after_the_step_is_refused() -> Result<(), String> {
+    let (mut outcome, trigger, mode) = confirmed_rung_step()?;
+    let other = outcome.journal[mode].clone();
+    outcome.journal[trigger] = other;
+    assert_refused(&outcome, trigger, "the trigger replaced by the mode change");
+    Ok(())
+}
+
+/// A trigger whose limit was changed after the step is not the record the time was read for.
+#[test]
+fn a_trigger_whose_limit_was_changed_is_refused() -> Result<(), String> {
+    let (mut outcome, trigger, _) = confirmed_rung_step()?;
+    if let Some(RiskEvent::RiskLimitTriggered { limit, .. }) = outcome.journal.get_mut(trigger) {
+        *limit = LimitKey::LifetimeFloor;
+    }
+    assert_refused(
+        &outcome,
+        trigger,
+        "the 0.06 rung's trigger relabelled as the floor's",
+    );
+    Ok(())
+}
+
+/// A trigger put where the step journalled another event has no time recorded for it, which is not
+/// the same answer as 0.
+#[test]
+fn a_trigger_put_in_place_of_another_event_is_refused() -> Result<(), String> {
+    let (mut outcome, trigger, mode) = confirmed_rung_step()?;
+    let other = outcome.journal[trigger].clone();
+    outcome.journal[mode] = other;
+    assert_refused(&outcome, mode, "the mode change replaced by a trigger");
+    Ok(())
+}
+
+/// A position past the end of the journal names no record at all.
+#[test]
+fn a_position_past_the_journal_is_refused() -> Result<(), String> {
+    let (outcome, _, _) = confirmed_rung_step()?;
+    assert_refused(&outcome, outcome.journal.len(), "one past the last event");
+    Ok(())
+}
+
+/// One walk input: a mark at a whole-dollar bid, a clock tick, or an allocation change, each after
+/// a gap of whole seconds.
+#[derive(Debug, Clone)]
+enum GuardInput {
+    Mark(i64),
+    Tick,
+    Allocate(i64),
+}
+
+fn guard_input() -> impl Strategy<Value = (GuardInput, u64)> {
+    (
+        prop_oneof![
+            (60_i64..140).prop_map(GuardInput::Mark),
+            Just(GuardInput::Tick),
+            (-2_000_i64..2_000).prop_map(GuardInput::Allocate),
+        ],
+        1_u64..120,
+    )
+}
+
+/// No `Outcome` holds two `RiskLimitTriggered` for one limit, so a breach time is never ambiguous
+/// between two records of the same limit. The one batch that merges two evaluations is an
+/// allocation change's settling tick followed by the change itself, with no time between them
+/// (§5.1), and the same limit cannot trigger in both:
+/// - a confirming limit the tick triggers is latched, and a latched limit is not evaluated again;
+/// - a daily loss the tick latches waits for a new risk day;
+/// - a scale rung the tick triggers stays active, so it does not trigger again;
+/// - a condition that was false at the tick and true after the change is the change's own
+///   `would_trigger_limit` refusal, which moves nothing;
+/// - neither input is a quote, so neither starts a hard breach.
+///
+/// Fuzzed over marks, ticks, and allocation changes, which settle a tick first, with windows of
+/// 0, 30, and 60 s.
+#[test]
+fn no_outcome_triggers_one_limit_twice() {
+    let mut runner = TestRunner::new(ProptestConfig {
+        cases: 256,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    });
+    let strategy = (
+        prop::collection::vec(guard_input(), 1..16),
+        prop::sample::select(vec![0_u64, 30, 60]),
+    );
+    let result = runner.run(&strategy, |(inputs, need)| {
+        let mandate = ok(ladder_only(&[(
+            "/risk/breach_confirm_s",
+            Some(common::i(need)),
+        )]))?;
+        let mut when = at("2026-09-21T14:00:00.000000000Z").secs();
+        let mut steps = Vec::new();
+        for (input, gap) in &inputs {
+            when += i64::try_from(*gap).unwrap_or(1);
+            let instant = UtcNanos::from_parts(when, 0).expect("an instant");
+            steps.push(match input {
+                GuardInput::Mark(bid) => {
+                    quote_at(instant, &bid.to_string(), MarketSession::Regular, true)
+                }
+                GuardInput::Tick => tick_utc(instant, MarketSession::Regular),
+                GuardInput::Allocate(delta) => Step {
+                    at: instant,
+                    session: MarketSession::Regular,
+                    input: Input::AllocationChange {
+                        delta_usd: usd(&delta.to_string()),
+                    },
+                },
+            });
+        }
+        let outcomes = ok(walk(
+            &mandate,
+            &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+            &RegularSessionClock::new(),
+            &steps,
+        ))?;
+        for (index, outcome) in outcomes.iter().enumerate() {
+            let mut seen = BTreeSet::new();
+            for event in &outcome.journal {
+                if let RiskEvent::RiskLimitTriggered { limit, .. } = event {
+                    prop_assert!(
+                        seen.insert(*limit),
+                        "step {}: {:?} triggered twice in {:?}",
+                        index + 1,
+                        limit,
+                        outcome.journal
+                    );
+                }
+            }
+        }
+        Ok(())
+    });
+    if let Err(failure) = result {
+        panic!("one trigger a limit an outcome: {failure}");
+    }
+}
+
+/// The merged batch the property relies on is reached: an allocation change whose settling tick
+/// confirms the 0.06 rung journals that trigger once, with its breach time at its own position,
+/// ahead of the change's refusal (a decrease below the 9850 held is refused).
+#[test]
+fn an_allocation_changes_settling_trigger_keeps_its_own_position() -> Result<(), String> {
+    let mandate = swing(&[
+        ("/risk/max_daily_loss", Some(s("0.5"))),
+        ("/risk/scale_lift_after_s", Some(common::i(0))),
+    ])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "105"),
+            mark("2026-09-21T14:02:00.000000000Z", "98.5"),
+            allocate("2026-09-21T14:03:00.000000000Z", "-100"),
+        ],
+    )?;
+    let merged = step_of(&outcomes, 3)?;
+    let triggers: Vec<usize> = merged
+        .journal
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| matches!(event, RiskEvent::RiskLimitTriggered { .. }))
+        .map(|(position, _)| position)
+        .collect();
+    assert_eq!(triggers.len(), 1, "{:?}", merged.journal);
+    let refused = merged
+        .journal
+        .iter()
+        .position(|event| matches!(event, RiskEvent::MandateVersionApplied { .. }))
+        .ok_or("the change journals its result")?;
+    assert!(
+        triggers[0] < refused,
+        "the settling tick's events come first"
+    );
+    assert_eq!(rejection_code(merged), Some("equity_below_exposure"));
+    assert_eq!(
+        merged
+            .breach_time_s(triggers[0])
+            .map_err(|e| e.to_string())?,
+        Some(60)
+    );
+    assert_eq!(
+        merged.breach_time_s(refused).map_err(|e| e.to_string())?,
+        None
+    );
+    Ok(())
+}
