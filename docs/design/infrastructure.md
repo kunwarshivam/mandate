@@ -597,7 +597,7 @@ range's `cause` `token_unverifiable`; any `anchor_unstamped` fails the drill (DE
    (`SOURCE_DATE_EPOCH`, a double-build diff) with an SBOM and cargo-auditable metadata (ES-14,
    ES-17). Built by `cargo xtask release build` and proved by `release.yml`'s two builds of each
    released `main` commit on two runners ([DEC-972](../project/decisions/DEC-972.md),
-   [DEC-2030](../project/decisions/DEC-2030.md)); the build digest is the binary's SHA-256, as
+   [DEC-2025](../project/decisions/DEC-2025.md)); the build digest is the binary's SHA-256, as
    `SHA256SUMS` lists it.
 3. **Sign.** From M11 or the first external install, images and bundles are signed with cosign
    under the founder's hardware key, with build provenance (ES-17). Every process checks its own

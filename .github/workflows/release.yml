@@ -36,7 +36,7 @@ permissions: {}
 
 # A pull request's runs share one group, so a new push cancels the old run. Pushes to `main` share
 # one group that cancels nothing: the running release finishes, and of the pushes behind it only
-# the newest waits, so a burst of merges releases once, at the tip (DEC-2030). A manual dispatch
+# the newest waits, so a burst of merges releases once, at the tip (DEC-2025). A manual dispatch
 # has a group of its own, because its `release-signing` job can wait hours for the founder's
 # approval and must not hold the pushes' releases behind it.
 concurrency:

@@ -1978,7 +1978,7 @@ mod tests {
     /// Pull requests cancel their own stale runs; pushes to `main` share one group that cancels
     /// nothing, so a burst of merges releases once, at its tip; a manual dispatch, which can wait
     /// on the founder's approval, has its own group so it never holds the pushes' releases
-    /// (DEC-2030).
+    /// (DEC-2025).
     #[test]
     fn main_releases_once_per_burst_and_a_dispatch_never_holds_it() -> Result<()> {
         let text = fs::read_to_string(
@@ -1993,7 +1993,7 @@ mod tests {
         );
         assert!(
             text.contains(block),
-            "release.yml's concurrency is not DEC-2030's"
+            "release.yml's concurrency is not DEC-2025's"
         );
         assert_eq!(
             text.matches("concurrency:").count(),
