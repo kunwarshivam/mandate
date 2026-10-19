@@ -56,7 +56,9 @@ enum Retirement {
 ///
 /// Nothing in the retirement refuses the Stop (DEC-2039 item 6, `AGENTS.md` rule 13): a claim the
 /// journal refuses or cannot take, a read or append that fails, or a control stream that keeps
-/// moving under the retirement sends it as [`crate::agent::command`] does, as before.
+/// moving under the retirement sends it as [`crate::agent::command`] does, as before. After a
+/// failure the control stream is read again first: an `AgentStopped` whose append did commit is
+/// returned, and no command is sent beside it.
 ///
 /// # Errors
 /// [`crate::agent::command`]'s alone: a wrong or missing code refused as `step_up_missing` with
@@ -82,13 +84,29 @@ pub fn stop(
         for _ in 0..DECISIONS {
             match retire(journal, store, owner, agent, now) {
                 Ok(Retirement::Retired(submitted)) => return Ok(submitted),
-                Ok(Retirement::Ran | Retirement::NeverDeployed | Retirement::DocumentUnread)
-                | Err(_) => break,
+                Ok(Retirement::Ran | Retirement::NeverDeployed | Retirement::DocumentUnread) => {
+                    break;
+                }
+                Err(_) => match retired(journal, owner, agent) {
+                    Some(submitted) => return Ok(submitted),
+                    None => break,
+                },
                 Ok(Retirement::Moved) => {}
             }
         }
     }
     agent::command(journal, ids, owner, agent, &command, typed, now)
+}
+
+/// The `AgentStopped` that retires `agent`, read afresh after a retirement that failed: its append
+/// may have committed although no answer settled it, and a Stop has one effect, so the Stop returns
+/// it rather than send a command beside it. `None` when none is stored, or the control stream
+/// cannot be read.
+fn retired(journal: &dyn ControlJournal, owner: &Owner, agent: &str) -> Option<Submitted> {
+    let rows = rows(journal, owner).ok()?;
+    last_of(&rows, agent)
+        .filter(|row| row.event_type == STOPPED)
+        .map(Row::submitted)
 }
 
 /// The agent's latest `AgentDeployed` or `AgentStopped`.
