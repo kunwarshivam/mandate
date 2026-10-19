@@ -116,6 +116,11 @@ needs:
   | `CF_INFRA_API_TOKEN` | §2.2 |
   | `TOFU_STATE_PASSPHRASE` | at least 32 random characters, for example `openssl rand -base64 48`. It is stretched with PBKDF2-SHA-512 at 600,000 iterations into an AES-GCM key. **Keep a copy in your password manager.** Without it the state cannot be read, and every later plan fails. Use a different one per environment |
 
+- **Environment secret, staging only:** `FOUNDER_OIDC_SUBJECT`, your user id in staging's
+  Supabase project (Authentication → Users, the `id` of your user), which staging's apply links to
+  the founder's principal so you can sign in to staging's web app
+  ([DEC-2114](../../docs/project/decisions/DEC-2114.md)). It never leaves the apply step: only its
+  digest reaches the cluster. Without it, the apply links no one and changes nothing.
 - **Environment secret, production only:** `ACCESS_ALLOWED_EMAILS`, for example
   `["you@example.com"]`: who Access lets through to production's API host, as a JSON list of full
   addresses. It is a secret so the public log never shows it. Staging needs none: its Access
