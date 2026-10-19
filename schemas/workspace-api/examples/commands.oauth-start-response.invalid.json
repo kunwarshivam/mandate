@@ -52,5 +52,11 @@
     "set": {
       "/mutant_member": 1
     }
+  },
+  {
+    "label": "a missing connection_id",
+    "remove": [
+      "/connection_id"
+    ]
   }
 ]
