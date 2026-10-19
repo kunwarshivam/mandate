@@ -1564,26 +1564,26 @@ fn reviewed_commit(sha: &str, run_sha: &str, head: &str) -> Result<()> {
 /// be the run's commit and the checkout. With `sha` empty, `preflight` and `plan` proceed at the
 /// checkout, once it is the run's commit and a full commit, since main moves between the founder
 /// reading a commit and dispatching; `apply` never does, so an apply still binds to the commit the
-/// founder named.
+/// founder named. An action other than those three is refused first, whatever `sha` is.
 fn run_commit(action: &str, sha: &str, run_sha: &str, head: &str) -> Result<String> {
+    if !matches!(action, "preflight" | "plan" | "apply") {
+        bail!("no infra action {action:?} (DEC-2042)");
+    }
     if !sha.is_empty() {
         reviewed_commit(sha, run_sha, head)?;
         return Ok(sha.to_owned());
     }
-    match action {
-        "preflight" | "plan" => {
-            reviewed_commit(head, run_sha, head).context(
-                "no sha was given, so the run proceeds at the checkout, which must be the run's \
-                 full commit (DEC-2042)",
-            )?;
-            Ok(head.to_owned())
-        }
-        "apply" => bail!(
+    if action == "apply" {
+        bail!(
             "apply needs {INFRA_SHA_ENV}, the full commit you reviewed, so the approval binds to \
              it; plan first and dispatch apply naming the commit the plan printed (DEC-2042)"
-        ),
-        other => bail!("no infra action {other:?} (DEC-2042)"),
+        );
     }
+    reviewed_commit(head, run_sha, head).context(
+        "no sha was given, so the run proceeds at the checkout, which must be the run's full \
+         commit (DEC-2042)",
+    )?;
+    Ok(head.to_owned())
 }
 
 /// The paths a change to which changes what `infra.yml` does: the OpenTofu tree, the workflow, and
@@ -17021,10 +17021,29 @@ mod tests {
             "{refused}"
         );
         assert!(crate::run_commit("apply", other, sha, sha).is_err());
-        assert!(
-            crate::run_commit("destroy", "", sha, sha).is_err(),
-            "an unknown action never defaults"
-        );
+        for (named, why) in [
+            (" ", "a blank sha"),
+            (" 0123456789abcdef0123456789abcdef01234567", "a padded sha"),
+            (
+                "0123456789ABCDEF0123456789ABCDEF01234567",
+                "an uppercase sha",
+            ),
+        ] {
+            assert!(
+                crate::run_commit("apply", named, sha, sha).is_err(),
+                "apply: {why}"
+            );
+        }
+        for named in ["", sha] {
+            let refused = crate::run_commit("destroy", named, sha, sha)
+                .err()
+                .map(|error| error.to_string())
+                .unwrap_or_default();
+            assert!(
+                refused.contains("no infra action"),
+                "an unknown action is refused, with sha {named:?}: {refused}"
+            );
+        }
         Ok(())
     }
 
