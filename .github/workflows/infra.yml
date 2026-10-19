@@ -43,7 +43,7 @@ concurrency:
 jobs:
   tofu:
     if: github.ref == 'refs/heads/main'
-    # DEC-2612: the runner the founder reserves for this job, by the repository variable
+    # DEC-2614: the runner the founder reserves for this job, by the repository variable
     # INFRA_RUNNER, so it never queues behind CI; GitHub's hosted runner while that is unset.
     runs-on: ${{ vars.INFRA_RUNNER || 'ubuntu-24.04' }}
     environment: infra-${{ inputs.environment }}

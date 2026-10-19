@@ -1292,13 +1292,13 @@ fn tofu_roots(tofu_dir: &Path) -> Result<Vec<PathBuf>> {
 
 /// The workflow that alone plans and applies the hosted environments (E21-56, DEC-2014).
 const INFRA_WORKFLOW: &str = ".github/workflows/infra.yml";
-/// `infra.yml`'s job's runner (DEC-2612): the runner the founder reserves for it, named by the
+/// `infra.yml`'s job's runner (DEC-2614): the runner the founder reserves for it, named by the
 /// repository variable `INFRA_RUNNER`, or GitHub's hosted runner while that is unset.
 const INFRA_RUNS_ON: &str = "${{ vars.INFRA_RUNNER || 'ubuntu-24.04' }}";
-/// The label of the runner reserved for `infra.yml` (DEC-2612). Only the repository variable
+/// The label of the runner reserved for `infra.yml` (DEC-2614). Only the repository variable
 /// holds it; no workflow may name it, nor `self-hosted`, nor the variable but `infra.yml`.
 const RESERVED_RUNNER_NAMES: [&str; 3] = ["mandate-infra", "self-hosted", "INFRA_RUNNER"];
-/// The runners every other job may run on, exactly as its `runs-on:` names them (DEC-2612):
+/// The runners every other job may run on, exactly as its `runs-on:` names them (DEC-2614):
 /// GitHub's hosted runners, directly, through a matrix of [`HOSTED_RUNNERS`], or through
 /// `codeql.yml`'s template expression, which picks between two hosted runners.
 const HOSTED_RUNS_ON: [&str; 5] = [
@@ -1308,7 +1308,7 @@ const HOSTED_RUNS_ON: [&str; 5] = [
     "${{ matrix.runner }}",
     "${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}",
 ];
-/// The hosted runners a matrix's `runner:` may name (DEC-2612).
+/// The hosted runners a matrix's `runner:` may name (DEC-2614).
 const HOSTED_RUNNERS: [&str; 2] = ["ubuntu-24.04", "ubuntu-24.04-arm"];
 /// The one command `infra.yml`'s secret-holding step runs: the binary an earlier step built with
 /// no secret in its environment, so no build script runs beside one.
@@ -2075,7 +2075,7 @@ fn guarded_word_problems(file: &CiFile) -> Vec<String> {
     problems
 }
 
-/// Every job that could reach the runner reserved for `infra.yml` (DEC-2612): a `runs-on:` that
+/// Every job that could reach the runner reserved for `infra.yml` (DEC-2614): a `runs-on:` that
 /// is not one of [`HOSTED_RUNS_ON`] exactly, `infra.yml`'s own job aside, which must read
 /// [`INFRA_RUNS_ON`]; a matrix `runner:` that is not one of [`HOSTED_RUNNERS`]; and any line of a
 /// workflow but `infra.yml`, comments aside, that names one of [`RESERVED_RUNNER_NAMES`]. A
@@ -2095,7 +2095,7 @@ fn runner_problems(files: &[CiFile]) -> Vec<String> {
                     problems.push(format!(
                         "{}:{number}: runs on `{value}`, which is not one of GitHub's hosted \
                          runners this check lists; only {INFRA_WORKFLOW} may reach the reserved \
-                         runner (DEC-2612)",
+                         runner (DEC-2614)",
                         file.path
                     ));
                 }
@@ -2105,7 +2105,7 @@ fn runner_problems(files: &[CiFile]) -> Vec<String> {
             {
                 problems.push(format!(
                     "{}:{number}: a matrix runner `{value}` that is not one of GitHub's hosted \
-                     runners this check lists (DEC-2612)",
+                     runners this check lists (DEC-2614)",
                     file.path
                 ));
             }
@@ -2116,14 +2116,14 @@ fn runner_problems(files: &[CiFile]) -> Vec<String> {
             {
                 problems.push(format!(
                     "{}:{number}: names `{name}`, which only {INFRA_WORKFLOW} may, so no other \
-                     job reaches the runner reserved for it (DEC-2612)",
+                     job reaches the runner reserved for it (DEC-2614)",
                     file.path
                 ));
             }
         }
         if infra && infra_runs_on != 1 {
             problems.push(format!(
-                "{INFRA_WORKFLOW}: its one job must run on `{INFRA_RUNS_ON}` (DEC-2612)"
+                "{INFRA_WORKFLOW}: its one job must run on `{INFRA_RUNS_ON}` (DEC-2614)"
             ));
         }
     }
@@ -17122,7 +17122,7 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-2612: the committed workflows pass the reserved-runner check, and each way a job could
+    /// DEC-2614: the committed workflows pass the reserved-runner check, and each way a job could
     /// reach that runner is named: a self-hosted or other unlisted `runs-on:`, a matrix runner off
     /// the list, the reserved label or the variable named outside `infra.yml`, and `infra.yml`
     /// running anywhere but on the variable.
