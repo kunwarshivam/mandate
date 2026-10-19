@@ -347,7 +347,6 @@ fn oracle_names_for_c1() -> Vec<String> {
 /// An absent `dir` passes and is not made; an owner-only one passes whether it is empty or holds
 /// earlier plain files at the output names (DEC-2022 items 1 and 2).
 #[test]
-#[ignore = "pending E21-32"]
 fn an_absent_or_owner_only_dir_passes_before_any_vault_and_nothing_is_made() {
     let connections = [c("c1")];
     let dir = fresh("checked-absent");
@@ -367,7 +366,6 @@ fn an_absent_or_owner_only_dir_passes_before_any_vault_and_nothing_is_made() {
 /// Every `dir` or parent `write_credentials` refuses is refused before any vault is reached, and
 /// nothing is made or changed (DEC-2022 items 1 and 2).
 #[test]
-#[ignore = "pending E21-32"]
 fn a_dir_or_parent_the_write_refuses_is_refused_before_any_vault() {
     let connections = [c("c1")];
     for bits in [0o755, 0o750, 0o705, 0o500, 0o300] {
@@ -410,7 +408,6 @@ fn a_dir_or_parent_the_write_refuses_is_refused_before_any_vault() {
 /// A link or a directory planted at any name the write would replace is refused before any vault;
 /// one at a token exchange's name, which is never written, is not (DEC-2022 items 1 and 2).
 #[test]
-#[ignore = "pending E21-32"]
 fn anything_but_a_plain_file_at_a_credential_name_is_refused_before_any_vault() {
     let connections = [c("c1")];
     let target = fresh("checked-target");
