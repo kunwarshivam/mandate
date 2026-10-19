@@ -11,7 +11,7 @@ mock_provider "digitalocean" {
 
   mock_data "digitalocean_sizes" {
     defaults = {
-      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc3", "tor1"], gpu_info = [] }]
+      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc3", "sfo2"], gpu_info = [] }]
     }
   }
 }
@@ -52,12 +52,12 @@ run "staging_plans_under_its_cap" {
   }
 
   assert {
-    condition     = output.archive_bucket == "mandate-journal-archive-staging"
+    condition     = output.archive_bucket == "mandate-journal-archive-west-staging"
     error_message = "The archive bucket is staging's."
   }
 
   assert {
-    condition     = output.archive_destination_path == "s3://mandate-journal-archive-staging/journal-db" && output.archive_jurisdiction == "default" && output.cloudflare_account_id == "fedcba9876543210fedcba9876543210"
+    condition     = output.archive_destination_path == "s3://mandate-journal-archive-west-staging/journal-db" && output.archive_jurisdiction == "default" && output.cloudflare_account_id == "fedcba9876543210fedcba9876543210"
     error_message = "Lane GO's archive inputs: the destination path, the default jurisdiction and the account id."
   }
 }
@@ -146,7 +146,7 @@ run "staging_may_rely_on_the_window_alone" {
   }
 
   assert {
-    condition     = length(var.kube_api_allowed_addresses) == 0 && output.monthly_estimate_usd == 57 && output.archive_bucket == "mandate-journal-archive-staging"
+    condition     = length(var.kube_api_allowed_addresses) == 0 && output.monthly_estimate_usd == 57 && output.archive_bucket == "mandate-journal-archive-west-staging"
     error_message = "Staging plans whole with no founder CIDR: the root refuses nothing, and the cluster's own test shows its firewall then admits nobody."
   }
 }
@@ -174,13 +174,13 @@ run "refuses_a_short_commit" {
   expect_failures = [var.commit_sha]
 }
 
-# DEC-2047: the cluster and its VPC are in tor1, since neither nyc3 nor nyc1 offers the node size,
-# and the state bucket stays in nyc3.
-run "the_cluster_moves_to_tor1_and_the_state_bucket_stays" {
+# DEC-2047: the cluster and its VPC are in the US West, in sfo2, and the state bucket stays in nyc3
+# until it moves in a later change.
+run "the_cluster_runs_in_sfo2_and_the_state_bucket_stays" {
   command = plan
 
   assert {
-    condition     = module.cell.regions == { vpc = "tor1", cluster = "tor1", state_bucket = "nyc3" }
-    error_message = "Staging's VPC and cluster are in tor1, and its state bucket stays in nyc3."
+    condition     = module.cell.regions == { vpc = "sfo2", cluster = "sfo2", state_bucket = "nyc3" }
+    error_message = "Staging's VPC and cluster are in sfo2, and its state bucket stays in nyc3."
   }
 }

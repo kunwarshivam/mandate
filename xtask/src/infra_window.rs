@@ -36,14 +36,10 @@ const CLOSE_POLL_SECONDS: u64 = 5;
 /// checked.
 const CLOCK_SKEW_SECONDS: i64 = 120;
 
-/// Each environment's cluster region, as its root's `region` local sets it: staging's cluster moved
-/// to tor1, since DigitalOcean offers its node size in neither nyc3 nor nyc1 (DEC-2047).
-fn cluster_region(environment: &str) -> &'static str {
-    if environment == "staging" {
-        "tor1"
-    } else {
-        "nyc3"
-    }
+/// Each environment's cluster region, as its root's `region` local sets it: the founder put all of
+/// the infrastructure in the US West, so both run in sfo2 (DEC-2047).
+fn cluster_region(_environment: &str) -> &'static str {
+    "sfo2"
 }
 
 /// The cluster `infra` opens a window to, by environment: its DOKS name and its kubeconfig context,
@@ -922,7 +918,7 @@ mod tests {
             cluster_names("staging"),
             (
                 "mandate-staging".to_owned(),
-                "do-tor1-mandate-staging".to_owned()
+                "do-sfo2-mandate-staging".to_owned()
             )
         );
         for (environment, root) in [

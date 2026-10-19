@@ -148,7 +148,12 @@ have seen. The log never shows a value: only addresses and actions.
      The pin changes in a one-line pull request.
    - If `apply` fails with "region has insufficient capacity", or the plan says DigitalOcean does
      not offer the node size in the region, tell lane IAC: staging's region is one line
-     (DEC-2044 item 2, DEC-2047). Staging's cluster runs in `tor1`; its state bucket stays in `nyc3`.
+     (DEC-2044 item 2, DEC-2047). Both clusters run in `sfo2`, the US West, which you require;
+     the state buckets stay in `nyc3` until they move.
+   - After staging's first apply in `sfo2`, delete by hand, in R2, the empty bucket
+     `mandate-journal-archive-staging` (eastern North America) if the first apply made it. The
+     plan forgets it rather than destroying it (DEC-2047 item 3); the archive is now
+     `mandate-journal-archive-west-staging`.
 3. Dispatch again with action `apply` and `sha` set to the commit the plan printed, and approve it. The job plans again after
    your approval, prints that plan, and applies exactly it, so the apply reflects the commit and
    the cloud as they are when the job runs. Dispatch `apply` only at a commit you have read, and

@@ -11,7 +11,7 @@ mock_provider "digitalocean" {
 
   mock_data "digitalocean_sizes" {
     defaults = {
-      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc3"], gpu_info = [] }]
+      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc3", "sfo2"], gpu_info = [] }]
     }
   }
 }
@@ -68,4 +68,15 @@ run "refuses_spaces_counted_as_free" {
   }
 
   expect_failures = [var.spaces_monthly_usd]
+}
+
+# DEC-2047: a cluster outside the US West is refused.
+run "refuses_a_region_outside_the_west" {
+  command = plan
+
+  variables {
+    region = "nyc3"
+  }
+
+  expect_failures = [var.region]
 }

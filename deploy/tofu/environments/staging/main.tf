@@ -1,8 +1,8 @@
-# Staging (DEC-2011 item 1): one DOKS cluster of two nodes in tor1, its buckets, and the API host
-# behind the tunnel and Access. The cluster and its VPC run in tor1, Toronto, which DEC-995 item 2
-# allows, because DigitalOcean offers s-2vcpu-4gb in neither nyc3 nor nyc1; the price is the same,
-# and the state bucket stays in nyc3 (DEC-2047, DEC-2044 item 2). DigitalOcean's provider reads its
-# credentials from the environment (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
+# Staging (DEC-2011 item 1): one DOKS cluster of two nodes in sfo2, its buckets, and the API host
+# behind the tunnel and Access. The founder put all of the infrastructure in the US West (DEC-2047):
+# the cluster and its VPC run in sfo2 and the archive in R2's wnam; the state bucket moves from nyc3
+# in a later change. DigitalOcean's provider reads its credentials from the environment
+# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
 # token as a variable; only infra.yml's job under infra-staging receives either.
 
 provider "digitalocean" {}
@@ -13,7 +13,7 @@ provider "cloudflare" {
 
 locals {
   environment  = "staging"
-  region       = "tor1"
+  region       = "sfo2"
   state_region = "nyc3"
   account_id = sensitive(one(distinct([
     for account in data.cloudflare_accounts.visible.result : account.id
@@ -68,7 +68,7 @@ module "cloudflare" {
   zone_name      = "owlhead.ai"
   api_hostname   = "api-staging.owlhead.ai"
   api_origin     = var.api_origin
-  archive_bucket = "mandate-journal-archive-${local.environment}"
+  archive_bucket = "mandate-journal-archive-west-${local.environment}"
 }
 
 resource "terraform_data" "applied_commit" {
