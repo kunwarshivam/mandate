@@ -492,10 +492,15 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
         conditions = {
             c.get("name"): squash(c.get("expression", "").split()) for c in spec.get("matchConditions", [])
         }
-        if set(conditions) != {"labelled-control", "changed-control"} or conditions["labelled-control"] != label:
+        if (
+            set(conditions) != {"labelled-control", "changed-control"}
+            or conditions["labelled-control"] != label
+        ):
             problems.append(f"{name}: matches {conditions.get('labelled-control')!r}, not the control label")
         elif conditions["changed-control"] != changed:
-            problems.append(f"{name}: matches {conditions['changed-control']!r}, not every change to a control spec")
+            problems.append(
+                f"{name}: matches {conditions['changed-control']!r}, not every change to a control spec"
+            )
         validations = [squash(v.get("expression", "").split()) for v in spec.get("validations", [])]
         if validations != [allowed]:
             problems.append(f"{name}: allows {validations}")
@@ -507,6 +512,67 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
 
 def test_kill_switch_exemption(overlay):
     assert kill_switch_exemption(overlay[1]) == []
+
+
+# What reaches into a running pod. Exec and attach are CONNECT requests whose admission object is
+# the exec options, not the pod, so no policy can tell a kill switch's pod from another: RBAC holds
+# them, and nothing the hosted clusters apply grants them (DEC-2046).
+POD_ACCESS = {"pods/exec", "pods/attach", "pods/ephemeralcontainers", "pods/*", "*"}
+BROAD_ROLES = {"cluster-admin", "admin", "edit"}
+
+
+def pod_access(objects: list[dict]) -> list[str]:
+    """No Role or ClusterRole the hosted clusters apply reaches into a pod, and no binding hands out
+    a built-in role that does."""
+    problems = []
+    for doc in objects:
+        where = f"{doc.get('kind')} {doc.get('metadata', {}).get('name')}"
+        if doc.get("kind") in ("Role", "ClusterRole"):
+            for rule in doc.get("rules") or []:
+                groups = set(rule.get("apiGroups") or [])
+                reached = POD_ACCESS & set(rule.get("resources") or [])
+                if groups & {"", "*"} and reached:
+                    problems.append(f"{where}: grants {sorted(reached)}")
+        if doc.get("kind") in ("RoleBinding", "ClusterRoleBinding"):
+            role = (doc.get("roleRef") or {}).get("name")
+            if role in BROAD_ROLES:
+                problems.append(f"{where}: binds {role}")
+    return problems
+
+
+def test_nothing_reaches_into_a_pod(overlay):
+    _, docs, _, rendered, _ = overlay
+    assert pod_access(docs + rendered) == []
+
+
+@pytest.mark.parametrize(
+    "added",
+    [
+        {
+            "kind": "Role",
+            "metadata": {"name": "debugger"},
+            "rules": [{"apiGroups": [""], "resources": ["pods", "pods/exec"], "verbs": ["create"]}],
+        },
+        {
+            "kind": "ClusterRole",
+            "metadata": {"name": "everything"},
+            "rules": [{"apiGroups": ["*"], "resources": ["*"], "verbs": ["*"]}],
+        },
+        {
+            "kind": "Role",
+            "metadata": {"name": "debug-container"},
+            "rules": [{"apiGroups": [""], "resources": ["pods/ephemeralcontainers"], "verbs": ["patch"]}],
+        },
+        {
+            "kind": "RoleBinding",
+            "metadata": {"name": "editor"},
+            "roleRef": {"kind": "ClusterRole", "name": "edit"},
+        },
+    ],
+)
+def test_access_into_a_pod_is_caught(overlay, added):
+    _, docs, _, rendered, _ = overlay
+    assert pod_access([*docs, *rendered, added])
 
 
 def uncovered_workspaces(docs: list[dict]) -> list[str]:
