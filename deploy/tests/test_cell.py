@@ -748,6 +748,92 @@ def test_api_contained():
         assert helm(CHART, *args).returncode != 0, refused
 
 
+FOUNDER = "01KDEM0000000000000000000F"
+FOUNDING = ("--set", "founding.enabled=true", "--set", f"founding.member={FOUNDER}")
+FOUNDING_HOOK = "post-install,post-upgrade"
+
+
+def founding_hook(docs: list[dict]) -> list[str]:
+    """With founding on (DEC-2114), the one `founding` Job is the control process's: a post-install
+    and post-upgrade hook made again before each run, running exactly `workspace found --open` for
+    the founder on the hosted workspace as the control role, and naming no identity-provider
+    subject anywhere."""
+    jobs = [d for d in docs if d["kind"] == "Job" and d["metadata"]["name"] == "founding"]
+    if len(jobs) != 1:
+        return [f"{len(jobs)} founding Jobs"]
+    job = jobs[0]
+    problems = []
+    annotations = job["metadata"].get("annotations", {})
+    if annotations.get("helm.sh/hook") != FOUNDING_HOOK:
+        problems.append(f"the founding Job is not a {FOUNDING_HOOK} hook: {annotations}")
+    if annotations.get("helm.sh/hook-delete-policy") != "before-hook-creation":
+        problems.append(f"the founding Job is not made again before each run: {annotations}")
+    if job["metadata"]["labels"].get("mandate.dev/process") != "control":
+        problems.append(f"the founding Job is not the control process's: {job['metadata']['labels']}")
+    run = pod_spec(job)["containers"]
+    if len(run) != 1:
+        return [*problems, f"the founding Job runs {len(run)} containers"]
+    args = run[0].get("args", [])
+    want = [
+        "workspace",
+        "found",
+        "--open",
+        "--workspace",
+        args[4] if len(args) > 4 else "",
+        "--member",
+        FOUNDER,
+        "--method",
+        "oidc",
+        "--journal",
+        "$(MANDATE_JOURNAL_DSN)",
+        "--store",
+        "/work/store",
+    ]
+    if args != want or not re.fullmatch(r"[0-7][0-9A-HJKMNP-TV-Z]{25}", want[4]):
+        problems.append(f"the founding Job runs {args}")
+    dsn = next((e.get("value", "") for e in run[0]["env"] if e["name"] == "MANDATE_JOURNAL_DSN"), "")
+    if not dsn.startswith("postgres://mandate_control@"):
+        problems.append(f"the founding Job connects as {dsn}")
+    if "subject" in json.dumps(job).lower():
+        problems.append("the founding Job names a subject")
+    return problems
+
+
+def test_the_founding_grant_is_a_hook_of_the_control_process():
+    """Off by default; on, one hook Job of `control` with control's role, gate, hardening, files
+    and egress, and nothing else changed; refused without the workspace, the member, or the control
+    process's image (DEC-2114)."""
+    assert not [d for d in render_all() if d["metadata"]["name"] == "founding"]
+    base = ("-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set-json", f'egress.kube-api=["{KUBE_API}"]')
+    docs = render(*base, *FOUNDING)
+    plain = render(*base)
+    assert founding_hook(docs) == []
+    assert [d for d in docs if d["metadata"]["name"] != "founding"] == plain, "founding adds only its Job"
+    for check in (gated, hardened, secrets_as_files, egress_exact):
+        assert check(docs) == [], check.__name__
+    for seed in (
+        lambda j: j["metadata"]["annotations"].update({"helm.sh/hook": "pre-install,pre-upgrade"}),
+        lambda j: j["metadata"]["annotations"].pop("helm.sh/hook-delete-policy"),
+        lambda j: j["metadata"]["labels"].update({"mandate.dev/process": "api"}),
+        lambda j: pod_spec(j)["containers"][0]["args"].remove("--open"),
+        lambda j: pod_spec(j)["containers"][0]["args"].append("--subject"),
+        lambda j: pod_spec(j)["containers"][0]["env"].append({"name": "FOUNDER_OIDC_SUBJECT", "value": "x"}),
+        lambda j: pod_spec(j)["containers"][0]["env"][0].update(value="postgres://mandate_migrator@journal-rw"),
+        lambda j: pod_spec(j)["containers"].append(pod_spec(j)["containers"][0]),
+    ):
+        assert founding_hook(mutate(docs, "founding", "Job", seed)), seed
+    assert founding_hook([d for d in docs if d["metadata"]["name"] != "founding"])
+    for refused in (
+        ("--set", "founding.member="),
+        ("--set", "api.workspace="),
+        ("--set", "founding.member=not-a-ulid"),
+    ):
+        args = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image(), *FOUNDING, *refused]
+        assert helm(CHART, *args).returncode != 0, refused
+    without_control = ["-f", str(CELL / "values" / "k3d.yaml"), *FOUNDING]
+    assert helm(CHART, *without_control).returncode != 0
+
+
 # The public CA bundle the API server trusts for the identity provider's key set (RS's finding 1):
 # copied from the pinned postgres image by the pod's init container, since the API's own image is
 # a bare binary with none.
