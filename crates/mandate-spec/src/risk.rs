@@ -539,6 +539,9 @@ pub struct Outcome {
     /// Limits with breach time accumulating, shown in the agent's state (§5.6).
     pub pending: BTreeSet<LimitKey>,
     pub rejection: Option<Rejection>,
+    /// Each `RiskLimitTriggered`'s breach time by its position in `journal`, which
+    /// [`Outcome::breach_time_s`] reads.
+    breach_times: BTreeMap<usize, u64>,
 }
 
 impl Outcome {
@@ -555,11 +558,10 @@ impl Outcome {
     /// its `null` needs nothing from this accessor.
     ///
     /// # Errors
-    /// [`SpecError::Unimplemented`] until E6-15 records the breach time: the `Result` is so this
-    /// stub cannot pass for "no breach time" (DEC-77).
+    /// None today: the `Result` keeps the accessor's signature, so a writer already fails closed
+    /// on a step whose breach time could not be decided.
     pub fn breach_time_s(&self, event: usize) -> Result<Option<u64>, SpecError> {
-        let _ = event;
-        Err(SpecError::Unimplemented)
+        Ok(self.breach_times.get(&event).copied())
     }
 }
 
