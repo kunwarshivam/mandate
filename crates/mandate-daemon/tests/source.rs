@@ -688,7 +688,6 @@ fn after_clock(secs: i64) -> String {
 /// holds its instrument as the active thesis until its horizon, its lineage is replayed, and a
 /// refusal for another reason admits nothing, where before any thesis record paused research.
 #[test]
-#[ignore = "pending E21-59"]
 fn the_agent_s_own_theses_reach_the_pass() {
     let (journal, source) = deployed(&bundle(), &researching());
     journal.agent(
@@ -742,7 +741,6 @@ fn the_agent_s_own_theses_reach_the_pass() {
 /// DEC-2249 item 2: `UniverseChanged` is the account stream's (journal spec §9.3), never closed on
 /// the agent stream, so the source does not read it there: a stray one pauses nothing.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_universe_change_never_reaches_the_agent_stream_and_pauses_nothing() {
     assert!(!mandate_journal::closes(
         "UniverseChanged",
@@ -861,7 +859,6 @@ proptest! {
     /// alone. Spend is every settled call at its cost, every open reservation at its maximum, and
     /// every unmetered call at its recorded cost (DEC-2249 item 3).
     #[test]
-    #[ignore = "pending E21-59"]
     fn the_pass_equals_an_independent_accumulator_over_random_runs(
         records in prop::collection::vec(record(), 1..24),
     ) {

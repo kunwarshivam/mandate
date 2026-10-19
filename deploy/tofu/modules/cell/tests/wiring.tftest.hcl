@@ -35,7 +35,7 @@ run "plans_with_the_estimate_under_the_cap" {
   }
 
   assert {
-    condition     = output.state_bucket == "mandate-tofu-state-staging"
+    condition     = output.state_bucket == "mandate-tofu-state-west-staging"
     error_message = "The state bucket is named for the environment."
   }
 }
@@ -79,6 +79,17 @@ run "refuses_a_region_outside_the_west" {
   }
 
   expect_failures = [var.region]
+}
+
+# DEC-2047 item 6: a state bucket outside the US West is refused.
+run "refuses_a_state_bucket_outside_the_west" {
+  command = plan
+
+  variables {
+    state_region = "nyc3"
+  }
+
+  expect_failures = [var.state_region]
 }
 
 run "refuses_nyc1" {

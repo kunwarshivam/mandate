@@ -174,13 +174,12 @@ run "refuses_a_short_commit" {
   expect_failures = [var.commit_sha]
 }
 
-# DEC-2047: the cluster and its VPC are in the US West, in sfo2, and the state bucket stays in nyc3
-# until it moves in a later change.
-run "the_cluster_runs_in_sfo2_and_the_state_bucket_stays" {
+# DEC-2047: the cluster, its VPC and the state bucket are in the US West, in sfo2.
+run "the_cluster_and_the_state_run_in_sfo2" {
   command = plan
 
   assert {
-    condition     = module.cell.regions == { vpc = "sfo2", cluster = "sfo2", state_bucket = "nyc3" }
-    error_message = "Staging's VPC and cluster are in sfo2, and its state bucket stays in nyc3."
+    condition     = module.cell.regions == { vpc = "sfo2", cluster = "sfo2", state_bucket = "sfo2" }
+    error_message = "Staging's VPC, cluster and state bucket are in sfo2."
   }
 }

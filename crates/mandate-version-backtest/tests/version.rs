@@ -271,7 +271,6 @@ fn a_split_in_range_is_not_refused() {
 /// DEC-2245 item 6 slice 3: a cash dividend inside the bars, on either edge too, is applied and
 /// the run completes.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_dividend_in_range_completes_the_run() {
     let days = trading_days(DAYS);
     let outputs = daily_outputs(&days, "0.5");

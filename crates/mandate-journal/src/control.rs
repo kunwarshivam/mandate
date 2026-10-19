@@ -23,7 +23,9 @@
 //! `GateDecided`, and `OrderSubmitted` at `schema_version` 2, each their version 1's members with
 //! `risk_clock` last; `OrderRequestRecorded`, the companion a version-2 submission names; and
 //! `ProtectionChanged` closed whole. The version-1 schemas of the three stay registered (§8): a
-//! stream that holds version-1 records keeps replaying and appending them.
+//! stream that holds version-1 records keeps replaying and appending them. Journal spec v0.65
+//! adds rule 245 on `IntentReceived` at either version (DEC-2037), and v0.67 the owner's
+//! confirmation `OwnerConfirmationReceived` with rule 247 and the batch rule 248 (DEC-2040).
 
 use mandate_canon::Value;
 use mandate_domain::ThesisRefusal;
@@ -62,20 +64,26 @@ const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 /// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460).
 /// `OrderRequestRecorded` and `ProtectionChanged` close at version 1; `IntentReceived`,
 /// `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1, and so does
-/// `OrderStateChanged` (journal spec §9.16, DEC-869).
-const EXECUTOR: [&str; 9] = [
+/// `OrderStateChanged` (journal spec §9.16, DEC-869). `OwnerConfirmationReceived` closes at
+/// version 1 (DEC-2040).
+const EXECUTOR: [&str; 10] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
     "OrderRequestRecorded",
     "OrderStateChanged",
     "ProtectionChanged",
+    CONFIRMATION,
     "BrokerPositionObserved",
     "AgentModeApplied",
     "CompensatingEvent",
 ];
 
 const ACCOUNT_STATE: &str = "AccountStateObserved";
+
+/// The owner's confirmed bid journaled beside an owner exit's `IntentReceived` (§9.5, DEC-2040):
+/// rule 247 on its own members and the batch rule 248 on the intent before it.
+const CONFIRMATION: &str = "OwnerConfirmationReceived";
 
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
 /// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
@@ -335,6 +343,8 @@ pub(crate) fn payload(
         }
         "ThesisProposed" | "ThesisRevised" => thesis_rules(event_type, p, config_refs)?,
         COMPANION => companion_rules(p)?,
+        "IntentReceived" => intent_received_rules(p)?,
+        CONFIRMATION => confirmation_rules(p)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
@@ -437,6 +447,42 @@ const ACCOUNT_ONLY_REASONS: [&str; 4] = [
 
 /// `ConfigSnapshotRegistered`'s kind for a signal model.
 const MODEL_KIND: &str = "model_version";
+
+/// Rule 245 at either version (DEC-2037 items 1 and 2): `type` is `limit` or `market`, `market`
+/// only for an exit, and then `limit_price` is non-null exactly for `limit`.
+fn intent_received_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    let kind = p.text("type");
+    let opening = matches!(p.text("purpose"), "open" | "increase");
+    ensure(
+        kind == "limit" || kind == "market" && !opening,
+        InvalidReason::Schema,
+        "payload.type",
+    )?;
+    ensure(
+        p.is_null("limit_price") == (kind == "market"),
+        InvalidReason::Schema,
+        "payload.limit_price",
+    )
+}
+
+/// Rule 247 (DEC-2040 items 2 and 7): the confirmed quantity, bid, bid size, floor, and expiry are
+/// each positive, reported at the first that is not.
+fn confirmation_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    for member in ["qty", "bid", "bid_size", "floor"] {
+        ensure(
+            crate::scheduler::positive(p.text(member)),
+            InvalidReason::Schema,
+            &format!("payload.{member}"),
+        )?;
+    }
+    ensure(
+        p.0.get("expires_at")
+            .and_then(Value::as_int)
+            .is_some_and(|at| at > 0),
+        InvalidReason::Schema,
+        "payload.expires_at",
+    )
+}
 
 /// §9.5's rules 39 and 40 on a well-typed `OrderRequestRecorded` (DEC-446 item 2), the first
 /// offending member in the order the spec reports: 39's pairs at `order_class` then
@@ -738,6 +784,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("OrderStateChanged", 1) => Some(&ORDER_STATE_CHANGED),
         ("OrderStateChanged", 2) => Some(&ORDER_STATE_CHANGED_V2),
         ("ProtectionChanged", 1) => Some(&PROTECTION_CHANGED),
+        (CONFIRMATION, 1) => Some(&OWNER_CONFIRMATION_RECEIVED),
         ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
         ("AgentModeApplied", 1) => Some(&AGENT_MODE_APPLIED),
         ("CompensatingEvent", 1) => Some(&COMPENSATING_EVENT),
@@ -768,8 +815,9 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
 /// `OrderRequestRecorded` and names it as its `causation_id`; an `OrderRequestRecorded` no
 /// `OrderSubmitted` in the batch names is its own refusal. Checked draft by draft first (each
 /// draft's own rules, in [`payload`]), then on the submissions in batch order, then the orphans.
-/// A version-1 `OrderSubmitted` carries no rule here: it precedes the companion. Batches of any
-/// other stream pass.
+/// A version-1 `OrderSubmitted` carries no rule here: it precedes the companion. Then rule 248
+/// on each `OwnerConfirmationReceived` in batch order ([`confirmed_intent`]). Batches of any other
+/// stream pass.
 pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     fn names(draft: &Draft) -> &str {
         draft
@@ -805,6 +853,52 @@ pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
         {
             return Err((i, Invalid::new(InvalidReason::Schema, "event_type")));
         }
+    }
+    for (i, draft) in drafts.iter().enumerate() {
+        if draft.event_type() == CONFIRMATION {
+            confirmed_intent(drafts, i)?;
+        }
+    }
+    Ok(())
+}
+
+/// A draft's normalized payload, as the rules read it.
+fn payload_of(draft: &Draft) -> Payload<'_> {
+    Payload(draft.fields().get("payload").unwrap_or(&Value::Null))
+}
+
+/// Rule 248 for the confirmation at `at` (DEC-2040 items 2 and 7): the record immediately before
+/// it is an `IntentReceived` (else the confirmation's `event_type`) of the same intent, instrument,
+/// and quantity (its `payload.intent_id`, `payload.instrument_id`, `payload.qty`; decimals are
+/// normalized, so equal text is an equal value), whose purpose is `owner_exit` (the intent's
+/// `payload.purpose`) and whose limit is null or not below the floor (the intent's
+/// `payload.limit_price`).
+fn confirmed_intent(drafts: &[Draft], at: usize) -> Result<(), (usize, Invalid)> {
+    let refuse = |index: usize, path: &str| Err((index, Invalid::new(InvalidReason::Schema, path)));
+    let before = at
+        .checked_sub(1)
+        .and_then(|index| drafts.get(index).map(|draft| (index, draft)))
+        .filter(|(_, draft)| draft.event_type() == "IntentReceived");
+    let (Some(confirmation), Some((index, intent))) = (drafts.get(at), before) else {
+        return refuse(at, "event_type");
+    };
+    let (mine, theirs) = (payload_of(confirmation), payload_of(intent));
+    if theirs.text("intent_id") != mine.text("intent_id") {
+        return refuse(at, "payload.intent_id");
+    }
+    for member in ["instrument_id", "qty"] {
+        if theirs.text(member) != mine.text(member) {
+            return refuse(at, &format!("payload.{member}"));
+        }
+    }
+    if theirs.text("purpose") != "owner_exit" {
+        return refuse(index, "payload.purpose");
+    }
+    let below = !theirs.is_null("limit_price")
+        && crate::scheduler::signed(theirs.text("limit_price"), mine.text("floor"))
+            == std::cmp::Ordering::Less;
+    if below {
+        return refuse(index, "payload.limit_price");
     }
     Ok(())
 }
@@ -1014,6 +1108,19 @@ static ORDER_SUBMITTED_V2: Ty = Ty::Record(&[
     ("tif", Ty::Str),
     ("qty", Ty::Decimal),
     ("limit_price", Ty::Nullable(&Ty::Decimal)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `OwnerConfirmationReceived` (DEC-2040 item 2).
+static OWNER_CONFIRMATION_RECEIVED: Ty = Ty::Record(&[
+    ("intent_id", Ty::Ulid),
+    ("instrument_id", Ty::Str),
+    ("qty", Ty::Decimal),
+    ("bid", Ty::Decimal),
+    ("bid_size", Ty::Decimal),
+    ("floor", Ty::Decimal),
+    ("expires_at", Ty::Int),
+    ("copied_from", Ty::Ulid),
     ("risk_clock", Ty::RiskClock),
 ]);
 

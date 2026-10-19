@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
-use std::io::Write;
+use std::io::{Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -27,6 +27,8 @@ mod mutant_costs;
 mod promote;
 mod release;
 mod tofu_audit;
+mod trial;
+mod vault_init;
 
 const USAGE: &str = "\
 usage: cargo xtask <command>
@@ -36,8 +38,8 @@ commands:
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
                         postgres | openbao | objectstore | stub-release | mutants |
-                        schema-mutants | cell |
-                        cell-demo | cell-journal | cell-failover | cell-kill-switch | sweep; or
+                        schema-mutants | cell | cell-demo | cell-journal | cell-failover |
+                        cell-kill-switch | cell-executor | cell-vault | sweep; or
                         one part of test: test-nextest | test-doc | test-rh-sim | test-python.
                         Tests, pending tests,
                         doctests, the rehearsal, Postgres, OpenBao and object-store runs and
@@ -64,6 +66,10 @@ commands:
   live-feature          check that only the runner may build `live`, and CI only compiles it or
                         tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
+  trial <pr|branch>     merge a pull request (refs/pull/<n>/head) or origin/<branch> into
+                        origin/main in target/trial, then cargo check --workspace --all-targets and
+                        the selected crates' nextest run; a conflict names the conflicting paths
+  trial --main <commit> the same checks on origin/main itself, selecting what changed since <commit>
   release tools         install the release build's pinned tools under $CARGO_HOME
   release build <out>   build the release binaries reproducibly into <out>, with SHA256SUMS and an
                         SBOM each, and print digest=<sha256 of SHA256SUMS> (E21-8)
@@ -83,6 +89,13 @@ commands:
   release publish-index <out>
                         push and sign the multi-arch index over every arch's published images
                         (main only, from CI, after each arch's publish)
+  release publish-signed <dist> <signatures> <out>
+                        verify every release signature against the committed key, then push this
+                        arch's images with them as signed-<commit>-<arch> (dispatch from main,
+                        from CI; DEC-2026)
+  release publish-signed-index <out>
+                        push and sign the multi-arch signed-<commit> index over every arch's
+                        release-signed images (dispatch from main, from CI; DEC-2026)
   release publish-charts <out>
                         package the hosted clusters' charts, push them to GHCR and sign each
                         digest keyless (main only, from CI; E21-58)
@@ -104,10 +117,13 @@ commands:
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
                         ready and what waits on its lane, then web/ at 127.0.0.1:4317
   cell demo --scenario demo
-                        the demo's six steps in order on the local cell: each gesture on main run
+                        the demo's steps in order on the local cell: each gesture on main run
                         in the cell, each missing link named by its PR or story (E21-54)
+  cell demo --scenario demo --dry-run --image <ref@sha256:...> --workspace <ULID> [--namespace <ns>]
+                        render the demo's gestures' Job and inputs for staging (ws-ws1 by default)
+                        with helm template and print them; reads no kubeconfig, applies nothing
   cell web-kill-switch <workspace> [agent]
-                        step 6 from web/ against a running cell with sign-in ready: next dev, then
+                        step 7 from web/ against a running cell with sign-in ready: next dev, then
                         Playwright presses one listed agent's kill switch (DEC-2406)
   cell down             delete the local cell
   cell hosted           cell #1's bring-up (deploy/hosted/) against a two-node k3d cluster of
@@ -161,6 +177,8 @@ const PR_JOBS: &[&str] = &[
     "cell-journal",
     "cell-failover",
     "cell-kill-switch",
+    "cell-executor",
+    "cell-vault",
 ];
 
 /// The workspace API's schema checkers, run over `schemas/workspace-api/` by the `schemas` job;
@@ -195,6 +213,9 @@ const SCHEMA_SHARD_ENV: &str = "MANDATE_SCHEMA_SHARD";
 /// test-nextest`, through the environment for the same reason as [`SCHEMA_SHARD_ENV`] (DEC-871).
 /// `cargo xtask ci test` ignores it and runs every test.
 const TEST_PARTITION_ENV: &str = "MANDATE_TEST_PARTITION";
+/// Set, `ci test-nextest` keeps running after a failing test and reports every failure: what
+/// `cargo xtask trial` asks for. CI never sets it, so its shards still stop at the first failure.
+pub(crate) const NO_FAIL_FAST_ENV: &str = "MANDATE_NO_FAIL_FAST";
 /// The simulator binary `test-rh-sim` builds, for `mandate-mcp`'s rehearsal tests to run (DEC-922
 /// item 3).
 const RH_SIM_BIN_ENV: &str = "MANDATE_RH_SIM_BIN";
@@ -313,6 +334,7 @@ fn run() -> Result<()> {
             release::tools(&release::Paths::from_env(&root)?.cargo_home).map(drop)
         }
         ["release", "build", out] => release::build(&root, Path::new(out)),
+        ["trial", rest @ ..] => trial::run(&root, &trial::Trial::parse(rest)?),
         ["release", "compare", a, b] => release::compare(Path::new(a), Path::new(b)),
         ["release", "images", dist, out] => {
             release::images(&root, Path::new(dist), Path::new(out), false)
@@ -328,8 +350,17 @@ fn run() -> Result<()> {
             release::publish(&root, Path::new(dist), Path::new(out))
         }
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
+        ["release", "publish-signed", dist, signatures, out] => release::publish_signed(
+            &root,
+            Path::new(dist),
+            Path::new(signatures),
+            Path::new(out),
+        ),
         ["infra"] => infra(),
         ["infra", "close"] => infra_close(),
+        ["release", "publish-signed-index", out] => {
+            release::publish_signed_index(&root, Path::new(out))
+        }
         ["release", "publish-charts", out] => release::publish_charts(&root, Path::new(out)),
         ["gitops", "bootstrap", environment] => {
             gitops::bootstrap(&root, gitops::Environment::parse(environment)?)
@@ -351,6 +382,9 @@ fn run() -> Result<()> {
         ["cell", "demo"] => cell::demo(true),
         ["cell", "demo", "--no-web"] => cell::demo(false),
         ["cell", "demo", "--scenario", name] => cell::scenario::run(name),
+        ["cell", "demo", "--scenario", name, "--dry-run", target @ ..] => {
+            cell::scenario::dry_run(name, target)
+        }
         ["cell", "web-kill-switch", workspace] => {
             cell::web::report(cell::web::kill_switch_from_web(workspace, None))
         }
@@ -370,6 +404,7 @@ fn run() -> Result<()> {
                     .chain(cell::JOURNAL_DRILLS)
                     .chain(cell::FAILOVER_DRILLS)
                     .chain(cell::KILL_SWITCH_DRILLS)
+                    .chain(cell::EXECUTOR_DRILLS)
                     .chain(cell::VAULT_DRILLS)
                     .collect()
             } else {
@@ -410,10 +445,9 @@ fn ci(job: &str) -> Result<()> {
         "cell-demo" => cell::scenario::ci(),
         "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
-        "cell-kill-switch" => cell::ci_drills(
-            job,
-            &[&cell::KILL_SWITCH_DRILLS[..], &cell::VAULT_DRILLS[..]].concat(),
-        ),
+        "cell-kill-switch" => cell::ci_drills(job, &cell::KILL_SWITCH_DRILLS),
+        "cell-executor" => cell::ci_drills(job, &cell::EXECUTOR_DRILLS),
+        "cell-vault" => cell::ci_drills(job, &cell::VAULT_DRILLS),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -542,7 +576,10 @@ fn test_part(part: &str, partition: Option<&str>) -> Result<()> {
                 eprintln!("    test-nextest: no crate affected (DEC-1190)");
                 return Ok(());
             }
-            let args = nextest_args(partition, scoped_packages(&selected).as_deref())?;
+            let mut args = nextest_args(partition, scoped_packages(&selected).as_deref())?;
+            if env::var_os(NO_FAIL_FAST_ENV).is_some() {
+                args.push("--no-fail-fast".to_owned());
+            }
             sh(
                 "cargo",
                 &args.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -1691,6 +1728,49 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         &context,
         &secrets,
     )?;
+    let in_cluster = |args: &[&str], stdin: Option<&str>| -> Result<(bool, String)> {
+        let mut child = gitops::tool("kubectl")
+            .args(["--v=0", "--kubeconfig"])
+            .arg(kubeconfig.path())
+            .args(["--context", &context])
+            .args(args)
+            .stdin(if stdin.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("starting kubectl")?;
+        if let Some(text) = stdin {
+            child
+                .stdin
+                .take()
+                .context("kubectl's stdin")?
+                .write_all(text.as_bytes())?;
+        }
+        let out = child.wait_with_output().context("waiting for kubectl")?;
+        Ok((
+            out.status.success(),
+            String::from_utf8(out.stdout).context("kubectl printed non-UTF-8")?,
+        ))
+    };
+    let new_key = || -> Result<String> {
+        let mut key = [0_u8; 32];
+        fs::File::open("/dev/urandom")
+            .and_then(|mut random| random.read_exact(&mut key))
+            .context("reading /dev/urandom")?;
+        Ok(key.iter().map(|byte| format!("{byte:02x}")).collect())
+    };
+    let words = vault_init::vault_init(&vault_init::Steps {
+        kubectl: &in_cluster,
+        new_key: &new_key,
+        pause: &|| std::thread::sleep(Duration::from_secs(5)),
+    })?;
+    for word in words {
+        eprintln!("    vault-init: {word} (DEC-2052)");
+    }
     let account = output("cloudflare_account_id")?;
     mask::add_mask(account.trim());
     let (tunnel_id, api_hostname) = (output("tunnel_id")?, output("api_hostname")?);
@@ -1699,7 +1779,7 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         let out = gitops::tool("kubectl")
             .args(["--v=0", "--kubeconfig"])
             .arg(kubeconfig.path())
-            .args(["--context", &context, "get"])
+            .args(["--context", &context, "--request-timeout=30s"])
             .args(args)
             .output()
             .context("starting kubectl")?;
@@ -2043,6 +2123,10 @@ const BACKSLASH_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         ".github/workflows/merge.yml",
         r##"if printf '%s\n' "$out" | grep -q '^merged as '; then"##,
+    ),
+    (
+        ".github/workflows/ci.yml",
+        r##"run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
     ),
     (
         ".github/workflows/web-e2e.yml",
@@ -2637,6 +2721,9 @@ struct Selection {
     /// selection holds a crate the cell's images hold ([`cell::IMAGE_PACKAGES`]), which it does
     /// whenever any crate those are built on changed.
     cell: bool,
+    /// Whether `cell-demo-web` runs: the cell jobs do, or a path under `web/` other than its
+    /// Markdown changed, since the job drives `web/` against the cell (DEC-2609 item 5).
+    cell_web: bool,
 }
 
 impl Selection {
@@ -2650,6 +2737,7 @@ impl Selection {
             schema_mutants: true,
             tofu: true,
             cell: true,
+            cell_web: true,
         }
     }
 
@@ -2686,8 +2774,8 @@ impl Selection {
         };
         format!(
             "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {} \
-             (tofu {}); schema-mutants {}; cell {}; lint, the spec guard and mutants run as always \
-             (DEC-1190)",
+             (tofu {}); schema-mutants {}; cell {}; cell-demo-web {}; lint, the spec guard and \
+             mutants run as always (DEC-1190)",
             yes(self.tests()),
             yes(self.python),
             yes(self.runner()),
@@ -2695,6 +2783,7 @@ impl Selection {
             yes(self.tofu),
             yes(self.schema_mutants),
             yes(self.cell),
+            yes(self.cell_web),
         )
     }
 
@@ -2703,7 +2792,7 @@ impl Selection {
     fn outputs(&self) -> String {
         format!(
             "tests={}\npython={}\nportable={}\nrh_sim_live={}\nfull_checks={}\nschema_mutants={}\n\
-             cell={}\nreasons={}\n",
+             cell={}\ncell_web={}\nreasons={}\n",
             self.tests(),
             self.python,
             self.runner(),
@@ -2711,6 +2800,7 @@ impl Selection {
             self.full_checks,
             self.schema_mutants,
             self.cell,
+            self.cell_web,
             self.reasons(),
         )
     }
@@ -2742,6 +2832,7 @@ fn select(
     let mut schema_mutants = false;
     let mut tofu = false;
     let mut cell = false;
+    let mut web_changed = false;
     for path in changed {
         if selects_everything(path) {
             return Selection::everything(graph, format!("{path} changed"));
@@ -2775,6 +2866,7 @@ fn select(
             .any(|entry| path_under(path, entry));
         tofu |= path_under(path, TOFU_DIR) && !docs;
         cell |= CELL_INPUTS.iter().any(|entry| path_under(path, entry));
+        web_changed |= web && !path.ends_with(".md");
     }
     let mut crates = dependents_closure(graph, &seeds);
     loop {
@@ -2807,6 +2899,7 @@ fn select(
         schema_mutants,
         tofu,
         cell,
+        cell_web: cell || web_changed,
     }
 }
 
@@ -5310,6 +5403,35 @@ const READ_LINES: &[(&str, &str)] = &[
         ".github/workflows/web-deploy.yml",
         "node scripts/workers.mjs size .wrangler/dry-run",
     ),
+    (
+        ".github/workflows/web.yml",
+        "node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "node_modules/.bin/wrangler deploy",
+    ),
+    (".github/workflows/ci.yml", "npm ci --ignore-scripts"),
+    (
+        ".github/workflows/ci.yml",
+        r##"echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT""##,
+    ),
+    (
+        ".github/workflows/ci.yml",
+        r##"grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "npx playwright install --with-deps --only-shell chromium",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "npx playwright install-deps chromium",
+    ),
 ];
 
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
@@ -5394,6 +5516,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_MUTANTS_PLANNED",
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
+    "MANDATE_DEMO_WEB_REQUIRED",
     "MANDATE_GITOPS_REQUIRED",
     "MANDATE_MUTANT_SHARD",
     "MANDATE_OPENBAO_ADDR",
@@ -5478,7 +5601,8 @@ fn local_name_allowed(name: &str) -> bool {
 /// The remote actions and reusable workflows a `uses:` may name, exactly as the repository's
 /// workflows pin them, each in any workflow or only in the one it names (DEC-873 item 6, B6):
 /// `docker://` images, other actions, other pins and remote reusable workflows cannot be read.
-/// `codeql.yml` keeps GitHub's template's tag pins.
+/// `codeql.yml`'s CodeQL actions are pinned to v4.39.0's commit, as leak-guard's L9 requires
+/// (DEC-2032).
 const READ_ACTIONS: &[(&str, Option<&str>)] = &[
     (
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -5512,13 +5636,12 @@ const READ_ACTIONS: &[(&str, Option<&str>)] = &[
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         Some(".github/workflows/release.yml"),
     ),
-    ("actions/checkout@v7", Some(".github/workflows/codeql.yml")),
     (
-        "github/codeql-action/init@v4",
+        "github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",
         Some(".github/workflows/codeql.yml"),
     ),
     (
-        "github/codeql-action/analyze@v4",
+        "github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",
         Some(".github/workflows/codeql.yml"),
     ),
 ];
@@ -5529,9 +5652,10 @@ const READ_IMAGES: &[&str] =
     &["postgres:17.11@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f"];
 
 /// The `npx` commands a `web` job may run, by their exact arguments (B7): `web-e2e.yml`'s two
-/// Playwright installs, `web.yml`'s pinned Impeccable detector, and the Worker's dry run and
-/// `web-deploy.yml`'s deploy, both through the `wrangler` the lockfile pins (DEC-731, DEC-1005). `npx` runs any package, so no
-/// other form is read.
+/// Playwright installs and `web.yml`'s pinned Impeccable detector. `npx` runs any package, so no
+/// other form is read. Wrangler is not one: the Worker's dry run and `web-deploy.yml`'s deploy run
+/// `node_modules/.bin/wrangler`, the version `npm ci` installed from the lockfile, as reviewed
+/// lines of [`READ_LINES`] (DEC-731, DEC-1005).
 const READ_NPX: &[&[&str]] = &[
     &[
         "playwright",
@@ -5542,14 +5666,6 @@ const READ_NPX: &[&[&str]] = &[
     ],
     &["playwright", "install-deps", "chromium"],
     &["--yes", "impeccable@4.1.0", "detect", "src/"],
-    &[
-        "wrangler",
-        "deploy",
-        "--dry-run",
-        "--outdir",
-        ".wrangler/dry-run",
-    ],
-    &["wrangler", "deploy"],
 ];
 
 /// The lines of the [`READ_SCRIPTS`] that run an interpreter a person has read and found to run
@@ -15645,7 +15761,8 @@ mod tests {
     /// which holds every earlier one, is always analysed; a pull request's runs cancel the older
     /// run of their ref; the weekly schedule has a group of its own.
     #[test]
-    fn codeql_runs_one_analysis_of_main_at_a_time() -> Result<()> {
+    fn codeql_runs_one_analysis_of_main_at_a_time_and_skips_documentation_pull_requests()
+    -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/codeql.yml"))?;
         assert!(
             workflow.contains(
@@ -15658,8 +15775,22 @@ mod tests {
              (DEC-2611)"
         );
         assert!(
-            workflow.contains("  push:\n    branches: [ \"main\" ]\n"),
-            "every push to main is still analysed (DEC-2606 item 3)"
+            workflow.contains("  push:\n    branches: [ \"main\" ]\n  pull_request:\n"),
+            "every push to main is still analysed, whatever it changes (DEC-2606 item 3, DEC-2613)"
+        );
+        assert!(
+            workflow.contains(
+                "  pull_request:\n    branches: [ \"main\" ]\n    types: [opened, synchronize, \
+                 reopened, ready_for_review]\n    paths-ignore:\n      - \"docs/**\"\n      - \
+                 \"**/*.md\"\n"
+            ),
+            "a pull request is analysed unless every path it changes is documentation (DEC-2613)"
+        );
+        assert_eq!(
+            workflow.matches("paths-ignore:").count(),
+            1,
+            "only the pull request trigger skips documentation; push and the schedule never do \
+             (DEC-2613)"
         );
         assert!(
             workflow.contains("  schedule:\n    - cron: '42 2 * * 1'\n"),
@@ -16273,7 +16404,7 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 12] = [
+    const SELECT_GATES: [(&str, &str); 15] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
@@ -16283,9 +16414,12 @@ mod tests {
         ("schema-mutants", "schema_mutants"),
         ("cell", "cell"),
         ("cell-demo", "cell"),
+        ("cell-demo-web", "cell_web"),
         ("cell-journal", "cell"),
         ("cell-failover", "cell"),
         ("cell-kill-switch", "cell"),
+        ("cell-executor", "cell"),
+        ("cell-vault", "cell"),
     ];
 
     /// DEC-1190 in `ci.yml`: `select` runs `cargo xtask ci select` into its outputs and exposes each
@@ -16877,6 +17011,20 @@ mod tests {
             last_secret < kubeconfig && kubeconfig < at(&staging, "gitops::bootstrap_from_infra("),
             "the kubeconfig is fetched after the secrets are wrapped and before the bootstrap"
         );
+        let init = at(&staging, concat!("vault_init::", "vault_init("));
+        assert!(
+            at(&staging, "gitops::bootstrap_from_infra(") < init
+                && init < at(&staging, "infra_verify::verify("),
+            "staging's vault is set up after its bootstrap and before its verify (DEC-2052)"
+        );
+        let source = include_str!("main.rs");
+        assert_eq!(
+            source
+                .matches(concat!("vault_init::", "vault_init("))
+                .count(),
+            1,
+            "only staging's bootstrap, which only staging's apply reaches, sets the vault up"
+        );
         let account = at(&staging, "mask::add_mask(account.trim());");
         let verify = at(&staging, "infra_verify::verify(");
         assert!(
@@ -17115,7 +17263,7 @@ mod tests {
         let text = fs::read_to_string(repo_root()?.join(INFRA_WORKFLOW))?;
         let web = ci_file(
             ".github/workflows/web-deploy.yml",
-            "jobs:\n  deploy:\n    steps:\n      - run: npx wrangler deploy\n        env:\n          \
+            "jobs:\n  deploy:\n    steps:\n      - run: node_modules/.bin/wrangler deploy\n        env:\n          \
              CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n",
         );
         let check = |infra: &str, others: &[CiFile]| {
@@ -17606,7 +17754,7 @@ mod tests {
         let outputs = selected.outputs();
         let lines: Vec<&str> = outputs.lines().collect();
         assert_eq!(
-            lines.get(..7),
+            lines.get(..8),
             Some(
                 [
                     "tests=true",
@@ -17616,18 +17764,40 @@ mod tests {
                     "full_checks=true",
                     "schema_mutants=false",
                     "cell=false",
+                    "cell_web=false",
                 ]
                 .as_slice()
             )
         );
-        let reasons = lines.get(7).copied().unwrap_or_default();
+        let reasons = lines.get(8).copied().unwrap_or_default();
         assert!(
             reasons.starts_with(
                 "reasons=3 crate(s) affected: mandate-executor, mandate-paper, mandate-risk;"
             ),
             "{reasons}"
         );
-        assert_eq!(lines.len(), 8, "{outputs}");
+        assert_eq!(lines.len(), 9, "{outputs}");
+    }
+
+    /// DEC-2609 item 5: `cell-demo-web` starts whenever the cell jobs do, and also for a change
+    /// under `web/` other than its Markdown, which the cell jobs skip; never for the
+    /// documentation alone; always with no base.
+    #[test]
+    fn the_web_demo_runs_for_the_cell_or_for_web() {
+        let graph = sample_graph();
+        let both = |paths: &[&str]| {
+            let changed: Vec<String> = paths.iter().map(|p| (*p).to_owned()).collect();
+            let selected = select(Some(&changed), &graph, &BTreeMap::new());
+            (selected.cell, selected.cell_web)
+        };
+        assert_eq!(both(&["web/src/app/page.tsx"]), (false, true));
+        assert_eq!(both(&["web/package-lock.json"]), (false, true));
+        assert_eq!(both(&["deploy/cell/values.yaml"]), (true, true));
+        assert_eq!(both(&["web/README.md"]), (false, false));
+        assert_eq!(both(&["docs/HLD.md"]), (false, false));
+        assert_eq!(both(&["crates/mandate-num/src/lib.rs"]), (false, false));
+        let everything = select(None, &graph, &BTreeMap::new());
+        assert!(everything.cell && everything.cell_web, "no base runs both");
     }
 
     /// DEC-2609: the cell jobs start for a change to a crate any image package is built on, the
@@ -18405,12 +18575,14 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            18,
+            21,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
-             `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-journal`, `cell-failover`, \
-             `cell-kill-switch` (DEC-2602), and `hosted-k3d` (E21-51)"
+             `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
+             `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), `cell-executor` \
+             (DEC-2615), `cell-vault` (DEC-2616), and `hosted-k3d` \
+             (E21-51)"
         );
         for checkout in checkouts {
             assert!(
@@ -20945,7 +21117,7 @@ jq -r "$filter" "$src"
             unreadable(&host_problems(&[flow(&run)])?, &["web-e2e"]);
         }
         let elsewhere = ci_file(
-            ".github/workflows/ci.yml",
+            ".github/workflows/nightly.yml",
             &format!("on: push\njobs:\n  web-e2e:\n    steps:\n      - run: {probe}\n"),
         );
         unreadable(&host_problems(&[elsewhere])?, &["web-e2e"]);
@@ -21475,7 +21647,7 @@ jq -r "$filter" "$src"
             &line.replace("rm -f", "rm -rf"),
         );
         unreadable(&host_problems(&[changed])?, &["web-e2e"]);
-        let elsewhere = flow(".github/workflows/ci.yml", line);
+        let elsewhere = flow(".github/workflows/nightly.yml", line);
         unreadable(&host_problems(&[elsewhere])?, &["web-e2e"]);
         Ok(())
     }
@@ -22160,9 +22332,10 @@ jq -r "$filter" "$src"
             ]),
             ci_file(
                 ".github/workflows/codeql.yml",
-                "on: push\njobs:\n  analyze:\n    steps:\n      - uses: actions/checkout@v7\n      \
-                 - uses: github/codeql-action/init@v4\n      - uses: \
-                 github/codeql-action/analyze@v4\n",
+                "on: push\njobs:\n  analyze:\n    steps:\n      - uses: \
+                 actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n      - uses: \
+                 github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee\n      - uses: \
+                 github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee\n",
             ),
         ];
         let problems = host_problems(&flows)?;

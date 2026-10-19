@@ -67,15 +67,6 @@ pub struct SourceFor {
     pub environment: Environment,
 }
 
-/// The records an agent stream may hold whose facts the source cannot fold yet (E21-59): any one of
-/// them gives the pass no context, so research pauses (DEC-2214 item 3).
-const UNFOLDED: [&str; 4] = [
-    "ThesisProposed",
-    "ThesisRevised",
-    "ThesisInvalidated",
-    "UniverseChanged",
-];
-
 /// What an agent stream's own research records fold to (DEC-2249 items 1 and 2): the working
 /// universe, the lineages, and the active theses the next pass is handed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,17 +263,13 @@ impl CellSource {
     /// Today's research spend: the recorded costs of the unreserved calls the agent stream records
     /// since the risk day of `clock` began, which counts a record the lagging clock has not reached
     /// yet, plus the meter's research spend for that day, which counts every reserved call at what
-    /// the meter holds for it (DEC-2249 item 3). `None` when the stream holds a record the source
-    /// cannot fold, or an unreserved cost or a time it cannot read, on any day, or while the meter
-    /// is held.
+    /// the meter holds for it (DEC-2249 item 3). `None` when the stream holds an unreserved
+    /// cost or a time it cannot read, on any day, or while the meter is held.
     fn spend(&self, agent: &[StoredEvent], clock: RiskClock) -> Option<Usd> {
         let now = UtcNanos::from_parts(clock.secs(), 0).ok()?;
         let day = risk_day(now).ok()?;
         let mut spend = Usd::parse("0").ok()?;
         for row in agent {
-            if UNFOLDED.contains(&row.event_type.as_str()) {
-                return None;
-            }
             if row.event_type != "ModelInvocationRecorded" {
                 continue;
             }
@@ -346,16 +333,30 @@ impl ResearchSource for CellSource {
         if self.others_deployed(&control)? {
             return None;
         }
-        let spend = self.spend(&agent, state.risk_clock()?)?;
+        let clock = state.risk_clock()?;
+        let spend = self.spend(&agent, clock)?;
         let asset = |fact: &InstrumentFact| AssetId::new(fact.asset_id.as_str()).ok();
         let pinned = envelope.universe_pinned;
+        let fold = fold_research(
+            &agent,
+            UtcNanos::from_parts(clock.secs(), 0).ok()?,
+            &self.instruments,
+        )
+        .ok()?;
+        if pinned && (fold.lineages != LineageState::default() || !fold.active.is_empty()) {
+            return None;
+        }
         Some(ResearchParts {
             preconditions: Preconditions::read(&JournalCatalog::JOURNAL),
             mandate: ValidatedMandate::from_validated_envelope(envelope),
             overlay: PolicyOverlay::internal_research_profile(),
-            universe: WorkingUniverse::Known {
-                instruments: BTreeSet::new(),
-                pinned,
+            universe: if pinned {
+                WorkingUniverse::Known {
+                    instruments: BTreeSet::new(),
+                    pinned,
+                }
+            } else {
+                fold.universe
             },
             facts: AdmissionFacts {
                 allowlist: self.allowlist.clone(),
@@ -377,8 +378,8 @@ impl ResearchSource for CellSource {
                 data_universe: Some(self.instruments.iter().map(asset).collect::<Option<_>>()?),
                 research_spend_usd_today: spend,
             },
-            lineages: LineageState::default(),
-            active: Vec::new(),
+            lineages: fold.lineages,
+            active: fold.active,
             last_reservation: None,
             data_symbols: self
                 .instruments

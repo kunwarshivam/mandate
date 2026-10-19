@@ -1,5 +1,9 @@
 # The staging workspace's settings: paper only (DEC-967 item 15), on top of the managed cluster's
-# values and then images.yaml, whose images and tier promotion sets (DEC-2016).
+# values and then images.yaml, whose images and tier promotion sets (DEC-2016). The API server's
+# settings take effect once promotion names images.api. Staging signs in through the site's own
+# Supabase project, not a new one (DEC-2057): its issuer and published key set, Supabase's
+# `authenticated` audience, and the one web app's origin. It hosts the demo's fixed workspace and
+# organization (DEC-2010). Every value is public; no Supabase key is here.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -9,3 +13,10 @@ spec:
   values:
     workspace: ws1
     environment: paper
+    api:
+      org: 01KDEM0000000000000000000R
+      workspace: 01KDEM0000000000000000000W
+      issuer: https://wyyxngmblqqokcvraflx.supabase.co/auth/v1
+      audience: authenticated
+      jwksUrl: https://wyyxngmblqqokcvraflx.supabase.co/auth/v1/.well-known/jwks.json
+      appOrigin: https://app.owlhead.ai

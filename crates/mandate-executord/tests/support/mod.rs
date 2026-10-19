@@ -20,7 +20,7 @@ use mandate_executor::{
     AccountRef, AccountScope, AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
     BindingGateSource, BrokerAccount, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest,
     BrokerUnknown, ConnectorError, EventId, ExecutorConfig, ExitTier, IdGen, InstrumentSnapshot,
-    MandateVersion, MandateView, ProtectionPrices, Seq, WorkspaceId, WriterEpoch,
+    MandateVersion, MandateView, ProtectionPrices, Purpose, Seq, WorkspaceId, WriterEpoch,
     equity_bracket_prices,
 };
 use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
@@ -1053,6 +1053,25 @@ impl BindingGateSource for Allowing {
     }
 }
 
+/// The binding gate's facts for any AAPL order, an exit's included: [`Allowing`]'s, looked up as
+/// an opening, so the gate runs and records every check on an exit too.
+pub struct ExitFacts;
+
+impl BindingGateSource for ExitFacts {
+    fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        Allowing.input(&BindingGateRequest {
+            agent: request.agent,
+            instrument: request.instrument,
+            side: request.side,
+            qty: request.qty,
+            limit: request.limit,
+            purpose: Purpose::Open,
+            tif: request.tif,
+            protection: request.protection,
+        })
+    }
+}
+
 /// The runtime's copy of the owner's exit of the AAPL position (journal spec §9.1): with the bid,
 /// bid size and floor the owner confirmed, or none confirmed.
 pub fn owner_exit(
@@ -1076,6 +1095,42 @@ pub fn owner_exit(
             ("scope", text("instrument")),
             ("step_up", Value::Null),
             ("step_up_status", text("absent")),
+            ("subject", text(AAPL)),
+            ("user", text("u1")),
+        ])?,
+    )
+}
+
+/// The owner's `OwnerExitRequested` of `AAPL` at `id`, confirming a bid of 150 for 100 and
+/// `floor`, with valid step-up authenticated at `authenticated_at` (DEC-2040 item 1).
+pub fn owner_exit_stepped_up(
+    journal: &Journal,
+    agent: &str,
+    id: &str,
+    floor: &str,
+    authenticated_at: &str,
+) -> Result<(), Error> {
+    journal.write(
+        &agent_stream(agent),
+        id,
+        "OwnerExitRequested",
+        1,
+        Some("command"),
+        object(vec![
+            ("bid", text("150")),
+            ("bid_size", text("100")),
+            ("confirmed", Value::Bool(true)),
+            ("floor", text(floor)),
+            ("scope", text("instrument")),
+            (
+                "step_up",
+                object(vec![
+                    ("assertion_id", text("a1")),
+                    ("authenticated_at", text(authenticated_at)),
+                    ("method", text("passkey")),
+                ])?,
+            ),
+            ("step_up_status", text("valid")),
             ("subject", text(AAPL)),
             ("user", text("u1")),
         ])?,

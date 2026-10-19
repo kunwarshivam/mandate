@@ -1,9 +1,9 @@
 # Staging (DEC-2011 item 1): one DOKS cluster of two nodes in sfo2, its buckets, and the API host
 # behind the tunnel and Access. The founder put all of the infrastructure in the US West (DEC-2047):
-# the cluster and its VPC run in sfo2 and the archive in R2's wnam; the state bucket moves from nyc3
-# in a later change. DigitalOcean's provider reads its credentials from the environment
-# (DIGITALOCEAN_TOKEN, SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its
-# token as a variable; only infra.yml's job under infra-staging receives either.
+# the cluster, its VPC and the state bucket run in sfo2, and the archive in R2's wnam.
+# DigitalOcean's provider reads its credentials from the environment (DIGITALOCEAN_TOKEN,
+# SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY) and Cloudflare's takes its token as a variable;
+# only infra.yml's job under infra-staging receives either.
 
 provider "digitalocean" {}
 
@@ -14,7 +14,7 @@ provider "cloudflare" {
 locals {
   environment  = "staging"
   region       = "sfo2"
-  state_region = "nyc3"
+  state_region = "sfo2"
   account_id = sensitive(one(distinct([
     for account in data.cloudflare_accounts.visible.result : account.id
     if account.id != null && account.id != ""
@@ -23,9 +23,9 @@ locals {
 
 # Provider 5.27.0 asks for the next page of accounts until a page comes back empty or it holds
 # max_items (default 1000), and the accounts API answered every page with the same account, so the
-# founder's first plan listed one account 1000 times. So the list is read as its distinct ids. max_items = 2 keeps
-# it to two requests: a token that sees a second account lists both on the first page, which the
-# rule below refuses.
+# founder's first plan listed one account 1000 times. So the list is read as its distinct ids.
+# max_items = 2 keeps it to two requests: a token that sees a second account lists both on the first
+# page, which the rule below refuses.
 data "cloudflare_accounts" "visible" {
   max_items = 2
 
@@ -42,8 +42,8 @@ data "cloudflare_accounts" "visible" {
 
 import {
   for_each = var.adopt_state_bucket ? toset(["state"]) : toset([])
-  to       = module.cell.module.spaces.digitalocean_spaces_bucket.state
-  id       = "${local.state_region},mandate-tofu-state-${local.environment}"
+  to       = module.cell.module.spaces.digitalocean_spaces_bucket.west
+  id       = "${local.state_region},mandate-tofu-state-west-${local.environment}"
 }
 
 module "cell" {
@@ -51,7 +51,7 @@ module "cell" {
   environment                = local.environment
   region                     = local.region
   state_region               = local.state_region
-  vpc_ip_range               = "10.110.0.0/20"
+  vpc_ip_range               = "10.111.0.0/20"
   kubernetes_version         = "1.35.9-do.1"
   node_size                  = "s-2vcpu-4gb"
   kube_api_allowed_addresses = var.kube_api_allowed_addresses

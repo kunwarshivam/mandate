@@ -26,6 +26,7 @@ use crate::admission_drill;
 use crate::{output, sh};
 use web::web_run;
 
+pub mod executor;
 pub mod scenario;
 pub mod web;
 
@@ -169,6 +170,10 @@ pub enum Drill {
     /// archived, and Barman's own tools, reading the store with the archive's key, list the backup
     /// and fetch the segment back (E21-41).
     Archive,
+    /// An agent deployed on a recorded paper connection, and the deployment manager starting that
+    /// account's executor until its pod runs and answers `livez`, not `readyz`, which needs a
+    /// scheduler tick the cell does not journal yet (E21-30, DEC-2035); see [`executor`].
+    Executor,
     /// `mandate vault provision` sets the cell's vault up, then each AppRole logs in from a pod
     /// labelled as the executor and reads only what DEC-977 item 2's table gives it: a runtime
     /// nothing, an executor exactly its own connection's token, the model gateway its key; and
@@ -186,12 +191,17 @@ pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
 /// the old primary's rejoin; `cargo xtask ci cell-failover` runs it in a job of its own (DEC-464).
 pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 
-/// The kill-switch drill (OPS-4, E21-34), which `cargo xtask ci cell-kill-switch` runs on a cell
-/// of its own so `ci cell` stays within its ten minutes (DEC-464, DEC-2602).
+/// The kill-switch drill (OPS-4, E21-34) and the admission drill, which `cargo xtask ci
+/// cell-kill-switch` runs on a cell of its own so `ci cell` stays within its ten minutes (DEC-464,
+/// DEC-2602).
 pub const KILL_SWITCH_DRILLS: [Drill; 2] = [Drill::KillSwitch, Drill::Admission];
 
-/// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-kill-switch` runs after the
-/// kill switch's, on that job's cell, so `ci cell` stays within its ten minutes (DEC-464).
+/// The executor drill (E21-30, DEC-2035), which `cargo xtask ci cell-executor` runs on a cell of
+/// its own, so `ci cell-kill-switch` stays within its ten minutes (DEC-464, DEC-2615).
+pub const EXECUTOR_DRILLS: [Drill; 1] = [Drill::Executor];
+
+/// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-vault` runs on a cell of its
+/// own, so each cell job stays within its ten minutes (DEC-464, DEC-2616).
 pub const VAULT_DRILLS: [Drill; 1] = [Drill::Vault];
 
 impl Drill {
@@ -206,6 +216,7 @@ impl Drill {
             Self::Admission => "admission",
             Self::StandbyDown => "standby-down",
             Self::Archive => "archive",
+            Self::Executor => "executor",
             Self::Vault => "vault",
         }
     }
@@ -216,6 +227,7 @@ impl Drill {
             .chain(JOURNAL_DRILLS)
             .chain(FAILOVER_DRILLS)
             .chain(KILL_SWITCH_DRILLS)
+            .chain(EXECUTOR_DRILLS)
             .chain(VAULT_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
@@ -245,6 +257,10 @@ impl Drill {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
             }
             Self::Archive => "the archive pointed at another bucket of the same store",
+            Self::Executor => {
+                "the connect check skipped, so the connection is never recorded and the agent \
+                 deploys at version 1"
+            }
             Self::Vault => {
                 "the runtime's policy rewritten to read every connection's token through a wildcard"
             }
@@ -266,6 +282,7 @@ impl Drill {
             Self::Admission => "admitted a service account's change to a person's control Job",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
+            Self::Executor => "no executor pod",
             Self::Vault => "wildcard in mandate-runtime",
         }
     }
@@ -313,8 +330,8 @@ pub fn ci() -> Result<()> {
     demo(false)
 }
 
-/// `cargo xtask ci cell-journal`, `ci cell-failover` and `ci cell-kill-switch`: the cell, then
-/// `drills`, plain and seeded (E21-41, DEC-2602). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+/// `cargo xtask ci cell-journal`, `ci cell-failover`, `ci cell-kill-switch`, `ci cell-executor` and
+/// `ci cell-vault`: the cell, then `drills`, plain and seeded (E21-41, DEC-2602, DEC-2615, DEC-2616). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
 pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
@@ -1581,11 +1598,11 @@ fn vault_drill_problems(logs: &str) -> Vec<String> {
 /// as the operator, then logs in as each role from the files `mandate vault provision` wrote and
 /// prints one line per read, and one per policy of the cell's that holds `*` or `+`. Seeded, it
 /// first rewrites the runtime's policy to read every connection's token through `+`, and puts the
-/// policy it read back when the script exits. Each read first looks its token up, so a token the
-/// vault does not honour is an `error`, never a denial. The scan counts the `mandate-*` policies it
-/// reads, and a failed read ends the script. Each read is
-/// `bao read` of the KV v2 data path, not `bao kv get`, whose preflight on the mount fails without
-/// `permission denied` for a role granted nothing under it, as the runtime is.
+/// policy it read back when the script exits, printing what the restore says so a failed one is
+/// seen. Each read first looks its token up, so a token the vault does not honour is an `error`,
+/// never a denial. The scan counts the `mandate-*` policies it reads, and a failed read ends the
+/// script. Each read is `bao read` of the KV v2 data path, not `bao kv get`, whose preflight on the
+/// mount fails without `permission denied` for a role granted nothing under it, as the runtime is.
 fn vault_drill_script(seeded: bool) -> String {
     let mut reads = String::new();
     for (role, path, _) in VAULT_DRILL_READS {
@@ -1606,7 +1623,7 @@ fn vault_drill_script(seeded: bool) -> String {
     }
     let plant = if seeded {
         "orig=$(BAO_TOKEN=\"$op\" bao policy read mandate-runtime)\n\
-         trap 'printf \"%s\\n\" \"$orig\" | BAO_TOKEN=\"$op\" bao policy write mandate-runtime - >/dev/null' EXIT\n\
+         trap 'printf \"%s\\n\" \"$orig\" | BAO_TOKEN=\"$op\" bao policy write mandate-runtime -' EXIT\n\
          printf 'path \"mandate/data/connections/+/token\" {\\n  capabilities = [\"read\"]\\n}\\n' \
          | BAO_TOKEN=\"$op\" bao policy write mandate-runtime - >/dev/null\n"
     } else {
@@ -1810,27 +1827,58 @@ fn apply_as(objects: &[Value], extra: &[&str]) -> Result<()> {
 /// The chart rendered with the cell's values and `sets`, as the JSON documents it emits.
 pub fn render(sets: &[String], show_only: Option<&str>) -> Result<Vec<Value>> {
     let images = image_sets()?;
-    let egress = egress_sets()?;
-    let mut args = vec![
+    let json_sets: Vec<String> = egress_sets()?
+        .into_iter()
+        .chain(sets.iter().cloned())
+        .collect();
+    render_with(&template_args(
+        NAMESPACE,
+        &[WORKSPACE_VALUES],
+        &images,
+        &json_sets,
+        show_only,
+    ))
+}
+
+/// `helm template`'s arguments for the workspace chart in `namespace`: each values file in order,
+/// each of `sets` as `--set` and each of `json_sets` as `--set-json`, and `show_only` when given.
+/// Pure, so a dry run's render is checked without a cluster.
+pub fn template_args(
+    namespace: &str,
+    values: &[&str],
+    sets: &[String],
+    json_sets: &[String],
+    show_only: Option<&str>,
+) -> Vec<String> {
+    let mut args: Vec<String> = [
         "template",
         "workspace",
         WORKSPACE_CHART,
         "--namespace",
-        NAMESPACE,
-        "-f",
-        WORKSPACE_VALUES,
-    ];
-    for image in &images {
-        args.extend(["--set", image.as_str()]);
+        namespace,
+    ]
+    .iter()
+    .map(|a| a.to_string())
+    .collect();
+    for file in values {
+        args.extend(["-f".to_string(), file.to_string()]);
     }
-    for set in egress.iter().chain(sets) {
-        args.push("--set-json");
-        args.push(set);
+    for set in sets {
+        args.extend(["--set".to_string(), set.clone()]);
+    }
+    for set in json_sets {
+        args.extend(["--set-json".to_string(), set.clone()]);
     }
     if let Some(template) = show_only {
-        args.push("--show-only");
-        args.push(template);
+        args.extend(["--show-only".to_string(), template.to_string()]);
     }
+    args
+}
+
+/// The chart rendered by `helm` with `args` ([`template_args`]): `helm template` alone, which
+/// reads no kubeconfig and reaches no cluster.
+pub fn render_with(args: &[String]) -> Result<Vec<Value>> {
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     parse_documents(&output("helm", &args)?)
 }
 
@@ -1867,6 +1915,7 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Admission => admission_drill::drill(seeded),
             Drill::StandbyDown => standby_down(seeded),
             Drill::Archive => archive(seeded),
+            Drill::Executor => executor::drill(seeded),
             Drill::Vault => vault_drill(seeded),
         };
         if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
@@ -4982,6 +5031,14 @@ mod tests {
             vault_drill_problems(&unscanned),
             ["want `checked 10 mandate policies`, got `checked 0 mandate policies`"]
         );
+        let scanned_twice = format!("{held}{}", probe(&["checked 10 mandate policies"]));
+        assert_eq!(
+            vault_drill_problems(&scanned_twice),
+            [
+                "want `checked 10 mandate policies`, got `checked 10 mandate policies` and \
+                 `checked 10 mandate policies`"
+            ]
+        );
         let no_scan = probe(&expected[..expected.len() - 1]);
         assert_eq!(
             vault_drill_problems(&no_scan),
@@ -4996,6 +5053,10 @@ mod tests {
         let seeded = vault_drill_script(true);
         assert!(!plain.contains("policy write"), "{plain}");
         assert!(seeded.contains("trap ") && seeded.contains("bao policy read mandate-runtime"));
+        assert!(
+            seeded.contains("bao policy write mandate-runtime -' EXIT"),
+            "the restore's output is not discarded: {seeded}"
+        );
         assert!(
             seeded.find("trap ") < seeded.find("connections/+/token"),
             "the restore is armed before the wildcard is planted: {seeded}"
