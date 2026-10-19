@@ -332,6 +332,59 @@ fn a_gap_runs_from_the_last_message_before_the_first_loss() {
     );
 }
 
+#[test]
+fn a_rejected_channel_narrows_the_subscription_and_never_reconnects() {
+    let mut link = fresh();
+    subscribe(&mut link, 0);
+    let actions = link.on(at(1), frame(&[error(410)]), 0);
+    assert_eq!(
+        actions,
+        [LinkAction::Subscribe(
+            subscribe_frame(&channels().narrowed()).unwrap()
+        )]
+    );
+    assert_eq!(link.state(), LinkState::Connecting, "awaits the narrowed echo");
+    link.on(
+        at(2),
+        frame(&[r#"{"T":"subscription","trades":["AAPL"],"quotes":["AAPL","SPY"]}"#.to_owned()]),
+        0,
+    );
+    assert_eq!(link.state(), LinkState::Resyncing);
+    link.on(at(3), frame(&[quote("AAPL"), status("AAPL")]), 0);
+    assert!(
+        !link.opens(&id("AAPL")),
+        "no status channel now, so no opening under the live rule"
+    );
+}
+
+#[test]
+fn a_status_or_band_that_cannot_be_read_resyncs_the_connection() {
+    for unreadable in [
+        status("AAPL").replace(r#""sc":"T""#, r#""sc":7"#),
+        r#"{"T":"l","S":"AAPL","u":"x"}"#.to_owned(),
+    ] {
+        let mut link = fresh();
+        subscribe(&mut link, 0);
+        link.on(
+            at(1),
+            frame(&[quote("AAPL"), status("AAPL"), quote("SPY"), status("SPY")]),
+            0,
+        );
+        assert_eq!(link.state(), LinkState::Live);
+        let actions = link.on(at(2), frame(&[unreadable.clone()]), 0);
+        assert_eq!(link.state(), LinkState::Down, "{unreadable}");
+        assert!(reconnect_after(&actions).is_some());
+    }
+    let mut link = fresh();
+    subscribe(&mut link, 0);
+    link.on(at(1), frame(&[quote("AAPL").replace("87.66", "8e1")]), 0);
+    assert_eq!(
+        link.state(),
+        LinkState::Resyncing,
+        "a quote it cannot read is only a missed quote"
+    );
+}
+
 /// One step of the property.
 #[derive(Debug, Clone)]
 enum Step {

@@ -307,6 +307,9 @@ pub enum StreamMessage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Refused {
     pub index: usize,
+    /// The message's `T`, when it could be read, so its reader can tell a missed quote from a
+    /// missed status.
+    pub kind: Option<String>,
     pub reason: WireError,
 }
 
@@ -330,7 +333,11 @@ pub fn read_frame(text: &str) -> Result<Frame, WireError> {
     for (index, item) in items.into_iter().enumerate() {
         match message(item) {
             Ok(message) => frame.messages.push(message),
-            Err(reason) => frame.refused.push(Refused { index, reason }),
+            Err(reason) => frame.refused.push(Refused {
+                index,
+                kind: None,
+                reason,
+            }),
         }
     }
     Ok(frame)

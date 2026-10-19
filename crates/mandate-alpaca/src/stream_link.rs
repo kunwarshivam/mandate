@@ -163,6 +163,7 @@ impl Link {
                         actions.push(LinkAction::Alert("stream_credential_rejected"));
                         return;
                     }
+                    Disposition::Narrow => continue,
                     Disposition::Overflow => {
                         actions.push(LinkAction::Alert("stream_symbol_limit"));
                         continue;

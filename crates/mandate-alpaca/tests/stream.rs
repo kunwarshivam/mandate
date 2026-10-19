@@ -276,6 +276,47 @@ fn a_zero_priced_side_is_absent_not_a_price() {
 }
 
 #[test]
+fn a_negative_zero_side_is_absent_too() {
+    for zero in ["-0", "-0.0"] {
+        let text = QUOTE.replace(r#""bp":87.66"#, &format!(r#""bp":{zero}"#));
+        let StreamMessage::Quote(quote) = one(&text) else {
+            panic!("not a quote");
+        };
+        assert_eq!(quote.bid, None, "{zero}");
+    }
+}
+
+#[test]
+fn a_message_with_a_repeated_key_is_refused() {
+    refusal(&QUOTE.replace(r#""bp":87.66,"#, r#""bp":87.66,"bp":1,"#));
+    refusal(&STATUS.replace(r#""sc":"H","#, r#""sc":"T","sc":"H","#));
+}
+
+#[test]
+fn a_subscription_that_omits_the_statuses_and_bands_reads_them_as_empty() {
+    let StreamMessage::Subscribed(channels) =
+        one(r#"{"T":"subscription","quotes":["SPY"],"trades":["SPY"]}"#)
+    else {
+        panic!("not a subscription");
+    };
+    assert!(channels.statuses.is_empty());
+    assert!(channels.lulds.is_empty());
+    assert_eq!(channels.quotes, set(&["SPY"]));
+}
+
+#[test]
+fn a_refusal_names_the_type_it_was_sent_as_when_it_can() {
+    let frame = read_frame(&format!(
+        "[{},{},17]",
+        STATUS.replace(r#""sc":"H""#, r#""sc":7"#),
+        QUOTE.replace("87.66", "8.766e1")
+    ))
+    .unwrap();
+    let kinds: Vec<Option<&str>> = frame.refused.iter().map(|r| r.kind.as_deref()).collect();
+    assert_eq!(kinds, [Some("s"), Some("q"), None]);
+}
+
+#[test]
 fn a_trade_a_bar_a_status_and_a_band_are_read_exactly() {
     let StreamMessage::Trade(trade) = one(TRADE) else {
         panic!("not a trade");
