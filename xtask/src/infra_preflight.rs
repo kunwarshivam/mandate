@@ -11,6 +11,7 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
@@ -592,18 +593,25 @@ pub(crate) fn state_move(west: u16, marker: u16, legacy: u16) -> StateMove {
     }
 }
 
-/// A file in the run's temporary directory, named for this process, readable by this user alone,
-/// deleted when dropped.
+/// A file in the run's temporary directory, named for this process and numbered per call, so no
+/// two in one machine share a name, readable by this user alone, deleted when dropped.
 struct TempFile {
     path: PathBuf,
 }
+
+/// The next number a [`TempFile`] takes in this process.
+static TEMP_FILES: AtomicU64 = AtomicU64::new(0);
 
 impl TempFile {
     fn new(name: &str) -> Result<Self> {
         let dir = std::env::var_os("RUNNER_TEMP")
             .map(PathBuf::from)
             .unwrap_or_else(std::env::temp_dir);
-        let path = dir.join(format!("{name}-{}", std::process::id()));
+        let path = dir.join(format!(
+            "{name}-{}-{}",
+            std::process::id(),
+            TEMP_FILES.fetch_add(1, Ordering::Relaxed)
+        ));
         OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -679,9 +687,10 @@ fn left_behind_note(left_behind: bool) -> &'static str {
 }
 
 /// Copies the nyc3 state into the West bucket and verifies it: `PUT`, read back, compare by
-/// SHA-256, then write the marker holding the digest. Once a `PUT` is attempted, any error or
-/// mismatch deletes the West copy, best effort, and keeps the original error, saying whether the
-/// copy was left behind.
+/// SHA-256, then write the marker holding the digest. After a `PUT` that answered 2xx, or whose
+/// answer was lost, any error or mismatch deletes the West copy, best effort, and keeps the
+/// original error, saying whether the copy was left behind; a `PUT` that was refused wrote
+/// nothing, so nothing is deleted.
 fn copy_state(store: &dyn Store, environment: &str, read: &Path, back: &Path) -> Result<Copied> {
     let (west, legacy) = state_buckets(environment);
     let (west_path, marker_path) = state_paths(&west, environment);
@@ -690,18 +699,24 @@ fn copy_state(store: &dyn Store, environment: &str, read: &Path, back: &Path) ->
         return Ok(Copied::Refused { left_behind: false });
     }
     let original = digest(read)?;
-    let verified = (|| -> Result<bool> {
-        if !(200..300).contains(&store.object("PUT", SPACES_REGION, &west_path, read)?) {
-            return Ok(false);
-        }
-        if store.object("GET", SPACES_REGION, &west_path, back)? != 200 {
-            return Ok(false);
-        }
-        Ok(digest(back)? == original)
-    })();
+    let put = store.object("PUT", SPACES_REGION, &west_path, read);
+    let may_have_written = !matches!(put, Ok(status) if !(200..300).contains(&status));
+    let verified = match put {
+        Ok(status) if (200..300).contains(&status) => (|| -> Result<bool> {
+            if store.object("GET", SPACES_REGION, &west_path, back)? != 200 {
+                return Ok(false);
+            }
+            Ok(digest(back)? == original)
+        })(),
+        Ok(_) => Ok(false),
+        Err(error) => Err(error),
+    };
     if !matches!(verified, Ok(true)) {
-        let deleted = store.object("DELETE", SPACES_REGION, &west_path, Path::new("/dev/null"));
-        let left_behind = !matches!(deleted, Ok(200..=299));
+        let left_behind = may_have_written
+            && !matches!(
+                store.object("DELETE", SPACES_REGION, &west_path, Path::new("/dev/null")),
+                Ok(200..=299)
+            );
         return match verified {
             Err(error) => Err(error.context(format!(
                 "copying the state to {west}: {}",
@@ -1171,6 +1186,7 @@ mod tests {
         read_back_empty: bool,
         put_response_lost: bool,
         put_corrupts: bool,
+        put_refused: bool,
         delete_fails: bool,
     }
 
@@ -1180,6 +1196,7 @@ mod tests {
         objects: RefCell<BTreeMap<String, Vec<u8>>>,
         faults: Faults,
         writes: Cell<u32>,
+        deletes: Cell<u32>,
     }
 
     impl FakeStore {
@@ -1225,6 +1242,7 @@ mod tests {
                         None => Ok(404),
                     }
                 }
+                "PUT" if west && self.faults.put_refused => Ok(403),
                 "PUT" => {
                     self.writes.set(self.writes.get() + 1);
                     let mut bytes = fs::read(file)?;
@@ -1237,8 +1255,12 @@ mod tests {
                     }
                     Ok(200)
                 }
-                "DELETE" if self.faults.delete_fails => bail!("curl: could not resolve host"),
+                "DELETE" if self.faults.delete_fails => {
+                    self.deletes.set(self.deletes.get() + 1);
+                    bail!("curl: could not resolve host")
+                }
                 "DELETE" => {
+                    self.deletes.set(self.deletes.get() + 1);
                     self.objects.borrow_mut().remove(&at);
                     Ok(204)
                 }
@@ -1360,6 +1382,66 @@ mod tests {
             );
             assert!(store.get(WEST_MARKER).is_none(), "{name} writes no marker");
         }
+        Ok(())
+    }
+
+    /// The review of #1854: a `PUT` that was refused wrote nothing, so nothing is deleted, and the
+    /// line says no copy is left.
+    #[test]
+    fn a_refused_put_deletes_nothing() -> Result<()> {
+        let store = FakeStore::with_legacy(
+            STATE,
+            Faults {
+                put_refused: true,
+                delete_fails: true,
+                ..Faults::default()
+            },
+        );
+        let missing = run_move(&store, true)?;
+        assert_eq!(missing.len(), 1);
+        assert!(
+            missing[0].contains("no unverified copy is left"),
+            "{}",
+            missing[0]
+        );
+        assert_eq!(
+            store.deletes.get(),
+            0,
+            "nothing was written, so nothing is deleted"
+        );
+        assert!(store.get(WEST_STATE).is_none() && store.get(WEST_MARKER).is_none());
+        Ok(())
+    }
+
+    /// A refused `PUT` never leads to a marker, even over an unmarked West copy an earlier run
+    /// left, whose bytes this run cannot vouch for.
+    #[test]
+    fn a_refused_put_never_marks_an_old_copy() -> Result<()> {
+        let store = FakeStore::with_legacy(
+            STATE,
+            Faults {
+                put_refused: true,
+                ..Faults::default()
+            },
+        );
+        store
+            .objects
+            .borrow_mut()
+            .insert(format!("{SPACES_REGION}/{WEST_STATE}"), STATE.to_vec());
+        assert_eq!(run_move(&store, true)?.len(), 1);
+        assert!(
+            store.get(WEST_MARKER).is_none(),
+            "no marker over a copy this run did not write"
+        );
+        Ok(())
+    }
+
+    /// Two temporary files in one process never share a name.
+    #[test]
+    fn temporary_files_never_share_a_name() -> Result<()> {
+        let one = TempFile::new("mandate-name-test")?;
+        let two = TempFile::new("mandate-name-test")?;
+        assert_ne!(one.path, two.path);
         Ok(())
     }
 
