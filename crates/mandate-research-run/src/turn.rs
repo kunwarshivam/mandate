@@ -153,6 +153,20 @@ pub fn call_turn<T: Transport, S: MeterStore, C: Clock>(
     gateway: &mut Gateway<T, S, C>,
     parts: TurnParts<'_>,
 ) -> Result<(TurnCall, Answer), ResearchRunError> {
-    let _ = (gateway, parts);
-    Err(ResearchRunError::Unimplemented { story: "E19-13" })
+    let dispatched_at = gateway.clock_mut().now();
+    let built = TurnCall::build(
+        parts.call,
+        parts.plan,
+        parts.kind,
+        parts.seed,
+        parts.context,
+        parts.transcript,
+        dispatched_at,
+    )?;
+    let request = built.request()?;
+    let answer = match gateway.call(&request) {
+        Ok(record) => Answer::Recorded(record),
+        Err(error) => Answer::Refused(error),
+    };
+    Ok((built, answer))
 }

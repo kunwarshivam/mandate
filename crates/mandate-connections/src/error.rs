@@ -16,6 +16,8 @@ pub enum ConnectError {
     StateUserMismatch,
     #[error("the state is already issued")]
     StateReused,
+    #[error("the vault's token entry is not in its format")]
+    TokenEntryInvalid,
     #[error("the request may not leave the process")]
     RequestRefused,
     #[error("the granted scopes differ from the requested ones")]
@@ -64,6 +66,7 @@ impl ConnectError {
             Self::StateExpired => "state_expired",
             Self::StateUserMismatch => "state_user_mismatch",
             Self::StateReused => "state_reused",
+            Self::TokenEntryInvalid => "token_entry_invalid",
             Self::RequestRefused => "request_refused",
             Self::ScopeMismatch => "scope_mismatch",
             Self::TokenType => "token_type",
