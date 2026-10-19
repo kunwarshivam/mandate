@@ -1,20 +1,23 @@
 //! `cargo xtask leak-guard`, part of `lint` (DEC-2032): the repository is public, so a CI log or
 //! artifact is too. Each rule is a text match over `.github/workflows` and `.github/scripts` that
-//! fails closed: a line it refuses stays refused until a person lists it, file and trimmed line
-//! byte for byte, in [`ALLOWED`], in a change a reviewer sees.
+//! refuses the shapes its rules name, and a line it refuses stays refused until a person lists it,
+//! file and trimmed line byte for byte, in [`ALLOWED`], in a change a reviewer sees. It is defence
+//! in depth: a text match is never complete, so the closed world is L9, a secret step that runs
+//! only a prebuilt command, together with no secret in a pull request's jobs.
 //!
 //! - **L1, environment dumps:** `printenv`, `declare`, `typeset`, a bare `export` or `export -p`,
-//!   a bare `set`, a bare `env` (a redirect is not an argument), `compgen -e` or `-v`, and any
-//!   `/proc/*/environ`.
+//!   a bare `set`, an `env` with no command (only options, assignments or a redirect),
+//!   `compgen -e` or `-v`, and any `/proc/*/environ`.
 //! - **L2, trace and debug output:** `set` with any flag holding `x` or `v`, or `-o xtrace` or
 //!   `-o verbose`; a shell run with any of those or `--xtrace`/`--verbose`, its `-c` program read as
-//!   a command of its own; a shebang with `-x` or `-v`; `PS4=`, the runner's and `gh`'s debug switches, `TF_LOG`,
-//!   `RUST_LOG` at `trace`, `helm --debug`, `kubectl` above `--v=5`, `doctl -v` and `cosign -d`.
+//!   a command of its own; a shebang with `-x` or `-v`; `PS4=`, `SHELLOPTS`, `BASH_XTRACEFD`,
+//!   `BASH_ENV`, the runner's and `gh`'s debug switches, `TF_LOG`, `RUST_LOG` at `trace`,
+//!   `helm --debug`, `kubectl` above `--v=5`, `doctl -v` and `cosign -d`.
 //! - **L3, contexts:** read in every GitHub expression whole (each `${{ … }}` joined across lines,
-//!   and each `if:` value) and without regard to case: `toJSON(` whose argument names a context,
-//!   however nested, `secrets[`, and `secrets.` anywhere but an `env:` block, so a secret reaches a
-//!   step only as a variable and is never pasted into its script; and `secrets: inherit` in any
-//!   case and spacing.
+//!   a quoted `}}` not ending it, and each `if:` value) and without regard to case: `toJSON(` whose
+//!   argument names a context, however nested; the whole `secrets` context anywhere; `secrets[`;
+//!   and `secrets.` anywhere but an `env:` block, so a secret reaches a step only as a variable and
+//!   is never pasted into its script; and `secrets: inherit` in any case and spacing.
 //! - **L5, artifacts:** each `upload-artifact` path is one of [`ARTIFACT_PATHS`], none names deploy
 //!   state, a plan, a key, a secret, a token, a kubeconfig, an `.env` or auth, and none uploads
 //!   hidden files.
@@ -288,33 +291,40 @@ pub(crate) fn findings(sources: &[Source]) -> Vec<Finding> {
     found
 }
 
-/// The commands of one line: split at `;`, `|`, `&`, `(`, `)` and backticks, then into words, with
-/// a leading YAML key or list dash dropped and wrappers (`sudo`, `exec`, `command`, `nohup`,
-/// `time`) stepped over, so each command's own name comes first. Quotes are dropped, not parsed:
-/// a refused word inside a string is refused too.
+/// The commands of one line: split at `;`, `|`, `&`, `(`, `)`, `{`, `}`, `!` and backticks, then
+/// into words, with a leading YAML key or list dash, shell keywords (`if`, `then`, `do`, …) and
+/// variable assignments (`A=1`) dropped, a leading `\` taken off, and wrappers (`sudo`, `exec`,
+/// `command`, `nohup`, `time`, `env`, `timeout`, `xargs`) stepped over with their options, so each
+/// command's own name comes first. Quotes are dropped, not parsed: a refused word inside a string
+/// is refused too.
 fn segments(line: &str) -> Vec<Vec<String>> {
     let mut out = Vec::new();
-    for piece in line.split([';', '|', '&', '(', ')', '`']) {
+    for piece in line.split([';', '|', '&', '(', ')', '`', '{', '}', '!']) {
         let mut words: Vec<String> = piece
             .split_whitespace()
             .map(|word| word.trim_matches(['"', '\'']).to_owned())
             .filter(|word| !word.is_empty())
             .collect();
-        while words
-            .first()
-            .is_some_and(|word| word == "-" || word.ends_with(':') || word == "$")
-        {
-            words.remove(0);
-        }
-        while words.first().is_some_and(|word| {
-            matches!(
-                word.as_str(),
-                "sudo" | "exec" | "command" | "nohup" | "time"
-            )
-        }) {
-            words.remove(0);
-            while words.first().is_some_and(|word| word.starts_with('-')) {
+        loop {
+            while words.first().is_some_and(|word| {
+                word == "-"
+                    || word.ends_with(':')
+                    || word == "$"
+                    || assignment(word)
+                    || KEYWORDS.contains(&word.as_str())
+            }) {
                 words.remove(0);
+            }
+            if let Some(first) = words.first_mut()
+                && let Some(bare) = first.strip_prefix('\\')
+            {
+                *first = bare.to_owned();
+            }
+            match wrapped(&words) {
+                Some(at) => {
+                    words.drain(..at);
+                }
+                None => break,
             }
         }
         if !words.is_empty() {
@@ -322,6 +332,61 @@ fn segments(line: &str) -> Vec<Vec<String>> {
         }
     }
     out
+}
+
+/// The shell keywords that come before a command and are not one.
+const KEYWORDS: [&str; 12] = [
+    "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac",
+];
+
+/// A shell variable assignment, `NAME=value`.
+fn assignment(word: &str) -> bool {
+    word.split_once('=').is_some_and(|(name, _)| {
+        !name.is_empty()
+            && !name.starts_with(|c: char| c.is_ascii_digit())
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Each wrapper, with the options that take the next word as their value.
+const WRAPPERS: &[(&str, &[&str])] = &[
+    (
+        "sudo",
+        &["-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U"],
+    ),
+    ("exec", &["-a"]),
+    ("command", &[]),
+    ("nohup", &[]),
+    ("time", &[]),
+    ("env", &["-u", "--unset", "-C", "--chdir"]),
+    ("timeout", &["-s", "--signal", "-k", "--kill-after"]),
+    ("xargs", &["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"]),
+];
+
+/// Where the command a wrapper runs starts in `words`, when `words` starts with a wrapper that
+/// runs one: past its options, the values they take, any assignments, and `timeout`'s duration.
+/// `None` for a wrapper with no command after it, a redirect not being one, so a bare `env` stays
+/// a bare `env`.
+fn wrapped(words: &[String]) -> Option<usize> {
+    let name = program(words);
+    let (_, valued) = WRAPPERS.iter().find(|(wrapper, _)| *wrapper == name)?;
+    let mut at = 1;
+    while let Some(word) = words.get(at) {
+        if valued.contains(&word.as_str()) {
+            at = at.saturating_add(2);
+        } else if word.starts_with('-') || (name == "env" && assignment(word)) {
+            at = at.saturating_add(1);
+        } else {
+            break;
+        }
+    }
+    if name == "timeout" {
+        at = at.saturating_add(1);
+    }
+    words
+        .get(at)
+        .is_some_and(|word| !word.contains(['>', '<']))
+        .then_some(at)
 }
 
 /// The program a command names, by its last path segment.
@@ -359,8 +424,8 @@ fn dump(words: &[String]) -> Option<&'static str> {
             Some("a bare `export` or `export -p` prints the environment")
         }
         "set" if args.is_empty() => Some("a bare `set` prints every variable"),
-        "env" if args.iter().all(|a| a.starts_with('-')) => {
-            Some("a bare `env` prints the environment")
+        "env" if wrapped(words).is_none() => {
+            Some("an `env` with no command, only options or assignments, prints the environment")
         }
         "compgen"
             if args
@@ -477,6 +542,15 @@ fn line_trace(line: &str) -> Option<&'static str> {
     {
         return Some("the runner's and `gh`'s debug switches print requests and variables");
     }
+    if ["SHELLOPTS", "BASH_XTRACEFD", "BASH_ENV"]
+        .iter()
+        .any(|name| line.contains(name))
+    {
+        return Some(
+            "`SHELLOPTS`, `BASH_XTRACEFD` and `BASH_ENV` turn on tracing, or run a file, in every \
+             shell the step starts",
+        );
+    }
     if line.contains("TF_LOG") {
         return Some("`TF_LOG` prints provider requests, credentials among them");
     }
@@ -496,8 +570,9 @@ fn shebang_trace(line: &str) -> Option<&'static str> {
 }
 
 /// The contexts whose whole value `toJSON(` must never print.
-const CONTEXTS: [&str; 9] = [
-    "secrets", "env", "github", "vars", "inputs", "steps", "needs", "matrix", "runner",
+const CONTEXTS: [&str; 11] = [
+    "secrets", "env", "github", "vars", "inputs", "steps", "needs", "matrix", "runner", "job",
+    "strategy",
 ];
 
 /// L3's line rule: `secrets: inherit`, in any case and spacing.
@@ -544,10 +619,7 @@ fn expressions(text: &str) -> Vec<(usize, String)> {
     while let Some(open) = text.get(rest..).and_then(|tail| tail.find("${{")) {
         let begin = rest.saturating_add(open);
         let body_at = begin.saturating_add(3);
-        let end = text
-            .get(body_at..)
-            .and_then(|tail| tail.find("}}"))
-            .map_or(text.len(), |close| body_at.saturating_add(close));
+        let end = close(text, body_at);
         let start_line = line_of(begin);
         let commented = lines
             .get(start_line)
@@ -566,6 +638,21 @@ fn expressions(text: &str) -> Vec<(usize, String)> {
     out
 }
 
+/// Where the expression whose body starts at `body_at` ends: the first `}}` outside a quoted
+/// string, since `'}}'` inside one does not end it; the end of `text` when none does.
+fn close(text: &str, body_at: usize) -> usize {
+    let mut quoted = false;
+    let tail = text.get(body_at..).unwrap_or_default();
+    for (at, c) in tail.char_indices() {
+        if c == '\'' {
+            quoted = !quoted;
+        } else if !quoted && tail.get(at..).is_some_and(|rest| rest.starts_with("}}")) {
+            return body_at.saturating_add(at);
+        }
+    }
+    text.len()
+}
+
 /// An expression lowercased, with its whitespace dropped.
 fn compact(expression: &str) -> String {
     expression
@@ -575,32 +662,48 @@ fn compact(expression: &str) -> String {
         .collect()
 }
 
+/// Each place `name` stands as a word of its own in `expression`, outside a quoted string's
+/// opening quote and not as a property (`x.name`), with the character after it.
+fn context_words<'a>(
+    expression: &'a str,
+    name: &'a str,
+) -> impl Iterator<Item = Option<char>> + 'a {
+    let word =
+        |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    expression
+        .match_indices(name)
+        .filter_map(move |(found, _)| {
+            let before = expression
+                .get(..found)
+                .and_then(|head| head.chars().next_back());
+            let after = expression
+                .get(found.saturating_add(name.len())..)
+                .and_then(|tail| tail.chars().next());
+            (!word(before) && !word(after) && !matches!(before, Some('\'' | '.'))).then_some(after)
+        })
+}
+
 /// L3 for one [`expressions`] entry, `in_env` when its line sits in an `env:` block: `toJSON(`
-/// whose argument names a whole context anywhere in it, however nested, `secrets[`, and
+/// whose argument names a whole context anywhere in it, however nested; the whole `secrets`
+/// context anywhere (`secrets` alone, in `join(` or `format(`, or `secrets.*`); `secrets[`; and
 /// `secrets.` outside an `env:` block.
 fn expression_rule(expression: &str, in_env: bool) -> Option<&'static str> {
     if let Some(at) = expression.find("tojson(") {
         let argument = expression.get(at..).unwrap_or_default();
-        let names_context = CONTEXTS.iter().any(|name| {
-            argument.match_indices(name).any(|(found, _)| {
-                let before = argument
-                    .get(..found)
-                    .and_then(|head| head.chars().next_back());
-                let after = argument
-                    .get(found.saturating_add(name.len())..)
-                    .and_then(|tail| tail.chars().next());
-                let word = |c: Option<char>| {
-                    c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-                };
-                !word(before) && !word(after) && before != Some('\'')
-            })
-        });
-        if names_context {
+        if CONTEXTS
+            .iter()
+            .any(|name| context_words(argument, name).next().is_some())
+        {
             return Some("`toJSON(` of a context prints every value in it");
         }
     }
     if expression.contains("secrets[") {
         return Some("`secrets[` reads a secret by a computed name");
+    }
+    if expression.contains("secrets.*")
+        || context_words(expression, "secrets").any(|after| after != Some('.'))
+    {
+        return Some("the whole `secrets` context is never read, only one secret by its name");
     }
     if expression.contains("secrets.") && !in_env {
         return Some("a secret is read only in an `env:` block, never pasted into a step");
@@ -1533,6 +1636,47 @@ mod tests {
         ("L2", "        run: set -o verbose\n"),
         ("L2", "        run: bash -v build.sh\n"),
         ("L2", "#!/bin/bash -v\n"),
+        ("L1", "        run: FOO=1 env\n"),
+        ("L1", "        run: if true; then env; fi\n"),
+        ("L1", "        run: for x in 1; do printenv; done\n"),
+        ("L1", "        run: { env; }\n"),
+        ("L1", "        run: ! env\n"),
+        ("L1", "        run: true || env\n"),
+        ("L1", "        run: \\env\n"),
+        ("L1", "        run: env -u HOME\n"),
+        ("L1", "        run: env -C /tmp\n"),
+        ("L1", "        run: env FOO=1\n"),
+        ("L1", "        run: env -i FOO=1 > out.txt\n"),
+        ("L1", "        run: env FOO=1 printenv\n"),
+        ("L1", "        run: timeout 5 printenv\n"),
+        ("L1", "        run: timeout -s KILL 5 env\n"),
+        ("L1", "        run: echo | xargs env\n"),
+        ("L1", "        run: echo | xargs -I x printenv\n"),
+        ("L1", "        run: sudo -u runner env\n"),
+        ("L1", "        run: sudo -E env\n"),
+        ("L2", "        run: X=1 set -x\n"),
+        ("L2", "        run: env bash -x build.sh\n"),
+        (
+            "L3",
+            "        run: echo '${{ format('}}', toJSON(secrets)) }}'\n",
+        ),
+        ("L3", "        run: echo '${{ secrets }}'\n"),
+        ("L3", "      - env:\n          X: ${{ secrets }}\n"),
+        (
+            "L3",
+            "      - env:\n          X: ${{ join(secrets, ',') }}\n",
+        ),
+        (
+            "L3",
+            "      - env:\n          X: ${{ format('{0}', secrets) }}\n",
+        ),
+        ("L3", "      - env:\n          X: ${{ secrets.* }}\n"),
+        ("L3", "        run: echo '${{ toJSON(job) }}'\n"),
+        ("L3", "        run: echo '${{ toJSON(strategy) }}'\n"),
+        ("L2", "          SHELLOPTS: xtrace\n"),
+        ("L2", "        run: export SHELLOPTS=xtrace\n"),
+        ("L2", "          BASH_XTRACEFD: 1\n"),
+        ("L2", "        run: BASH_ENV=./trace.sh make\n"),
     ];
 
     #[test]
@@ -1553,6 +1697,13 @@ mod tests {
             "        run: env -i PATH=/usr/bin make > build.log\n",
             "        if: github.ref == 'refs/heads/main'\n",
             "      - env:\n          X: ${{\n            secrets.TOKEN }}\n",
+            "        run: env -i PATH=/usr/bin make\n",
+            "        run: timeout 5 make test\n",
+            "        run: if [ -n \"$X\" ]; then make; fi\n",
+            "        run: echo \"${HOME}/bin\" | xargs -n 1 ls\n",
+            "        run: sudo -u runner make\n",
+            "        if: contains(github.event.head_commit.message, 'secrets')\n",
+            "        run: echo '${{ inputs.secrets }}'\n",
         ] {
             assert_eq!(one(WORKFLOW, text), Vec::new(), "{text:?}");
         }
