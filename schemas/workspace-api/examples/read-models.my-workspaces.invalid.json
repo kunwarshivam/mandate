@@ -1,0 +1,124 @@
+[
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a principal_id",
+    "set": {
+      "/principal_id": "01JB3K6F0C9R2V7N4M8Q1T5W3Z"
+    }
+  },
+  {
+    "label": "a missing workspaces",
+    "remove": [
+      "/workspaces"
+    ]
+  },
+  {
+    "label": "workspaces an object",
+    "set": {
+      "/workspaces": {}
+    }
+  },
+  {
+    "label": "an unknown workspace member",
+    "set": {
+      "/workspaces/0/state": "active"
+    }
+  },
+  {
+    "label": "a missing workspace_id",
+    "remove": [
+      "/workspaces/0/workspace_id"
+    ]
+  },
+  {
+    "label": "a malformed workspace_id",
+    "set": {
+      "/workspaces/0/workspace_id": "a b"
+    }
+  },
+  {
+    "label": "a missing label",
+    "remove": [
+      "/workspaces/0/label"
+    ]
+  },
+  {
+    "label": "an empty label",
+    "set": {
+      "/workspaces/0/label": ""
+    }
+  },
+  {
+    "label": "a label of 201 characters",
+    "set": {
+      "/workspaces/0/label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  {
+    "label": "a numeric label",
+    "set": {
+      "/workspaces/0/label": 7
+    }
+  },
+  {
+    "label": "a missing roles",
+    "remove": [
+      "/workspaces/0/roles"
+    ]
+  },
+  {
+    "label": "an org role",
+    "set": {
+      "/workspaces/0/roles": [
+        "org_owner"
+      ]
+    }
+  },
+  {
+    "label": "an unknown role",
+    "set": {
+      "/workspaces/0/roles": [
+        "mutant_value"
+      ]
+    }
+  },
+  {
+    "label": "a repeated role",
+    "set": {
+      "/workspaces/0/roles": [
+        "viewer",
+        "viewer"
+      ]
+    }
+  },
+  {
+    "label": "roles a string",
+    "set": {
+      "/workspaces/0/roles": "viewer"
+    }
+  },
+  {
+    "label": "a watermark",
+    "set": {
+      "/as_of": [
+        {
+          "stream_id": "ctl:ws_1",
+          "seq": 1,
+          "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "recorded_at": "2026-10-19T15:30:00.000000000Z"
+        }
+      ]
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  }
+]
