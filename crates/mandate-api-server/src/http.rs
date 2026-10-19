@@ -79,7 +79,8 @@ pub struct App {
     /// The same store, which the version routes add objects to (DEC-2101 item 8); `None` when
     /// the deployment names none, and those routes then answer `journal_unavailable`.
     pub objects: Option<Arc<dyn ObjectStore>>,
-    /// The step-up port (DEC-2101 item 2): [`crate::stepup::Unbound`] until E9-4 binds it.
+    /// The step-up port (DEC-2101 item 2): the deployment binds [`crate::confirm::CliConfirm`]
+    /// (DEC-2104), and tests bind [`crate::stepup::Unbound`] or their own.
     pub step_up: Arc<dyn StepUp>,
     /// The step-up challenges issued and not yet expired (DEC-2103 item 5).
     pub challenges: Arc<Challenges>,
@@ -119,12 +120,24 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             get(routes::one_agent).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/orders",
+            get(routes::agent_orders_read).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/positions",
+            get(routes::agent_positions_read).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/approvals",
             get(routes::list_approvals).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/approvals/{approval}",
             get(routes::one_approval).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/journal/events/{event}",
+            get(journal_reads::one_event).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/journal/streams/{stream}/events",

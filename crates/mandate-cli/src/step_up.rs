@@ -11,9 +11,15 @@
 use std::io::Write;
 
 use clap::{Args, Subcommand};
+use mandate_canon::{Value, is_ulid};
+use mandate_journal::{Environment, StreamId};
 
-use crate::approvals::Shown;
-use crate::control::{ControlError, ControlJournal, Now, Owner, Submitted};
+use crate::approvals::{self, Shown};
+use crate::control::{
+    Confirmation, ControlError, ControlJournal, Decision, Now, Owner, Repeat, Shape, Submitted,
+    commit_choice_at, control_stream, decide, envelope, same_environment, seconds, text,
+};
+use crate::inbox::show_lines;
 use crate::postgres::JournalArgs;
 
 /// The record the command appends (journal spec §9.29).
@@ -94,12 +100,43 @@ pub struct Confirmed {
     pub earlier: bool,
 }
 
+/// How many characters the code has: 40 bits of Crockford base 32 (DEC-2104 item 1).
+const CODE_LEN: usize = 8;
+
+/// Crockford's base-32 digits, upper case (journal spec §9.29's `confirm_code`).
+const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/// How many times [`confirm`] reads the rows again after the control stream moved past the head it
+/// checked them at, before it gives up.
+const ATTEMPTS: u32 = 8;
+
+fn refused(reason: &'static str) -> ControlError {
+    ControlError::Refused { reason }
+}
+
 /// The code as `StepUpConfirmed` carries it (DEC-2104 item 2, DEC-2106 item 2.4).
 ///
 /// # Errors
 /// [`ControlError::Refused`] with `code_invalid`.
-pub fn normalize(_code: &str) -> Result<String, ControlError> {
-    Err(ControlError::Unimplemented { story: "E9-4" })
+pub fn normalize(code: &str) -> Result<String, ControlError> {
+    let bare = match code.split_once('-') {
+        None => code.to_owned(),
+        Some((head, tail)) if head.len() == 4 => format!("{head}{tail}"),
+        Some(_) => return Err(refused("code_invalid")),
+    };
+    let normal: String = bare
+        .chars()
+        .map(|c| match c.to_ascii_uppercase() {
+            'I' | 'L' => '1',
+            'O' => '0',
+            c => c,
+        })
+        .collect();
+    if normal.len() == CODE_LEN && normal.bytes().all(|b| CROCKFORD.contains(&b)) {
+        Ok(normal)
+    } else {
+        Err(refused("code_invalid"))
+    }
 }
 
 /// DEC-2106 items 2.1 to 2.4, which read no journal. The owner is the principal, in `paper`.
@@ -107,8 +144,29 @@ pub fn normalize(_code: &str) -> Result<String, ControlError> {
 /// # Errors
 /// [`ControlError::Refused`] with `owner_workspace_invalid`, `principal_invalid`,
 /// `challenge_invalid`, or `code_invalid`, in that order.
-pub fn check(_confirming: &Confirming<'_>) -> Result<Checked, ControlError> {
-    Err(ControlError::Unimplemented { story: "E9-4" })
+pub fn check(confirming: &Confirming<'_>) -> Result<Checked, ControlError> {
+    let owner = Owner {
+        workspace: confirming.workspace.to_owned(),
+        user: confirming.principal.to_owned(),
+        environment: Environment::Paper,
+    };
+    if control_stream(&owner).is_err() {
+        return Err(refused("owner_workspace_invalid"));
+    }
+    if !is_ulid(confirming.principal) {
+        return Err(refused("principal_invalid"));
+    }
+    if !is_ulid(confirming.challenge) {
+        return Err(refused("challenge_invalid"));
+    }
+    let code = normalize(confirming.code)?;
+    Ok(Checked {
+        owner,
+        agent: confirming.agent.to_owned(),
+        approval: confirming.approval.to_owned(),
+        challenge: confirming.challenge.to_owned(),
+        code,
+    })
 }
 
 /// DEC-2106 items 2.5 to 2.9 against `journal`, then one `StepUpConfirmed` appended at `now`, at the
@@ -118,11 +176,107 @@ pub fn check(_confirming: &Confirming<'_>) -> Result<Checked, ControlError> {
 /// [`ControlError::Refused`] with DEC-2106 item 2's code, having appended nothing;
 /// [`ControlError::Journal`] when the journal cannot be read or refuses the record.
 pub fn confirm(
-    _journal: &mut dyn ControlJournal,
-    _checked: &Checked,
-    _now: Now,
+    journal: &mut dyn ControlJournal,
+    checked: &Checked,
+    now: Now,
 ) -> Result<Confirmed, ControlError> {
-    Err(ControlError::Unimplemented { story: "E9-4" })
+    let stream = control_stream(&checked.owner)?;
+    for _ in 0..ATTEMPTS {
+        let head = journal.head(&stream)?.seq;
+        same_environment(journal, &stream, &checked.owner)?;
+        let shown = approvals::show(journal, &checked.owner, &checked.agent, &checked.approval)?;
+        if shown.live {
+            return Err(refused("paper_only"));
+        }
+        if now.secs >= shown.deadline_s {
+            return Err(refused("late"));
+        }
+        if let Some(submitted) = earlier(journal, &stream, checked, &shown)? {
+            return Ok(Confirmed {
+                shown,
+                submitted,
+                earlier: true,
+            });
+        }
+        let key = vec![
+            ("action_digest", text(&shown.content_hash)),
+            ("action_kind", text("approve")),
+            ("challenge", text(&checked.challenge)),
+            ("code", text(&checked.code)),
+            ("confirmed_at", seconds(now.at.secs())?),
+            ("principal", text(&checked.owner.user)),
+        ];
+        let confirmation = Confirmation::Fixed(false);
+        let owner = &checked.owner;
+        let decided = match decide(
+            journal,
+            owner,
+            EVENT_TYPE,
+            key,
+            confirmation,
+            Repeat::AlwaysCommits,
+        )? {
+            Decision::Fresh(decided) => decided,
+            Decision::Committed(submitted) => {
+                return Ok(Confirmed {
+                    shown,
+                    submitted,
+                    earlier: true,
+                });
+            }
+        };
+        let shape = Shape {
+            schema_version: 1,
+            artifact_refs: vec![shown.content_hash.clone()],
+            config_refs: Vec::new(),
+        };
+        if let Some(submitted) = commit_choice_at(journal, owner, decided, shape, now, head)? {
+            return Ok(Confirmed {
+                shown,
+                submitted,
+                earlier: false,
+            });
+        }
+    }
+    Err(ControlError::Journal(format!(
+        "the control stream moved on each of {ATTEMPTS} reads; nothing was appended"
+    )))
+}
+
+/// Rule 243 and DEC-2106 item 3: the confirmation of `checked`'s challenge already on `stream`, if
+/// it is this command's, or `challenge_confirmed` for any other.
+fn earlier(
+    journal: &dyn ControlJournal,
+    stream: &StreamId,
+    checked: &Checked,
+    shown: &Shown,
+) -> Result<Option<Submitted>, ControlError> {
+    for row in journal.rows(stream)? {
+        if row.event_type != EVENT_TYPE {
+            continue;
+        }
+        let event = envelope(&row)?;
+        let member = |name: &str| {
+            event
+                .get("payload")
+                .and_then(|p| p.get(name))
+                .and_then(Value::as_str)
+        };
+        if member("challenge") != Some(checked.challenge.as_str()) {
+            continue;
+        }
+        let ours = member("action_digest") == Some(shown.content_hash.as_str())
+            && member("principal") == Some(checked.owner.user.as_str())
+            && member("code") == Some(checked.code.as_str());
+        if !ours {
+            return Err(refused("challenge_confirmed"));
+        }
+        return Ok(Some(Submitted {
+            event_id: row.event_id,
+            seq: row.seq,
+        }));
+    }
+    Ok(None)
 }
 
 /// What the command prints (DEC-2106 item 5): the approval as `approvals show` prints it, then
@@ -131,10 +285,23 @@ pub fn confirm(
 /// # Errors
 /// As [`crate::inbox::show_lines`].
 pub fn confirmed_lines(
-    _checked: &Checked,
-    _confirmed: &Confirmed,
+    checked: &Checked,
+    confirmed: &Confirmed,
 ) -> Result<Vec<String>, ControlError> {
-    Err(ControlError::Unimplemented { story: "E9-4" })
+    let mut lines = show_lines(&confirmed.shown)?;
+    let word = if confirmed.earlier {
+        "already confirmed"
+    } else {
+        "confirmed"
+    };
+    lines.push(format!(
+        "{word} {} as event {} at seq {} for {}",
+        checked.challenge,
+        confirmed.submitted.event_id,
+        confirmed.submitted.seq,
+        confirmed.shown.content_hash
+    ));
+    Ok(lines)
 }
 
 /// Runs [`confirm`] against `journal` and prints [`confirmed_lines`]. The binary runs [`check`]
@@ -143,10 +310,14 @@ pub fn confirmed_lines(
 /// # Errors
 /// As [`confirm`]. A refusal prints nothing.
 pub fn run_confirm(
-    _checked: &Checked,
-    _journal: &mut dyn ControlJournal,
-    _now: Now,
-    _report: &mut dyn Write,
+    checked: &Checked,
+    journal: &mut dyn ControlJournal,
+    now: Now,
+    report: &mut dyn Write,
 ) -> anyhow::Result<Confirmed> {
-    Err(ControlError::Unimplemented { story: "E9-4" }.into())
+    let confirmed = confirm(journal, checked, now)?;
+    for line in confirmed_lines(checked, &confirmed)? {
+        writeln!(report, "{line}")?;
+    }
+    Ok(confirmed)
 }
