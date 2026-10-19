@@ -103,7 +103,6 @@ fn a_run_kind_is_spelled_as_the_gateway_and_the_records_spell_it() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_turn_s_request_is_the_seed_s_call_with_the_turn_s_members() {
     let items = seed().items.len();
     let plan = turn_plan(3, 3_600_000);
@@ -159,7 +158,6 @@ fn a_turn_s_request_is_the_seed_s_call_with_the_turn_s_members() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_deadline_is_dispatch_plus_the_lesser_of_deadline_ms_and_the_time_left() {
     let items = seed().items.len();
     let short = build(items, &turn_plan(1, 5_000), Vec::new());
@@ -186,7 +184,6 @@ fn the_deadline_is_dispatch_plus_the_lesser_of_deadline_ms_and_the_time_left() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_seed_pairs_with_the_leading_observations() {
     let items = seed().items.len();
     let turn = build(items + 3, &turn_plan(2, 3_600_000), vec![earlier(1)]);
@@ -221,7 +218,6 @@ fn the_seed_pairs_with_the_leading_observations() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_first_turn_carries_no_transcript() {
     let items = seed().items.len();
     let request = build(items, &turn_plan(1, 3_600_000), Vec::new())
@@ -232,7 +228,6 @@ fn the_first_turn_carries_no_transcript() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_transcript_that_cannot_be_this_turn_s_is_refused() {
     let items = seed().items.len();
     let fitting = build(items, &turn_plan(2, 3_600_000), vec![earlier(1)]);

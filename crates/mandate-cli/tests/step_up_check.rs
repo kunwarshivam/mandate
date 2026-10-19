@@ -1,8 +1,7 @@
 //! `mandate step-up confirm`'s flags (DEC-2104 item 2, DEC-2106 items 2.1 to 2.4; E9-4 S2): what
 //! [`check`] refuses before any journal is opened, and how [`normalize`] reads the code the web app
 //! shows. The expected codes are computed here: the property test encodes 40 bits as Crockford base
-//! 32 itself. The tests are pending E9-4 and fail on the stubs' `ControlError::Unimplemented`
-//! (DEC-77, DEC-110). What the command does with the journal is `tests/step_up_confirm.rs`.
+//! 32 itself. What the command does with the journal is `tests/step_up_confirm.rs`.
 
 use mandate_cli::control::ControlError;
 use mandate_cli::step_up::{Confirming, check, normalize};
@@ -17,7 +16,6 @@ fn refused(reason: &'static str) -> ControlError {
 
 /// DEC-2106 items 2.1 to 2.4, first failing check first, before any journal exists.
 #[test]
-#[ignore = "pending E9-4"]
 fn the_flags_are_checked_in_order_before_any_journal() {
     let base = Confirming {
         workspace: "ws1",
@@ -54,7 +52,6 @@ fn the_flags_are_checked_in_order_before_any_journal() {
 /// DEC-2106 item 2.4: the one displayed form or the bare 8, any case, `I` and `L` as `1`, `O` as
 /// `0`; nothing else.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_code_normalizes_as_the_web_app_shows_it() {
     for (typed, normal) in [
         ("ABCD-EFGH", "ABCDEFGH"),
@@ -74,7 +71,6 @@ fn a_code_normalizes_as_the_web_app_shows_it() {
 /// Any 40-bit code the web app can show normalizes to itself, displayed or bare, in either case,
 /// with any of its `0`s and `1`s typed as the letters Crockford reads as them.
 #[test]
-#[ignore = "pending E9-4"]
 fn any_shown_code_normalizes_to_itself_and_its_typed_forms_too() {
     let drawn = (0..1u64 << 40, any::<bool>(), any::<u8>(), any::<u8>());
     TestRunner::deterministic()
