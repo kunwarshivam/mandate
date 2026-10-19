@@ -9,14 +9,12 @@ use std::path::Path;
 use mandate_canon::{Digest, Value, parse};
 use mandate_domain::{AssetClass, AssetId};
 use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
-use mandate_gateway::registry::{
-    Endpoint, Identity, Locality, Registry, Reported, Route, Snapshot, Status,
-};
+use mandate_gateway::registry::{Endpoint, Locality, Registry, Reported, Route, Status};
 use mandate_num::{Price, Qty};
 use mandate_research::{AllowlistVersion, SourceAllowlist, SourceId as AllowedSource};
 use mandate_research_run::{
-    Bar, BarReader, Filing, FilingReader, InstrumentFact, InstrumentReader, ItemId, NewsItem,
-    NewsReader, OutputBounds, ReadError, ResearchEntry, RetrievalPlan, SourceId, Symbol, TextQuery,
+    Bar, BarReader, EntryError, Filing, FilingReader, InstrumentFact, InstrumentReader, ItemId,
+    NewsItem, NewsReader, ReadError, ResearchEntry, SourceId, Symbol, TextQuery,
 };
 use mandate_time::UtcNanos;
 
@@ -129,7 +127,10 @@ impl Bundle {
         let endpoint = research.member("endpoint")?;
         let caps = research.member("caps")?;
         let reply = research.member("reply")?;
-        let slug = entry.text("model_name")?;
+        let pinned = ResearchEntry::recorded(entry.value).map_err(|error| match error {
+            EntryError::Member(member) => entry.malformed(member),
+        })?;
+        let slug = pinned.identity.model_name.clone();
         let reported_provider = endpoint.text("reported_provider")?;
         let prices = PriceTable::new(
             endpoint.per_million("input_per_million")?,
@@ -163,21 +164,7 @@ impl Bundle {
         let halted = halts(&research, &plane.instruments)?;
         let allowlist = allowlist(&research)?;
         Ok(Self {
-            entry: ResearchEntry {
-                model_id: entry.text("model_id")?.to_owned(),
-                model_version: entry.text("model_version")?.to_owned(),
-                identity: Identity {
-                    provider: entry.text("provider")?.to_owned(),
-                    model_name: slug.to_owned(),
-                    snapshot: Snapshot::Dated(entry.text("snapshot")?.to_owned()),
-                    quantization: None,
-                },
-                deadline_ms: entry.int("deadline_ms")?,
-                max_output_tokens: entry.small("max_output_tokens")?,
-                seed: Some(entry.int("seed")?),
-                plan: RetrievalPlan::v0_1(),
-                bounds: OutputBounds::v0_1(),
-            },
+            entry: pinned,
             endpoint: Endpoint {
                 id: endpoint.text("id")?.to_owned(),
                 host: endpoint.text("host")?.to_owned(),
@@ -190,7 +177,7 @@ impl Bundle {
                 prices,
             },
             probe: Reported {
-                model: Some(slug.to_owned()),
+                model: Some(slug),
                 provider: Some(reported_provider.to_owned()),
             },
             workspace_cap: caps.usd6("workspace_monthly_usd")?,

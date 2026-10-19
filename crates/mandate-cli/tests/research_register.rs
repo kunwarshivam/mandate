@@ -6,7 +6,7 @@
 
 mod common;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use common::{CONTROL, FixedIds, Journal, at, owner, stream};
 use mandate_canon::{Digest, parse, to_canonical};
@@ -16,6 +16,8 @@ use mandate_cli::version::{confirm, create};
 use mandate_gateway::registry::{Identity, Snapshot};
 use mandate_journal::{ArtifactStore, Draft, Environment};
 use mandate_research_run::{OutputBounds, ResearchEntry, RetrievalPlan};
+use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, Membership};
+use mandate_spec::{Mandate, ValidationContext, Violation, validate::validate};
 
 type Store = BTreeMap<Digest, Vec<u8>>;
 
@@ -23,6 +25,9 @@ const NOW: i64 = 1_790_000_000;
 const RECORDING: &str = include_str!("../../../deploy/cell/demo/research/research.json");
 const MANDATE: &str = include_str!("../../../deploy/cell/demo/research-mandate.json");
 const MODEL: (&str, &str) = ("llm.research_agent", "0.1.0");
+/// The demo entry's content hash, written out: the one `research-mandate.json` pins, so a change to
+/// the pinned template, plan, bounds or schema, or to how the entry is read, shows here first.
+const DEMO_HASH: &str = "sha256:40f446f7858575d2c66a223f747348b3a91ef83e844e13815e527f4d181e5283";
 
 /// The demo recording's entry, typed out.
 fn entry() -> ResearchEntry {
@@ -68,7 +73,6 @@ fn recording_with(edit: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn the_research_model_is_registered_from_its_entry_with_a_recomputed_hash() {
     let (mut journal, mut store) = (Journal::default(), Store::new());
     register(
@@ -82,6 +86,7 @@ fn the_research_model_is_registered_from_its_entry_with_a_recomputed_hash() {
     let canonical = to_canonical(&entry().content().canonical());
     let hash = Digest::of(&canonical);
     assert_eq!(hash, entry().content().content_hash());
+    assert_eq!(format!("sha256:{}", hash.to_hex()), DEMO_HASH);
     assert_eq!(store.get(&hash), Some(&canonical), "the content, stored");
     let rows = journal.rows(&stream(CONTROL)).unwrap();
     let [row] = rows.as_slice() else {
@@ -113,7 +118,6 @@ fn the_research_model_is_registered_from_its_entry_with_a_recomputed_hash() {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn a_registration_that_is_not_the_research_entry_s_is_refused_before_anything_is_written() {
     let missing = |member: &'static str| {
         recording_with(move |r| {
@@ -177,8 +181,14 @@ fn reference(text: &str) -> String {
     )
 }
 
-/// Creates and confirms `document` on a control stream registering the demo's two models.
-fn confirmed(document: &str) -> Result<Submitted, ControlError> {
+/// Creates and confirms `document` on a control stream registering the demo's two models: what
+/// `confirm` answers, and the rules the document violates over that stream's registry. The rules
+/// come from a validation context this helper builds itself, folding the stream with
+/// `JournaledFact::from_record` as the spec folds it. That is not the context `confirm` builds:
+/// `confirm`'s also knows whether the connection was recorded. So the violation sets here are
+/// compared only against the confirmed mandate's own fold, and `confirm`'s answer is asserted
+/// alongside them.
+fn confirmed(document: &str) -> (Result<Submitted, ControlError>, BTreeSet<Violation>) {
     let (mut journal, mut store, mut ids) = (Journal::default(), Store::new(), FixedIds::default());
     let owner = owner();
     register_model(
@@ -198,18 +208,44 @@ fn confirmed(document: &str) -> Result<Submitted, ControlError> {
         RECORDING.as_bytes(),
     )
     .unwrap();
-    create(
+    let documents = |d: &Digest| store.get(d).map(|bytes| parse(bytes).unwrap());
+    let mut facts = Vec::new();
+    for row in journal.rows(&stream(CONTROL)).unwrap() {
+        let payload = parse(&row.body).unwrap().get("payload").unwrap().clone();
+        facts.extend(
+            JournaledFact::from_record(&row.event_type, &payload, &documents, None).unwrap(),
+        );
+    }
+    let mandate = Mandate::parse(&parse(document.as_bytes()).unwrap()).unwrap();
+    let args = ContextArgs {
+        agent: AgentId::new("demo-research"),
+        connection_id: mandate.connection_id.clone(),
+        validation_date: at(NOW).at.date(),
+        membership: Some(Membership {
+            workspace_users: 1,
+            approver_users: 1,
+        }),
+        independent_approval_required: false,
+        instrument_groups: BTreeMap::new(),
+        eligibility_failures: BTreeSet::new(),
+    };
+    let context = ValidationContext::from_journal(&mandate, args, &facts).unwrap();
+    let violations = validate(&mandate, &context).unwrap().violations;
+    let created = create(
         &mut journal,
         &mut store,
         &owner,
         document.as_bytes(),
         at(NOW),
-    )?;
+    );
+    if let Err(refusal) = created {
+        return (Err(refusal), violations);
+    }
     let version = reference(document);
     let gesture = format!(r#"{{"gesture":"mandate_confirm","mandate_version":"{version}"}}"#);
     let code =
         Digest::of(&to_canonical(&parse(gesture.as_bytes()).unwrap())).to_hex()[..8].to_owned();
-    confirm(
+    let answer = confirm(
         &mut journal,
         &mut store,
         &mut ids,
@@ -217,7 +253,8 @@ fn confirmed(document: &str) -> Result<Submitted, ControlError> {
         &version,
         &code,
         at(NOW),
-    )
+    );
+    (answer, violations)
 }
 
 /// The demo's research mandate with `edit` applied to its signal models, kept sorted by id as
@@ -231,13 +268,19 @@ fn models_with(edit: impl FnOnce(&mut Vec<serde_json::Value>)) -> String {
 }
 
 /// The demo's research mandate confirms over its two registrations, the research model's admitted
-/// by its recomputed hash. V-007 still refuses a hash other than the registered one, and V-036
-/// still refuses a second admitting `llm.` model, an `llm.` model that admits nothing under a
-/// research envelope, and a quant model that claims to admit.
+/// by its recomputed hash. Each case below is refused, and adds exactly the rules it names to what
+/// the confirmed mandate's bare fold already reports: V-007 for a hash other than the registered
+/// one, V-007 and V-036 for a second admitting `llm.` model (it is also unregistered), and V-036
+/// for an `llm.` model admitting nothing under a research envelope or a quant model claiming to
+/// admit. A regression in one rule cannot hide behind another.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_demo_research_mandate_confirms_and_v_007_and_v_036_still_refuse() {
-    confirmed(MANDATE).unwrap();
+    let (answer, base) = confirmed(MANDATE);
+    answer.unwrap();
+    assert!(
+        !base.contains(&Violation::V007) && !base.contains(&Violation::V036),
+        "{base:?}"
+    );
     let research = |models: &mut Vec<serde_json::Value>| {
         models
             .iter_mut()
@@ -248,6 +291,7 @@ fn the_demo_research_mandate_confirms_and_v_007_and_v_036_still_refuse() {
     let cases = [
         (
             "a hash other than the registration's",
+            &[Violation::V007][..],
             models_with(|models| {
                 let model = models.iter_mut().find(|m| m["id"] == MODEL.0).unwrap();
                 model["content_hash"] = serde_json::json!(format!("sha256:{}", "4".repeat(64)));
@@ -255,6 +299,7 @@ fn the_demo_research_mandate_confirms_and_v_007_and_v_036_still_refuse() {
         ),
         (
             "a second admitting llm model",
+            &[Violation::V007, Violation::V036][..],
             models_with(|models| {
                 let mut second = research(models);
                 second["id"] = serde_json::json!("llm.second_agent");
@@ -263,6 +308,7 @@ fn the_demo_research_mandate_confirms_and_v_007_and_v_036_still_refuse() {
         ),
         (
             "an llm model admitting nothing under a research envelope",
+            &[Violation::V036][..],
             models_with(|models| {
                 let model = models.iter_mut().find(|m| m["id"] == MODEL.0).unwrap();
                 model["admits_instruments"] = serde_json::json!(false);
@@ -270,6 +316,7 @@ fn the_demo_research_mandate_confirms_and_v_007_and_v_036_still_refuse() {
         ),
         (
             "a quant model claiming to admit",
+            &[Violation::V036][..],
             models_with(|models| {
                 let model = models
                     .iter_mut()
@@ -279,7 +326,10 @@ fn the_demo_research_mandate_confirms_and_v_007_and_v_036_still_refuse() {
             }),
         ),
     ];
-    for (case, document) in cases {
-        assert_eq!(refused(confirmed(&document)), "version_invalid", "{case}");
+    for (case, named, document) in cases {
+        let (answer, violations) = confirmed(&document);
+        assert_eq!(refused(answer), "version_invalid", "{case}");
+        let added: BTreeSet<Violation> = violations.difference(&base).copied().collect();
+        assert_eq!(added, named.iter().copied().collect(), "{case}");
     }
 }
