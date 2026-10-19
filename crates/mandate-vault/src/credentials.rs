@@ -117,14 +117,6 @@ fn check_for(dir: &Path, identities: &[Identity]) -> Result<bool, SourceError> {
     Ok(true)
 }
 
-/// Checks, before any vault is reached, that [`write_credentials`] would accept `dir` for the
-/// credentials [`crate::openbao::provision`] issues for `connections`: the directory holding
-/// `dir`, `dir` itself when it exists, and each output name in it, by the same rules. An absent
-/// `dir` passes and is not made. A refusal here leaves no secret id issued and unwritten.
-pub fn check_credential_dir(_dir: &Path, _connections: &[ConnectionId]) -> Result<(), SourceError> {
-    Err(SourceError::Unimplemented { story: "E21-32" })
-}
-
 /// Writes `value` to `dir/name` as a plain file of mode 0600 that replaces whatever is there.
 ///
 /// A plain file named `.<name>.<anything>.tmp`, which only a crashed earlier write leaves, is
