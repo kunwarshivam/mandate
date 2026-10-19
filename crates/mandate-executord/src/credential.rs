@@ -8,19 +8,14 @@
 //! process takes the account stream (`AGENTS.md` rules 3 and 7).
 
 use mandate_alpaca::Credentials;
+use mandate_canon::{Value, parse};
 use mandate_connections::record::ConnectionId;
 use mandate_executor::AccountScope;
+use mandate_journal::StreamId;
 use mandate_store::Store;
 use mandate_vault::SourceError;
 use mandate_vault::lease::{Lease, LeaseKeeper};
-
-/// The code every stub of this story's tests PR returns, so every pending test fails at it
-/// (DEC-77); the implementation PR replaces the stubs and removes it.
-#[allow(
-    non_upper_case_globals,
-    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
-)]
-pub const Unimplemented: &str = "unimplemented";
+use secrecy::ExposeSecret;
 
 /// Which broker the process runs over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,8 +32,11 @@ pub enum BrokerChoice {
 /// # Errors
 /// `broker_unknown`.
 pub fn broker_choice(flag: Option<&str>) -> Result<BrokerChoice, &'static str> {
-    let _ = flag;
-    Err(Unimplemented)
+    match flag {
+        None | Some("fixture") => Ok(BrokerChoice::Fixture),
+        Some("alpaca-paper") => Ok(BrokerChoice::AlpacaPaper),
+        Some(_) => Err("broker_unknown"),
+    }
 }
 
 /// The connection the account stream's latest connect check passed for: the
@@ -51,8 +49,35 @@ pub fn checked_connection<S: Store>(
     store: &S,
     scope: &AccountScope,
 ) -> Result<ConnectionId, &'static str> {
-    let _ = (store, scope);
-    Err(Unimplemented)
+    let stream = StreamId::parse(&format!("acct:{}:{}", scope.workspace.0, scope.account.0))
+        .ok_or("stream_unavailable")?;
+    let rows = store.rows(&stream).ok_or("stream_unavailable")?;
+    let latest = rows
+        .iter()
+        .rev()
+        .find(|row| row.event_type == "ConnectionChecked")
+        .ok_or("connection_unchecked")?;
+    let payload = parse(&latest.body)
+        .ok()
+        .and_then(|body| body.get("payload").cloned())
+        .ok_or("connection_record_unreadable")?;
+    let passed = payload
+        .get("results")
+        .and_then(Value::as_array)
+        .is_some_and(|results| {
+            !results.is_empty()
+                && results
+                    .iter()
+                    .all(|result| result.get("result").and_then(Value::as_str) == Some("passed"))
+        });
+    if !passed {
+        return Err("connection_unchecked");
+    }
+    payload
+        .get("connection_id")
+        .and_then(Value::as_str)
+        .and_then(|id| ConnectionId::new(id).ok())
+        .ok_or("connection_record_unreadable")
 }
 
 /// The paper credentials `lease` holds, with the keeper that renews it.
@@ -63,6 +88,8 @@ pub fn checked_connection<S: Store>(
 pub fn paper_credentials(
     lease: Result<Lease, SourceError>,
 ) -> Result<(Credentials, LeaseKeeper), &'static str> {
-    let _ = lease;
-    Err(Unimplemented)
+    let lease = lease.map_err(|_| "credential_unavailable")?;
+    let credentials = Credentials::from_vault_secret(lease.secret.expose_secret())
+        .map_err(|_| "credential_malformed")?;
+    Ok((credentials, LeaseKeeper::new(lease)))
 }

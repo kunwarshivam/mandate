@@ -98,7 +98,6 @@ fn vault_secret(key_id: &str, secret: &str) -> Vec<u8> {
 /// DEC-2306 item 1: no flag and `fixture` are the fixture, `alpaca-paper` is the paper host, and
 /// any other value, a live one included, is refused rather than guessed.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_run_configuration_names_the_broker() {
     assert_eq!(broker_choice(None), Ok(BrokerChoice::Fixture));
     assert_eq!(broker_choice(Some("fixture")), Ok(BrokerChoice::Fixture));
@@ -118,7 +117,6 @@ fn the_run_configuration_names_the_broker() {
 /// DEC-2306 item 3: the connection is the one the latest connect check passed for. None, or a
 /// latest check that failed, leaves the executor with no connection to lease.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_connection_is_the_one_the_latest_check_passed_for() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     assert_eq!(
@@ -147,7 +145,6 @@ fn the_connection_is_the_one_the_latest_check_passed_for() -> Result<(), Error> 
 /// holds the lease to renew. A refused lease or a secret that does not read refuses the start,
 /// and neither refusal names the secret.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_lease_holds_the_credentials_or_refuses_the_start() -> Result<(), Error> {
     let expected = Credentials::from_lookup(|name| match name {
         KEY_ID_VAR => Some(KEY_ID.to_owned()),
