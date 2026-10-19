@@ -261,18 +261,18 @@ pub(crate) fn text(value: &str) -> Value {
     Value::Str(value.to_owned())
 }
 
-fn digest(value: &Digest) -> Value {
+pub(crate) fn digest(value: &Digest) -> Value {
     Value::Str(format!("sha256:{value}"))
 }
 
-fn int(value: u64) -> Result<Value, ResearchRunError> {
+pub(crate) fn int(value: u64) -> Result<Value, ResearchRunError> {
     Int::new(value)
         .map(Value::Int)
         .ok_or(ResearchRunError::InvalidId { what: "length" })
 }
 
 /// `cut_off − window_s`, the oldest knowledge time a read keeps.
-fn window_start(cut_off: UtcNanos, window_s: u32) -> Result<UtcNanos, ResearchRunError> {
+pub(crate) fn window_start(cut_off: UtcNanos, window_s: u32) -> Result<UtcNanos, ResearchRunError> {
     cut_off
         .secs()
         .checked_sub(i64::from(window_s))
@@ -281,7 +281,7 @@ fn window_start(cut_off: UtcNanos, window_s: u32) -> Result<UtcNanos, ResearchRu
 }
 
 /// The longest prefix of `text` at most `budget` bytes long that ends on a character boundary.
-fn cut(text: &str, budget: usize) -> &str {
+pub(crate) fn cut(text: &str, budget: usize) -> &str {
     let end = (0..=budget.min(text.len()))
         .rev()
         .find(|end| text.is_char_boundary(*end))
@@ -296,24 +296,24 @@ const FORM_BYTES: usize = 32;
 /// The id prefixes the platform derives its own items' ids under (`RetrievedItem::item_id`).
 const RESERVED_PREFIXES: [&str; 2] = ["bar:", "instrument:"];
 
-fn reserved(id: &ItemId) -> bool {
+pub(crate) fn reserved(id: &ItemId) -> bool {
     RESERVED_PREFIXES
         .iter()
         .any(|prefix| id.as_str().starts_with(prefix))
 }
 
 /// What every text read shares: a window, an allowlist, a scope, a cap, and a byte bound.
-struct TextRead<'a> {
-    scope: &'a Scope,
-    symbols: &'a BTreeSet<Symbol>,
-    window_start: UtcNanos,
-    max_items: u32,
-    kind: ItemKind,
+pub(crate) struct TextRead<'a> {
+    pub(crate) scope: &'a Scope,
+    pub(crate) symbols: &'a BTreeSet<Symbol>,
+    pub(crate) window_start: UtcNanos,
+    pub(crate) max_items: u32,
+    pub(crate) kind: ItemKind,
 }
 
 impl TextRead<'_> {
     /// The first filter an item fails, in a fixed order, or `None` when it is kept.
-    fn refusal(
+    pub(crate) fn refusal(
         &self,
         knowledge_at: UtcNanos,
         source: &SourceId,
@@ -357,7 +357,7 @@ impl TextRead<'_> {
         kept.split_off(over)
     }
 
-    fn query(&self, symbols: &BTreeSet<Symbol>) -> TextQuery {
+    pub(crate) fn query(&self, symbols: &BTreeSet<Symbol>) -> TextQuery {
         TextQuery {
             workspace: self.scope.workspace.clone(),
             symbols: symbols.clone(),
