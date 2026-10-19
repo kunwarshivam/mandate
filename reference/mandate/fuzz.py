@@ -9,6 +9,9 @@ from ref import D
 import bases as base
 
 rng = random.Random(int(sys.argv[1]) if len(sys.argv) > 1 else 7)
+# The corporate-action draws added for MI-33 take their own stream, so the walks every other invariant
+# was tuned on stay exactly as they were for each seed.
+action_rng = random.Random((int(sys.argv[1]) if len(sys.argv) > 1 else 7) + 1_000_003)
 FAIL = []
 
 def check(ok, name, ctx):
@@ -34,6 +37,8 @@ def rand_mandate(cls):
                                 {"at": "0.08", "action": "flatten_and_pause", "factor": None}]
     V.validate(m)
     return m
+
+MAX_POSITION_USD = D(10000)  # rand_mandate's max_position_usd: the gate denies a buy past it, so the walk never makes one
 
 def rand_steps(cls, n, start):
     t = T(start)
@@ -64,6 +69,22 @@ def rand_steps(cls, n, start):
         elif k < 0.88:
             steps.append({"event": "owner_acknowledged", "at": at, "session": sess,
                           "restriction": rng.choice(["drawdown_ladder", "daily_loss", "lifetime_floor"])})
+        elif k < 0.92 and cls == "us_equity" and sess == "after_hours" and qty > 0:
+            new, old = rng.choice([(2, 1), (3, 2), (1, 3), (1, 10)])
+            if action_rng.random() < 0.4:
+                new, old = action_rng.choice([(7, 3), (2, 3), (1, 1000)])
+            frac = rng.random() < 0.5
+            q_raw = qty * new / old
+            qty = q_raw.quantize(D("1e-9"), rounding=ROUND_DOWN) if frac else q_raw.to_integral_value(rounding=ROUND_DOWN)
+            px = max((px * old / new).quantize(D("0.01")), D(1))
+            steps.append({"event": "corporate_action_split", "at": at, "session": sess, "new": new, "old": old,
+                          "fractionable": frac,
+                          "cash_in_lieu_price": None if qty > 0 and action_rng.random() < 0.3 else norm(px)})
+        elif k < 0.93 and cls == "us_equity" and sess == "after_hours":
+            steps.append({"event": "corporate_action_dividend", "at": at, "session": sess,
+                          "per_share": rng.choice(["0.01", "0.255", "1.5"])})
+        elif k < 0.94 and cls == "us_equity":
+            steps.append({"event": rng.choice(["cash_in_lieu_posted", "dividend_paid"]), "at": at, "session": sess})
         elif k < 0.95 and qty > 0:
             q = qty if rng.random() < 0.5 else (qty / 2).quantize(D("0.0001"))
             qty -= q
@@ -76,7 +97,9 @@ def rand_steps(cls, n, start):
             steps.append({"event": "floor_loosened", "at": at, "session": sess, "new_max_loss_from_allocation": rng.choice(["0.15", "0.3", "0.5"]),
                           "independent_approval": rng.random() < 0.5, "confirmed_at": fmt(t - timedelta(hours=rng.choice([1, 30, 60])))})
         else:
-            q = D(10 if cls == "us_equity" else "0.01")
+            q = max(D(1), (D(1000) / px).to_integral_value(rounding=ROUND_DOWN)) if cls == "us_equity" else D("0.01")
+            if (qty + q) * px > MAX_POSITION_USD:
+                continue
             qty += q
             steps.append({"event": "fill", "at": at, "session": sess, "side": "buy", "qty": norm(q), "price": norm(px.quantize(D("0.01")))})
     return steps
@@ -113,11 +136,18 @@ def run(m, cls, steps, start, L="0"):
     oracle = Oracle(rs.need)
     f_oracle = Oracle(rs.need)
     last_daily_trigger, day_after, acked = None, False, False
+    due = D(0)
     prev_t = T(start)
     for s in steps:
         before = copy.deepcopy((rs.restrictions, {k: v["active"] for k, v in rs.scale.items()}, dict(rs.latched), rs.daily))
         pre = (rs.equity(), rs.H, rs.E0, rs.C, rs.L, rs.f)
         qty_before = rs.qty
+        n_before = rs.net_contributed
+        mark_before = rs.mark
+        tick = None
+        if s["event"] in ("corporate_action_split", "corporate_action_dividend"):
+            twin = copy.deepcopy(rs)
+            tick = twin.step({"event": "clock", "at": s["at"], "session": s["session"]})
         o = rs.step(s)
         outs.append(o)
         types = [e["type"] for e in o["journal"]]
@@ -134,6 +164,42 @@ def run(m, cls, steps, start, L="0"):
             check((E1 - E01) / E01 <= (E - E0) / E0, "MI-2 daily loss fraction not lowered", (s, o))
             check((E1 - C1) / C1 <= (E - C) / C, "MI-2 return not raised", (s, o))
             check((E1 - C1 * (1 - f) - rs.L) / E1 <= (E - C * (1 - f) - Lp) / E, "MI-2 floor headroom not raised", (s, o))
+        # MI-33: a corporate action moves the risk state only by its cash, recomputed here from the step and the
+        # state before it; the oracle carries the dividends due itself
+        E_pre, H_pre, E0_pre, C_pre, L_pre, _ = pre
+        E_now = D(o["agent_equity"])
+        lifts = lambda out: [j for j in out["journal"] if j["type"] == "RiskLimitLifted"]
+        triggers = lambda out: [j for j in out["journal"] if j["type"] == "RiskLimitTriggered"]
+        if s["event"] == "corporate_action_split" and "error" not in o:
+            new_, old_ = D(s["new"]), D(s["old"])
+            q_raw = qty_before * new_ / old_
+            q2 = q_raw.quantize(D("1e-9"), rounding=ROUND_DOWN) if s["fractionable"] else q_raw.to_integral_value(rounding=ROUND_DOWN)
+            mark2 = (mark_before * old_ / new_).quantize(D("1e-12"), rounding=ROUND_DOWN)
+            cash = ((q_raw - q2) * D(s["cash_in_lieu_price"] or 0)).quantize(D("0.01"), rounding=ROUND_HALF_EVEN)
+            check(E_now - E_pre == cash + q2 * mark2 - qty_before * mark_before,
+                  "MI-33 a split moves E by its cash in lieu and Q' at the adjusted mark", (s, o))
+            check(0 <= Fraction(mark_before) * int(old_) / int(new_) - Fraction(mark2) < Fraction(1, 10**12),
+                  "MI-33 the adjusted mark is rounded toward zero at 12 places", (s, o))
+            if q2 == q_raw:
+                check(E_now <= E_pre, "MI-33 a split with no residual never raises E", (s, o))
+                check(lifts(o) == lifts(tick) and all(j in triggers(o) for j in triggers(tick)),
+                      "MI-33 a split with no residual lifts nothing a tick would not, and triggers all a tick would", (s, o, tick))
+        if s["event"] == "corporate_action_dividend" and "error" not in o:
+            due += (qty_before * D(s["per_share"])).quantize(D("0.01"), rounding=ROUND_HALF_EVEN)
+            check(E_now == E_pre and D(o["high_water_mark"]) == H_pre and o["journal"] == tick["journal"],
+                  "MI-33 a dividend changes nothing at application", (s, o, tick))
+        if (s["event"] == "mark" and "error" not in o and s.get("sane", True)
+                and (cls == "crypto" or s["session"] == "regular")):
+            check(E_now - E_pre == qty_before * (D(s["bid"]) - mark_before) + due,
+                  "MI-33 the dividends due join E with the first counted sane mark", (s, o))
+            due = D(0)
+        if s["event"] in ("corporate_action_split", "corporate_action_dividend") and "error" not in o:
+            check(D(o["day_start_equity"]) == E0_pre and D(o["capital_base"]) == C_pre and rs.L == L_pre
+                  and rs.net_contributed == n_before,
+                  "MI-33 an action moves no day start, capital base, contributed dollars or carry", (s, o))
+        if s["event"] in ("cash_in_lieu_posted", "dividend_paid") and "error" not in o:
+            check(E_now == E_pre and D(o["high_water_mark"]) == H_pre,
+                  "MI-33 posting a receivable moves no USD measure", (s, o))
         # MI-3
         if s["event"] == "risk_day_started" and last_daily_trigger is not None:
             day_after = True
@@ -242,6 +308,38 @@ def fuzz_risk(n_runs):
         strip = lambda o: {x: y for x, y in o.items() if x != "pending"}
         check([strip(a[i]) for i in keep] == [strip(x) for x in c], "MI-13 no-event ticks are replay-safe", k)
     check(RELEASES[0] > 0, "the fuzz exercised a release (DEC-270)", RELEASES[0])
+
+def fuzz_split_boundaries(n_runs):
+    """MI-33 at the boundaries the general walk rarely lands on: a mark that puts E exactly at a rung, the daily loss
+    or the floor, then a split with no residual whose old / new does not terminate, while the limit's confirmation is
+    counting. The walk with the split and its twin with a tick in place of the split must trigger the same limits at
+    every later step, and the split's walk may lift nothing the twin does not."""
+    lifts = lambda out: [j for j in out["journal"] if j["type"] == "RiskLimitLifted"]
+    triggers = lambda out: [j for j in out["journal"] if j["type"] == "RiskLimitTriggered"]
+    for k in range(n_runs):
+        m = rand_mandate("us_equity")
+        r = m["risk"]
+        levels = [D(x["at"]) for x in r["drawdown_ladder"]] + [D(r["max_daily_loss"]),
+                                                               D(m["capital"]["max_loss_from_allocation"])]
+        bid = 100 * (1 - rng.choice(levels))
+        new, old = rng.choice([(3, 2), (7, 3), (3, 1), (7, 1), (9, 7), (11, 3)])
+        start = "2026-09-21T13:35:00.000000000Z"
+        t0 = T(start) + timedelta(minutes=1)
+        wait = max(r["breach_confirm_s"], 1)
+        at_split = t0 + timedelta(seconds=rng.randint(1, wait))
+        later = [t0 + timedelta(seconds=wait + rng.choice([0, 1, 5])), t0 + timedelta(seconds=2 * wait + 30)]
+        first = {"event": "mark", "at": fmt(t0), "bid": norm(bid), "session": "regular", "sane": True}
+        tail = [{"event": "clock", "at": fmt(x), "session": "regular"} for x in later]
+        split = {"event": "corporate_action_split", "at": fmt(at_split), "session": "regular", "new": new, "old": old,
+                 "fractionable": False, "cash_in_lieu_price": None}
+        tick = {"event": "clock", "at": fmt(at_split), "session": "regular"}
+        a = run(m, "us_equity", [first, split] + tail, start)
+        b = run(m, "us_equity", [first, tick] + tail, start)
+        for i in range(1, len(a)):
+            check(all(j in triggers(a[i]) for j in triggers(b[i])) and all(j in lifts(b[i]) for j in lifts(a[i])),
+                  "MI-33 at a boundary a split triggers all a tick would and lifts nothing more", (k, i, a[i], b[i]))
+        check(set(b[-1]["restrictions"]) <= set(a[-1]["restrictions"]),
+              "MI-33 at a boundary a split leaves every restriction a tick would", (k, a[-1], b[-1]))
 
 def fuzz_stepped_lift(n_runs):
     """§5.8's stepped lift, which the general walk rarely reaches: latch the exits_only rung, acknowledge, then wander
@@ -2429,6 +2527,7 @@ if __name__ == "__main__":
     fuzz_admission(300)
     fuzz_expiry(400)
     fuzz_lineage(300)
+    fuzz_split_boundaries(400)
     fuzz_pinning(400)
     fuzz_gate_universe(200)
     fuzz_autonomy(3000)
