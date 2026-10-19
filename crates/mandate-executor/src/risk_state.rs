@@ -251,6 +251,10 @@ pub struct AccountRiskFold<'c> {
     /// The last tick's clock, or the opening instant before any tick, from which the next tick
     /// crosses midnight. A mark does not move it (§5.4 starts the day at a tick).
     clock: UtcNanos,
+    /// The one instrument the risk state's position is (DEC-2308 item 4): the first a mark names.
+    /// `RiskState` holds a single position, so a row naming another instrument is one it cannot
+    /// step without moving this one's E on the other's price, and the view becomes unreadable.
+    instrument: Option<String>,
 }
 
 impl<'c> AccountRiskFold<'c> {
@@ -281,6 +285,7 @@ impl<'c> AccountRiskFold<'c> {
             tripwires,
             view,
             clock: opening.at,
+            instrument: None,
         })
     }
 
@@ -340,6 +345,19 @@ impl<'c> AccountRiskFold<'c> {
         }
     }
 
+    /// Binds the fold to the first instrument a row names, and refuses to decide a row naming any
+    /// other (DEC-2308 item 4): openings wait, exits go on (`AGENTS.md` rule 13).
+    fn bind(&mut self, instrument: &str) -> Result<(), UnreadableCause> {
+        match &self.instrument {
+            Some(bound) if bound != instrument => Err(UnreadableCause::RefusedToDecide),
+            Some(_) => Ok(()),
+            None => {
+                self.instrument = Some(instrument.to_owned());
+                Ok(())
+            }
+        }
+    }
+
     /// Steps a `MarkUpdated` at version 2 (journal spec §9.30, DEC-2305): its `bid` and `sane`
     /// become `Input::Mark` at its `risk_clock`, in the `session` the record carries and never one
     /// the calendar derives (DEC-2305 item 1), as mandate spec §5.2 reads a mark.
@@ -357,10 +375,11 @@ impl<'c> AccountRiskFold<'c> {
         row: &StoredEvent,
         payload: &Object,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
-        payload
+        let instrument = payload
             .get("instrument_id")
             .and_then(Value::as_str)
             .ok_or(UnreadableCause::Undecodable)?;
+        self.bind(instrument)?;
         let sane = match payload.get("sane") {
             Some(Value::Bool(sane)) => *sane,
             _ => return Err(UnreadableCause::Undecodable),

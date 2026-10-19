@@ -577,6 +577,15 @@ the spec invariants (DP-n) its tests cover.
     live order waits for C and the R0 re-pass (row 21).
   - **Gap (reference cases):** no mandate reference case steps an equity's after-hours or overnight
     mark; MC-R13 covers pre-market only. Add one when the mandate cases next change.
+  - **Follow-up ([DEC-2308](decisions/DEC-2308.md) item 5):** `mandate_spec::risk::RiskState` holds
+    one position, so the account risk fold binds to one instrument and makes the view unreadable on a
+    second. A multi-instrument risk state (per-instrument positions, marks, and staleness under one
+    account E and H) is a mandate spec change with its own reference cases. Until it lands, paper
+    agents run with `universe.max_instruments` 1.
+  - **Follow-up ([DEC-2308](decisions/DEC-2308.md) items 6 and 7):** the executor's mark writer
+    journals the New York midnight tick before any post-midnight mark (writer-side test), and once
+    MC-R13 gains its tick step the fold fails closed on a post-midnight mark with no tick. And
+    `Input::Mark { bid: Option<Price> }` replaces the fold's placeholder bid for a not-sane mark.
   - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
     "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
     one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which
