@@ -275,6 +275,13 @@ fn the_bundle_s_allowlist_and_halts_are_read_strictly() {
             Value::Array(vec![parse(b"7").unwrap()]),
             "halted_instruments",
         ),
+        (
+            "halted-not-a-list",
+            "halted_instruments",
+            Value::Str("MSFT".to_owned()),
+            "halted_instruments",
+        ),
+        ("allowlist-flag", "version", Value::Bool(true), "allowlist"),
     ];
     for (name, member, value, refused_as) in refused {
         assert_eq!(
@@ -287,19 +294,21 @@ fn the_bundle_s_allowlist_and_halts_are_read_strictly() {
         );
     }
 
-    let dir = copy("allowlist-negative", "", |_| {});
-    let research = fs::read_to_string(dir.join("research.json")).unwrap();
-    let negative = research.replacen(r#""version":3"#, r#""version":-3"#, 1);
-    assert_ne!(negative, research, "the fixture's version is written as 3");
-    fs::write(dir.join("research.json"), negative).unwrap();
-    assert_eq!(
-        Bundle::load(&dir),
-        Err(BundleError::Malformed {
-            file: "research.json",
-            member: ""
-        }),
-        "a negative version is not strict JSON"
-    );
+    for (name, version) in [("allowlist-negative", "-3"), ("allowlist-fraction", "3.5")] {
+        let dir = copy(name, "", |_| {});
+        let research = fs::read_to_string(dir.join("research.json")).unwrap();
+        let edited = research.replacen(r#""version":3"#, &format!(r#""version":{version}"#), 1);
+        assert_ne!(edited, research, "the fixture's version is written as 3");
+        fs::write(dir.join("research.json"), edited).unwrap();
+        assert_eq!(
+            Bundle::load(&dir),
+            Err(BundleError::Malformed {
+                file: "research.json",
+                member: ""
+            }),
+            "a version of {version} is not strict JSON"
+        );
+    }
 }
 
 /// The bundle records which of its instruments are halted at its as-of time, and a bundle that
