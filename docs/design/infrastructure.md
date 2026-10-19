@@ -260,6 +260,12 @@ journals each start, stop and crash loop on the control stream before acting (jo
 [DEC-1170](../project/decisions/DEC-1170.md)): a restart is a `ProcessStartIssued` with `cause`
 `restart`, which the bound counts, and the pause is `ProcessCrashLooped`. A kill switch never
 makes it stop a process, and a process the switch covers that is down is started at once.
+It reads a deployment's account from the control stream alone: a version-2 `AgentDeployed` names
+its connection, and that connection's version-2 `ConnectionEstablished` earlier on the stream, not
+revoked since, names the account (journal spec §9.24, [DEC-1171](../project/decisions/DEC-1171.md)).
+A version-1 deployment names no connection, so nothing starts for it and the manager raises
+`deployment_unread`; the owner stops it and deploys a new agent id
+([DEC-1173](../project/decisions/DEC-1173.md)).
 In the cell it is its own process, `mandate-deployd` ([DEC-1172](../project/decisions/DEC-1172.md)),
 the one pod with a service-account token. Its namespaced Role creates, reads, lists and deletes
 pods and nothing else, only its pod may reach the API server, and its egress gate proves its policy
@@ -716,6 +722,7 @@ are authoritative; a few come from metrics.
 | Vault lease renewal failing | Executor metrics | SEV-2 | RB-12 |
 | Broker API errors, rate limits, or outage | Connector metrics | SEV-2 | RB-13 |
 | Crash loop; agent left paused | Deployment manager | SEV-2 | RB-14 |
+| A version-1 deployment the manager cannot run (`deployment_unread`) | Deployment manager ([DEC-1173](../project/decisions/DEC-1173.md)) | SEV-3 | RB-14 |
 | Approval not delivered | Approval service | SEV-2 (07) | RB-15 |
 | Backup failed; drill overdue or failed | Backup job metrics; the drill events E21-25 defines | SEV-2 | RB-16 |
 
