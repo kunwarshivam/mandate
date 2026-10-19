@@ -282,6 +282,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         }),
         step_up: Arc::new(Unbound),
         challenges: Arc::new(Challenges::default()),
+        connect: None,
     };
     let api = spawn_listener(
         serve(
