@@ -5,6 +5,8 @@ use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
 use mandate_risk::GatePass;
 
+use mandate_num::{Price, Qty};
+
 use crate::batch::{Batch, config_refs};
 use crate::codec::{order_type_name, purpose_name, side_name, tif_name};
 use crate::error::ExecutorError;
@@ -12,18 +14,18 @@ use crate::gate::{
     PartialGateDecision, Proposal, SESSION_CLOSED, SESSION_UNKNOWN, UNPRICED, binding_checks,
 };
 use crate::ids::{ClientOrderId, IntentId};
-use crate::kill::is_flatten;
+use crate::kill::{confirmed_bid, is_flatten};
 use crate::payload::{int, text};
 use crate::protection::{
     ExitPrice, alone, awaits_cancel, begin_exit, crypto_add, exit_limit, fallback, passive_exit,
-    reprotect_unpriced, rests,
+    reference_price, reprotect_unpriced, rests,
 };
 use crate::session::{closed_hold, extended_hours};
 use crate::shape::offers_bracket;
 use crate::state::IntentOutcome;
 use crate::types::{
-    AgentId, BracketLegs, BrokerRequest, EventId, GateVerdict, IntentBody, IntentHandoff,
-    OrderType, ProtectionPrices, Purpose, SubmitOrder, TimeInForce,
+    AgentId, BracketLegs, BrokerRequest, EventId, GateVerdict, HandedConfirmation, IntentBody,
+    IntentHandoff, OrderType, ProtectionPrices, Purpose, SubmitOrder, TimeInForce,
 };
 
 /// `Input::Intent`: deduplicated by the fold lookup, journaled as `IntentReceived`, then gated.
@@ -37,12 +39,23 @@ pub(crate) fn received(
     }
     let IntentBody::Order {
         instrument,
+        qty,
         protection,
+        limit,
+        purpose,
         ..
     } = &handoff.body
     else {
         return flatten_plan();
     };
+    if limit.is_none() && purpose.adds_risk() {
+        return Err(ExecutorError::NonCanonicalPayload {
+            field: "limit_price".to_owned(),
+        });
+    }
+    if let Some(confirmation) = &handoff.confirmation {
+        fits(confirmation, *purpose, *limit)?;
+    }
     let tif = handoff
         .tif
         .ok_or_else(|| ExecutorError::NonCanonicalPayload {
@@ -60,6 +73,13 @@ pub(crate) fn received(
         refs,
         intent_received_fields(&handoff.intent_id, &handoff.agent, &handoff.body, tif)?,
     )?;
+    if let Some(confirmation) = &handoff.confirmation {
+        batch.journal(
+            "OwnerConfirmationReceived",
+            None,
+            confirmation_fields(&handoff.intent_id, (instrument, *qty), confirmation)?,
+        )?;
+    }
     if let Some(prices) = protection {
         batch.journal(
             "ProtectionChanged",
@@ -68,6 +88,58 @@ pub(crate) fn received(
         )?;
     }
     gate_and_submit(batch, &handoff.intent_id)
+}
+
+/// DEC-2040 item 1: a confirmation only for an owner's exit, with a positive bid size, and never
+/// under a limit below its floor; anything else is non-canonical, refused before it is journaled.
+fn fits(
+    confirmation: &HandedConfirmation,
+    purpose: Purpose,
+    limit: Option<Price>,
+) -> Result<(), ExecutorError> {
+    let refuse = |field: &str| {
+        Err(ExecutorError::NonCanonicalPayload {
+            field: field.to_owned(),
+        })
+    };
+    if purpose != Purpose::OwnerExit {
+        return refuse("confirmation");
+    }
+    if confirmation.bid_size.is_zero() {
+        return refuse("bid_size");
+    }
+    if confirmation.expires_at.secs() <= 0 {
+        return refuse("expires_at");
+    }
+    if limit.is_some_and(|limit| limit < confirmation.floor) {
+        return refuse("limit_price");
+    }
+    Ok(())
+}
+
+/// `OwnerConfirmationReceived` (§9.5, DEC-2040 item 2): the owner's confirmation, journaled
+/// immediately after its intent's `IntentReceived` in the same batch (rule 248), so replay reads
+/// the bid and floor back.
+fn confirmation_fields(
+    intent: &IntentId,
+    (instrument, qty): (&InstrumentId, Qty),
+    confirmation: &HandedConfirmation,
+) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
+    let expires_at = u64::try_from(confirmation.expires_at.secs()).map_err(|_| {
+        ExecutorError::NonCanonicalPayload {
+            field: "expires_at".to_owned(),
+        }
+    })?;
+    Ok(vec![
+        ("intent_id", text(intent.0.0.clone())),
+        ("instrument_id", text(instrument.as_str())),
+        ("qty", text(qty.to_string())),
+        ("bid", text(confirmation.bid.to_string())),
+        ("bid_size", text(confirmation.bid_size.to_string())),
+        ("floor", text(confirmation.floor.to_string())),
+        ("expires_at", int(expires_at)?),
+        ("copied_from", text(confirmation.copied_from.0.clone())),
+    ])
 }
 
 /// The `intended` `ProtectionChanged` (§9.5, DEC-446 item 5): the receipt-time protective prices
@@ -158,12 +230,13 @@ fn begin_and_submit(
         begin_exit(batch, intent)?;
     }
     match gate(batch, intent, always)? {
-        ALLOW => submit(batch, intent)?,
-        HOLD if WAITS.contains(
-            &decide(batch, intent, GatePass::BeforeSubmission)?
-                .0
-                .reason_code(),
-        ) =>
+        (ALLOW, binding) => submit(batch, intent, binding)?,
+        (HOLD, _)
+            if WAITS.contains(
+                &decide(batch, intent, GatePass::BeforeSubmission)?
+                    .0
+                    .reason_code(),
+            ) =>
         {
             reprotect_unpriced(batch, intent)?;
         }
@@ -209,9 +282,11 @@ fn decide(
             qty: *qty,
             purpose: *purpose,
             protection: *protection,
-            limit: *limit,
+            limit: limit.or_else(|| reference_price(batch, intent, instrument, *purpose)),
+            market: limit.is_none(),
             tif: order_tif(batch, instrument),
             flatten: is_flatten(&batch.view, intent),
+            owner_confirmed_bid: confirmed_bid(&batch.view, intent, batch.at()),
         },
         pass,
         batch.ports,
@@ -220,9 +295,15 @@ fn decide(
     let allowed = decision.verdict == GateVerdict::Allow;
     let closed = closed_hold(batch.ports, instrument, batch.at())
         .filter(|_| allowed && !purpose.adds_risk());
-    let unpriced = *purpose == Purpose::DiscretionaryExit
-        && allowed
-        && exit_limit(batch, intent, instrument, *purpose, *limit) == ExitPrice::Held;
+    let unpriced = allowed
+        && exit_limit(
+            batch,
+            intent,
+            instrument,
+            *purpose,
+            *limit,
+            decision.is_binding(),
+        ) == ExitPrice::Held;
     let decision = match closed {
         Some(reason) => decision.closed(reason),
         None if unpriced => decision.unpriced(),
@@ -231,15 +312,15 @@ fn decide(
     Ok((decision, *purpose))
 }
 
-/// Runs the binding gate on an intent, journals the decision, and answers its verdict name:
-/// `allow`, `hold`, or `deny`. With `always` false, a decision that does not allow is not
+/// Runs the binding gate on an intent, journals the decision, and answers its verdict name,
+/// `allow`, `hold`, or `deny`, and whether the decision read a binding snapshot. With `always` false, a decision that does not allow is not
 /// journaled again: a held intent re-checked at a tick records only the moment it is released,
 /// or a discretionary exit's terminal denial beside a plan (DEC-410 item 3).
 fn gate(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
     always: bool,
-) -> Result<&'static str, ExecutorError> {
+) -> Result<(&'static str, bool), ExecutorError> {
     let (decision, _) = decide(batch, intent, GatePass::BeforeSubmission)?;
     let verdict = decision.verdict_name();
     if verdict == ALLOW || always || decision.crowded_denial() {
@@ -263,10 +344,10 @@ fn gate(
             *qty = sized;
         }
         if let Some(paced) = decision.paced_limit() {
-            *limit = paced;
+            *limit = Some(paced);
         }
     }
-    Ok(verdict)
+    Ok((verdict, decision.is_binding()))
 }
 
 fn journal_decision(
@@ -338,7 +419,11 @@ pub(crate) fn order_tif(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Tim
 /// to price from goes at its own limit, journaled and alerted (DEC-160 (12)); a discretionary one
 /// is held before the gate allows it ([`decide`]), so one found unpriced after its allow goes the
 /// same way rather than being dropped (rule 13).
-fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorError> {
+fn submit(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    binding: bool,
+) -> Result<(), ExecutorError> {
     let (agent, body) = intent_of(batch, intent)?;
     let IntentBody::Order {
         instrument,
@@ -359,32 +444,47 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     let bracket = bracket_of(batch, &instrument, purpose, protection)?;
     let lone = !batch.view.exiting.contains_key(&instrument)
         && !rests(&batch.view, &instrument)
-        && alone(batch, &instrument, purpose, limit);
-    let limit = match exit_limit(batch, intent, &instrument, purpose, limit) {
-        ExitPrice::Own(limit) | ExitPrice::Laddered(limit) => limit,
-        ExitPrice::Fallback(limit) => {
+        && alone(
+            batch,
+            &instrument,
+            (
+                purpose,
+                confirmed_bid(&batch.view, intent, batch.at()).is_some(),
+            ),
+            limit,
+            binding,
+        );
+    let limit = match (
+        exit_limit(batch, intent, &instrument, purpose, limit, binding),
+        limit,
+    ) {
+        (ExitPrice::Own(limit) | ExitPrice::Laddered(limit), _) => Some(limit),
+        (ExitPrice::Fallback(limit), _) | (ExitPrice::Held, Some(limit)) => {
             fallback(batch, intent, &instrument, limit)?;
-            limit
+            Some(limit)
         }
-        ExitPrice::Held => {
-            fallback(batch, intent, &instrument, limit)?;
-            limit
-        }
+        (ExitPrice::Market, _) => None,
+        (ExitPrice::Held, None) => return Ok(()),
     };
     let tif = match bracket {
         Some(_) => TimeInForce::Gtc,
         None => order_tif(batch, &instrument),
     };
-    let extended_hours =
-        bracket.is_none() && extended_hours(batch.ports, &instrument, batch.at(), purpose);
+    let confirmed = confirmed_bid(&batch.view, intent, batch.at()).is_some();
+    let extended_hours = bracket.is_none()
+        && extended_hours(batch.ports, &instrument, batch.at(), (purpose, confirmed));
     let request = SubmitOrder {
         client_order_id: ClientOrderId::for_intent(intent)?,
         instrument,
         side,
         qty,
-        order_type: OrderType::Limit,
+        order_type: if limit.is_some() {
+            OrderType::Limit
+        } else {
+            OrderType::Market
+        },
         tif,
-        limit_price: Some(limit),
+        limit_price: limit,
         stop_price: None,
         bracket,
         oco: None,
@@ -576,10 +676,20 @@ pub(crate) fn intent_received_fields(
         ("agent_id", text(agent.0.clone())),
         ("instrument_id", text(instrument.as_str())),
         ("side", text(side_name(*side))),
-        ("type", text(order_type_name(OrderType::Limit))),
+        (
+            "type",
+            text(order_type_name(if limit.is_some() {
+                OrderType::Limit
+            } else {
+                OrderType::Market
+            })),
+        ),
         ("tif", text(tif_name(proposed_tif))),
         ("qty", text(qty.to_string())),
-        ("limit_price", text(limit.to_string())),
+        (
+            "limit_price",
+            limit.map_or(Value::Null, |limit| text(limit.to_string())),
+        ),
         ("purpose", text(purpose_name(*purpose))),
     ])
 }
@@ -644,31 +754,46 @@ pub(crate) fn resubmit(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<
         .get(id)
         .and_then(|order| order.intent_id.clone())
     else {
-        return send_again(batch, id);
+        return send_again(batch, id, true);
     };
     if too_old(batch, &intent) {
         return abandon(batch, &intent, "intent_too_old");
     }
     match gate(batch, &intent, true)? {
-        ALLOW => send_again(batch, id),
-        HOLD => Ok(()),
+        (ALLOW, binding) => send_again(batch, id, binding),
+        (HOLD, _) => Ok(()),
         _ => abandon(batch, &intent, "gate_recheck"),
     }
 }
 
 /// Sends the request an `OrderSubmitted` already named again, under the same id with the next
-/// attempt number.
-fn send_again(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), ExecutorError> {
+/// attempt number. A request at the market whose re-check read no `binding` snapshot goes as a
+/// limit at the ladder's first rung instead, since nothing checked a market order's caps, and
+/// waits in `Intent` with nothing to price from (DEC-2037 items 3 and 4).
+fn send_again(
+    batch: &mut Batch<'_, '_>,
+    id: &ClientOrderId,
+    binding: bool,
+) -> Result<(), ExecutorError> {
     let unknown = || ExecutorError::UnknownOrder {
         client_order_id: id.as_str().to_owned(),
     };
     let order = batch.view.orders.get(id).cloned().ok_or_else(unknown)?;
-    let request = batch
+    let mut request = batch
         .view
         .details
         .get(id)
         .and_then(|detail| detail.request.clone())
         .ok_or_else(unknown)?;
+    if !binding && request.order_type == OrderType::Market {
+        let intent = order.intent_id.as_ref().ok_or_else(unknown)?;
+        let Some(limit) = reference_price(batch, intent, &request.instrument, request.purpose)
+        else {
+            return Ok(());
+        };
+        request.order_type = OrderType::Limit;
+        request.limit_price = Some(limit);
+    }
     let attempt = order.attempt.saturating_add(1);
     send(
         batch,
@@ -721,8 +846,8 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
             abandon(batch, &intent, "intent_too_old")?;
         } else if !batch.view.orders.contains_key(&id) {
             begin_and_submit(batch, &intent, false)?;
-        } else if gate(batch, &intent, false)? == ALLOW {
-            send_again(batch, &id)?;
+        } else if let (ALLOW, binding) = gate(batch, &intent, false)? {
+            send_again(batch, &id, binding)?;
         }
     }
     Ok(())
@@ -1096,10 +1221,11 @@ mod bracket_call_tests {
                 instrument: InstrumentId::new("AAPL")?,
                 side: Side::Buy,
                 qty: Qty::parse("5")?,
-                limit: Price::parse("150")?,
+                limit: Some(Price::parse("150")?),
                 purpose: Purpose::Increase,
                 protection,
             },
+            confirmation: None,
         }))
     }
 
@@ -1277,7 +1403,7 @@ mod draft_member_tests {
                 instrument: InstrumentId::new(vector_text(payload, "instrument_id")?)?,
                 side: Side::Buy,
                 qty: Qty::parse(vector_text(payload, "qty")?)?,
-                limit: Price::parse(vector_text(payload, "limit_price")?)?,
+                limit: Some(Price::parse(vector_text(payload, "limit_price")?)?),
                 purpose: Purpose::Open,
                 protection,
             },

@@ -140,14 +140,16 @@ fn reopens(at: RiskClock) -> bool {
 /// after-hours that may trade there (§4.3) — a risk exit, a protective order or a flatten. An
 /// opening never does (§3.1), and a discretionary or an unconfirmed owner exit waits for the
 /// regular session (§5.5, §9.6): it goes as a regular-session limit, which the broker queues to
-/// that session (§5.2), rule 13's broker hold.
+/// that session (§5.2), rule 13's broker hold. An owner exit the owner `confirmed` goes there too
+/// (§5.5, DEC-2040 item 3, amending DEC-260 (13)).
 pub(crate) fn extended_hours(
     ports: &Ports<'_>,
     instrument: &InstrumentId,
     at: RiskClock,
-    purpose: Purpose,
+    (purpose, confirmed): (Purpose, bool),
 ) -> bool {
-    purpose.exempt_from_pacing() && venue(ports, instrument, at) == Venue::Extended
+    let trades_there = purpose.exempt_from_pacing() || confirmed && purpose == Purpose::OwnerExit;
+    trades_there && venue(ports, instrument, at) == Venue::Extended
 }
 
 /// The second from which a resting stop can trigger at `at` (§5.4: stops do not trigger in
@@ -272,7 +274,7 @@ mod venue_tests {
                 Purpose::Open,
             ] {
                 assert!(
-                    !extended_hours(&ports, &aapl, at(closed), purpose),
+                    !extended_hours(&ports, &aapl, at(closed), (purpose, false)),
                     "never extended-hours overnight or closed (DEC-30): {purpose:?} at {closed}"
                 );
             }
@@ -287,12 +289,12 @@ mod venue_tests {
             (Purpose::Increase, false),
         ] {
             assert_eq!(
-                extended_hours(&ports, &aapl, at(CLOSE), purpose),
+                extended_hours(&ports, &aapl, at(CLOSE), (purpose, false)),
                 expected,
                 "{purpose:?} in after-hours"
             );
             assert!(
-                !extended_hours(&ports, &aapl, at(OPEN), purpose),
+                !extended_hours(&ports, &aapl, at(OPEN), (purpose, false)),
                 "{purpose:?}"
             );
         }
@@ -351,7 +353,12 @@ mod venue_tests {
         for secs in [PRE_MARKET - 1, CLOSE_WINDOW, CLOSE, SATURDAY] {
             assert_eq!(venue(&ports, &coin, at(secs)), Venue::Regular, "at {secs}");
             assert_eq!(stops_trigger_since(&ports, &coin, at(secs)), Some(i64::MIN));
-            assert!(!extended_hours(&ports, &coin, at(secs), Purpose::RiskExit));
+            assert!(!extended_hours(
+                &ports,
+                &coin,
+                at(secs),
+                (Purpose::RiskExit, false)
+            ));
         }
         assert!(same_session(&ports, &coin, at(CLOSE - 1), at(SATURDAY)));
         Ok(())

@@ -8,10 +8,12 @@
 
 mod common;
 
+use std::collections::BTreeMap;
+
 use clap::Parser;
 use common::{ACCOUNT, AGENT, ASKED_AT, CONTROL, FixedIds, Fixture, OWNER, at, body, member};
 use common::{member_text, owner};
-use mandate_canon::Value;
+use mandate_canon::{Digest, Value};
 use mandate_cli::agent::{Command as Owned, Confirmed, RELEASE_WARNING, Restriction, Status, code};
 use mandate_cli::brake::AgentCommand;
 use mandate_cli::control::ControlError;
@@ -64,6 +66,11 @@ fn parsed(args: &[&str]) -> clap::error::Result<AgentCommand> {
     parsed_as(args, ["ws1", OWNER, "paper"], dsn, "/work/store")
 }
 
+/// The artifact store a command answers from: these agents' deployments are never read from one.
+fn no_store() -> BTreeMap<Digest, Vec<u8>> {
+    BTreeMap::new()
+}
+
 /// [`answer`] for [`AGENT`] at `ASKED_AT + n`, panicking with anything but lines.
 fn answered(
     fx: &mut Fixture,
@@ -73,8 +80,17 @@ fn answered(
     n: usize,
 ) -> Vec<String> {
     let now = at(ASKED_AT + i64::try_from(n).unwrap());
-    answer(&mut fx.journal, ids, &owner(), AGENT, command, typed, now)
-        .unwrap_or_else(|e| panic!("{command:?} answers, not: {e}"))
+    answer(
+        &mut fx.journal,
+        &no_store(),
+        ids,
+        &owner(),
+        AGENT,
+        command,
+        typed,
+        now,
+    )
+    .unwrap_or_else(|e| panic!("{command:?} answers, not: {e}"))
 }
 
 fn controls(fx: &Fixture) -> Vec<Value> {
@@ -353,6 +369,7 @@ fn a_wrong_code_refuses_a_resume_or_stop_and_commits_nothing() {
         let typed = Typed::Commit(Some("not-the-code"));
         match answer(
             &mut fx.journal,
+            &no_store(),
             &mut ids,
             &owner(),
             AGENT,
@@ -445,6 +462,7 @@ fn an_exit_with_an_unusable_bid_confirmation_is_refused_and_commits_nothing() {
         for typed in [Typed::Show, Typed::Commit(None)] {
             match answer(
                 &mut fx.journal,
+                &no_store(),
                 &mut ids,
                 &owner(),
                 AGENT,

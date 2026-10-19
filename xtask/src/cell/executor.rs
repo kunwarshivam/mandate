@@ -1,7 +1,9 @@
 //! The `executor` drill (E21-30, DEC-2035): an agent deployed on a recorded paper connection, and
-//! the deployment manager starting that account's executor, which the drill waits on until its
-//! `readyz` passes. Paper and fixtures only: the connect check and the executor reach the
-//! in-process fixture broker (DEC-2007), and no credential is read.
+//! the deployment manager starting that account's executor, which the drill waits on until its pod
+//! runs and its process answers `livez`. Not `readyz`: the executor is ready only once a scheduler
+//! tick lets it start and reconcile, and the cell builds no scheduler yet (`processes.json`), so no
+//! tick is ever journaled there. Paper and fixtures only: the connect check and the executor reach
+//! the in-process fixture broker (DEC-2007), and no credential is read.
 //!
 //! Three one-off Jobs, each a fresh `/work`: the executor's connect check (`checked <event id>`);
 //! the workspace opened and founded, and the connection's record shown (`code <code>`); then the
@@ -28,11 +30,19 @@ pub const CONNECTION: &str = "conn_demo_paper_01";
 const JOURNAL: &str = "$(MANDATE_JOURNAL_DSN)";
 const STORE: &str = "/work/store";
 const INPUTS: &str = "/in";
-/// The polls, two seconds apart, for the manager's executor pod to pass `readyz`; a seeded run
-/// waits all of them before it names the pod missing.
+/// The polls, two seconds apart, for the manager's executor pod to run and answer `livez`; a
+/// seeded run waits all of them before it names the pod missing.
 const POLLS: u32 = 45;
 const MANAGED_BY: &str = "app.kubernetes.io/managed-by=mandate-deploy-manager";
 const SUBJECT: &str = "mandate.dev/subject";
+/// The executor's own probe, as its pod's `livez` probe runs it (`processes.json`, DEC-994 item 5).
+const LIVEZ: [&str; 5] = [
+    "/usr/local/bin/mandate-executord",
+    "probe",
+    "livez",
+    "--probe",
+    "/tmp/process.sock",
+];
 
 /// The run's workspace: a ULID, fresh for each run id, since the manager and API host only a ULID
 /// and a confirmed version refuses a second confirmation.
@@ -127,6 +137,20 @@ fn record(workspace: &str, account: &str, checked: &str, code: Option<&str>) -> 
 
 /// The second Job's gestures: the workspace opened and founded, and the record shown.
 pub fn opening(workspace: &str, account: &str, checked: &str) -> Vec<Gesture> {
+    let mut all = workspace_opened(workspace);
+    all.push(gesture(
+        3,
+        "the connection's record and its code, shown (nothing committed)",
+        record(workspace, account, checked, None),
+        "code ".into(),
+    ));
+    all
+}
+
+/// The workspace's paper control stream, opened, and the founder's membership: what both runs
+/// need before the deployment's gestures, the seeded run included, so its only difference is the
+/// connection left unrecorded.
+pub fn workspace_opened(workspace: &str) -> Vec<Gesture> {
     let target = ["--journal", JOURNAL, "--store", STORE];
     let open = [
         "workspace",
@@ -156,12 +180,6 @@ pub fn opening(workspace: &str, account: &str, checked: &str) -> Vec<Gesture> {
             "the founder's membership",
             strings(&[&found[..], &["--method", "oidc"], &target].concat()),
             format!("founded ctl:{workspace} for member {FOUNDER}"),
-        ),
-        gesture(
-            3,
-            "the connection's record and its code, shown (nothing committed)",
-            record(workspace, account, checked, None),
-            "code ".into(),
         ),
     ]
 }
@@ -236,18 +254,21 @@ pub fn deployment(
 }
 
 /// The manager's executor pod for `account` in `pods` (a `kubectl get pods -o json` list): `None`
-/// when there is none, else whether it is ready.
-pub fn executor_ready(pods: &Value, account: &str) -> Option<bool> {
+/// when there is none, else its name once it is `Running` with every container started, and `None`
+/// inside while it is not.
+pub fn executor_running(pods: &Value, account: &str) -> Option<Option<String>> {
     let pod = pods["items"]
         .as_array()?
         .iter()
         .find(|p| p["metadata"]["annotations"][SUBJECT] == account)?;
+    let statuses = pod["status"]["containerStatuses"].as_array();
+    let started =
+        statuses.is_some_and(|all| !all.is_empty() && all.iter().all(|c| c["started"] == true));
+    let running = pod["status"]["phase"] == "Running" && started;
     Some(
-        pod["status"]["conditions"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|c| c["type"] == "Ready" && c["status"] == "True"),
+        running
+            .then(|| pod["metadata"]["name"].as_str().map(str::to_owned))
+            .flatten(),
     )
 }
 
@@ -271,6 +292,12 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         ),
     ];
     let recorded = if seeded {
+        let (done, logs) = gestures(&id, "o", &workspace_opened(&workspace), &files)?;
+        if !done {
+            return Ok(Verdict::Broken(format!(
+                "the workspace failed to open:\n{logs}"
+            )));
+        }
         None
     } else {
         let check = render(
@@ -314,7 +341,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         )));
     }
     let selector = format!("{MANAGED_BY},mandate.dev/process=executor");
-    let mut ready = None;
+    let mut found = None;
     for _ in 0..POLLS {
         let pods = kubectl(&[
             "get",
@@ -326,21 +353,28 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
             "-o",
             "json",
         ])?;
-        ready = executor_ready(
+        found = executor_running(
             &serde_json::from_str(&pods).context("the executor pods")?,
             &account,
         );
-        if ready == Some(true) {
-            eprintln!("    the manager's executor for account {account} is ready");
-            return Ok(Verdict::Held);
+        if let Some(Some(pod)) = &found {
+            let mut exec = vec!["exec", "--namespace", NAMESPACE, pod.as_str(), "--"];
+            exec.extend(LIVEZ);
+            if kubectl(&exec).is_ok() {
+                eprintln!(
+                    "    the manager's executor for account {account} runs and is live; not ready \
+                     until a scheduler tick, and the cell builds no scheduler yet"
+                );
+                return Ok(Verdict::Held);
+            }
         }
         sleep(Duration::from_secs(2));
     }
-    Ok(Verdict::Broken(match ready {
+    Ok(Verdict::Broken(match found {
         None => {
             format!("no executor pod for account {account}: the deployment manager started none")
         }
-        Some(_) => format!("the executor pod for account {account} never passed readyz"),
+        Some(_) => format!("the executor pod for account {account} never ran and answered livez"),
     }))
 }
 
@@ -365,6 +399,7 @@ fn gestures(
         &all,
         &format!("executor-in-{id}{suffix}"),
         files,
+        NAMESPACE,
     )?)
 }
 
@@ -425,16 +460,44 @@ mod tests {
         assert_eq!(unique.len(), names.len(), "{names:?}");
     }
 
+    /// Both runs open the workspace's control stream and found its member before the deployment,
+    /// so the seeded run reaches the deployment manager and differs only by the missing record.
     #[test]
-    fn the_executor_is_found_by_its_account_and_readiness() {
-        let pod = |subject: &str, ready: &str| {
-            json!({"metadata": {"annotations": {SUBJECT: subject}},
-                   "status": {"conditions": [{"type": "Ready", "status": ready}]}})
+    fn both_runs_open_the_workspace_first() {
+        let opened = workspace_opened("w");
+        let heads: Vec<_> = opened.iter().map(|g| g.args[..2].to_vec()).collect();
+        assert_eq!(heads, [["workspace", "open"], ["workspace", "found"]]);
+        let full = opening("w", "a", "c");
+        assert_eq!(full.len(), opened.len() + 1);
+        for (a, b) in full.iter().zip(&opened) {
+            assert_eq!(a.args, b.args);
+        }
+        assert_eq!(full.last().unwrap().args[..2], ["connection", "record"]);
+    }
+
+    #[test]
+    fn the_executor_is_found_by_its_account_once_it_runs() {
+        let pod = |subject: &str, phase: &str, started: bool| {
+            json!({"metadata": {"name": format!("executor-{subject}"),
+                                "annotations": {SUBJECT: subject}},
+                   "status": {"phase": phase,
+                              "containerStatuses": [{"name": "executor", "started": started}]}})
         };
-        let pods = json!({"items": [pod("other", "True"), pod("acct", "False")]});
-        assert_eq!(executor_ready(&pods, "acct"), Some(false));
-        assert_eq!(executor_ready(&pods, "none"), None);
-        let pods = json!({"items": [pod("acct", "True")]});
-        assert_eq!(executor_ready(&pods, "acct"), Some(true));
+        let pods = json!({"items": [pod("other", "Running", true), pod("acct", "Pending", false)]});
+        assert_eq!(executor_running(&pods, "acct"), Some(None));
+        assert_eq!(executor_running(&pods, "none"), None);
+        let pods = json!({"items": [pod("acct", "Running", false)]});
+        assert_eq!(executor_running(&pods, "acct"), Some(None), "not started");
+        let pods = json!({"items": [pod("acct", "Failed", true)]});
+        assert_eq!(executor_running(&pods, "acct"), Some(None), "stopped");
+        let pods = json!({"items": [pod("acct", "Running", true)]});
+        assert_eq!(
+            executor_running(&pods, "acct"),
+            Some(Some("executor-acct".to_owned()))
+        );
+        let bare = json!({"items": [{"metadata": {"name": "executor-acct",
+                                                  "annotations": {SUBJECT: "acct"}},
+                                     "status": {"phase": "Running", "containerStatuses": []}}]});
+        assert_eq!(executor_running(&bare, "acct"), Some(None), "no container");
     }
 }
