@@ -88,7 +88,6 @@ fn equity_on(series: &[mandate_backtest::Observation], date: Date) -> mandate_nu
 /// the close before. The control without the action shows the fall the receivable offsets: its
 /// version equity at the ex-date's close is lower by Q × 0.25, Q the shares the run filled.
 #[test]
-#[ignore = "pending E4-4"]
 fn both_equities_are_flat_across_an_ex_date_and_a_pay_date() {
     let days = trading_days(DAYS);
     let run = run_dividend(EX, days[PAY], 25);
@@ -139,7 +138,6 @@ fn both_equities_are_flat_across_an_ex_date_and_a_pay_date() {
 /// A dividend paid after the last bar stays in equity as a receivable: the version's last
 /// equity equals its equity at the close before the ex-date.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_dividend_paid_after_the_last_bar_stays_in_equity() {
     let days = trading_days(DAYS);
     let after = (0..10).fold(days[DAYS - 1], |date, _| date.next().unwrap());
@@ -154,7 +152,6 @@ fn a_dividend_paid_after_the_last_bar_stays_in_equity() {
 /// the run holds is 60 USD, the tight ladder's 0.6% flatten rung on its own, and the run latches
 /// nothing and ends no more restricted than a flat walk.
 #[test]
-#[ignore = "pending E4-4"]
 fn the_risk_state_reads_no_drawdown_from_a_dividend() {
     let days = trading_days(DAYS);
     let control = run_with(
@@ -210,7 +207,6 @@ fn ex_date_row(
 /// prices it, and the gate's prior close agrees, where the cum-dividend close of 100 would set a
 /// limit 5 above the market.
 #[test]
-#[ignore = "pending E4-4"]
 fn an_opening_on_the_ex_date_reads_the_ex_dividend_close() {
     let days = trading_days(DAYS);
     let outputs = daily_outputs(&days[EX..], "0.5");
@@ -229,7 +225,6 @@ fn an_opening_on_the_ex_date_reads_the_ex_dividend_close() {
 /// A dividend whose ex-date is the first bar's trade date was taken before the run, which holds
 /// nothing then: the run completes as it would without it.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_dividend_on_the_first_bars_date_changes_nothing() {
     let days = trading_days(DAYS);
     let outputs = daily_outputs(&days, "0.5");
