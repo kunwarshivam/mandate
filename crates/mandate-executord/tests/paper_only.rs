@@ -97,3 +97,36 @@ fn only_the_credential_module_names_the_paper_transport() -> Result<(), Error> {
     }
     Ok(())
 }
+
+/// The `layer` of `crate_name`'s entry in `xtask/layers.toml`.
+fn layer(crate_name: &str) -> Result<u32, Error> {
+    let layers = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../xtask/layers.toml");
+    let text = fs::read_to_string(layers)?;
+    let header = format!("[crates.{crate_name}]");
+    let entry: Vec<String> = text
+        .lines()
+        .skip_while(|line| line.trim() != header)
+        .skip(1)
+        .take_while(|line| !line.starts_with('['))
+        .map(str::to_owned)
+        .collect();
+    Ok(value(&entry, "layer")
+        .ok_or_else(|| format!("no layer for {crate_name}"))?
+        .parse()?)
+}
+
+/// DEC-2306 item 6: the executor process sits above the vault, which it leases from, and the
+/// connector crates sit below it, so neither can depend on it (a crate depends only on lower
+/// layers, ES-02).
+#[test]
+fn only_the_process_sits_above_the_vault() -> Result<(), Error> {
+    let vault = layer("mandate-vault")?;
+    assert!(layer("mandate-executord")? > vault);
+    for connector in ["mandate-executor", "mandate-alpaca"] {
+        assert!(
+            layer(connector)? < vault,
+            "{connector} could take the vault"
+        );
+    }
+    Ok(())
+}
