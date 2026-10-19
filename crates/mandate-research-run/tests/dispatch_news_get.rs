@@ -7,12 +7,13 @@
 mod common;
 
 use common::{BLOG, CUT_OFF, Fixture, NEWSWIRE, at, item, news, scope};
-use mandate_canon::{Value, to_canonical};
+use mandate_canon::{Digest, Int, Value, to_canonical};
 use mandate_research_run::agentic::{Code, LoopBounds, Tool, ToolCall, ToolCallId, ToolOutcome};
 use mandate_research_run::{
-    Dispatch, DispatchScope, Dispatched, NewsItem, NewsReader, NewsText, ReadError, Readers,
-    RetrievedItem, TextQuery, dispatch,
+    Dispatch, DispatchScope, Dispatched, ItemId, NewsItem, NewsReader, NewsText, ReadError,
+    Readers, RetrievedItem, TextQuery, dispatch,
 };
+use mandate_time::UtcNanos;
 
 const TURN: u32 = 4;
 const FAILED: (ToolOutcome, Option<Code>) = (ToolOutcome::Failed, Some(Code::Unavailable));
@@ -92,7 +93,6 @@ fn with_text(item: NewsItem, text: &str) -> Fixture {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn news_get_reads_the_stored_text_of_the_item_asked() {
     let fixture = with_text(
         news("n-1", NEWSWIRE, "AAPL", CUT_OFF - 60),
@@ -123,9 +123,33 @@ fn news_get_reads_the_stored_text_of_the_item_asked() {
         "text",
     ];
     assert_eq!(keys(wrapped), fields);
+    let field = |name: &str| wrapped.get(name).cloned();
+    assert_eq!(field("text"), Some(Value::Str("The full text.".to_owned())));
     assert_eq!(
-        wrapped.get("text").and_then(Value::as_str),
-        Some("The full text.")
+        field("headline"),
+        Some(Value::Str("Headline n-1".to_owned()))
+    );
+    assert_eq!(
+        field("published_at"),
+        Some(Value::Str(at(CUT_OFF - 60).to_string()))
+    );
+    assert_eq!(
+        field("content_hash"),
+        Some(Value::Str(format!("sha256:{}", Digest::of(b"n-1"))))
+    );
+    let record = "Headline n-1".len() + "Summary of n-1.".len();
+    let record = u64::try_from(record).unwrap_or(u64::MAX);
+    assert_eq!(
+        field("length_bytes"),
+        Int::new(record).map(Value::Int),
+        "the length is the observed record's, as the search reports it"
+    );
+    assert_eq!(
+        (first.get("item_id").cloned(), first.get("source").cloned()),
+        (
+            Some(Value::Str("n-1".to_owned())),
+            Some(Value::Str(NEWSWIRE.to_owned()))
+        )
     );
     assert_eq!(
         observed(&result),
@@ -136,7 +160,6 @@ fn news_get_reads_the_stored_text_of_the_item_asked() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn news_get_text_is_cut_to_eight_thousand_bytes() {
     let item = news("n-1", NEWSWIRE, "AAPL", CUT_OFF - 60);
     let result = one(
@@ -151,14 +174,27 @@ fn news_get_text_is_cut_to_eight_thousand_bytes() {
         .and_then(|i| i.get("untrusted"))
         .and_then(|u| u.get("text"));
     let text = text.and_then(Value::as_str).unwrap_or_default().to_owned();
-    assert!(
-        text.len() <= 8_000 && text.len() > 7_990,
-        "§6.10's 8,000 bytes: {}",
-        text.len()
+    assert_eq!(text, "é".repeat(4_000), "§6.10's 8,000 bytes");
+    assert!(result.truncated);
+
+    let offset = format!("a{}", "é".repeat(5_000));
+    let result = one(
+        &with_text(item.clone(), &offset),
+        Tool::NewsGet,
+        r#"{"item":"n-1"}"#,
     );
-    assert!(
-        text.chars().all(|c| c == 'é'),
-        "cut on a character boundary"
+    let value = parsed(&result);
+    let shown = items(&value)
+        .first()
+        .and_then(|i| i.get("untrusted"))
+        .and_then(|u| u.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    assert_eq!(
+        shown,
+        format!("a{}", "é".repeat(3_999)),
+        "the 8,000th byte is inside a character, so the cut keeps 7,999 bytes"
     );
     assert!(result.truncated);
 
@@ -168,7 +204,6 @@ fn news_get_text_is_cut_to_eight_thousand_bytes() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn news_get_reads_nothing_from_a_reader_that_leaks_or_from_bad_arguments() {
     let mut licensed = news("n-1", NEWSWIRE, "AAPL", CUT_OFF - 60);
     licensed.licensed = true;
@@ -221,7 +256,6 @@ fn news_get_reads_nothing_from_a_reader_that_leaks_or_from_bad_arguments() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_reader_with_no_stored_text_answers_unavailable() {
     struct Bare;
     impl NewsReader for Bare {
@@ -253,6 +287,31 @@ fn a_reader_with_no_stored_text_answers_unavailable() {
         96_000 - 23,
         "its error counts as the read's result"
     );
+}
+
+#[test]
+fn a_reader_that_refuses_the_text_reads_nothing() {
+    struct Refusing;
+    impl NewsReader for Refusing {
+        fn news(&self, _: &TextQuery) -> Result<Vec<NewsItem>, ReadError> {
+            Ok(Vec::new())
+        }
+        fn news_text(&self, _: &ItemId, _: UtcNanos, _: u32) -> Result<NewsText, ReadError> {
+            Err(ReadError::Refused {
+                reason: "leaked reason".to_owned(),
+            })
+        }
+    }
+    let fixture = Fixture::default();
+    let readers = Readers {
+        news: &Refusing,
+        ..fixture.readers()
+    };
+    let got = run(readers, &[call(0, Tool::NewsGet, r#"{"item":"n-1"}"#)]);
+    let result = got.results.first().unwrap_or_else(|| panic!("one result"));
+    assert_eq!(verdict(result), FAILED, "a refused read is an empty read");
+    assert!(result.items.is_empty());
+    assert_eq!(result.content, br#"{"error":"unavailable"}"#.to_vec());
 }
 
 /// The port's default body, called directly rather than through the pending dispatch, so the
