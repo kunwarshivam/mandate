@@ -257,7 +257,6 @@ fn an_exit_at_the_market_whose_gate_read_no_snapshot_goes_by_the_ladder() {
 /// checked a market order's caps, so it is resent as a limit at the ladder's first rung; with one,
 /// at the market as before.
 #[test]
-#[ignore = "pending E7-29"]
 fn a_lost_exit_at_the_market_is_resent_at_the_market_only_on_a_binding_recheck() {
     let (ids, mandates, instruments, config) = (
         TestIds,
