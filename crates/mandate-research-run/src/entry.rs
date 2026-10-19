@@ -55,6 +55,8 @@ pub struct ResearchEntry {
     pub seed: Option<u64>,
     pub plan: RetrievalPlan,
     pub bounds: OutputBounds,
+    /// The agentic loop's pinned bounds, or `None` for a `single_call` entry (DEC-2263).
+    pub agentic: Option<LoopBounds>,
 }
 
 /// Why a recorded research entry could not be read: the member that is missing or not what it
@@ -62,6 +64,10 @@ pub struct ResearchEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryError {
     Member(&'static str),
+    /// The body of the tests commit's stub (DEC-77).
+    Unimplemented {
+        story: &'static str,
+    },
 }
 
 impl ResearchEntry {
@@ -70,6 +76,8 @@ impl ResearchEntry {
     /// `max_output_tokens` and `seed`, with the fixed `v0_1` plan and bounds. Nothing is defaulted:
     /// the recorded bundle's loader and `model register --entry` read it here alike, so the pin a
     /// run carries and the hash a registration records are of the same content.
+    ///
+    /// An optional `agentic` member names the entry's loop (DEC-2263).
     ///
     /// # Errors
     /// [`EntryError::Member`] naming the first member that is missing, empty, or out of range.
@@ -103,6 +111,7 @@ impl ResearchEntry {
             seed: Some(int("seed")?),
             plan: RetrievalPlan::v0_1(),
             bounds: OutputBounds::v0_1(),
+            agentic: entry.get("agentic").map(named_loop).transpose()?,
         })
     }
 
@@ -134,6 +143,11 @@ impl ResearchEntry {
             authorship: AUTHORSHIP.to_owned(),
         }
     }
+}
+
+/// The loop an entry's optional `agentic` member names (DEC-2263 item 1): `v0_2`, §6.11's bounds.
+fn named_loop(_named: &Value) -> Result<LoopBounds, EntryError> {
+    Err(EntryError::Unimplemented { story: "E19-13" })
 }
 
 /// An agentic research entry's pinned loop (agent harness spec §6.9 to §6.11, DEC-2262):
