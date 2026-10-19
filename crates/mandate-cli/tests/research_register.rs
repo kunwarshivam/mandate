@@ -182,8 +182,12 @@ fn reference(text: &str) -> String {
 }
 
 /// Creates and confirms `document` on a control stream registering the demo's two models: what
-/// `confirm` answers, and the rules the document violates over that stream's registry, folded as
-/// the spec folds it.
+/// `confirm` answers, and the rules the document violates over that stream's registry. The rules
+/// come from a validation context this helper builds itself, folding the stream with
+/// `JournaledFact::from_record` as the spec folds it. That is not the context `confirm` builds:
+/// `confirm`'s also knows whether the connection was recorded. So the violation sets here are
+/// compared only against the confirmed mandate's own fold, and `confirm`'s answer is asserted
+/// alongside them.
 fn confirmed(document: &str) -> (Result<Submitted, ControlError>, BTreeSet<Violation>) {
     let (mut journal, mut store, mut ids) = (Journal::default(), Store::new(), FixedIds::default());
     let owner = owner();
