@@ -19,7 +19,7 @@ use crate::agentic::{Code, LoopBounds, Tool, ToolCall, ToolCallId, ToolClass, To
 use crate::error::ResearchRunError;
 use crate::item::{Bar, ItemId, ItemKind, NewsItem, Symbol};
 use crate::plan::Scope;
-use crate::ports::{FilingEntry, NewsText, Readers};
+use crate::ports::{FilingEntry, FilingText, NewsText, ReadError, Readers};
 use crate::retrieve::{RetrievedItem, TextRead, cut, digest, int, reserved, text, window_start};
 
 /// What a dispatch reads within: the run's frozen scope, its pinned bounds, and the result bytes the
@@ -127,6 +127,9 @@ struct Read {
     /// `filings.search`'s stored lengths, one per item in `items`' order, shown beside each filing
     /// and never observed (DEC-2250 item 5).
     stored_bytes: Vec<u64>,
+    /// `filings.get`'s range: where its text starts in the filing's stored text, shown with
+    /// `stored` in place of the excerpt (DEC-2252 item 3).
+    range_offset: Option<u64>,
 }
 
 impl Read {
@@ -137,7 +140,13 @@ impl Read {
         let mut truncated = self.trimmed;
         loop {
             let shown = self.items.get(..kept).unwrap_or_default();
-            let content = render(shown, truncated, self.stored.as_deref(), &self.stored_bytes)?;
+            let content = render(
+                shown,
+                truncated,
+                self.stored.as_deref(),
+                &self.stored_bytes,
+                self.range_offset,
+            )?;
             if content.len() <= budget || kept == 0 {
                 let mut items = self.items;
                 items.truncate(kept);
@@ -269,6 +278,7 @@ fn news_search(
         untrusted: true,
         stored: None,
         stored_bytes: Vec::new(),
+        range_offset: None,
     }))
 }
 
@@ -339,6 +349,7 @@ fn news_get(
         items: vec![RetrievedItem::News(item)],
         untrusted: true,
         stored_bytes: Vec::new(),
+        range_offset: None,
     }))
 }
 
@@ -411,6 +422,7 @@ fn filings_search(
     }
     Ok(Answer::Read(Read {
         stored_bytes: kept.iter().map(|entry| entry.stored_bytes).collect(),
+        range_offset: None,
         items: kept
             .into_iter()
             .map(|entry| RetrievedItem::Filing(entry.filing))
@@ -427,8 +439,54 @@ fn filings_get(
     scope: &Scope,
     readers: Readers<'_>,
 ) -> Result<Answer, ResearchRunError> {
-    let _ = (call, scope, readers);
-    Err(ResearchRunError::Unimplemented { story: "E19-13" })
+    let Ok(arguments) = mandate_canon::parse(call.arguments.as_bytes()) else {
+        return Ok(Answer::Failed);
+    };
+    let parsed = (|| {
+        let asked = ItemId::new(arguments.get("item")?.as_str()?).ok()?;
+        let Value::Int(offset) = arguments.get("offset")? else {
+            return None;
+        };
+        let length = bounded(arguments.get("length")?, 1, 8_000)?;
+        Some((asked, offset.get(), length))
+    })();
+    let Some((asked, offset, length)) = parsed else {
+        return Ok(Answer::Failed);
+    };
+    let answered = match readers.filings.filing_text(
+        &asked,
+        scope.cut_off,
+        scope.allowlist.version,
+        offset,
+        length,
+    ) {
+        Ok(answered) => answered,
+        Err(ReadError::OutOfRange) => return Ok(Answer::Refused(Code::UnknownItem)),
+        Err(_) => return Ok(Answer::Failed),
+    };
+    let FilingText {
+        filing,
+        stored_bytes,
+        offset: answered_at,
+        text,
+    } = answered;
+    let leaks = filing.item_id != asked
+        || filing.knowledge_at > scope.cut_off
+        || !scope.allowlist.sources.contains(&filing.source)
+        || filing.licensed
+        || answered_at != offset
+        || text.len() > usize::try_from(length).unwrap_or(usize::MAX);
+    if leaks {
+        return Ok(Answer::Failed);
+    }
+    Ok(Answer::Read(Read {
+        items: vec![RetrievedItem::Filing(filing)],
+        trimmed: false,
+        untrusted: true,
+        stored: Some(text),
+        stored_bytes: vec![stored_bytes],
+        range_offset: Some(offset),
+    }))
 }
 
 /// The forms `filings.search` may name, in their order (DEC-2250 item 1).
@@ -492,6 +550,7 @@ fn bars(arguments: &Value, scope: &Scope, readers: Readers<'_>) -> Answer {
         untrusted: false,
         stored: None,
         stored_bytes: Vec::new(),
+        range_offset: None,
     })
 }
 
@@ -517,6 +576,7 @@ fn render(
     truncated: bool,
     stored: Option<&str>,
     stored_bytes: &[u64],
+    range_offset: Option<u64>,
 ) -> Result<Vec<u8>, ResearchRunError> {
     let mut shown = Vec::with_capacity(items.len());
     for (index, item) in items.iter().enumerate() {
@@ -550,17 +610,25 @@ fn render(
                 let length = stored_bytes.get(index).ok_or(ResearchRunError::LoopOrder {
                     what: "a filing shown without its stored length",
                 })?;
-                (
-                    "untrusted",
-                    vec![
-                        ("form", text(&filing.form)),
-                        ("filed_at", text(&filing.filed_at.to_string())),
-                        ("excerpt", text(&filing.excerpt)),
-                        ("content_hash", digest(&filing.content_hash)),
-                        ("length_bytes", int(item.length_bytes())?),
-                        ("stored_bytes", int(*length)?),
-                    ],
-                )
+                let mut fields = vec![
+                    ("form", text(&filing.form)),
+                    ("filed_at", text(&filing.filed_at.to_string())),
+                    ("content_hash", digest(&filing.content_hash)),
+                    ("length_bytes", int(item.length_bytes())?),
+                    ("stored_bytes", int(*length)?),
+                ];
+                match (stored, range_offset) {
+                    (Some(range), Some(offset)) => {
+                        fields.extend([("offset", int(offset)?), ("text", text(range))]);
+                    }
+                    (None, None) => fields.push(("excerpt", text(&filing.excerpt))),
+                    _ => {
+                        return Err(ResearchRunError::LoopOrder {
+                            what: "a filing range shown without its offset or text",
+                        });
+                    }
+                }
+                ("untrusted", fields)
             }
             RetrievedItem::Instrument(_) => {
                 return Err(ResearchRunError::LoopOrder {
