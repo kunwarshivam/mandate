@@ -1,11 +1,15 @@
 //! DEC-2247 item 1: a recorded research entry reads as one `ResearchEntry`, the same content the
 //! recorded bundle's loader pins and `model register --entry` registers. Each member is required
-//! and nothing is defaulted. The oracle is the demo recording's entry, typed out here.
+//! and nothing is defaulted. The oracle is the demo recording's entry, typed out here. An optional
+//! `agentic` member names the entry's pinned loop (DEC-2263).
 
 use mandate_canon::{Key, Value, parse};
-use mandate_gateway::registry::{Identity, Snapshot};
-use mandate_research_run::{EntryError, OutputBounds, ResearchEntry, RetrievalPlan};
+use mandate_gateway::registry::{Identity, Mode, Snapshot};
+use mandate_research_run::agentic::LoopBounds;
+use mandate_research_run::{EntryError, OutputBounds, ResearchEntry, RetrievalPlan, agentic_loop};
 
+/// The agentic demo entry's content hash, pinned (DEC-2263 item 3).
+const AGENTIC_HASH: &str = "bff754a2e669add9a7928a4b8c71c764cfe61455e361621ae6f6c262af0824cd";
 const RECORDING: &str = include_str!("../../../deploy/cell/demo/research/research.json");
 const MEMBERS: [&str; 8] = [
     "model_id",
@@ -55,6 +59,7 @@ fn the_demo_recording_reads_as_its_entry_with_the_fixed_plan_and_bounds() {
         seed: Some(7),
         plan: RetrievalPlan::v0_1(),
         bounds: OutputBounds::v0_1(),
+        agentic: None,
     };
     assert_eq!(ResearchEntry::recorded(&recorded_entry()), Ok(expected));
 }
@@ -93,4 +98,83 @@ fn each_member_missing_empty_or_out_of_range_is_refused_by_name() {
         ResearchEntry::recorded(&with("max_output_tokens", Some(too_large))),
         Err(EntryError::Member("max_output_tokens"))
     );
+}
+
+/// The demo recording's entry naming the `v0_2` loop.
+fn agentic() -> ResearchEntry {
+    ResearchEntry::recorded(&with("agentic", Some(Value::Str("v0_2".to_owned()))))
+        .unwrap_or_else(|e| panic!("{e:?}"))
+}
+
+/// Words the agentic system text never holds: it says what the tools may do, never to trade, to
+/// size, or to recommend (the coordinator's condition on DEC-2263).
+const NEVER_SAID: [&str; 7] = [
+    "buy",
+    "sell",
+    "recommend",
+    "should trade",
+    "position size",
+    "allocate",
+    "profit",
+];
+
+#[test]
+fn a_recording_without_the_member_is_a_single_call_entry() {
+    let entry = ResearchEntry::recorded(&recorded_entry()).unwrap();
+    assert_eq!(entry.agentic, None);
+    assert_eq!(entry.content().mode, Mode::SingleCall);
+}
+
+#[test]
+fn a_recording_naming_the_v0_2_loop_reads_its_bounds() {
+    assert_eq!(agentic().agentic, Some(LoopBounds::v0_2()));
+}
+
+#[test]
+fn a_recording_naming_any_other_loop_is_refused_by_name() {
+    for named in [
+        Value::Str("v0_3".to_owned()),
+        Value::Str(String::new()),
+        Value::Str("V0_2".to_owned()),
+        parse(b"2").unwrap(),
+        parse(b"true").unwrap(),
+    ] {
+        assert_eq!(
+            ResearchEntry::recorded(&with("agentic", Some(named.clone()))),
+            Err(EntryError::Member("agentic")),
+            "{named:?}"
+        );
+    }
+}
+
+#[test]
+fn the_agentic_entry_pins_its_loop_and_its_own_system_text() {
+    let entry = agentic();
+    let content = entry.content();
+    let single = ResearchEntry::recorded(&recorded_entry())
+        .unwrap()
+        .content();
+    let pinned = agentic_loop(&LoopBounds::v0_2(), &OutputBounds::v0_1())
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(content.mode, Mode::Agentic(pinned));
+    assert_eq!(content.template.user, single.template.user);
+    assert_eq!(content.template.inputs, single.template.inputs);
+    assert_ne!(content.template.system, single.template.system);
+    assert_eq!(
+        content.content_hash().to_string(),
+        AGENTIC_HASH,
+        "the system text and the loop are pinned content: a change to either is a new pin"
+    );
+    assert_ne!(content.content_hash(), single.content_hash());
+}
+
+#[test]
+fn the_agentic_system_text_says_what_the_tools_may_do_and_never_to_trade() {
+    let system = agentic().content().template.system.to_lowercase();
+    for said in ["tools", "read", "note", "never orders", "untrusted"] {
+        assert!(system.contains(said), "{said}: {system}");
+    }
+    for word in NEVER_SAID {
+        assert!(!system.contains(word), "{word}: {system}");
+    }
 }

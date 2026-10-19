@@ -2157,3 +2157,19 @@ def test_probes_name_the_binary_at_the_image_root():
         ),
     )
     assert probe_binaries(moved)
+
+
+def test_the_journal_reaches_the_kubernetes_api_by_ipv4_hosts_only():
+    """Whatever names the Kubernetes API's addresses, values or the cluster lookup, the policy takes
+    only single IPv4 hosts: an IPv6 address read as `/32` would cover a vast range. The schema
+    refuses them in values; the template refuses them from any source, shown with the schema
+    skipped, since a rendering without a cluster cannot fake the lookup."""
+    k3d = ("-f", str(CELL / "values" / "k3d-journal-db.yaml"))
+    assert helm(JOURNAL_CHART, *JOURNAL_ARGS).returncode == 0
+    for cidrs in (["fd00::1/32"], ["10.43.0.1/32", "fd00::1/32"], ["10.0.0.0/8"], ["0.0.0.0/0"], ["10.43.0.1"]):
+        api = json.dumps({"cidrs": cidrs, "ports": [443]})
+        assert helm(JOURNAL_CHART, *k3d, "--set-json", f"kubeApi={api}").returncode != 0, cidrs
+        skipped = helm(JOURNAL_CHART, *k3d, "--skip-schema-validation", "--set-json", f"kubeApi={api}")
+        assert skipped.returncode != 0 and "Kubernetes API" in skipped.stderr, cidrs
+    unknown = helm(JOURNAL_CHART, *k3d)
+    assert unknown.returncode != 0 and "Kubernetes API" in unknown.stderr
