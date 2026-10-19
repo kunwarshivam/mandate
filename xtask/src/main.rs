@@ -18,6 +18,7 @@ mod gitops;
 mod image;
 mod infra_preflight;
 mod mail;
+mod mask;
 mod mutant_costs;
 mod release;
 mod tofu_audit;
