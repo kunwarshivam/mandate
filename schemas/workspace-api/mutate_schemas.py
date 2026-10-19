@@ -49,6 +49,7 @@ DELIBERATE: dict[str, str] = {
     "read-models/backtest.schema.json/$defs/Backtest/allOf/0/if/required drops state": "`state` is required by `Backtest` itself, so an instance without it fails whatever the `if` reads (DEC-1001)",
     "read-models/backtest.schema.json/$defs/Backtest/allOf/1/if/required drops state": "`state` is required by `Backtest` itself, so an instance without it fails whatever the `if` reads (DEC-1001)",
     "read-models/backtest.schema.json/$defs/Backtest/allOf/2/if/required drops state": "`state` is required by `Backtest` itself, so an instance without it fails whatever the `if` reads (DEC-1001)",
+    "read-models/session.schema.json/allOf/1/if/required drops kind": "`kind` is required by the session itself, so an instance without it fails whatever the `if` reads (DEC-2113)",
 }
 
 

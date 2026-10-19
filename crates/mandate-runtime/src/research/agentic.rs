@@ -674,6 +674,26 @@ pub(super) fn dispatched(
     Ok(out)
 }
 
+/// The gateway refused the turn out (DEC-2261): the run ends `error`; with no turn out, the refusal
+/// is not interpreted.
+pub(super) fn refused(
+    _run: &mut Run,
+    agentic: &mut Agentic,
+    batch: &mut Batch<'_>,
+) -> Result<Out, RuntimeError> {
+    if !matches!(agentic.stage, Stage::Turning { .. }) {
+        return Err(RuntimeError::NotInterpreted {
+            what: "a refused turn for an agentic run with no turn out".to_owned(),
+            story: "E19-13",
+        });
+    }
+    end(agentic, EndReason::Error, batch)?;
+    Ok(Out {
+        ended: true,
+        ..Out::default()
+    })
+}
+
 /// One `ToolResultRecorded`, after its call's record.
 #[allow(
     clippy::too_many_arguments,

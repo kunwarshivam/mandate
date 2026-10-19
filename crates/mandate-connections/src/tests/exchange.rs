@@ -166,7 +166,6 @@ fn no_secret_reaches_the_grant_or_an_error() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_exchange_sends_the_redirect_uri_the_deployment_registered() {
     let staging = OAuthClient {
         client_id: ClientId("client-1".to_owned()),
