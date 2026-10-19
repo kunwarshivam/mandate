@@ -124,7 +124,6 @@ fn base(section: &Value, name: &str) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn every_risk_limit_base_and_valid_draft_parses() {
     let section = section();
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
@@ -155,7 +154,6 @@ fn every_risk_limit_base_and_valid_draft_parses() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn every_invalid_risk_limit_draft_is_refused_with_its_reason_at_its_path() {
     let section = section();
     let invalid = list(&section, "invalid_drafts");
@@ -181,7 +179,6 @@ fn every_invalid_risk_limit_draft_is_refused_with_its_reason_at_its_path() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn the_risk_limit_records_append_on_the_account_stream_and_the_stream_verifies() {
     let section = section();
     let mut journal = MemoryJournal::new();

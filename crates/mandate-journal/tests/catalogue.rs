@@ -1579,7 +1579,6 @@ const VERIFICATION: &str = "VerificationRun";
 /// §9.27's records are closed on the account stream at schema version 1: an unlisted member is
 /// refused `schema` there and `wrong_stream` on every other stream, and version 2 has no schema.
 #[test]
-#[ignore = "pending E6-15"]
 fn the_risk_limit_records_are_closed_on_the_account_stream() {
     for event_type in CLOSED_BY_SECTION_9_27 {
         for kind in [ACCT, AGENT, CTL, CLOCK] {

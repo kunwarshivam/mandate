@@ -108,6 +108,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
                 || event_type == SNAPSHOT
                 || event_type == ACCOUNT_STATE
                 || RISK_STATE.contains(&event_type)
+                || crate::risk_limits::ACCOUNT.contains(&event_type)
                 || EXECUTOR.contains(&event_type)
         }
         StreamType::Scheduler | StreamType::Notice | StreamType::Meter => false,
@@ -132,6 +133,7 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::gateway::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::invalidation::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::runs::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::risk_limits::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
             ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
             _ => schema(event_type, schema_version),
@@ -191,6 +193,7 @@ pub(crate) fn payload(
     crate::backtest_records::rules(event_type, &payload, config_refs, actor)?;
     crate::notices::rules(event_type, &payload, causation_id)?;
     crate::membership::rules(event_type, &payload, actor, event_time)?;
+    crate::risk_limits::rules(event_type, &payload, causation_id)?;
     let p = Payload(&payload);
     match event_type {
         "MandateVersionCreated" => {
