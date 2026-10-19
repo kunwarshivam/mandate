@@ -149,7 +149,10 @@ and actions.
      The pin changes in a one-line pull request.
    - If `apply` fails with "region has insufficient capacity", or the plan says DigitalOcean does
      not offer the node size in the region, tell lane IAC: staging's region is one line
-     (DEC-2044 item 2). Staging's cluster runs in `nyc1`; its state bucket stays in `nyc3`.
+     (DEC-2044 item 2, DEC-2047). Both clusters run in `sfo2`, the US West, which you require;
+     the state buckets stay in `nyc3` until they move.
+   - The buckets the move to the US West leaves behind are listed under
+     [Deleted by hand, later](#5-deleted-by-hand-later).
 3. Dispatch again with action `apply` and `sha` set to the commit the plan printed, and approve
    it. The job plans again after your approval, prints that plan, and applies exactly it, so the
    apply reflects the commit and the cloud as they are when the job runs. Dispatch `apply` only at
@@ -169,6 +172,17 @@ and actions.
    pulls from then on.
    Production's bootstrap is lane GO's `deploy/gitops/BOOTSTRAP.md`, run from an address in
    `KUBE_API_ALLOWED_CIDRS`.
+
+### 5. Deleted by hand, later
+
+The move to the US West (DEC-2047) forgets these, never destroys them, so each is yours to delete
+once staging runs in `sfo2`. Delete each only if it exists; none holds anything you need.
+
+| Where | Exact name | Why it is left | When |
+|---|---|---|---|
+| Cloudflare R2 | `mandate-journal-archive-staging`, with its lock rule (deleting the empty bucket removes the rule) | staging's first apply may have made it in eastern North America; the archive is now `mandate-journal-archive-west-staging` | after staging's first apply in `sfo2` |
+| DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-staging` | the old state bucket, kept as the rollback when the state moves to `sfo2` | after the state move lands and a plan reads the new bucket |
+| DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-production` | the same, if a production run made it before the move | after the state move lands |
 
 ## What this does not guard, said plainly
 

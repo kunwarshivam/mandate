@@ -29,13 +29,18 @@ variable "prefix" {
 }
 
 variable "region" {
-  description = "The region of the cluster and its VPC."
+  description = "The region of the cluster and its VPC: the US West alone (DEC-2047)."
   type        = string
-  default     = "nyc3"
+  default     = "sfo2"
+
+  validation {
+    condition     = contains(["sfo2", "sfo3"], var.region)
+    error_message = "The cluster runs in sfo2 or sfo3; the founder put all of the infrastructure in the US West (DEC-2047)."
+  }
 }
 
 variable "state_region" {
-  description = "The region of the Spaces state bucket, which stays in nyc3 wherever the cluster runs (DEC-2044 item 2)."
+  description = "The region of the Spaces state bucket, which stays in nyc3 until it moves to the US West in a later change (DEC-2044 item 2, DEC-2047)."
   type        = string
   default     = "nyc3"
 }
